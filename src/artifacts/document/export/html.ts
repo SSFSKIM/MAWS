@@ -111,12 +111,12 @@ export async function exportHtml<T>(source: ExportSource, options: HtmlExportOpt
     tabs.map(({ body }) => body),
     options as HtmlExportOptions<unknown>,
   );
-  const env = { tokens, dark, image };
+  const env = { tokens, dark, image, view: options.renderView }; // P3-E: a kind's drawn views
   const content =
     tabs.length === 1
       ? renderBody(tabs[0].body, env)
       : tabs.map(({ id, title, body }) => `<section class="doc-tab" data-tab="${escapeAttr(id)}"><h1 class="doc-tab-title">${escapeText(title)}</h1>${renderBody(body, env)}</section>`).join('');
-  const css = design.resolveCss(`${themeForFile(themeCss)}\n${pageCss(pageOf(design, options.pageSize))}`);
+  const css = design.resolveCss(`${themeForFile(themeCss)}\n${pageCss(pageOf(design, options.pageSize))}${options.viewCss ? `\n${options.viewCss}` : ''}`); // P3-E: + viewCss
   const imgSrc = options.images === 'reference' ? 'data: maws-artifact: https:' : 'data: maws-artifact:';
   return [
     '<!doctype html>',

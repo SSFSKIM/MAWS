@@ -32,6 +32,7 @@ import { parseToolArguments, type ArtifactPublishInput, type ArtifactPublishResu
 import { assetWarnings } from '@artifacts/slides/answer'; // P3-C
 import { boardAssetWarnings } from '@artifacts/design/answer'; // P3-E
 import { stateV2 } from '@artifacts/yjs';
+import { legacyDashboardFiles, legacyDashboardReason } from '@artifacts/dashboard/legacy'; // P3-E
 import type { ArtifactStore } from '../documents/store';
 import { actorOf, answering, filesOf, lineageOf, loaderFields, opIdOf, pathsOf, publisherOf, refuse, refusedAfterCommit, resolveArtifact, storeOf, ToolRefusal, withDoc, type ArtifactToolDeps } from './artifact-context';
 import { externalReferenceCount } from './artifacts';
@@ -58,6 +59,13 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (!artifact) throw refuse(TOOL, { reason: 'notFound', artifactId }, `the artifact ${input.artifact} was deleted`);
       if (artifact.kind === 'file') throw refuse(TOOL, { reason: 'invalid', kind: 'file' }, 'a file artifact is delivered again with send_file, not published');
       if (artifact.kind === 'document') throw refuse(TOOL, { reason: 'invalid', kind: 'document' }, 'a document is edited block by block, not published');
+      // P3-E (E2 M2; ledger X25; parent Decision Log 16): a dashboard is a document, its data bound by artifact_dataset
+      // (fix wave R1) one made from files before E2 is held, named with its files and the way forward
+      if (artifact.kind === 'dashboard') {
+        const held = await store.readCommitted(() => legacyDashboardFiles(store.service.live(artifactId)));
+        if (held) throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard', held }, `${input.artifact}: ${legacyDashboardReason(held)}; nothing was written`);
+        throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard' }, 'a dashboard is edited block by block (artifact_edit) and its data bound with artifact_dataset, not published');
+      }
       const suggest = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
       if (suggest && !isDocKind(artifact.kind)) {
         const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;

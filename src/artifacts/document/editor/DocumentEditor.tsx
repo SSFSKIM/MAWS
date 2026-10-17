@@ -22,18 +22,20 @@
 // never re-binds (and re-renders) the live tab, and leaving keeps its undo. Awareness (D11): the other replicas' cursors and an agent's editing blocks.
 // P3-F1: the rail beside the page in a body 720 px wide or more, a drawer over the page's right side below (rail-layout.ts).
 import type { Editor } from '@tiptap/core';
+import type { Node as PMNode } from '@tiptap/pm/model'; // P3-E
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { JointHold, TypingPause, type VersionView } from '../collab';
 import { isDarkGround } from '../export/highlight';
-import { isBindingTransaction, type Carry } from '../../yjs';
+import { isBindingTransaction, type Carry, type Doc } from '../../yjs'; // P3-E: Doc
 import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { coreExtensionOptions } from '../ids';
 import { nanoid8 } from '../schema';
 import { tabBody } from '../tabs';
-import { discardThread, getThread, reopen, reply, resolve } from '../threads';
-import { activeThread, COMMENTS_ORIGIN, commentSelection, liveRanges } from './comments/plugins';
+import { discardThread, getThread, isBlockAnchor /* P3-E */, reopen, reply, resolve } from '../threads';
+import type { ExtraChange } from '../history'; // P3-E
+import { activeThread, COMMENTS_ORIGIN, commentBlock /* P3-E */, commentSelection, liveRanges, type CommentsOptions /* P3-E */ } from './comments/plugins';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from './comments/surface';
 import { ThreadsRail } from './comments/ThreadsRail';
 import { useOpenThreadCount } from './comments/use-threads';
@@ -43,11 +45,11 @@ import type { HistoryApi } from './history/api';
 import type { HistoryController, HistorySnapshot, Preview } from './history/controller';
 import { HistoryBar } from './history/HistoryBar';
 import { HistoryRail } from './history/HistoryRail';
-import { goToChange, setCarried } from './history/paint';
+import { goToChange, setCarried, setExtra /* P3-E */ } from './history/paint';
 import { ShowEditorsMenu, useShowEditors } from './history/ShowEditors';
 import { useHistoryController, useHistorySnapshot } from './history/use-history';
 import { cssColor, type DocumentHandle, type EditorHost } from './host-types';
-import type { ViewEnvironment } from './nodes/views';
+import { displayedDocument, type ViewEnvironment } from './nodes/views'; // P3-E: displayedDocument
 import { Tabs } from './Tabs';
 import { useTabs } from './tabs-store';
 import type { MentionSource } from './MentionPicker';
@@ -89,11 +91,19 @@ export interface DocumentEditorProps {
   onPreviewChange?(previewing: boolean): void;
   /** Who and what Insert › Mention can name (people, sessions, artifacts); without it, a mention names the owner. */
   mentions?: MentionSource;
+  // P3-E start (E2 M3; E's Decision Log 19): a dashboard's charts drawn by E (absent: B's placeholder), and the document
+  // the editor shows told as it changes: the live one, a previewed version's with its revision, the suggestion replica's
+  renderChart?: ViewEnvironment['renderChart'];
+  onDisplayedDocument?(doc: Doc, revision?: number): void;
+  /** E2 M4 (E's Decision Log 28): the quote of a selected block commented whole (a dashboard's chart); absent, text only. */
+  blockCommentQuote?(node: PMNode): string | undefined;
+  // P3-E end
 }
 
 export type DocumentRail = 'comments' | 'history' | null;
 type Rail = DocumentRail;
 const NO_CARRIES: ReadonlyMap<string, Carry['kind']> = new Map();
+const NO_EXTRAS: readonly ExtraChange[] = []; // P3-E
 
 // P3-F1: the input types the owner types text into (an unknown type reads as 'text')
 const TEXT_ENTRY_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
@@ -137,6 +147,16 @@ export function DocumentEditor(props: DocumentEditorProps) {
   useEffect(() => {
     onPreviewChange?.(previewing);
   }, [previewing, onPreviewChange]);
+  // P3-E start (E2 M3): the document shown, told as it changes (a preview with no tab to show tells nothing new)
+  const [suggestionDoc, setSuggestionDoc] = useState<Doc | null>(null);
+  const shownVersion = previewRevision(preview, snapshot?.versions ?? null);
+  const shownDoc = preview ? (preview.view?.ytype.doc ?? null) : pendingSuggestions && suggestionDoc ? suggestionDoc : doc;
+  const { onDisplayedDocument } = props;
+  const shownRevision = preview ? shownVersion : undefined;
+  useEffect(() => {
+    if (shownDoc) onDisplayedDocument?.(shownDoc, shownRevision);
+  }, [shownDoc, shownRevision, onDisplayedDocument]);
+  // P3-E end
   const openRail = (next: Rail) => {
     if (!held) setOwnRail(next);
     onRailChange?.(next);
@@ -190,7 +210,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
       <div ref={body} className="doc-editor-body" data-rail-layout={railShown ? railLayout.mode : undefined} style={drawer ? ({ '--doc-drawer-top': `${railLayout.top}px` } as CSSProperties) : undefined} onKeyDown={onBodyKeyDown}>
         {active && props.suggestions && (
           <div className="doc-tab-editor" style={{ display: preview ? 'none' : pendingSuggestions ? undefined : 'contents' }}>
-            <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} hold={hold} typing={typing} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} />
+            <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} hold={hold} typing={typing} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} renderChart={props.renderChart} onDisplayedDocument={setSuggestionDoc} /* P3-E */ />
           </div>
         )}
         <div className="doc-tab-editor" style={{ display: pendingSuggestions && !preview ? 'none' : undefined }} onKeyDown={() => typing.keystroke()}>
@@ -211,6 +231,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
               historySnapshot={snapshot}
               hold={hold}
               readOnly={readOnly}
+              previewRevision={shownVersion} /* P3-E */
             />
           ) : (
             <div className="doc-editor-loading" role="status">
@@ -259,16 +280,18 @@ interface TabEditorProps extends DocumentEditorProps {
   onActiveThread(threadId: string | null): void;
   /** A click on a highlighted passage activated its thread. */
   onPassageClick(): void;
+  /** P3-E: the previewed version's revision, its charts' displayed one. */
+  previewRevision?: number;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
   // What Comment reads when it runs (a keystroke or a click after any render), kept current after each render.
-  const latest = useRef({ comments, author, tabTitle, onPassageClick });
+  const latest = useRef({ comments, author, tabTitle, onPassageClick, blockCommentQuote /* P3-E */ });
   useLayoutEffect(() => {
-    latest.current = { comments, author, tabTitle, onPassageClick };
+    latest.current = { comments, author, tabTitle, onPassageClick, blockCommentQuote /* P3-E */ };
   });
   const commentRef = useRef<() => boolean>(() => false);
 
@@ -283,8 +306,8 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           hold,
           onRestored: (listener) => handle.onRestored(listener),
         },
-        comments: { doc: handle.doc, tabId, onComment: () => commentRef.current(), onActivate: () => latest.current.onPassageClick() },
-        env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}) },
+        comments: { doc: handle.doc, tabId, onComment: () => commentRef.current(), onActivate: () => latest.current.onPassageClick(), blockQuote: (node) => latest.current.blockCommentQuote?.(node), artifactId /* P3-E */ },
+        env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}), ...(renderChart ? { renderChart, displayed: displayedDocument(handle.doc) } : {}) /* P3-E */ },
       }),
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'live' } },
       shouldRerenderOnTransaction: false,
@@ -312,7 +335,10 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
       const { comments: surface, author: by, tabTitle: title } = latest.current;
       if (!surface || editor.isDestroyed || !editor.isEditable) return false;
       const threadId = nanoid8();
-      const made = commentSelection(editor, handle.doc, { threadId, tabId, by: by.actor, at: by.now() });
+      const comment = { threadId, tabId, by: by.actor, at: by.now() };
+      // P3-E: a selected block the comments' `blockQuote` names is commented whole; otherwise B's passage
+      const { blockQuote } = (editor.extensionManager.extensions.find((extension) => extension.name === 'comments')?.options ?? {}) as Partial<CommentsOptions>;
+      const made = (blockQuote && commentBlock(editor, handle.doc, comment, blockQuote)) || commentSelection(editor, handle.doc, comment);
       if (!made) return false;
       editor.commands.setActiveThread(threadId);
       surface.opened({ threadId, tabId, tabTitle: title, quote: made.quote });
@@ -340,8 +366,10 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
     if (!showing) return;
     const show = () => {
       const range = liveRanges(editor.state.doc).get(showing.threadId)?.[0];
-      if (!range) return false;
-      editor.chain().setTextSelection(range).setActiveThread(showing.threadId).scrollIntoView().run();
+      // P3-E: a block thread's block, selected whole
+      const block = range ? -1 : blockPos(editor, handle.doc, showing.threadId);
+      if (!range && block < 0) return false;
+      (range ? editor.chain().setTextSelection(range) : editor.chain().setNodeSelection(block)).setActiveThread(showing.threadId).scrollIntoView().run();
       onShown();
       return true;
     };
@@ -353,7 +381,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
     return () => {
       editor.off('transaction', retry);
     };
-  }, [showing, editor, onShown]);
+  }, [showing, editor, onShown, handle]);
 
   const toggleHistory = () => openRail(rail === 'history' ? null : 'history');
   const onKeyDown = (event: KeyboardEvent) => {
@@ -381,6 +409,9 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           renderDiagram={renderDiagram}
           controller={historyController}
           onEditor={setPreviewEditor}
+          renderChart={renderChart} /* P3-E */
+          revision={shownRevision}
+          extras={preview.extras}
         />
       )}
       {preview && historyController ? (
@@ -473,7 +504,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
     const writable = () => !handle.state().readOnly;
     return {
       doc,
-      locate: (threadId) => passageRect(editor, frame.current, threadId),
+      locate: (threadId) => passageRect(editor, frame.current, threadId, doc /* P3-E */),
       setActive: (threadId) => void (!editor.isDestroyed && editor.commands.setActiveThread(threadId)),
       resolve: (threadId) => {
         if (writable() && getThread(doc, threadId)) resolve(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN);
@@ -559,13 +590,28 @@ const SAFE_ID = /^[\w-]+$/;
 
 // The first line box of a thread's live passage in the shown tab, in the frame's coordinates; null when no live text
 // of the thread is drawn here.
-function passageRect(editor: Editor, frame: HTMLElement | null, threadId: string): PassageRect | null {
+function passageRect(editor: Editor, frame: HTMLElement | null, threadId: string, doc: Doc /* P3-E */): PassageRect | null {
   if (!frame || editor.isDestroyed || !SAFE_ID.test(threadId)) return null;
-  const span = editor.view.dom.querySelector(`[data-thread="${threadId}"]`);
-  if (!span) return null;
+  // P3-E: a block thread's block, its top line box (resolved or open: the card stays on it)
+  const block = blockPos(editor, doc, threadId);
+  const span = block >= 0 ? editor.view.nodeDOM(block) : editor.view.dom.querySelector(`[data-thread="${threadId}"]`);
+  if (!(span instanceof Element)) return null;
   const line = span.getClientRects()[0] ?? span.getBoundingClientRect();
   const origin = frame.getBoundingClientRect();
   return { x: line.left - origin.left, y: line.top - origin.top, width: line.width, height: line.height };
+}
+
+// P3-E (E2 M4): where a block thread's block is in the editor's doc, or -1 (not a block thread, or no such block here).
+function blockPos(editor: Editor, doc: Doc, threadId: string): number {
+  const thread = getThread(doc, threadId);
+  if (!thread || !isBlockAnchor(thread.anchor) || thread.blockId === null) return -1;
+  let at = -1;
+  editor.state.doc.descendants((node, pos) => {
+    if (at >= 0) return false;
+    if (node.attrs.id === thread.blockId) at = pos;
+    return !node.isTextblock;
+  });
+  return at;
 }
 
 // The preview's own editor (M9): read-only, bound to the version's view from its creation (the binding's microtask),
@@ -592,7 +638,7 @@ function PreviewMount({ editor }: { editor: Editor }) {
 interface PreviewEditorProps {
   view: VersionView;
   carried: ReadonlyMap<string, Carry['kind']>;
-  focus: number | 'tab' | null;
+  focus: Preview['focus']; // P3-E: an unbound extra's too
   handle: DocumentHandle;
   tabId: string;
   artifactId: string;
@@ -600,16 +646,24 @@ interface PreviewEditorProps {
   renderDiagram: DocumentEditorProps['renderDiagram'];
   controller: HistoryController | null;
   onEditor(editor: Editor | null): void;
+  renderChart?: DocumentEditorProps['renderChart']; // P3-E
+  revision?: number; // P3-E: the version's
+  extras?: readonly ExtraChange[]; // P3-E (E2 M4): the comparison's extra changes, the shown tab's merged into its list
 }
 
-function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, renderDiagram, controller, onEditor }: PreviewEditorProps) {
+function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, renderDiagram, controller, onEditor, renderChart, revision, extras }: PreviewEditorProps) {
+  // P3-E: this tab's extra changes, as a value that changes only when they do
+  const tabExtras = useMemo(() => extras?.filter((extra) => extra.tabId === tabId && extra.blockId !== null) ?? NO_EXTRAS, [extras, tabId]);
+  // P3-E: the version shown, for its charts; this editor is put on other versions without being made again, so it moves
+  const [displayed] = useState(() => displayedDocument(view.ytype.doc!, revision));
+  useLayoutEffect(() => displayed.set(view.ytype.doc!, revision), [displayed, view, revision]);
   const editor = useEditor(
     {
       coreExtensionOptions,
       extensions: editorExtensions({
         collaboration: { ytype: tabBody(handle.doc, tabId) ?? null, awareness: null, user: null, hold: null, onRestored: null, version: view },
         comments: { doc: handle.doc, tabId, onComment: () => false },
-        env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}) },
+        env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}), ...(renderChart ? { renderChart, displayed } : {}) /* P3-E */ },
       }),
       element: detached,
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'preview' } },
@@ -629,8 +683,9 @@ function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, 
     // a view other than the one the editor is on (or being bound to at its creation)
     if (sync()?.ytype != null && !bound()) editor.commands.showVersion(view);
     setCarried(editor, carried);
+    if (extras) setExtra(editor, tabExtras); // P3-E: only with the hook, so B's preview dispatches nothing new
     const drawn = () => {
-      if (focus !== null) goToChange(editor, focus === 'tab' ? null : focus);
+      if (focus !== null) goToChange(editor, typeof focus === 'number' ? focus : null); // P3-E: an extra's focus is the bar's
       controller?.applied(view);
     };
     if (bound()) return void drawn();
@@ -643,6 +698,15 @@ function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, 
     return () => {
       editor.off('transaction', once);
     };
-  }, [editor, view, carried, focus, controller]);
+  }, [editor, view, carried, focus, controller, extras, tabExtras]);
   return null;
+}
+
+// P3-E (E2 M3): the revision of the version a preview shows (the later one of a comparison); none for the live state.
+function previewRevision(preview: Preview | null, versions: readonly { id: number; seq: number }[] | null): number | undefined {
+  const target = preview?.target;
+  if (!target || target.kind === 'since') return undefined;
+  const ids = target.kind === 'version' ? [target.versionId] : target.versionIds;
+  const seqs = ids.map((id) => versions?.find((version) => version.id === id)?.seq).filter((seq): seq is number => seq !== undefined);
+  return seqs.length > 0 ? Math.max(...seqs) : undefined;
 }

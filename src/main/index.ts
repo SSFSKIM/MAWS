@@ -133,6 +133,10 @@ import { registerPresentationExporters } from './presentations/export'; // P3-C 
 import { registerDesignExporters } from './design/export'; // P3-E (E1's M5)
 import { registerPresenter } from './presentations/present'; // P3-C M6
 // P3-D end
+// P3-E start
+import { registerAssetDownload } from './dashboard/download';
+import { registerDashboardExporters } from './dashboard/export'; // E2 M5
+// P3-E end
 import { startConnectors } from './connectors'; // P3-H H3b
 import { createDirectRoute } from './connectors/direct-route'; // P3-HD: route D, MAWS's own MCP connections
 
@@ -600,6 +604,8 @@ void startWithProfileLock(app, () => {
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
   registerPresentationExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude; the governing system from D's `designSystems.governing` (Decision Log 27 (2))
+  // P3-E (E2 M5; E's Decision Log 32): `dashboard` as md, html, docx, pdf: B's four, governed by D, over the captured views
+  shutdown.add('dashboard-exporters', registerDashboardExporters((exporter) => artifacts.exporters.register(exporter), { call: engineHostCall(hosts.dispatch), env: process.env }));
   registerDesignExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-E (E1's M5): `design` as png and pdf over C's capture window, never cropped (XE9)
   shutdown.add('presenter', registerPresenter({ register: registerMainHandler, appUrl, env: process.env }).end); // P3-C M6: `presentations.present`, the show's windows
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
@@ -628,6 +634,18 @@ void startWithProfileLock(app, () => {
     },
   });
   shutdown.add('library', library.stop);
+  // P3-E start (E2 M3; E's Decision Log 18): a dashboard source sheet's Download, the artifact's own asset saved through
+  // main's dialog under Downloads
+  registerAssetDownload(registerMainHandler, {
+    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+    downloads: () => app.getPath('downloads'),
+    showSaveDialog: (options, sender) => {
+      const win = sender ? BrowserWindow.fromWebContents(sender) : null;
+      return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+    },
+    env: process.env,
+  });
+  // P3-E end
   openWindow();
 
   // E5 start: each window's unsaved editor files for the quit guard (E5 execution document, M5): the page pushes its

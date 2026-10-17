@@ -48,6 +48,8 @@ export interface DocumentTabDeps {
   noContentMs?: number;
   /** How long edits wait for the host's acknowledgement before the tab says it is saving (500 ms). */
   savingShownMs?: number;
+  /** P3-E (E2 M4; E's Decision Log 28): the kind's extra history changes, given to the history (a dashboard's datasets). */
+  extraChanges?: HistoryApi['extraChanges'];
 }
 
 export interface DocumentTabSnapshot {
@@ -110,6 +112,7 @@ export class DocumentTabState {
       whenShown: () => this.whenShown,
       sessionTitle: deps.sessionTitle,
       log: deps.log,
+      ...(deps.extraChanges && { extraChanges: deps.extraChanges }), // P3-E
     });
     this.mentions = documentMentions({
       artifactId: this.artifactId,

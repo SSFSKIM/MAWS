@@ -5,14 +5,23 @@
 // top-level heading.
 import { docMarkdown } from '../markdown';
 import { schemaFor } from '../schema';
-import { tabsOf, type ExportSource } from './source';
+import { tabsOf, type ExportSource, type ViewRenderer } from './source';
 
-export function exportMarkdown(source: ExportSource, { tab }: { tab?: string } = {}): string {
+export function exportMarkdown(source: ExportSource, { tab, renderView }: { tab?: string; renderView?: ViewRenderer /* P3-E */ } = {}): string {
   const md = docMarkdown();
   const schema = schemaFor();
   const tabs = tabsOf(source, tab);
+  // P3-E (E2 M5): each chart block's drawn view, by its id, written where the block is
+  const charts = new Map<string, string>();
+  if (renderView)
+    for (const { body } of tabs)
+      body.descendants((node) => {
+        const view = node.type.name === 'chart' && typeof node.attrs.id === 'string' ? renderView(node) : undefined;
+        if (view) charts.set(node.attrs.id as string, view.markdown);
+        return true;
+      });
   const parts = tabs.map(({ title, body }) => {
-    const text = md.serialize(body, { ids: false });
+    const text = md.serialize(body, { ids: false, ...(charts.size > 0 && { charts }) });
     if (tabs.length === 1) return text;
     const heading = schema.node('heading', { level: 1 }, title ? [schema.text(title)] : []);
     return `${md.block(heading, { ids: false })}\n\n${text}`;

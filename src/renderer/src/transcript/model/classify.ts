@@ -95,6 +95,8 @@ const TABLE: Record<string, TableRow> = {
   [MAWS_TOOL_USE.artifact_comments]: standalone('other'),
   [MAWS_TOOL_USE.artifact_reply]: standalone('other'),
   [MAWS_TOOL_USE.artifact_resolve]: standalone('other'),
+  // P3-E (E2 M2): a dashboard's dataset bind is a cell of its own, as the namespace's other writers are
+  [MAWS_TOOL_USE.artifact_dataset]: standalone('other'),
   // E13 start: a cua_repl `js` call is a cell of its own, never folded into a group of MCP calls, so the browser
   // activity under it is in view without opening a group (it folds with the turn's work, as every cell does)
   [CUA_JS_TOOLS[0]]: standalone('mcp'),

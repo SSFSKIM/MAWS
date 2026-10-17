@@ -7,7 +7,7 @@
 import type { Editor } from '@tiptap/core';
 import { useEditorState } from '@tiptap/react';
 import { useState, type FormEvent, type ReactNode } from 'react';
-import type { DiffTab, TabChanges } from '../../history';
+import { unboundExtras /* P3-E */, type DiffTab, type ExtraChange /* P3-E */, type TabChanges } from '../../history';
 import type { HistoryController, Preview } from './controller';
 import { changesOf, goToChange } from './paint';
 
@@ -16,25 +16,37 @@ interface Stop {
   /** A body change's index in its tab, or the tab's own change. */
   at: number | 'tab';
 }
-const stopsOf = (changes: readonly TabChanges[]): Stop[] =>
-  changes.flatMap(({ tab, entry, body }) => [...(entry ? [{ tabId: tab.id, at: 'tab' as const }] : []), ...Array.from({ length: body }, (_, at) => ({ tabId: tab.id, at }))]);
+// P3-E (E2 M4): an unbound extra change is a stop of its own, after every tab's, reached where the bar is (no tab faked)
+type AnyStop = Stop | { extra: ExtraChange };
+const stopsOf = (changes: readonly TabChanges[], extras?: readonly ExtraChange[]): AnyStop[] => [
+  ...changes.flatMap(({ tab, entry, body }) => [...(entry ? [{ tabId: tab.id, at: 'tab' as const }] : []), ...Array.from({ length: body }, (_, at) => ({ tabId: tab.id, at }))]),
+  ...unboundExtras(extras).map((extra) => ({ extra })), // P3-E
+];
+const reachedExtra = (preview: Preview): string | null => (typeof preview.focus === 'object' && preview.focus !== null ? preview.focus.extra : null); // P3-E
 
 // ↓ or ↑ over the whole comparison, wrapping: from what is reached in the shown tab, or, with nothing reached, from the
 // shown tab's place in the tab order. Another tab's stop shows that tab and reaches it there.
 function step(editor: Editor, preview: Preview, controller: HistoryController, direction: 1 | -1): void {
-  const stops = stopsOf(preview.changes);
+  const stops = stopsOf(preview.changes, preview.extras);
   if (stops.length === 0) return;
   const shown = preview.tabId;
   const { current } = changesOf(editor.state);
+  const extra = reachedExtra(preview); // P3-E
   const reached = current !== null ? current : preview.focus === 'tab' ? 'tab' : null;
-  const at = reached === null ? -1 : stops.findIndex((stop) => stop.tabId === shown && stop.at === reached);
-  let target: Stop;
+  const at = extra !== null ? stops.findIndex((stop) => 'extra' in stop && stop.extra.key === extra) : reached === null ? -1 : stops.findIndex((stop) => 'tabId' in stop && stop.tabId === shown && stop.at === reached);
+  let target: AnyStop;
   if (at >= 0) target = stops[(at + direction + stops.length) % stops.length];
   else {
     const order = preview.tabs.map((tab) => tab.id);
     const here = order.indexOf(shown ?? '');
-    const first = stops.findIndex((stop) => order.indexOf(stop.tabId) >= here);
+    const first = stops.findIndex((stop) => 'tabId' in stop && order.indexOf(stop.tabId) >= here);
     target = direction === 1 ? stops[first >= 0 ? first : 0] : stops[((first >= 0 ? first : stops.length) - 1 + stops.length) % stops.length];
+  }
+  // P3-E: an unbound entry is reached in the bar, where the preview is
+  if ('extra' in target) {
+    goToChange(editor, null);
+    controller.setFocus({ extra: target.extra.key });
+    return;
   }
   if (target.tabId !== shown) controller.setTab(target.tabId, target.at);
   else if (target.at === 'tab') {
@@ -51,7 +63,9 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
   const [naming, setNaming] = useState(false);
   // re-rendered as ↑ ↓ moves within the tab (the count itself is the whole comparison's)
   useEditorState({ editor, selector: ({ editor: e }) => (e ? changesOf(e.state).current : null) });
-  const count = preview.changes.reduce((n, tab) => n + (tab.entry ? 1 : 0) + tab.body, 0);
+  const unbound = unboundExtras(preview.extras); // P3-E
+  const count = preview.changes.reduce((n, tab) => n + (tab.entry ? 1 : 0) + tab.body, 0) + unbound.length; // P3-E: + unbound
+  const extraReached = unbound.find((extra) => extra.key === reachedExtra(preview)); // P3-E
   const shownTab = preview.tabs.find((tab) => tab.id === preview.tabId);
   const tabReached = preview.focus === 'tab' ? '' : undefined;
   const annotated = shownTab && tabLabel(shownTab, preview.showChanges) !== (shownTab.title || 'Untitled tab');
@@ -74,6 +88,12 @@ export function HistoryBar({ editor, preview, controller, onBack }: { editor: Ed
           </select>
         )}
         {shownTab?.change === 'removed' && <span className="doc-history-tab-note">This tab was deleted.</span>}
+        {preview.showChanges && extraReached && (
+          // P3-E: the unbound change ↑ ↓ reached, named
+          <span className="doc-history-tab" data-current="" data-extra={extraReached.key}>
+            {extraReached.label}
+          </span>
+        )}
         <span className="doc-toolbar-separator" />
         <label className="doc-history-filter">
           <input type="checkbox" checked={preview.showChanges} onChange={(event) => controller.setShowChanges(event.target.checked)} />

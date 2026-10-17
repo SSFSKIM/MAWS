@@ -208,7 +208,7 @@ describe('A’s publishDoc answers kept and removed from the kind’s paths (Dec
     const calls: number[] = [];
     w.store.registerAdapter({ kind: 'design', paths: (doc) => (calls.push(1), Object.keys(readFiles(doc))) });
     const answers = [];
-    for (const kind of ['design', 'dashboard']) {
+    for (const kind of ['design', 'design_system']) { // P3-E (parent Decision Log 16): a generic stand-in; a dashboard is never published
       const created = await create({ kind, title: kind, files: { 'a.html': 'A', 'b.css': 'B', 'c.js': 'C' } });
       const base = await read(created.artifactId);
       answers.push(await published({ artifact: created.artifactId, baseRevision: base.revision, files: { 'b.css': 'B2', 'c.js': null, 'd.svg': 'D' } }));
