@@ -46,8 +46,10 @@ export interface DirectRoute extends ConnectorRoute {
   hostLost(): void; // the engine host left `ready`
   stop(): void;
   // Ends every direct operation and connection in the host (`directClose` with no credential named), answering what
-  // is pending here first. For the owner lifecycle (M4) and the owner's Disconnect (M3).
-  close(): Promise<void>;
+  // is pending here first. A global close, not a stop: later resolutions and calls run afresh, so a scoped Disconnect
+  // (M3) never needs it. `ok: false`: the host did not confirm (its answer failed or never came); the caller must not
+  // treat the host's direct work as ended.
+  close(): Promise<{ ok: true; cancelled: number } | { ok: false; why: 'directClose failed' }>;
   // The verified source naming `server` for the artifact (no tool: an owner's Connect starts from it), or why not.
   resolveSource(artifactId: string, server: string, signal: AbortSignal): Promise<{ ok: true; source: DirectSource } | { ok: false; why: Extract<DirectResolveAnswer, { ready: false }>['why'] }>;
   // The owner's discovery of a source's tools: initialize and tools/list, never a tool call.
@@ -87,6 +89,7 @@ function answerOf(outcome: DirectCallOutcome): ConnectorRouteAnswer {
 export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
   const log = deps.log ?? ((line: string) => console.warn(`[connectors] ${line}`));
   const pending = new Map<string, Pending>();
+  let stopped = false; // main is stopping: terminal, unlike the host leaving ready or a close
 
   async function host<N extends 'library.entry' | 'spaces.list'>(name: N, input: CommandInput<N>) {
     const result = await deps.call(name, input);
@@ -118,7 +121,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
       (taken) => {
         operation.taking = false;
         if (!pending.has(operationId)) return;
-        if (!taken.ok) return operation.settle(lost(`directTake failed: ${taken.error.code}`));
+        if (!taken.ok) return withdraw(operationId, lost(`directTake failed: ${taken.error.code}`)); // the host may still run it
         const { outcome } = taken.value;
         if (outcome !== null) return operation.settle(outcome.kind === operation.kind ? outcome : lost('the host answered another kind of operation'));
         const next = operation.again;
@@ -128,7 +131,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
       },
       () => {
         operation.taking = false;
-        operation.settle(lost('directTake failed'));
+        withdraw(operationId, lost('directTake failed'));
       },
     );
   }
@@ -143,6 +146,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
 
   // Why no operation may start now, before anything is gathered or sent. Not streaming: its end could not reach main.
   function refusal(signal: AbortSignal): Lost | null {
+    if (stopped) return lost('main is stopping');
     if (signal.aborted) return lost('cancelled');
     if (!deps.streaming()) return lost('the engine host is not streaming its events yet');
     return pending.size >= DIRECT_PENDING_LIMIT ? lost('too many direct operations are pending') : null;
@@ -181,7 +185,6 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     const refused = refusal(signal);
     if (refused) return refused;
     const directories = (await directoriesOf(artifactId)).slice(0, 16);
-    if (signal.aborted) return lost('cancelled');
     if (directories.length === 0) return { ready: false, why: 'unobserved' };
     const result = await run('resolve', (operationId) => deps.call('connectors.directResolve', { operationId, artifactId, directories, server, ...(tool === undefined ? {} : { tool }) }), DIRECT_RESOLVE_DEADLINE_MS, signal);
     return 'lost' in result ? result : result.answer;
@@ -245,11 +248,13 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
       stopAll('the engine host is no longer ready');
     },
     stop() {
+      stopped = true;
       stopAll('main is stopping');
     },
     async close() {
       stopAll('direct work was closed');
-      await deps.call('connectors.directClose', {}).catch(() => {});
+      const closed = await deps.call('connectors.directClose', {}).catch(() => null);
+      return closed?.ok ? { ok: true, cancelled: closed.value.cancelled } : { ok: false, why: 'directClose failed' };
     },
   };
 }

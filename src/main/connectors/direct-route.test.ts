@@ -462,6 +462,67 @@ describe('call (one submission, bound to the target main selected)', () => {
     expect(host.last('connectors.directClose').input).toEqual({});
   });
 
+  it('a failed or rejected directTake withdraws the operation from the host, which may still run it', async () => {
+    const found = await target();
+    for (const mode of ['failing', 'rejecting'] as const) {
+      const pending = found.call({}, context());
+      await settle();
+      const id = host.last('connectors.directStart').input.operationId as string;
+      const cancels = host.of('connectors.directCancel').length;
+      host[mode].add('connectors.directTake');
+      route.reconcile(); // the host still runs it; the take cannot say
+      expect(await pending).toMatchObject({ ok: false, failure: 'unavailable' });
+      await settle();
+      expect(host.of('connectors.directCancel')).toHaveLength(cancels + 1);
+      expect(host.last('connectors.directCancel').input).toEqual({ operationId: id });
+      host[mode].delete('connectors.directTake');
+    }
+    expect(discloses(log.mock.calls)).toBe(false);
+  });
+
+  it('stop is terminal: metadata still being gathered, a target resolved before it and a discovery start nothing afterwards', async () => {
+    const found = await target();
+    let release!: () => void;
+    host.gates.set('library.entry', new Promise<void>((resolve) => (release = resolve)));
+    const resolving = route.resolve(ART, ROWS, signalOf().signal);
+    await settle();
+    route.stop();
+    release();
+    expect(await resolving).toBeNull();
+    expect(await found.call({}, context())).toEqual({ ok: false, failure: 'unavailable', message: 'main is stopping' });
+    expect(await route.discover({ directory: '/repo', sourceId: SOURCE_ID, generation: 3, server: 'fixture' }, signalOf().signal)).toMatchObject({ ok: false });
+    host.gates.clear();
+    expect(await route.resolve(ART, ROWS, signalOf().signal)).toBeNull();
+    expect(host.of('connectors.directResolve')).toHaveLength(1); // the first target’s alone
+    expect(host.of('connectors.directStart')).toHaveLength(0);
+    expect(host.of('connectors.directDiscover')).toHaveLength(0);
+  });
+
+  it('the host leaving ready is temporary: the next resolution and call work', async () => {
+    route.hostLost();
+    const found = await target();
+    const pending = found.call({}, context());
+    await settle();
+    host.finish(host.last('connectors.directStart').input.operationId as string, called({ ok: true, result: 'back' }));
+    expect(await pending).toEqual({ ok: true, result: 'back' });
+  });
+
+  it('close answers what is pending, reports whether the host confirmed it, and leaves the route usable', async () => {
+    expect(await route.close()).toEqual({ ok: true, cancelled: 0 });
+    host.failing.add('connectors.directClose');
+    expect(await route.close()).toEqual({ ok: false, why: 'directClose failed' });
+    host.failing.clear();
+    host.rejecting.add('connectors.directClose');
+    expect(await route.close()).toEqual({ ok: false, why: 'directClose failed' });
+    host.rejecting.clear();
+    const found = await target(); // a close is not stop: later work still runs
+    const pending = found.call({}, context());
+    await settle();
+    host.finish(host.last('connectors.directStart').input.operationId as string, called({ ok: true, result: 'after' }));
+    expect(await pending).toEqual({ ok: true, result: 'after' });
+    expect(discloses(log.mock.calls)).toBe(false);
+  });
+
   it('a call is never retried or switched: one admitted call is exactly one directStart whatever happens after', async () => {
     const found = await target();
     const pending = found.call({}, context());
