@@ -3065,8 +3065,15 @@ deployment, so they never switch the production Worker's org, is deferred.
 **The owner's first steps** (DX7's ordering): sign in, set up the org key first (the first unlock method), then
 enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the code pasted at its hidden prompt).
 
-**State** (2026-10-16, evening):
-- **Deployed:** `hub@47fa64ff web@master.47fa64ff` (Worker version `09cc96e0`), adding machine removal in the web
+**State** (2026-10-16, night):
+- **Deployed:** `hub@f12b122b web@master.f12b122b` (Worker version `ff8af865`), the build the two-Mac walk runs on:
+  MAWS #20, the defects found preparing the walk (the web's blank async question, a refused Skip, the delivery reason
+  and read-only drawing, the Diff error, a stale spawn dialog, model ids, revoked machines in the grid; on the hub, a
+  removal that ends the machine's lease in every project, retried until each takes it, and leaves a name enrolled
+  anew alone). No migration: #20's two tables are created on first use inside the objects' own SQLite; variables,
+  bindings, secrets and Access unchanged. MAWS #21 (a test's port race) and #22 (item 8's console snippet, pasted by
+  the owner, never served) change nothing deployed.
+- **Before it:** `hub@47fa64ff web@master.47fa64ff` (Worker version `09cc96e0`), adding machine removal in the web
   (#17), over `hub@2ee490bc web@master.2ee490bc` (Worker `c44f4cd4`): MAWS master after DC3, DC5, DC6 and the
   channel's anchoring fallback (#16) merged, built from a clean checkout of master. The hub's code is
   byte-identical to the previous deploy's (no migration, the same variables, bindings and secrets); the web gained
@@ -3509,6 +3516,15 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A removal whose answer from the machine's object is lost is finished by the admin's Remove again, with
+  nothing persisted for it in Phase 1. The object fences the credential before it answers and answers a second
+  revocation of a fenced credential as it did the first, so the retried DELETE completes (pinned by a test, MAWS #20);
+  until then the machine stays listed and its daemon is refused. A removal re-reads the name by enrollment after the
+  object answers and touches nothing when that enrollment no longer holds it, so a removal racing another removal and
+  a re-enrollment leaves the new machine alone. Rejected: a persisted revocation intent with a sweep that finishes it
+  (self-healing, but a second retry machine beside the projects' lease one for a state the admin sees and clears in
+  one click); kept in the backlog.
+  Date/Author: 2026-10-16, design session (PR #20's review).
 - Decision: Acceptance 8 is checked on the deployment with a browser-console snippet for two attacks, a forged
   `human` and a forged RPC to a live session, each with a wrong code. The machine-side suites are the evidence for
   the other three (a `say` under another machine's writer, an Allow whose card digest does not match, a spawn into
