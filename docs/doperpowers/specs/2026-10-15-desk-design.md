@@ -2630,7 +2630,7 @@ order (`evidence: rows`; for a background agent, the result row is its start and
 background by `meta.requestShape`, `spawn.background`, the persisted call's `input.run_in_background` (`true` or
 `"true"`; `false` proves nothing, since calls flagged false were launched async), or its result's exact launch text
 (`Async agent launched successfully.` followed by a line `agentId: …`, or a fork's `Fork started — processing in
-background`), read only on a result row with no `toolUseResult` — where one is present its status decides, since a
+background`), read only on a result row with no `toolUseResult` that is not `is_error` — where one is present its status decides, since a
 foreground agent's own answer may begin with that text. Either text is `async_launched` running evidence at (3), and a
 launch without a `toolUseResult` names no `outputFile` (the panel, DC8, 2026-10-17: older launches and all forks carry no `toolUseResult`, so without these a
 cold open read them `completed` while the live view read `exited`). (2) known process death, `exited`: the session's process is gone (`session`), the parent
