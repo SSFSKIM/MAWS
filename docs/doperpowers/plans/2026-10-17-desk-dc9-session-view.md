@@ -988,6 +988,16 @@ in their own worktrees.
   launch's time).
   Date/Author: 2026-10-17, M5 executor, folded by the controller.
 
+- Decision: DC9.G3's phone check is "loads no transcript chunk" (the
+  composite's writer, amending G3): the phone has drawn `<message>` bodies
+  through MAWS's Markdown since DC5, so its channel fetches the markdown,
+  KaTeX and shiki chunks, while it never loads SessionView, TranscriptPane
+  or any script holding MAWS's Transcript — §4's binding. M6's phone test
+  asserts the transcript-chunk check and records the Markdown chunks it
+  loads. Residue: shiki and KaTeX loaded on the phone only when a message
+  holds code or math.
+  Date/Author: 2026-10-17, the composite's writer.
+
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
   transcript never ended it. The engine writes a `system/turn_duration`
