@@ -26,7 +26,7 @@ For example:
 
     S=~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers
     printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "CF_DESK_HUB_SERVICE_TOKENS=$(cat $S/CF_DESK_HUB_SERVICE_TOKENS)" \
-      | pnpm --filter desk-hub deployment deploy --assets <desk-web's dist>
+      | pnpm --filter desk-hub deployment deploy --assets "$PWD/apps/desk-web/dist"
 
 The logged-in wrangler (`wrangler login`) does the Worker's own upload. Its
 OAuth token carries no Access scopes, which is why the setup token exists.
@@ -46,7 +46,7 @@ OAuth token carries no Access scopes, which is why the setup token exists.
      - `desk-hub public paths`: `/machine/enroll`, `/manifest.webmanifest`, and `/icons/*` on the same host, Bypass. It is more specific, so it takes precedence.
 
    A hostname-level application is used, not the Worker's own Access toggle, which refuses WebSocket upgrades. Access admits any service token of the account; the hub's Registry refuses a client id it never enrolled (`403 not-enrolled`).
-2. **The Worker** (`wrangler deploy`), with its variables on the command line (`--var`): `ORG_ID`, `ORG_NAME`, `ORG_ADMIN_EMAIL`, `ACCESS_ISSUER`, `ACCESS_AUD` (the `desk-hub` application's AUD), `ACCESS_CERTS_URL`, `CF_API_URL`, `CF_ACCOUNT_ID`. `wrangler.jsonc` keeps them empty on purpose. A deploy made any other way (a plain `wrangler deploy`) resets them, and the hub then answers `503 not-configured` to everything until `deploy` runs again. `--assets <dir>` serves the web app's build from `<dir>` (default `apps/desk-web/dist`). Pass it on every deploy once the web app is live: a deploy without it uploads whatever `apps/desk-web/dist` holds, possibly nothing.
+2. **The Worker** (`wrangler deploy`), with its variables on the command line (`--var`): `ORG_ID`, `ORG_NAME`, `ORG_ADMIN_EMAIL`, `ACCESS_ISSUER`, `ACCESS_AUD` (the `desk-hub` application's AUD), `ACCESS_CERTS_URL`, `CF_API_URL`, `CF_ACCOUNT_ID`. `wrangler.jsonc` keeps them empty on purpose. A deploy made any other way (a plain `wrangler deploy`) resets them, and the hub then answers `503 not-configured` to everything until `deploy` runs again. `--assets <dir>` serves the web app's build from `<dir>` (default `apps/desk-web/dist`). Pass it on every deploy once the web app is live: a deploy without it uploads whatever `apps/desk-web/dist` holds, possibly nothing. Give it absolute: pnpm runs the command in `apps/desk-hub`, where a relative `<dir>` would resolve.
 3. **The secrets**, each put only when the Worker lacks it:
    - `CF_API_TOKEN`, from `CF_DESK_HUB_SERVICE_TOKENS` (`--put-api-token` rotates it);
    - `VAPID_KEY`, generated once. Browsers' push subscriptions are bound to it, so it is never regenerated, and it exists nowhere but the Worker.
@@ -82,8 +82,9 @@ project socket as the person whose `DESK_ACCESS_TOKEN` it is given: it resumes
 the log from offset 0 to `caught-up` and sends nothing else (no visibility, no
 `human`, no RPC, no subscription), so it runs against `config.json`'s org.
 `machine-counts.py` reads a machine's half from its log files
-(`$SMINOS_HOME/projects/<id>/log/`), standard library only, so a machine with no
-MAWS checkout runs it over ssh:
+(`$SMINOS_HOME/projects/<id>/log/`) and its enrolled and former names (from
+`daemon/hub.json`, nothing else of it), standard library only, so a machine with
+no MAWS checkout runs it over ssh:
 
     python3 apps/desk-hub/deploy/machine-counts.py --dir <checkout> > /tmp/sk.json
     ssh mini python3 - --dir <checkout on the mini> < apps/desk-hub/deploy/machine-counts.py > /tmp/mini.json
@@ -93,8 +94,14 @@ MAWS checkout runs it over ssh:
 Per writer it prints the count and last seq on each side and a verdict:
 `agrees`; `explained`, for a position that machine refused (the audit's
 `rejected`, or its own `spent` list in the project's `uplink.json`) or a writer
-under a name other than the machine's enrolled one, which stays local; or
-`differs`. It exits 1 when any writer differs. The audit
+under one of the machine's own former names (`former` in its `hub.json`, the
+names it wrote under before it enrolled), which stays local; or `differs`. The
+comparison goes position by position: every position both sides hold must carry
+the same event (kind and ts), so a refusal never hides a change elsewhere, and a
+writer of another machine missing at the hub differs. A log line that is not an
+event makes its machine differ too: `machine-counts.py` still writes the
+snapshot, names the lines on stderr, and exits 1. `counts` exits 1 when anything
+differs, and refuses a snapshot taken by an older `machine-counts.py`. The audit
 is the hub's replay after `caught-up`, its latest 100 rows. `--audit` also prints
 those rows (`decided` carries who settled each request); `--json` prints the
 hub's half alone.

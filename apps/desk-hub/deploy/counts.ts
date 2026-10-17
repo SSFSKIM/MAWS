@@ -6,12 +6,13 @@
 // nothing else — no `visibility`, `human`, `rpc`, or `subscribe` — then closes. It keeps every `log` frame and the
 // audit record's latest rows, which the hub replays after `caught-up` (up to 100: `decided`, `rejected`, `refused`).
 //
-// Per writer it reports the count, the last seq, the seqs missing below it, the seqs held twice, and a fingerprint
-// (SHA-256 over `<seq>\t<kind>\t<ts>\n` in seq order), the same as `machine-counts.py` computes from a machine's log
-// files. Given those files (`--machine`, one per machine), it compares each machine with the hub writer by writer and
-// names the differences that are refusals, not losses: a position a daemon refused (the audit's `rejected`, DX2, or the
-// machine's own `spent` list) and a writer the hub never held because it is not under the machine's enrolled name (a
-// former name's, DX2 `writer-not-yours`).
+// Per writer it reports the count, the last seq, the seqs missing below it, the seqs held twice, a fingerprint
+// (SHA-256 over `<seq>\t<kind>\t<ts>\n` in seq order), and the rows (`[seq, kind, ts]` in seq order), the same as
+// `machine-counts.py` computes from a machine's log files. Given those files (`--machine`, one per machine), it compares
+// each machine with the hub writer by writer, position by position, and names the differences that are refusals, not
+// losses: a position a daemon refused (the audit's `rejected`, DX2, or the machine's own `spent` list) and a writer the
+// hub never held because it is under one of that machine's own former names, the ones it wrote under before it enrolled
+// (DX2 `writer-not-yours`). Anything else is a difference, and so is a machine log with lines that are not events.
 //
 // stdin or the environment: DESK_ACCESS_TOKEN (`cloudflared access token -app=https://<host>`).
 import { createHash } from 'node:crypto';
@@ -23,21 +24,26 @@ import { readDeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { Person, sleep } from './hub';
 
-export type WriterCounts = { count: number; last: number; holes: number[]; repeats: number[]; fingerprint: string };
+/** `rows`: each event's `[seq, kind, ts]`, in seq order (repeats included), which the comparison reads position by position. */
+export type WriterCounts = { count: number; last: number; holes: number[]; repeats: number[]; fingerprint: string; rows: Array<[number, string, string]> };
 
 /** One side's view of a project's log: the hub's (`side` "hub") or a machine's (`side` its name, from machine-counts.py). */
 export type Snapshot = {
-  v: 1;
+  v: 2;
   side: string;
   project: string;
   at: string;
   /** The machine's enrolled name (a machine's snapshot), which its own writers begin with. */
   machine?: string | null;
+  /** A machine's: the names it wrote under before it enrolled (hub.json's `former`), whose writers the hub never takes. */
+  former?: string[];
   writers: Record<string, WriterCounts>;
   /** The hub's: the audit rows it replayed after `caught-up`, newest last. */
   audit?: AuditRow[];
   /** A machine's: the positions it refused on import and skipped past (its uplink.json's `spent`). */
   spent?: Record<string, number[]>;
+  /** A machine's: the log lines that are not events (`<file>:<line>`), which make it differ whatever its counts say. */
+  unreadable?: string[];
   /** The hub's: `X-Desk-Build` of the deployment that answered. */
   build?: string | null;
 };
@@ -69,18 +75,13 @@ export function countWriters(events: Countable[]): Record<string, WriterCounts> 
     const repeats = [...seen].filter(([, n]) => n > 1).map(([seq]) => seq);
     const hash = createHash('sha256');
     for (const { seq, kind, ts } of list) hash.update(`${seq}\t${kind}\t${ts}\n`, 'utf8');
-    out[writer] = { count: list.length, last, holes, repeats, fingerprint: hash.digest('hex') };
+    const rows = list.map(({ seq, kind, ts }): [number, string, string] => [seq, kind, ts]);
+    out[writer] = { count: list.length, last, holes, repeats, fingerprint: hash.digest('hex'), rows };
   }
   return out;
 }
 
-const present = (c: WriterCounts | undefined): Set<number> => {
-  const out = new Set<number>();
-  if (!c) return out;
-  const holes = new Set(c.holes);
-  for (let seq = 1; seq <= c.last; seq++) if (!holes.has(seq)) out.add(seq);
-  return out;
-};
+const positions = (c: WriterCounts | undefined) => new Map((c?.rows ?? []).map(([seq, kind, ts]) => [seq, `${kind}\t${ts}`]));
 const show = (c: WriterCounts | undefined) => (c ? `${c.count}/${c.last}` : '-');
 const ranges = (seqs: number[]) => {
   const sorted = [...seqs].sort((a, b) => a - b);
@@ -110,6 +111,9 @@ export function compare(hub: Snapshot, machines: Snapshot[]): Finding[] {
     const name = m.machine ?? m.side;
     const refused = new Map(refusedBy.get(name) ?? []);
     for (const [writer, seqs] of Object.entries(m.spent ?? {})) for (const seq of seqs) if (!refused.has(`${writer}\t${seq}`)) refused.set(`${writer}\t${seq}`, 'spent there');
+    const former = new Set(m.former ?? []);
+    // A line that is not an event could have been any writer's: the machine's log is damaged, whatever its counts say.
+    if (m.unreadable?.length) findings.push({ writer: '(log files)', machine: m.side, verdict: 'differs', hub: '-', there: '-', detail: `not events there: ${m.unreadable.join(', ')}` });
     const writers = [...new Set([...Object.keys(hub.writers), ...Object.keys(m.writers)])].sort();
     for (const writer of writers) {
       const h = hub.writers[writer];
@@ -124,29 +128,39 @@ export function compare(hub: Snapshot, machines: Snapshot[]): Finding[] {
         continue;
       }
       if (!h) {
+        // Only this machine's own former names: a writer of another machine (it imports theirs) or of a renamed one is
+        // the hub's to hold, so its absence there is a loss.
         const owner = writerMachine(writer);
-        if (m.machine && owner !== null && owner !== m.machine) finding('explained', `local only: not under ${m.machine}/, so the hub never takes it (a former name's writer)`);
+        if (owner !== null && former.has(owner)) finding('explained', `local only: under ${owner}/, a name ${name} wrote under before it enrolled, so the hub never takes it`);
         else finding('differs', 'held there, not at the hub');
         continue;
       }
-      const atHub = present(h);
-      const there = present(t);
-      const missing = [...atHub].filter((seq) => !there.has(seq));
-      const extra = [...there].filter((seq) => !atHub.has(seq));
-      if (extra.length) {
-        finding('differs', `there, not at the hub: ${ranges(extra)}`);
+      if (h.repeats.length) {
+        finding('differs', `held twice at the hub: ${ranges(h.repeats)}`);
         continue;
       }
-      if (missing.length === 0) {
-        finding('differs', 'the same positions, different events (seq, kind, or ts)');
-        continue;
-      }
+      // Position by position: every position both hold carries the same event, none is there only, and each the
+      // machine lacks it refused.
+      const atHub = positions(h);
+      const there = positions(t);
+      const changed = [...there.keys()].filter((seq) => atHub.has(seq) && atHub.get(seq) !== there.get(seq));
+      const extra = [...there.keys()].filter((seq) => !atHub.has(seq));
+      const missing = [...atHub.keys()].filter((seq) => !there.has(seq));
       const unexplained = missing.filter((seq) => !refused.has(`${writer}\t${seq}`));
-      if (unexplained.length === 0) {
-        const reasons = [...new Set(missing.map((seq) => refused.get(`${writer}\t${seq}`)))].join(', ');
-        finding('explained', `refused there (${reasons}): ${ranges(missing)}`);
+      const refusedThere = missing.filter((seq) => refused.has(`${writer}\t${seq}`));
+      const problems = [
+        changed.length ? `another event there (kind or ts): ${ranges(changed)}` : '',
+        extra.length ? `there, not at the hub: ${ranges(extra)}` : '',
+        unexplained.length ? `at the hub, not there: ${ranges(unexplained)}` : '',
+      ].filter(Boolean);
+      if (problems.length) {
+        finding('differs', `${problems.join('; ')}${refusedThere.length ? ` (and refused there: ${ranges(refusedThere)})` : ''}`);
+      } else if (refusedThere.length) {
+        const reasons = [...new Set(refusedThere.map((seq) => refused.get(`${writer}\t${seq}`)))].join(', ');
+        finding('explained', `refused there (${reasons}): ${ranges(refusedThere)}`);
       } else {
-        finding('differs', `at the hub, not there: ${ranges(unexplained)}${unexplained.length < missing.length ? ` (and refused there: ${ranges(missing.filter((s) => refused.has(`${writer}\t${s}`)))})` : ''}`);
+        // The rows agree and the counts do not, which only a snapshot edited after it was taken shows: not agreement.
+        finding('differs', 'the rows agree, the counts do not');
       }
     }
   }
@@ -177,7 +191,7 @@ export async function readHub(person: Person, project: string, settleMs = 1500):
     else if (frame.t === 'refused') audit.push({ kind: 'refused', entry: frame.refusal as Record<string, unknown> });
   }
   const ordered = [...events].sort(([a], [b]) => a - b).map(([, e]) => e);
-  return { v: 1, side: 'hub', project, at: new Date().toISOString(), writers: countWriters(ordered), audit, build };
+  return { v: 2, side: 'hub', project, at: new Date().toISOString(), writers: countWriters(ordered), audit, build };
 }
 
 const USAGE = `usage: deployment counts --project <id> [--machine <file>]... [--audit] [--json] [--hub <url>]
@@ -217,6 +231,10 @@ export async function main(argv: string[], person?: Person): Promise<number> {
     return 2;
   }
   for (const m of machines) {
+    if (m.v !== 2) {
+      console.error(`${m.side}'s snapshot is of version ${m.v}, not 2: take it again with this checkout's machine-counts.py`);
+      return 2;
+    }
     if (m.project !== values.project) {
       console.error(`${m.side}'s snapshot is of project ${m.project}, not ${values.project}`);
       return 2;

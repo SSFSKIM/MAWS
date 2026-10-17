@@ -6,17 +6,21 @@ agree between each machine's log files and the hub).
 Read-only, and standard library only, so it runs on a machine with no MAWS
 checkout (`ssh mini python3 - … < machine-counts.py`). It reads the log files
 under $SMINOS_HOME/projects/<id>/log/, the positions the machine refused on
-import (`spent` in the project's uplink.json), and the machine's enrolled name
-from $SMINOS_HOME/daemon/hub.json (the name alone: nothing else of that file is
-kept or printed). It runs no sminos command, since every sminos verb may
-migrate state first.
+import (`spent` in the project's uplink.json), and from
+$SMINOS_HOME/daemon/hub.json the machine's enrolled name and its former names
+(the keys of `former`, the names the installation wrote under before it
+enrolled): those names alone, nothing else of that file is kept or printed. It
+runs no sminos command, since every sminos verb may migrate state first.
 
     python3 machine-counts.py --dir <a checkout of the project> > sk.json
     ssh mini python3 - --dir <the checkout there> < machine-counts.py > mini.json
 
 Per writer: the count, the last seq, the seqs missing below it, the seqs held
-twice, and a fingerprint (SHA-256 over "<seq>\\t<kind>\\t<ts>\\n" in seq order),
-computed as counts.ts computes the hub's.
+twice, a fingerprint (SHA-256 over "<seq>\\t<kind>\\t<ts>\\n" in seq order), and
+the rows themselves ([seq, kind, ts] in seq order), computed as counts.ts
+computes the hub's. A line that is not an event (not JSON, or without a writer
+and an integer seq) is damage: the snapshot is still written, naming each such
+line under `unreadable`, and the script names them on stderr and exits 1.
 """
 import argparse
 import datetime
@@ -51,13 +55,18 @@ def project_of(directory):
         d = parent
 
 
-def enrolled_name(home):
+def enrollment(home):
+    """The enrolled name and the former names (hub.json's `machine` and the keys of its `former`)."""
     try:
         with open(os.path.join(home, "daemon", "hub.json")) as f:
-            name = json.load(f).get("machine")
-    except (OSError, ValueError, AttributeError):
-        return None
-    return name if isinstance(name, str) and name else None
+            held = json.load(f)
+    except (OSError, ValueError):
+        return None, []
+    if not isinstance(held, dict):
+        return None, []
+    name, former = held.get("machine"), held.get("former")
+    return (name if isinstance(name, str) and name else None,
+            sorted(n for n in former if isinstance(n, str) and n) if isinstance(former, dict) else [])
 
 
 def count_writers(events):
@@ -85,6 +94,7 @@ def count_writers(events):
             "holes": [s for s in range(1, last + 1) if s not in seen],
             "repeats": sorted(s for s, n in seen.items() if n > 1),
             "fingerprint": digest.hexdigest(),
+            "rows": [[seq, kind, ts] for seq, _, kind, ts in rows],
         }
     return out
 
@@ -102,19 +112,21 @@ def main():
     if not os.path.isdir(log_dir):
         sys.exit("no log at %s: is the project known on this machine?" % log_dir)
     events, unreadable = [], []
-    for path in sorted(glob.glob(os.path.join(log_dir, "*.jsonl"))):
-        with open(path, encoding="utf-8") as f:
+    for path in sorted(glob.glob(os.path.join(glob.escape(log_dir), "*.jsonl"))):
+        with open(path, "rb") as f:
             for n, line in enumerate(f, 1):
                 if not line.strip():
                     continue
                 try:
-                    e = json.loads(line)
+                    e = json.loads(line.decode("utf-8"))
                 except ValueError:
+                    e = None
+                if not (isinstance(e, dict) and isinstance(e.get("writer"), str)
+                        and type(e.get("seq")) is int):
                     unreadable.append("%s:%d" % (os.path.basename(path), n))
                     continue
-                if isinstance(e, dict):
-                    events.append(e)
-    machine = enrolled_name(home)
+                events.append(e)
+    machine, former = enrollment(home)
     # The positions this machine refused on import and skipped past (uplink.json's `spent`, sminos_hublog.py): a hole
     # one leaves is the refusal's, not a loss. Nothing else of uplink.json is read.
     spent = {}
@@ -126,11 +138,12 @@ def main():
     except (OSError, ValueError, AttributeError):
         pass
     snapshot = {
-        "v": 1,
+        "v": 2,
         "side": args.side or machine or os.uname().nodename,
         "project": pid,
         "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "machine": machine,
+        "former": former,
         "log": log_dir,
         "writers": count_writers(events),
         "spent": spent,
@@ -139,6 +152,9 @@ def main():
         snapshot["unreadable"] = unreadable
     json.dump(snapshot, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
+    if unreadable:
+        # Written all the same, so counts.ts names the damage beside the rest; a damaged log never agrees.
+        sys.exit("%d line(s) of %s are not events: %s" % (len(unreadable), log_dir, ", ".join(unreadable)))
 
 
 if __name__ == "__main__":

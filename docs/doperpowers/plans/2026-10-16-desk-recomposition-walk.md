@@ -271,7 +271,7 @@ F1. Before anything else in this part, take the counts once (they should agree):
         printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=https://desk-hub.opencognita-platform.workers.dev)" \
           | pnpm --filter desk-hub deployment counts --project <W0.1> --machine /tmp/macbook.json --machine /tmp/mini.json
 
-    (from a MAWS checkout at master, or this branch until it merges). **Record W10.1:** the last line.
+    (from the root of a MAWS checkout at master, or this branch until it merges). **Record W10.1:** the last line.
 
 F2. Start traffic on both Macs, each in a terminal in the checkout, for about eight minutes:
 
@@ -281,15 +281,16 @@ F2. Start traffic on both Macs, each in a terminal in the checkout, for about ei
     and post a few untagged lines from the desk as it runs.
 
 F3. While it runs, in this order:
-    - **The controller redeploys the Worker** (new code, so the objects restart about five minutes later), from a clean
-      checkout of MAWS master:
+    - **The controller redeploys the Worker** (new code, so the objects restart about five minutes later), from the root
+      of a clean checkout of MAWS master:
 
           pnpm --filter desk-web build
           S=~/.config/claude-secrets/projects/-Users-new-Developer-GitHub-doperpowers
           printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "CF_DESK_HUB_SERVICE_TOKENS=$(cat $S/CF_DESK_HUB_SERVICE_TOKENS)" \
-            | pnpm --filter desk-hub deployment deploy --assets apps/desk-web/dist --web master.<sha>.walk
+            | pnpm --filter desk-hub deployment deploy --assets "$PWD/apps/desk-web/dist" --web master.<sha>.walk
 
       The label must differ from the live one (`master.47fa64ff`): Cloudflare restarts objects for new code only.
+      `--assets` is absolute because pnpm runs the command in `apps/desk-hub`, where a relative path would resolve.
     - Two minutes later, **restart the mini's daemon**: `launchctl kickstart -k gui/$(id -u)/com.doperpowers.sminos-daemon`.
     - Six minutes after the deploy (the objects restart at about +5:15 to +5:30), **reload the desk** in the browser.
     - **Record W10.2:** the new `X-Desk-Build`, and anything the desk showed meanwhile.
