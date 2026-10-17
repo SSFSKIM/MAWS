@@ -12,6 +12,8 @@ import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSch
 import { ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
+import { ASK_MOD_TOOL } from './classify'; // DC9
+import { askModAnswers } from './ask-mod'; // DC9
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { hookNotice, type HookRecord } from './hooks';
@@ -472,14 +474,22 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         const agentId = record(event.structured).agentId;
         if (typeof agentId === 'string') agentIds.set(event.toolUseId, agentId as AgentId);
         const pending = pendingRows.get(event.toolUseId);
-        if (pending?.kind === 'question' && pending.answers === null) {
+        // DC9 start: doperpowers' ask tool keeps no structured answers, so they are read from its result's text, where the
+        // human's decline is the engine's refusal inside `<tool_use_error>`: an empty answer map (Skipped), not an error
+        const askMod = pending !== undefined && pending.use.toolName === ASK_MOD_TOOL;
+        if (askMod && pending.answers === null) {
+          const questions = record(pending.use.input).questions;
+          pending.answers = askModAnswers(Array.isArray(questions) ? questions.map(record).map((q) => ({ question: str(q.question) })) : [], event);
+        }
+        // DC9 end
+        if (pending?.kind === 'question' && pending.answers === null && !askMod /* DC9 */) {
           const answers = record(event.structured).answers;
           if (typeof answers === 'object' && answers !== null) pending.answers = answers as Record<string, string>;
         }
         // E1 (A-17): the engine refused the call before any request reached the human (its own validation error, such as
         // a preview that is not HTML), so there was no card to show it on: the question row says so. A decline is a
-        // denial or a plain error text, never wrapped in `<tool_use_error>`.
-        if (pending?.kind === 'question' && event.isError && event.denial === null) pending.error = engineRefusalOf(resultText(event.content));
+        // denial or a plain error text, never wrapped in `<tool_use_error>` (DC9: but the ask mod's is, and answered above).
+        if (pending?.kind === 'question' && event.isError && event.denial === null && !(askMod && pending.answers !== null)) pending.error = engineRefusalOf(resultText(event.content));
         const ask = asks.get(event.toolUseId); // E1
         if (ask) resultOfAsk(ask, event);
         const delivery = deliveries.get(event.toolUseId); // E1
