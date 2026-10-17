@@ -1,15 +1,16 @@
 // P3-HD M1: route D's source lookup and its one file entry (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md,
-// "Source truth and lifetime"; P3 co-work Decision Log 98 (1) and (2)). The file a launch's environment names, the one
-// JSON location a user or local scope names in it, the engine's `${VAR}` expansion reproduced against that launch's
-// environment alone, the visible fields compared as mcp_status reports them (spikes/p3-connectors/fixtures/
-// engine-mcp-call.jsonl seq 5), and the whole entry made into what MAWS's own instance would run: the SDK's minimal
-// environment from the launch plus the configured env, the command found on the launch's PATH.
+// "Source truth and lifetime"; P3 co-work Decision Log 98 (1) and (2), with P3-HD's settings ruling). The file a launch's
+// environment names, the one JSON location a scope names in it (never another key), `${…}` references admitted only
+// as the reference policy attests them, the visible fields compared as mcp_status reports them
+// (spikes/p3-connectors/fixtures/engine-mcp-call.jsonl seq 5), the whole entry made into what MAWS's own instance would
+// run, and the config file read under a cap that holds on the bytes actually read.
+import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { McpStatusResponse } from '@shared/wire/control';
-import { configFileOf, expandVariables, legacyConfigFileOf, locateEntry, materializeEntry, nodeSourceFiles, reportedVisible, visibleKey, visibleOfEntry } from './source-entry';
+import { CONNECTOR_REFERENCE_POLICY, configFileOf, expandVariables, legacyConfigFileOf, locateEntry, materializeEntry, nodeSourceFiles, reportedVisible, visibleKey, visibleOfEntry } from './source-entry';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
 const SPIKE = (() => {
@@ -52,40 +53,40 @@ describe('the config file a launch names', () => {
   });
 });
 
-describe('expandVariables (the engine’s ${VAR} and ${VAR:-default}, against the launch environment)', () => {
-  const env = { XDG_A: 'alpha', XDG_EMPTY: '', ANTHROPIC_API_KEY: 'k', HOMEBREW_GITHUB_API_TOKEN: 't', CLAUDE_CONFIG_DIR: '/c' };
+describe('references under the settings ruling', () => {
+  const env = { XDG_A: 'alpha', XDG_EMPTY: '', HOMEBREW_GITHUB_API_TOKEN: 't' };
 
-  it('substitutes a defined variable (empty included), else the default; `$VAR` without braces is literal', () => {
-    expect(expandVariables('a-${XDG_A}-b', env)).toBe('a-alpha-b');
-    expect(expandVariables('${XDG_EMPTY:-fallback}', env)).toBe('');
-    expect(expandVariables('${XDG_MISSING:-fallback}', env)).toBe('fallback');
-    expect(expandVariables('${XDG_MISSING:-}', env)).toBe('');
+  it('is literal-only until the probe attests otherwise: no reference is expanded, a literal `$` passes', () => {
+    expect(CONNECTOR_REFERENCE_POLICY).toBe('literalOnly');
+    for (const value of ['${XDG_A}', 'a-${XDG_A}-b', '${XDG_MISSING:-fallback}', '${XDG_A:=x}']) expect(expandVariables(value, env), value).toBeNull();
     expect(expandVariables('$XDG_A and plain', env)).toBe('$XDG_A and plain');
+    expect(expandVariables('plain', env)).toBe('plain');
   });
 
-  it('refuses an unresolved variable and any other `${…}` form', () => {
-    expect(expandVariables('${XDG_MISSING}', env)).toBeNull();
-    expect(expandVariables('${XDG_A:=x}', env)).toBeNull();
-    expect(expandVariables('${not valid}', env)).toBeNull();
-    expect(expandVariables('${}', env)).toBeNull();
-  });
-
-  it('refuses, for an omitted field, a variable the engine may withhold from a server: its own and credential-shaped names', () => {
-    for (const value of ['${ANTHROPIC_API_KEY}', '${CLAUDE_CONFIG_DIR}', '${HOMEBREW_GITHUB_API_TOKEN}', '${ANTHROPIC_API_KEY:-x}']) expect(expandVariables(value, env, 'omitted'), value).toBeNull();
-    // a visible field's expansion is compared with the engine's own report, so it needs no such list
-    expect(expandVariables('${HOMEBREW_GITHUB_API_TOKEN}', env, 'visible')).toBe('t');
+  it('attestedPresent: a variable present in the attested environment, empty included; absent refuses even with a default', () => {
+    const x = (value: string) => expandVariables(value, env, 'attestedPresent');
+    expect(x('a-${XDG_A}-b')).toBe('a-alpha-b');
+    expect(x('${XDG_EMPTY:-fallback}')).toBe('');
+    expect(x('${XDG_A:-fallback}')).toBe('alpha');
+    expect(x('${XDG_MISSING:-fallback}')).toBeNull(); // settings may supply it
+    expect(x('${XDG_MISSING}')).toBeNull();
+    expect(x('${XDG_A:=x}')).toBeNull();
+    expect(x('${not valid}')).toBeNull();
+    expect(x('${}')).toBeNull();
+    expect(x('${HOMEBREW_GITHUB_API_TOKEN}')).toBe('t'); // no credential-name heuristic: a visible field meets the report
   });
 });
 
-describe('locateEntry (the one JSON location the reported scope names)', () => {
+describe('locateEntry (exactly the JSON location it is given)', () => {
   const file = {
     mcpServers: { top: { command: 'a' } },
     projects: { '/work/p': { mcpServers: { here: { command: 'b' } } }, '/work': { mcpServers: { here: { command: 'c' } } } },
   };
 
-  it('reads user scope at mcpServers[name] and local scope at projects[exact cwd].mcpServers[name]', () => {
-    expect(locateEntry(file, 'user', '/work/p', 'top')).toEqual({ entry: { command: 'a' }, entryPath: ['mcpServers', 'top'], alternates: [] });
-    expect(locateEntry(file, 'local', '/work/p', 'here')).toEqual({ entry: { command: 'b' }, entryPath: ['projects', '/work/p', 'mcpServers', 'here'], alternates: [{ command: 'c' }] });
+  it('reads user scope at mcpServers[name] and local scope at projects[key].mcpServers[name] for that key alone', () => {
+    expect(locateEntry(file, 'user', '/work/p', 'top')).toEqual({ entry: { command: 'a' }, entryPath: ['mcpServers', 'top'] });
+    expect(locateEntry(file, 'local', '/work/p', 'here')).toEqual({ entry: { command: 'b' }, entryPath: ['projects', '/work/p', 'mcpServers', 'here'] });
+    expect(locateEntry(file, 'local', '/work', 'here')).toEqual({ entry: { command: 'c' }, entryPath: ['projects', '/work', 'mcpServers', 'here'] });
   });
 
   it('is changed when the entry is missing or not an object, never found by another location', () => {
@@ -98,15 +99,16 @@ describe('locateEntry (the one JSON location the reported scope names)', () => {
 });
 
 describe('the visible fields, as mcp_status reports them and as the file gives them', () => {
-  it('matches the spike’s reported stdio and http entries from the files that produced them', () => {
+  it('matches the spike’s reported stdio entry, and its http entry from the referencing file only where attested', () => {
     const stdio = reportedVisible(reported('usertoy'))!;
     const fileStdio = { type: 'stdio', command: (reported('usertoy') as { command: string }).command, args: (reported('usertoy') as { args: string[] }).args };
     expect(visibleKey(visibleOfEntry(fileStdio, {}) as never)).toBe(visibleKey(stdio));
     // engine-mcp-call-probe.mjs wrote `${PROBE_FAKE_SECRET}` and the report carries its expanded value
     const http = reportedVisible(reported('userhttp'))!;
     const fileHttp = { type: 'http', url: 'http://127.0.0.1:47831/mcp', headers: { 'X-Probe-Header': '${PROBE_FAKE_SECRET}' } };
-    expect(visibleKey(visibleOfEntry(fileHttp, { PROBE_FAKE_SECRET: 'fake-value-not-a-credential' }) as never)).toBe(visibleKey(http));
-    expect(visibleKey(visibleOfEntry(fileHttp, { PROBE_FAKE_SECRET: 'other' }) as never)).not.toBe(visibleKey(http));
+    expect(visibleOfEntry(fileHttp, { PROBE_FAKE_SECRET: 'fake-value-not-a-credential' })).toBe('unattested');
+    expect(visibleKey(visibleOfEntry(fileHttp, { PROBE_FAKE_SECRET: 'fake-value-not-a-credential' }, 'attestedPresent') as never)).toBe(visibleKey(http));
+    expect(visibleKey(visibleOfEntry(fileHttp, { PROBE_FAKE_SECRET: 'other' }, 'attestedPresent') as never)).not.toBe(visibleKey(http));
   });
 
   it('reads a missing type as stdio, missing args as none and streamable-http as http', () => {
@@ -119,7 +121,6 @@ describe('the visible fields, as mcp_status reports them and as the file gives t
       expect(reportedVisible(config), JSON.stringify(config)).toBeNull();
       expect(visibleOfEntry((config ?? {}) as Record<string, unknown>, {}), JSON.stringify(config)).toBeNull();
     }
-    expect(visibleOfEntry({ command: '${XDG_MISSING}' }, {})).toBe('unresolved');
   });
 });
 
@@ -131,11 +132,10 @@ describe('materializeEntry (the whole entry, for MAWS’s own instance)', () => 
     mkdirSync(second);
     const tool = executable(join(second, 'probe-tool'));
     const launch = { PATH: `${first}:${second}`, HOME: '/h', USER: 'u', LOGNAME: 'u', SHELL: '/bin/zsh', TERM: 'dumb', TMPDIR: '/t', LANG: 'en', XDG_V: 'v', FN: '() { :; }' };
-    const entry = { type: 'stdio', command: 'probe-tool', args: ['--v', '${XDG_V}', './rel'], env: { PLAIN: 'p', EXPANDED: '${XDG_V}', DEFAULTED: '${XDG_NONE:-d}' } };
-    const made = await materializeEntry(entry, launch, '/work/p', nodeSourceFiles);
-    expect(made).toEqual({
-      visible: { transport: 'stdio', command: 'probe-tool', args: ['--v', 'v', './rel'] },
-      launch: { transport: 'stdio', command: 'probe-tool', executable: tool, args: ['--v', 'v', './rel'], cwd: '/work/p', env: { HOME: '/h', LOGNAME: 'u', PATH: `${first}:${second}`, SHELL: '/bin/zsh', TERM: 'dumb', USER: 'u', PLAIN: 'p', EXPANDED: 'v', DEFAULTED: 'd' } },
+    const entry = { type: 'stdio', command: 'probe-tool', args: ['--v', './rel'], env: { PLAIN: 'p', DOLLAR: 'a$b' } };
+    expect(await materializeEntry(entry, launch, '/work/p', nodeSourceFiles)).toEqual({
+      visible: { transport: 'stdio', command: 'probe-tool', args: ['--v', './rel'] },
+      launch: { transport: 'stdio', command: 'probe-tool', executable: tool, args: ['--v', './rel'], cwd: '/work/p', env: { HOME: '/h', LOGNAME: 'u', PATH: `${first}:${second}`, SHELL: '/bin/zsh', TERM: 'dumb', USER: 'u', PLAIN: 'p', DOLLAR: 'a$b' } },
     });
     // the host's own PATH never resolves it
     expect(await materializeEntry(entry, { ...launch, PATH: '/usr/bin' }, '/work/p', nodeSourceFiles)).toBe('unresolved');
@@ -151,12 +151,27 @@ describe('materializeEntry (the whole entry, for MAWS’s own instance)', () => 
     expect(await materializeEntry({ command: join(dir, 'absent') }, {}, dir, nodeSourceFiles)).toBe('unresolved');
   });
 
-  it('reads an http entry’s headers transiently, expanded against the launch environment', async () => {
-    const made = await materializeEntry({ type: 'http', url: 'http://127.0.0.1:1/${XDG_P}', headers: { 'X-H': 'v-${XDG_P}' } }, { XDG_P: 'mcp' }, '/w', nodeSourceFiles);
-    expect(made).toEqual({ visible: { transport: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'v-mcp' } }, launch: { transport: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'v-mcp' } } });
+  it('reads an http entry’s headers transiently; a referencing header only where attested', async () => {
+    expect(await materializeEntry({ type: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'literal' } }, {}, '/w', nodeSourceFiles)).toEqual({
+      visible: { transport: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'literal' } },
+      launch: { transport: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'literal' } },
+    });
+    const referencing = { type: 'http', url: 'http://127.0.0.1:1/${XDG_P}', headers: { 'X-H': 'v-${XDG_P}' } };
+    expect(await materializeEntry(referencing, { XDG_P: 'mcp' }, '/w', nodeSourceFiles)).toBe('unattested');
+    expect(await materializeEntry(referencing, { XDG_P: 'mcp' }, '/w', nodeSourceFiles, 'attestedPresent')).toMatchObject({ launch: { url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'v-mcp' } } });
   });
 
-  it('is engine-only for helpers, manual OAuth clients, unknown options and unsupported transports; unresolved for a withheld variable', async () => {
+  it('refuses any reference in an omitted stdio env value under either policy, and a referencing argument unless attested', async () => {
+    const tool = executable(join(dir, 'tool'));
+    for (const policy of ['literalOnly', 'attestedPresent'] as const) {
+      for (const value of ['${XDG_V}', '${XDG_V:-d}', '${XDG_NONE:-d}', 'x${XDG_V}']) expect(await materializeEntry({ command: tool, env: { K: value } }, { XDG_V: 'v' }, dir, nodeSourceFiles, policy), `${policy} ${value}`).toBe('unattested');
+    }
+    expect(await materializeEntry({ command: tool, args: ['${XDG_V}'] }, { XDG_V: 'v' }, dir, nodeSourceFiles)).toBe('unattested');
+    expect(await materializeEntry({ command: tool, args: ['${XDG_V}'] }, { XDG_V: 'v' }, dir, nodeSourceFiles, 'attestedPresent')).toMatchObject({ launch: { args: ['v'] } });
+    expect(await materializeEntry({ command: tool, args: ['${XDG_NONE:-d}'] }, {}, dir, nodeSourceFiles, 'attestedPresent')).toBe('unattested');
+  });
+
+  it('is engine-only for helpers, manual OAuth clients, unknown options and unsupported transports', async () => {
     for (const entry of [
       { type: 'http', url: 'http://h/m', headersHelper: '/bin/helper' },
       { type: 'http', url: 'http://h/m', oauth: { clientId: 'c' } },
@@ -165,8 +180,24 @@ describe('materializeEntry (the whole entry, for MAWS’s own instance)', () => 
     ])
       expect(await materializeEntry(entry, { PATH: '/usr/bin' }, '/w', nodeSourceFiles), JSON.stringify(entry)).toBe('engineOnly');
     const tool = executable(join(dir, 'tool'));
-    expect(await materializeEntry({ command: tool, env: { K: '${ANTHROPIC_API_KEY}' } }, { ANTHROPIC_API_KEY: 'k' }, dir, nodeSourceFiles)).toBe('unresolved');
-    expect(await materializeEntry({ command: tool, env: { K: '${XDG_NONE}' } }, {}, dir, nodeSourceFiles)).toBe('unresolved');
     expect(await materializeEntry({ command: tool, env: { K: 7 } }, {}, dir, nodeSourceFiles)).toBe('changed');
+  });
+});
+
+describe('nodeSourceFiles.read (the config file under its cap)', () => {
+  it('reads a file up to the cap and refuses one byte past it, counting the bytes it actually reads', async () => {
+    const path = join(dir, 'file.json');
+    writeFileSync(path, 'x'.repeat(100));
+    expect(await nodeSourceFiles.read(path, 100)).toBe('x'.repeat(100));
+    await expect(nodeSourceFiles.read(path, 99)).rejects.toThrow(/larger than 99 bytes/);
+    expect(await nodeSourceFiles.read(join(dir, 'absent'), 10)).toBeNull();
+  });
+
+  it('refuses what is not a regular file without hanging: a FIFO with no writer, a character device, a directory', async () => {
+    const fifo = join(dir, 'fifo');
+    execFileSync('mkfifo', [fifo]);
+    await expect(nodeSourceFiles.read(fifo, 10)).rejects.toThrow(/not a regular file/);
+    await expect(nodeSourceFiles.read('/dev/zero', 10)).rejects.toThrow(/not a regular file/); // size 0, endless
+    await expect(nodeSourceFiles.read(dir, 10)).rejects.toThrow(/not a regular file/);
   });
 });

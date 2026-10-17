@@ -5,9 +5,11 @@
 // engine live, until main detaches.
 //
 // - An observation is one complete report of one launch (`ConnectorLaunchContext`: the launch's directory and the
-//   environment MAWS handed that engine, a host-private reference to the launch plan's own facts). A launch's newer
-//   report replaces its older one, removals included; an answer to an older request, or from a launch its session has
-//   since replaced, never lands; `clear` invalidates every observation and file read begun before it.
+//   environment MAWS attests it handed that engine: the launch plan's environment, plus the env of the flag settings
+//   MAWS passed where the plan lacks a key; never a settings file). A launch's newer report replaces its older one,
+//   removals included; an answer to an older request, or from a launch its session has since replaced, never lands;
+//   `clear` invalidates every observation begun before it. Session and launch bookkeeping is bounded: past it the cache
+//   saturates (every answer unavailable, nothing more tracked) until main reattaches.
 // - Reports are grouped by launch context (config file and cwd). For one server, every report of a context must agree:
 //   one identity (scope, source label, visible configuration) and no report omitting or disabling it. A contradiction
 //   is sticky until the attachment resets; there is no latest-launch precedence. A context whose newer report is
@@ -15,10 +17,14 @@
 // - Retained: identity digests (keyed per attachment, so a header value is never recoverable from one), tool names
 //   with their readOnly annotation, observation times and the launch reference. Never a header, env, args or OAuth
 //   field of a report or a file.
-// - A server becomes a `VerifiedConnectorSource` at each use, never once: the scope must be user or local, the launch
-//   must name one file, the one entry the scope names there must reproduce the reported visible fields under every
-//   agreeing launch's environment and give the whole entry one meaning under all of them (./source-entry.ts).
-//   `readEntry` returns that whole entry for MAWS's own instance, transiently; this module keeps none of it.
+// - A server becomes a `VerifiedConnectorSource` at each use, never once: the scope must be user (local stays
+//   engine-only until a probe attests the engine's `projects` key, ./source-entry.ts), the launch must name one file,
+//   the one entry the scope names there must reproduce the reported visible fields under every agreeing launch's
+//   environment and give the whole entry one meaning under all of them, under the settings ruling's reference policy.
+//   A lookup that any mutation of the cache overtakes while it reads starts again from the cache as it is then (a
+//   bounded number of times, then unavailable), so a suspended lookup never answers what a fresh one would not; a
+//   clear makes it unavailable. `readEntry` returns the whole entry for MAWS's own instance, transiently; this module
+//   keeps none of it.
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { McpStatusResponse } from '@shared/wire/control';
 import { connectorFingerprint } from './status';
@@ -31,9 +37,9 @@ import {
   materializeEntry,
   nodeSourceFiles,
   reportedVisible,
-  visibleKey,
-  visibleOfEntry,
+  CONNECTOR_REFERENCE_POLICY,
   type ConnectorLaunchEntry,
+  type ReferencePolicy,
   type ConnectorSourceRefusal,
   type ConnectorTransport,
   type SourceFiles,
@@ -43,17 +49,23 @@ import {
 export type { ConnectorLaunchEntry, ConnectorSourceRefusal } from './source-entry';
 
 // The launch facts an engine was started with, captured from its launch plan (EngineSession.connectorLaunchContext).
-// `environment` is that plan's own environment object: never copied, serialized, journaled or sent over IPC.
+// `environment` is the attested environment: the plan's own object when the flag settings add nothing, else the plan's
+// values over the flag settings' string env. Host memory only: never serialized, journaled or sent over IPC. The config
+// file and the engine's legacy file come from the plan's environment alone (settings never move the config home).
 export interface ConnectorLaunchContext {
   readonly appSessionId: string;
   readonly launchId: string;
   readonly cwd: string; // the attested spawn cwd
-  readonly configFile: string | null; // the file user and local scope live in, or null when the launch names none
+  readonly configFile: string | null; // the file user scope lives in, or null when the launch names none
+  readonly legacyConfigFile: string | null; // the engine's legacy file, which would win over it when present
   readonly environment: Readonly<Record<string, string>>;
 }
 
-export function connectorLaunchContext(facts: { appSessionId: string; launchId: string; cwd: string; environment: Readonly<Record<string, string>> }): ConnectorLaunchContext {
-  return Object.freeze({ appSessionId: facts.appSessionId, launchId: facts.launchId, cwd: facts.cwd, configFile: configFileOf(facts.environment), environment: facts.environment });
+export function connectorLaunchContext(facts: { appSessionId: string; launchId: string; cwd: string; environment: Readonly<Record<string, string>>; flagSettings?: Readonly<Record<string, unknown>> }): ConnectorLaunchContext {
+  const flagEnv = typeof facts.flagSettings?.env === 'object' && facts.flagSettings.env !== null && !Array.isArray(facts.flagSettings.env) ? (facts.flagSettings.env as Record<string, unknown>) : {};
+  const filling = Object.entries(flagEnv).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && !Object.hasOwn(facts.environment, entry[0]));
+  const environment = filling.length === 0 ? facts.environment : Object.freeze({ ...Object.fromEntries(filling), ...facts.environment });
+  return Object.freeze({ appSessionId: facts.appSessionId, launchId: facts.launchId, cwd: facts.cwd, configFile: configFileOf(facts.environment), legacyConfigFile: legacyConfigFileOf(facts.environment), environment });
 }
 
 // A fingerprint-matched entry located in the one file the engine's reported scope and the launch context name. Host
@@ -84,7 +96,10 @@ export type ConnectorSourceAnswer = { ok: true; source: VerifiedConnectorSource 
 export type ConnectorToolAnswer = { ok: true; source: VerifiedConnectorSource; tool: ConnectorObservedTool } | { ok: false; why: ConnectorSourceRefusal };
 export type ConnectorEntryAnswer = { ok: true; source: VerifiedConnectorSource; entry: ConnectorLaunchEntry } | { ok: false; why: ConnectorSourceRefusal };
 
-export const CONNECTOR_STATUS_BOUNDS = { contexts: 128, serversPerContext: 256, launchesPerContext: 64, toolsPerServer: 1024 } as const;
+// `launches`: sessions and launches tracked for replacement (current plus replaced), across every context.
+export const CONNECTOR_STATUS_BOUNDS = { contexts: 128, serversPerContext: 256, launchesPerContext: 64, toolsPerServer: 1024, launches: 1024 } as const;
+// fresh attempts of one lookup the cache keeps changing under
+const VERIFY_ATTEMPTS = 3;
 
 // One mcp_status request's place in its launch's order, taken before the request is written.
 export interface ConnectorStatusTicket {
@@ -96,6 +111,7 @@ export interface ConnectorStatusTicket {
 export interface ConnectorStatusCacheOptions {
   files?: SourceFiles;
   now?: () => Date;
+  references?: ReferencePolicy; // tests; production takes the settings ruling's CONNECTOR_REFERENCE_POLICY
 }
 
 // Statuses that attest the reported configuration (needs-auth included: the owner's first Connect starts from it), and
@@ -128,6 +144,9 @@ interface ContextState {
   readonly revisions: Map<string, number>;
 }
 
+type Verified = { source: VerifiedConnectorSource; entry: ConnectorLaunchEntry; visible: VisibleConfig; observation: Positive; positives: Positive[] };
+const OVERTAKEN = Symbol('overtaken'); // a lookup some change of the cache overtook: start again
+
 const launchKeyOf = (context: ConnectorLaunchContext) => `${context.appSessionId}\0${context.launchId}`;
 const contextKeyOf = (context: ConnectorLaunchContext) => `${context.configFile ?? ''}\0${context.cwd}`;
 const record = (value: unknown): Record<string, unknown> | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
@@ -135,6 +154,8 @@ const record = (value: unknown): Record<string, unknown> | null => (typeof value
 export class ConnectorStatusCache {
   private readonly files: SourceFiles;
   private readonly now: () => Date;
+  private readonly references: ReferencePolicy;
+  private version = 0; // moves with every change a lookup's answer can depend on
   private key = randomBytes(32);
   private epoch = 0;
   private seq = 0;
@@ -149,13 +170,22 @@ export class ConnectorStatusCache {
   constructor(options: ConnectorStatusCacheOptions = {}) {
     this.files = options.files ?? nodeSourceFiles;
     this.now = options.now ?? (() => new Date());
+    this.references = options.references ?? CONNECTOR_REFERENCE_POLICY;
   }
 
   begin(context: ConnectorLaunchContext): ConnectorStatusTicket {
+    const ticket = { epoch: this.epoch, seq: ++this.seq, context };
+    if (this.saturated) return ticket; // refused at observe; nothing more is tracked
     const latest = this.current.get(context.appSessionId);
-    if (latest !== undefined && latest !== context.launchId) this.retired.add(`${context.appSessionId}\0${latest}`);
+    const replacing = latest !== undefined && latest !== context.launchId;
+    const added = (replacing ? 1 : 0) + (latest === undefined ? 1 : 0);
+    if (this.current.size + this.retired.size + added > CONNECTOR_STATUS_BOUNDS.launches) {
+      this.saturate();
+      return ticket;
+    }
+    if (replacing) this.retired.add(`${context.appSessionId}\0${latest}`);
     if (!this.retired.has(launchKeyOf(context))) this.current.set(context.appSessionId, context.launchId);
-    return { epoch: this.epoch, seq: ++this.seq, context };
+    return ticket;
   }
 
   // A complete successful report of the ticket's launch.
@@ -164,18 +194,19 @@ export class ConnectorStatusCache {
     if (!state) return;
     const servers = this.parse(answer);
     const launch = launchKeyOf(ticket.context);
-    if (servers === null || (!state.snapshots.has(launch) && state.snapshots.size >= CONNECTOR_STATUS_BOUNDS.launchesPerContext)) return void (state.failed = true);
+    if (servers === null || (!state.snapshots.has(launch) && state.snapshots.size >= CONNECTOR_STATUS_BOUNDS.launchesPerContext)) return this.fail(state);
     const names = new Set([...state.names, ...servers.keys()]);
-    if (names.size > CONNECTOR_STATUS_BOUNDS.serversPerContext) return void (state.failed = true);
+    if (names.size > CONNECTOR_STATUS_BOUNDS.serversPerContext) return this.fail(state);
     state.snapshots.set(launch, { seq: ticket.seq, observedAt: this.now().toISOString(), context: ticket.context, servers });
     state.names = names;
     for (const name of names) this.settle(state, name);
+    this.version += 1;
   }
 
   // A report of the ticket's launch that failed its schema: its context fails closed.
   reject(ticket: ConnectorStatusTicket): void {
     const state = this.admit(ticket);
-    if (state) state.failed = true;
+    if (state) this.fail(state);
   }
 
   resolveSource(cwd: string, server: string): Promise<ConnectorSourceAnswer> {
@@ -202,6 +233,7 @@ export class ConnectorStatusCache {
   // Main detached, or the host shuts down: every observation goes, and nothing begun before lands.
   clear(): void {
     this.epoch += 1;
+    this.version += 1;
     this.key = randomBytes(32);
     this.saturated = false;
     this.refused.clear();
@@ -220,8 +252,11 @@ export class ConnectorStatusCache {
       if (this.contexts.size >= CONNECTOR_STATUS_BOUNDS.contexts) {
         // refused, never evicted; its directory's answers are unavailable (the refused report could have contradicted
         // another config home's there) until main reattaches
-        if (this.refused.size >= CONNECTOR_STATUS_BOUNDS.contexts) this.saturated = true;
-        else this.refused.add(ticket.context.cwd);
+        if (this.refused.size >= CONNECTOR_STATUS_BOUNDS.contexts) this.saturate();
+        else if (!this.refused.has(ticket.context.cwd)) {
+          this.refused.add(ticket.context.cwd);
+          this.version += 1;
+        }
         return null;
       }
       state = { key, cwd: ticket.context.cwd, configFile: ticket.context.configFile, snapshots: new Map(), names: new Set(), failed: false, contested: new Set(), summaries: new Map(), revisions: new Map() };
@@ -229,6 +264,18 @@ export class ConnectorStatusCache {
     }
     const previous = state.snapshots.get(launch);
     return previous && previous.seq > ticket.seq ? null : state; // a newer request of this launch already answered
+  }
+
+  private fail(state: ContextState): void {
+    state.failed = true;
+    this.version += 1;
+  }
+
+  // Every answer unavailable and nothing more tracked (`begin` stops at the flag), until `clear`; stale tickets stay
+  // refused (by the saturation, then by the epoch).
+  private saturate(): void {
+    this.saturated = true;
+    this.version += 1;
   }
 
   // null: past a bound
@@ -286,7 +333,15 @@ export class ConnectorStatusCache {
     state.revisions.set(name, (state.revisions.get(name) ?? 0) + 1);
   }
 
-  private async verify(cwd: string, server: string): Promise<{ source: VerifiedConnectorSource; entry: ConnectorLaunchEntry; visible: VisibleConfig; observation: Positive; positives: Positive[] } | ConnectorSourceRefusal> {
+  private async verify(cwd: string, server: string): Promise<Verified | ConnectorSourceRefusal> {
+    for (let attempt = 0; attempt < VERIFY_ATTEMPTS; attempt++) {
+      const answer = await this.verifyOnce(cwd, server);
+      if (answer !== OVERTAKEN) return answer;
+    }
+    return 'unavailable';
+  }
+
+  private async verifyOnce(cwd: string, server: string): Promise<Verified | ConnectorSourceRefusal | typeof OVERTAKEN> {
     if (this.saturated || this.refused.has(cwd)) return 'unavailable';
     const states = [...this.contexts.values()].filter((state) => state.cwd === cwd);
     if (states.length === 0) return 'unobserved';
@@ -300,14 +355,19 @@ export class ConnectorStatusCache {
     const { state, positives } = holding[0]!;
     const observation = positives[0]!.observation; // every positive of an uncontested server has this identity
     if (observation.transport === null || (observation.scope !== 'user' && observation.scope !== 'local')) return 'engineOnly';
+    // Local scope's `projects` key is the engine's own derivation (the canonical git root inside a repository); until a
+    // probe attests it, no key is looked up.
+    if (observation.scope === 'local') return 'unidentified';
     const scope = observation.scope;
     // every agreeing launch's legacy file (one config file can be named by CLAUDE_CONFIG_DIR in one launch, HOME in another)
-    const legacies = [...new Set(positives.map(({ snapshot }) => legacyConfigFileOf(snapshot.context.environment)))];
+    const legacies = [...new Set(positives.map(({ snapshot }) => snapshot.context.legacyConfigFile))];
     if (state.configFile === null || legacies.includes(null)) return 'unidentified';
 
     const epoch = this.epoch;
+    const version = this.version;
     const revision = state.revisions.get(server);
-    const moved = (): ConnectorSourceRefusal | null => (this.epoch !== epoch || this.contexts.get(state.key) !== state || state.failed ? 'unavailable' : state.revisions.get(server) !== revision ? 'changed' : null);
+    // after every await: a clear is unavailable; any other change of the cache starts the lookup again
+    const moved = (): ConnectorSourceRefusal | typeof OVERTAKEN | null => (this.epoch !== epoch ? 'unavailable' : this.version !== version ? OVERTAKEN : null);
     let text: string | null;
     let legacyPresent: boolean;
     try {
@@ -333,7 +393,7 @@ export class ConnectorStatusCache {
     let entryDigest: string | undefined;
     for (const { snapshot } of positives) {
       const environment = snapshot.context.environment;
-      const result = await materializeEntry(located.entry, environment, cwd, this.files);
+      const result = await materializeEntry(located.entry, environment, cwd, this.files, this.references);
       const after = moved();
       if (after) return after;
       if (typeof result === 'string') return result;
@@ -342,13 +402,6 @@ export class ConnectorStatusCache {
       if (entryDigest !== undefined && digest !== entryDigest) return 'ambiguous'; // the agreeing launches would run it differently
       entryDigest = digest;
       made ??= result;
-      // Local scope: an entry under another project key that the engine could have read as this one (it keys by git
-      // root inside a repository) is indistinguishable; one whose visible fields differ cannot be what it reported.
-      const target = canonicalJson(located.entry);
-      for (const alternate of located.alternates) {
-        const visible = visibleOfEntry(alternate, environment);
-        if (visible !== null && visible !== 'unresolved' && visibleKey(visible) === visibleKey(result.visible) && canonicalJson(alternate) !== target) return 'ambiguous';
-      }
     }
     const { visible, launch } = made!;
     const meaning = `${observation.identity}\0${revision}`;

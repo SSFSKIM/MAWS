@@ -539,10 +539,10 @@ export class EngineSession {
   }
 
   // P3-HD start: the launch facts route D's observations are tied to (connectors/provenance.ts): this launch's id, its
-  // spawn cwd and a reference to the environment its plan handed the engine. Host-only: never part of `status()`, a
-  // journal row or an IPC answer.
+  // spawn cwd, the environment its plan handed the engine and the flag settings MAWS passed it. Host-only: never part of
+  // `status()`, a journal row or an IPC answer.
   connectorLaunchContext(): ConnectorLaunchContext {
-    this.launchContext ??= connectorLaunchContext({ appSessionId: this.spec.appSessionId, launchId: this.plan.launchId, cwd: this.plan.cwd, environment: this.plan.env });
+    this.launchContext ??= connectorLaunchContext({ appSessionId: this.spec.appSessionId, launchId: this.plan.launchId, cwd: this.plan.cwd, environment: this.plan.env, flagSettings: this.plan.flagSettings });
     return this.launchContext;
   }
   private launchContext: ConnectorLaunchContext | undefined;

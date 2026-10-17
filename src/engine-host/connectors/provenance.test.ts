@@ -13,6 +13,8 @@ import { connectorToolState } from './status';
 import { CONNECTOR_STATUS_BOUNDS, ConnectorStatusCache, connectorLaunchContext, type ConnectorLaunchContext } from './provenance';
 import { nodeSourceFiles, type SourceFiles } from './source-entry';
 
+type Private = { current: Map<string, string>; retired: Set<string> };
+
 const REPO_ROOT = resolve(__dirname, '../../..');
 type Server = { name: string; status: string; scope?: string; source?: string; config?: Record<string, unknown>; tools?: { name: string; annotations?: Record<string, unknown> }[] };
 const SPIKE: McpStatusResponse = (() => {
@@ -55,8 +57,8 @@ function writeConfig(edit: (file: Record<string, unknown>) => void = () => {}): 
   const file: Record<string, unknown> = {
     hasCompletedOnboarding: true,
     mcpServers: {
-      usertoy: { type: 'stdio', command: 'toy', args: ['toy-server.mjs', 'stdio'], env: { TOY_SECRET: SECRET_ENV, TOY_EXPANDED: '${XDG_TOY}' } },
-      userhttp: { type: 'http', url: 'http://127.0.0.1:47831/mcp', headers: { 'X-Probe-Header': '${XDG_HEADER}' } },
+      usertoy: { type: 'stdio', command: 'toy', args: ['toy-server.mjs', 'stdio'], env: { TOY_SECRET: SECRET_ENV } },
+      userhttp: { type: 'http', url: 'http://127.0.0.1:47831/mcp', headers: { 'X-Probe-Header': HEADER } },
     },
     projects: { [project]: { mcpServers: { localtoy: { command: 'toy', args: ['local'] } } } },
   };
@@ -72,7 +74,7 @@ function observed(cache: ConnectorStatusCache, context: ConnectorLaunchContext, 
 }
 
 describe('ConnectorStatusCache: a verified source from one live report', () => {
-  it('admits user and local entries the launch’s own file holds, with H’s fingerprint and the reported readOnly', async () => {
+  it('admits user entries the launch’s own file holds, with H’s fingerprint and the reported readOnly', async () => {
     writeConfig();
     const cache = new ConnectorStatusCache();
     const answer = USER_REPORT();
@@ -83,7 +85,6 @@ describe('ConnectorStatusCache: a verified source from one live report', () => {
     expect(read.ok && ready.ready && read.tool.fingerprint === ready.fingerprint).toBe(true); // a route change alone never re-grants
     expect(await cache.resolve(project, 'usertoy', 'send_document')).toMatchObject({ ok: true, tool: { readOnly: false } });
     expect(await cache.resolve(project, 'usertoy', 'not_listed')).toMatchObject({ ok: true, tool: { readOnly: null } });
-    expect(await cache.resolve(project, 'localtoy', 'metrics_snapshot')).toMatchObject({ ok: true, source: { scope: 'local', entryPath: ['projects', project, 'mcpServers', 'localtoy'] } });
     const http = await cache.resolve(project, 'userhttp', 'metrics_snapshot');
     expect(http).toMatchObject({ ok: true, source: { transport: 'http', url: 'http://127.0.0.1:47831/mcp' } });
     const httpReady = connectorToolState(answer, 'userhttp', 'metrics_snapshot');
@@ -144,20 +145,19 @@ describe('ConnectorStatusCache: a verified source from one live report', () => {
     expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'changed' });
   });
 
-  it('refuses a local entry another project key holds with the same visible fields and other contents (the engine may key by git root)', async () => {
-    const parent = dir;
-    writeConfig((file) => ((file.projects as Record<string, unknown>)[parent] = { mcpServers: { localtoy: { command: 'toy', args: ['local'], env: { OTHER: '1' } } } }));
-    const cache = new ConnectorStatusCache();
+  it('keeps local scope engine-only until the engine’s projects key is attested, and reads no other key for it', async () => {
+    writeConfig((file) => ((file.projects as Record<string, unknown>)[dir] = { mcpServers: { localtoy: { command: 'toy', args: ['local'] } } }));
+    let reads = 0;
+    const files: SourceFiles = { ...nodeSourceFiles, read: async (path, max) => (reads++, nodeSourceFiles.read(path, max)) };
+    const cache = new ConnectorStatusCache({ files });
     observed(cache, launch(), report({ ...stdio('localtoy', ['local']), scope: 'local', source: 'local' }));
-    expect(await cache.resolveSource(project, 'localtoy')).toEqual({ ok: false, why: 'ambiguous' });
-    // a same-named entry elsewhere whose visible fields differ cannot be what the engine reported
-    writeConfig((file) => ((file.projects as Record<string, unknown>)[parent] = { mcpServers: { localtoy: { command: 'toy', args: ['elsewhere'] } } }));
-    expect(await cache.resolveSource(project, 'localtoy')).toMatchObject({ ok: true });
+    expect(await cache.resolveSource(project, 'localtoy')).toEqual({ ok: false, why: 'unidentified' });
+    expect(reads).toBe(0); // refused before any lookup, so no candidate key is ever scanned
   });
 });
 
 describe('ConnectorStatusCache: what MAWS’s own instance reads', () => {
-  it('reads the whole entry transiently: the launch’s minimal environment and PATH, the configured env expanded, never the host’s', async () => {
+  it('reads the whole entry transiently: the launch’s minimal environment and PATH plus the configured env, never the host’s', async () => {
     writeConfig();
     const cache = new ConnectorStatusCache();
     observed(cache, launch(), USER_REPORT());
@@ -167,7 +167,7 @@ describe('ConnectorStatusCache: what MAWS’s own instance reads', () => {
     expect(read).toEqual({
       ok: true,
       source: source.source,
-      entry: { transport: 'stdio', command: 'toy', executable: join(bin, 'toy'), args: ['toy-server.mjs', 'stdio'], cwd: project, env: { HOME: home, LOGNAME: 'u', PATH: bin, SHELL: '/bin/zsh', TERM: 'dumb', USER: 'u', TOY_SECRET: SECRET_ENV, TOY_EXPANDED: 'expanded' } },
+      entry: { transport: 'stdio', command: 'toy', executable: join(bin, 'toy'), args: ['toy-server.mjs', 'stdio'], cwd: project, env: { HOME: home, LOGNAME: 'u', PATH: bin, SHELL: '/bin/zsh', TERM: 'dumb', USER: 'u', TOY_SECRET: SECRET_ENV } },
     });
     expect(process.env.PATH).not.toBe(bin);
     const http = await cache.resolveSource(project, 'userhttp');
@@ -187,8 +187,8 @@ describe('ConnectorStatusCache: what MAWS’s own instance reads', () => {
       expect(held).not.toContain(SECRET_ENV);
       expect(held).not.toContain('toy-server.mjs'); // even visible args stay in the file and the report, never the cache
     }
-    // the launch environment the engine was handed stays the launch plan's own reference, not a copy in the answers
     expect(JSON.stringify(source)).not.toContain(HEADER);
+    expect(JSON.stringify(http)).not.toContain(HEADER);
   });
 
   it('refuses a source whose meaning changed since it was resolved, rather than reading another', async () => {
@@ -345,7 +345,7 @@ describe('ConnectorStatusCache: bounds and fences fail closed', () => {
     expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
   });
 
-  it('a report observed while the file was being read refuses that read rather than answering the older meaning', async () => {
+  it('a report observed while the file was being read answers what a fresh lookup answers, never the older meaning', async () => {
     writeConfig();
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
@@ -356,6 +356,137 @@ describe('ConnectorStatusCache: bounds and fences fail closed', () => {
     const reading = cache.resolveSource(project, 'usertoy');
     observed(cache, context, without(USER_REPORT(), 'usertoy'));
     release();
-    expect(await reading).toEqual({ ok: false, why: 'changed' });
+    expect(await reading).toEqual({ ok: false, why: 'unobserved' });
+    expect(await reading).toEqual(await cache.resolveSource(project, 'usertoy'));
+  });
+
+  // Finding 1: every mutation of the cache while a lookup is suspended, not only the chosen context's revision.
+  const suspended = () => {
+    let started!: () => void;
+    const gate: { release?: () => void; pending: number; reading: Promise<void> } = { pending: 0, reading: new Promise<void>((resolve) => (started = resolve)) };
+    const files: SourceFiles = {
+      ...nodeSourceFiles,
+      read: async (path, max) => {
+        if (gate.pending++ === 0) {
+          const held = new Promise<void>((resolve) => (gate.release = resolve));
+          started(); // the lookup is suspended in its read now
+          await held;
+        }
+        return nodeSourceFiles.read(path, max);
+      },
+    };
+    return { gate, files };
+  };
+
+  it('a suspended lookup answers ambiguous when another config home reports the server meanwhile, as a fresh one would', async () => {
+    writeConfig();
+    const config2 = join(dir, 'config2');
+    mkdirSync(config2);
+    writeFileSync(join(config2, '.claude.json'), readFileSync(join(config, '.claude.json')));
+    const { gate, files } = suspended();
+    const cache = new ConnectorStatusCache({ files });
+    observed(cache, launch(), USER_REPORT());
+    const reading = cache.resolveSource(project, 'usertoy');
+    await gate.reading;
+    observed(cache, launch('app-2', 'L2', { CLAUDE_CONFIG_DIR: config2 }), USER_REPORT());
+    gate.release!();
+    expect(await reading).toEqual({ ok: false, why: 'ambiguous' });
+    expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'ambiguous' });
+  });
+
+  it('a suspended lookup answers ambiguous when an agreeing launch with another PATH reports meanwhile', async () => {
+    writeConfig();
+    const other = join(dir, 'other-bin');
+    mkdirSync(other);
+    writeFileSync(join(other, 'toy'), '#!/bin/sh\n');
+    chmodSync(join(other, 'toy'), 0o755);
+    const { gate, files } = suspended();
+    const cache = new ConnectorStatusCache({ files });
+    observed(cache, launch(), USER_REPORT());
+    const reading = cache.resolveSource(project, 'usertoy');
+    await gate.reading;
+    observed(cache, launch('app-2', 'L2', { PATH: other }), USER_REPORT());
+    gate.release!();
+    expect(await reading).toEqual({ ok: false, why: 'ambiguous' });
+  });
+
+  it('a suspended lookup answers unavailable when its directory is refused or the cache saturates meanwhile', async () => {
+    for (const fill of ['refuse', 'saturate'] as const) {
+      writeConfig();
+      const { gate, files } = suspended();
+      const cache = new ConnectorStatusCache({ files });
+      observed(cache, launch(), USER_REPORT());
+      for (let i = 1; i < CONNECTOR_STATUS_BOUNDS.contexts; i++) observed(cache, launch(`app-${i}`, `L${i}`, {}, join(dir, `d${i}`)), report());
+      const reading = cache.resolveSource(project, 'usertoy');
+      await gate.reading;
+      if (fill === 'refuse') observed(cache, launch('app-x', 'Lx', { CLAUDE_CONFIG_DIR: join(dir, 'config2') }), USER_REPORT());
+      else for (let i = 0; i <= CONNECTOR_STATUS_BOUNDS.contexts; i++) observed(cache, launch(`app-r${i}`, `Lr${i}`, {}, join(dir, `r${i}`)), report());
+      gate.release!();
+      expect(await reading, fill).toEqual({ ok: false, why: 'unavailable' });
+      expect(await cache.resolveSource(project, 'usertoy'), fill).toEqual({ ok: false, why: 'unavailable' });
+    }
+  });
+
+  it('a lookup the cache keeps changing under gives up unavailable after a bounded number of fresh attempts', async () => {
+    writeConfig();
+    const churn: { cache?: ConnectorStatusCache; n: number } = { n: 0 };
+    const files: SourceFiles = { ...nodeSourceFiles, read: async (path, max) => (observed(churn.cache!, launch(`app-c${churn.n}`, `Lc${churn.n++}`), USER_REPORT()), nodeSourceFiles.read(path, max)) };
+    const cache = (churn.cache = new ConnectorStatusCache({ files }));
+    observed(cache, launch(), USER_REPORT());
+    expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unavailable' });
+    expect(churn.n).toBe(3); // one read per attempt, then it stops
+  });
+});
+
+describe('ConnectorStatusCache: references under the settings ruling', () => {
+  const referencing = (file: Record<string, unknown>) => ((file.mcpServers as Record<string, unknown>).usertoy = { type: 'stdio', command: 'toy', args: ['toy-server.mjs', '${XDG_TOY}'] });
+  const answer = () => report(stdio('usertoy', ['toy-server.mjs', 'expanded']));
+
+  it('literal-only by default: an entry with any reference is unattested, its report notwithstanding', async () => {
+    writeConfig(referencing);
+    const cache = new ConnectorStatusCache();
+    observed(cache, launch(), answer());
+    expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unattested' });
+  });
+
+  it('attestedPresent: a visible reference to a present variable matches its report; an absent one refuses, its default too', async () => {
+    writeConfig(referencing);
+    const cache = new ConnectorStatusCache({ references: 'attestedPresent' });
+    observed(cache, launch(), answer());
+    expect(await cache.resolveSource(project, 'usertoy')).toMatchObject({ ok: true });
+    writeConfig((file) => ((file.mcpServers as Record<string, unknown>).usertoy = { command: 'toy', args: ['toy-server.mjs', '${XDG_ABSENT:-expanded}'] }));
+    expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unattested' });
+  });
+
+  it('the attested environment is the launch plan’s plus the flag settings env MAWS passed, filling only what the plan lacks', async () => {
+    const context = connectorLaunchContext({ appSessionId: 'app-1', launchId: 'L1', cwd: project, environment: environment(), flagSettings: { env: { XDG_FLAG: 'from-flag', XDG_TOY: 'flag-loses', CLAUDE_CONFIG_DIR: join(dir, 'elsewhere'), ODD: 7 } } });
+    expect(context.environment).toMatchObject({ XDG_FLAG: 'from-flag', XDG_TOY: 'expanded' });
+    expect(context.environment).not.toHaveProperty('ODD');
+    expect(context.configFile).toBe(join(config, '.claude.json')); // settings never move the config home
+    writeConfig((file) => ((file.mcpServers as Record<string, unknown>).usertoy = { command: 'toy', args: ['toy-server.mjs', '${XDG_FLAG}'] }));
+    const cache = new ConnectorStatusCache({ references: 'attestedPresent' });
+    observed(cache, context, report(stdio('usertoy', ['toy-server.mjs', 'from-flag'])));
+    expect(await cache.resolveSource(project, 'usertoy')).toMatchObject({ ok: true });
+  });
+});
+
+describe('ConnectorStatusCache: launch metadata is bounded', () => {
+  it('a session replaced past the launch bound, or new sessions past it, saturate the cache: closed, and growing no further', async () => {
+    for (const kind of ['replacements', 'sessions'] as const) {
+      writeConfig();
+      const cache = new ConnectorStatusCache();
+      observed(cache, launch(), USER_REPORT());
+      const stale = cache.begin(launch());
+      for (let i = 0; i < CONNECTOR_STATUS_BOUNDS.launches + 50; i++) cache.begin(kind === 'replacements' ? launch('app-r', `R${i}`) : launch(`app-s${i}`, 'S'));
+      expect(await cache.resolveSource(project, 'usertoy'), kind).toEqual({ ok: false, why: 'unavailable' });
+      for (let i = 0; i < 1000; i++) cache.begin(launch(`app-more${i}`, 'M'));
+      const held = cache as unknown as Private;
+      expect(held.current.size + held.retired.size, kind).toBeLessThanOrEqual(CONNECTOR_STATUS_BOUNDS.launches);
+      cache.observe(stale, without(USER_REPORT(), 'usertoy')); // refused while saturated
+      cache.clear();
+      cache.observe(stale, without(USER_REPORT(), 'usertoy')); // and after the reset
+      observed(cache, launch(), USER_REPORT());
+      expect(await cache.resolveSource(project, 'usertoy'), kind).toMatchObject({ ok: true });
+    }
   });
 });

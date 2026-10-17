@@ -1,9 +1,10 @@
 // P3-HD's fixture MCP server (e2e/connectors-direct.spec.ts): newline-delimited JSON-RPC over stdio, or Streamable HTTP
 // in JSON-response mode on 127.0.0.1 only, with no SDK. Every request goes to a shared call log; a stdio instance first
-// logs what it was started with (its cwd, its arguments and its MAWS_PROBE_* environment), so a run can compare the
-// instance the engine started with the entry MAWS would start from the same file. `--auth` answers the MCP endpoint
-// 401 with protected-resource metadata, so the engine reports the server needs-auth; it never issues a token.
-//   node connector-direct-server.mjs stdio --id <id> --log <file> [--tools '<json>'] [--arg <value>]
+// logs what it was started with (its cwd, its arguments, its MAWS_PROBE_* environment and the SDK-minimal keys), so a
+// run can compare the instance the engine started with the entry MAWS would start from the same file. `--auth` answers
+// the MCP endpoint 401 with protected-resource metadata, so the engine reports the server needs-auth; it never issues a
+// token.
+//   node connector-direct-server.mjs stdio --id <id> --log <file> [--tools '<json>'] [any further arguments, logged]
 //   node connector-direct-server.mjs http --id <id> --log <file> [--tools '<json>'] [--auth]   (prints {"port":n})
 import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -53,7 +54,8 @@ const reply = (message) => {
 
 if (mode === 'stdio') {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('MAWS_PROBE_')));
-  record({ event: 'start', cwd: process.cwd(), argv, env });
+  const sdk = Object.fromEntries(['HOME', 'LOGNAME', 'PATH', 'SHELL', 'TERM', 'USER'].filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]]));
+  record({ event: 'start', cwd: process.cwd(), argv, env, sdk });
   for await (const line of createInterface({ input: process.stdin })) {
     if (line.trim() === '') continue;
     const message = JSON.parse(line);
