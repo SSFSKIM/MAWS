@@ -28,7 +28,7 @@
 - [x] M1 — The hub's `output`, the widened bodies, and DX8's `output()` (2026-10-17, reviewed clean: d2c8fec5..af560476, fix 7098835a..89b2e560)
 - [x] M2 — The fake machine's part: the session-view recording, jobs and status, `output`, pages after the replay (2026-10-17, reviewed clean: 36131d48..6bb8bb4f, fixes 45c4d172..62c4fbd3 and 62c4fbd3..c4a17632)
 - [x] M3 — The per-session owner and the session view (2026-10-17, reviewed clean: 36131d48..57320abd on `desk-dc9-m3`, fixes ..6b2ddded, ..2388b1f3, ..55c6e118; merged at 582aecfd)
-- [ ] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements (in review: built 7e2bbe64, fix 1b05db7a; fix wave 2 — affirmative provenance — in flight on `desk-dc9`)
+- [x] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements (2026-10-17, reviewed clean: ec8021c6..7e2bbe64, fixes b05deb29..1b05db7a and 1b05db7a..38791976)
 - [ ] M5 — The column: agents with real status, the jobs view, `output`, MCP names (building on `desk-dc9-m5` in `/tmp/desk-dc9-m5`; to be reviewed, then merged)
 - [ ] M6 — The acceptance, the phone's bundle, and the gate
 
@@ -920,6 +920,32 @@ in their own worktrees.
   backfill, so it ends the turn and draws no phantom prompt (history and
   older plugins keep that shape).
   Date/Author: 2026-10-17, the composite's writer, folded by the controller.
+
+- Decision (M4, as built): each tail send is a turnless MAWS
+  `request_slot` row (id `desk-tail:<kind>:<key>`) drawn by
+  `renderRequest` — turnless, so the report never folds it — after the
+  streaming rows, then the inline request cards, then the end marker; the
+  bubble is the desk's own markup in `UserRow`'s classes with a separate
+  `DeliveryFoot {state, words, reason}`, words naming no session, a
+  reason's first line cut to 60 characters (the full text in the tooltip),
+  and a `ResizeObserver` as `UserRow` has. Steers are tail rows matched by
+  the row uuid their RPC result names (the only uuid path; per tab). The
+  matcher reads both frames sminos writes — `[sminos chat … <writer>:<seq>
+  from … → @you|@all]` and `[sminos message from … id=<msg_id>]` — on the
+  row's whole first line, on a row marking a delivery's provenance (a user
+  row `{kind: plugin, asUser: true}`, a queued command `peer` or
+  `plugin`); origin-less rows and the bridge's appended steer row never
+  match. The ask overlay is portalled into MAWS's question row (found again
+  by a frame-throttled `MutationObserver`; CSS hides the receipt's own
+  lines while it draws) — the fragile piece, which a `QuestionRow` prop in
+  MAWS would replace. "Waiting for your answer · below" while its card is
+  at the tail. The end marker shows for `group === 'ended'`, untimed, the
+  session named through `SessionLabel`. The n-0 fallback lives in
+  `SessionView`. The pill shows while no card is in view; a request landing
+  marks and centers its card. DC5's `StreamView` landing effect returned
+  Chrome's `scrollIntoView` promise as its cleanup (a crash on unmount),
+  fixed. The six DC5 `fixme` tests are moved and pass.
+  Date/Author: 2026-10-17, M4 executor, folded by the controller.
 
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
