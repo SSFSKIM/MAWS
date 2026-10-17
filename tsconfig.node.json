@@ -57,6 +57,10 @@
     "e2e/support/final-bundle-reporter.ts",
     // P3-H: test/support/send-to-approval.test.ts runs the Send to live run's approval predicate
     "e2e/support/send-to-approval.ts",
+    // P3-HD M4a: test/support/connector-oauth*.test.ts run the toy OAuth fixture's logic, its scene support and fake browser
+    "e2e/support/connector-oauth-core.d.mts",
+    "e2e/support/connector-oauth.ts",
+    "e2e/support/connector-oauth-browser.ts",
     // P2-F S-locale: the transcript model's day words and the agent tools' ages write through the renderer's date
     // formats (D2 widened), and the agent models' tests read the system locale's relative times; listed for the same
     // reason as C8a's
