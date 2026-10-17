@@ -662,3 +662,80 @@ describe('a dashboard tab’s live datasets: a long stale threshold (E3 M3 fix)'
     expect(w.startSession).not.toHaveBeenCalled();
   });
 });
+
+// E3 M3 residual (the retained review's finding): a recovery probe armed for a watch's due time is withdrawn as soon as
+// the watch proves its handle exists (a refresh of it heard, or the handle answering true to any ask), and an ask whose
+// answer arrives after a later show or a heard refresh changes nothing, so no extra refresh runs before the next due.
+describe('a dashboard tab’s live datasets: a recovery probe made obsolete (E3 M3 residual)', () => {
+  async function armed() {
+    const w = world();
+    setDataset(w.doc, 'sales', query({ schedule: 60 }));
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    w.listeners.get('w1')!(DATASET('sales')); // completion at t0
+    w.live.setShown(false);
+    w.setClock(AT + 10_000);
+    w.live.setShown(true); // not due: a probe armed for t60
+    await settle();
+    expect(w.surface.refreshWatch).not.toHaveBeenCalled();
+    return w;
+  }
+
+  it('the owner’s Refresh completing first withdraws the armed probe: nothing asked again before the next due', async () => {
+    const w = await armed();
+    await vi.advanceTimersByTimeAsync(10_000);
+    w.setClock(AT + 20_000);
+    await w.live.refresh('sales'); // the owner's Refresh at t20: the handle answers true
+    expect(w.surface.refreshWatch).toHaveBeenCalledTimes(1);
+    w.listeners.get('w1')!(DATASET('sales')); // its completion at t20: H's next is due at t80
+    await vi.advanceTimersByTimeAsync(45_000); // past t60
+    expect(w.surface.refreshWatch).toHaveBeenCalledTimes(1);
+    expect(w.surface.watchTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('a scheduled refresh heard before the probe’s time withdraws it', async () => {
+    const w = await armed();
+    await vi.advanceTimersByTimeAsync(30_000);
+    w.setClock(AT + 40_000);
+    w.listeners.get('w1')!(DATASET('sales')); // H's own refresh of the watch ended: the handle exists
+    await vi.advanceTimersByTimeAsync(30_000); // past t60
+    expect(w.surface.refreshWatch).not.toHaveBeenCalled();
+    expect(w.surface.watchTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('an ask answered false after a refresh of the watch was heard, or after the dashboard was shown again, registers nothing', async () => {
+    const w = world();
+    setDataset(w.doc, 'sales', query({ schedule: 60 }));
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    w.listeners.get('w1')!(DATASET('sales'));
+    w.live.setShown(false);
+    w.setClock(AT + 70_000);
+    const late = deferred<boolean>();
+    w.surface.refreshWatch.mockImplementationOnce(() => late.promise);
+    w.live.setShown(true); // due: asked at once, the answer slow
+    await settle();
+    w.listeners.get('w1')!(DATASET('sales')); // the watch refreshed meanwhile
+    late.resolve(false);
+    await settle();
+    expect(w.surface.unwatchTool).not.toHaveBeenCalled();
+    expect(w.surface.watchTool).toHaveBeenCalledTimes(1);
+
+    const slow = deferred<boolean>();
+    w.surface.refreshWatch.mockImplementationOnce(() => slow.promise);
+    w.live.setShown(false);
+    w.setClock(AT + 200_000);
+    w.live.setShown(true); // due: asked, slow
+    await settle();
+    w.live.setShown(false);
+    w.live.setShown(true); // shown again: a second ask, answered true
+    await settle();
+    slow.resolve(false); // the first ask's late answer belongs to an earlier showing
+    await settle();
+    expect(w.surface.refreshWatch).toHaveBeenCalledTimes(3);
+    expect(w.surface.unwatchTool).not.toHaveBeenCalled();
+    expect(w.surface.watchTool).toHaveBeenCalledTimes(1);
+  });
+});

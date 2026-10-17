@@ -54,6 +54,7 @@ interface Query {
   busy: LiveQueryStatus['busy'];
   heardAt?: number; // E3 M3 fix: when its watch's last refresh was heard
   probe?: ReturnType<typeof setTimeout>; // E3 M3 fix: asks its handle at its due time, while shown
+  probes: number; // E3 M3 residual: advanced whenever a pending or in-flight ask of its handle becomes obsolete
 }
 
 // E3 M3 fix: the longest delay a timer takes (a longer one fires at once); a later boundary is reached by re-arming.
@@ -241,7 +242,7 @@ export class LiveDatasetsController implements LiveDatasets {
         continue;
       }
       if (known) this.endWatch(known);
-      const query: Query = { id, source, identity, settings, watch: null, pause: known && known.identity === identity ? known.pause : null, busy: null };
+      const query: Query = { id, source, identity, settings, watch: null, pause: known && known.identity === identity ? known.pause : null, busy: null, probes: 0 };
       this.queries.set(id, query);
       if (this.surface && source.schedule !== undefined) this.startWatch(query);
     }
@@ -330,6 +331,7 @@ export class LiveDatasetsController implements LiveDatasets {
 
   private heard(query: Query, update: ConnectorCallOutcome): void {
     query.heardAt = this.now(); // E3 M3 fix
+    this.stopProbe(query); // E3 M3 residual: a refresh heard proves its handle; an armed or in-flight ask is obsolete
     if (!update.ok && update.state === 'invalid') query.watch = null; // H ended the watch
     const pause = pauseOf(update);
     if (pause !== undefined) this.patch(query, { pause });
@@ -365,10 +367,13 @@ export class LiveDatasetsController implements LiveDatasets {
 
   // Asks the watch's handle for a refresh: false is a handle the broker no longer has (a running dataset watch answers
   // true), so it is unwatched and registered again, which refreshes at once. Never two watches for one query.
+  // E3 M3 residual: an ask is withdrawn when a refresh of the watch is heard, the dashboard hides or shows again, or another
+  // ask finds the handle (`probes` advanced), so its late answer registers nothing and no refresh runs early.
   private async probe(query: Query): Promise<void> {
     const surface = this.surface;
     const watch = query.watch;
     if (!surface || !watch?.id || !this.shown) return;
+    const asked = query.probes;
     let kept: boolean;
     try {
       kept = await surface.refreshWatch(watch.id);
@@ -376,7 +381,9 @@ export class LiveDatasetsController implements LiveDatasets {
       this.log(`a watch refresh failed: ${messageOf(error)}`);
       return;
     }
-    if (kept || this.disposed || !this.shown || this.queries.get(query.id) !== query || query.watch !== watch) return;
+    if (query.probes !== asked) return; // made obsolete meanwhile
+    if (kept) return this.stopProbe(query); // the handle exists: an armed ask is withdrawn
+    if (this.disposed || !this.shown || this.queries.get(query.id) !== query || query.watch !== watch) return;
     this.endWatch(query);
     this.startWatch(query);
   }
@@ -384,6 +391,7 @@ export class LiveDatasetsController implements LiveDatasets {
   private stopProbe(query: Query): void {
     if (query.probe !== undefined) clearTimeout(query.probe);
     delete query.probe;
+    query.probes += 1; // E3 M3 residual: any ask in flight is obsolete
   }
 
   // ── grants and gestures ──
