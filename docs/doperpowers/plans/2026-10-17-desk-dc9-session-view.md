@@ -866,6 +866,17 @@ in their own worktrees.
   Date/Author: 2026-10-17, the composite's writer relaying DC8, folded by
   the controller.
 
+- Decision (the fake's follow-up, `97e3b111..458f60c1` on `desk-dc9-fx`,
+  reviewed clean, merged): DC8's fixture is vendored at doperpowers
+  `48f254aa` (18 body and 17 output cases; replaces `c81b77fc`); an agent
+  is background by `meta.requestShape`, `spawn.background`, the call's
+  `run_in_background` (`true` or `"true"`), or a launch among its rows; a
+  result row with a `toolUseResult` is decided by its status alone, and
+  the engine's launch texts are read only on a row with no `toolUseResult`
+  and no `is_error`, so a foreground answer that begins like a launch stays
+  `completed`.
+  Date/Author: 2026-10-17, M2 executor, folded by the controller.
+
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
   transcript never ended it. The engine writes a `system/turn_duration`
