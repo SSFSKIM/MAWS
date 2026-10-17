@@ -3509,6 +3509,27 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Acceptance 8 is checked on the deployment with a browser-console snippet for two attacks, a forged
+  `human` and a forged RPC to a live session, each with a wrong code. The machine-side suites are the evidence for
+  the other three (a `say` under another machine's writer, an Allow whose card digest does not match, a spawn into
+  a directory that is not a known checkout). A forged RPC's refusal is evidenced by the refusing daemon's log line
+  and the `rpc-state` the snippet prints, not by the web. As built, the web ignores `rpc-state` for a nonce it did
+  not send, and the hub neither audits a daemon's RPC refusal nor keeps an `rpc-result` for a nonce it has no record
+  of, so "the refusal shows in the web" cannot hold for an RPC the hub forged; drawing those refusals is backlog.
+  Nothing deployable could place events at the hub without the org key: the proof commands refuse the real org, and
+  an RPC is never stored. Rejected: hand-editing the walk project's Durable Object storage through Cloudflare's Data
+  Studio (literal, but a hand-written row in production storage, and a misplaced one stops a writer's uploads); a
+  test route or a second Worker bound to the hub's classes (a standing production write path); relying on the
+  suites alone (the two live attacks are the cheapest proof that the deployed path refuses).
+  Date/Author: 2026-10-16, owner ruling (the walk's preparation).
+- Decision: MAWS's recomposition panel is the three children's own xhigh panels. DC3's, DC5's and DC6's ran over
+  their own ranges, each landing on master after the one before it (DC5's on top of DC3's hub, DC6's on top of
+  both), so every MAWS line of Phase 1 was read by a panel, and the seams between them were read from the later
+  child's side and exercised by the real-hub suite. The doperpowers repository's panel ran once over DC2, DC4 and
+  DC7's merged range, as planned, and its eight fixes landed (doperpowers #201). Rejected: a second MAWS panel over
+  the merged range (master moved with unrelated work in between, so the range would mostly be other initiatives',
+  and every desk line in it has had a panel).
+  Date/Author: 2026-10-16, design session.
 - Decision: An admin removes a machine from the web's Machines dialog (MAWS #17). DX7 specified
   `DELETE /api/machines/<name>` and the hub served it, but no child's web scope named the action, so after the walk
   the owner had no way to remove its stand-in machine. Removal is a full confirmation step, because what it means
