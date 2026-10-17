@@ -230,6 +230,10 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     rejectSuggestion: (artifactId, ranges) => call('artifacts.rejectSuggestion', { artifactId, ranges }),
     uploadAsset: (artifactId, bytes, { name, mime }) => call('artifacts.uploadAsset', { artifactId, bytes, name, mime }),
     copyAsset: (from, ref, to) => call('artifacts.copyAsset', { from, ref, to }), // P3-C (Decision Log 25)
+    // P3-E (E2 M2): a page of a dataset snapshot, read by the host
+    readDataset: (artifactId, ref, { format, offset, limit }) => call('artifacts.readDataset', { artifactId, ref, format, ...(offset !== undefined && { offset }), ...(limit !== undefined && { limit }) }),
+    // P3-E (E2 M3): the source sheet's Download, main's Save dialog over the artifact's own asset
+    downloadAsset: (artifactId, ref, options) => call('artifacts.downloadAsset', { artifactId, ref, ...(options?.name !== undefined && { name: options.name }) }),
     identity: () => ({ actor: HUMAN, ...actorDisplay(HUMAN) }),
     ...createConnectorHost(ipc), // P3-H H4: a page's connector surface and the owner's grants
   };

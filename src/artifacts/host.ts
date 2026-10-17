@@ -18,6 +18,15 @@ import type {
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { Restored, SaveState } from './provider/port';
 import type { Carry, ContentIds, Doc, SuggestionRange } from './yjs';
+import type { Cell, DatasetColumn, DatasetFormat } from './dashboard/datasets'; // P3-E
+
+// P3-E: a page of `ArtifactHost.readDataset`
+export interface DatasetPage {
+  columns: DatasetColumn[];
+  rows: Cell[][];
+  total: number;
+  truncated: boolean;
+}
 
 // One row of the threads mirror (`artifact_threads`), which P3-B's adapter keeps from the doc's comment threads so the
 // library and the session panel can list them without opening the doc (Decision Log 23c).
@@ -192,6 +201,15 @@ export interface ArtifactHost {
   // P3-C (Decision Log 25; the parent's 65): one artifact's asset copied into another by the store, bytes and mime
   // unchanged; answers the target's ref (an existing one for identical bytes).
   copyAsset(from: string, ref: string, to: string): Promise<{ assetId: string; ref: string }>;
+  // P3-E (docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md M2; ledger X23, E's Decision Log 6 and 8): one page of a
+  // dataset snapshot, the asset `ref` read in the `format` the displayed descriptor names, parsed by the host; at most
+  // `limit` rows (DATASET_READ_MAX_ROWS) and DATASET_READ_MAX_BYTES of JSON, so a caller continues at `offset` plus the
+  // rows answered, never assuming `limit`. The only route to a dataset's rows (the renderer never fetches bytes).
+  readDataset(artifactId: string, ref: string, options: { format: DatasetFormat; offset?: number; limit?: number }): Promise<DatasetPage>;
+  // P3-E (E2 M3; ledger X23, E's Decision Log 18): the owner saves one of the artifact's own assets (a dataset snapshot,
+  // by the displayed descriptor's ref) where they choose, `name` the suggestion; `path` null when they cancel. Main reads
+  // and copies the bytes; the editor never fetches them.
+  downloadAsset(artifactId: string, ref: string, options?: { name?: string }): Promise<{ path: string | null }>;
   identity(): { actor: Actor; name: string; color: string };
   // P3-H H4 (the X9 amendment, Decision Log 80): a page's connector surface, and the owner's grants of one artifact's
   // tools (the editor header's, never a page's). A grant is taken under the fingerprint of the route that has the tool

@@ -6,6 +6,7 @@
 // imports only the leaf `./artifact-id`, so the two never import each other. The read and create fields live in `./tools`.
 import * as z from 'zod';
 import { ARTIFACT_ID } from './artifact-id';
+import type { DashboardDatasetSummary, DashboardViewWarning } from './dashboard-tools'; // P3-E
 
 export const DOCUMENT_TOOL_NAMES = ['artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve'] as const;
 export type DocumentToolName = (typeof DOCUMENT_TOOL_NAMES)[number];
@@ -76,6 +77,7 @@ export interface ArtifactEditResult {
   results: EditOpResultLine[];
   orphaned: string[]; // open threads no live text carries after the batch
   answered?: { threadId: string; messageId: string };
+  viewWarnings?: DashboardViewWarning[]; // P3-E (E's Decision Log 9): a dashboard's, the specs this batch wrote
 }
 export interface DocumentTab {
   id: string;
@@ -85,10 +87,12 @@ export interface DocumentTab {
 export interface DocumentReadResult {
   status: 'read';
   artifactId: string;
-  kind: 'document';
+  kind: 'document' | 'dashboard'; // P3-E: a dashboard is read as a document
   title: string;
   handle?: string;
   revision: number;
+  datasets?: DashboardDatasetSummary[]; // P3-E: a dashboard's, as the read doc holds them
+  viewWarnings?: DashboardViewWarning[]; // P3-E (E's Decision Log 9): a dashboard's retained specs' problems, read only
   tabs: DocumentTab[];
   tab: string;
   markdown: string;

@@ -6,7 +6,7 @@
 import { assetPathOf } from './canon';
 import { cssString, fontFamilyCss } from './css';
 import { stableHash } from './hash';
-import { parseStylesheet, urlsIn, type Declaration } from './css-read';
+import { parseFontStack, parseStylesheet, urlsIn, type Declaration } from './css-read';
 import { resolveTokens } from './resolve';
 import type { TokenSet } from './tokens';
 
@@ -126,6 +126,18 @@ export function fontFaces(documentCss: string | undefined, tokens: TokenSet, toU
   }
   return { css: faces.length ? `${faces.join('\n')}\n` : '', aliases };
 }
+
+// P3-E start (E2 M5; P3-E Decision Log 37): a scope's family value as the system authored it, the private names
+// `fontFaces` gives a scope's faces dropped and every other family written as `fontFamilyCss` writes it; what a figure
+// meant for a file names (a dashboard's chart, whose editor and exports draw one SVG). A value that is not a stack is
+// kept as it is.
+const FACE_ALIAS = /^ds-face-[0-9a-z]+$/;
+export function authoredFontStack(value: string): string {
+  const names = parseFontStack(value.trim());
+  if (!names || names.some((name) => name === '' || /^var\(/i.test(name))) return value;
+  return fontFamilyCss(names.filter((name) => !FACE_ALIAS.test(name)));
+}
+// P3-E end
 
 /** The system's faces under their authored names, for a frame (a document of its own). */
 export const fontFaceCss = (documentCss: string | undefined, tokens: TokenSet, toUrl: AssetUrl | null): string => fontFaces(documentCss, tokens, toUrl, { aliased: false }).css;

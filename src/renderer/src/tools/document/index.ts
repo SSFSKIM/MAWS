@@ -12,7 +12,8 @@ import { DocumentMain } from './DocumentMain';
 import { DocumentPanel } from './DocumentPanel';
 import { DocumentTabState, type DocumentTabDeps } from './tab-state';
 
-const windowDeps = (): DocumentTabDeps => ({
+// P3-E (E2 M3; E's Decision Log 19): exported, so the dashboard's DocumentTabState is made with the same window's deps
+export const documentWindowDeps = (): DocumentTabDeps => ({
   host: artifactHost(),
   ipc,
   log: (line) => console.warn(`[document] ${line}`),
@@ -29,7 +30,7 @@ const windowDeps = (): DocumentTabDeps => ({
 });
 
 /** Registers the document editor (App.tsx's P3-B block); returns the registration's removal. */
-export function registerDocumentEditor(deps: () => DocumentTabDeps = windowDeps): () => void {
+export function registerDocumentEditor(deps: () => DocumentTabDeps = documentWindowDeps): () => void {
   return registerArtifactEditor<DocumentTabState>('document', {
     Panel: DocumentPanel,
     Main: DocumentMain,

@@ -9,7 +9,7 @@ import type { Doc, Node } from '../yjs';
 import { DocIndex, type TopBlock } from './block-index';
 import { docMarkdown } from './markdown';
 import { listTabs, tabBody } from './tabs';
-import { liveThreadIds, locate, markExtents, threadStates, type ThreadState } from './threads';
+import { isBlockAnchor /* P3-E */, liveThreadIds, locate, markExtents, threadStates, type ThreadState } from './threads';
 
 export const DEFAULT_COUNT = 200;
 export const MAX_COUNT = 1000;
@@ -99,11 +99,21 @@ export function readDocument(doc: Doc, { tab, from, count = DEFAULT_COUNT, only 
     while (top.parent && top.parent !== body) top = top.parent;
     return top;
   };
-  const open = states.filter((thread) => thread.status === 'open' && (extents.has(thread.id) || (thread.orphan && thread.tabId === tabId)));
+  // P3-E (E2 M4): a live block thread is on its block, here when this tab holds the block (it carries no mark)
+  const onBlockHere = (thread: ThreadState): boolean => thread.live && isBlockAnchor(thread.anchor) && thread.blockId !== null && index.find(thread.blockId)?.top.tabId === tabId;
+  const open = states.filter((thread) => thread.status === 'open' && (extents.has(thread.id) || (thread.orphan && thread.tabId === tabId) || onBlockHere(thread) /* P3-E */));
   const resolved = states.filter((thread) => thread.status === 'resolved' && thread.tabId === tabId).length;
   const lines: string[] = [];
   let outside = 0;
   for (const thread of open) {
+    // P3-E start (E2 M4): a block thread on its block, shown or outside the range like a passage
+    if (onBlockHere(thread)) {
+      const top = index.find(thread.blockId!)!.top;
+      if (!inRange.has(top.node)) outside += 1;
+      else lines.push(`- c:${thread.id} on ^${thread.blockId} · ${quoted(thread)} · ${messages(thread)}`);
+      continue;
+    }
+    // P3-E end
     const extent = extents.get(thread.id);
     if (extent) {
       if (!inRange.has(topOf(extent.first.node))) outside += 1;

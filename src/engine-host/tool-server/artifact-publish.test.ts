@@ -218,7 +218,7 @@ describe('artifact_publish of a file kind (the generic file model)', () => {
   it('goes through the kind’s registered publish and readFiles when it has them', async () => {
     const calls: unknown[] = [];
     const adapter: KindAdapter = {
-      kind: 'dashboard',
+      kind: 'design', // P3-E (parent Decision Log 16): a generic stand-in; a dashboard is never published
       readFiles: (doc) => ({ 'view.json': String(doc.get('model').getAttr('view') ?? '{}') }),
       publish: (live, base, sent, force) => {
         calls.push({ base, sent, force });
@@ -227,7 +227,7 @@ describe('artifact_publish of a file kind (the generic file model)', () => {
       },
     };
     w.store.registerAdapter(adapter);
-    const created = await create({ kind: 'dashboard', title: 'Board' });
+    const created = await create({ kind: 'design', title: 'Board' /* P3-E: the stand-in */ });
     const answer = jsonOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { 'view.json': '{"a":1}' } }));
     expect(answer).toMatchObject({ changed: ['view.json'], kept: [] });
     expect(calls[0]).toEqual({ base: { 'view.json': '{}' }, sent: { 'view.json': '{"a":1}' }, force: false });

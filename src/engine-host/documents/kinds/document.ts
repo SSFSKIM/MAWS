@@ -48,8 +48,10 @@ export function registerDocumentKind(store: ArtifactStore): DocumentKind {
   };
 }
 
-/** The document adapter registered with `store`, or null when the document kind is not registered. */
-export function documentAdapterOf(store: ArtifactStore): DocumentAdapter | null {
-  const adapter = store.service.adapterFor('document') as Partial<DocumentAdapter> | undefined;
+/** The document adapter registered with `store`, or null when the document kind is not registered. P3-E (E2 M2; ledger
+ * X25): `kind` selects the adapter of the artifact a tool writes, B's document's or the dashboard's (B's adapter under
+ * that kind, src/engine-host/dashboards/), so a batch's provenance carries reach the adapter whose hooks run its update. */
+export function documentAdapterOf(store: ArtifactStore, kind: 'document' | 'dashboard' = 'document'): DocumentAdapter | null {
+  const adapter = store.service.adapterFor(kind) as Partial<DocumentAdapter> | undefined;
   return adapter && typeof adapter.registerCarries === 'function' ? (adapter as DocumentAdapter) : null;
 }
