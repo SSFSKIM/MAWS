@@ -160,6 +160,17 @@ describe('materializeEntry (the whole entry, for MAWS’s own instance)', () => 
   });
 });
 
+describe('nodeSourceFiles.exists (the legacy file check)', () => {
+  it('is true for a present path and false only for an absent one; any other failure is not an absence', async () => {
+    const present = join(dir, 'present');
+    writeFileSync(present, '{}');
+    expect(await nodeSourceFiles.exists(present)).toBe(true);
+    expect(await nodeSourceFiles.exists(join(dir, 'absent'))).toBe(false);
+    expect(await nodeSourceFiles.exists(join(present, 'under-a-file'))).toBe(false); // ENOTDIR
+    await expect(nodeSourceFiles.exists(join(dir, 'x'.repeat(300)))).rejects.toMatchObject({ code: 'ENAMETOOLONG' });
+  });
+});
+
 describe('nodeSourceFiles.read (the config file under its cap)', () => {
   it('reads a file up to the cap and refuses one byte past it, counting the bytes it actually reads', async () => {
     const path = join(dir, 'file.json');

@@ -116,6 +116,16 @@ describe('ConnectorStatusCache: a verified source from one live report', () => {
     expect(await pending.resolveSource(project, 'userhttp')).toEqual({ ok: false, why: 'unobserved' });
   });
 
+  it('is unavailable when the legacy file cannot be checked: a denied or failed check never reads as its absence', async () => {
+    writeConfig();
+    for (const code of ['EACCES', 'EPERM', 'EIO']) {
+      const files: SourceFiles = { ...nodeSourceFiles, exists: async () => Promise.reject(Object.assign(new Error(code), { code })) };
+      const cache = new ConnectorStatusCache({ files });
+      observed(cache, launch(), USER_REPORT());
+      expect(await cache.resolveSource(project, 'usertoy'), code).toEqual({ ok: false, why: 'unavailable' });
+    }
+  });
+
   it('is unidentified when the launch environment names no file, or the engine’s legacy file could be the one it read', async () => {
     writeConfig();
     const cache = new ConnectorStatusCache();

@@ -54,7 +54,7 @@ export type ConnectorLaunchEntry =
 
 export interface SourceFiles {
   read(path: string, maxBytes: number): Promise<string | null>; // null: absent; throws when unreadable, not a regular file, or past maxBytes
-  exists(path: string): Promise<boolean>;
+  exists(path: string): Promise<boolean>; // false only for ENOENT/ENOTDIR; throws on any other failure
   executable(path: string): Promise<boolean>; // a file with an execute bit for this process
 }
 
@@ -89,11 +89,16 @@ export const nodeSourceFiles: SourceFiles = {
       await handle.close();
     }
   },
+  // Only an absence is false; a denied or failed check throws (the caller's unavailable), never reads as absent.
   async exists(path) {
-    return lstat(path).then(
-      () => true,
-      () => false,
-    );
+    try {
+      await lstat(path);
+      return true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+      throw error;
+    }
   },
   async executable(path) {
     try {
