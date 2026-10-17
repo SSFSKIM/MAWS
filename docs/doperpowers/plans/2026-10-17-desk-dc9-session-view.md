@@ -808,6 +808,15 @@ in their own worktrees.
   Date/Author: 2026-10-17, the owner via the composite's writer.
 
 ## Surprises & Discoveries
+- 2026-10-17 (a probe on a real session, local only): paging crosses a
+  compaction cleanly — MAWS's backfill turns `compact_boundary` into one
+  historical `boundary.compaction` row and hides only rewind branches, the
+  summary row (`isCompactSummary`) is meta in both views by MAWS's design,
+  and the desk's `older()` filters nothing — so rows before a compaction
+  draw above "Compacted earlier" in Report and Transcript, to the file's
+  first row. The same probe found the reader's place lost when an older
+  page answers with any delay (100–830 px of drift per page); M3's fix
+  wave 2 takes it.
 - 2026-10-17 (M3): MAWS's report counts question rows as persistent, not
   as tool calls ("Working record · 1 tool call" for a turn with Bash and
   two questions). MAWS's "Jump to latest" animates working dots whenever
