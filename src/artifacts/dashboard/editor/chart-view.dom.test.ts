@@ -7,7 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { DatasetPage } from '../../host';
 import { displayedDocument, type ViewEnvironment } from '../../document/editor/nodes/views';
 import { newDoc, type Doc } from '../../yjs';
-import { removeDataset, setDataset, type DatasetDescriptor } from '../datasets';
+import { removeDataset, setDataset, type FileDatasetDescriptor } from '../datasets'; // E3: the file arm
 import { Editor } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
 import { coreExtensionOptions } from '../../document/ids';
@@ -17,7 +17,7 @@ import { createChartRenderer, type SourceCapture } from './chart-view';
 import { SnapshotReader } from '../snapshots';
 
 const AT = Date.UTC(2026, 9, 16, 8, 30);
-const descriptor = (ref: string, over: Partial<DatasetDescriptor> = {}): DatasetDescriptor => ({
+const descriptor = (ref: string, over: Partial<FileDatasetDescriptor> = {}): FileDatasetDescriptor => ({ // E3: the file arm of the descriptor union
   title: '지역별 매출',
   source: { kind: 'file', ref, name: 'sales.csv', format: 'csv', sha256: 'a'.repeat(64), size: 42 },
   columns: [{ name: 'region', type: 'string' }, { name: 'sales', type: 'number' }],

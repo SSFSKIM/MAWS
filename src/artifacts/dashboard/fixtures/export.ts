@@ -7,7 +7,7 @@ import { schemaFor } from '../../document/schema';
 import { createDocument } from '../../document/tabs';
 import { addThread, reply } from '../../document/threads';
 import { newDoc, type Doc } from '../../yjs';
-import { setDataset, type DatasetDescriptor } from '../datasets';
+import { setDataset, type FileDatasetDescriptor } from '../datasets'; // E3: the file arm
 import type { ViewTable } from '../render';
 
 export const SESSION: Actor = { kind: 'session', appSessionId: 'session-a' } as Actor;
@@ -26,7 +26,7 @@ export const SNAPSHOTS: Record<string, ViewTable> = {
   [NEW_REF]: { columns, rows: [['North', 70], ['South', 80], ['West | *star*', 90]] },
 };
 
-export const descriptor = (ref: string, at: number, by: Actor = SESSION): DatasetDescriptor => ({
+export const descriptor = (ref: string, at: number, by: Actor = SESSION): FileDatasetDescriptor => ({
   title: 'Sales',
   source: { kind: 'file', ref, name: 'sales.csv', format: 'csv', sha256: (ref === OLD_REF ? 'a' : 'b').repeat(64), size: 40 },
   columns,

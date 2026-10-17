@@ -6,13 +6,13 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DatasetPage } from '../../host';
-import type { DatasetDescriptor } from '../datasets';
+import type { FileDatasetDescriptor } from '../datasets'; // E3: the file arm
 import { SourceSheet } from './SourceSheet';
 import { SourceSheetState } from './sheet';
 import { SnapshotReader } from '../snapshots';
 
 const AT = Date.UTC(2026, 9, 16, 8, 30);
-const descriptor = (ref: string, rows: number, over: Partial<DatasetDescriptor> = {}): DatasetDescriptor => ({
+const descriptor = (ref: string, rows: number, over: Partial<FileDatasetDescriptor> = {}): FileDatasetDescriptor => ({ // E3: the file arm of the descriptor union
   title: '지역별 매출',
   description: 'Monthly sales by region, from the finance export.',
   source: { kind: 'file', ref, name: 'sales.tsv', format: 'tsv', sha256: 'b'.repeat(64), size: 1_234 },

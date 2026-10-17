@@ -40,54 +40,80 @@ const FileSourceSchema = z.strictObject({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   size: z.number().int().nonnegative(),
 });
-// E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R2, R4; E's Decision Log 48 (4)): a granted tool's
-// result, validated as a file is, its snapshot a JSON asset. `snapshot` is null until the first successful fetch (a
-// configured query never fetched: no rows, no columns, no `updated`); `schedule` is whole seconds within
-// QUERY_SCHEDULE_SECONDS, absent meaning manual; `staleAfter` positive whole seconds, independent of the schedule.
+// E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R2, R4; E's Decision Log 48 (4) and the M1 review's
+// ruling): a granted tool's result, validated as a file is, its snapshot a JSON asset. `snapshot` is null until the first
+// successful fetch; `schedule` is whole seconds within QUERY_SCHEDULE_SECONDS, absent meaning manual; `staleAfter`
+// positive whole seconds, independent of the schedule.
 export const QUERY_SCHEDULE_SECONDS = { min: 30, max: 86_400 } as const;
-const QuerySourceSchema = z.strictObject({
+const querySourceShape = {
   kind: z.literal('query'),
   server: z.string().min(1).max(200),
   tool: z.string().min(1).max(200),
   args: z.record(z.string(), z.unknown()),
   schedule: z.number().int().min(QUERY_SCHEDULE_SECONDS.min).max(QUERY_SCHEDULE_SECONDS.max).optional(),
   staleAfter: z.number().int().positive().optional(),
-  snapshot: z.strictObject({ ref: z.string().startsWith('assets/').max(1_000), at: Time }).nullable(),
-});
+};
+const SnapshotSchema = z.strictObject({ ref: z.string().startsWith('assets/').max(1_000), at: Time });
+const FetchedQuerySourceSchema = z.strictObject({ ...querySourceShape, snapshot: SnapshotSchema });
+const UnfetchedQuerySourceSchema = z.strictObject({ ...querySourceShape, snapshot: z.null() });
 // E3 end
-const DescriptorSchema = z
-  .strictObject({
-    title: z.string().min(1).max(200),
-    description: Text.optional(),
-    source: z.discriminatedUnion('kind', [FileSourceSchema, QuerySourceSchema]),
-    columns: z.array(ColumnSchema).max(DATASET_LIMITS.columns),
-    rows: z.number().int().nonnegative().max(DATASET_LIMITS.rows),
-    rowKey: z.string().min(1).max(DATASET_LIMITS.columnName).optional(),
-    updated: z.strictObject({ at: Time, by: ActorSchema }).optional(), // E3: absent exactly while a query was never fetched
-    state: z.strictObject({ status: z.enum(['ok', 'error', 'stale', 'paused']), message: Text.optional(), at: Time }),
-  })
-  // E3: `updated` is the successful fetch's (or the file's bind's) provenance, so it is present exactly when a snapshot is
-  .refine((d) => (d.updated !== undefined) === (d.source.kind === 'file' || d.source.snapshot !== null), { message: 'updated is present exactly when the dataset has a snapshot' });
+const StateSchema = z.strictObject({ status: z.enum(['ok', 'error', 'stale', 'paused']), message: Text.optional(), at: Time });
+const UpdatedSchema = z.strictObject({ at: Time, by: ActorSchema });
+const common = {
+  title: z.string().min(1).max(200),
+  description: Text.optional(),
+  rowKey: z.string().min(1).max(DATASET_LIMITS.columnName).optional(),
+  state: StateSchema,
+};
+const withRows = { columns: z.array(ColumnSchema).max(DATASET_LIMITS.columns), rows: z.number().int().nonnegative().max(DATASET_LIMITS.rows) };
+// E3: three arms, told apart by the source's kind and its snapshot: a file (its bind's `updated`), a fetched query (its
+// last successful fetch's `updated`), and a query never fetched (no `updated`, no rows, no columns)
+const DescriptorSchema = z.union([
+  z.strictObject({ ...common, source: FileSourceSchema, ...withRows, updated: UpdatedSchema }),
+  z.strictObject({ ...common, source: FetchedQuerySourceSchema, ...withRows, updated: UpdatedSchema }),
+  z.strictObject({ ...common, source: UnfetchedQuerySourceSchema, columns: z.array(ColumnSchema).max(0), rows: z.literal(0) }),
+]);
 
 export type DatasetColumn = z.infer<typeof ColumnSchema>;
 export type FileSource = z.infer<typeof FileSourceSchema>;
-export type QuerySource = z.infer<typeof QuerySourceSchema>;
+export type FetchedQuerySource = z.infer<typeof FetchedQuerySourceSchema>; // E3
+export type UnfetchedQuerySource = z.infer<typeof UnfetchedQuerySourceSchema>; // E3
+export type QuerySource = FetchedQuerySource | UnfetchedQuerySource;
 export type DatasetSource = FileSource | QuerySource;
-export type DatasetState = z.infer<typeof DescriptorSchema>['state'];
-export interface DatasetDescriptor {
+export type DatasetState = z.infer<typeof StateSchema>;
+interface DescriptorCommon {
   title: string;
   description?: string;
-  source: DatasetSource;
-  columns: DatasetColumn[];
-  rows: number;
   rowKey?: string;
-  /** E3: absent exactly while a `query` dataset was never fetched (its `snapshot` null); a file's always. */
-  updated?: { at: number; by: Actor };
   state: DatasetState;
 }
+/** A file's dataset: the bind's provenance always named. */
+export interface FileDatasetDescriptor extends DescriptorCommon {
+  source: FileSource;
+  columns: DatasetColumn[];
+  rows: number;
+  updated: { at: number; by: Actor };
+}
+/** E3: a query fetched at least once: its last successful fetch's snapshot and provenance. */
+export interface FetchedQueryDatasetDescriptor extends DescriptorCommon {
+  source: FetchedQuerySource;
+  columns: DatasetColumn[];
+  rows: number;
+  updated: { at: number; by: Actor };
+}
+/** E3: a query configured and never fetched: no snapshot, no rows, no columns, no provenance. */
+export interface UnfetchedQueryDatasetDescriptor extends DescriptorCommon {
+  source: UnfetchedQuerySource;
+  columns: [];
+  rows: 0;
+  updated?: never;
+}
+export type DatasetDescriptor = FileDatasetDescriptor | FetchedQueryDatasetDescriptor | UnfetchedQueryDatasetDescriptor;
 
 /** The immutable snapshot a descriptor names: its asset ref and the format its bytes are read in. E3: null for a query
- * never fetched, which has no bytes to read. */
+ * never fetched, which has no bytes to read (a file's or a fetched query's is never null, by its type). */
+export function snapshotOf(descriptor: FileDatasetDescriptor | FetchedQueryDatasetDescriptor): { ref: string; format: DatasetFormat };
+export function snapshotOf(descriptor: DatasetDescriptor): { ref: string; format: DatasetFormat } | null;
 export function snapshotOf(descriptor: DatasetDescriptor): { ref: string; format: DatasetFormat } | null {
   const { source } = descriptor;
   if (source.kind === 'file') return { ref: source.ref, format: source.format };

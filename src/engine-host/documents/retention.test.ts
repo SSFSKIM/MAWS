@@ -48,15 +48,10 @@ afterEach(() => {
 const store = () => documents.store;
 const db = () => documents.storage.db;
 
-const queryDescriptor = (snapshot: { ref: string; at: number } | null, by: Actor = human, over: Partial<DatasetDescriptor> = {}): DatasetDescriptor => ({
-  title: 'Live',
-  source: { kind: 'query', server: 'fixture', tool: 'rows', args: {}, snapshot },
-  columns: snapshot ? [{ name: 'v', type: 'number' }] : [],
-  rows: snapshot ? 1 : 0,
-  ...(snapshot && { updated: { at: snapshot.at, by } }),
-  state: { status: 'ok', at: snapshot?.at ?? Date.now() },
-  ...over,
-});
+const queryDescriptor = (snapshot: { ref: string; at: number } | null, by: Actor = human): DatasetDescriptor =>
+  snapshot
+    ? { title: 'Live', source: { kind: 'query', server: 'fixture', tool: 'rows', args: {}, snapshot }, columns: [{ name: 'v', type: 'number' }], rows: 1, updated: { at: snapshot.at, by }, state: { status: 'ok', at: snapshot.at } }
+    : { title: 'Live', source: { kind: 'query', server: 'fixture', tool: 'rows', args: {}, snapshot: null }, columns: [], rows: 0, state: { status: 'ok', at: Date.now() } };
 
 /** M2's publication: the snapshot under a fresh UUID name, marked a query snapshot, the descriptor and the retention in one frame. */
 async function refresh(artifactId: string, datasetId: string, content: Content, actor: Actor = human, after?: () => void): Promise<string> {

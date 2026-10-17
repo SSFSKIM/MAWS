@@ -2,9 +2,9 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { applyV1, diffV1, newDoc } from '../yjs';
-import { DATASET_LIMITS, DATASETS_ROOT, datasetIdFromSource, datasetIdProblem, listDatasets, readDataset, removeDataset, setDataset, type DatasetDescriptor } from './datasets';
+import { DATASET_LIMITS, DATASETS_ROOT, datasetIdFromSource, datasetIdProblem, listDatasets, readDataset, removeDataset, setDataset, type FileDatasetDescriptor } from './datasets'; // E3: the file arm
 
-const descriptor = (over: Partial<DatasetDescriptor> = {}): DatasetDescriptor => ({
+const descriptor = (over: Partial<FileDatasetDescriptor> = {}): FileDatasetDescriptor => ({ // E3: the file arm of the descriptor union
   title: 'Sales',
   source: { kind: 'file', ref: 'assets/sales.csv', name: 'sales.csv', format: 'csv', sha256: 'a'.repeat(64), size: 42 },
   columns: [

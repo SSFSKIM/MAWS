@@ -14,14 +14,10 @@ import { renderFailure } from './render';
 import { DATASET_STATES } from './states';
 
 const theme = exportTheme();
-const query = (snapshot: { ref: string; at: number } | null): DatasetDescriptor => ({
-  title: 'Live sales',
-  source: { kind: 'query', server: 'fixture', tool: 'rows', args: {}, snapshot },
-  columns: snapshot ? [...SNAPSHOTS[OLD_REF].columns] : [],
-  rows: snapshot ? 3 : 0,
-  ...(snapshot && { updated: { at: snapshot.at, by: { kind: 'human' as const } } }),
-  state: { status: 'ok', at: BOUND_AT },
-});
+const query = (snapshot: { ref: string; at: number } | null): DatasetDescriptor =>
+  snapshot
+    ? { title: 'Live sales', source: { kind: 'query', server: 'fixture', tool: 'rows', args: {}, snapshot }, columns: [...SNAPSHOTS[OLD_REF].columns], rows: 3, updated: { at: snapshot.at, by: { kind: 'human' } }, state: { status: 'ok', at: BOUND_AT } }
+    : { title: 'Live sales', source: { kind: 'query', server: 'fixture', tool: 'rows', args: {}, snapshot: null }, columns: [], rows: 0, state: { status: 'ok', at: BOUND_AT } };
 
 describe('the exporters over a query (E3)', () => {
   it('draw a never-fetched query as the no-data presentation labelled "not fetched", reading nothing', async () => {
