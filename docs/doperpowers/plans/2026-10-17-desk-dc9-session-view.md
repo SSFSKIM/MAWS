@@ -4,7 +4,7 @@
 > branch `smns-erb`; on this machine
 > `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/smns-erb/`), child
 > **DC9** (The web — the session view — plan). **Parent pin:** composite
-> MAWS commit `77e82d832`. The child's section there is its design; this
+> MAWS commit `f60dd668b` (re-pinned 2026-10-17 from `77e82d832`; Decision Log). The child's section there is its design; this
 > document carries only the constraints and the milestones. Before M1 read
 > the composite's §9 whole, §4 as amended (the phone ruling is binding),
 > the DC9 child section, the Cross-Child Contracts DX3, DX4 and DX8 with
@@ -231,9 +231,11 @@ typechecks; desk-web's `project-client.test.ts` covers `output()` and the
 (plus each agent's own rows for nested outcomes), so the shared fixture
 can pin it directly. Until DC8's fixture is relayed, a fixture of this
 child's own (rows → expected body; DX4's every raw word, the module-reload
-case, a nested agent whose parent still runs and one whose parent is over,
-an unknown task, a deleted output file, a monitor just started with no
-path) pins it. Each synthesized row is copied from a real transcript
+case, a nested agent whose parent still runs and one under an ended
+parent (`exited`), a cold open of an ended session holding an agent with a
+`running` status and no completion notification (`exited`), an unknown
+task, a deleted output file (`missing` with its path), a monitor just
+started with no path (`missing` with `path: null`)) pins it. Each synthesized row is copied from a real transcript
 row's shape (a background Bash, a Monitor, a task-notification, a
 `task_status`, an `mcp_instructions_delta`, an agent's rows), scrubbed,
 never invented; the Decision Log names where each shape came from, and the
@@ -315,7 +317,9 @@ session view beside them; `apps/desk-web/e2e/`.
   doperpowers' `sminos.py` give the exact grammar), or an exact row uuid
   (the bridge's optional `delivered.uuid`). There is no text-containment
   fallback: a row without a frame (a prompt typed at the terminal) never
-  matches a web send. A send whose delivery ends `failed`,
+  matches a web send. A send whose row never arrives because the session
+  ends first stays as a delivered entry at the tail, ahead of the end
+  marker, never silently hidden. A send whose delivery ends `failed`,
   `refused-read-only` or `recorded` keeps its tail row with that state; a
   second outcome for the same key (`failed` after `delivered`) replaces
   the first.
@@ -347,7 +351,8 @@ own framed row; a submission delayed then refused keeping its tail row as
 `failed` — plus a frame naming another send, an exact-uuid match, and the
 second review's case: an earlier terminal prompt "continue", then a web
 send "continue" acknowledged while the session is busy, whose tail row
-stays until its own framed row arrives); browser tests for the band (a permission
+stays until its own framed row arrives; a send whose row never arrives
+because the session ended first, kept ahead of the end marker); browser tests for the band (a permission
 and a question answered, cards gone), the overlay, the end marker with
 Resume, each fallback, and the phone drawing no transcript; DC5's
 conversation and phone suites pass.
@@ -493,6 +498,16 @@ in their own worktrees.
   Supersedes the plan's earlier matcher and `missing` wording (M1, M2, M4,
   M5 edited in place).
   Date/Author: 2026-10-17, the composite's writer, folded by the controller.
+- Decision: Parent re-pinned to `f60dd668b` (composite smns-erb), which
+  writes the three corrections above into §9.1, §9.3, §9.4, DC9.G1 (five
+  tail-row cases, the fifth a send whose row never comes, kept ahead of
+  the end marker), DC9.G5 (the fixture's cases: a cold open of an ended
+  session with a `running` agent, a nested agent under an ended parent, a
+  monitor answering `missing` with `path: null`), DX4's `output` row and
+  "Precedence" (the producer re-derives every entry when the process goes;
+  accepted residual: a background agent resumed after its notification
+  shows `completed` until its next notification). Nothing else changed.
+  Date/Author: 2026-10-17, controller.
 
 ## Surprises & Discoveries
 
