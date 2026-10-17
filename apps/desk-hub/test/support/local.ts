@@ -29,6 +29,9 @@ import {
   PROJECT_VISIBLE_PATH,
   PROJECTS_PATH,
   SEND_FAULT_PATH,
+  REVOKE_FAULT_PATH,
+  REVOKE_HELD_PATH,
+  REVOKE_RELEASE_PATH,
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   TIMING_PATH,
@@ -237,6 +240,23 @@ export async function startLocalHub() {
       const deadline = Date.now() + 10_000;
       while ((await seam('MACHINE', machine, SEND_RELEASE_PATH)) !== 'released') {
         if (Date.now() > deadline) throw new Error(`no send of ${machine} was held`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    },
+    /** Holds the answer to the machine's next revocation until `releaseRevoke`, or loses it once the revocation is
+     * stored (`lose`), as a slow or a lost RPC answer would (the suites' Worker only). */
+    async faultNextRevoke(machine: string, mode: 'hold' | 'lose') {
+      await seam('MACHINE', machine, `${REVOKE_FAULT_PATH}?mode=${mode}`);
+    },
+    /** Whether the answer to a revocation of the machine is held. */
+    async revokeHeld(machine: string): Promise<boolean> {
+      return (await seam('MACHINE', machine, REVOKE_HELD_PATH)) === 'held';
+    },
+    /** Releases the held answer to the machine's revocation, once it is held (waiting for it to be). */
+    async releaseRevoke(machine: string) {
+      const deadline = Date.now() + 10_000;
+      while ((await seam('MACHINE', machine, REVOKE_RELEASE_PATH)) !== 'released') {
+        if (Date.now() > deadline) throw new Error(`no revocation of ${machine} was held`);
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     },

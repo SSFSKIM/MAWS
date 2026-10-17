@@ -155,6 +155,34 @@ describe('enrollment refuses', () => {
     await again.close();
   });
 
+  it('two removals of one machine at once, the name enrolled anew between them: the later one leaves the new machine be', async () => {
+    const project = '6a1c0a8e-3b2d-4c5e-9f70-0000000000a1';
+    const machine = new MachineClient(hub, 'overlap-1', await enroll(hub, ADMIN, 'overlap-1'));
+    await machine.connect();
+    // The first removal's answer from the machine's object is held; the second removes it meanwhile.
+    await hub.faultNextRevoke('overlap-1', 'hold');
+    const first = hub.fetchAs(ADMIN, '/api/machines/overlap-1', { method: 'DELETE' });
+    await waitFor(() => hub.revokeHeld('overlap-1'));
+    expect((await hub.fetchAs(ADMIN, '/api/machines/overlap-1', { method: 'DELETE' })).status).toBe(200);
+    expect((await machines()).map((m) => m.name)).not.toContain('overlap-1');
+    // Enrolled again under the name, it opens a project and is that project's archive machine.
+    const again = new MachineClient(hub, 'overlap-1', await enroll(hub, ADMIN, 'overlap-1'));
+    await again.connect();
+    await again.sync(project);
+    expect((await hub.fetchAs(ADMIN, `/api/projects/${project}/archive`, { method: 'PUT', body: { machine: 'overlap-1' } })).status).toBe(200);
+    await waitFor(() => tokensNamed('overlap-1').length === 1);
+
+    await hub.releaseRevoke('overlap-1');
+    expect((await first).status).toBe(200);
+    expect((await machines()).find((m) => m.name === 'overlap-1')?.state).toBe('active');
+    expect(tokensNamed('overlap-1').map((t) => t.client_id)).toEqual([again.creds.clientId]);
+    const projects = ((await (await hub.fetchAs(ADMIN, '/api/projects')).json()) as { projects: Array<{ id: string; archive_machine: string | null }> }).projects;
+    expect(projects.find((p) => p.id === project)?.archive_machine).toBe('overlap-1');
+    expect(again.isEnded).toBe(false);
+    await again.close();
+    await machine.close();
+  });
+
   it('a revoked machine whose service token outlived the revocation: the hub no longer knows it', async () => {
     const creds1 = await enroll(hub, ADMIN, 'revoked-2');
     const machine = new MachineClient(hub, 'revoked-2', creds1);

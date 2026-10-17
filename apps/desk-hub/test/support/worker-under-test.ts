@@ -5,6 +5,8 @@
 //   - a `Machine` whose heartbeat and lease are shortened, so a lease can lapse within a test;
 //   - a `Machine` the suite terminates (`ctx.abort()`), as a crash or a runtime's reset would: no `closed` reaches its
 //     projects, only the lease's lapse;
+//   - a `Machine` armed to hold its next revocation's answer until the suite releases it, or to lose it once the
+//     revocation is stored;
 //   - a `Project` that says which instance answers (a woken object is a new one), and takes a lease's renewal or close
 //     for any generation, as a late one from an older stream would arrive;
 //   - a `Project` that holds a `hello` at its registration, so a close can arrive while the Registry answers, and
@@ -38,6 +40,9 @@ import {
   PROJECT_SEND_PATH,
   PROJECT_VISIBLE_PATH,
   PROJECTS_PATH,
+  REVOKE_FAULT_PATH,
+  REVOKE_HELD_PATH,
+  REVOKE_RELEASE_PATH,
   SEND_FAULT_PATH,
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
@@ -76,9 +81,21 @@ export class Registry extends DeployedRegistry {
 
 export class Machine extends DeployedMachine {
   private release: (() => void) | undefined;
+  private revokeRelease: (() => void) | undefined;
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === REVOKE_FAULT_PATH) {
+      this.ctx.storage.kv.put('revoke-fault', url.searchParams.get('mode') ?? '');
+      return new Response('armed');
+    }
+    if (url.pathname === REVOKE_HELD_PATH) return new Response(this.revokeRelease ? 'held' : 'none');
+    if (url.pathname === REVOKE_RELEASE_PATH) {
+      const release = this.revokeRelease;
+      this.revokeRelease = undefined;
+      release?.();
+      return new Response(release ? 'released' : 'none');
+    }
     if (url.pathname === SEND_HOLD_PATH) {
       this.ctx.storage.kv.put('send-hold', url.searchParams.get('kind') ?? '');
       return new Response('armed');
@@ -103,6 +120,18 @@ export class Machine extends DeployedMachine {
 
   protected timing(): Timing {
     return this.ctx.storage.kv.get<Timing>('timing') ?? super.timing();
+  }
+
+  async revoke(clientId: string | null): Promise<number> {
+    const generation = await super.revoke(clientId);
+    const fault = this.ctx.storage.kv.get<string>('revoke-fault');
+    if (fault) this.ctx.storage.kv.delete('revoke-fault');
+    if (fault === 'lose') {
+      await this.ctx.storage.sync(); // the revocation is stored; only its answer is lost
+      throw new Error('a revocation answer the suite lost');
+    }
+    if (fault === 'hold') await new Promise<void>((resolve) => (this.revokeRelease = resolve));
+    return generation;
   }
 
   async send(frame: DownFrame, generation?: number): Promise<'written' | 'offline'> {

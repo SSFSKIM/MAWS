@@ -83,7 +83,7 @@ export class Machine extends DurableObject<Env> {
   /** The machine was revoked: its stream ends now, and a request with the revoked credential is refused from here on,
    * one the Worker admitted before the revocation included. Answers the newest stream generation it had opened, which
    * its projects stop counting it through. */
-  revoke(clientId: string | null): number {
+  async revoke(clientId: string | null): Promise<number> {
     if (clientId) this.ctx.storage.kv.put(revokedKey(clientId), true);
     this.end(this.stream);
     return this.ctx.storage.kv.get<number>('generation') ?? 0;

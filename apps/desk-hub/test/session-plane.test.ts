@@ -986,6 +986,30 @@ describe('the grid', () => {
     grid.close();
     await m.close();
   });
+
+  it("a removal whose answer from the machine's object was lost after it took it completes when asked again", async () => {
+    const project = newProject();
+    const m = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    await gridReached(grid, project, 0, { machines: 1, machines_online: 1 }, 'the machine');
+    const listed = async () => ((await (await hub.fetchAs(ADMIN, '/api/machines')).json()) as { machines: Array<{ name: string }> }).machines.some((x) => x.name === m.name);
+
+    // The object refuses the credential and ends the stream, and its answer is lost: the removal fails, the record stays.
+    hub.expectRuntimeLog(/a revocation answer the suite lost/);
+    await hub.faultNextRevoke(m.name, 'lose');
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${m.name}`, { method: 'DELETE' })).status).not.toBe(200);
+    await waitFor(() => (m.isEnded ? true : undefined));
+    expect(await listed()).toBe(true);
+    expect((await hub.fetchAs(m.creds, '/machine/stream')).status).toBe(403);
+
+    // Asked again, the object answers as it did, and the removal completes: the record goes and the project is told.
+    const from = grid.frames.length;
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${m.name}`, { method: 'DELETE' })).status).toBe(200);
+    expect(await listed()).toBe(false);
+    await gridReached(grid, project, from, { machines: 0, machines_online: 0 }, 'the removed machine no longer counted');
+    grid.close();
+    await m.close();
+  });
 });
 
 describe('the grid, past the frame bound', () => {

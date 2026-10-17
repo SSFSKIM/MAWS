@@ -246,7 +246,10 @@ export class Registry extends DurableObject<Env> {
    * an archive designation of it is cleared, and every project of the org stops counting it on the grid (retried until
    * each project takes it). The `Machine` object goes first because it answers the newest stream generation the machine
    * opened, which the projects are told: no stream of a refused credential opens after, so the generation recorded with
-   * the record's deletion is final.
+   * the record's deletion is final. What the name holds is read again once the object answers: a revocation of the same
+   * enrollment may have finished meanwhile and the name been enrolled anew, and that machine is not this one. The object
+   * answers a revocation of a credential it already refused as it did the first, so a DELETE whose answer was lost after
+   * the object took it completes when the admin asks again.
    */
   async revoke(member: MemberRecord, name: string): Promise<Result<{ revoked: string }>> {
     if (member.role !== 'admin') return fail(403, 'not-admin');
@@ -258,13 +261,16 @@ export class Registry extends DurableObject<Env> {
     // A credential minted for it while its object answered (a pending machine's token redeemed again) is refused there too.
     for (;;) {
       const now = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name = ? AND enrollment = ?`, machine.name, machine.enrollment).toArray()[0];
-      if (!now?.client_id || now.client_id === machine.client_id) break;
+      // Its record went while its object answered (another revocation of it, or its enrollment's expiry), and what the
+      // name holds now, if anything, is another machine's: nothing of the name's is touched.
+      if (!now) return ok({ revoked: machine.name });
+      if (!now.client_id || now.client_id === machine.client_id) break;
       machine = now;
       generation = Math.max(generation, await object.revoke(machine.client_id));
     }
     const revoked = machine;
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec('DELETE FROM machines WHERE name = ?', revoked.name);
+      this.sql.exec('DELETE FROM machines WHERE name = ? AND enrollment = ?', revoked.name, revoked.enrollment);
       this.sql.exec("UPDATE enrollments SET state = 'expired' WHERE id = ? AND state IN ('open', 'pending')", revoked.enrollment);
       this.sql.exec('UPDATE projects SET archive_machine = NULL WHERE archive_machine = ?', revoked.name);
       this.orphan(revoked.token_name);
