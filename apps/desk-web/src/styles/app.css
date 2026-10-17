@@ -63,6 +63,142 @@
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3v10M3.5 8.5 8 13l4.5-4.5'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
+/* DC9 M4: a send at the session view's tail (the owner's 1B, mockups/desk/09-session-view.html): MAWS's user bubble
+   with its delivery state as a foot under a hairline. A send still on its way dims its words as MAWS dims a held
+   bubble; one that will not arrive tints the whole bubble, warning for a send kept for later or refused by policy,
+   danger for one that failed or was never sent. */
+.desk-delivery-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  line-height: 1.45;
+}
+.desk-delivery-glyph {
+  flex: none;
+  font-size: 11px;
+}
+.desk-delivery-foot[data-state="uncertain"] {
+  font-style: italic;
+}
+.desk-tail-send:is([data-state="sending"], [data-state="queued"], [data-state="delivered"], [data-state="uncertain"]) .transcript-user-content {
+  opacity: 0.6;
+}
+.desk-tail-send:is([data-state="recorded"], [data-state="refused-read-only"]) .transcript-user-bubble {
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 45%, transparent);
+}
+.desk-tail-send:is([data-state="recorded"], [data-state="refused-read-only"]) .desk-delivery-foot {
+  border-top-color: color-mix(in srgb, var(--warning) 30%, transparent);
+  color: var(--warning);
+}
+.desk-tail-send:is([data-state="failed"], [data-state="not-sent"]) .transcript-user-bubble {
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.desk-tail-send:is([data-state="failed"], [data-state="not-sent"]) .desk-delivery-foot {
+  border-top-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  color: var(--danger);
+}
+
+/* An ended or retired session's end marker: MAWS's boundary row with the session named under it and, when it can be,
+   Resume (mockups/desk/09-session-view.html, 3A and 3B). */
+.desk-end-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0 18px;
+}
+.desk-end-marker .transcript-boundary {
+  width: 100%;
+  padding: 0;
+}
+.desk-end-words {
+  color: var(--fg);
+  font-weight: 550;
+}
+.desk-end-who {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  font-size: var(--text-ui-sm);
+}
+.desk-end-sub {
+  margin: 0;
+  max-width: 60ch;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  line-height: 1.5;
+  text-align: center;
+}
+.desk-end-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.desk-end-resume {
+  border: 1px solid var(--fg);
+  border-radius: var(--radius-sm);
+  background: var(--fg);
+  color: var(--bg);
+  padding: 4px 14px;
+  font-size: var(--text-ui-sm);
+  font-weight: 550;
+}
+.desk-end-resume:disabled {
+  cursor: not-allowed;
+  border-color: var(--fg-faint);
+  background: var(--fg-faint);
+}
+
+/* The ask mod's async question, its receipt overlaid by the log's question and answer (QuestionOverlay.tsx): the
+   receipt's own lines give way to the overlay's while it is there. */
+.transcript-question:has(> [data-desk-question]:not(:empty)) > .transcript-question-lines {
+  display: none;
+}
+.desk-question-foot {
+  padding: 5px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}
+.desk-question-foot[data-waiting] {
+  color: var(--warning);
+}
+
+/* "N waiting ↓": the requests at the tail, for a reader scrolled away from them (the owner's 2B). */
+.desk-waiting-pill {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  translate: -50% 0;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+  color: var(--warning);
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+}
+.desk-landed {
+  display: block;
+  margin-inline: -8px;
+  padding-inline: 8px;
+  border-radius: var(--radius);
+  outline: 1px solid var(--warning);
+}
+
 @theme inline {
   --text-numeral: var(--text-numeral);
   --text-label: var(--text-label);

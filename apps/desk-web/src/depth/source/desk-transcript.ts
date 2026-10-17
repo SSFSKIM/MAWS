@@ -37,10 +37,6 @@
 // opening, the reader's refresh), never polled; a request lost to a reset or an end is asked again once the fresh
 // snapshot is in.
 //
-// A range (the `transcript` slot, `range.ts`). Given one, the source draws only the held rows inside it, its bounding
-// rows cut at span granularity, under a store key of its own; the subscription and every rule above are the same. A
-// row the range leaves out settles its streaming block at once, since it is never drawn.
-//
 // Disruptions (DX8). A `reset` (a gap, a dropped socket, a hub restart, the bridge's own discontinuity) drops what was
 // drawn: the layer is cleared, the source resets MAWS's store key, and its next snapshot waits for the fresh one the
 // client subscribes for. Any other `end` keeps what was drawn and says why; `resubscribe` takes a fresh snapshot,
@@ -60,7 +56,6 @@ import { taskGraphOf, withEvents, withMetas, withStatuses } from '../agents/task
 import { OutputRequests } from '../jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
 import { normalizeInterruptRow, withInterruptEnd } from './interrupt';
-import { rowsInRange, type BoundState, type Range } from './range';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
 export type TranscriptStoreApi = Pick<ReturnType<typeof createTranscriptStore>, 'getState' | 'subscribe'>;
@@ -94,8 +89,6 @@ export type DepthTranscriptState = {
   diff: { pending: boolean; answer: SessionBodies['diff'] | null } | null;
   /** The model of the transcript's latest response among the held rows (DX8: the model comes from the transcript). */
   model: string | null;
-  /** With a range: whether each bound was found among the held rows (`open` for a null one). */
-  bounds: { from: BoundState; to: BoundState } | null;
 };
 
 export type DeskTranscriptOptions = {
@@ -105,8 +98,6 @@ export type DeskTranscriptOptions = {
   store: TranscriptStoreApi;
   /** Rows asked for per older page. */
   page?: number;
-  /** Draw only the rows strictly between these bounds (the `transcript` slot), under a store key of the range's own. */
-  range?: Range;
 };
 
 const PAGE = 100;
@@ -257,10 +248,6 @@ export class DeskTranscript {
   private served = false;
   private source: RowsSource;
   private offStore: (() => void) | null = null;
-  private readonly range: Range | null;
-  /** The rows the source draws: the held ones, or with a range those inside it (bounding rows cut). */
-  private shown: Row[] = [];
-  private readonly shownUuids = new Set<string>();
   /** The jobs view's open outputs, asked for on this subscription (a main-thread one's). */
   readonly outputs = new OutputRequests((taskId, tail) => {
     if (!this.served || this.subscription === null) return false;
@@ -274,9 +261,7 @@ export class DeskTranscript {
     this.store = options.store;
     this.target = options.target;
     this.page = options.page ?? PAGE;
-    this.range = options.range ?? null;
-    const key = transcriptKey(options.project, options.target);
-    this.key = this.range === null ? key : `${key}#range:${this.range.from ?? ''}:${this.range.to ?? ''}`;
+    this.key = transcriptKey(options.project, options.target);
     this.source = new RowsSource(this);
     this.state = createStore<DepthTranscriptState>(() => ({
       source: this.source,
@@ -291,7 +276,6 @@ export class DeskTranscript {
       usage: undefined,
       diff: null,
       model: null,
-      bounds: null,
     }));
   }
 
@@ -319,13 +303,12 @@ export class DeskTranscript {
   }
 
   /**
-   * Asks for the page of rows before the oldest held one, when older rows exist and none is on its way. A range whose
-   * start is held draws nothing older, so asks for none.
+   * Asks for the page of rows before the oldest held one, when older rows exist and none is on its way.
    */
   loadOlder(): void {
-    const { more, loadingOlder, bounds } = this.state.getState();
+    const { more, loadingOlder } = this.state.getState();
     const oldest = this.rows[0];
-    if (!more || loadingOlder || !this.subscription || !oldest || bounds?.from === 'found') return;
+    if (!more || loadingOlder || !this.subscription || !oldest) return;
     this.state.setState({ loadingOlder: true });
     this.subscription.rows(oldest.uuid, this.page);
   }
@@ -352,7 +335,7 @@ export class DeskTranscript {
   }
 
   heldRows(): readonly Row[] {
-    return this.shown;
+    return this.rows;
   }
 
   newContext(): BackfillContext {
@@ -447,22 +430,9 @@ export class DeskTranscript {
     this.rows.push(row);
     const model = modelOf(row);
     if (model !== null && model !== this.state.getState().model) this.setModel(model);
-    if (this.range === null) this.source.live(row);
-    else this.rangeRow(row);
+    this.source.live(row);
     if (this.treeContext !== null) this.setTree(withEvents(this.heldTasks, eventsOf(row, this.treeContext)));
     this.publish();
-  }
-
-  /**
-   * A live row under a range: one past the range's end changes nothing drawn, one that changes more than the tail (a
-   * bound found, a bounding row cut) rebuilds, and any other continues the source.
-   */
-  private rangeRow(row: Row): void {
-    const before = this.shown;
-    this.reshow();
-    const shown = this.shown;
-    if (shown.length === before.length + 1 && shown.at(-1) === row && before.every((r, i) => shown[i] === r)) this.source.live(row);
-    else if (shown.length !== before.length || shown.some((r, i) => r !== before[i])) this.rebuild();
   }
 
   private metadata(subagents: readonly SubagentMeta[]): void {
@@ -538,21 +508,6 @@ export class DeskTranscript {
     for (const row of rows) this.uuids.add(row.uuid);
     const latest = rows.findLast((row) => modelOf(row) !== null);
     if (latest) this.setModel(modelOf(latest)!);
-    this.reshow();
-  }
-
-  /** The rows the source draws, from the held ones and the range. */
-  private reshow(): void {
-    if (this.range === null) {
-      this.shown = this.rows;
-      return;
-    }
-    const view = rowsInRange(this.rows, this.range);
-    this.shown = view.rows;
-    this.shownUuids.clear();
-    for (const row of view.rows) this.shownUuids.add(row.uuid);
-    const { bounds } = this.state.getState();
-    if (bounds?.from !== view.from || bounds.to !== view.to) this.state.setState({ bounds: { from: view.from, to: view.to } });
   }
 
   /**
@@ -567,8 +522,7 @@ export class DeskTranscript {
     let changed = false;
     for (const uuid of awaited) {
       if (!this.uuids.has(uuid)) continue;
-      const hidden = this.range !== null && !this.shownUuids.has(uuid); // a row the range leaves out is never drawn
-      if (hidden || entry.state.seen.has(uuid as EventId) || this.silent.has(uuid)) changed = this.layer.settle(uuid) || changed;
+      if (entry.state.seen.has(uuid as EventId) || this.silent.has(uuid)) changed = this.layer.settle(uuid) || changed;
     }
     return changed;
   }

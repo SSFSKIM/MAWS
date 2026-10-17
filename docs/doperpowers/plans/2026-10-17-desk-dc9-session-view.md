@@ -4,7 +4,7 @@
 > branch `smns-erb`; on this machine
 > `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/smns-erb/`), child
 > **DC9** (The web — the session view — plan). **Parent pin:** composite
-> MAWS commit `4021c5bbb` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`, `bd9c67b14`, `21ba47570`, `34defe9f6`, `f5df1687d`, `a87d7fa04`; Decision Log). The child's section there is its design; this
+> MAWS commit `417b8d2d3` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`, `bd9c67b14`, `21ba47570`, `34defe9f6`, `f5df1687d`, `a87d7fa04`, `4021c5bbb`, `52a17353e`, `d447cfe97`, `2a2e16c6f`; Decision Log; the last folds M4's tail window and provenance into §9.1). The child's section there is its design; this
 > document carries only the constraints and the milestones. Before M1 read
 > the composite's §9 whole, §4 as amended (the phone ruling is binding),
 > the DC9 child section, the Cross-Child Contracts DX3, DX4 and DX8 with
@@ -22,14 +22,14 @@
 
 ## Progress
 
-- [x] S1 — Shared edit: the ask tool classified as a question (2026-10-17, reviewed clean: a2fc6a2c..dd7c37ab; gate 39045490193; PR SSFSKIM/MAWS#26; merged into desk-dc9)
+- [x] S1 — Shared edit: the ask tool classified as a question (2026-10-17, reviewed clean: a2fc6a2c..dd7c37ab; gate 39045490193; PR SSFSKIM/MAWS#26, merged to master as 67710ddd after merging master 360f87b3, gate 39071873678)
 - [~] S2 — Shared edit: shell and monitor starts and `task_status` in MAWS's backfill — **parked** (2026-10-17; branch `desk-backfill-jobs` pushed, no PR; Decision Log)
 - [x] T0 — Mockups of the four taste surfaces (2026-10-17: `desk-dc9-mockups` 73ecf8f0, the owner's choices marked c73916fa)
 - [x] M1 — The hub's `output`, the widened bodies, and DX8's `output()` (2026-10-17, reviewed clean: d2c8fec5..af560476, fix 7098835a..89b2e560)
 - [x] M2 — The fake machine's part: the session-view recording, jobs and status, `output`, pages after the replay (2026-10-17, reviewed clean: 36131d48..6bb8bb4f, fixes 45c4d172..62c4fbd3 and 62c4fbd3..c4a17632)
 - [x] M3 — The per-session owner and the session view (2026-10-17, reviewed clean: 36131d48..57320abd on `desk-dc9-m3`, fixes ..6b2ddded, ..2388b1f3, ..55c6e118; merged at 582aecfd)
-- [ ] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements
-- [ ] M5 — The column: agents with real status, the jobs view, `output`, MCP names
+- [x] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements (2026-10-17, reviewed clean: ec8021c6..7e2bbe64, fixes b05deb29..1b05db7a and 1b05db7a..38791976)
+- [ ] M5 — The column: agents with real status, the jobs view, `output`, MCP names (building on `desk-dc9-m5` in `/tmp/desk-dc9-m5`; to be reviewed, then merged)
 - [ ] M6 — The acceptance, the phone's bundle, and the gate
 
 ## Constraints that bind every milestone
@@ -428,10 +428,24 @@ owner's verdict on T0. A screenshot set of the session view, the inline requests
 the end marker and the jobs view under the workspace for the composite's
 writer.
 
+M6 also polishes from the owner's review of M4: the `[sminos chat …]`
+frame line is stripped from the display of a row matched to the owner's
+own send (its bubble already says who wrote it), and a row a peer
+delivered keeps who sent it — its frame line drawn as a compact sender
+label from the frame's `from` — the text the session read unchanged in
+both; a landing on a message (not only a request) marks its row in the
+session view. And a job's `missing` with `path: null` says plainly that
+no output file was named when the job is terminal or the session has
+ended (no "asks again"); the retry wording stays for a running job in a
+live session.
+
 G2's proof pages across a compaction boundary: rows before a
 `compact_boundary` in the same transcript file load and draw above MAWS's
 "Compacted earlier" divider, never stopping there (the owner's ask is the
-full history).
+full history), on a committed synthetic recording — never one derived
+from the owner's transcripts. The acceptance also asserts that a session
+whose last turn has its `system/turn_duration` row reads as finished (no
+"working" divider or dots), pinning the narrowed debt row.
 
 **Touches:** `apps/desk-web/e2e/` and whatever the acceptance finds.
 
@@ -828,7 +842,122 @@ in their own worktrees.
   none after).
   Date/Author: 2026-10-17, M3 executor, folded by the controller.
 
+- Decision: An interrupted turn ends at its interrupt marker on the desk
+  side (M5, in the adapter). Of 171 interrupt markers in the 60 latest
+  local transcripts, 11 are followed by a `turn_duration`; MAWS's backfill
+  only clears its tool loop at a marker and its live path ends the turn
+  from the SDK result, which the desk never gets; DX4 relays no DX5 turn
+  end. The marker row is engine-written and ordered, so the adapter emits
+  a `turn.ended` with an id derived from the marker's uuid at its position
+  — replayed identically through resets, rebuilds and pages, MAWS's
+  backfill unedited. Rejected for now: a relayed DX4 turn-end kind (a
+  contract change, DC8 producing it), kept as residue. The debt row then
+  covers a process killed mid-turn and a cut replay.
+  Date/Author: 2026-10-17, controller (at the composite's writer's ask).
+  Confirmed by the composite's writer (composite `52a17353e`) with a
+  fourth check: a desk Steer or a queued send mid-turn is never read as a
+  marker — the engine's exact marker text and row shape, not a prefix a
+  typed prompt could carry.
+
+- Decision: Parent re-pinned to `d447cfe97` (DC8's panel fix wave): an
+  agent is known as background by `meta.requestShape`, `spawn.background`,
+  the persisted call's `input.run_in_background` (`true` or `"true"`;
+  `false` proves nothing), or its result's exact launch text —
+  `Async agent launched successfully.` then a line `agentId: …`, or a
+  fork's `Fork started — processing in background` — either text being
+  `async_launched` running evidence at precedence (3); a launch without a
+  `toolUseResult` names no `outputFile`. DC8's fixture moves to
+  doperpowers `c81b77fc` (77/77; the legacy case split into a cold open, a
+  list-seeded reload, and an agent known as background only from its
+  spawn), pushed once DC8's review and CI pass. The fake machine's
+  derivation follows it in a small task once the fixture is pushed (a cold
+  open would otherwise show older launches and every fork `completed`
+  where the live view shows `exited`). DX5's `resync.refused` is
+  machine-only.
+  Date/Author: 2026-10-17, the composite's writer relaying DC8, folded by
+  the controller.
+
+- Decision (the fake's follow-up, `97e3b111..458f60c1` on `desk-dc9-fx`,
+  reviewed clean, merged): DC8's fixture is vendored at doperpowers
+  `48f254aa` (18 body and 17 output cases; replaces `c81b77fc`); an agent
+  is background by `meta.requestShape`, `spawn.background`, the call's
+  `run_in_background` (`true` or `"true"`), or a launch among its rows; a
+  result row with a `toolUseResult` is decided by its status alone, and
+  the engine's launch texts are read only on a row with no `toolUseResult`
+  and no `is_error`, so a foreground answer that begins like a launch stays
+  `completed`.
+  Date/Author: 2026-10-17, M2 executor, folded by the controller.
+
+- Decision (M4, a gap §9.1 did not foresee): a send stays at the tail
+  until its own row is observed, but with history only partly held a
+  `queued`, `delivered` or `uncertain` send older than the oldest held row
+  is left off the tail until the history is complete (`more` false), and
+  shows again then if its row never came; a send that ended `failed`,
+  `refused-read-only` or `recorded` never gets a row and always stays.
+  Reason: §9.1's rule was written for a live send; applied to a reopened
+  session it would pile every past web send whose row sits in unpaged
+  history at the tail, each wrongly. Rejected: positive reconciliation of
+  every logged send against rows not yet loaded (it needs the whole
+  transcript on the web, or a new DX4 lookup). Accepted residual: a
+  delivered send whose row never came before the session ended, opened
+  later with newer history held, shows only once the history is paged to
+  its start. Also: the matcher requires affirmative delivery provenance
+  (a user row with origin `plugin`/`asUser`, a queued command with `peer`
+  or `plugin`) besides the frame's whole first line, so a typed or
+  origin-less row never consumes a send.
+  Date/Author: 2026-10-17, controller (M4 review).
+
+- Decision: The bridge's interrupt row (the marker line followed by its
+  own "Task …" lines) is multi-line, so MAWS's `INTERRUPT_MARKER` misses it
+  and MAWS's backfill reads it as a prompt that opens a turn: a desk
+  Interrupt left the turn "working" and drew a phantom prompt. Fixed on
+  both sides: the bridge writes the marker row as the engine's exact text
+  and the task lines as a separate row (a doperpowers follow-up the
+  composite's writer dispatches; DC8 is merged); and M5's adapter
+  recognizes the bridge's current shape strictly — the marker line
+  followed only by the bridge's own "Task …" lines, on a row with the
+  bridge's origin, never a typed prompt — and normalizes it before MAWS's
+  backfill, so it ends the turn and draws no phantom prompt (history and
+  older plugins keep that shape).
+  Date/Author: 2026-10-17, the composite's writer, folded by the controller.
+
+- Decision (M4, as built): each tail send is a turnless MAWS
+  `request_slot` row (id `desk-tail:<kind>:<key>`) drawn by
+  `renderRequest` — turnless, so the report never folds it — after the
+  streaming rows, then the inline request cards, then the end marker; the
+  bubble is the desk's own markup in `UserRow`'s classes with a separate
+  `DeliveryFoot {state, words, reason}`, words naming no session, a
+  reason's first line cut to 60 characters (the full text in the tooltip),
+  and a `ResizeObserver` as `UserRow` has. Steers are tail rows matched by
+  the row uuid their RPC result names (the only uuid path; per tab). The
+  matcher reads both frames sminos writes — `[sminos chat … <writer>:<seq>
+  from … → @you|@all]` and `[sminos message from … id=<msg_id>]` — on the
+  row's whole first line, on a row marking a delivery's provenance (a user
+  row `{kind: plugin, asUser: true}`, a queued command `peer` or
+  `plugin`); origin-less rows and the bridge's appended steer row never
+  match. The ask overlay is portalled into MAWS's question row (found again
+  by a frame-throttled `MutationObserver`; CSS hides the receipt's own
+  lines while it draws) — the fragile piece, which a `QuestionRow` prop in
+  MAWS would replace. "Waiting for your answer · below" while its card is
+  at the tail. The end marker shows for `group === 'ended'`, untimed, the
+  session named through `SessionLabel`. The n-0 fallback lives in
+  `SessionView`. The pill shows while no card is in view; a request landing
+  marks and centers its card. DC5's `StreamView` landing effect returned
+  Chrome's `scrollIntoView` promise as its cleanup (a crash on unmount),
+  fixed. The six DC5 `fixme` tests are moved and pass.
+  Date/Author: 2026-10-17, M4 executor, folded by the controller.
+
 ## Surprises & Discoveries
+- 2026-10-17: an idle session's last turn reads "working" only when the
+  transcript never ended it. The engine writes a `system/turn_duration`
+  row (with a uuid) at every turn's end — 749, 2,570 and 183 in the
+  latest MAWS-project transcripts — which MAWS's backfill maps to
+  `turn.ended` (`backfill.ts:415`) and the desk's adapter replays; the
+  recordings' last turn is an interrupted one (`isAbortedMidStream`, no
+  `turn_duration`). So the desk-only debt row covers an interrupt with no
+  end row, a process killed mid-turn, and a cut replay; ordinary idle
+  sessions read finished. The local copy of the owner's transcript used
+  for the retake and the compaction probe is deleted.
 - 2026-10-17 (a probe on a real session, local only): paging crosses a
   compaction cleanly — MAWS's backfill turns `compact_boundary` into one
   historical `boundary.compaction` row and hides only rewind branches, the

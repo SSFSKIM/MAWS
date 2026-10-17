@@ -9,7 +9,7 @@ import { useStore } from 'zustand';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
-import { Transcript, type TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
+import { Transcript, type TranscriptListHandle, type TranscriptProps } from '../../../../../src/renderer/src/transcript/view/Transcript';
 import type { DeskSession } from '../../shell/sessions';
 import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
 import { reachable, TranscriptKeeper } from '../source/keeper';
@@ -75,10 +75,13 @@ type PaneProps = {
   list: RefObject<TranscriptListHandle | null>;
   /** MAWS's report over the transcript (the session view): its streaming rows join the turn they answer. */
   ownerLane?: boolean;
+  /** The session view's rows after the streaming ones (its tail sends, requests, end), drawn by `renderRequest`. */
+  extraTail?: readonly Row[];
+  renderRequest?: TranscriptProps['renderRequest'];
 };
 
 /** The transcript's rows and stream, and what its subscription's disruptions say. */
-export function TranscriptPane({ controller, state, variant, actions, list, ownerLane }: PaneProps) {
+export function TranscriptPane({ controller, state, variant, actions, list, ownerLane, extraTail = NO_ROWS, renderRequest }: PaneProps) {
   // Older rows when the reader scrolls to the top, while the rows drawn do not fill the pane, and after a page that drew
   // nothing new (`older-pages.ts`).
   const rows = useTranscriptStore((s) => s.entries[controller.key]?.rows ?? NO_ROWS);
@@ -88,7 +91,8 @@ export function TranscriptPane({ controller, state, variant, actions, list, owne
 
   const since = useSince();
   const turn = ownerLane ? latestTurn(rows) : null;
-  const tail = useMemo(() => streamingRows(state.streaming, since, { turn }), [state.streaming, since, turn]);
+  const streaming = useMemo(() => streamingRows(state.streaming, since, { turn }), [state.streaming, since, turn]);
+  const tail = useMemo(() => (extraTail.length === 0 ? streaming : [...streaming, ...extraTail]), [streaming, extraTail]);
 
   return (
     <>
@@ -105,7 +109,7 @@ export function TranscriptPane({ controller, state, variant, actions, list, owne
           {state.retryIn != null ? ` Trying again in ${Math.round(state.retryIn / 1000)} s.` : ''}
         </p>
       )}
-      <Transcript source={state.source} variant={variant} actions={actions} tail={tail} handle={list} className="min-h-0 flex-1" ownerLane={ownerLane} />
+      <Transcript source={state.source} variant={variant} actions={actions} tail={tail} handle={list} className="min-h-0 flex-1" ownerLane={ownerLane} renderRequest={renderRequest} />
     </>
   );
 }
