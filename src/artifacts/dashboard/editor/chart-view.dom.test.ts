@@ -101,6 +101,27 @@ describe('the chart view', () => {
     }
   });
 
+  it('keeps the browser’s own caret out of a press on the view, leaving the editor’s block selection alone; its controls keep theirs (E2 M6)', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const { into, release } = mount(world().renderChart, doc);
+    await settle();
+    // the editor's own listener sits on an ancestor: it must see the press unrefused, or ProseMirror ignores it
+    const seenByEditor: boolean[] = [];
+    into.addEventListener('mousedown', (event) => seenByEditor.push(event.defaultPrevented));
+    const press = (target: Element) => {
+      const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(press(into.querySelector('.dash-caption')!)).toBe(true);
+    expect(press(into.querySelector('.dash-figure svg')!)).toBe(true);
+    expect(press(into.querySelector('button.dash-source-label')!)).toBe(false);
+    expect(seenByEditor).toEqual([false, false, false]);
+    release();
+    expect(press(into.querySelector('.dash-caption')!)).toBe(false);
+  });
+
   it('redraws on a replacement, never letting an earlier snapshot\'s late read paint over it', async () => {
     const doc = newDoc();
     setDataset(doc, 'sales', descriptor('assets/sales.csv'));

@@ -108,6 +108,15 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
     source.setAttribute('data-atom-controls', ''); // its button's clicks and keys are its own, not the editor's (B's atom view)
     view.append(title, frame, source);
     into.append(view);
+    // E2 M6 (the tracker's last-block row, run 38992236787's selection log): a press on the view is the editor's alone. The
+    // browser's default would focus the editor with its own caret at the document's start, and that caret's late
+    // selectionchange, read by ProseMirror as the pointer's, replaced the block selection the click had just made; the
+    // editor focuses itself and selects the block on the click. The default is refused once the press has bubbled past
+    // the editor (ProseMirror ignores a press already refused), and the source label's controls keep their own.
+    const pressed = (event: MouseEvent) => {
+      if (event.button === 0 && view.contains(event.target as Node) && !source.contains(event.target as Node)) event.preventDefault();
+    };
+    into.ownerDocument.addEventListener('mousedown', pressed);
     const detachHover = attachHover(frame, tip);
 
     let released = false;
@@ -229,6 +238,7 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       stopDoc();
       stopDisplayed();
       detachHover();
+      into.ownerDocument.removeEventListener('mousedown', pressed);
     };
   };
 }

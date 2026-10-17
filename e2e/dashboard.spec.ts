@@ -558,7 +558,9 @@ test('beside the agentâ€™s views the owner comments on the chart and writes; Bâ€
     // the prose first, while the column is the panel's whole width (the rail open narrows it: the tracker's P3-F row)
     const prose = record.locator('.ds-doc .ProseMirror p', { hasText: 'Revenue by region this quarter.' });
     await prose.click();
-    await page.keyboard.press('End');
+    // the caret at the paragraph's end (End would stop at its first visual line: the panel wraps it, run 38992236787)
+    await prose.evaluate((el) => el.ownerDocument.getSelection()!.collapse(el, el.childNodes.length));
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))); // read by the editor
     await page.keyboard.type(' Owner: compare with last year.');
     await expect(prose).toHaveText('Revenue by region this quarter. Owner: compare with last year.');
     const watched = await watchSelection(record);
