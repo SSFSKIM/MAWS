@@ -1024,9 +1024,10 @@ shared per-uid temp root"; `/private/tmp/claude-501/…` as the
 `task_status`, the notification and the Bash result each name it here) —
 only for a task the loop's index holds, only at the path the session's own
 rows named for it, and only when the resolved path of what is opened lies
-under the resolved canonical root the machine derives for that session
-from its own state (the engine's temp rule, the uid, the transcript's
-project directory, the session id; DX4), besides carrying the
+under one of the resolved canonical roots the machine derives for that
+session from its own state (the engine's temp rule, the uid, the slugs of
+the transcript's project directory and of the session's working
+directories, the session id; DX4), besides carrying the
 `<session id>/tasks/<taskId>.output` suffix. A symlink that keeps the
 suffix but points elsewhere, and one to a file of another name, are both
 refused (the review, 2026-10-17); an agent task's `.output`, which the
@@ -2579,7 +2580,9 @@ start and does not count); (2) known process death, `exited`: the session's proc
 agent (`meta.parentAgentId` or `spawn.parentAgentId`) has ended — a terminal status or `exited` of its own
 (`parent`) — or the bridge reports the agent stopped without a terminal word (`bridge`); (3) `running` or `pending`
 evidence, `running`: the bridge's word on an agent it holds (true from spawn, the seed or a refresh; `bridge`) or a
-row's non-terminal word (`rows`) — and cached bridge-running evidence stops counting once the session's process is
+row's non-terminal word (`rows`), a background agent's launch result (`toolUseResult.status` `async_launched`)
+among them, as `outcome {status: running, raw: async_launched}` (DC8, 2026-10-17: without it a background agent of
+a running session without a bridge would be `unknown` with a result in hand, none of the named cases) — and cached bridge-running evidence stops counting once the session's process is
 gone, so (2) holds then; (4) `unknown` (`none`), only with no evidence, the cases §9.3 names: a parent transcript gone
 or unreadable while the parent is not over; a running session without a bridge whose agent's call has no result,
 notification or `task_status` yet; a meta with no `toolUseId` and no spawn record. An unrecognized raw word changes
@@ -2594,22 +2597,28 @@ graph on the desk side (`task-feed.ts`), never in MAWS's `mergeSidecars`. One fi
 pins the plane's and the fake machine's derivations, as DX1's vectors pin its two code implementations; it holds the
 module-reload case, a nested agent whose parent still runs, a cold open of an ended session holding an agent with a
 `running` status and no completion notification (`exited`), a nested agent under an ended parent (`exited`), each raw
-word of the table, an unknown task, a deleted output file (`missing` with its path), and a monitor just started with
-no path (`missing` with `path: null`).
+word of the table, a background agent of a bridgeless running session with only its `async_launched` result
+(`running`), an unknown task, a deleted output file (`missing` with its path), a monitor just started with no path
+(`missing` with `path: null`), and an output path under the original working directory's slug for a session whose
+transcript lives under another (`ok`).
 
 **`output` [2026-10-17, §9.4].** The browser asks `output {sub, taskId, tail}` (DX3); the hub carries it (DX2); the
 machine answers `output` on the sub. **Containment** (the review, 2026-10-17): the machine first derives the
-**canonical root** for the session from its own state, never from a row — the engine's tasks directory,
-`<resolved tmp>/claude-<uid>/<project slug>/<session id>/tasks/`, where `<resolved tmp>` is the realpath of
+**canonical roots** for the session from its own state, never from a row — the engine's tasks directories,
+`<resolved tmp>/claude-<uid>/<slug>/<session id>/tasks/`, where `<resolved tmp>` is the realpath of
 `CLAUDE_CODE_TMPDIR` or `/tmp` as the engine resolves it (SPEC ch. 20, "the shared per-uid temp root"; `/private/tmp`
-on macOS), `<uid>` the daemon's own, `<project slug>` the name of the transcript's project directory
-(`~/.claude/projects/<slug>/<session id>.jsonl`, the engine's slug of the working directory), and `<session id>` the
-subscription's; a machine whose engine settings name `adoptShellOutputRoot` has `<that root>/<session id>/tasks/`
-instead. It then serves only a task the loop's index holds (`unknown-task` otherwise), only at the path the session's
-own rows named for it — a `task_status`'s `outputFilePath`, a notification's `<output-file>`, a Bash result's
-"Output is being written to:" — and only when **both** hold: the path carries the suffix `<session id>/tasks/
-<taskId>.output`, and the realpath of the target as opened (symlinks resolved) has the root's realpath as a prefix in
-whole path components and is a regular file. So a symlink under the root whose target keeps all three suffix
+on macOS), `<uid>` the daemon's own, `<session id>` the subscription's, and `<slug>` each of: the name of the
+transcript's project directory (`~/.claude/projects/<slug>/<session id>.jsonl`), the engine's slug (SPEC §35.2.1) of
+the working directory the session joined the log with, and the engine's slug of its session record's `cwd`; a
+machine whose engine settings name `adoptShellOutputRoot` adds `<that root>/<session id>/tasks/`. A set, not one
+root (DC8, 2026-10-17): the engine's temp directory takes the slug of the session's original working directory,
+so a session that moved into a worktree writes its outputs under one slug while its transcript lives under another
+(a family coordinator session's rows named 387 output paths under the first and 137 under the second); one root
+taken from the transcript directory would refuse most of its shells. It then serves only a task the loop's index
+holds (`unknown-task` otherwise), only at the path the session's own rows named for it — a `task_status`'s
+`outputFilePath`, a notification's `<output-file>`, a Bash result's "Output is being written to:" — and only when
+**both** hold: the path carries the suffix `<session id>/tasks/<taskId>.output`, and the realpath of the target as
+opened (symlinks resolved) has one root's realpath as a prefix in whole path components and is a regular file. So a symlink under the root whose target keeps all three suffix
 components elsewhere (`…/<same session>/tasks/<same task>.output` under another root) is refused, an ordinary
 symlink to a file of another name is refused, and an agent task's `.output` — a symlink the engine makes into the
 agent's transcript under `~/.claude/projects/` (SPEC ch. 20) — is refused, the agent being read through its own
@@ -4385,6 +4394,18 @@ a hub that connects into machines (§2).
   known task with no output file yet answers `missing` with `path: null`,
   retry-eligible, never `refused`, which stays the containment warning
   (DX4, §9.4, DC8.G4, DC9.G5).
+  2026-10-17, DC8's two gaps in DX4, recorded from its Decision Log: the
+  `output` containment root is a set — the slugs of the transcript's
+  project directory, of the working directory the session joined with and
+  of its session record's `cwd`, plus `adoptShellOutputRoot` — because the
+  engine's temp directory follows the session's original working
+  directory and a session that moved into a worktree splits its outputs
+  from its transcript (387 and 137 paths in one family session); one root
+  would refuse most of its shells, and a root taken from a row would undo
+  containment. A background agent's `async_launched` result is `running`
+  evidence from the rows at precedence (3), so a bridgeless running
+  session's background agent is not `unknown` with a result in hand; the
+  shared fixture pins it, and DC9's fake machine applies the same rule.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
