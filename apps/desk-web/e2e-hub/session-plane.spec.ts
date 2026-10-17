@@ -460,6 +460,14 @@ test('an admin removes a connected machine from the Machines dialog: it leaves t
   await row.getByRole('button', { name: `Remove ${fm.name}` }).click();
   const confirm = dialog.getByTestId('remove-confirm');
   await expect(confirm.getByTestId('remove-meaning')).toContainText('disconnects it at once and deletes its credential');
+  // Timed from the confirming click, on a monotonic clock, by a watcher that samples every 20 ms (expect.poll's
+  // intervals stretch to 1 s and would blur the measurement); it is capped at 30 s so a stream that never ends fails
+  // on the assertion below, not by hanging.
+  const since = performance.now();
+  const ended = (async () => {
+    while (fm.isConnected && performance.now() - since < 30_000) await new Promise((resolve) => setTimeout(resolve, 20));
+    return Math.round(performance.now() - since);
+  })();
   await confirm.getByRole('button', { name: `Remove ${fm.name}` }).click();
   await expect(dialog.getByTestId('machines-notice')).toHaveText(`Removed ${fm.name}. To use it with the desk again, enroll it again.`);
   await expect(row).toHaveCount(0);
@@ -467,8 +475,14 @@ test('an admin removes a connected machine from the Machines dialog: it leaves t
   expect(listed.machines.map((m) => m.name)).not.toContain(fm.name);
   enrolledNames.splice(enrolledNames.indexOf(fm.name), 1); // revoked here: the teardown has nothing left to revoke for it
 
-  // The hub ended its stream with the revocation, not at a lapsed lease: well within one heartbeat.
-  await expect.poll(() => fm.isConnected, { timeout: hub.heartbeatMs }).toBe(false);
+  // The hub ended its stream with the revocation, not at a lapsed lease. Under the local command that is bounded like
+  // M1's offline step: DX2 has a close seen within one heartbeat there (wrangler dev's proxy closes gracefully, noticed
+  // at the next write), plus a margin for the chain after the abort.
+  const endedAfter = await ended;
+  const endBound = hub.heartbeatMs + 500;
+  test.info().annotations.push({ type: 'stream end after the confirming click (ms)', description: String(endedAfter) });
+  expect(fm.isConnected).toBe(false);
+  expect(endedAfter, `the stream ended ${endedAfter} ms after the click; bound ${endBound} ms`).toBeLessThanOrEqual(endBound);
   // Reconnecting with the credential it holds, as its daemon would, is refused.
   await expect(fm.connect()).rejects.toMatchObject({ status: 403 });
 });
