@@ -839,7 +839,22 @@ What only the log or the hub knows joins the transcript:
   with the bridge's reason — the bridge's `delivered {outcome: "refused"}`
   reaches no DX4 outcome today (the child keeps `submitted` keys alone,
   `sminos_bridge.py:642-646`), so DC8 relays it — and the tail row shows
-  that state; its row never comes.
+  that state; its row never comes. A row consumes a send only with
+  affirmative delivery provenance: a bridge row whose origin is `plugin`
+  or `asUser`, or an inbox queued command from `peer` or `plugin`. A typed
+  or origin-less row never does, even when it carries the whole frame
+  line; web sends exist only on engines that write the origin (DC9's M4
+  review, 2026-10-17). On a reopened session whose history is not all
+  held, a `queued`, `delivered` or `uncertain` send older than the oldest
+  held row stays off the tail until the history is paged to its start
+  (`more` false), and shows then if its row never came. Its row may be in
+  the history not yet paged, and drawing it at the tail would misplace
+  every past send. A `failed`, `refused-read-only` or `recorded` send has
+  no row, so it always stays (DC9's M4, 2026-10-17). The accepted
+  residual: a delivered send whose row never came before the session
+  ended shows only once the reader pages to the start. Rejected:
+  reconciling against rows not yet loaded, which needs the whole
+  transcript on the web or a new DX4 lookup.
 - **Pending requests** are request cards at the transcript's tail, after
   any tail sends, scrolling with it — the cards the channel draws today
   from the hub's pending set, so a request is answered in the session view
