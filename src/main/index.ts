@@ -2,7 +2,7 @@ import { guardStdio } from './stdio-guard'; // cua board #97
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
 import { totalmem } from 'node:os'; // C12: the default memory budget
-import { app, BrowserWindow, dialog, screen } from 'electron';
+import { app, BrowserWindow, dialog, screen, type WebContents } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
@@ -135,6 +135,7 @@ import { registerPresenter } from './presentations/present'; // P3-C M6
 import { registerAssetDownload } from './dashboard/download';
 import { registerDashboardExporters } from './dashboard/export'; // E2 M5
 // P3-E end
+import { startConnectors } from './connectors'; // P3-H H3b
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -587,6 +588,12 @@ void startWithProfileLock(app, () => {
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
   });
   shutdown.add('artifacts', artifacts.stop);
+  // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
+  // engine host's main-only commands). Its stop runs before the hosts' (steps run in the order added): every lease,
+  // watch and pending operation ends, each operation withdrawn from the host, while the host can still hear it.
+  // P3-H H4: a page's owner window, read by main, vetoes its pages while hidden or minimized (P3 Decision Log 89)
+  const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents) });
+  shutdown.add('connectors', connectors.stop);
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)

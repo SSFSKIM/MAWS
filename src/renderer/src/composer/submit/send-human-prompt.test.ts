@@ -160,6 +160,60 @@ describe('the human send seam', () => {
       expect(fake.invoked('session.send')).toEqual([]);
     });
 
+    // P3-H (P3 Decision Log 88): a caller whose send must not release a prompt the session holds (Send to) carries the
+    // guard into the acquisition, even when the session was ready at the call and went cold while its queue was read
+    describe('a send that requires no held message', () => {
+      const PENDING = 'A message is waiting in this session · send or discard it there first';
+      const refusedForPending = { status: 'refused', appSessionId: APP, reason: 'busy', message: PENDING };
+
+      it('carries requireEmptyMessage into the acquisition after a ready session goes cold during the queue read; main’s refusal sends neither prompt', async () => {
+        known();
+        ready();
+        const fake = fakeClient({ 'session.acquire': refusedForPending, 'session.send': sendResult, 'session.steer': { messageUuid: UUID } });
+        const current = vi.fn(() => true);
+        const sending = sendHumanPrompt(APP, 'the new request', { origin: 'sendTo', requireEmptyMessage: true, current }, fake.client);
+        await vi.waitFor(() => expect(fake.pending('session.queue.list')).toBe(1));
+        ready({ process: 'exited' }); // the engine stopped while the queue was read; a resume's message waits in main
+        await fake.reply('session.queue.list', { entries: [], paused: false });
+        expect(await sending).toEqual({ disposition: 'refused', started: false, reason: PENDING });
+        expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: APP, reason: 'send', options: { requireEmptyMessage: true } }]);
+        expect(fake.invoked('session.send')).toEqual([]);
+        expect(fake.invoked('session.steer')).toEqual([]);
+      });
+
+      it('carries it when the session is cold from the start', async () => {
+        known();
+        ready({ process: 'exited' });
+        const fake = acquiring(refusedForPending);
+        expect(await sendHumanPrompt(APP, 'the new request', { origin: 'sendTo', requireEmptyMessage: true }, fake.client)).toEqual({ disposition: 'refused', started: false, reason: PENDING });
+        expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: APP, reason: 'send', options: { requireEmptyMessage: true } }]);
+        expect(fake.invoked('session.send')).toEqual([]);
+      });
+
+      it('a caller gone during the acquisition sends nothing even when main answers ready', async () => {
+        known();
+        ready({ process: 'exited' });
+        let wanted = true;
+        const fake = fakeClient({ 'session.send': sendResult });
+        const sending = sendHumanPrompt(APP, 'the new request', { origin: 'sendTo', requireEmptyMessage: true, current: () => wanted }, fake.client);
+        await vi.waitFor(() => expect(fake.pending('session.acquire')).toBe(1));
+        wanted = false;
+        await fake.reply('session.acquire', readyOutcome(true));
+        expect(await sending).toMatchObject({ disposition: 'refused' });
+        expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: APP, reason: 'send', options: { requireEmptyMessage: true } }]);
+        expect(fake.invoked('session.send')).toEqual([]);
+      });
+
+      it('leaves every other caller’s acquisition as it was', async () => {
+        known();
+        ready({ process: 'exited' });
+        const fake = acquiring(readyOutcome(true));
+        await sendHumanPrompt(APP, 'carry on', { origin: 'composer' }, fake.client);
+        await sendHumanPrompt(APP, 'carry on', { origin: 'comment' }, fake.client);
+        expect(fake.invoked('session.acquire').map((input) => (input as { options?: unknown }).options)).toEqual([undefined, undefined]);
+      });
+    });
+
     it('throws when the acquisition itself cannot be asked, so the caller’s Retry applies', async () => {
       known();
       const fake = fakeClient({ 'session.send': sendResult });

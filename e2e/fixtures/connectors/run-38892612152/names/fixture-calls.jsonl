@@ -1,0 +1,17 @@
+{"at":"2026-10-16T11:16:59.420Z","server":"dots","pid":64385,"method":"server/discover"}
+{"at":"2026-10-16T11:16:59.421Z","server":"plain","pid":64386,"method":"server/discover"}
+{"at":"2026-10-16T11:16:59.422Z","server":"claudeai-shaped","pid":64384,"method":"server/discover"}
+{"at":"2026-10-16T11:16:59.425Z","server":"dots","pid":64385,"method":"initialize"}
+{"at":"2026-10-16T11:16:59.425Z","server":"plain","pid":64386,"method":"initialize"}
+{"at":"2026-10-16T11:16:59.425Z","server":"claudeai-shaped","pid":64384,"method":"initialize"}
+{"at":"2026-10-16T11:16:59.426Z","server":"dots","pid":64385,"method":"notifications/initialized"}
+{"at":"2026-10-16T11:16:59.427Z","server":"dots","pid":64385,"method":"tools/list"}
+{"at":"2026-10-16T11:16:59.427Z","server":"plain","pid":64386,"method":"notifications/initialized"}
+{"at":"2026-10-16T11:16:59.427Z","server":"plain","pid":64386,"method":"tools/list"}
+{"at":"2026-10-16T11:16:59.428Z","server":"claudeai-shaped","pid":64384,"method":"notifications/initialized"}
+{"at":"2026-10-16T11:16:59.428Z","server":"claudeai-shaped","pid":64384,"method":"tools/list"}
+{"at":"2026-10-16T11:16:59.669Z","server":"claudeai-shaped","pid":64384,"method":"tools/call","tool":"rows-v2","arguments":{"case":"names"}}
+{"at":"2026-10-16T11:16:59.677Z","server":"claudeai-shaped","pid":64384,"method":"tools/call","tool":"rows.snapshot","arguments":{"case":"names"}}
+{"at":"2026-10-16T11:16:59.683Z","server":"dots","pid":64385,"method":"tools/call","tool":"rows.snapshot","arguments":{"case":"names"}}
+{"at":"2026-10-16T11:16:59.685Z","server":"plain","pid":64386,"method":"tools/call","tool":"rows_snapshot","arguments":{"case":"names"}}
+{"at":"2026-10-16T11:16:59.687Z","server":"claudeai-shaped","pid":64384,"method":"tools/call","tool":"rows.snapshot","arguments":{"raw":"mcp__claude.ai  Fixture (Drive)__rows.snapshot"}}

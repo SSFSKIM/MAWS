@@ -28,6 +28,12 @@
 // shown revision's page URL, about the session that made the page. Picking belongs to one frame (a version switch or a
 // Reload ends it, as do Escape and a pick); the host re-pins the card through the frame's locate handle; an unclaimed
 // card (the Side pane's re-dock) is claimed by a viewer of its artifact in its mode.
+//
+// P3-H H4, an HTML page's connectors (docs/doperpowers/plans/2026-10-12-p3-co-work.md, P3-H; ./connectors/): each load of
+// the page gets its own connector surface over a port the frame hands it, kept by the tab's `ConnectorsTab` and shown
+// only while the body is visible and the window's document is (the page never says). The header's Connectors action,
+// there once the page declared a tool or the artifact holds a grant, opens the owner's sheet (grant, revoke, Start);
+// a declaration never opens it. The tab's grants are read on mount and on every committed grant change.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -36,8 +42,10 @@ import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
 import type { LibraryContent, LibraryRow } from '@shared/ipc/schema/library';
+import { artifactHost } from '../../../artifacts';
 import type { ArtifactOpenAt } from '../../../artifacts/open-at';
-import type { ArtifactEditor, ArtifactEditorProps } from '../../../artifacts/registry';
+import type { ArtifactEditor, ArtifactEditorProps, ArtifactEditorTarget } from '../../../artifacts/registry';
+import { startArtifactSession } from '../../../artifacts/session-context';
 import { ipc } from '../../../ipc/client';
 import { toastFailure } from '../../../library/dialogs';
 import { exportArtifact, saveArtifactCopy, useExportFormats } from '../../../library/export';
@@ -51,13 +59,17 @@ import { openCommentComposer } from '../../code/anchor/anchor';
 import { openFile } from '../../code/open-file';
 import { FileBody } from '../../code/viewer/FileViewer';
 import { useViewer, type ArtifactRead } from '../../code/viewer/viewer-store';
+import { ArtifactConnectorsSheet } from './connectors/ConnectorsSheet';
+import { CONNECTORS_COPY } from './connectors/copy';
+import { ConnectorsTab, NO_CONNECTORS } from './connectors/tab';
+import { useDocumentVisible } from './connectors/use-document-visible';
 import { clearArtifactConsole, noteArtifactVersions, useArtifactConsole } from './console';
 import { ConsoleEntriesChip } from './ConsoleChip';
 import { VIEWERS_COPY } from './copy';
 import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
 import { Media } from './frames/Media';
 import { PdfFrame } from './frames/PdfFrame';
-import { CommentIcon, OpenAsFileIcon, OpenExternallyIcon, ReloadIcon, RevealIcon } from './icons';
+import { CommentIcon, ConnectorsIcon, OpenAsFileIcon, OpenExternallyIcon, ReloadIcon, RevealIcon } from './icons';
 import { bodyOf, placeOfOpenAt, selectionAt, selectionOf, shownVersion, underSession, versionLabel, versionsInOrder, type BodyKind, type VersionSelection } from './model';
 import { pageElementAnchor, type PickMessage } from './pick';
 import { takeVersionRequest, useVersionRequest } from './requests';
@@ -77,6 +89,7 @@ interface ViewState {
 }
 export interface ByteViewerState {
   view: StoreApi<ViewState>;
+  connectors: ConnectorsTab | null; // P3-H H4: an HTML page's, null for a File artifact
 }
 
 let reloadSerial = 0;
@@ -134,6 +147,19 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   const body: BodyKind | null = content === null ? null : kind === 'html' ? 'html' : bodyOf(content.name);
   const session = homeSession(row);
   const reader = useReaderSession(session);
+  // P3-H H4: the page's connectors: shown only while the body and the window's document are, read grants kept current
+  const { connectors } = state;
+  const pageShown = useDocumentVisible() && visible;
+  useEffect(() => connectors?.setVisible(pageShown), [connectors, pageShown]);
+  useEffect(() => () => connectors?.setVisible(false), [connectors]);
+  useEffect(() => {
+    if (!connectors) return;
+    void connectors.readGrants();
+    return ipc.on('connectors.grantChanged', (change) => {
+      if (change.artifactId === connectors.artifactId) void connectors.readGrants();
+    });
+  }, [connectors]);
+  const connectorSheet = useStore(connectors?.view ?? NO_CONNECTORS, (s) => s.sheet);
   const reload = () => {
     if (content) clearArtifactConsole(artifactId, content.revision);
     state.view.setState({ reloads: nextReload(), pickingIn: null });
@@ -206,7 +232,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   // review: a revision asked for keeps its version id even while it is the latest, so a publish since the read is not
   // what it exports; only the latest followed exports live.
   const selection = ordered !== null && content !== null ? { revision: content.revision, versionId: shown && selected !== 'latest' ? shown.version.id : undefined } : null;
-  useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload: reload });
+  useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload: reload, connectors });
   useRegionMarkupSurface(bodyBox, title, body !== null); // P3-G (§D4.1): Mark-up over the drawn body
 
   const failed = versionsRead.status === 'error' ? versionsRead.error : contentRead.status === 'error' ? contentRead.error : null;
@@ -231,6 +257,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
             onPick={onPick}
             onFrame={setFrameHandle}
             onReady={ready}
+            connectors={connectors}
           />
         )}
         {picking && (
@@ -242,6 +269,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
             {VIEWERS_COPY.picking}
           </p>
         )}
+        {connectors && connectorSheet && visible && <ArtifactConnectorsSheet tab={connectors} artifact={row ?? null} />}
         {kind === 'html' && (
           <CommentCardHost hostId={hostId} host="artifact-page" mode={scope.surface === 'panel' ? 'panel' : 'tab'} layout="anchored" accepts={accepts} frame={cardFrame} visible={visible} restoreFocus={restoreFocus} />
         )}
@@ -302,9 +330,10 @@ interface BodyProps {
   onPick(message: PickMessage): void;
   onFrame(handle: FrameHandle | null): void;
   onReady(): void; // the content is loaded (whether or not it is on screen)
+  connectors: ConnectorsTab | null; // P3-H H4: what each load's connector port is relayed through
 }
 
-function Body({ artifactId, content, body, title, session, reloads, picking, onPick, onFrame, onReady }: BodyProps) {
+function Body({ artifactId, content, body, title, session, reloads, picking, onPick, onFrame, onReady, connectors }: BodyProps) {
   const url = artifactUrl(artifactId, content.revision, content.name);
   const frameTitle = VIEWERS_COPY.frameTitle(title);
   switch (body) {
@@ -318,6 +347,7 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
           picking={picking}
           onPick={onPick}
           onFrame={onFrame}
+          onPagePort={connectors ? (port) => connectors.attach(port) : undefined}
         />
       );
     case 'pdf':
@@ -362,6 +392,7 @@ interface HeaderInput {
   frameKey: string | null;
   reloads: number;
   onReload(): void;
+  connectors: ConnectorsTab | null; // P3-H H4
 }
 
 const answered = async (pending: Promise<{ ok: true; value: { opened?: boolean; revealed?: boolean; message: string | null } } | { ok: false; error: { message: string } }>) => {
@@ -370,7 +401,7 @@ const answered = async (pending: Promise<{ ok: true; value: { opened?: boolean; 
   else if (result.value.message !== null) toastFailure(result.value.message);
 };
 
-function useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload }: HeaderInput): void {
+function useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload, connectors }: HeaderInput): void {
   const revision = selection?.revision;
   const formats = useExportFormats(kind);
   const sessionRecord = useSessions((s) => (session === null ? undefined : s.records.get(session)));
@@ -379,6 +410,12 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
   const actions: EditorHostAction[] = [];
   if (commentable) {
     actions.push({ id: COMMENT_ACTION, label: VIEWERS_COPY.comment, icon: CommentIcon, pressed: picking, onSelect: () => state.view.setState({ pickingIn: picking ? null : frameKey }) });
+  }
+  // P3-H H4: the owner's Connectors, once the page asked for a tool or the artifact holds a grant
+  const connectorsAsked = useStore(connectors?.view ?? NO_CONNECTORS, (s) => s.declared.length > 0 || (s.grants?.length ?? 0) > 0);
+  const connectorsOpen = useStore(connectors?.view ?? NO_CONNECTORS, (s) => s.sheet);
+  if (connectors && connectorsAsked) {
+    actions.push({ id: 'connectors', label: CONNECTORS_COPY.action, icon: ConnectorsIcon, pressed: connectorsOpen, onSelect: () => (connectors.view.getState().sheet ? connectors.closeSheet() : connectors.openSheet()) });
   }
   actions.push({ id: 'reload', label: VIEWERS_COPY.reload, icon: ReloadIcon, onSelect: onReload });
   if (content && opensExternally(content.name)) {
@@ -411,11 +448,19 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
 
 // ---- registration ------------------------------------------------------------------------------------------------------
 
-const createState = (): ByteViewerState => ({ view: createStore<ViewState>()(() => ({ selected: 'latest', reloads: 0, pickingIn: null })) });
+// P3-H H4: an HTML page's tab keeps its connectors, ended with the tab
+const connectorsFor = (artifactId: string): ConnectorsTab =>
+  new ConnectorsTab(artifactId, { host: artifactHost(), startSession: (context, previous) => startArtifactSession(context, previous), log: (line) => console.warn(`[connectors] ${line}`) });
+
+const createState = (kind: ByteKind, target: ArtifactEditorTarget): ByteViewerState => ({
+  view: createStore<ViewState>()(() => ({ selected: 'latest', reloads: 0, pickingIn: null })),
+  connectors: kind === 'html' ? connectorsFor(target.artifactId) : null,
+});
+const dispose = (state: ByteViewerState) => state.connectors?.dispose();
 
 const viewers: Record<ByteKind, ArtifactEditor<ByteViewerState>> = {
-  html: { Panel: (props) => <ByteViewer kind="html" {...props} />, createState },
-  file: { Panel: (props) => <ByteViewer kind="file" {...props} />, createState },
+  html: { Panel: (props) => <ByteViewer kind="html" {...props} />, createState: (target) => createState('html', target), dispose },
+  file: { Panel: (props) => <ByteViewer kind="file" {...props} />, createState: (target) => createState('file', target), dispose },
 };
 
 // The kind's editor, for the registry (`register.ts`); the panel's record view and a main tab mount the same viewer.

@@ -422,3 +422,95 @@ describe('the export’s snapshot and its asset reads (fix wave 1, the review’
     await expect(service.exportForLibrary({ artifactId: DOC, format: 'pdf' })).rejects.toMatchObject({ error: { code: 'internal', message: expect.stringContaining('the engine host is restarting') } });
   });
 });
+
+// P3 Decision Log 91 (the interface ledger's X31 `ownFile` row, the input-side twin of E's Decision Log 33 `exportId`): an
+// export that is a file of its own is named, before it renders, by an id main mints, so no later export of the same
+// revision and format replaces what its caller (Send to) still waits to deliver; every other export keeps the
+// revision-and-format cache path.
+describe('an export of its own file (P3 Decision Log 91)', () => {
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const own = (dir: string, revision: number, format: string, exportId: string) => join(root, dir, 'exports', `${revision}-${format}-${exportId}.${format}`);
+
+  it('with ownFile, writes under a name minted before rendering and answers its exportId; two such exports never share a file', async () => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    const seen: ExportRequest[] = [];
+    let n = 0;
+    registry.register(writing('html', 'pdf', () => `%PDF ${++n}`, seen));
+    const service = startExportService(host.deps(registry));
+    const first = await service.exportForLibrary({ artifactId: ID, format: 'pdf', ownFile: true });
+    const second = await service.exportForLibrary({ artifactId: ID, format: 'pdf', ownFile: true });
+    expect(first.exportId).toMatch(UUID);
+    expect(first).toEqual({ path: own(ID, 4, 'pdf', first.exportId!), revision: 4, exportId: first.exportId });
+    expect(second.exportId).toMatch(UUID);
+    expect(second.exportId).not.toBe(first.exportId);
+    expect(
+      seen.map((r) => [r.path, r.exportId]),
+      'the exporter was asked for the minted file itself, not the cache',
+    ).toEqual([
+      [first.path, first.exportId],
+      [second.path, second.exportId],
+    ]);
+    expect(await readFile(first.path, 'utf8')).toBe('%PDF 1');
+    expect(await readFile(second.path, 'utf8')).toBe('%PDF 2');
+    expect((await readdir(join(root, ID, 'exports'))).sort(), 'no cache file, no temporary left').toEqual([`4-pdf-${first.exportId}.pdf`, `4-pdf-${second.exportId}.pdf`].sort());
+  });
+
+  it('carries its id through the live revision a moved document is exported at', async () => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    registry.register(writing('document', 'pdf', async (_req, ctx) => new TextDecoder().decode(await ctx.state())));
+    const service = startExportService(host.deps(registry));
+    host.moveTo(9); // admitted at 7 (artifacts.get), exported at 9
+    const answer = await service.exportForLibrary({ artifactId: DOC, format: 'pdf', ownFile: true });
+    expect(answer).toEqual({ path: own(DOC, 9, 'pdf', answer.exportId!), revision: 9, exportId: expect.stringMatching(UUID) });
+    expect(await readFile(answer.path, 'utf8')).toBe('live@9');
+  });
+
+  it('keeps its selected bytes and path while other exports of the same revision and format, with other options, run before and after it lands', async () => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    let gate: Promise<void> | null = null;
+    let rendering = false;
+    registry.register(
+      writing('html', 'pdf', async (req) => {
+        const held = gate;
+        if (held) {
+          rendering = true;
+          await held;
+        }
+        return `%PDF ${req.pageSize ?? 'own'}`;
+      }),
+    );
+    const service = startExportService(host.deps(registry));
+    // the Send's export is rendering when a normal export of the same revision and format (another paper) runs and lands
+    let release!: () => void;
+    gate = new Promise<void>((resolve) => (release = resolve));
+    const sending = service.exportForLibrary({ artifactId: ID, format: 'pdf', ownFile: true });
+    await until(() => rendering);
+    gate = null;
+    const letter = await service.exportForLibrary({ artifactId: ID, format: 'pdf', pageSize: 'letter' });
+    expect(letter, 'a normal export keeps the cache path and answers no id').toEqual({ path: join(root, ID, 'exports', '4-pdf.pdf'), revision: 4 });
+    release();
+    const selected = await sending;
+    expect(selected.path).not.toBe(letter.path);
+    expect(await readFile(selected.path, 'utf8')).toBe('%PDF own');
+    // then, while Send to waits for its session, another normal export of that revision and format replaces the cache
+    const a4 = await service.exportForLibrary({ artifactId: ID, format: 'pdf', pageSize: 'a4' });
+    expect(a4.path).toBe(letter.path);
+    expect(await readFile(a4.path, 'utf8')).toBe('%PDF a4');
+    expect(await readFile(selected.path, 'utf8'), 'the selected file is untouched').toBe('%PDF own');
+  });
+
+  it('mints an id for a design export through the bridge too (E’s Decision Log 33), in the directory the host named', async () => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    registry.register(writing('design', 'png', () => 'PNG'));
+    startExportService(host.deps(registry));
+    host.emit(hostRequest({ kind: 'design', format: 'png', revision: 7, path: join(root, ID, 'exports', '7-png.png') }));
+    await until(() => host.answered.length === 1);
+    const answer = host.answered[0]!.answer as { ok: true; path: string; revision: number; exportId?: string };
+    expect(answer).toEqual({ ok: true, revision: 7, path: own(ID, 7, 'png', answer.exportId!), exportId: expect.stringMatching(UUID) });
+    expect(await readFile(answer.path, 'utf8')).toBe('PNG');
+  });
+});

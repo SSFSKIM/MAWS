@@ -75,6 +75,7 @@ import { ObservedFactsService } from './observed-facts';
 import { FileObservedFactsStore, type ObservedFactsStore } from './store/observed-facts-store';
 import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 // P2-A end
+import { rendererMcpStatus } from './mcp-status'; // P3-H
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
 type C3Command = (typeof C3_SESSION_COMMANDS)[number] | (typeof C3_ENGINE_COMMANDS)[number];
@@ -565,7 +566,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   handle('session.getWorkspaceDiff', read('get_workspace_diff'));
   handle('session.exportConversation', read('export_conversation'));
   handle('session.getStatus', read('get_status'));
-  handle('session.mcpStatus', read('mcp_status'));
+  handle('session.mcpStatus', async (input) => rendererMcpStatus(await read('mcp_status')(input))); // P3-H: never a header value
   // C10 start: every list_models answer also refreshes the catalogue cache
   handle('session.listModels', async (input) => {
     const answer = await read('list_models')(input);

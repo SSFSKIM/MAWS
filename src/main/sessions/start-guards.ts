@@ -33,6 +33,8 @@ export interface GuardContext {
 
 export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: SetupIntent, args: { message: FirstMessage | null; options: StartOptions }): Promise<Guarded> {
   const appSessionId = intentIn.appSessionId;
+  // P3-H (Decision Log 88): a start that must run no turn, refused before anything is written while a message would go
+  if (args.options.requireEmptyMessage && (args.message !== null || intentIn.message !== null)) return [pendingMessageRefusal(appSessionId), null];
   // the options and the message first, persisted and published (C7's gate closes on the published message); the
   // decision is re-bound to the key the location answers to now
   let intent: SetupIntent = { ...intentIn, updatedAt: s.now() };
@@ -85,6 +87,12 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   return [{ status: 'starting', appSessionId }, () => runIntentSetup(s, appSessionId, { gateway, directFallback })];
 }
 
+// P3-H (P3 Decision Log 88): a `requireEmptyMessage` start meeting a first message, in the request or retained (an
+// intent's, or a resume's behind a card): refused through the existing outcome, the message left untouched, so the
+// owner sends or discards it in the session itself.
+export const PENDING_MESSAGE_REFUSAL = 'A prompt is waiting in this session · open it to send or discard the prompt first';
+const pendingMessageRefusal = (appSessionId: AppSessionId): StartOutcome => ({ status: 'refused', appSessionId, reason: 'busy', message: PENDING_MESSAGE_REFUSAL });
+
 export const directRouteRefusal = (model: string) =>
   `${model} is a gateway model, which the Direct route cannot serve · choose a Claude model, or start on the gateway`;
 
@@ -109,6 +117,8 @@ export function sideThreadRefusal(s: Pick<Setup, 'sessions'>, sourceId: AppSessi
 
 export async function guardResumeStart(s: Setup, record: SessionRecord, args: { message: FirstMessage | null; options: StartOptions }, resumeMessages: Map<string, FirstMessage>, paused?: PausedHolder): Promise<Guarded> {
   const appSessionId = record.appId;
+  // P3-H (Decision Log 88): as an intent's, refused leaving a retained message where it is
+  if (args.options.requireEmptyMessage && (args.message !== null || resumeMessages.has(appSessionId))) return [pendingMessageRefusal(appSessionId), null];
   if (args.message !== null) resumeMessages.set(appSessionId, args.message);
   const handBack = (outcome: StartOutcome): [StartOutcome, null] => {
     resumeMessages.delete(appSessionId);

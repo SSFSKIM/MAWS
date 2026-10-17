@@ -18,19 +18,16 @@ import { PortProvider, type PortLike, type Restored, type SaveState } from '@art
 import { newDoc, newSuggestionDoc, type Doc } from '@artifacts/yjs';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import { artifactUrl } from '@shared/artifacts/scheme';
-import type { CommandInput, CommandName, CommandOutput, IpcError, MawsBridge } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
+import { ArtifactCommandError } from './command-error';
+import { createConnectorHost } from './connectors';
 
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 3_000] as const;
 export const AWARENESS_THROTTLE_MS = 50; // Decision Log 31c (parent 37's advisory)
 
-// A command the store refused; `error` is the IpcError (its `issues` an ArtifactRefusal when the store named why).
-export class ArtifactCommandError extends Error {
-  constructor(readonly error: IpcError) {
-    super(error.message);
-    this.name = 'ArtifactCommandError';
-  }
-}
+// A command the store refused (P3-H H4: defined in ./command-error.ts, shared with the connector family).
+export { ArtifactCommandError };
 
 // The ports the preload posts to the page, awaited by channel. A port can arrive before or after the open's answer.
 // The window's own are `windowDocPorts` (window-ports.ts); this module touches no DOM type, so a Node test can drive the
@@ -237,5 +234,6 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     // P3-E (E2 M3): the source sheet's Download, main's Save dialog over the artifact's own asset
     downloadAsset: (artifactId, ref, options) => call('artifacts.downloadAsset', { artifactId, ref, ...(options?.name !== undefined && { name: options.name }) }),
     identity: () => ({ actor: HUMAN, ...actorDisplay(HUMAN) }),
+    ...createConnectorHost(ipc), // P3-H H4: a page's connector surface and the owner's grants
   };
 }

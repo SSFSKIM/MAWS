@@ -15,7 +15,8 @@ import { readSessionQueue } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { ENDED, STARTING, isBusy } from './submit-state';
 
-export type HumanPromptOrigin = 'composer' | 'answer' | 'reply' | 'comment' | 'peer';
+// P3-H (Decision Log 87): 'sendTo', the library's Send to request; internal typing, never an IPC name
+export type HumanPromptOrigin = 'composer' | 'answer' | 'reply' | 'comment' | 'peer' | 'sendTo';
 export interface HumanPromptOptions {
   origin: HumanPromptOrigin; // the caller's provenance; not a plugin-origin submission or a new engine/written field
   display?: string; // C12's first-message display: the composer preserves its pasted-segment markers
@@ -27,6 +28,10 @@ export interface HumanPromptOptions {
   // before every dispatch and handed to an acquisition so a gone caller's card is not docked again; false refuses it
   // with no reason, nothing sent
   current?: () => boolean;
+  // P3-H (P3 Decision Log 88): the send must not release a prompt the session holds (Send to's request). An acquisition
+  // this call makes carries main's guard, which refuses while a first message is retained there and leaves it in place;
+  // absent, an acquisition keeps today's semantics (a retained resume message goes first).
+  requireEmptyMessage?: true;
 }
 export interface HumanPromptResult {
   disposition: 'sent' | 'steered' | 'queued' | 'held' | 'refused';
@@ -78,7 +83,12 @@ async function sendAcquiring(appSessionId: AppSessionId, content: SendContent, o
   const composer = options.origin === 'composer';
   const display = options.display ?? (typeof content === 'string' ? content : content.filter((block) => block.type === 'text').map((block) => block.text).join('\n'));
   const dockMessage = { content, display, ...(options.pastedContents !== undefined && { pastedContents: options.pastedContents }) };
-  const outcome = await acquireSession(appSessionId, 'send', { ...(composer && { dockMessage }), ...(options.current && { current: options.current }) }, client);
+  const outcome = await acquireSession(
+    appSessionId,
+    'send',
+    { ...(composer && { dockMessage }), ...(options.current && { current: options.current }), ...(options.requireEmptyMessage && { requireEmptyMessage: true }) },
+    client,
+  );
   if (options.current?.() === false) return { disposition: 'refused', started: outcome.status === 'ready' && (outcome.launched || outcome.joined) }; // P2-F F-C1
   if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') {
     if (composer) return { disposition: 'held', started: false, reason: outcome.status === 'needs_trust' ? 'trust' : 'relay' };

@@ -41,6 +41,7 @@ import { presentationsScaleSeamRequested, startPresentationsScaleSeam } from './
 // P3-C end
 import { registerDashboards } from './dashboards'; // P3-E (E2 M2)
 import { dashboardE2eSeamRequested, startDashboardE2eSeam } from './dashboards/e2e-seam'; // P3-E (E2 M6): the acceptance seam (e2e only)
+import { registerConnectors } from './connectors/register'; // P3-H H3b
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -88,9 +89,11 @@ const register: HostRegister = (on, emit, client) => {
   if (documents && presentationsScaleSeamRequested(process.env)) startPresentationsScaleSeam(documents.store, join(userData, 'presentations-scale')); // P3-C M10: the scale gate's seam, MAWS_E2E=1 and MAWS_PRESENTATIONS_SCALE=1 only
   const dashboards = registerDashboards({ documents }); // P3-E (E2 M2): the dashboard kind's adapter and its derived change index
   if (documents && dashboardE2eSeamRequested(process.env)) startDashboardE2eSeam(documents.store, join(userData, 'dashboard-e2e')); // P3-E (E2 M6): the agent's tools for the dashboard e2e groups, MAWS_E2E=1 and MAWS_DASHBOARD_E2E=1 only
+  let connectors: { close(): void } | null = null; // P3-H H3b: below, over the process table
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
+      connectors?.close(); // P3-H H3b: no connector operation or outcome outlives the sessions
       artifacts.close(); // P3-A
       library.close(); // P3-L
       designSystems.close(); // P3-D
@@ -107,6 +110,8 @@ const register: HostRegister = (on, emit, client) => {
   ({ table } = ipc);
   table.startSampling();
   // C3 end
+  // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when main's client goes
+  connectors = registerConnectors(on, emit, client, { sessions: table, store });
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
   // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
   const rows = table;
