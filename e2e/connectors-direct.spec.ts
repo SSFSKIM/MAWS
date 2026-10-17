@@ -25,8 +25,10 @@
 // P3-HD M4's disconnect scene is the built app (support/connector-scene.ts), with no host or route double:
 //   disconnect: the owner starts a session (no message, no model), allows a page's read, the page reads through the
 //          engine; the engine is stopped and the page's next refresh reads through MAWS's own stdio instance (route D,
-//          via direct, no session, no engine started); that scratch main is then killed and every member of the instance
-//          (wrapper, EOF-ignoring grandchild, server) is gone within 5 s while the detached host stays up.
+//          via direct, no session, no engine started) and, with no call left, the idle bound ends that instance; a second
+//          instance is held with a call pending (the fixture answers nothing), still up past the idle bound, and killing
+//          that scratch main ends every member (wrapper, EOF-ignoring grandchild, server) within 5 s while the detached
+//          host stays up: only the host's client-gone cleanup can, as the pending call's lease forbids the idle close.
 // P3-HD M2's transport scenes drive MAWS's own connections (src/engine-host/connectors/direct-client.ts) against the
 // same fixture server, with no engine and no artifact grant (the host's operations and main's disconnect are the
 // host scenes'):
@@ -53,8 +55,9 @@ import type { VerifiedConnectorSource } from '../src/engine-host/connectors/prov
 import { alive, DIRECT_HOST, until, wrappedLaunch, wrapperPids, writeWrapper } from './support/connector-direct-transport';
 // P3-HD M2 end
 // P3-HD M4 start
-import { invoke as appInvoke, value as appValue, TOOL_NAME, WATCH_MS, withScene } from './support/connector-scene';
-import { newMembers, wrappedServer } from './support/connector-direct-scene';
+import { invoke as appInvoke, value as appValue, TOOL_NAME, wait, WATCH_MS, withScene } from './support/connector-scene';
+import { holdFileOf, newMembers, wrappedServer } from './support/connector-direct-scene';
+import { ps } from './support/processes';
 // P3-HD M4 end
 
 test.skip(process.env.MAWS_CONNECTORS_DIRECT_E2E !== '1', 'the direct-route e2e runs under pnpm e2e:connectors-direct (MAWS_CONNECTORS_DIRECT_E2E=1)');
@@ -601,24 +604,45 @@ test('disconnect: the page reads through MAWS’s own instance after the engine 
       expect(await scene.live(run.page), 'route D started no engine').toEqual([]);
       expect(scene.launches(engine.appSessionId).spawns, 'the owner’s one launch, never another').toBe(1);
 
-      // MAWS's own instance: a new wrapper, grandchild and server, none of them the engine's
-      const own = newMembers(scene, engineMembers);
-      expect(own.wrappers, 'one new wrapper').toHaveLength(1);
-      expect(own.sleepers, 'one new grandchild').toHaveLength(1);
-      const directServer = scene.toolCalls().at(-1)!.pid;
-      expect(directServer, 'a server other than the engine’s').not.toBe(engineServer);
-      const members = [...own.wrappers, ...own.sleepers, directServer];
-      expect(members.every(alive), 'MAWS’s instance is running').toBe(true);
+      // MAWS's own first instance: a new wrapper, grandchild and server, none of them the engine's; with no call left it
+      // is the ordinary idle bound (5 s) that ends it, which is not what the client-gone proof below may rest on
+      const first = newMembers(scene, engineMembers);
+      expect(first.wrappers, 'one new wrapper').toHaveLength(1);
+      expect(first.sleepers, 'one new grandchild').toHaveLength(1);
+      const firstServer = scene.toolCalls().at(-1)!.pid;
+      expect(firstServer, 'a server other than the engine’s').not.toBe(engineServer);
+      expect(ps(firstServer, 'ppid'), 'the server is the wrapper’s child').toBe(String(first.wrappers[0]));
+      const firstGroup = [...first.wrappers, ...first.sleepers, firstServer];
+      writeFileSync(holdFileOf(scene), ''); // from here the fixture answers no tools/call: the next refresh's call will be held
+      await expect.poll(() => firstGroup.filter(alive), { timeout: 20_000, intervals: [250], message: 'the idle bound ended the first instance with no call pending' }).toEqual([]);
+
+      // a call held pending on a second instance (the fixture answers nothing while the hold file exists): its lease keeps
+      // the instance from idling, so only the host's cleanup at main's death can end it
+      const seen = new Set([engineServer, firstServer]);
+      await expect
+        .poll(() => scene.toolCalls().filter((entry) => !seen.has(entry.pid)).length, { timeout: WATCH_MS + 30_000, message: 'the next refresh submitted its call to a second instance of MAWS’s' })
+        .toBe(1);
+      const heldServer = scene.toolCalls().find((entry) => !seen.has(entry.pid))!.pid;
+      const second = newMembers(scene, { wrappers: [...engineMembers.wrappers, ...first.wrappers], sleepers: [...engineMembers.sleepers, ...first.sleepers] });
+      expect(second.wrappers, 'one new wrapper').toHaveLength(1);
+      expect(second.sleepers, 'one new grandchild').toHaveLength(1);
+      expect(ps(heldServer, 'ppid'), 'the held call’s server is that wrapper’s child').toBe(String(second.wrappers[0]));
+      const members = [...second.wrappers, ...second.sleepers, heldServer];
+      expect(members.every(alive), 'the second instance is running with a call pending').toBe(true);
+      await wait(7_000); // past the 5 s idle bound: a leased instance is still up
+      expect(members.every(alive), 'the idle bound does not end an instance with a call pending').toBe(true);
+      expect(scene.toolCalls().filter((entry) => entry.pid === heldServer), 'the held call was submitted once and never answered').toHaveLength(1);
+      expect(await scene.live(run.page), 'route D started no engine').toEqual([]);
       const supervisor = await scene.supervisor(run.page);
       scene.note('direct instance', { members, supervisor });
 
-      // that scratch main is killed: the detached host sees its client go and ends the whole instance
+      // that scratch main is killed: the detached host sees its client go and ends the whole instance, call pending
       await scene.killApp(run);
       await expect
         .poll(() => members.filter(alive), { timeout: 5_000, intervals: [100], message: 'wrapper, grandchild and server are gone within 5 s of main’s death' })
         .toEqual([]);
       expect(scene.pidAlive(supervisor), 'the detached host outlived main, so it was its own client-gone cleanup that ended the instance').toBe(true);
-      await info.attach('direct-members.json', { body: JSON.stringify({ engineMembers, own, directServer }, null, 2), contentType: 'application/json' });
+      await info.attach('direct-members.json', { body: JSON.stringify({ engineMembers, first, firstServer, second, heldServer }, null, 2), contentType: 'application/json' });
     },
     { server: wrappedServer },
   );

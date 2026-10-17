@@ -4,7 +4,7 @@
 //   node connector-mcp-server.mjs --id <id> --log <file> --tools '<json array of tool names>'
 // A tool call answers `{server: <id>, tool, arguments, n}` as text and as structuredContent, n counting this
 // process's calls.
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import process from 'node:process';
 import { createInterface } from 'node:readline';
 
@@ -16,6 +16,10 @@ const arg = (name) => {
 const id = arg('id');
 const log = arg('log');
 const tools = JSON.parse(arg('tools'));
+// P3-HD M4: an optional hold file. While it exists a tools/call is logged on receipt (the evidence of its submission) and
+// never answered, so a scene can keep a call pending on this process. Absent the option (every H scene), nothing changes.
+const holdIndex = process.argv.indexOf('--hold');
+const hold = holdIndex === -1 ? null : process.argv[holdIndex + 1];
 let calls = 0;
 
 const record = (entry) => appendFileSync(log, `${JSON.stringify({ at: new Date().toISOString(), server: id, pid: process.pid, ...entry })}\n`);
@@ -46,6 +50,7 @@ for await (const line of createInterface({ input: process.stdin })) {
   if (line.trim() === '') continue;
   const message = JSON.parse(line);
   record({ method: message.method ?? null, ...(message.method === 'tools/call' ? { tool: message.params?.name, arguments: message.params?.arguments ?? {} } : {}) });
+  if (hold !== null && message.method === 'tools/call' && existsSync(hold)) continue; // P3-HD M4: submitted, held, never answered
   if (message.id === undefined || message.method === undefined) continue; // a notification, or a response to nothing we asked
   const result = answer(message.method, message.params);
   send(result.error ? { id: message.id, error: result.error } : { id: message.id, result });

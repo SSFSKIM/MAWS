@@ -10,6 +10,11 @@ import { FIXTURE_SERVER } from './connector-engine';
 import { TOOL, type ConnectorScene } from './connector-scene';
 import { wrapperPids, type WrapperPids } from './connector-direct-transport';
 
+// The fixture server answers no tools/call while this file exists (support/connector-mcp-server.mjs `--hold`).
+export function holdFileOf(scene: ConnectorScene): string {
+  return join(scene.root, 'hold');
+}
+
 export function wrapperLogOf(scene: ConnectorScene): string {
   return join(scene.root, 'wrapper.log');
 }
@@ -27,7 +32,7 @@ export function wrappedServer(scene: ConnectorScene): Record<string, unknown> {
   return {
     type: 'stdio',
     command: path,
-    args: [FIXTURE_SERVER, '--id', 'series', '--log', scene.log, '--tools', JSON.stringify([TOOL])],
+    args: [FIXTURE_SERVER, '--id', 'series', '--log', scene.log, '--tools', JSON.stringify([TOOL]), '--hold', holdFileOf(scene)],
     env: { MAWS_PROBE_WRAPPER_LOG: wrapperLogOf(scene), MAWS_PROBE_SCENE_ROOT: scene.root },
   };
 }
