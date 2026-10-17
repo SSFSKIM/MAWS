@@ -32,8 +32,8 @@ const spawn = { parentAgentId: null, subagentType: 'general-purpose', descriptio
 const entries: SubagentMeta[] = [
   { agentId: 'a1', meta, status: 'completed', evidence: 'rows', outcome: { status: 'completed', raw: 'completed', at: '2026-10-17T08:00:00.000Z', summary: 'done', outputFile: '/tmp/x.output' }, file: { size: 4096, mtimeMs: 1760688000000, firstAt: '2026-10-17T07:59:00.000Z', lastAt: '2026-10-17T08:00:00.000Z' } },
   { agentId: 'a2', meta: { toolUseId: 'toolu_02' }, status: 'running', evidence: 'bridge', running: true, spawn },
-  // A module reloaded mid-session seeds what `$.agent.list()` gives: no background, model, or tool-use id.
-  { agentId: 'a3', meta: {}, status: 'running', evidence: 'bridge', running: true, spawn: { parentAgentId: 'a2', subagentType: 'Explore', description: 'look', name: null } },
+  // A module reloaded mid-session seeds what `$.agent.list()` gives: no name, background, model, or tool-use id.
+  { agentId: 'a3', meta: {}, status: 'running', evidence: 'bridge', running: true, spawn: { parentAgentId: 'a2', subagentType: 'Explore', description: 'look' } },
   { agentId: 'a4', meta: { parentAgentId: 'a2' }, status: 'exited', evidence: 'parent' },
   { agentId: 'a5', meta: {}, status: 'unknown', evidence: 'none' },
 ];

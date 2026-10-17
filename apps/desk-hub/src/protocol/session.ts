@@ -251,15 +251,16 @@ export type SubagentStatusFacts = {
 };
 
 /**
- * DX5's `agent` spawn, or, for an agent the module did not see spawn, what the `$.agent.list()` seed gives (no
- * `background`, `model`, or `toolUseId`).
+ * DX5's `agent` spawn, or, for an agent the module did not see spawn, what the `$.agent.list()` seed gives: the parent,
+ * the type, and the description, with no `name`, `background`, `model`, or `toolUseId`.
  */
 export type SubagentSpawn = {
   /** The agent that spawned it; null for one the main loop spawned. */
   parentAgentId: string | null;
   subagentType: string;
   description: string;
-  name: string | null;
+  /** The spawn's name, null when it had none; absent from a seed. */
+  name?: string | null;
   background?: boolean;
   model?: string;
   toolUseId?: string | null;
@@ -309,8 +310,10 @@ export type McpServer = { name: string };
 
 /**
  * A background task's output, answering an `output` request, by `result`. The machine serves only a task its index
- * holds, only at the path the session's rows named for it, and only when that path carries `<session>/tasks/<taskId>.output`
- * and resolves, symlinks followed, to a regular file under the session's tasks directory as the machine derives it.
+ * holds, only at the path the session's rows named for it, and only when that path carries
+ * `<session>/tasks/<taskId>.output` and its realpath as opened (symlinks resolved) is a regular file equal to
+ * `<realpath of a root>/<taskId>.output` for one of the session's canonical tasks roots, as the machine derives them
+ * from its own state (DX4's containment rule).
  */
 export type TaskOutput =
   /** `text` is the last `tail` bytes decoded as UTF-8 with replacement, cut forward to the first line break inside the
