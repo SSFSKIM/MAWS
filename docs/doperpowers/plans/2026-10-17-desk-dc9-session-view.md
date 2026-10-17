@@ -586,6 +586,26 @@ in their own worktrees.
   carries them (the owner's verdicts entry above).
   Date/Author: 2026-10-17, controller.
 
+- Decision: DC8's shared fixture is `tests/sminos/dx4-jobs.json` at
+  doperpowers `38a45f6b` (branch `desk-dc8`; its runner
+  `tests/sminos/jobs_parity.py`, 65/65): 13 body cases and 17 output cases
+  with explicit inputs (main rows, agent rows with size and mtime, metas,
+  the bridge state or null, whether the session runs, roots under a
+  placeholder). M2 vendors a copy under `apps/desk-hub/fake-machine/`
+  (with a note of its source commit), and the fake's derivation passes
+  every case; its `about` field binds where DX4's prose is open
+  (unrecognized raw words, an Agent result's raw word, tie order within a
+  precedence level, a job's `startedAt`/`endedAt`/`summary`, MCP removals
+  before additions, an output window with no line break not cut). Two
+  contract notes: containment is exact (the target's realpath equals
+  `<realpath root>/<taskId>.output`), and a `$.agent.list()` seed carries
+  no `name`. The `session-view` recording's synthesized rows take the
+  fixture's row shapes. The fixture may change in one place (an expired
+  monitor ends rather than staying `running`); the composite's writer
+  relays the commit, and M2 or a later fix re-vendors it. A copy for the
+  executors is at `.doperpowers/sde/2026-10-17-desk-dc9-session-view/dc8/`.
+  Date/Author: 2026-10-17, the composite's writer, folded by the controller.
+
 ## Surprises & Discoveries
 
 ## Outcomes & Retrospective
