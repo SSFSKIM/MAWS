@@ -91,7 +91,10 @@ function canonical(value: unknown): string {
 
 /** Whether two JSON values are the same, whatever order their objects' keys came in. */
 export const sameJson = (a: unknown, b: unknown): boolean => canonical(a) === canonical(b);
-const sameQuery = (source: QuerySource, call: Pick<RefreshStart, 'server' | 'tool' | 'arguments'>) => source.server === call.server && source.tool === call.tool && sameJson(source.args, call.arguments);
+/** Whether two queries are one: the same server, tool and arguments (their keys in any order). Its schedule, staleness
+ * and the dataset's metadata are no part of a query's identity (the architect's M2 ruling). */
+export const sameQueryIdentity = (a: Pick<QuerySource, 'server' | 'tool' | 'args'>, b: Pick<QuerySource, 'server' | 'tool' | 'args'>): boolean => a.server === b.server && a.tool === b.tool && sameJson(a.args, b.args);
+const sameQuery = (source: QuerySource, call: Pick<RefreshStart, 'server' | 'tool' | 'arguments'>) => sameQueryIdentity(source, { server: call.server, tool: call.tool, args: call.arguments });
 
 export function datasetRefresher(store: ArtifactStore, options: { now?: () => number } = {}): { admit(start: RefreshStart, scope: RefreshScope): Promise<RefreshAdmission> } {
   const now = options.now ?? Date.now;

@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute, relative } from 'node:path';
-import { DATASET_LIMITS, readDataset, removeDataset, setDataset, datasetSlotProblem, type DatasetDescriptor, type DatasetFormat } from '@artifacts/dashboard/datasets';
+import { DATASET_LIMITS, readDataset, removeDataset, setDataset, datasetSlotProblem, snapshotOf, type DatasetDescriptor, type DatasetFormat } from '@artifacts/dashboard/datasets';
 import { DatasetError, parseDataset, rowKeyProblem, type ParsedDataset } from '@artifacts/dashboard/parse';
 import { DATASET_STATES } from '@artifacts/dashboard/states';
 import { legacyDashboardFiles, legacyDashboardReason } from '@artifacts/dashboard/legacy';
@@ -24,6 +24,7 @@ import type { ArtifactDatasetResult } from '@shared/maws/dashboard-tools';
 import { mimeOf } from '@shared/files/mime';
 import type { MawsDatasetRefreshOutcome } from '@shared/ipc/schema/maws'; // E3
 import type { DatasetRefreshRequests } from '../connectors/dataset-requests'; // E3
+import { sameQueryIdentity } from '../dashboards/refresh'; // E3
 import { parseToolArguments, TOOL_ERRORS } from '@shared/maws/tools';
 import { dashboardAdapterOf } from '../dashboards';
 import { actorOf, answering, lineageOf, opIdOf, pathUnderCwd, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
@@ -129,6 +130,13 @@ const ENDED: Record<'timeout' | 'withdrawn' | 'noClient', string> = {
   withdrawn: 'the request was withdrawn',
   noClient: 'MAWS is not open; the dataset cannot be refreshed',
 };
+// The query `source` configures keeps what `prior` fetched when it is the same query (its server, tool and
+// arguments): its snapshot, provenance, columns, rows, state and retention (the architect's M2 ruling).
+const keptBy = (prior: DatasetDescriptor | null, source: { server: string; tool: string; args: Record<string, unknown> }): prior is DatasetDescriptor =>
+  prior !== null && prior.source.kind === 'query' && sameQueryIdentity(prior.source, source);
+// The retained snapshot a supplied row key must key, or null: a kept query's rows, when the key is a change.
+const keyedSnapshot = (prior: DatasetDescriptor | null, input: { source: { server: string; tool: string; args: Record<string, unknown> }; rowKey?: string }): string | null =>
+  input.rowKey !== undefined && keptBy(prior, input.source) && prior.rowKey !== input.rowKey ? (snapshotOf(prior)?.ref ?? null) : null;
 // E3 end
 
 export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<DatasetRefreshRequests, 'ask'> /* E3 */ }): McpToolDefinition {
@@ -186,7 +194,25 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
         // end of the write, so a query snapshot retired meanwhile keeps its bytes for the descriptor that names it (which
         // then adopts it)
         let held: { release(): void } | null = null;
+        // E3 (R2): a supplied row key of a kept query, validated before the write against the rows it retains (held)
+        let keyed: string | null = null;
         try {
+          if (input.source) {
+            const query = input.source;
+            const retained = await store.readCommitted(() => {
+              const ref = keyedSnapshot(readDataset(store.service.live(artifactId), input.id), { source: query, rowKey: input.rowKey });
+              const asset = ref === null ? undefined : store.listAssets(artifactId).find((candidate) => candidate.ref === ref);
+              if (asset) held = store.holdAsset(artifactId, asset.ref); // in the lookup's turn
+              return ref === null ? null : { ref, asset };
+            });
+            if (retained) {
+              if (!retained.asset) throw refuse(TOOL, { reason: 'unavailable', dataset: input.id }, `dataset "${input.id}"'s rows could not be read to check the row key; nothing was written`);
+              const rows = parseDataset(store.files.readAsset(artifactId, retained.asset.sha256), 'json');
+              const keyProblem = rows instanceof DatasetError ? rows.reason : rowKeyProblem(rows, input.rowKey!);
+              if (keyProblem) throw refuse(TOOL, { reason: 'invalid', rowKey: input.rowKey, message: keyProblem }, `${keyProblem}; nothing was written`);
+              keyed = retained.ref;
+            }
+          }
           if (!input.remove && !input.source /* E3: a query reads nothing */) {
             if (input.path !== undefined) {
               const validated = await realFileUnder(ctx.cwd, input.path);
@@ -225,6 +251,7 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
               async (op) => {
                 let existing: DatasetDescriptor | null = null;
                 let recorded: ArtifactDatasetResult | undefined;
+                let configured: DatasetDescriptor | null = null; // E3: the query a `source` wrote
                 // the final check, inside the write's savepoint and synchronous with it
                 const prepare = () => {
                   if (!store.get(artifactId)) throw new ToolRefusal(TOOL_ERRORS.noArtifact(TOOL, input.artifact));
@@ -240,6 +267,10 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
                     const detail = existing ? 'replaced since your read' : 'removed since your read';
                     throw refuse(TOOL, { reason: 'conflict', dataset: input.id, detail, liveRevision: live }, `dataset "${input.id}" was ${detail.replace(' since your read', '')} since your read (revision ${input.baseRevision}); read the dashboard again`);
                   }
+                  // E3 (R2): the rows a supplied row key was checked against are still the ones it will key
+                  if (input.source && keyedSnapshot(existing, { source: input.source, rowKey: input.rowKey }) !== keyed) {
+                    throw refuse(TOOL, { reason: 'conflict', dataset: input.id, detail: 'replaced since your read', liveRevision: live }, `dataset "${input.id}" was replaced while its row key was checked; read the dashboard again`);
+                  }
                   if (input.remove && !existing) throw refuse(TOOL, { reason: 'notFound', dataset: input.id }, `${DATASET_STATES.noDataset(input.id)} to remove`);
                   const slot = input.remove ? null : datasetSlotProblem(doc, input.id);
                   if (slot) throw refuse(TOOL, { reason: 'invalid', dataset: input.id }, slot);
@@ -251,19 +282,19 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
                   assets,
                   (doc, refs) => {
                     const prior = existing as DatasetDescriptor | null;
-                    // E3 (R2): a query configured, never fetched: no snapshot, rows, columns or provenance
+                    // E3 (R2): a query configured: the same query keeps what it fetched (its policy and metadata
+                    // updated); a new one is never fetched (no snapshot, rows, columns or provenance). An omitted
+                    // title, description or row key stays.
                     if (input.source) {
                       const { kind, server, tool, args, schedule, staleAfter } = input.source;
                       const description = input.description ?? prior?.description;
-                      return setDataset(doc, input.id, {
-                        title: input.title ?? prior?.title ?? input.id,
-                        ...(description !== undefined && { description }),
-                        ...(input.rowKey !== undefined && { rowKey: input.rowKey }),
-                        source: { kind, server, tool, args, ...(schedule !== undefined && { schedule }), ...(staleAfter !== undefined && { staleAfter }), snapshot: null },
-                        columns: [],
-                        rows: 0,
-                        state: { status: 'ok', at },
-                      });
+                      const rowKey = input.rowKey ?? prior?.rowKey;
+                      const meta = { title: input.title ?? prior?.title ?? input.id, ...(description !== undefined && { description }), ...(rowKey !== undefined && { rowKey }) };
+                      const query = { kind, server, tool, args, ...(schedule !== undefined && { schedule }), ...(staleAfter !== undefined && { staleAfter }) };
+                      configured = keptBy(prior, input.source)
+                        ? ({ ...prior, ...meta, source: { ...query, snapshot: (prior.source as { snapshot: { ref: string; at: number } | null }).snapshot } } as DatasetDescriptor)
+                        : { ...meta, source: { ...query, snapshot: null }, columns: [], rows: 0, state: { status: 'ok', at } };
+                      return setDataset(doc, input.id, configured);
                     }
                     if (!source || !table) return removeDataset(doc, input.id);
                     const title = input.title ?? prior?.title ?? input.id;
@@ -282,8 +313,8 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
                   {
                     prepare,
                     inFrame: (revision) => {
-                      recorded = input.source
-                        ? { status: 'dataset', artifactId, id: input.id, revision, columns: [], rows: 0, notFetched: true } // E3
+                      recorded = configured
+                        ? { status: 'dataset', artifactId, id: input.id, revision, columns: configured.columns, rows: configured.rows, ...(snapshotOf(configured) === null && { notFetched: true as const }) } // E3
                         : table
                         ? { status: 'dataset', artifactId, id: input.id, revision, columns: table.columns, rows: table.rows.length, ...(table.warnings.length > 0 && { warnings: table.warnings }) }
                         : { status: 'dataset', artifactId, id: input.id, revision };

@@ -127,6 +127,64 @@ describe('artifact_dataset: a query source', () => {
     expect(replaced.revision).toBe(store.revision(boardId));
   });
 
+  // E3 M2 fix (reviewer finding 4; the architect's M2 ruling): a query's identity is its server, tool and arguments
+  // (their keys in any order); a policy or metadata change keeps what was fetched
+  const memberships = () => storage.db.prepare('SELECT datasetId, assetId FROM artifact_query_snapshots WHERE artifactId = ?').all(boardId);
+  async function fetched(): Promise<DatasetDescriptor> {
+    const base = await configured();
+    json(await dataset({ baseRevision: base, id: 'live', refresh: true }));
+    return live('live')!;
+  }
+
+  it('keeps the fetched snapshot, provenance, rows, state and retention through a schedule, staleAfter, key-order or metadata change', async () => {
+    const two = { kind: 'query', server: 'fixture', tool: 'rows', args: { series: 'revenue', limit: 2 } } as const;
+    json(await dataset({ baseRevision: await board(), id: 'live', title: 'Revenue', source: two }));
+    json(await dataset({ baseRevision: store.revision(boardId), id: 'live', refresh: true }));
+    const before = live('live')!;
+    expect(before).toMatchObject({ rows: 2, source: { snapshot: { ref: expect.any(String) } } });
+    const kept = memberships();
+    expect(kept).toHaveLength(1);
+    const answer = json(await dataset({ baseRevision: store.revision(boardId), id: 'live', description: 'Daily revenue', source: { ...two, args: { limit: 2, series: 'revenue' }, schedule: 600, staleAfter: 900 } }));
+    expect(live('live')).toEqual({ ...before, description: 'Daily revenue', source: { ...before.source, schedule: 600, staleAfter: 900 } });
+    expect(answer).toEqual({ status: 'dataset', artifactId: boardId, id: 'live', revision: store.revision(boardId), columns: before.columns, rows: 2 });
+    expect(memberships()).toEqual(kept);
+    // an explicit title applies and an omitted description stays; a schedule left out is manual again
+    json(await dataset({ baseRevision: store.revision(boardId), id: 'live', title: 'Revenue (EUR)', source: two }));
+    expect(live('live')).toEqual({ ...before, title: 'Revenue (EUR)', description: 'Daily revenue' });
+    expect(memberships()).toEqual(kept);
+  });
+
+  it('validates a supplied row key against the retained rows before the write: a valid one applies, an invalid one refuses the whole call', async () => {
+    const before = await fetched();
+    const revision = store.revision(boardId);
+    const refused = refusal(await dataset({ baseRevision: revision, id: 'live', rowKey: 'nope', source: { ...SOURCE, schedule: 3_600 } }));
+    expect(refused).toMatchObject({ reason: 'invalid', rowKey: 'nope' });
+    expect(store.revision(boardId)).toBe(revision);
+    expect(live('live')).toEqual(before); // nothing written: not the schedule either
+    json(await dataset({ baseRevision: revision, id: 'live', rowKey: 'v', source: SOURCE }));
+    expect(live('live')).toEqual({ ...before, rowKey: 'v' });
+    // omitted, the row key stays
+    json(await dataset({ baseRevision: store.revision(boardId), id: 'live', source: { ...SOURCE, schedule: 60 } }));
+    expect(live('live')).toMatchObject({ rowKey: 'v', rows: 2, source: { schedule: 60 } });
+  });
+
+  it('starts an actual replacement of the query not fetched: another tool, server or arguments; its retention cleared', async () => {
+    await configured();
+    for (const change of [{ tool: 'other' }, { server: 'elsewhere' }, { args: { series: 'cost' } }]) {
+      json(await dataset({ baseRevision: store.revision(boardId), id: 'live', source: SOURCE }));
+      json(await dataset({ baseRevision: store.revision(boardId), id: 'live', refresh: true }));
+      const before = live('live')!;
+      const ref = (before.source as { snapshot: { ref: string } }).snapshot.ref;
+      json(await dataset({ baseRevision: store.revision(boardId), id: 'live', rowKey: 't', source: { ...SOURCE, ...change } }));
+      const after = live('live')!;
+      expect(after).toEqual({ title: 'Revenue', rowKey: 't', source: { ...SOURCE, ...change, snapshot: null }, columns: [], rows: 0, state: { status: 'ok', at: expect.any(Number) } });
+      expect(after).not.toHaveProperty('updated');
+      expect(memberships()).toEqual([]);
+      const asset = store.listAssets(boardId).find((candidate) => candidate.ref === ref);
+      if (asset) expect(storage.db.prepare('SELECT retiredAt FROM artifact_assets WHERE artifactId = ? AND assetId = ?').get(boardId, asset.assetId)).toEqual({ retiredAt: expect.any(Number) });
+    }
+  });
+
   it('refuses modes mixed, a schedule outside 30 s to 24 h and a staleAfter that is not a positive whole number, writing nothing', async () => {
     const base = await board();
     const revision = store.revision(boardId);
