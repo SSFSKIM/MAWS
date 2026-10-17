@@ -50,6 +50,7 @@ figure { margin: 0; }
 figcaption { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
 figcaption .number { color: var(--fg-muted); font: 11px var(--font-mono); }
 figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.pick.chosen { color: var(--bg); background: var(--success); border-color: var(--success); }
 .pick { font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 2px 6px; }
 .rationale { margin: 0 0 12px; font-size: 11.5px; color: var(--fg-muted); line-height: 1.55; max-width: 100ch; }
 .frame { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
@@ -241,7 +242,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 .ttext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui-sm); font-variant-numeric: tabular-nums; }
 .act { flex-shrink: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 8px; font-size: var(--text-ui-sm); }
 .act[aria-expanded="true"], .act.pressed { background: var(--bg-active); border-color: var(--border-strong); }
-.act:disabled { color: var(--fg-faint); }
+.act:disabled { color: var(--fg-faint); border-color: var(--border); cursor: help; }
 .tsub { padding-left: 14px; font-size: 11.5px; color: var(--fg-muted); line-height: 1.45; }
 .tsub code { font-size: 11px; }
 /* The output, inline (4A) and drilled into (4B): a plain-text tail, never Markdown */
@@ -290,15 +291,15 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 <header class="page-head">
   <div class="eyebrow">The desk / The session view / 09 <a href="?theme=dark" id="theme-link">View in dark</a></div>
   <h1>The session view: what the transcript does not know yet, and what runs beside it.</h1>
-  <p>On a desktop browser whose machine is online, a direct channel's center is MAWS's report over the session's own transcript (§9.1): <code>&lt;message&gt;</code> spans as Message cards, one “Working record” row per marked turn, a Report · Transcript toggle. Around it, four surfaces are the desk's own and are this document's subject: <strong>the tail row's delivery line</strong> for a send the transcript has not shown yet, <strong>the request band</strong> above the composer, <strong>the end marker</strong> of an ended or retired session, and <strong>the jobs view</strong> in the column. Where a surface has a real choice, two alternatives stand side by side, named, with the one recommended marked.</p>
+  <p>On a desktop browser whose machine is online, a direct channel's center is MAWS's report over the session's own transcript (§9.1): <code>&lt;message&gt;</code> spans as Message cards, one “Working record” row per marked turn, a Report · Transcript toggle. Around it, four surfaces are the desk's own and are this document's subject: <strong>the tail row's delivery line</strong> for a send the transcript has not shown yet, <strong>the request band</strong> above the composer, <strong>the end marker</strong> of an ended or retired session, and <strong>the jobs view</strong> in the column. Where a surface has a real choice, two alternatives stand side by side, named, with the owner's choice of 2026-10-17 marked.</p>
 </header>
 
 <!-- ═══════════════════════════════ 0. The whole view ═══════════════════════════════ -->
 <section class="surface" id="s0">
 <div class="section-rule"><b>0</b> The session view, assembled</div>
 <section class="vignette"><figure>
-  <figcaption><span class="number">0</span><h2>maws-45 on mini, working; two sends at the tail, two requests waiting, the Jobs tab open</h2><span class="dimension">300 · fluid · 380 px</span></figcaption>
-  <p class="rationale">Every surface in its place, with the recommended alternative of each (1A, 2A, 4A). The center's header carries the status word (moved from the column, M3). The column has lost its Transcript tab; Subagents, Jobs, Diff and Info read the one shared subscription.</p>
+  <figcaption><span class="number">0</span><h2>maws-45 on mini, working; two sends at the tail, two requests waiting inline, the Jobs tab open</h2><span class="dimension">300 · fluid · 380 px</span></figcaption>
+  <p class="rationale">Every surface in its place, as the owner chose on 2026-10-17 (1B, 2B, 4A, Stop disabled with its reason on hover). The center's header carries the status word (moved from the column, M3). The column has lost its Transcript tab; Subagents, Jobs, Diff and Info read the one shared subscription.</p>
   <div class="frame"><div class="desk">
     <aside class="sidebar" aria-label="MAWS channels and sessions">
       <div class="sb-head"><a class="back" href="02-project.html"><svg><use href="#back"/></svg>Projects</a><span class="proj">MAWS</span><span class="proj-mach">2 of 3 machines</span></div>
@@ -317,25 +318,20 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
         <button class="session"><span class="session-glyph g-ended">✓</span><span><span class="session-title"><span class="alias">maws-docs</span><span class="at">@studio</span></span><span class="session-sub">charter and research index</span></span></button>
       </nav>
     </aside>
-    <section class="center" aria-label="maws-45">
+    <section class="center inline" aria-label="maws-45">
       <header class="chead"><span class="name">maws-45</span><span class="at">@mini</span><span class="charge">· desk session view and jobs</span><span class="status-word"><span class="dot"></span>Working · turn 14</span><button class="hbtn">Retire…</button></header>
       <div class="owner-bar"><span class="notes">Report: what maws-45 sent you, each turn's work folded</span><span class="toggle" role="group" aria-label="Session view"><button aria-pressed="true">Report</button><button aria-pressed="false">Transcript</button></span></div>
       <div class="scroll"><div class="column">
         <div class="user"><div class="bubble">Wire the jobs tab against the fake machine's recording. Keep the output tail plain text.</div></div>
         <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="counts"> · 23 tool calls · 4 messages</span></button></div>
         <div class="ocard"><div class="ocard-label">Message</div><p>The jobs tab reads the widened <code>subagents</code> body now: two shells, one monitor, three MCP names. Output asks <code>output(taskId, 4096)</code> and draws each variant; <code>unknown-task</code> waits one <code>subagents</code> message before it says so.</p></div>
-        <div class="qrow"><ul><li><span class="ql">Tail size</span><span aria-hidden="true">→</span><span class="qa">waiting</span></li></ul><div class="qfoot wait">Waiting for your answer · in the band below</div></div>
+        <div class="qrow"><ul><li><span class="ql">Tail size</span><span aria-hidden="true">→</span><span class="qa">waiting</span></li></ul><div class="qfoot wait">Waiting for your answer · below</div></div>
         <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="dots" role="img" aria-label="Working"><span></span><span></span><span></span></span><span class="counts"> · 6 tool calls</span></button></div>
-        <div class="user tail" data-state="delivered" data-way><div class="bubble">Also list the MCP servers under the jobs, names only.</div><div class="user-meta"><span class="dl"><span class="g">✓</span>Delivered · waiting in maws-45's queue</span></div></div>
-        <div class="user tail" data-state="queued" data-way><div class="bubble">When that lands, run the desk-web e2e lane once.</div><div class="user-meta"><span class="dl"><span class="g">◷</span>Queued · delivers when maws-45 is idle</span></div></div>
+        <div class="user tail-b" data-state="delivered" data-way><div class="bubble"><div class="txt">Also list the MCP servers under the jobs, names only.</div><div class="foot">✓ Delivered · waiting in maws-45's queue</div></div></div>
+        <div class="user tail-b" data-state="queued" data-way><div class="bubble"><div class="txt">When that lands, run the desk-web e2e lane once.</div><div class="foot">◷ Queued · delivers when maws-45 is idle</div></div></div>
+        <article class="rc"><div class="rc-head"><span class="m">Wants to run a command, through its subagent</span><b>a7c1e2</b><span class="tool">Bash</span></div><pre class="mono">pnpm --filter desk-web exec playwright test e2e/jobs.spec.ts</pre><div class="controls"><button class="cb ghost">Deny… with a reason</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></article>
+        <article class="rc"><div class="rc-head"><span class="m">Asks</span><span class="f">· it keeps working while it waits</span></div><span class="hchip">Tail size</span><p class="q">How much of a shell's output should one Output press ask for?</p><div class="opts"><div class="opt on"><span class="n">1</span><span class="ot"><span>4 KB</span><span class="od">One screen of a log; asks again for more.</span></span></div><div class="opt"><span class="n">2</span><span class="ot"><span>64 KB</span><span class="od">A build's whole tail in one answer.</span></span></div></div><div class="controls"><button class="cb">Skip</button><button class="cb primary">Submit</button></div></article>
       </div></div>
-      <section class="band" aria-label="2 requests waiting on you">
-        <div class="band-head">2 waiting on you</div>
-        <div class="band-cards">
-          <article class="rc"><div class="rc-head"><span class="m">Wants to run a command, through its subagent</span><b>a7c1e2</b><span class="tool">Bash</span></div><pre class="mono">pnpm --filter desk-web exec playwright test e2e/jobs.spec.ts</pre><div class="controls"><button class="cb ghost">Deny… with a reason</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></article>
-          <article class="rc"><div class="rc-head"><span class="m">Asks</span><span class="f">· it keeps working while it waits</span></div><span class="hchip">Tail size</span><p class="q">How much of a shell's output should one Output press ask for?</p><div class="opts"><div class="opt on"><span class="n">1</span><span class="ot"><span>4 KB</span><span class="od">One screen of a log; asks again for more.</span></span></div><div class="opt"><span class="n">2</span><span class="ot"><span>64 KB</span><span class="od">A build's whole tail in one answer.</span></span></div></div><div class="controls"><button class="cb">Skip</button><button class="cb primary">Submit</button></div></article>
-        </div>
-      </section>
       <div class="composer"><textarea class="box" placeholder="Steer maws-45 (Enter), or Send to queue it" aria-label="Message maws-45"></textarea><div class="verbs"><button class="vb">Send</button><button class="vb primary">Steer</button><button class="vb">Interrupt</button><span class="vsep"></span><button class="vb">Model</button><button class="vb">Compact</button></div></div>
     </section>
     <aside class="depth" aria-label="maws-45 in depth">
@@ -343,7 +339,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
       <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="false">Subagents · 1 running</button><button class="tab" role="tab" aria-selected="true">Jobs · 2 running</button><button class="tab" role="tab" aria-selected="false">Diff</button><button class="tab" role="tab" aria-selected="false">Info</button></div>
       <div class="pane" role="tabpanel" aria-label="Jobs">
         <section class="grp"><h3>Shells · 1 running</h3>
-          <div class="trow sel"><div class="tline"><span class="tdot on"></span><span class="ttext">vite dev server · running 18m 04s</span><button class="act" aria-expanded="true">Output</button><button class="act">Stop</button></div>
+          <div class="trow sel"><div class="tline"><span class="tdot on"></span><span class="ttext">vite dev server · running 18m 04s</span><button class="act" aria-expanded="true">Output</button><button class="act" disabled title="Stopping a job from the web is not available yet: stop it from the session's terminal">Stop</button></div>
             <div class="out"><div class="out-head"><span class="path">/private/tmp/claude-501/…/3f2a9c1e/tasks/bq81x2kd.output</span><button>Refresh</button><button>Close</button></div><p class="before">1.1 MB before this, not shown</p><pre>[vite] hmr update /src/depth/view/JobsPane.tsx
 [vite] hmr update /src/depth/view/JobsPane.tsx
   ➜  Local:   http://localhost:5174/
@@ -354,7 +350,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
           <div class="trow"><div class="tline"><span class="tdot"></span><span class="ttext">desk-web unit tests · completed 4m ago</span><button class="act">Output</button></div></div>
         </section>
         <section class="grp"><h3>Monitors · 1</h3>
-          <div class="trow"><div class="tline"><span class="tdot on"></span><span class="ttext">watch CI on desk-dc9 · running 2m 10s</span><button class="act">Stop</button></div></div>
+          <div class="trow"><div class="tline"><span class="tdot on"></span><span class="ttext">watch CI on desk-dc9 · running 2m 10s</span><button class="act" disabled title="Stopping a job from the web is not available yet: stop it from the session's terminal">Stop</button></div></div>
         </section>
         <section class="grp"><h3>MCP servers · 3</h3>
           <ul class="mcp"><li>doperpowers</li><li>playwright</li><li>openaiDeveloperDocs</li></ul>
@@ -372,7 +368,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 <p class="rationale">A send the transcript has not shown yet is a tail row in MAWS's held-prompt shape (<code>heldRow</code>). It stays, whatever its delivery says, until its own framed user row arrives, then gives way to it. <strong>The choice is where the delivery line sits.</strong> Both columns hold the same six sends, oldest first: a Send queued for idle, one delivered whose row has not arrived, one recorded for a session not running, one refused by a read-only machine, one that failed with the bridge's reason, and a Steer whose RPC never answered.</p>
 <div class="pair">
 <section class="vignette"><figure>
-  <figcaption><span class="number">1A</span><h2>Under the bubble: MAWS's held caption</h2><span class="pick">Recommended</span><span class="dimension">Center · 684 px</span></figcaption>
+  <figcaption><span class="number">1A</span><h2>Under the bubble: MAWS's held caption</h2><span class="dimension">Center · 684 px</span></figcaption>
   <p class="rationale">The line sits where MAWS writes “Sends when this turn ends” under a held bubble, so the desk's tail reads as MAWS's does. A send still on its way is dimmed as MAWS dims a held one; a send whose journey ended without its row is drawn at full strength, the caption in its tone, so it does not read as “still coming”. Buildable on MAWS's <code>UserRow</code> as it stands: the caption is the row's mount mark.</p>
   <div class="frame"><div class="center" style="height:auto">
     <header class="chead"><span class="name">maws-45</span><span class="at">@mini</span><span class="status-word"><span class="dot"></span>Working</span></header>
@@ -389,7 +385,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
   <p class="annot"><b>Each line is a fact about the send, never about the row.</b> “Delivered” says the text entered maws-45's queue (§9.1); the bubble stays dimmed until its own framed row arrives, then that row replaces it in place.</p>
 </figure></section>
 <section class="vignette"><figure>
-  <figcaption><span class="number">1B</span><h2>In the bubble, as its foot</h2><span class="dimension">Center · 684 px</span></figcaption>
+  <figcaption><span class="number">1B</span><h2>In the bubble, as its foot</h2><span class="pick chosen">Chosen (owner, 2026-10-17)</span><span class="dimension">Center · 684 px</span></figcaption>
   <p class="rationale">The state rides inside the bubble under a hairline, and a send that will not arrive tints the whole bubble: a failure is visible from a scroll away and cannot be read as a sent message. It costs MAWS's shape: the desk draws its own tail bubble instead of <code>UserRow</code>, and the tail no longer looks like MAWS's held messages.</p>
   <div class="frame"><div class="center" style="height:auto">
     <header class="chead"><span class="name">maws-45</span><span class="at">@mini</span><span class="status-word"><span class="dot"></span>Working</span></header>
@@ -422,7 +418,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 <p class="rationale">The hub's pending requests for the session, as DC5's request cards, answerable in place; a card leaves when its request settles. The band is not in the scroll, so a request the turn is blocked on can never sit folded inside a closed working record (§9.1's reason for rejecting <code>request_slot</code> rows). <strong>The choice is what happens when many are waiting</strong>: the band, which keeps the oldest open and folds the rest to one line each, or the cards inline at the transcript's tail.</p>
 <div class="pair">
 <section class="vignette"><figure>
-  <figcaption><span class="number">2A</span><h2>The band above the composer</h2><span class="pick">Recommended</span><span class="dimension">Center · 684 px</span></figcaption>
+  <figcaption><span class="number">2A</span><h2>The band above the composer</h2><span class="dimension">Center · 684 px</span></figcaption>
   <p class="rationale">Two waiting: both open. The answer is under the reader's hands, beside the composer, whatever they have scrolled to. The cost shows at a laptop's 900 px: two open cards take about 560 px of the center. With three or more, below, the oldest stays open and the rest fold to a line each; folding from two is the stricter variant of the same rule.</p>
   <div class="frame"><div class="center" style="height:900px">
     <header class="chead"><span class="name">maws-45</span><span class="at">@mini</span><span class="status-word"><span class="dot"></span>Waiting on you</span></header>
@@ -444,8 +440,8 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
   <p class="annot"><b>The ask mod's question is in two places by construction</b>: its transcript row (S1's classify entry) and the hub's pending request. While pending, the row says where to answer; once answered, the band's card leaves and the row is MAWS's receipt, with the log's <code>answered</code> overlaid.</p>
 </figure></section>
 <section class="vignette"><figure>
-  <figcaption><span class="number">2B</span><h2>Inline, at the transcript's tail</h2><span class="dimension">Center · 684 px</span></figcaption>
-  <p class="rationale">The cards are the transcript's last rows, after any tail sends, and scroll with it, as DC5's channel draws them in its stream today. The composer stays clear, but a reader scrolled up sees only a “2 waiting ↓” pill, and a long card pushes the session's own latest words off screen.</p>
+  <figcaption><span class="number">2B</span><h2>Inline, at the transcript's tail</h2><span class="pick chosen">Chosen (owner, 2026-10-17)</span><span class="dimension">Center · 684 px</span></figcaption>
+  <p class="rationale">The cards are the transcript's last rows, after any tail sends, and scroll with it, as DC5's channel draws them in its stream today. The composer stays clear, but a reader scrolled up gets an “N waiting ↓” pill, and a long card pushes the session's own latest words off screen.</p>
   <div class="frame"><div class="center inline" style="height:900px">
     <header class="chead"><span class="name">maws-45</span><span class="at">@mini</span><span class="status-word"><span class="dot"></span>Waiting on you</span></header>
     <div class="owner-bar"><span class="notes"></span><span class="toggle"><button aria-pressed="true">Report</button><button aria-pressed="false">Transcript</button></span></div>
@@ -488,7 +484,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
       <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="counts"> · 31 tool calls · 2 messages</span></button></div>
       <div class="ocard"><div class="ocard-label">Message</div><p>The end marker reads the session's presence, never the subscription.</p></div>
       <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="counts"> · 9 tool calls</span></button></div>
-      <button class="jump"><svg><use href="#down"/></svg>4 waiting on you</button>
+      <button class="jump">4 waiting<svg><use href="#down"/></svg></button>
     </div></div>
     <div class="composer"><textarea class="box" placeholder="Steer maws-45 (Enter), or Send to queue it"></textarea><div class="verbs"><button class="vb">Send</button><button class="vb primary">Steer</button><button class="vb">Interrupt</button></div></div>
   </div></div>
@@ -498,7 +494,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 
 <!-- ═══════════════════════════════ 3. The end marker ═══════════════════════════════ -->
 <section class="surface" id="s3">
-<div class="section-rule"><b>3</b> The end marker · ended, and retired</div>
+<div class="section-rule"><b>3</b> The end marker · ended, and retired · <span class="pick chosen">Chosen (owner, 2026-10-17)</span> as drawn</div>
 <p class="rationale">One row at the tail of an ended or retired session's view, in MAWS's boundary shape (a rule, its words, a rule), with what the channel's header offers: Resume, or who retired it. The history above stays pageable to the first line; whether the session runs is read from presence, never from the subscription. The header keeps its own Resume, so the marker's is a second door at the place the eye ends.</p>
 <div class="pair">
 <section class="vignette"><figure>
@@ -541,14 +537,14 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
 <p class="rationale">A tab beside Subagents, Diff and Info, drawn with MAWS's <code>ShellRow</code> and <code>MonitorRow</code> under MAWS's Background work headings, over the widened <code>subagents</code> body's <code>jobs</code> and <code>mcp</code>. A shell's Output asks the machine for the file's tail (<code>output(taskId, tail)</code>) and draws it as plain text. <strong>The choice is where the output opens</strong> in a 380 px column: under its row, or as the column's whole pane.</p>
 <div class="trio">
 <section class="vignette"><figure>
-  <figcaption><span class="number">4A</span><h2>Output under its row</h2><span class="pick">Recommended</span></figcaption>
+  <figcaption><span class="number">4A</span><h2>Output under its row</h2><span class="pick chosen">Chosen (owner, 2026-10-17)</span></figcaption>
   <p class="rationale">The list stays in view: a second shell's Output opens beside the first, and the monitor stays visible. The tail is bounded to a few lines' height.</p>
   <div class="frame solo"><aside class="depth">
     <header class="dhead"><span class="name">maws-45</span><span class="at">@mini</span></header>
     <div class="tabs"><button class="tab" aria-selected="false">Subagents · 1 running</button><button class="tab" aria-selected="true">Jobs · 2 running</button><button class="tab" aria-selected="false">Diff</button><button class="tab" aria-selected="false">Info</button></div>
     <div class="pane">
       <section class="grp"><h3>Shells · 1 running</h3>
-        <div class="trow sel"><div class="tline"><span class="tdot on"></span><span class="ttext">vite dev server · running 18m 04s</span><button class="act" aria-expanded="true">Output</button><button class="act">Stop</button></div>
+        <div class="trow sel"><div class="tline"><span class="tdot on"></span><span class="ttext">vite dev server · running 18m 04s</span><button class="act" aria-expanded="true">Output</button><button class="act" disabled title="Stopping a job from the web is not available yet: stop it from the session's terminal">Stop</button></div>
           <div class="out"><div class="out-head"><span class="path">/private/tmp/claude-501/…/3f2a9c1e/tasks/bq81x2kd.output</span><button>Refresh</button><button>Close</button></div><p class="before">1.1 MB before this, not shown</p><pre>[vite] hmr update /src/depth/view/JobsPane.tsx
   ➜  Local:   http://localhost:5174/
 [vite] page reload src/views/project/SessionView.tsx
@@ -559,7 +555,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
         <div class="trow"><div class="tline"><span class="tdot"></span><span class="ttext" style="color:var(--danger)">pnpm typecheck · failed 22m ago</span><button class="act">Output</button></div></div>
       </section>
       <section class="grp"><h3>Monitors · 1</h3>
-        <div class="trow"><div class="tline"><span class="tdot on"></span><span class="ttext">watch CI on desk-dc9 · running 2m 10s</span><button class="act">Stop</button></div><p class="tsub">No output file yet: a monitor names none at its start.</p></div>
+        <div class="trow"><div class="tline"><span class="tdot on"></span><span class="ttext">watch CI on desk-dc9 · running 2m 10s</span><button class="act" disabled title="Stopping a job from the web is not available yet: stop it from the session's terminal">Stop</button></div><p class="tsub">No output file yet: a monitor names none at its start.</p></div>
       </section>
       <section class="grp"><h3>MCP servers · 3</h3>
         <ul class="mcp"><li>doperpowers</li><li>playwright</li><li>openaiDeveloperDocs</li></ul>
@@ -575,7 +571,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
     <header class="dhead"><span class="name">maws-45</span><span class="at">@mini</span></header>
     <div class="tabs"><button class="tab" aria-selected="false">Subagents · 1 running</button><button class="tab" aria-selected="true">Jobs · 2 running</button><button class="tab" aria-selected="false">Diff</button><button class="tab" aria-selected="false">Info</button></div>
     <div class="pane">
-      <div class="drill-head"><button class="backb"><svg><use href="#back"/></svg>Jobs</button><span class="t">vite dev server</span><button class="act" style="margin-left:auto">Refresh</button><button class="act">Stop</button></div>
+      <div class="drill-head"><button class="backb"><svg><use href="#back"/></svg>Jobs</button><span class="t">vite dev server</span><button class="act" style="margin-left:auto">Refresh</button><button class="act" disabled title="Stopping a job from the web is not available yet: stop it from the session's terminal">Stop</button></div>
       <div class="drill-meta">Running 18m 04s · <code>pnpm --filter desk-web dev</code><br>Last 4 KB of 1.1 MB · <code>…/3f2a9c1e/tasks/bq81x2kd.output</code></div>
       <div class="drill-body"><div class="out big"><pre>  VITE v6.2.0  ready in 412 ms
 
@@ -607,7 +603,7 @@ figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11
   </div>
 </figure></section>
 </div>
-<p class="annot"><b>Stop is MAWS's row as it stands</b>: <code>ShellRow</code> and <code>MonitorRow</code> draw it on every running task. Stopping from the web is optional in §9.4 (an RPC through the bridge's <code>TaskStop</code>); until it exists the desk draws it disabled with the reason on hover, or the row is adapted to hide it.</p>
+<p class="annot"><b>Stop is MAWS's row as it stands</b>: <code>ShellRow</code> and <code>MonitorRow</code> draw it on every running task. Stopping from the web is optional in §9.4 (an RPC through the bridge's <code>TaskStop</code>); the owner chose (2026-10-17) to draw it disabled, its reason on hover, until that RPC exists.</p>
 </section>
 
 </main>
