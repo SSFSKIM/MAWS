@@ -7,8 +7,9 @@
 // Every call checks that the artifact is live and holds the ref, cache hits included (a ref implies no authority). A
 // page holds at most `limit` rows (DATASET_READ_MAX_ROWS) and at most DATASET_READ_MAX_BYTES of JSON; the caller
 // continues at `offset + rows.length`, and a single row larger than a page is refused `tooLarge`. The parse cache is
-// keyed by the bytes' sha256 and the format, bounded by entries and by source bytes, least recently read leaving first;
-// it is not authoritative and starts cold after a restart.
+// keyed by the bytes' sha256 and the format, bounded by entries and by the bytes its parsed tables hold (`heldBytes`:
+// what a table expands to, not its source's size), least recently read leaving first; a table larger than the whole
+// cache answers its read and is not kept. It is not authoritative and starts cold after a restart.
 import { DATASET_READ_MAX_BYTES, DATASET_READ_MAX_ROWS, type Cell, type DatasetFormat } from '@artifacts/dashboard/datasets';
 import { DatasetError, parseDataset, type ParsedDataset } from '@artifacts/dashboard/parse';
 import type { DatasetPage } from '@artifacts/host';
@@ -23,13 +24,38 @@ export interface DatasetReadOptions {
 
 // Candidates with the read's bounds, until the mini measures them (the execution document's acceptance 7).
 const CACHE_ENTRIES = 8;
-const CACHE_SOURCE_BYTES = 64 * 1024 * 1024;
+const CACHE_HELD_BYTES = 64 * 1024 * 1024;
+
+// E2 M6 (panel P2 scalpel-4#2, E's Decision Log 40): what a parsed table holds, estimated from its shape, not its
+// source: a sparse JSON file of 600 KB expands to 200,000 x 256 cells. Calibrated on V8 without pointer compression
+// (heap deltas of parsed tables after GC, from 1x for sparse cells to about 1.7x for one-byte text, never below): a row
+// array's headers and an 8-byte slot per cell, a 16-byte box per number that is not a small integer, a string's header
+// and two bytes per character (two-byte text is the larger form), and the source's length besides, the decoded text a
+// field sliced from it may keep alive. Counting stops once past `cap`: such a table is not kept.
+const ROW_BYTES = 80;
+const SLOT_BYTES = 8;
+const BOXED_NUMBER_BYTES = 16;
+const STRING_BYTES = 32;
+const SMALL_INTEGER = 2 ** 30;
+
+function heldBytes(parsed: ParsedDataset, sourceBytes: number, cap: number): number {
+  const width = parsed.columns.length;
+  let held = sourceBytes + parsed.rows.length * (ROW_BYTES + width * SLOT_BYTES);
+  for (const row of parsed.rows) {
+    if (held > cap) return held;
+    for (const cell of row) {
+      if (typeof cell === 'string') held += STRING_BYTES + 2 * cell.length;
+      else if (typeof cell === 'number' && !(Number.isInteger(cell) && Math.abs(cell) < SMALL_INTEGER)) held += BOXED_NUMBER_BYTES;
+    }
+  }
+  return held;
+}
 
 const encoder = new TextEncoder();
 const jsonBytes = (value: unknown) => encoder.encode(JSON.stringify(value)).length;
 
 export class DatasetReader {
-  private readonly cache = new Map<string, { parsed: ParsedDataset; size: number }>(); // in read order, oldest first
+  private readonly cache = new Map<string, { parsed: ParsedDataset; size: number }>(); // in read order, oldest first; size: heldBytes
   private readonly maxEntries: number;
   private readonly maxBytes: number;
 
@@ -38,7 +64,7 @@ export class DatasetReader {
     options: { maxEntries?: number; maxBytes?: number } = {},
   ) {
     this.maxEntries = options.maxEntries ?? CACHE_ENTRIES;
-    this.maxBytes = options.maxBytes ?? CACHE_SOURCE_BYTES;
+    this.maxBytes = options.maxBytes ?? CACHE_HELD_BYTES;
   }
 
   /** One page of the snapshot `ref` of `artifactId` read as `format`. Synchronous over the store's state; a caller
@@ -71,7 +97,7 @@ export class DatasetReader {
     return [...this.cache.keys()];
   }
 
-  private parsed(artifactId: string, sha256: string, size: number, format: DatasetFormat): ParsedDataset {
+  private parsed(artifactId: string, sha256: string, sourceBytes: number, format: DatasetFormat): ParsedDataset {
     const key = `${sha256}:${format}`;
     const hit = this.cache.get(key);
     if (hit) {
@@ -81,11 +107,12 @@ export class DatasetReader {
     }
     const parsed = parseDataset(this.store.files.readAsset(artifactId, sha256), format);
     if (parsed instanceof DatasetError) throw new ArtifactStoreError(parsed.kind, `the snapshot does not read as ${format}: ${parsed.reason}`, parsed.line === undefined ? {} : { line: parsed.line });
+    const size = heldBytes(parsed, sourceBytes, this.maxBytes);
+    if (size > this.maxBytes) return parsed; // larger than the whole cache: answered, never kept
     this.cache.set(key, { parsed, size });
     let held = [...this.cache.values()].reduce((sum, entry) => sum + entry.size, 0);
     for (const [old, entry] of this.cache) {
       if (this.cache.size <= this.maxEntries && held <= this.maxBytes) break;
-      if (old === key) continue;
       this.cache.delete(old);
       held -= entry.size;
     }

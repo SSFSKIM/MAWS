@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DATASET_READ_MAX_BYTES, DATASET_READ_MAX_ROWS } from '@artifacts/dashboard/datasets';
+import { BENCH_ROWS, benchCsv } from '@artifacts/dashboard/fixtures/bench';
 import type { Actor } from '@shared/artifacts/actor';
 import { ArtifactStoreError } from '../documents/errors';
 import { DocumentService } from '../documents/service';
@@ -160,6 +161,52 @@ describe('DatasetReader', () => {
     for (const { ref } of refs) reader.read(id, ref, { format: 'csv' });
     expect(reader.cached()).toHaveLength(2);
     expect(reader.read(id, refs[0]!.ref, { format: 'csv' }).rows).toEqual([[0]]);
+    expect(reader.cached()).toHaveLength(2);
+  });
+
+  // E2 M6 (panel P2 scalpel-4#2, E's Decision Log 40): a sparse JSON file of a few kilobytes expands to rows x columns
+  // cells; the cache charges what it holds, the expanded table, never the source's size.
+  const sparse = (rows: number, keys: number, salt = 0) => JSON.stringify(Array.from({ length: rows }, (_, r) => ({ [`k${(r + salt) % keys}`]: r })));
+
+  it('charges a cached snapshot its expanded cells, so a sparse JSON file is held at no less than its cell slots', async () => {
+    const id = await board();
+    const text = sparse(2_000, 256);
+    expect(text.length).toBeLessThan(40_000);
+    const slots = 2_000 * 256 * 8;
+    const { ref } = await world.store.uploadAsset(id, bytes(text), { name: 'sparse.json', mime: 'application/json' }, human);
+    const tight = new DatasetReader(world.store, { maxBytes: slots - 1 });
+    expect(tight.read(id, ref, { format: 'json', limit: 10 }).total).toBe(2_000);
+    expect(tight.cached()).toEqual([]);
+    const roomy = new DatasetReader(world.store, { maxBytes: slots * 2 });
+    roomy.read(id, ref, { format: 'json', limit: 10 });
+    expect(roomy.cached()).toHaveLength(1);
+  });
+
+  it('never retains a snapshot larger than the whole cache, answering its pages and keeping the snapshots already held', async () => {
+    const id = await board();
+    const small = await upload(id, 'n\n1\n2\n');
+    const { ref } = await world.store.uploadAsset(id, bytes(sparse(2_000, 256)), { name: 'sparse.json', mime: 'application/json' }, human);
+    const reader = new DatasetReader(world.store, { maxBytes: 1024 * 1024 });
+    reader.read(id, small.ref, { format: 'csv' });
+    const first = reader.read(id, ref, { format: 'json', limit: 3 });
+    expect(first).toMatchObject({ rows: [[0, ...Array(255).fill(null)], [null, 1, ...Array(254).fill(null)], [null, null, 2, ...Array(253).fill(null)]], total: 2_000, truncated: true });
+    expect(reader.read(id, ref, { format: 'json', offset: 1_999, limit: 3 }).rows).toEqual([[...Array(207).fill(null), 1_999, ...Array(48).fill(null)]]);
+    expect(reader.cached()).toEqual([`${world.store.listAssets(id).find((asset) => asset.ref === small.ref)!.sha256}:csv`]);
+  });
+
+  it('holds sparse snapshots under the default cap by their expanded size: two of 16,000 x 256 cells never stay together', async () => {
+    const id = await board();
+    const refs = await Promise.all([0, 1].map((salt) => world.store.uploadAsset(id, bytes(sparse(16_000, 256, salt)), { name: `s${salt}.json`, mime: 'application/json' }, human)));
+    const reader = new DatasetReader(world.store);
+    for (const { ref } of refs) expect(reader.read(id, ref, { format: 'json', limit: 1 }).total).toBe(16_000);
+    expect(reader.cached()).toHaveLength(1);
+  });
+
+  it('keeps the scale bench\'s ledger and its replacement together under the default cap, each parsed once for every page', async () => {
+    const id = await board();
+    const refs = await Promise.all([0, 1].map((variant) => upload(id, benchCsv(BENCH_ROWS, variant), `ledger${variant}.csv`)));
+    const reader = new DatasetReader(world.store);
+    for (const { ref } of refs) expect(reader.read(id, ref, { format: 'csv', limit: 1 }).total).toBe(BENCH_ROWS);
     expect(reader.cached()).toHaveLength(2);
   });
 });
