@@ -924,6 +924,34 @@ describe('the grid', () => {
     });
     grid.close();
   });
+
+  it('stops counting a machine once it is revoked, and counts it again once the name is enrolled anew and opens the project', async () => {
+    const project = newProject();
+    const kept = await machine(project, CLOSES);
+    const revoked = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    /** The project's counts as a frame carries them: the grid on connect, a summary after. */
+    const counts = (machines: number, online: number) => (f: GridDown) =>
+      (f.t === 'grid' ? f.projects : f.t === 'summary' ? [f.project] : []).some((p) => p.id === project && p.machines === machines && p.machines_online === online);
+    /** The counts reached in a frame after `from`. */
+    const reached = async (from: number, machines: number, online: number, what: string) =>
+      waitFor(() => (grid.frames.slice(from).some(counts(machines, online)) ? true : undefined)).catch(() => {
+        throw new Error(`no ${what}; got ${JSON.stringify(grid.frames.slice(from))}`);
+      });
+    await reached(0, 2, 2, 'both machines');
+    let from = grid.frames.length;
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${revoked.name}`, { method: 'DELETE' })).status).toBe(200);
+    await reached(from, 1, 1, 'the revoked machine no longer counted');
+
+    from = grid.frames.length;
+    const again = new MachineClient(hub, revoked.name, await enroll(hub, ADMIN, revoked.name));
+    await again.connect();
+    await again.sync(project);
+    await reached(from, 2, 2, 'the name enrolled anew counted again');
+    grid.close();
+    await again.close();
+    await kept.close();
+  });
 });
 
 describe('the grid, past the frame bound', () => {

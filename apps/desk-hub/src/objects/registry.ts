@@ -239,7 +239,8 @@ export class Registry extends DurableObject<Env> {
   }
 
   /** Revokes a machine: its record goes at once (the hub refuses it from then), its stream ends, its service token is
-   * deleted (retried until Cloudflare confirms), its name is released, and an archive designation of it is cleared. */
+   * deleted (retried until Cloudflare confirms), its name is released, an archive designation of it is cleared, and every
+   * project of the org stops counting it on the grid. */
   async revoke(member: MemberRecord, name: string): Promise<Result<{ revoked: string }>> {
     if (member.role !== 'admin') return fail(403, 'not-admin');
     const org = this.ensureOrg();
@@ -251,7 +252,9 @@ export class Registry extends DurableObject<Env> {
       this.sql.exec('UPDATE projects SET archive_machine = NULL WHERE archive_machine = ?', machine.name);
       this.orphan(machine.token_name);
     });
-    await this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`)).revoke(machine.client_id);
+    const generation = await this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`)).revoke(machine.client_id);
+    // Whichever projects it opened: a project knows its machines, the registry does not.
+    await Promise.allSettled(this.projects().map((p) => this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org.id}:${p.id}`)).forget(org.id, p.id, machine.name, generation)));
     await this.sweepOrphans();
     await this.scheduleAlarm();
     return ok({ revoked: machine.name });

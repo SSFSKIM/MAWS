@@ -192,7 +192,7 @@ export class Project extends DurableObject<Env> {
     this.remember(ctx.org, ctx.project);
     let applied = 0;
     for (const frame of frames) {
-      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation) return { applied, stale: true, failed: false };
+      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || this.isRevoked(ctx.machine, ctx.generation)) return { applied, stale: true, failed: false };
       try {
         if ((await this.fromMachineFrame(ctx, frame)) === 'stale') return { applied, stale: true, failed: false };
         // Settled at once for a frame that owes no reply, which most of a stream's frames are.
@@ -227,7 +227,7 @@ export class Project extends DurableObject<Env> {
     this.remember(ctx.org, ctx.project);
     this.sweepLeases();
     const lease = this.plane.lease(ctx.machine);
-    if (!lease || lease.generation !== ctx.generation || lease.closed) return;
+    if (!lease || lease.generation !== ctx.generation || lease.closed || this.isRevoked(ctx.machine, ctx.generation)) return;
     const wasOnline = this.isFresh(lease);
     this.plane.putLease({ ...lease, expires: Date.now() + ctx.leaseMs, online: true });
     if (!wasOnline) this.cameOnline(ctx.machine);
@@ -248,6 +248,18 @@ export class Project extends DurableObject<Env> {
     }
     if (lease.online) this.lapse({ ...lease, closed: true });
     else this.plane.putLease({ ...lease, closed: true });
+  }
+
+  /**
+   * The machine was revoked from the org (DX7), its streams through `generation` with it: from now on the grid does not
+   * count it, and a frame those streams still carry (a POST the Worker admitted before the revocation) is refused as
+   * stale. Its sessions keep their history and read as on a machine that is offline. A machine enrolled again under the
+   * name opens a newer stream, and counts again once it opens the project.
+   */
+  forget(org: string, project: string, machine: string, generation: number): void {
+    this.remember(org, project);
+    this.plane.revoke(machine, generation);
+    this.reportSummary();
   }
 
   /** Leases that lapsed with no close, and background requests whose window closed. */
@@ -693,6 +705,12 @@ export class Project extends DurableObject<Env> {
     this.reportSummary();
   }
 
+  /** Whether `generation` of the machine's streams was revoked. */
+  private isRevoked(machine: string, generation: number): boolean {
+    const through = this.plane.revokedThrough(machine);
+    return through !== null && generation <= through;
+  }
+
   private isOnline(machine: string): boolean {
     const lease = this.plane.lease(machine);
     return lease !== undefined && this.isFresh(lease);
@@ -740,8 +758,10 @@ export class Project extends DurableObject<Env> {
 
   /** The project's line on the org's grid, sent to the registry when it changes. */
   private reportSummary(): void {
-    const leased = this.plane.leases();
-    const machines = new Set([...leased.map((l) => l.machine), ...this.plane.machinePresence().map((p) => p.machine)]);
+    // A revoked machine is no machine of the project, unless its name was enrolled anew and opened the project since.
+    const leased = this.plane.leases().filter((l) => !this.isRevoked(l.machine, l.generation));
+    const revoked = (machine: string) => this.isRevoked(machine, this.plane.lease(machine)?.generation ?? 0);
+    const machines = new Set([...leased.map((l) => l.machine), ...this.plane.machinePresence().map((p) => p.machine).filter((m) => !revoked(m))]);
     const online = new Set(leased.filter((l) => this.isFresh(l)).map((l) => l.machine));
     let working = 0;
     for (const { machine, message } of this.plane.presence()) {
