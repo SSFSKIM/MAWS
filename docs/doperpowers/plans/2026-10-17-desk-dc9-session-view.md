@@ -27,7 +27,7 @@
 - [x] T0 — Mockups of the four taste surfaces (2026-10-17: `desk-dc9-mockups` 73ecf8f0, the owner's choices marked c73916fa)
 - [x] M1 — The hub's `output`, the widened bodies, and DX8's `output()` (2026-10-17, reviewed clean: d2c8fec5..af560476, fix 7098835a..89b2e560)
 - [x] M2 — The fake machine's part: the session-view recording, jobs and status, `output`, pages after the replay (2026-10-17, reviewed clean: 36131d48..6bb8bb4f, fixes 45c4d172..62c4fbd3 and 62c4fbd3..c4a17632)
-- [ ] M3 — The per-session owner and the session view
+- [x] M3 — The per-session owner and the session view (2026-10-17, reviewed clean: 36131d48..57320abd on `desk-dc9-m3`, fixes ..6b2ddded, ..2388b1f3, ..55c6e118; merged at 582aecfd)
 - [ ] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements
 - [ ] M5 — The column: agents with real status, the jobs view, `output`, MCP names
 - [ ] M6 — The acceptance, the phone's bundle, and the gate
@@ -806,6 +806,27 @@ in their own worktrees.
   folded behind MAWS's "Worked for …" divider, one click opens them; the
   build does not change. Parent re-pinned to `4021c5bbb`, which records it.
   Date/Author: 2026-10-17, the owner via the composite's writer.
+
+- Decision (M3 fix waves): the jump-to-latest control gets a 56 px gutter
+  on the transcript's scroller itself (the container `100cqi` is measured
+  against), so rows, wide tables and code blocks all end clear of it; the
+  subagent tree's headings carry MAWS's Chevron (Done still starts
+  closed); an idle or ended session's jump control drops MAWS's working
+  dots for its arrow through a desk CSS rule on `data-at-rest`, a
+  decoration only — a synthetic `process.exited` was tried and reverted,
+  since an early idle presence ended a turn still running and the marker's
+  placement differed across resets, so the transcript stays what its rows
+  say and an idle session's last open turn still reads as working inside
+  it (desk-only tech-debt row; MAWS's app ends such a turn through its
+  disk follower); the session view's chunk loader clears a failed attempt
+  and offers Retry and Reload (Chrome caches a failed module import);
+  keep-place arms the reader's place from the DOM when the page is
+  answered and holds it frame by frame after every page (5 steady frames,
+  at most 120), yielding to a gesture in progress (touch or press, from its
+  start on the scroller to its end on the window), so the place holds
+  through a page that answers late (the probe: 109–830 px of drift before,
+  none after).
+  Date/Author: 2026-10-17, M3 executor, folded by the controller.
 
 ## Surprises & Discoveries
 - 2026-10-17 (a probe on a real session, local only): paging crosses a
