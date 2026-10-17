@@ -116,9 +116,11 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
     // (run 39001816938 at 30d7035fd) the Word comment case fails, 9/10, its log showing the block selection, the
     // editor's focus, a DOM caret in the first paragraph and a text selection replacing the block's; with it (run
     // 39002799612 at e6168906c) 10/10 pass, the editor's own DOM range and its NodeSelection held through Comment.
-    // The refused default would also have moved the keyboard, so a press while the editor does not hold it (it went to
-    // a control since gone, a drawer's Close) has the editor take it at once through its own focus, which puts the
-    // editor's selection in the DOM with it (E2 landing): the block's cut and keys then reach the editor.
+    // A press while the editor does not hold the keyboard (it went to a control since gone, a drawer's Close) has the
+    // editor take it at once through its own focus, which puts the editor's selection in the DOM with it, so the
+    // block's cut and keys reach the editor whether or not the editor's click handling then focuses it (E2 landing).
+    // After the press in the failing landing run 39035344107 the chart was selected and the keyboard outside the
+    // editor; why the editor did not take it there is not established.
     const pressed = (event: MouseEvent) => {
       if (event.button !== 0 || !view.contains(event.target as Node) || source.contains(event.target as Node)) return;
       event.preventDefault();
