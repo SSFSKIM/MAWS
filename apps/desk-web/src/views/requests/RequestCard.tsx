@@ -82,11 +82,14 @@ export function RequestCard({ request, embedded = false }: { request: string; em
     >
       <header className="flex flex-wrap items-baseline gap-x-1.5 text-ui-sm">
         {!embedded && (
-          <>
-            <span className="font-semibold text-fg">{who}</span>
-            {session?.title && <span className="text-fg-muted">{session.alias}</span>}
-            <span className="text-fg-muted">@{record.machine}</span>
-          </>
+          // One line at most: a long title truncates, whole on hover, before its alias and machine wrap away from it.
+          <span className="flex min-w-0 items-baseline gap-x-1.5" data-testid="card-who">
+            <span className="min-w-0 truncate font-semibold text-fg" title={session?.title ? who : undefined}>
+              {who}
+            </span>
+            {session?.title && <span className="shrink-0 text-fg-muted">{session.alias}</span>}
+            <span className="shrink-0 text-fg-muted">@{record.machine}</span>
+          </span>
         )}
         <span className="text-fg-muted">{embedded ? what.charAt(0).toUpperCase() + what.slice(1) : what}</span>
         {isAsyncQuestion(record.raised) && <span className="text-fg-faint">· it keeps working while it waits</span>}

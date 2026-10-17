@@ -71,7 +71,7 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
     <section className="flex h-full min-h-0 flex-col" data-slot="depth" data-testid="depth" data-session={session.session} aria-label={`${sessionName(session)} in depth`}>
       <header className="flex items-baseline gap-2 border-b border-border px-4 py-2">
         <SessionLabel session={session} name="text-ui font-medium text-fg" muted="text-ui-sm text-fg-muted" />
-        <span className="ml-auto text-ui-sm text-fg-muted" data-testid="depth-status">
+        <span className="ml-auto shrink-0 text-ui-sm text-fg-muted" data-testid="depth-status">
           {transcriptStatus(state)}
         </span>
       </header>

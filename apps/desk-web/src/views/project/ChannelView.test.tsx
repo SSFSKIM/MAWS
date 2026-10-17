@@ -147,3 +147,26 @@ it("heads a direct channel as a sidebar row names it — the title, its machine 
   expect(header().querySelector('[data-testid="liveness"]')).toBeNull(); // the header as it was: no word
   expect(screen.getByRole('textbox', { name: 'Message maws-fe' })).toBeTruthy();
 });
+
+it('gives the actions their width first: the name and the charge truncate in one group beside them, a confirmation included', () => {
+  const long = 'Codex native Computer Use internals, its approval prompts, and the native helper';
+  const titled = { ...session(A, 'maws-4d', long), charge: 'owner artifacts page' };
+  render(
+    <DeskContext.Provider value={{ connection, member: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', sessions: new Map([[A, titled]]) }}>
+      <ChannelView name="MAWS" channel={{ kind: 'session', session: A }} session={titled} events={[]} />
+    </DeskContext.Provider>,
+  );
+  const header = screen.getByTestId('channel-header');
+  const group = screen.getByTestId('channel-name');
+  const [first, actions] = [...header.children];
+  expect(header.children).toHaveLength(2);
+  expect(first).toBe(group);
+  // The group takes what the actions leave and no more: it grows from nothing, shrinks, and clips.
+  expect(group.className.split(' ')).toEqual(expect.arrayContaining(['flex-1', 'min-w-0', 'overflow-hidden']));
+  expect(group.querySelector('[data-testid="session-name"]')?.textContent).toBe(long);
+  expect(group.textContent).toContain('· owner artifacts page');
+  expect(actions.contains(screen.getByRole('button', { name: 'Retire…' }))).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Retire…' }));
+  expect(actions.textContent).toContain(`Retire ${long}?`);
+  expect(group.textContent).not.toContain('Retire');
+});

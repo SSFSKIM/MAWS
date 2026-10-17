@@ -52,6 +52,11 @@ it("names a session's message by its title, the alias it went out under muted be
   expect(who.map((e) => e.textContent)).toEqual(['cua_repl', 'maws-45']);
   expect(screen.getAllByTestId('said-alias').map((e) => e.textContent)).toEqual(['maws-4d']);
   expect(who[0].parentElement!.textContent).toContain('@macbook');
+  // One line: the title truncates, whole on hover; the alias, the machine and the time never give up their width.
+  expect(who[0].className).toContain('truncate');
+  expect(who[0].title).toBe('cua_repl');
+  expect(who[1].title).toBe('');
+  for (const meta of [...who[0].parentElement!.children].slice(1)) expect(meta.className).toContain('shrink-0');
   connection.stop();
 });
 

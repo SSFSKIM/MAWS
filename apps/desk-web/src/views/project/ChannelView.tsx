@@ -56,12 +56,16 @@ export function ChannelView(props: {
           </span>
         ) : (
           <>
-            {session ? (
-              <SessionLabel session={session} name="text-ui font-semibold" muted="text-ui-sm text-fg-muted" />
-            ) : (
-              <span className="text-ui font-semibold">{channel.session.slice(0, 8)}</span>
-            )}
-            {session?.charge && <span className="min-w-0 truncate text-ui-sm text-fg-muted">· {session.charge}</span>}
+            {/* The actions take their width first; the name and the charge truncate in what is left (a phone wraps the
+                charge under the name), clipped when a confirmation leaves them nothing. */}
+            <span className={['flex min-w-0 flex-1 items-center gap-2 overflow-hidden', phone ? 'flex-wrap' : ''].join(' ')} data-testid="channel-name">
+              {session ? (
+                <SessionLabel session={session} name="text-ui font-semibold" muted="text-ui-sm text-fg-muted" />
+              ) : (
+                <span className="text-ui font-semibold">{channel.session.slice(0, 8)}</span>
+              )}
+              {session?.charge && <span className="min-w-0 truncate text-ui-sm text-fg-muted">· {session.charge}</span>}
+            </span>
             {session && <SessionActions key={session.session} session={session} phone={phone} />}
           </>
         )}

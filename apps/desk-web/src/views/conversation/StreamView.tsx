@@ -166,14 +166,18 @@ function author(from: string, session: { title: string | null } | undefined): { 
   return session?.title ? { who: session.title, alias: from } : { who: from };
 }
 
+/** An item under its author's line: one line, where a long name (a title) truncates, whole on hover, and the alias,
+ * machine and time keep their width. */
 function Said({ who, alias, machine, ts, children }: { who: string; alias?: string; machine?: string; ts: string | null; children: React.ReactNode }) {
   return (
     <div className="py-1.5">
       <div className="flex items-baseline gap-2">
-        <span className="text-ui font-semibold" data-testid="said-who">{who}</span>
-        {alias && <span className="text-ui-sm text-fg-muted" data-testid="said-alias">{alias}</span>}
-        {machine && <span className="text-ui-sm text-fg-muted">@{machine}</span>}
-        {ts && <span className="text-ui-sm text-fg-faint">{time(ts)}</span>}
+        <span className="min-w-0 truncate text-ui font-semibold" data-testid="said-who" title={alias ? who : undefined}>
+          {who}
+        </span>
+        {alias && <span className="shrink-0 text-ui-sm text-fg-muted" data-testid="said-alias">{alias}</span>}
+        {machine && <span className="shrink-0 text-ui-sm text-fg-muted">@{machine}</span>}
+        {ts && <span className="shrink-0 text-ui-sm text-fg-faint">{time(ts)}</span>}
       </div>
       {children}
     </div>
