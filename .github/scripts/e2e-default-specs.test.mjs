@@ -47,6 +47,7 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
       'e2e/code-tools-live.spec.ts',
       'e2e/composer-live.spec.ts',
       'e2e/connectors-soak.spec.ts',
+      'e2e/dashboard-live-data.spec.ts',
       'e2e/dashboard-live.spec.ts',
       'e2e/dashboard-scale.spec.ts',
       'e2e/design-live.spec.ts',
@@ -77,7 +78,7 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
       'e2e/to-human-live.spec.ts',
       'e2e/voice.spec.ts',
     ]);
-    assert.match(readFileSync(join(dir, 'summary'), 'utf8'), /its own 39 of the bare set's 72 specs/);
+    assert.match(readFileSync(join(dir, 'summary'), 'utf8'), /its own 40 of the bare set's 73 specs/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
