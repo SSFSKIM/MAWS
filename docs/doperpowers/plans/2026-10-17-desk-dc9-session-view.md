@@ -625,6 +625,22 @@ in their own worktrees.
   older than DC8 does.
   Date/Author: 2026-10-17, M1 executor, folded by the controller.
 
+- Decision: DC8's fixture moves to doperpowers `8b34237b` (reviewed with
+  DC8's M1; `origin/desk-dc8` head `67ef2193`; `jobs_parity` 68/68), which
+  replaces `38a45f6b` — vendor this one only. What matters for the fake:
+  the `about` states the launch rule alone (an `async_launched` result is
+  running evidence, raw `async_launched`, precedence 3); a new case,
+  monitors that expire — for a task the ledger holds as a monitor, a
+  statusless notification whose `<event>` begins `[Monitor expired after `
+  or is `[Monitor timed out` is `completed`, raw `expired`, `endedAt` at
+  the notice, `summary` the event text, while a plain event notice, the
+  same line on a shell, and a literal status word `expired` elsewhere
+  change nothing; the machine's descriptor check after open is the
+  machine's own, and the fake needs only the static exact-containment rule
+  the fixture pins. The executors' copy at
+  `.doperpowers/sde/2026-10-17-desk-dc9-session-view/dc8/` is refreshed.
+  Date/Author: 2026-10-17, the composite's writer, folded by the controller.
+
 ## Surprises & Discoveries
 - 2026-10-17: reviewers and workers dispatched from this controller
   inherit a worktree guard that refuses git commands aimed outside the
