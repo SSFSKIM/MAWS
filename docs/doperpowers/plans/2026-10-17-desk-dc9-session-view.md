@@ -23,7 +23,7 @@
 ## Progress
 
 - [x] S1 — Shared edit: the ask tool classified as a question (2026-10-17, reviewed clean: a2fc6a2c..dd7c37ab; gate 39045490193; PR SSFSKIM/MAWS#26; merged into desk-dc9)
-- [ ] S2 — Shared edit: shell and monitor starts and `task_status` in MAWS's backfill (own PR)
+- [~] S2 — Shared edit: shell and monitor starts and `task_status` in MAWS's backfill — **parked** (2026-10-17; branch `desk-backfill-jobs` pushed, no PR; Decision Log)
 - [x] T0 — Mockups of the four taste surfaces (2026-10-17: `desk-dc9-mockups` 73ecf8f0, the owner's choices marked c73916fa)
 - [x] M1 — The hub's `output`, the widened bodies, and DX8's `output()` (2026-10-17, reviewed clean: d2c8fec5..af560476, fix 7098835a..89b2e560)
 - [ ] M2 — The fake machine's part: the session-view recording, jobs and status, `output`, pages after the replay
@@ -660,6 +660,26 @@ in their own worktrees.
   M2's; M3's browser tests run on the committed `two-subagents` recording
   and leave that file alone, and M4 onward moves to `session-view`.
   Date/Author: 2026-10-17, controller.
+
+- Decision: **S2 is parked**, not landed. Its review found that the
+  backfilled job events never reach the MAWS app's production
+  background-task store: a disk-only session reads sidecars and workflow
+  runs only, rejects seq-null events, and BackgroundTool hides a job with
+  no engine status. So the backfill alone does not deliver §9.5's one
+  purpose ("so MAWS's own disk-only sessions gain them"), the desk does not
+  consume it, and landing it would put a half-feature on master against
+  C8b's product line ("known only while the session runs here"). The
+  branch `desk-backfill-jobs` is pushed with its fixes (monitor expiry,
+  re-delivery) and no PR; the whole feature is one MAWS-app follow-up in
+  the report's residue (the backfill, a disk-only `session.events` read
+  reversing C8b's documented line, an exited rule for disk-only sessions,
+  BackgroundTool's live gate and product line dropped, Stop hidden for
+  reconstructed jobs). DC9.G6 is S1's one PR (#26), which depends on
+  nothing in S2. The live path's `local_bash` mismatch is kept as a
+  tech-debt row on this branch, so it reaches master with DC9. M5 imports
+  `TaskRows.tsx` with Stop drawn disabled with its reason, as decided.
+  Date/Author: 2026-10-17, the composite's writer (composite amendment to
+  §9.5, DC9.G6 in flight), folded by the controller.
 
 ## Surprises & Discoveries
 - 2026-10-17: reviewers and workers dispatched from this controller
