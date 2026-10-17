@@ -521,6 +521,21 @@ in their own worktrees.
   fixture.
   Date/Author: 2026-10-17, controller (the composite's writer's notice).
 
+- Decision (T0, mockups at `desk-dc9-mockups` 73ecf8f03, sent to the
+  owner through the composite's writer): the recommended variants are 1A
+  (the delivery line under the bubble, MAWS's held caption; in-flight
+  sends dimmed, ended ones full strength with a coloured caption; words
+  extending DC5's `DELIVERY_TEXT`), 2A (the band above the composer; with
+  many requests the oldest stays open, the rest fold to one line each), the
+  end marker in MAWS's boundary-row shape with a second Resume, and 4A (a
+  shell's output under its row; tab "Jobs · N running", Shells, Monitors,
+  "MCP servers · N"). An ask-mod async question pending in the band draws
+  its transcript row pointing to the band, and the log's answer once
+  answered. A job's Stop draws disabled with its reason ("Stopping a job
+  runs from its terminal"): web Stop is optional in §9.4 and has no DX6
+  RPC, so it is residue. M4–M6 polish to the owner's verdict when it comes.
+  Date/Author: 2026-10-17, controller.
+
 ## Surprises & Discoveries
 
 ## Outcomes & Retrospective
