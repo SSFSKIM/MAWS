@@ -20,6 +20,7 @@ import { PROJECT, S, stageProject } from './scene';
 const MACHINE = 'fake';
 const ALIAS = 'fakerec';
 const ASK = 'mcp__doperpowers__AskUserQuestion';
+const TITLE = 'Mockup server and its suites';
 const SHOTS = process.env.DESK_SHOTS;
 const shot = async (target: Page | Locator, name: string) => {
   if (SHOTS) await target.screenshot({ path: `${SHOTS}/${name}.png` });
@@ -103,6 +104,8 @@ function logStager(hub: HubDouble, replay: FakeMachineReplay) {
 
 test("an ended session: the send it never got stays tinted at the tail, ahead of its end marker and Resume; the ask mod's question carries the log's answer", async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
+  // A titled session: named title first, alias muted, through SessionLabel, and nowhere in a foot's words.
+  await hub.append(PROJECT, { writer: `${MACHINE}/${fm.session}`, kind: 'titled', session: fm.session, title: TITLE });
   const stage = logStager(hub, fm);
   fm.playThrough();
   await stage(fm.recording.steps.length);
@@ -114,15 +117,19 @@ test("an ended session: the send it never got stays tinted at the tail, ahead of
   await expect(send).toContainText('Re-run the suites when you are back, please.');
   await expect(send.getByTestId('delivery-foot')).toHaveText('◇Recorded, not delivered · Resume delivers it');
   await expect(send.getByTestId('delivery-foot')).toHaveAttribute('title', /not running here/);
+  await expect(send).not.toContainText(TITLE);
+  await expect(send).not.toContainText(ALIAS);
   const marker = view.getByTestId('end-marker');
   await expect(marker).toContainText('Ended');
   await expect(marker).toContainText(`Its process on ${MACHINE} is gone. Everything above stays here.`);
-  await expect(marker.getByRole('button', { name: `Resume ${ALIAS}` })).toBeEnabled();
+  await expect(marker.getByTestId('session-name')).toHaveText(TITLE);
+  await expect(marker.getByTestId('alias')).toHaveText(ALIAS);
+  await expect(marker.getByRole('button', { name: 'Resume' })).toBeEnabled();
   expect(await rowIndex(view, '[data-testid="tail-send"]')).toBeLessThan(await rowIndex(view, '[data-testid="end-marker"]'));
   await shot(view, 'tail-recorded-and-end-marker');
 
   // The marker's Resume is the header's: one sealed RPC.
-  await marker.getByRole('button', { name: `Resume ${ALIAS}` }).click();
+  await marker.getByRole('button', { name: 'Resume' }).click();
   await expect.poll(() => hub.rpcs(PROJECT).map((r) => [r.rpc, r.args])).toEqual([['resume', { session: fm.session }]]);
 
   // The ask mod's async question, answered from the web: its receipt carries the log's answer.
@@ -201,26 +208,51 @@ test('a send from the composer stays at the tail, queued then delivered, until i
   await expect.poll(() => hub.logOf(PROJECT).some((e) => e.event.text === text)).toBe(true);
   const event = hub.logOf(PROJECT).find((e) => e.event.text === text)!.event;
   await expect(send).toHaveAttribute('data-state', 'queued');
-  await expect(send.getByTestId('delivery-foot')).toHaveText(`◷Queued · delivers when ${ALIAS} is idle`);
+  await expect(send.getByTestId('delivery-foot')).toHaveText('◷Queued · delivers when the session is idle');
 
   await hub.deliver(PROJECT, MACHINE, { event: { writer: event.writer, seq: event.seq }, session: fm.session, outcome: 'delivered', reason: 'submitted to the session' });
   await expect(send).toHaveAttribute('data-state', 'delivered');
-  await expect(send.getByTestId('delivery-foot')).toHaveText(`✓Delivered · waiting in ${ALIAS}'s queue`);
+  await expect(send.getByTestId('delivery-foot')).toHaveText('✓Delivered · waiting in the session’s queue');
   await shot(view, 'tail-delivered');
 
   // A prompt typed at the terminal with the same words is not the send's row.
   const last = fm.recording.rows.main.at(-1)!;
-  const userRow = (uuid: string, content: string) => ({ type: 'user', uuid, parentUuid: last.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, message: { role: 'user', content } });
-  fm.depth.apply({ at: 0, k: 'row', agentId: null, row: userRow('typed-row', text) as never });
+  // The engine marks each prompt's provenance: typed at the terminal, or submitted by the bridge as the user's.
+  const userRow = (uuid: string, content: string, origin: JsonObject) => ({ type: 'user', uuid, parentUuid: last.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, origin, message: { role: 'user', content } });
+  fm.depth.apply({ at: 0, k: 'row', agentId: null, row: userRow('typed-row', text, { kind: 'human' }) as never });
   const prompts = view.locator('[data-kind="user"]').filter({ hasText: text });
   await expect(prompts).toHaveCount(1);
   await expect(send).toHaveCount(1);
 
-  // Its own row, framed as the bridge submits a delivery, replaces it: drawn once.
-  const frame = `[sminos chat MAWS ${event.writer}:${event.seq} from human → @${ALIAS}]\n${text}`;
-  fm.depth.apply({ at: 0, k: 'row', agentId: null, row: userRow('framed-row', frame) as never });
+  // Typed with the frame's own first line, it is still not the send's.
+  const frame = `[sminos chat MAWS ${event.writer}:${event.seq} from human → @you]\n${text}`;
+  fm.depth.apply({ at: 0, k: 'row', agentId: null, row: userRow('typed-frame', frame, { kind: 'human' }) as never });
+  await expect(prompts).toHaveCount(2);
+  await expect(send).toHaveCount(1);
+
+  // Its own row, the frame sminos pushed as the bridge submitted it, replaces it: drawn once.
+  fm.depth.apply({ at: 0, k: 'row', agentId: null, row: userRow('framed-row', frame, { kind: 'plugin', name: 'doperpowers', asUser: true }) as never });
   await expect(send).toHaveCount(0);
-  await expect(prompts).toHaveCount(2); // the typed one and the send's own
+  await expect(prompts).toHaveCount(3); // the two typed ones and the send's own
+});
+
+test('a long send at the tail folds as MAWS folds a bubble, and offers Show more once the center narrows', async ({ page, hub }) => {
+  const { view } = await openSession(page, hub);
+  const sentence = 'The suites ran green on the mini; the jobs view draws the shell and its output under its row. ';
+  const text = Array.from({ length: 6 }, (_, i) => `Part ${i + 1}: ${sentence}`).join('\n\n');
+  await page.getByRole('textbox', { name: `Message ${ALIAS}` }).fill(text);
+  await page.getByTestId('composer').getByRole('button', { name: 'Send' }).click();
+  const send = tailSends(view);
+  await expect(send).toHaveCount(1);
+  const more = send.getByRole('button', { name: 'Show more' });
+  await expect(send).toContainText('Part 6: The suites ran green');
+  await expect(more).toHaveCount(0); // it fits at this width
+  await view.evaluate((el) => {
+    (el as HTMLElement).style.maxWidth = '380px'; // the center narrows (the column widens, the window shrinks)
+  });
+  await expect(more).toBeVisible();
+  await more.click();
+  await expect(send.getByRole('button', { name: 'Show less' })).toBeVisible();
 });
 
 test("where the session view cannot draw, the channel is the log's, its working record a label: a machine offline, a machine that serves no transcript for the session", async ({ page, hub }) => {
@@ -235,7 +267,7 @@ test("where the session view cannot draw, the channel is the log's, its working 
   await expect.poll(() => hub.subscriptions(PROJECT).filter((s) => s.session === S.asks).length).toBe(1);
   const { sub } = hub.subscriptions(PROJECT).find((s) => s.session === S.asks)!;
   hub.sendSub(PROJECT, sub, 'end', { reason: 'session-ended' });
-  await expect(center.getByTestId('no-transcript')).toContainText('mini serves no transcript for maws-45');
+  await expect(center.getByTestId('no-transcript')).toContainText('mini serves no transcript for this session');
   await expect(center.getByTestId('session-view')).toHaveCount(0);
   await expect(center).toContainText('the store is split');
   await expect(center.getByTestId('working-record').first()).toHaveText('Working record · no transcript on mini');

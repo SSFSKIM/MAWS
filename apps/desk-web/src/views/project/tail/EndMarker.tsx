@@ -1,13 +1,12 @@
 // An ended or retired session's end, as the last row of its session view (the composite's §9.1, "Lifecycle"; the end
 // marker as the owner chose it, mockups/desk/09-session-view.html 3A and 3B): MAWS's boundary shape — a rule, its words,
-// a rule — naming the session, with what the channel's header offers: Resume for an ended session (a second door where
-// the eye ends; drawn disabled with §5's reason when it cannot), who retired it for a retired one, which cannot be
-// resumed. Whether the session runs is read from its presence, never from the subscription, which stays open and
+// a rule — the session named under it through `SessionLabel` (title first, alias muted), with what the channel's
+// header offers: Resume for an ended session (a second door where the eye ends; drawn disabled with §5's reason when it
+// cannot), who retired it for a retired one, which cannot be resumed. Whether the session runs is read from its presence, never from the subscription, which stays open and
 // pageable after the end; the history above stays.
 import { useState } from 'react';
 import { capabilities, retiredBy } from '../../../conversation/capabilities';
 import { byWhom } from '../../../conversation/stream';
-import { sessionName } from '../../../log/projection';
 import { SessionLabel } from '../../../shell/SessionLabel';
 import type { DeskSession } from '../../../shell/sessions';
 import { useConnected, useDesk } from '../../conversation/desk-context';
@@ -44,7 +43,7 @@ export function EndMarker({ session }: { session: DeskSession }) {
             title={can.reason ?? undefined}
             onClick={async () => setRpc(await connection.rpc(member, session.machine, 'resume', { session: session.session }))}
           >
-            Resume {sessionName(session)}
+            Resume
           </button>
           <RpcStatus nonce={rpc} />
         </div>

@@ -4,16 +4,21 @@
 // the text entered the session's queue, not that its row is on disk, so a send stays at the tail, whatever its state,
 // until its own row is observed, and only then gives way to it.
 //
-// Matching is by identity alone, one to one. The bridge submits a send as sminos's delivery frame, whose first line
-// names the event: `[sminos chat <project> <writer_short>:<seq> from …]` (`compose_chat_frame`, `event_ref`,
-// `writer_short` in doperpowers' `sminos.py`; a web send's writer, `hub/<member>`, has no session part and stands whole),
-// or `[sminos message from … id=<msg_id>]` for an event that carries a `msg_id` (`frame_of`, `compose_frame`). A steer's
-// result names the row it appended. Nothing is matched by text: a prompt typed at the terminal is never a web send's
-// row, however equal its words, and a send whose row never comes (the session ended first) stays, its state saying so.
+// Matching is by identity alone, one to one. sminos pushes a send as its delivery frame, and the prompt's whole first
+// line must be the frame sminos writes for that event: `[sminos chat <project> <writer_short>:<seq> from <from> →
+// <@you | @all>[ | unread N]]` (`frame_of`, `compose_chat_frame`, `event_ref`, `writer_short` in doperpowers'
+// `sminos.py`; a web send's writer, `hub/<member>`, has no session part and stands whole), or `[sminos message from
+// <via or from> id=<msg_id>]` for an event that carries a `msg_id` (`compose_frame`). Where the row marks its
+// provenance it must mark a delivery's (the bridge's plugin prompt, a peer's queued command), never a prompt typed at
+// the terminal. A steer's result names the row it appended. Nothing is matched by text: a typed prompt is never a web
+// send's row, however equal its words, and a send whose row never comes (the session ended first) stays, its state
+// saying so.
 //
 // The log holds every send since the session joined while the view holds the transcript's newest rows until it pages
-// further, so a send older than every held row is left out — its row, if any, is in the history not loaded — unless
-// the view holds the transcript back to its first row. Before the transcript's first snapshot no log send is placed.
+// further. A send whose row may yet exist (queued, delivered, possibly delivered) is placed only once the transcript is
+// in, and only when it is no older than the oldest held row — its row, if any, may be in the history not loaded — or
+// the view holds the transcript back to its first row. A send whose journey ended without a row (recorded, refused by
+// a read-only machine, failed) stays at the tail whatever history is held.
 import type { Delivery, JsonObject, LogEvent, Recipient } from 'desk-hub/protocol';
 import { failureOf, resultOf } from './outcome';
 import { failureText } from './words';
@@ -54,52 +59,66 @@ const writerShort = (writer: string): string => {
   return UUID.test(last) ? last.slice(0, 8) : writer;
 };
 
-/** The identity a delivery frame names an event by. */
+/** A send's identity among the tail's rows: the event a delivery frame names. */
 export function sendRef(event: { writer: string; seq: number; msg_id?: unknown }): string {
   return typeof event.msg_id === 'string' && event.msg_id !== '' ? `message:${event.msg_id}` : `chat:${writerShort(event.writer)}:${event.seq}`;
 }
 
-const CHAT_FRAME = /^\[sminos chat .*? (\S+:\d+) from /;
-const MESSAGE_FRAME = /^\[sminos message from .* id=([^\]\s]+)\]$/;
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** The event a prompt's frame names, from its first line; null for a prompt that is not a delivery. */
-export function frameRef(text: string): string | null {
-  const line = text.split('\n', 1)[0];
-  const chat = CHAT_FRAME.exec(line);
-  if (chat) return `chat:${chat[1]}`;
-  const message = MESSAGE_FRAME.exec(line);
-  return message ? `message:${message[1]}` : null;
+/**
+ * The first line sminos writes when it pushes this event, as a pattern over a whole line: `compose_frame`'s
+ * `[sminos message from <via or from> id=<msg_id>]` for an event with a `msg_id`, else `compose_chat_frame`'s
+ * `[sminos chat <project> <writer_short>:<seq> from <from> → <@all | @you>[ | unread N]]`. Only the project's name (the
+ * machine's own for it) and the unread count are open.
+ */
+export function framePattern(event: { writer: string; seq: number; from?: unknown; via?: unknown; msg_id?: unknown; wake?: unknown }): RegExp {
+  const str = (value: unknown) => (typeof value === 'string' ? value : '');
+  if (str(event.msg_id) !== '') return new RegExp(`^${escape(`[sminos message from ${str(event.via) || str(event.from)} id=${str(event.msg_id)}]`)}$`);
+  const tail = ` ${writerShort(event.writer)}:${event.seq} from ${str(event.from)} → ${event.wake === true ? '@all' : '@you'}`;
+  return new RegExp(`^\\[sminos chat .+${escape(tail)}(?: \\| unread [1-9][0-9]*)?\\]$`);
 }
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
 
-/** The prompt texts a row carries: a user row's text or text blocks (never a tool's result), a queued command's prompt. */
-function promptsOf(row: JsonObject): string[] {
+/**
+ * The first lines of the prompts a row carries that may be a delivery: a user row's text or text blocks (never a
+ * tool's result), a queued command's prompt. A row that marks its provenance must mark a delivery's: the bridge submits
+ * as a plugin (`$.prompt.submit({asUser: true})` writes a user row whose `origin` is `{kind: "plugin", asUser: true}`),
+ * and the other last hops queue the prompt as a peer's (`origin.kind` `peer`); a prompt typed at the terminal says
+ * `human` and is never one.
+ */
+function deliveredLines(row: JsonObject): string[] {
+  const firstLine = (text: string) => text.split('\n', 1)[0];
   if (row.type === 'user') {
+    const origin = object(row.origin);
+    if (origin !== null && origin.kind !== 'plugin') return [];
     const content = object(row.message)?.content;
-    if (typeof content === 'string') return [content];
-    if (Array.isArray(content)) return content.flatMap((block) => (object(block)?.type === 'text' && typeof object(block)!.text === 'string' ? [object(block)!.text as string] : []));
+    if (typeof content === 'string') return [firstLine(content)];
+    if (Array.isArray(content)) return content.flatMap((block) => (object(block)?.type === 'text' && typeof object(block)!.text === 'string' ? [firstLine(object(block)!.text as string)] : []));
     return [];
   }
   const attachment = object(row.attachment);
-  return row.type === 'attachment' && attachment?.type === 'queued_command' && typeof attachment.prompt === 'string' ? [attachment.prompt] : [];
+  if (row.type !== 'attachment' || attachment?.type !== 'queued_command' || typeof attachment.prompt !== 'string') return [];
+  const origin = object(attachment.origin);
+  return origin !== null && origin.kind !== 'peer' && origin.kind !== 'plugin' ? [] : [firstLine(attachment.prompt)];
 }
 
-/** What the held rows say of the sends: the events their frames name, their uuids, and when the oldest was written. */
-function heldFacts(rows: readonly JsonObject[]): { refs: Set<string>; uuids: Set<string>; since: string | null } {
-  const refs = new Set<string>();
+/** What the held rows say of the sends: the first lines that may be deliveries, the uuids, the oldest row's time. */
+function heldFacts(rows: readonly JsonObject[]): { lines: string[]; uuids: Set<string>; since: string | null } {
+  const lines: string[] = [];
   const uuids = new Set<string>();
   let since: string | null = null;
   for (const row of rows) {
     if (typeof row.uuid === 'string') uuids.add(row.uuid);
     if (typeof row.timestamp === 'string' && (since === null || row.timestamp < since)) since = row.timestamp;
-    for (const text of promptsOf(row)) {
-      const ref = frameRef(text);
-      if (ref !== null) refs.add(ref);
-    }
+    for (const line of deliveredLines(row)) if (line.startsWith('[sminos ')) lines.push(line);
   }
-  return { refs, uuids, since };
+  return { lines, uuids, since };
 }
+
+/** Outcomes after which no row comes: the send stays at the tail whatever history the view holds. */
+const NO_ROW: ReadonlySet<FootState> = new Set(['recorded', 'refused-read-only', 'failed']);
 
 const addressedTo = (event: LogEvent, session: string) => Array.isArray(event.to) && (event.to as Recipient[]).some((r) => typeof r === 'object' && r !== null && r.session === session);
 
@@ -128,17 +147,26 @@ export function tailSends(input: TailInput): TailSend[] {
   const { session, machine, transcript } = input;
   const out: TailSend[] = [];
   const held = transcript ? heldFacts(transcript.rows) : null;
+  /** Each held delivery line takes one send at most. */
+  const taken = new Set<number>();
 
   const sends: TailSend[] = [];
-  if (transcript && held) {
-    for (const { event } of input.entries) {
-      if (event.kind !== 'human' || !addressedTo(event, session)) continue;
-      if (!transcript.complete && (held.since === null || event.ts < held.since)) continue;
-      const key = sendRef(event);
-      if (held.refs.has(key)) continue;
-      const delivery = input.deliveries[deliveryKey(event)]?.[session];
-      sends.push({ key, via: 'send', text: typeof event.text === 'string' ? event.text : '', at: event.ts, state: delivery?.outcome ?? 'queued', reason: delivery?.reason || null });
+  for (const { event } of input.entries) {
+    if (event.kind !== 'human' || !addressedTo(event, session)) continue;
+    const delivery = input.deliveries[deliveryKey(event)]?.[session];
+    const state: FootState = delivery?.outcome ?? 'queued';
+    // A send whose row may yet exist is placed only where the view could know: once the transcript is in, and, unless
+    // it holds the transcript back to its first row, not older than the oldest row held.
+    if (!NO_ROW.has(state) && (!transcript || !held || (!transcript.complete && (held.since === null || event.ts < held.since)))) continue;
+    if (held) {
+      const pattern = framePattern(event);
+      const at = held.lines.findIndex((line, i) => !taken.has(i) && pattern.test(line));
+      if (at >= 0) {
+        taken.add(at);
+        continue;
+      }
     }
+    sends.push({ key: sendRef(event), via: 'send', text: typeof event.text === 'string' ? event.text : '', at: event.ts, state, reason: delivery?.reason || null });
   }
   for (const entry of input.rpcs) {
     const { rpc } = entry;
@@ -156,16 +184,25 @@ export function tailSends(input: TailInput): TailSend[] {
   return out;
 }
 
-/** What a foot says of its send: the session's name and machine, and whether it runs, has ended, could be resumed. */
-export type FootContext = { name: string; machine: string; running: boolean; ended: boolean; resumable: boolean };
+/**
+ * What a foot says of its send, in words that name no session (the view names it, through `SessionLabel`): whether
+ * the session runs, has ended, could be resumed.
+ */
+export type FootContext = { running: boolean; ended: boolean; resumable: boolean };
 
-/** A send's foot: its state, its short words, and the reason behind them for the tooltip. */
+/** A send's foot: its state, its short words, and the reason behind them in full, for the tooltip. */
 export function footOf(send: TailSend, ctx: FootContext): { state: FootState; words: string; reason: string | null } {
   const { state, reason } = send;
   return { state, words: send.via === 'steer' ? steerWords(state, reason) : sendWords(state, reason, ctx), reason };
 }
 
-const quoted = (reason: string | null) => (reason ? ` · “${reason}”` : '');
+/** The visible part of a reason: its first line, cut to a foot's width; the tooltip has the whole. */
+const REASON_MAX = 60;
+function quoted(reason: string | null): string {
+  if (!reason) return '';
+  const line = reason.split('\n', 1)[0].trim();
+  return ` · “${line.length > REASON_MAX || line !== reason.trim() ? `${line.slice(0, REASON_MAX).trimEnd()}…` : line}”`;
+}
 
 function sendWords(state: FootState, reason: string | null, ctx: FootContext): string {
   switch (state) {
@@ -174,15 +211,15 @@ function sendWords(state: FootState, reason: string | null, ctx: FootContext): s
     case 'not-sent':
       return 'Not sent · the hub refused it';
     case 'queued':
-      return ctx.running ? `Queued · delivers when ${ctx.name} is idle` : 'Queued';
+      return ctx.running ? 'Queued · delivers when the session is idle' : 'Queued';
     case 'delivered':
-      return ctx.ended ? 'Delivered · not seen in the transcript before the session ended' : `Delivered · waiting in ${ctx.name}'s queue`;
+      return ctx.ended ? 'Delivered · not seen in the transcript before the session ended' : 'Delivered · waiting in the session’s queue';
     case 'uncertain':
       return 'Possibly delivered';
     case 'recorded':
       return ctx.resumable ? 'Recorded, not delivered · Resume delivers it' : 'Recorded, not delivered';
     case 'refused-read-only':
-      return `Not delivered · ${ctx.machine} is read-only`;
+      return 'Not delivered · the machine is read-only';
     case 'failed':
       return `Not delivered${quoted(reason)}`;
   }

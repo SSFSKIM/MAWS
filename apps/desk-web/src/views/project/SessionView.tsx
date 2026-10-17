@@ -112,7 +112,7 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
     items: drawn.byId,
     session,
     landed: landedRequest,
-    foot: { name: sessionName(session), machine: session.machine, running: session.presence?.record != null, ended, resumable: retiredBy(session) === null },
+    foot: { running: session.presence?.record != null, ended, resumable: retiredBy(session) === null },
   };
 
   // The ask mod's async questions the log knows, each waiting on its card below while its request is pending.
@@ -129,7 +129,7 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
   useLandOnCard(root, landedRequest, requests.some((r) => r.request === landedRequest));
 
   if (unavailable && fallback)
-    return fallback(`${session.machine} serves no transcript for ${sessionName(session)}: its daemon predates the session view, or a /clear left the history under another id. What it sent and was sent stays here, from the project's log.`);
+    return fallback(`${session.machine} serves no transcript for this session: its daemon predates the session view, or a /clear left the history under another id. What it sent and was sent stays here, from the project's log.`);
   return (
     <section
       ref={setRoot}

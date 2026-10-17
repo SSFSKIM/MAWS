@@ -13,10 +13,17 @@ export function TailBubble({ text, at, foot }: { text: string; at: string | null
   const content = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [overflows, setOverflows] = useState(false);
+  // Measured while folded only, as MAWS's `UserRow` measures it: again whenever the content's size changes (the center
+  // narrowing or widening, the text rewrapping), so "Show more" follows the bubble's width.
   useLayoutEffect(() => {
     const element = content.current;
     if (!element || open) return;
-    setOverflows(element.scrollHeight > element.clientHeight + 1);
+    const measure = () => setOverflows(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined' || !element.firstElementChild) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element.firstElementChild);
+    return () => observer.disconnect();
   }, [open, text]);
   const time = at === null ? NaN : Date.parse(at);
   return (

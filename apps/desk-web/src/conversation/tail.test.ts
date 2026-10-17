@@ -1,12 +1,13 @@
 // The sends at a session view's tail (the composite's §9.1, the DC9 plan's M4): each send to the session — an outbox item,
 // a `human` addressed to it, a steer this tab issued — that no row of the transcript is yet known to be, with the state
-// of its delivery. A send gives way only to its own row, matched by identity alone: the delivery frame's first line
-// naming the send's event (`[sminos chat <project> <writer_short>:<seq> from …]`, or `[sminos message from … id=<msg_id>]`
-// for an event that carries one), or the row a steer's result names. No text is compared.
+// of its delivery. A send gives way only to its own row, matched by identity alone: a delivered prompt whose whole first
+// line is the frame sminos writes for the send's event (`[sminos chat <project> <writer_short>:<seq> from <from> →
+// @you]`, or `[sminos message from … id=<msg_id>]` for an event that carries one), or the row a steer's result names.
+// No text is compared.
 import { describe, expect, it } from 'vitest';
 import type { Delivery, JsonObject, LogEvent, Rpc } from 'desk-hub/protocol';
 import { deliveryKey, type OutboxItem, type RpcEntry } from '../project/conversation';
-import { footOf, frameRef, sendRef, tailSends, type TailInput, type TailSend } from './tail';
+import { footOf, framePattern, sendRef, tailSends, type TailInput, type TailSend } from './tail';
 
 const S = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b'; // the session, on mini
 const OTHER = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a';
@@ -23,10 +24,13 @@ const delivery = (seq: number, outcome: Delivery['outcome'], reason = '', writer
 });
 
 let uuid = 0;
-const userRow = (content: unknown, ts = '2026-10-15T09:00:05.000Z'): JsonObject => ({ type: 'user', uuid: `u${++uuid}`, timestamp: ts, message: { role: 'user', content } }) as JsonObject;
+/** A prompt row; `origin` as the engine marks it (the bridge's submission is a plugin's, as user), none for an older engine. */
+const userRow = (content: unknown, ts = '2026-10-15T09:00:05.000Z', origin: JsonObject | null = { kind: 'plugin', name: 'doperpowers', asUser: true }): JsonObject =>
+  ({ type: 'user', uuid: `u${++uuid}`, timestamp: ts, message: { role: 'user', content }, ...(origin && { origin }) }) as JsonObject;
+const typedRow = (content: string, ts?: string) => userRow(content, ts, { kind: 'human' });
 const assistantRow = (text: string, ts = '2026-10-15T08:59:00.000Z'): JsonObject => ({ type: 'assistant', uuid: `a${++uuid}`, timestamp: ts, message: { role: 'assistant', content: [{ type: 'text', text }] } }) as JsonObject;
 /** The frame the bridge submits for a web send: its first line names the event, then the text. */
-const framed = (seq: number, text: string, writer = WEB) => `[sminos chat MAWS ${writer}:${seq} from human → @maws-45]\n${text}`;
+const framed = (seq: number, text: string, writer = WEB) => `[sminos chat MAWS ${writer}:${seq} from human → @you]\n${text}`;
 
 const base = (over: Partial<TailInput> = {}): TailInput => ({
   session: S,
@@ -48,12 +52,35 @@ describe('the frame a delivery names its send by', () => {
     expect(sendRef({ writer: 'mini/human', seq: 1, msg_id: '5e551e17' })).toBe('message:5e551e17');
   });
 
-  it("is read from a row's first line only, whatever the project's name, and never from text that only quotes one", () => {
-    expect(frameRef(framed(3, 'keep user_id'))).toBe(`chat:${WEB}:3`);
-    expect(frameRef(`[sminos chat my project ${WEB}:4 from human → @maws-45 | unread 2]\nhi`)).toBe(`chat:${WEB}:4`);
-    expect(frameRef('[sminos message from human id=5e551e17]\nRe-run the suites')).toBe('message:5e551e17');
-    expect(frameRef(`Another session sent a message:\n${framed(3, 'x')}`)).toBeNull();
-    expect(frameRef('continue')).toBeNull();
+  it("is the whole first line sminos writes for the event, whatever the project's name and the unread count", () => {
+    const chat = framePattern({ writer: WEB, seq: 3, from: 'human' });
+    expect(chat.test(`[sminos chat MAWS ${WEB}:3 from human → @you]`)).toBe(true);
+    expect(chat.test(`[sminos chat my project ${WEB}:3 from human → @you | unread 2]`)).toBe(true);
+    expect(framePattern({ writer: WEB, seq: 3, from: 'human', wake: true }).test(`[sminos chat MAWS ${WEB}:3 from human → @all]`)).toBe(true);
+    expect(framePattern({ writer: `mini/${S}`, seq: 7, from: 'maws-45' }).test('[sminos chat MAWS 67646a1b:7 from maws-45 → @you]')).toBe(true);
+    const message = framePattern({ writer: 'mini/human', seq: 1, from: 'human', msg_id: '5e551e17' });
+    expect(message.test('[sminos message from human id=5e551e17]')).toBe(true);
+    expect(framePattern({ writer: 'mini/human', seq: 1, from: 'human', via: 'kim', msg_id: '5e551e17' }).test('[sminos message from kim id=5e551e17]')).toBe(true);
+  });
+
+  it('refuses a malformed or partial lookalike of either form', () => {
+    const chat = framePattern({ writer: WEB, seq: 3, from: 'human' });
+    for (const line of [
+      `[sminos chat MAWS ${WEB}:3 from `, // cut after "from"
+      `[sminos chat MAWS ${WEB}:3 from human`, // no arrow, no bracket
+      `[sminos chat MAWS ${WEB}:3 from human → @you`, // no closing bracket
+      `[sminos chat MAWS ${WEB}:3 from human → @you] and more`, // the line goes on
+      `[sminos chat MAWS ${WEB}:3 from human → @maws-45]`, // a recipient sminos never writes
+      `[sminos chat MAWS ${WEB}:3 from someone → @you]`, // another sender
+      `[sminos chat MAWS ${WEB}:3 from human → @all]`, // a wake the event did not carry
+      `[sminos chat MAWS ${WEB}:30 from human → @you]`, // another seq
+      `[sminos chat MAWS ${WEB}:3 from human → @you | unread 0]`, // sminos writes no zero count
+      `[sminos chat ${WEB}:3 from human → @you]`, // no project
+    ])
+      expect(chat.test(line), line).toBe(false);
+    const message = framePattern({ writer: 'mini/human', seq: 1, from: 'human', msg_id: '5e551e17' });
+    for (const line of ['[sminos message from human id=5e551e17', '[sminos message from human id=5e551e17] extra', '[sminos message from human id=5e551e1]', '[sminos message from other id=5e551e17]', '[sminos message id=5e551e17]'])
+      expect(message.test(line), line).toBe(false);
   });
 });
 
@@ -94,13 +121,33 @@ describe("a send at the session view's tail", () => {
   });
 
   it('is never taken by a prompt typed at the terminal with the same words: it waits for its own framed row', () => {
-    const typed = userRow('continue', '2026-10-15T08:59:30.000Z'); // the terminal's, before the send
+    const typed = typedRow('continue', '2026-10-15T08:59:30.000Z'); // the terminal's, before the send
     const send = human(1, 'continue');
     const rows = [assistantRow('x'), typed];
     expect(shape(tailSends(base({ entries: [send], deliveries: delivery(1, 'delivered'), transcript: { rows, complete: false } })))).toEqual([['continue', 'delivered']]);
-    const later = [...rows, userRow('continue', '2026-10-15T09:00:10.000Z')]; // typed again: still not the send's
+    const later = [...rows, typedRow('continue', '2026-10-15T09:00:10.000Z')]; // typed again: still not the send's
     expect(tailSends(base({ entries: [send], deliveries: delivery(1, 'delivered'), transcript: { rows: later, complete: false } }))).toHaveLength(1);
     expect(tailSends(base({ entries: [send], deliveries: delivery(1, 'delivered'), transcript: { rows: [...later, userRow(framed(1, 'continue'))], complete: false } }))).toEqual([]);
+  });
+
+  it('is never taken by a typed prompt shaped like its frame, nor by a malformed one', () => {
+    const send = human(1, 'x');
+    const lookalikes = [
+      typedRow(framed(1, 'x')), // the whole frame, typed at the terminal
+      userRow(`[sminos chat MAWS ${WEB}:1 from \nx`), // cut short
+      userRow(`[sminos chat MAWS ${WEB}:1 from human → @you\nx`), // no closing bracket
+      { type: 'attachment', uuid: 'q-typed', timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt: framed(1, 'x'), commandMode: 'prompt', origin: { kind: 'human' } } } as JsonObject,
+    ];
+    for (const row of lookalikes) expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } })), JSON.stringify(row)).toHaveLength(1);
+    const machineHuman = { offset: ++offset, event: { ts: '2026-10-15T09:00:00.000Z', writer: 'mini/human', seq: 1, kind: 'human', from: 'human', to: [{ session: S, alias: 'maws-45' }], text: 'r', msg_id: '5e551e17', mac: { nonce: 'h2', value: 'v' } } as LogEvent };
+    for (const row of [typedRow('[sminos message from human id=5e551e17]\nr'), userRow('[sminos message from human id=5e551e17 \nr')])
+      expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toHaveLength(1);
+  });
+
+  it('takes a frame from a row with no provenance (an engine that marks none), or from a peer-queued command', () => {
+    const send = human(1, 'x');
+    const rows = [userRow(framed(1, 'x'), undefined, null), { type: 'attachment', uuid: 'q-peer', timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt: framed(1, 'x'), commandMode: 'prompt', origin: { kind: 'peer', from: 'unknown' } } } as JsonObject];
+    for (const row of rows) expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
   });
 
   it("matches a frame however the engine carries the prompt: the row's text, a text block, a queued command", () => {
@@ -118,16 +165,39 @@ describe("a send at the session view's tail", () => {
     expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), userRow('[sminos message from human id=5e551e17]\nRe-run the suites')], complete: false } }))).toEqual([]);
   });
 
-  it('counts only sends addressed to the session, and only inside the history the view holds unless it holds all of it', () => {
+  it('counts only sends addressed to the session', () => {
     const elsewhere = { offset: ++offset, event: { ...human(1, 'x').event, seq: 9, to: [{ session: OTHER, alias: 'maws-fe' }] } as LogEvent };
     const record = { offset: ++offset, event: { ...human(1, 'x').event, seq: 10, to: '*' } as LogEvent };
-    const old = human(11, 'from last week', '2026-10-08T09:00:00.000Z');
+    expect(tailSends(base({ entries: [elsewhere, record] }))).toEqual([]);
+  });
+
+  it('leaves out an older send whose row may be in history not loaded, until the view holds the transcript back to its first row', () => {
     const rows = [assistantRow('earliest held', '2026-10-15T08:00:00.000Z')];
-    expect(tailSends(base({ entries: [elsewhere, record, old], transcript: { rows, complete: false } }))).toEqual([]);
-    // Paged to the first row: a send older than everything held was never matched, so it is at the tail.
-    expect(shape(tailSends(base({ entries: [old], transcript: { rows, complete: true } })))).toEqual([['from last week', 'queued']]);
-    // Before the transcript loads, the log's sends are not placed: whether their rows are there is not known yet.
-    expect(tailSends(base({ entries: [human(12, 'now')], transcript: null }))).toEqual([]);
+    const old = (seq: number) => human(seq, `older ${seq}`, '2026-10-08T09:00:00.000Z');
+    const sends = [old(11), old(12), old(13)];
+    const deliveries = { ...delivery(12, 'delivered'), ...delivery(13, 'uncertain') };
+    expect(tailSends(base({ entries: sends, deliveries, transcript: { rows, complete: false } }))).toEqual([]);
+    // Paged to the first row and its row still not there: it is at the tail.
+    expect(shape(tailSends(base({ entries: sends, deliveries, transcript: { rows, complete: true } })))).toEqual([
+      ['older 11', 'queued'],
+      ['older 12', 'delivered'],
+      ['older 13', 'uncertain'],
+    ]);
+    // Before the transcript loads, whether their rows are there is not known yet.
+    expect(tailSends(base({ entries: [human(14, 'now')], deliveries: delivery(14, 'delivered'), transcript: null }))).toEqual([]);
+  });
+
+  it('keeps an older send that never gets a row — recorded, refused by a read-only machine, failed — against a partial history, and before the transcript loads', () => {
+    const rows = [assistantRow('earliest held', '2026-10-15T08:00:00.000Z')];
+    const sends = [human(21, 'kept for later', '2026-10-08T09:00:00.000Z'), human(22, 'read-only', '2026-10-08T09:01:00.000Z'), human(23, 'failed', '2026-10-08T09:02:00.000Z')];
+    const deliveries = { ...delivery(21, 'recorded', 'not running'), ...delivery(22, 'refused-read-only', 'read-only'), ...delivery(23, 'failed', 'no bridge') };
+    const expected = [
+      ['kept for later', 'recorded'],
+      ['read-only', 'refused-read-only'],
+      ['failed', 'failed'],
+    ];
+    expect(shape(tailSends(base({ entries: sends, deliveries, transcript: { rows, complete: false } })))).toEqual(expected);
+    expect(shape(tailSends(base({ entries: sends, deliveries, transcript: null })))).toEqual(expected);
   });
 
   it("draws this tab's sends on their way to the log, and one the hub refused", () => {
@@ -169,14 +239,14 @@ describe("a send at the session view's tail", () => {
 });
 
 describe("a tail send's foot", () => {
-  const ctx = { name: 'maws-45', machine: 'mini', running: true, ended: false, resumable: true };
+  const ctx = { running: true, ended: false, resumable: true };
   const send = (state: TailSend['state'], reason: string | null = null, via: TailSend['via'] = 'send'): TailSend => ({ key: 'k', via, text: 't', at: null, state, reason });
 
   it('says where the send is, in short words', () => {
-    expect(footOf(send('queued'), ctx).words).toBe('Queued · delivers when maws-45 is idle');
-    expect(footOf(send('delivered'), ctx).words).toBe("Delivered · waiting in maws-45's queue");
+    expect(footOf(send('queued'), ctx).words).toBe('Queued · delivers when the session is idle');
+    expect(footOf(send('delivered'), ctx).words).toBe('Delivered · waiting in the session’s queue');
     expect(footOf(send('recorded', 'not running'), ctx)).toEqual({ state: 'recorded', words: 'Recorded, not delivered · Resume delivers it', reason: 'not running' });
-    expect(footOf(send('refused-read-only', 'read-only'), ctx).words).toBe('Not delivered · mini is read-only');
+    expect(footOf(send('refused-read-only', 'read-only'), ctx).words).toBe('Not delivered · the machine is read-only');
     expect(footOf(send('failed', 'dropped: a compaction was running'), ctx).words).toBe('Not delivered · “dropped: a compaction was running”');
     expect(footOf(send('uncertain', 'taken, never answered'), ctx).words).toBe('Possibly delivered');
     expect(footOf(send('sending'), ctx).words).toBe('Sending…');
@@ -187,6 +257,15 @@ describe("a tail send's foot", () => {
     expect(footOf(send('delivered'), { ...ctx, running: false, ended: true }).words).toBe('Delivered · not seen in the transcript before the session ended');
     expect(footOf(send('recorded'), { ...ctx, running: false, ended: true, resumable: false }).words).toBe('Recorded, not delivered');
     expect(footOf(send('queued'), { ...ctx, running: false }).words).toBe('Queued');
+  });
+
+  it('shows a long reason cut to its first line and a foot’s width, keeping all of it for the tooltip', () => {
+    const long = `the engine dropped the prompt: ${'a compaction was running and the queue was cleared; '.repeat(4)}`;
+    const foot = footOf(send('failed', long), ctx);
+    expect(foot.words).toBe(`Not delivered · “${long.slice(0, 60).trimEnd()}…”`);
+    expect(foot.reason).toBe(long);
+    expect(footOf(send('failed', 'first line\nsecond line'), ctx).words).toBe('Not delivered · “first line…”');
+    expect(footOf(send('failed', long, 'steer'), ctx).words).toBe(`Steer not delivered · “${long.slice(0, 60).trimEnd()}…”`);
   });
 
   it("names a steer's own way", () => {
