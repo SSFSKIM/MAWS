@@ -26,7 +26,8 @@
 // - P3-HD M3b (Decision Log 15, 18 and 21): a resolution naming a tool ranks main's directories by the artifact's
 //   existing grant, checked afresh and consuming nothing: the first candidate with known tool metadata the grant
 //   matches, else the first with none known that it matches (`grantBacked`: no readOnly is invented), else the first
-//   with known metadata (a new grant's). Known metadata is an agreeing engine report's annotation combined with the
+//   with known metadata (a new grant's); a check that cannot be made (no store, or one failing) makes the whole
+//   resolution unavailable, never a ranking without it. Known metadata is an agreeing engine report's annotation combined with the
 //   host-only hints (./direct-hints.ts) that the owner's discovery and every call's successful live listing publish in
 //   their synchronous post-list validity step; credential withdrawal and main's going forget them. At the call, a read
 //   grant whose live tool may write is the private `changed`, the durable grant untouched.
@@ -337,7 +338,8 @@ export class DirectCalls {
       const readOnly = combined(answer.tool.readOnly, this.hints.readOnly(answer.source, tool));
       if (readOnly === null && grantBacked !== null) continue; // a later grant-backed candidate ranks no higher
       const matches = await this.grantMatches(input.artifactId, { server: input.server, tool, fingerprint });
-      if (!this.registered(operation)) return { ready: false, why: 'unavailable' };
+      // a check that could not be made says nothing of the grant: no candidate stands on it (M3b review fix)
+      if (matches === null || !this.registered(operation)) return { ready: false, why: 'unavailable' };
       const source = publicSource(answer.source);
       if (readOnly !== null) {
         const candidate = { ready: true as const, source, tool: { fingerprint, readOnly } };
@@ -349,14 +351,15 @@ export class DirectCalls {
     return grantBacked ?? known ?? { ready: false, why: first ?? 'unobserved' };
   }
 
-  // Whether the artifact's existing grant admits `call` now, consuming nothing; a store that cannot say matches nothing.
-  private async grantMatches(artifactId: string, call: ConnectorCallRef): Promise<boolean> {
+  // Whether the artifact's existing grant admits `call` now, consuming nothing; null when it cannot be told (no store
+  // this run, or a check that failed), which is not a grant's absence.
+  private async grantMatches(artifactId: string, call: ConnectorCallRef): Promise<boolean | null> {
     const store = this.options.store();
-    if (!store) return false;
+    if (!store) return null;
     try {
       return (await store.checkConnectorCall(artifactId, call)).granted;
     } catch {
-      return false;
+      return null;
     }
   }
 

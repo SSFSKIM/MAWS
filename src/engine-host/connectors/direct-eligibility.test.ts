@@ -155,13 +155,32 @@ describe('directResolve ranks main’s directories by the artifact’s existing 
     expect(await resolveIn([unknown, elsewhere])).toMatchObject({ ready: true, source: { directory: elsewhere }, tool: { grantBacked: true } });
   });
 
-  it('a grant check that fails yields no grant-backed candidate, and an observed one still answers', async () => {
+  // M3b review fix: a grant check that could not be made (no store, or one that throws) is no answer about the grant,
+  // so no candidate stands on it, observed ones included: the resolution is unavailable rather than a ranking guess.
+  const unanswered: [string, () => unknown][] = [
+    ['an absent store', () => null],
+    ['a store whose check throws', () => ({ ...documents.store, checkConnectorCall: () => Promise.reject(new Error('the store broke')) })],
+  ];
+  for (const [label, store] of unanswered) {
+    it(`${label} yields no candidate at all: the resolution is unavailable`, async () => {
+      const unknown = directory('unknown', otherHome, toy(['other.mjs'], []));
+      const observed = directory('observed', mainHome, toy(['toy-server.mjs']));
+      await grant(unknown);
+      calls = build({ store: store as never });
+      expect(await resolveIn([unknown])).toEqual({ ready: false, why: 'unavailable' });
+      expect(await resolveIn([unknown, observed])).toEqual({ ready: false, why: 'unavailable' });
+      expect(await resolveIn([observed])).toEqual({ ready: false, why: 'unavailable' });
+      expect(await resolveIn([observed], null)).toMatchObject({ ready: true, source: { directory: observed } }); // the source alone checks no grant
+    });
+  }
+
+  it('a successful check that matches no grant still answers the first observed candidate (a new grant’s metadata)', async () => {
     const unknown = directory('unknown', otherHome, toy(['other.mjs'], []));
     const observed = directory('observed', mainHome, toy(['toy-server.mjs']));
-    await grant(unknown);
-    calls = build({ store: () => ({ ...documents.store, checkConnectorCall: () => Promise.reject(new Error('the store broke')) }) as never });
-    expect(await resolveIn([unknown])).toEqual({ ready: false, why: 'toolMissing' });
-    expect(await resolveIn([unknown, observed])).toMatchObject({ ready: true, source: { directory: observed }, tool: { readOnly: true } });
+    const other = directory('other', otherHome, toy(['other.mjs']));
+    expect(await resolveIn([unknown, observed, other])).toMatchObject({ ready: true, source: { directory: observed }, tool: { readOnly: true } });
+    await documents.store.grantConnectorTool(artifactId, { server: 'usertoy', tool: 'rows', fingerprint: 'a'.repeat(64), mode: 'read' }); // matches none
+    expect(await resolveIn([unknown, observed, other])).toMatchObject({ ready: true, source: { directory: observed }, tool: { readOnly: true } });
   });
 
   it('ranking consumes nothing: an Allow once matched by a resolution is still there, and no connection was made', async () => {
