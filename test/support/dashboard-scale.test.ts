@@ -2,10 +2,11 @@
 // definitions" and Decision Log 36): the scale gate's judging, free of Playwright. A timing row needs three admitted
 // trials (started at a 1-minute load below 10) and every one within its bound, a trial at 10 or more never counting
 // as met; the scroll row is the p95 of every admitted event pooled across trials, per-trial p95s information only, a
-// long task over 50 ms failing it on its own; the renderer's memory is the first of two consecutive 10 s samples of
-// its private footprint within 5 % of each other, within 60 s, never a forced collection's figure.
+// long task over 50 ms failing it on its own; the renderer's memory is its documented private memory, the later of the
+// first two 10 s-spaced samples within 5 % completed within 60 s of the first one's start, every sample admitted below
+// load 10, never a forced collection's figure.
 import { describe, expect, it } from 'vitest';
-import { footprintMB, LOAD_BELOW, percentile, replacementInterval, scrollVerdict, settledMemory, timingVerdict } from '../../e2e/support/dashboard-scale';
+import { LOAD_BELOW, memoryVerdict, percentile, privateMB, replacementInterval, scrollVerdict, timingVerdict } from '../../e2e/support/dashboard-scale';
 
 const at = (load: number) => (value: number) => ({ value, load });
 
@@ -65,18 +66,39 @@ describe('the scroll row', () => {
   });
 });
 
-describe('the renderer’s memory', () => {
-  it('is the later of the first two consecutive samples within 5 %, within the samples a minute holds', () => {
-    expect(settledMemory([600, 560, 530, 520])).toEqual({ settled: true, value: 520, index: 3 });
-    expect(settledMemory([300, 300])).toEqual({ settled: true, value: 300, index: 1 });
-    expect(settledMemory([600, 500, 400, 300, 200, 100, 50])).toEqual({ settled: false, value: null, index: -1 });
+describe('the renderer’s memory (parent Decision Log 42(5))', () => {
+  // a sample: when it started and completed (ms from the first sample's start), the 1-minute load as it started, the
+  // renderer's private memory in MB
+  const sample = (startedAt: number, completedAt: number, mb: number, load = 3) => ({ startedAt, completedAt, load, mb });
+
+  it('is met by the later of the first two 10 s-spaced samples within 5 %, both completed within 60 s of the first one’s start', () => {
+    expect(memoryVerdict([sample(0, 40, 520), sample(10_000, 10_040, 480), sample(20_000, 20_050, 470)], 500)).toMatchObject({ verdict: 'met', value: 470 });
+    expect(memoryVerdict([sample(0, 40, 300), sample(10_000, 10_030, 301)], 500)).toMatchObject({ verdict: 'met', value: 301 });
   });
 
-  it('reads the private footprint footprint(1) reports, in MB', () => {
-    expect(footprintMB('=====\nElectron Helper (Renderer) [80172]: 64-bit    Footprint: 412 MB (16384 bytes per page)\n=====')).toBe(412);
-    expect(footprintMB('zsh [39185]: 64-bit    Footprint: 2096 KB (16384 bytes per page)')).toBeCloseTo(2.05, 2);
-    expect(footprintMB('x [1]: 64-bit    Footprint: 1.25 GB (16384 bytes per page)')).toBe(1280);
-    expect(() => footprintMB('no footprint here')).toThrow(/footprint/);
+  it('fails a settled value over the bound', () => {
+    expect(memoryVerdict([sample(0, 40, 555), sample(10_000, 10_040, 556)], 500)).toMatchObject({ verdict: 'failed', value: 556 });
+  });
+
+  it('is hardware-blocked by any sample started at load 10 or more, even a stable low pair: never met afterwards', () => {
+    expect(memoryVerdict([sample(0, 40, 300), sample(10_000, 10_040, 300, 11)], 500)).toMatchObject({ verdict: 'hardware-blocked' });
+    expect(memoryVerdict([sample(0, 40, 300, 12), sample(10_000, 10_040, 300), sample(20_000, 20_040, 300)], 500)).toMatchObject({ verdict: 'hardware-blocked' });
+  });
+
+  it('admits no pair completed after the 60 s deadline: a stable pair whose later sample completes late is unsettled', () => {
+    const drifting = [600, 540, 480, 420, 360, 300].map((mb, k) => sample(k * 10_000, k * 10_000 + 50, mb));
+    expect(memoryVerdict([...drifting, sample(60_000, 60_001, 299)], 500)).toMatchObject({ verdict: 'unsettled', value: null });
+    // the same pair completing on time settles
+    expect(memoryVerdict([...drifting, sample(59_900, 59_990, 299)], 500)).toMatchObject({ verdict: 'met', value: 299 });
+  });
+
+  it('is unsettled when no two consecutive samples come within 5 % before the deadline', () => {
+    expect(memoryVerdict([600, 500, 400, 300, 200, 100, 50].map((mb, k) => sample(k * 10_000, k * 10_000 + 50, mb)), 500)).toMatchObject({ verdict: 'unsettled', value: null, reason: expect.stringMatching(/within 5 %/) });
+  });
+
+  it('takes the renderer’s private kilobytes as MB, refusing what is not a finite non-negative number', () => {
+    expect(privateMB({ private: 512_000 })).toBe(500);
+    for (const bad of [{ private: -1 }, { private: Number.NaN }, { private: Number.POSITIVE_INFINITY }, {}, null, undefined, { private: '512000' }]) expect(() => privateMB(bad), JSON.stringify(bad)).toThrow(/private/);
   });
 
   it('takes percentiles by rank', () => {
