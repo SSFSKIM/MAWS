@@ -1573,9 +1573,11 @@ predates the module has no evidence while it runs.
   - **G3 (fallbacks):** with the fake machine disconnected the channel is
     the log-built stream with its folds as labels; on the phone layout the
     channel is the log-built stream with "Working record · on a computer"
-    and no transcript chunk is loaded (the phone's bundle measured without
-    MAWS's Markdown and shiki chunks); the group chat is unchanged against
-    DC5's tests.
+    and no transcript chunk is loaded (the phone loads no script holding
+    MAWS's Transcript, SessionView or TranscriptPane; MAWS's Markdown,
+    with its KaTeX and shiki chunks, stays, since the log-built channel
+    has drawn `<message>` bodies through it since DC5; amended 2026-10-17,
+    DC9's M6); the group chat is unchanged against DC5's tests.
   - **G4 (the column):** the Transcript tab is gone; Subagents shows the
     nested agent under its parent and every recorded agent with the
     status DX4 carries, none under "On disk / status unavailable"; an
@@ -4603,6 +4605,15 @@ a hub that connects into machines (§2).
   exact marker text through an older plugin, logged as debt. Rejected:
   telling the rows apart by an append field, since 2.1.300's
   `$.session.append` offers none.
+  2026-10-17, DC9.G3 amended at DC9's M6. G3 said the phone's bundle is
+  measured without MAWS's Markdown and shiki chunks. But the phone's
+  log-built channel has drawn every `<message>` body through MAWS's
+  Markdown since DC5, and the owner walked that phone. What §4 binds is
+  that the phone never mounts the transcript, so G3 now holds the phone
+  to loading no transcript chunk. Rejected: plain-text messages on the
+  phone, which would make its report worse to meet a measuring line
+  that overreached. A follow-up loads shiki and KaTeX only when a
+  message holds code or math.
   2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
   desk-dc8 370662a2, c81b77fc, 578b11b8):
   - DX5's `resync` gains `refused`, so a refusal whose post failed is not
