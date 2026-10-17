@@ -183,6 +183,26 @@ describe('question row', () => {
     const view = renderRow(rowOf(store.rows(), 'question'), { storeKey: store.key });
     expect(lines(view.container)).toEqual(['Colour→Blue', 'Fruits→Not answered']);
   });
+
+  // DC9 (the desk, 2026-10-17): doperpowers' ask tool draws as the built-in's question, its answers read from the
+  // engine's summary its result carries.
+  it('a question asked through doperpowers’ ask tool draws as a question row, header → answer', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('q1', 'mcp__doperpowers__AskUserQuestion', {
+      questions: [
+        { question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red' }, { label: 'Blue' }] },
+        { question: 'Which fruits?', header: 'Fruits', multiSelect: true, options: [{ label: 'Apple' }, { label: 'Pear' }] },
+      ],
+      async: false,
+    });
+    const answered = 'The user answered: "Which colour?"="Teal, actually". Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.';
+    b.result('q1', answered, { structured: answered });
+    b.end(['u1']);
+    const store = await expanded(b.events);
+    renderRow(rowOf(store.rows(), 'question'), { storeKey: store.key });
+    expect(lines(screen.getByRole('region', { name: 'Question' }))).toEqual(['Colour→Teal, actually', 'Fruits→Not answered']);
+  });
 });
 
 describe('request slot', () => {
