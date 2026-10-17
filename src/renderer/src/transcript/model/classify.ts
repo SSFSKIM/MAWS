@@ -32,10 +32,16 @@ export const CUA_JS_TOOLS = ['mcp__plugin_cua_cua_repl__js', 'mcp__cua_repl__js'
 export const isCuaJsTool = (toolName: string): boolean => (CUA_JS_TOOLS as readonly string[]).includes(toolName);
 // E13 end
 
+// DC9 start (the desk's session view, 2026-10-17; desk composite §9.5): doperpowers' ask tool, which stands in for the
+// built-in AskUserQuestion in a terminal session running the doperpowers ask mod; its result is read in ask-mod.ts
+export const ASK_MOD_TOOL = 'mcp__doperpowers__AskUserQuestion';
+// DC9 end
+
 const ROW_KIND_TOOLS: Record<string, Presentation> = {
   Agent: 'subagent', Task: 'subagent', Workflow: 'subagent',
   SendMessage: 'agent_message',
   AskUserQuestion: 'question',
+  [ASK_MOD_TOOL]: 'question', // DC9: the ask mod's question, a question as the built-in's is
   ExitPlanMode: 'plan',
   // E1 start: an ask is a capsule, a delivered file a delivery row
   [MAWS_TOOL_USE.ask]: 'ask',

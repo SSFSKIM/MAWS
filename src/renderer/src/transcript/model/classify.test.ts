@@ -57,6 +57,7 @@ describe('classification table', () => {
     expect(presentationOf('Workflow')).toBe('subagent');
     expect(presentationOf('SendMessage')).toBe('agent_message');
     expect(presentationOf('AskUserQuestion')).toBe('question');
+    expect(presentationOf('mcp__doperpowers__AskUserQuestion')).toBe('question'); // DC9: doperpowers' ask tool
     expect(presentationOf('ExitPlanMode')).toBe('plan');
     expect(presentationOf('Bash')).toBe('cell');
     expect(presentationOf('mcp__x__y')).toBe('cell');
