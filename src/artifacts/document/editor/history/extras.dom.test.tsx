@@ -116,6 +116,19 @@ describe('extra changes in the history (P3-E)', () => {
     expect(within(bar()).getByText('2 changes')).toBeTruthy();
   });
 
+  it('reaching the unbound entry clears the reached chart’s block selection, so its outline is not left drawn (E2 M6)', async () => {
+    await setup({ withHook: true });
+    await until(() => screen.queryByRole('button', { name: 'See 2 new changes' }) !== null, 'the pill');
+    click(screen.getByRole('button', { name: 'See 2 new changes' }));
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) !== null && previewChart() !== null, 'the preview');
+    step('Next change');
+    await until(() => previewChart()!.classList.contains('ProseMirror-selectednode'), 'the chart selected whole');
+    step('Next change');
+    await until(() => within(bar()).queryByText('Dataset spare replaced') !== null, 'the unbound entry reached');
+    expect(previewEditor()!.state.selection instanceof NodeSelection).toBe(false);
+    expect(previewChart()!.classList.contains('ProseMirror-selectednode')).toBe(false);
+  });
+
   it('without the hook the same data-only change counts nothing: no pill', async () => {
     await setup({ withHook: false });
     await new Promise((resolve) => setTimeout(resolve, 50));

@@ -6,7 +6,7 @@
 // bar counts and steps through. Outside a diff it draws nothing.
 import { Extension, type Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { NodeSelection /* P3-E */, Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
+import { NodeSelection /* P3-E */, Plugin, PluginKey, Selection /* P3-E */, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Carry } from '../../../yjs';
 import { ySyncPluginKey } from '../../../yjs/prosemirror';
@@ -118,11 +118,18 @@ export function setExtra(editor: Editor, extra: readonly ExtraChange[]): void {
 /** Selects the shown tab's change `index` and scrolls it into view; null clears what ↑ ↓ reached. */
 export function goToChange(editor: Editor, index: number | null): void {
   if (editor.isDestroyed) return;
-  const { changes } = changesOf(editor.state);
+  const { changes, current } = changesOf(editor.state);
   const change = index === null ? undefined : changes[index];
   let tr = editor.state.tr.setMeta(historyPaintKey, { current: change ? index : null } satisfies PaintMeta).setMeta('addToHistory', false);
   // P3-E: an extra change is its whole block, selected as such
   const block = change?.runs === 0 ? tr.doc.nodeAt(change.from) : null;
   if (change) tr = tr.setSelection(block && NodeSelection.isSelectable(block) ? NodeSelection.create(tr.doc, change.from) : TextSelection.near(tr.doc.resolve(Math.min(change.from + 1, tr.doc.content.size)))).scrollIntoView();
+  // P3-E (E2 M6): leaving a reached block for no change (an unbound entry, the tab) lets go of its block selection too
+  const left = !change && current !== null ? changes[current] : undefined;
+  if (left?.runs === 0 && tr.selection instanceof NodeSelection && tr.selection.from === left.from) {
+    // a caret in the text before the block, else after it (Selection.near would pick the block again)
+    const caret = Selection.findFrom(tr.doc.resolve(tr.selection.from), -1, true) ?? Selection.findFrom(tr.doc.resolve(tr.selection.to), 1, true);
+    if (caret) tr = tr.setSelection(caret);
+  }
   editor.view.dispatch(tr);
 }

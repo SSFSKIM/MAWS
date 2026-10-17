@@ -50,7 +50,9 @@ export class DatasetReader {
     const parsed = this.parsed(artifactId, asset.sha256, asset.size, format);
     const rows: Cell[][] = [];
     const end = Math.min(parsed.rows.length, offset + Math.min(limit, DATASET_READ_MAX_ROWS));
-    let bytes = jsonBytes({ columns: parsed.columns, rows: [], total: parsed.rows.length, truncated: true });
+    // sized as the page serialises: rows add their own bytes and a comma, and the empty page is counted with
+    // `truncated: false`, its longer spelling, so a page that turns out complete still fits (E2 M6)
+    let bytes = jsonBytes({ columns: parsed.columns, rows: [], total: parsed.rows.length, truncated: false });
     for (let r = offset; r < end; r++) {
       const row = parsed.rows[r]!;
       const size = jsonBytes(row) + (rows.length > 0 ? 1 : 0);

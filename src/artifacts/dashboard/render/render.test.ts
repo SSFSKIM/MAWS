@@ -523,6 +523,26 @@ describe('many series: labelled small multiples (parent Decision Log 27)', () =>
     expect(grade(/<g>(.*?)<\/g>/.exec(four)![0]).texts).toEqual(qualified);
   });
 
+  it('names series apart over the unfiltered domain: a generated name never takes a source label, and a filter never renames one (E2 M6)', () => {
+    // the number 1 and the text "1" read alike and are qualified; a source value already reads "1 (number)"
+    const typed: ViewTable = { columns: [{ name: 'x', type: 'number' }, { name: 'y', type: 'number' }, { name: 's', type: 'string' }], rows: [[1, 2, 1], [2, 3, '1'], [3, 4, '1 (number)']] };
+    const legend = (svg: string) => grade(/<g>(.*?)<\/g>/.exec(svg)![0]).texts;
+    const all = legend(scatter(typed).svg!);
+    expect(all).toHaveLength(3);
+    expect(new Set(all).size).toBe(3);
+    expect(all).toContain('1 (number)');
+    // ` · ` inside a series name meets a measure's: the duplicate's number is the unfiltered view's, kept under a filter
+    const joined: ViewTable = { columns: [{ name: 'x', type: 'number' }, { name: 'r', type: 'number' }, { name: 'q · r', type: 'number' }, { name: 's', type: 'string' }], rows: [[1, 1, 2, 'p · q'], [1, 3, 4, 'p']] };
+    const spec = { view: 'line', x: 'x', y: ['r', 'q · r'], series: 's' };
+    const whole = legend(renderView(spec, joined, theme, 't').svg!);
+    expect(whole).toEqual(['p · q · r', 'p · q · q · r', 'p · r', 'p · q · r (2)']);
+    const filtered = legend(renderView({ ...spec, filter: [{ column: 's', op: 'eq', value: 'p' }] }, joined, theme, 't').svg!);
+    expect(filtered).toEqual(['p · r', 'p · q · r (2)']);
+    // a numbering suffix steps past a source label that already reads as it
+    const suffixed: ViewTable = { columns: [{ name: 'x', type: 'number' }, { name: 'y', type: 'number' }, { name: 'y (2)', type: 'number' }], rows: [[1, 1, 2]] };
+    expect(legend(renderView({ view: 'line', x: 'x', y: ['y', 'y (2)', 'y'] }, suffixed, theme, 't').svg!)).toEqual(['y', 'y (2)', 'y (3)']);
+  });
+
   it('draws a panel for each series and measure, each measure in its own format', () => {
     const t: ViewTable = {
       columns: [{ name: 'x', type: 'string' }, { name: 's', type: 'string' }, { name: 'rate', type: 'number' }, { name: 'amount', type: 'number' }],

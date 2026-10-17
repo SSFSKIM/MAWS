@@ -114,7 +114,8 @@ describe('exportView', () => {
     expect(lines).toContain('| --- | ---: |');
     expect(lines.filter((line) => line.startsWith('| k'))).toHaveLength(26); // the header and 25 rows
     expect(view.markdown).toContain('*first 25 of 40 rows');
-    expect(lines.at(-1)).toBe('*Sales · from sales.csv · updated 2026-10-01 09:00 UTC by Owner*');
+    // the label, then (E2 M6) what the view could not show below it, as the other formats place it
+    expect(lines.slice(-3)).toEqual(['*Sales · from sales.csv · updated 2026-10-01 09:00 UTC by Owner*', '', '*some category labels are shortened; the source table has them whole*']);
   });
 
   it('takes an explicit limit up to 100 rows in Markdown, as the table view does', () => {
@@ -138,6 +139,17 @@ describe('exportView', () => {
     const view = exportView({ spec: { view: 'line', x: 'k', y: 'v', colour: 'red' }, datasetId: 'sales', descriptor: mixed, table: gaps, theme, by: 'Owner' });
     expect(view.warnings).toEqual(['2 of 3 values in v are not number', 'unknown key "colour" ignored', '1 row has no v; not drawn']);
     for (const warning of view.warnings!) expect(view.markdown).toContain(warning.replace(/"/g, '"'));
+  });
+
+  it('writes the warnings below the label in Markdown as the other formats place them, the preview’s notes above it, each once (E2 M6)', () => {
+    const mixed = { ...sales, columns: [{ name: 'k', type: 'string' as const }, { name: 'v', type: 'number' as const, mismatches: 2 }] };
+    const view = exportView({ spec: { view: 'line', x: 'k', y: 'v', colour: 'red' }, datasetId: 'sales', descriptor: mixed, table: many, theme, by: 'Owner' });
+    const blocks = view.markdown.split('\n\n');
+    const label = blocks.indexOf('*Sales · from sales.csv · updated 2026-10-01 09:00 UTC by Owner*');
+    expect(label).toBeGreaterThan(0);
+    expect(blocks.slice(0, label).some((block) => block.includes('first 25 of 40 rows'))).toBe(true);
+    expect(blocks.slice(label + 1)).toEqual([`*${view.warnings!.join(' · ').replace(/"/g, '"')}*`]);
+    for (const warning of view.warnings!) expect(view.markdown.split(warning).length - 1, warning).toBe(1);
   });
 
   it('a state drawn in place is not repeated as a warning', () => {

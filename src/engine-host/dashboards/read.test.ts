@@ -130,6 +130,23 @@ describe('DatasetReader', () => {
     expect(String(next.rows[0]![0]).startsWith(String(page.rows.length))).toBe(true);
   });
 
+  it('never answers a page past the byte bound, an exactly filled last page included (E2 M6: the page is sized as it serialises)', async () => {
+    const id = await board();
+    // a short row, then one whose cell makes the last page's JSON exactly fill the bound when it is counted as `truncated:
+    // true`: the page answers `truncated: false`, one byte longer
+    const empty = Buffer.byteLength(JSON.stringify({ columns: [{ name: 't', type: 'string' }], rows: [], total: 2, truncated: true }));
+    const fill = DATASET_READ_MAX_BYTES - empty - '["a"],'.length - '[""]'.length;
+    for (const width of [fill - 1, fill, fill + 1]) {
+      const { ref } = await upload(id, `t\na\n${'x'.repeat(width)}\n`, `fill-${width}.csv`);
+      const reader = new DatasetReader(world.store);
+      const page = reader.read(id, ref, { format: 'csv' });
+      expect(Buffer.byteLength(JSON.stringify(page)), `width ${width}`).toBeLessThanOrEqual(DATASET_READ_MAX_BYTES);
+      const rest = reader.read(id, ref, { format: 'csv', offset: page.rows.length });
+      expect(page.rows.length + rest.rows.length, `width ${width}: every row reached`).toBe(2);
+      expect(Buffer.byteLength(JSON.stringify(rest)), `width ${width}`).toBeLessThanOrEqual(DATASET_READ_MAX_BYTES);
+    }
+  });
+
   it('refuses a single row larger than a page', async () => {
     const id = await board();
     const { ref } = await upload(id, `t\n${'y'.repeat(DATASET_READ_MAX_BYTES + 10)}\n`);

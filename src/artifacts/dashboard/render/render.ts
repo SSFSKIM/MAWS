@@ -305,7 +305,24 @@ function seriesNames(seriesKeys: string[], column: ViewColumn, format: ValueForm
   const readers = new Map<string, string[]>();
   for (const [key, name] of names) readers.set(name, [...(readers.get(name) ?? []), key]);
   for (const [name, keys] of readers) if (keys.length > 1) for (const key of keys) names.set(key, `${name} (${typeName(JSON.parse(key) as Cell)})`);
-  return names;
+  const distinct = distinctNames([...names.values()]);
+  return new Map([...names.keys()].map((key, i) => [key, distinct[i]]));
+}
+
+/**
+ * Names told apart over their whole domain, in its order (E2 M6): the first of a name keeps it; a later one gains " (n)",
+ * n the least that no name of the domain reads as and none given yet, so a generated suffix never takes a source
+ * label ("y (2)" beside a measure named so) and a name never depends on which others a filter kept.
+ */
+function distinctNames(names: readonly string[]): string[] {
+  const domain = new Set(names);
+  const given = new Set<string>();
+  return names.map((name) => {
+    let shown = name;
+    for (let n = 2; given.has(shown) || (shown !== name && domain.has(shown)); n += 1) shown = `${name} (${n})`;
+    given.add(shown);
+    return shown;
+  });
 }
 
 /**
@@ -340,6 +357,11 @@ function cartesian(v: View): Rendered {
   const si = data.series;
   const names = si === undefined ? null : seriesNames(data.seriesKeys, table.columns[si], columnFormat(spec, data, si));
   const rank = new Map(data.seriesKeys.map((key, i) => [key, i]));
+  // Every entry's label over the unfiltered domain (each series by each measure, in form order), told apart there: two
+  // that still read alike (a series name holding " · ", a y named twice) are numbered the same under any filter (E2 M6).
+  const domain = si === undefined ? ys.map((_, k) => ({ key: `y${k}`, label: yName(k) })) : data.seriesKeys.flatMap((sk) => ys.map((_, k) => ({ key: `${sk}\u0000${k}`, label: ys.length > 1 ? `${names!.get(sk)} · ${yName(k)}` : names!.get(sk)! })));
+  const shownLabels = distinctNames(domain.map((entry) => entry.label));
+  const labelOf = new Map(domain.map((entry, i) => [entry.key, shownLabels[i]]));
   const all: Series[] = [];
   const byKey = new Map<string, Series>();
   table.rows.forEach((row, r) =>
@@ -349,7 +371,7 @@ function cartesian(v: View): Rendered {
       let s = byKey.get(key);
       if (!s) {
         const seriesName = names?.get(typedKey(value)) ?? '';
-        const label = si === undefined ? yName(k) : ys.length > 1 ? `${seriesName} · ${yName(k)}` : seriesName;
+        const label = labelOf.get(key)!;
         const style = si === undefined ? k : (rank.get(typedKey(value)) ?? 0) * ys.length + k;
         s = { key, label, style, form: style, marks: [], format: formats[k], seriesName, measure: yName(k) };
         byKey.set(key, s);
@@ -360,13 +382,6 @@ function cartesian(v: View): Rendered {
     }),
   );
   all.sort((a, b) => a.style - b.style);
-  // two entries whose names still read alike (a series name holding " · ", a y named twice) are numbered apart
-  const seen = new Map<string, number>();
-  for (const s of all) {
-    const n = (seen.get(s.label) ?? 0) + 1;
-    seen.set(s.label, n);
-    if (n > 1) s.label = `${s.label} (${n})`;
-  }
   // More identities than forms: one labelled panel each, each in the first form (parent Decision Log 27). The domain is
   // the unfiltered snapshot's, so a filter to S0 and S6 of seven stays two named panels and never cycles a form.
   const faceted = (si === undefined ? ys.length : data.seriesKeys.length * ys.length) > MAX_FORMS;

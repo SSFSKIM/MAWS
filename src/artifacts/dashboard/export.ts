@@ -95,8 +95,11 @@ export function exportView({ spec, datasetId, descriptor, table, theme, by }: Vi
   const warnings = [...new Set([...(descriptor ? mismatchNotes(descriptor) : []), ...(drawnInPlace ? [] : rendered.warnings)])];
 
   const preview = table === null ? ({ ok: false, error: DATASET_STATES.noDataset(datasetId) } as const) : viewPreview(spec, table, datasetId);
-  const notes = [...new Set([...(preview.ok ? preview.table.notes : []), ...warnings])];
-  const markdown = [`**${mdLine(caption)}**`, preview.ok ? gfm(preview.table) : mdLine(preview.error), ...(notes.length > 0 ? [`*${mdLine(notes.join(' · '))}*`] : []), `*${mdLine(label)}*`].join('\n\n');
+  // the preview's notes under its rows, the warnings below the label as every other format places them (E2 M6), each once
+  const notes = preview.ok ? preview.table.notes : [];
+  const below = warnings.filter((warning) => !notes.includes(warning));
+  const line = (texts: readonly string[]) => (texts.length > 0 ? [`*${mdLine(texts.join(' · '))}*`] : []);
+  const markdown = [`**${mdLine(caption)}**`, preview.ok ? gfm(preview.table) : mdLine(preview.error), ...line(notes), `*${mdLine(label)}*`, ...line(below)].join('\n\n');
 
   const common = { caption, sourceLabel: label, markdown, ...(warnings.length > 0 && { warnings }) };
   if (rendered.svg !== undefined) return { svg: rendered.svg, ...svgSize(rendered.svg), ...common };

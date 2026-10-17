@@ -14,7 +14,7 @@
 // shows. Nothing here reads the locale, the clock or a DOM; nothing spreads a data-sized array into a call.
 import type { Cell } from '../datasets';
 import { DATASET_STATES, VIEW_STATES } from '../states';
-import { yColumns, type ValueFormat, type ViewFilter, type ViewSpec } from '../spec';
+import { SPEC_LIMITS, yColumns, type ValueFormat, type ViewFilter, type ViewSpec } from '../spec';
 
 export interface ViewColumn {
   name: string;
@@ -104,8 +104,9 @@ export function transform(table: ViewTable, spec: ViewSpec, datasetId: string): 
     const taken = new Set(keys);
     const measures = sources.map((y) => {
       let name = y ?? 'count';
-      if (taken.has(name)) name = y === null ? 'count of rows' : `${spec.agg} of ${y}`;
-      for (let n = 2; taken.has(name); n += 1) name = `${y === null ? 'count of rows' : `${spec.agg} of ${y}`} (${n})`;
+      const renamed = y === null ? 'count of rows' : `${spec.agg} of ${y}`;
+      if (taken.has(name)) name = withinNameBound(renamed);
+      for (let n = 2; taken.has(name); n += 1) name = withinNameBound(renamed, ` (${n})`);
       taken.add(name);
       return { name, from: y === null ? null : index.get(y)! };
     });
@@ -171,6 +172,22 @@ export function transform(table: ViewTable, spec: ViewSpec, datasetId: string): 
 export function shownColumns(data: ViewData, spec: ViewSpec): number[] {
   const columns = data.table.columns;
   return spec.columns ? spec.columns.map((name) => columns.findIndex((column) => column.name === name)) : columns.map((_, i) => i);
+}
+
+/**
+ * A generated output name within the grammar's name bound (SPEC_LIMITS.name, in code units as the parser counts), so a
+ * spec's `sort.by` or `columns` can always name it (E2 M6): past the bound, the name is cut at a whole character and
+ * marked with "…" before its `suffix`, which is always kept whole.
+ */
+function withinNameBound(name: string, suffix = ''): string {
+  if (name.length + suffix.length <= SPEC_LIMITS.name) return `${name}${suffix}`;
+  const room = SPEC_LIMITS.name - suffix.length - 1;
+  let cut = '';
+  for (const char of name) {
+    if (cut.length + char.length > room) break;
+    cut += char;
+  }
+  return `${cut}…${suffix}`;
 }
 
 const OVERFLOW = Symbol('overflow');

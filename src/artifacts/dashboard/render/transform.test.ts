@@ -2,7 +2,7 @@
 // from the unfiltered snapshot by typed keys; each column's role by index, so a measure and a grouping column of one
 // name stay apart; actual values asserted.
 import { describe, expect, it } from 'vitest';
-import type { ViewSpec } from '../spec';
+import { SPEC_LIMITS, type ViewSpec } from '../spec';
 import { columnFormat, instantOf, overflowKey, transform, typedKey, type ViewData, type ViewTable } from './transform';
 
 const SALES: ViewTable = {
@@ -36,6 +36,24 @@ describe('transform', () => {
     expect(rows({ x: 'region', y: 'sales', agg: 'mean' })).toEqual([['north', 7.5], ['south', 5], ['east', 7]]);
     expect(rows({ x: 'region', y: 'sales', agg: 'min' })).toEqual([['north', 5], ['south', 4], ['east', 7]]);
     expect(rows({ x: 'region', y: 'sales', agg: 'max', series: 'rep' })).toEqual([['north', 'Ana', 10], ['south', 'Ben', 6], ['east', 'Cy', 7], ['north', 'Dee', 5]]);
+  });
+
+  it('bounds a generated measure name by the grammar’s name bound, apart from its twins (E2 M6, the tracker’s alias row)', () => {
+    const long = `${'긴'.repeat(SPEC_LIMITS.name - 2)}𝑥`; // 256 code units, a surrogate pair at its end
+    expect(long.length).toBe(SPEC_LIMITS.name);
+    const table: ViewTable = { columns: [{ name: long, type: 'number' }, { name: `sum of ${long}`.slice(0, SPEC_LIMITS.name), type: 'number' }], rows: [[1, 2], [1, 3], [2, 4]] };
+    const named = data({ x: long, y: long, agg: 'sum' }, table).table.columns.map((c) => c.name);
+    for (const name of named) expect(name.length, name).toBeLessThanOrEqual(SPEC_LIMITS.name);
+    expect(new Set(named).size).toBe(named.length);
+    expect(named[1]).toMatch(/^sum of 긴+…$/);
+    // a twin's suffix survives its bound
+    const twins = data({ x: long, series: table.columns[1]!.name, y: [long, long], agg: 'sum' }, table).table.columns.map((c) => c.name);
+    expect(twins).toHaveLength(4);
+    expect(new Set(twins).size).toBe(4);
+    for (const name of twins) expect(name.length, name).toBeLessThanOrEqual(SPEC_LIMITS.name);
+    expect(twins[3]).toMatch(/^sum of 긴+… \(2\)$/);
+    // a sort within the grammar's bound names the measure
+    expect(rows({ x: long, y: long, agg: 'sum', sort: { by: named[1]!, dir: 'desc' } }, table)).toEqual([[1, 2], [2, 2]]);
   });
 
   it('keeps a measure apart from a grouping column of the same name: counting the rows of each region', () => {
