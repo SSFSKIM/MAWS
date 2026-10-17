@@ -2,8 +2,9 @@
 // in JSON-response mode on 127.0.0.1 only, with no SDK. Every request goes to a shared call log; a stdio instance first
 // logs what it was started with (its cwd, its arguments, its MAWS_PROBE_* environment and the SDK-minimal keys), so a
 // run can compare the instance the engine started with the entry MAWS would start from the same file. `--auth` answers
-// the MCP endpoint 401 with protected-resource metadata, so the engine reports the server needs-auth; it never issues a
-// token.
+// the MCP endpoint 401 with protected-resource and authorization-server metadata, and never issues a token. It is for
+// MAWS's own client only: no engine is ever configured with an `--auth` instance (P3-HD Decision Log 23; an engine's
+// discovery may enter its native credential custody), which support/connector-direct-probe.ts refuses at launch.
 //   node connector-direct-server.mjs stdio --id <id> --log <file> [--tools '<json>'] [any further arguments, logged]
 //   node connector-direct-server.mjs http --id <id> --log <file> [--tools '<json>'] [--auth]   (prints {"port":n})
 import { appendFileSync } from 'node:fs';

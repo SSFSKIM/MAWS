@@ -9,8 +9,10 @@
 // 127.0.0.1. Each expectation below is what the 2.1.300 readable bundle says the engine does; a different observation
 // fails the case, and the wire and the sources summary it printed are the evidence.
 //   sources: user and local (outside a repository) entries from a CLAUDE_CONFIG_DIR admitted as the engine ran them
-//          (PATH, cwd, argv, env, the SDK-minimal keys, H's fingerprint, an HTTP header as sent); a needs-auth server's
-//          source without tool metadata; a referencing entry unattested; project and dynamic entries never direct.
+//          (PATH, cwd, argv, env, the SDK-minimal keys, H's fingerprint, an HTTP header as sent); a referencing entry
+//          unattested; project and dynamic entries never direct. No engine here is ever configured with a resource that
+//          advertises authorization (Decision Log 23): the needs-auth bootstrap is proven on the retained real reports
+//          of runs 39007800364 and 39011899461 (src/engine-host/connectors/retained-needs-auth.test.ts).
 //   home: with no CLAUDE_CONFIG_DIR the file is $HOME/.claude.json.
 //   settings: what the engine hands a stdio server for a variable only settings set (with and without a default), one
 //          settings override over the launch, a benign credential-shaped name, a known-withheld synthetic name and one
@@ -133,11 +135,10 @@ async function expectSameInstance(cache: ConnectorStatusCache, layout: ProbeLayo
   expect(Object.fromEntries(Object.entries(entry.env).filter(([key]) => SDK_KEYS.includes(key))), `${name}'s SDK-minimal keys`).toEqual(started!.sdk);
 }
 
-test('sources: user and local entries are admitted as the engine ran them; a needs-auth source without tools; referencing, project and dynamic entries never direct', async () => {
+test('sources: user and local entries are admitted as the engine ran them; referencing, project and dynamic entries never direct', async () => {
   const info = test.info();
   const layout = probeLayout();
   const http = await startHttpFixture(layout, 'userhttp');
-  const auth = await startHttpFixture(layout, 'userauth', { auth: true });
   try {
     writeJson(join(layout.config, '.claude.json'), {
       hasCompletedOnboarding: true,
@@ -145,7 +146,6 @@ test('sources: user and local entries are admitted as the engine ran them; a nee
         usertoy: stdioEntry(layout, 'usertoy', { args: ['--literal', 'value'] }),
         userref: stdioEntry(layout, 'userref', { args: ['--arg', '${XDG_MAWS_PROBE_ARG}'] }),
         userhttp: { type: 'http', url: http.url, headers: { 'X-Probe-Header': PROBE_VALUE } },
-        userauth: { type: 'http', url: auth.url },
       },
       projects: { [layout.project]: { hasTrustDialogAccepted: true, mcpServers: { localtoy: stdioEntry(layout, 'localtoy') } } },
     });
@@ -173,10 +173,6 @@ test('sources: user and local entries are admitted as the engine ran them; a nee
       expect(sent.at(-1)).toBe(PROBE_VALUE);
       if (httpSource.ok) expect(await cache.readEntry(httpSource.source)).toMatchObject({ ok: true, entry: { transport: 'http', headers: { 'X-Probe-Header': sent.at(-1) } } });
 
-      // the bootstrap case: the engine reports the protected server needs-auth with no tools, still an attested source
-      expect(named(status, 'userauth'), 'userauth').toMatchObject({ status: 'needs-auth', scope: 'user' });
-      expect(await cache.resolve(layout.project, 'userauth', 'rows')).toMatchObject({ ok: true, source: { transport: 'http', url: auth.url }, tool: { readOnly: null } });
-
       // a reference: the engine reports its expansion; MAWS does not attest it under the literal-only policy
       expect(named(status, 'userref'), 'userref').toMatchObject({ status: 'connected', scope: 'user', config: { args: expect.arrayContaining([PROBE_ARG]) } });
       expect(await cache.resolveSource(layout.project, 'userref')).toEqual({ ok: false, why: 'unattested' });
@@ -192,7 +188,6 @@ test('sources: user and local entries are admitted as the engine ran them; a nee
     });
   } finally {
     http.close();
-    auth.close();
     layout.close();
   }
 });
@@ -636,12 +631,18 @@ test('disconnect: the page reads through MAWS’s own instance after the engine 
       const supervisor = await scene.supervisor(run.page);
       scene.note('direct instance', { members, supervisor });
 
-      // that scratch main is killed: the detached host sees its client go and ends the whole instance, call pending
+      // that scratch main is killed: the detached host sees its client go and ends the whole instance, call pending. The
+      // bound counts from just before the kill, so the wait for main's own exit is inside it.
+      const killedAt = Date.now();
       await scene.killApp(run);
       await expect
         .poll(() => members.filter(alive), { timeout: 5_000, intervals: [100], message: 'wrapper, grandchild and server are gone within 5 s of main’s death' })
         .toEqual([]);
-      expect(scene.pidAlive(supervisor), 'the detached host outlived main, so it was its own client-gone cleanup that ended the instance').toBe(true);
+      const elapsedMs = Date.now() - killedAt;
+      const supervisorSurvived = scene.pidAlive(supervisor);
+      await evidence(info, 'direct-main-loss', { elapsedMs, members: members.length, heldSubmissions: scene.toolCalls().filter((entry) => entry.pid === heldServer).length, supervisorSurvived });
+      expect(elapsedMs, 'from main’s kill until every member is gone').toBeLessThan(5_000);
+      expect(supervisorSurvived, 'the detached host outlived main, so it was its own client-gone cleanup that ended the instance').toBe(true);
       await info.attach('direct-members.json', { body: JSON.stringify({ engineMembers, first, firstServer, second, heldServer }, null, 2), contentType: 'application/json' });
     },
     { server: wrappedServer },

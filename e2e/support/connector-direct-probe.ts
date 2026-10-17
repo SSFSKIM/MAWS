@@ -68,13 +68,27 @@ export interface LogEntry {
 
 export const readLog = (layout: ProbeLayout): LogEntry[] => (existsSync(layout.log) ? readFileSync(layout.log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as LogEntry) : []);
 
+// The origins of auth-advertising fixtures this process started: for MAWS's own client only (P3-HD Decision Log 23).
+const authOrigins = new Set<string>();
+
+// `auth`: a MAWS-client-only fixture; a probe engine whose configuration names one refuses to launch.
 export async function startHttpFixture(layout: ProbeLayout, id: string, options: { auth?: boolean } = {}): Promise<{ url: string; close(): void }> {
   const child: ChildProcess = spawn(process.execPath, [DIRECT_SERVER, 'http', '--id', id, '--log', layout.log, ...(options.auth ? ['--auth'] : [])], { stdio: ['ignore', 'pipe', 'inherit'] });
   const port = await new Promise<number>((resolve, reject) => {
     child.stdout!.once('data', (chunk: Buffer) => resolve((JSON.parse(chunk.toString('utf8').split('\n')[0]!) as { port: number }).port));
     child.once('exit', (code) => reject(new Error(`the http fixture ${id} exited (${code})`)));
   });
+  if (options.auth) authOrigins.add(`127.0.0.1:${port}`);
   return { url: `http://127.0.0.1:${port}/mcp`, close: () => void child.kill('SIGTERM') };
+}
+
+// No engine may see a resource that advertises authorization, not even its 401 (P3-HD Decision Log 23): the engine's
+// configuration as this launch would read it (both config homes, the project's .mcp.json, the user settings, the
+// dynamic servers) must name no auth fixture's origin.
+export function assertNoAuthFixture(layout: ProbeLayout, dynamic?: Record<string, unknown>): void {
+  const files = [join(layout.config, '.claude.json'), join(layout.home, '.claude.json'), join(layout.config, 'settings.json'), join(layout.project, '.mcp.json')];
+  const configuration = [...files.filter((path) => existsSync(path)).map((path) => readFileSync(path, 'utf8')), JSON.stringify(dynamic ?? {})].join('\n');
+  for (const origin of authOrigins) if (configuration.includes(origin)) throw new Error(`a probe engine must never be configured with the auth-advertising fixture at ${origin} (P3-HD Decision Log 23)`);
 }
 
 // The PATH a probe launch hands its engine: the layout's bin first, then the runner's.
@@ -94,6 +108,7 @@ let launches = 0;
 
 // `configDir`: launch with CLAUDE_CONFIG_DIR at the layout's config home, else with HOME alone.
 export async function startProbeEngine(layout: ProbeLayout, options: { cwd: string; configDir: boolean; dynamic?: Record<string, unknown>; appSessionId?: string; launchEnv?: Record<string, string>; syntheticEnv?: Record<string, string> }): Promise<ProbeEngine> {
+  assertNoAuthFixture(layout, options.dynamic); // before anything of the engine runs
   const engine = installedEngine();
   launches += 1;
   const captured: Record<string, string> = {
