@@ -157,11 +157,30 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
     },
     [artifactId, appSessionId, context /* P3-F1 */, hostId, artifactKind],
   );
+  // P3-F1 start: a comment waiting on its session belongs to the target it was made for; the target moving on (another
+  // directory, a session found, a chat shown beside it) withdraws it and its draft, so its start, settling later, opens
+  // nothing on the old one. An equal target given anew is the same target.
+  const target = targetKeyOf(appSessionId, context);
+  const madeFor = useRef(target);
+  useLayoutEffect(() => {
+    if (madeFor.current === target) return;
+    madeFor.current = target;
+    cancelPendingComment(hostId);
+  }, [target, hostId]);
+  // P3-F1 end
   const namesParent = appSessionId === undefined; // P3-F1
   return useMemo(() => {
     const binding: Binding = { artifactId, hostId, mode, visible, holdReplica, namesParent /* P3-F1 */ };
     return { opened, overlay: (props: CommentOverlayProps): ReactNode => <DocumentCardHost {...props} binding={binding} /> };
   }, [opened, artifactId, hostId, mode, visible, holdReplica, namesParent /* P3-F1 */]);
+}
+
+// P3-F1: where a document's comments go, by what it is rather than by the object that says it
+function targetKeyOf(appSessionId: AppSessionId | undefined, context: ArtifactSessionContext | undefined): string {
+  if (appSessionId !== undefined) return JSON.stringify(['session', appSessionId]);
+  if (context?.kind === 'session') return JSON.stringify(['session', context.appSessionId]);
+  if (context?.kind === 'directory') return JSON.stringify(['directory', context.path, context.projectId]);
+  return JSON.stringify(['none']);
 }
 
 const threadOf = (card: OpenCard | null): string | null => (card?.target?.kind === 'artifact' ? card.target.threadId : null);

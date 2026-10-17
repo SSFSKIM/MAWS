@@ -375,6 +375,85 @@ describe('a comment from a document with no chat beside it', () => {
     expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: LATER, reason: 'read', options: { requireEmptyMessage: true } }]);
   });
 
+  // The panel's follow-up: a pending comment belongs to the target it was made for. The target moving on, with no other
+  // Comment, withdraws it and its draft; the start it waited on still runs to its end for its own directory.
+  it('a context that moves while its start runs withdraws the comment at once; the start then opens nothing, its session kept for its directory', async () => {
+    const { reach, comment, move } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    expect(notice()!.dataset.commentContext).toBe('starting');
+    move({ context: OTHER });
+    expect(notice(), 'withdrawn without another Comment').toBeNull();
+    expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
+    expect(reach.setActive).toHaveBeenLastCalledWith(null);
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(async () => fake.event('session.setup', ready(STARTED)));
+    expect(useCommentCard.getState().open, 'no card on the old directory’s session').toBeNull();
+    expect(notice()).toBeNull();
+    const s = useSessions.getState();
+    useSessions.setState({ records: new Map([...s.records, [STARTED, record(STARTED, { projectId: P1 })]]), recordsVersion: s.recordsVersion + 1 });
+    move({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    expect(fake.invoked('session.create'), 'back in its directory, the session it made is the one reused').toHaveLength(1);
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: STARTED, reason: 'read', options: { requireEmptyMessage: true } }]);
+  });
+
+  it('a context that moves away and back while its start runs: the old comment stays withdrawn, a new Comment joins the same start', async () => {
+    const { reach, comment, move } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    move({ context: OTHER });
+    move({ context: DIRECTORY });
+    expect(notice()).toBeNull();
+    expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
+    comment(second);
+    await act(async () => {});
+    expect(fake.invoked('session.create'), 'one start for the directory').toHaveLength(1);
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(async () => fake.event('session.setup', ready(STARTED)));
+    expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED, target: { threadId: second.threadId } });
+  });
+
+  it('a chat shown beside it while a comment waits withdraws the comment, which never opens on the artifact’s context', async () => {
+    const { reach, comment, move } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    move({ appSessionId: SHOWN });
+    expect(notice()).toBeNull();
+    expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(async () => fake.event('session.setup', ready(STARTED)));
+    expect(useCommentCard.getState().open).toBeNull();
+  });
+
+  it('no context, then one: the notice saying why is withdrawn as the target moves', async () => {
+    const { reach, comment, move } = mount({ context: { kind: 'none' } });
+    comment();
+    await act(async () => {});
+    expect(notice()!.dataset.commentContext).toBe('none');
+    move({ context: { kind: 'session', appSessionId: OWN } });
+    expect(notice()).toBeNull();
+    expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
+    expect(useCommentCard.getState().open).toBeNull();
+  });
+
+  it('the same target given anew (an equal context object) keeps the waiting comment, which opens on its start', async () => {
+    const { reach, comment, move } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    move({ context: { projectId: P1, path: '/work/p1', kind: 'directory' } });
+    expect(notice()!.dataset.commentContext).toBe('starting');
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(async () => fake.event('session.setup', ready(STARTED)));
+    expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED, target: { threadId: passage.threadId } });
+    expect(reach.discard).not.toHaveBeenCalled();
+  });
+
   it('the editor going withdraws a pending comment, and its start then opens nothing', async () => {
     const { reach, view, comment } = mount({ context: DIRECTORY });
     comment();
