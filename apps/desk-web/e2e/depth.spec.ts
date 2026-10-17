@@ -1,8 +1,9 @@
-// M1 of the DC6 plan, in a browser against DC5's DX3 double and the recorded session's plane (`depth-player.ts`):
-// selecting a direct channel opens the depth column on the session's main transcript, drawn by MAWS's transcript view;
+// M1 of the DC6 plan, in a browser against DC5's DX3 double and the recorded session's plane (`depth-player.ts`),
+// moved to the center by DC9's M3 (the session view draws the session's main transcript there, the depth column's
+// Transcript tab gone): selecting a direct channel draws the session's main transcript, through MAWS's transcript view;
 // a response streams per content block and settles into the rows a reload draws; a reconnect, a hub restart, and a
 // chunk the snapshot already held each end with no gap and no duplicated text; older rows page in at the top with the
-// reader kept in place; an end keeps what was drawn and says why, and the column subscribes again once the session is
+// reader kept in place; an end keeps what was drawn and says why, and the view subscribes again once the session is
 // reachable; a row's script, raw HTML, and `javascript:` link draw inert.
 import type { Locator, Page } from '@playwright/test';
 import type { JsonObject } from 'desk-hub/protocol';
@@ -22,11 +23,14 @@ async function openDepth(page: Page, hub: HubDouble, options: Partial<PlayerOpti
   const player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, ...options });
   await seedKey(page, hub);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
-  const depth = page.getByTestId('depth');
+  const depth = page.getByTestId('session-view');
   await expect(depth).toHaveAttribute('data-session', S.asks);
   await expect.poll(() => player.subscriptions()).toBe(1);
   return { player, depth };
 }
+
+/** The session view's status word, in the center's header. */
+const status = (page: Page) => page.getByTestId('session-status');
 
 /** How many times `text` occurs in the column's drawn text: once when settled, never twice. */
 const occurrences = (depth: Locator, text: string) => depth.evaluate((el, t) => (el.textContent ?? '').split(t).length - 1, text);
@@ -54,7 +58,7 @@ test.afterEach(async ({ page }) => {
 test('a direct channel draws its transcript; a response streams per block, settles, and a reload draws the same rows', async ({ page, hub }) => {
   const { player, depth } = await openDepth(page, hub, { lateRows: true, strayAfterBlockRow: 4 });
   // The snapshot is taken at the start; the session's first turn arrives live.
-  await expect(depth.getByTestId('depth-status')).toHaveText('');
+  await expect(status(page)).toHaveText('');
   player.advanceTo(isChunk('thinking'));
   await expect(depth).toContainText('Think briefly first');
   player.advance(1); // the first thinking chunk: live thinking, MAWS's own row
@@ -147,7 +151,7 @@ test('older rows page in when the reader reaches the top, and the reader stays w
   await expect.poll(() => hub.up.filter((u) => u.frame.t === 'rows').length).toBe(1); // the reader reached the top
   // The reader's anchor: the first drawn row whose id outlives the rebuild (a turn's time and divider rows are keyed
   // by the turn, which the older page can re-identify once it holds the turn's prompt).
-  const anchorId = (await depth.locator('[data-row-id]:not([data-row-id^="time:"]):not([data-row-id^="divider:"])').first().getAttribute('data-row-id'))!;
+  const anchorId = (await depth.locator('[data-row-id]:not([data-row-id^="time:"]):not([data-row-id^="divider:"]):not([data-row-id^="owner-record:"])').first().getAttribute('data-row-id'))!;
   // Live chunks while the page is on its way, drawn before the reader's place is taken.
   const streamed = (await streamingRows(depth).last().textContent()) ?? '';
   player.advance(3);
@@ -163,7 +167,7 @@ test('older rows page in when the reader reaches the top, and the reader stays w
   // The row the reader was looking at stays where it was, whatever changed beneath it (here a subagent's hand-back row,
   // which reads its agent's name once the older page holds the call that started it). The rows above it at the top —
   // the oldest turn's time and divider — are renamed by the page, so the list's own anchor cannot hold this; the
-  // depth pane's does (`view/keep-place.ts`).
+  // pane's does (`view/keep-place.ts`).
   const at = (rows: Array<{ id: string; y: number }>) => rows.find((r) => r.id === anchorId)!.y;
   expect(Math.abs(at(after) - at(before))).toBeLessThan(4);
   player.advance(player.script.length);
@@ -194,7 +198,25 @@ test("a response cut off mid-block drops its partial text at its step-end; what 
   await expect.poll(() => rowIds(depth)).toEqual(settled);
 });
 
-test('an end keeps what was drawn and says why; the column subscribes again once the session is reachable', async ({ page, hub }) => {
+test('an end keeps what was drawn and says why, and the view takes the transcript up again while the session stays reachable', async ({ page, hub }) => {
+  const { player, depth } = await openDepth(page, hub);
+  await midAnswer(player, depth, 'Both sub');
+  // The machine's lease replaced online to online: its old subscriptions end `machine-offline`, no offline between.
+  player.end('machine-offline');
+  await expect(depth.getByTestId('depth-unavailable')).toContainText('The machine is offline');
+  await expect(depth.getByTestId('depth-unavailable')).toContainText('Trying again in 1 s.');
+  await expect(status(page)).toHaveText('Unavailable');
+  await expect(streamingRows(depth).last()).toContainText('Both sub');
+  await expect(depth).toContainText('Think briefly first');
+  await expect.poll(() => player.subscriptions()).toBe(1); // after the backoff's first second
+  await expect(depth.getByTestId('depth-unavailable')).toHaveCount(0);
+  await expect(status(page)).toHaveText('');
+  player.advance(player.script.length);
+  await expect(streamingRows(depth)).toHaveCount(0);
+  await expect.poll(() => occurrences(depth, ANSWER)).toBe(1);
+});
+
+test("while the machine is offline the center falls back to the log-built stream and the column keeps the transcript; once it is back the view draws it again and subscribes once", async ({ page, hub }) => {
   const { player, depth } = await openDepth(page, hub);
   await midAnswer(player, depth, 'Both sub');
   const policy = { read_only: false, ceiling: 'default' };
@@ -203,9 +225,9 @@ test('an end keeps what was drawn and says why; the column subscribes again once
     { machine: 'SK.local', online: true, policy, checkouts: [] },
   ]);
   player.end('machine-offline');
-  await expect(depth.getByTestId('depth-unavailable')).toContainText('The machine is offline');
-  await expect(streamingRows(depth).last()).toContainText('Both sub');
-  await expect(depth).toContainText('Think briefly first');
+  await expect(page.getByTestId('machine-offline')).toBeVisible();
+  await expect(depth).toHaveCount(0);
+  await expect(page.getByTestId('channel-events')).toBeVisible();
   player.advance(4); // the machine goes on; nobody is subscribed
   await page.waitForTimeout(200);
   expect(player.subscriptions()).toBe(0);
@@ -215,7 +237,9 @@ test('an end keeps what was drawn and says why; the column subscribes again once
     { machine: 'SK.local', online: true, policy, checkouts: [] },
   ]);
   hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session: S.asks, kind: 'presence', sub: null, n: null, body: { record: { status: 'busy' }, bridge: true } });
+  await expect(depth).toBeVisible();
   await expect.poll(() => player.subscriptions()).toBe(1);
+  await expect(depth).toContainText('Think briefly first'); // what the column kept, continued by the fresh snapshot
   await expect(depth.getByTestId('depth-unavailable')).toHaveCount(0);
   player.advance(player.script.length);
   await expect(streamingRows(depth)).toHaveCount(0);
@@ -230,14 +254,14 @@ test('a subscription the hub ends before its snapshot reads as reconnecting, not
   player.skip(player.script.length);
   await seedKey(page, hub);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
-  const depth = page.getByTestId('depth');
+  const depth = page.getByTestId('session-view');
   await expect.poll(() => hub.subscriptions(PROJECT).length).toBeGreaterThanOrEqual(2); // ended at n 0, then taken up again
-  await expect(depth.getByTestId('depth-status')).toHaveText('Reconnecting…');
+  await expect(status(page)).toHaveText('Reconnecting…');
   await expect(depth.getByTestId('depth-reconnecting')).toBeVisible();
   expect(player.releaseSubscriptions()).toBeGreaterThanOrEqual(1);
   await expect(depth).toContainText(ANSWER);
   await expect(depth.getByTestId('depth-reconnecting')).toHaveCount(0);
-  await expect(depth.getByTestId('depth-status')).toHaveText('');
+  await expect(status(page)).toHaveText('');
 });
 
 const HOSTILE =

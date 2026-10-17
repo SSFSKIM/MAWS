@@ -111,6 +111,50 @@ describe('the reader’s place through an older page', () => {
     expect(s.at()).toBe(100);
   });
 
+  it('a touch begun while the page was on its way, and moving once the hold has begun, keeps the place it scrolls to', async () => {
+    const s = scene();
+    s.view.rerender({ rows: s.initial, loading: true });
+    s.scroller.dispatchEvent(new Event('touchstart')); // under way before the answer: no hold yet to stop
+    s.row.remove();
+    s.view.rerender({ rows: rowsOf(...Array.from({ length: 100 }, (_, i) => `user:older-${i}`), KEPT), loading: false });
+    await frames(3); // the hold has begun and put the row back
+    expect(s.at()).toBe(100);
+    s.scroller.dispatchEvent(new Event('touchmove'));
+    s.moveTo(140); // the reader's finger moves the list down by 40 px
+    s.scroller.dispatchEvent(new Event('scroll'));
+    await frames(12);
+    expect(s.at()).toBe(140);
+    window.dispatchEvent(new Event('touchend'));
+  });
+
+  it('a press held down through the answer makes its scrolls the reader’s, with no move event of its own', async () => {
+    const s = scene();
+    s.view.rerender({ rows: s.initial, loading: true });
+    s.scroller.dispatchEvent(new Event('pointerdown')); // a press on the scrollbar, dragged after the page lands
+    s.row.remove();
+    s.view.rerender({ rows: rowsOf(...Array.from({ length: 100 }, (_, i) => `user:older-${i}`), KEPT), loading: false });
+    await frames(3);
+    s.moveTo(140);
+    s.scroller.dispatchEvent(new Event('scroll'));
+    await frames(12);
+    expect(s.at()).toBe(140);
+    window.dispatchEvent(new Event('pointerup'));
+  });
+
+  it('a gesture ended before the answer leaves the list’s own scrolls to the hold', async () => {
+    const s = scene();
+    s.view.rerender({ rows: s.initial, loading: true });
+    s.scroller.dispatchEvent(new Event('pointerdown'));
+    window.dispatchEvent(new Event('pointerup'));
+    s.row.remove();
+    s.view.rerender({ rows: rowsOf(...Array.from({ length: 100 }, (_, i) => `user:older-${i}`), KEPT), loading: false });
+    await frames(5);
+    s.moveTo(60); // the list scrolls again as it measures
+    s.scroller.dispatchEvent(new Event('scroll'));
+    await frames(12);
+    expect(s.at()).toBe(100);
+  });
+
   it('a reader the list holds at the end is the list’s, and the answered page leaves nothing to restore later', () => {
     const s = scene();
     (s.handle as unknown as { following: boolean }).following = true;

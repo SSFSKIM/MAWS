@@ -5,12 +5,15 @@
 // collapsed until opened; **On disk**, agents whose status the held rows do not say. What MAWS's list draws from its own
 // host is left out, since the desk has no source for it: the team roster (MAWS's transcript activity of teammate
 // listings), an agent waiting on a request (MAWS's attention store), and the live footer and disk-only note (MAWS's
-// engine status). A row opens the agent's own transcript.
+// engine status). A row opens the agent's own transcript. A section's heading carries MAWS's disclosure chevron (its
+// transcript's, turned while open), which MAWS's list draws without: the tree is the column's first tab, and a closed
+// Done must read as closed, not as empty.
 import type { TaskId } from '@shared/graph/ids';
 import { SUBAGENTS_COPY } from '../../../../../src/renderer/src/tools/agents/copy';
 import { elapsedOf, formatElapsed } from '../../../../../src/renderer/src/tools/agents/model/elapsed';
 import { agentRows, agentTree, isEnded, outcomeSummary, rowSecondLine, rowTitle, shownRows, type TaskGraph, type TreeRow } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import { outcomeOf, refOf, SLOW_TICK_MS, useTicker } from '../../../../../src/renderer/src/tools/agents/subagents/shared';
+import { Chevron } from '../../../../../src/renderer/src/transcript/view/rows/parts';
 import { SubagentGlyph } from '../../../../../src/renderer/src/transcript/view/rows/Subagent';
 
 export type TreeSection = 'agents' | 'done' | 'disk';
@@ -72,7 +75,8 @@ export function SubagentTree({ tasks, view, onView, onOpen }: Props) {
       {SECTIONS.filter((name) => rows[name].length > 0).map((name) => (
         <section key={name} data-section={name} aria-label={headings[name]} className="flex shrink-0 flex-col border-b border-border pb-1 last-of-type:border-b-0">
           <h3 className="m-0 flex h-9 items-center px-3.5 text-ui font-semibold">
-            <button type="button" aria-expanded={view.expanded[name]} onClick={() => toggle(name)} className="rounded-sm outline-accent focus-visible:outline-2">
+            <button type="button" aria-expanded={view.expanded[name]} onClick={() => toggle(name)} className="inline-flex items-center gap-1.5 rounded-sm outline-accent focus-visible:outline-2">
+              <Chevron />
               {headings[name]}
             </button>
           </h3>

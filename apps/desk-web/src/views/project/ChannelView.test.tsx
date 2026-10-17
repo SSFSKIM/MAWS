@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 // A direct channel's local state belongs to its session: moving from one session's channel to another's carries over
-// no draft, no RPC status, and no Retire confirmation, so a confirmation begun for A can never retire B.
+// no draft, no RPC status, and no Retire confirmation, so a confirmation begun for A can never retire B. On a desktop
+// whose session's machine is online the center is the session view (DC9), its own chunk, stood in for here: what it
+// draws is its own suite's; the log-built stream is the center of a session whose machine is offline.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { importOrgKey, type LogEvent } from 'desk-hub/protocol';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../../test/vectors';
 import { memoryLogRecord } from '../../log/record';
@@ -10,6 +12,13 @@ import { ProjectConnection } from '../../project/connection';
 import type { DeskSession } from '../../shell/sessions';
 import { DeskContext } from '../conversation/desk-context';
 import { ChannelView } from './ChannelView';
+
+vi.mock('./SessionView', () => ({
+  default: function SessionView({ session }: { session: DeskSession }) {
+    return <section data-testid="session-view" data-session={session.session} />;
+  },
+  SessionStatus: () => <span data-testid="session-status">Loading…</span>,
+}));
 
 const A = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
 const B = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a';
@@ -84,8 +93,28 @@ it('draws every control that issues an RPC disabled while the project socket is 
   expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false);
 });
 
+it("draws a direct channel's session view on a desktop while its machine is online, its status word beside the actions; the log-built stream once it is offline", async () => {
+  const online = session(A, 'maws-45');
+  const view = (s: DeskSession) => (
+    <DeskContext.Provider value={{ connection, member: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', sessions: new Map([[A, s]]) }}>
+      <ChannelView name="MAWS" channel={{ kind: 'session', session: A }} session={s} events={[]} />
+    </DeskContext.Provider>
+  );
+  const { rerender } = render(view(online));
+  expect((await screen.findByTestId('session-view')).dataset.session).toBe(A);
+  expect(screen.getByTestId('session-status').parentElement?.contains(screen.getByRole('button', { name: 'Retire…' }))).toBe(true);
+  expect(screen.queryByTestId('channel-events')).toBeNull();
+  expect(screen.getByRole('textbox', { name: 'Message maws-45' })).toBeTruthy(); // the composer stays below it
+
+  rerender(view({ ...online, machineOnline: false }));
+  expect(screen.getByTestId('machine-offline')).toBeTruthy();
+  expect(screen.queryByTestId('session-view')).toBeNull();
+  expect(screen.queryByTestId('session-status')).toBeNull();
+  expect(screen.getByTestId('channel-events')).toBeTruthy();
+});
+
 it("draws each item of a session's stream once as it changes (the stream and the composer each keep their own key)", () => {
-  const sessions = new Map([[A, session(A, 'maws-45')]]);
+  const sessions = new Map([[A, { ...session(A, 'maws-45'), machineOnline: false }]]);
   const mac = { nonce: 'n', value: 'v' };
   const joined = { offset: 1, event: { ts: '2026-10-15T08:00:00.000Z', writer: `mini/${A}`, seq: 1, kind: 'joined', session: A, alias: 'maws-45', machine: 'mini', seat: '', mac } as LogEvent };
   render(

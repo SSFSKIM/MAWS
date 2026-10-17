@@ -4,18 +4,22 @@
 // change id once the page holds the turn's prompt (`turn:e<event>` becomes `turn:<uuid>`): the row under a reader at
 // the top is exactly the one whose key goes, the list finds no anchor, and the reader is thrown to the top of the page.
 // So the pane keeps its own anchor: the first row in view whose id outlives a rebuild, and how far below the viewport's
-// top it sat. The page's rows are the first rows drawn after the request is answered (rows that land while it is out
-// are live ones, beneath the reader, and settle nothing here); when they are, the scroller moves by however far that
-// row moved (nothing, when the list's anchor held). A row the list has not rendered (a page longer than its overscan)
-// is jumped to by index, and the offset is finished once the list has drawn and measured it.
+// top it sat, read when the page is answered. The page's rows are the first rows drawn after the answer (rows that land
+// while it is out are live ones, beneath the reader, and settle nothing here); when they are, the scroller moves by
+// however far that row moved (nothing, when the list's anchor held), and is held there frame by frame while the list
+// measures the page's rows at their sizes, each of which, above the reader, moves them again. A row the list has not
+// rendered (a page longer than its overscan) is jumped to by index first, then held the same way.
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
 
-/** Rows keyed by their turn (which a rebuild can rename) or drawn by the stream (which a row replaces). */
-const VOLATILE = /^(time|divider|desk-stream):/;
+/** Rows keyed by their turn (which a rebuild can rename: the report's working record too) or drawn by the stream (which a row replaces). */
+const VOLATILE = /^(time|divider|owner-record|desk-stream):/;
 /** What only a reader does to the scroller (the list's own scrolling raises none of it): their move ends a correction. */
-const INTENT = ['wheel', 'touchstart', 'pointerdown'] as const;
+const INTENT = ['wheel', 'touchstart', 'touchmove', 'pointerdown'] as const;
+/** A press or a touch, from its start on the scroller until it ends anywhere: while one is down, a scroll is the reader's. */
+const GESTURE_START = ['touchstart', 'pointerdown'] as const;
+const GESTURE_END = ['touchend', 'touchcancel', 'pointerup', 'pointercancel'] as const;
 const NAVIGATION_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 /** Frames the offset must hold, after an index jump, before the place is the list's again; and the most it waits. */
 const STEADY_FRAMES = 5;
@@ -55,23 +59,30 @@ export function useKeepPlaceThroughOlderRows(list: RefObject<TranscriptListHandl
   const place = useRef<Place | null>(null);
   const asked = useRef(false); // an older page is on its way
   const landed = useRef(false); // it was answered; its rows are the next drawn
-  const correcting = useRef<number | null>(null); // the frame request of an offset being finished after an index jump
+  const correcting = useRef<number | null>(null); // the frame request of an offset being held after a page
+  const drawn = useRef(rows); // the rows the last layout below handled: the ones the list draws now
 
   // The reader's place as of their last scroll (rows drawn beneath it, the stream included, do not move it).
   useEffect(() => {
     const scroller = list.current?.scrollElement;
     if (!scroller) return;
-    const scrolled = () => {
-      if (correcting.current === null) place.current = placeOf(scroller);
-    };
     // A reader who wheels, touches, presses on the list or its scrollbar, or pages with the keys takes their place back:
     // a correction still running stops, and their scroll is their place. The list's own scrolling (its jump, its
-    // realignments while it measures) raises no such event, so it never stops one.
+    // realignments while it measures) raises no such event, so it never stops one. A gesture already under way when a
+    // page lands (a finger down, a scrollbar held while the page was out) raised its start before there was anything to
+    // stop: while it is down, its moves and the scrolls it makes are the reader's and stop the hold the page began.
+    let gesture = false;
     const yieldToReader = () => {
       if (correcting.current === null) return;
       cancelAnimationFrame(correcting.current);
       correcting.current = null;
     };
+    const scrolled = () => {
+      if (gesture) yieldToReader();
+      if (correcting.current === null) place.current = placeOf(scroller);
+    };
+    const began = () => void (gesture = true);
+    const ended = () => void (gesture = false);
     const keyed = (event: KeyboardEvent) => {
       if (NAVIGATION_KEYS.has(event.key)) yieldToReader();
     };
@@ -79,22 +90,34 @@ export function useKeepPlaceThroughOlderRows(list: RefObject<TranscriptListHandl
     scroller.addEventListener('scroll', scrolled, { passive: true });
     for (const kind of INTENT) scroller.addEventListener(kind, yieldToReader, { passive: true });
     scroller.addEventListener('keydown', keyed);
+    for (const kind of GESTURE_START) scroller.addEventListener(kind, began, { passive: true });
+    for (const kind of GESTURE_END) addEventListener(kind, ended, { passive: true });
     return () => {
       scroller.removeEventListener('scroll', scrolled);
       for (const kind of INTENT) scroller.removeEventListener(kind, yieldToReader);
       scroller.removeEventListener('keydown', keyed);
+      for (const kind of GESTURE_START) scroller.removeEventListener(kind, began);
+      for (const kind of GESTURE_END) removeEventListener(kind, ended);
       yieldToReader();
     };
   }, [list]);
 
-  // Before the rows' layout effect below, so a render that brings both the answer and its rows restores at once.
+  // Before the rows' layout effect below, so a render that brings both the answer and its rows restores at once. The
+  // place is armed at the answer, from what is drawn then: since the reader's last scroll a row above them may have
+  // been measured at its size rather than its guess (MAWS's list guesses a turn's time row at 56 px), which moves no
+  // scroll position and so leaves no scroll event to read it by. The page's own rows are not drawn yet when the answer
+  // comes alone (the rebuilt source installs later); when they come in the same render, the place stays as it was.
   useLayoutEffect(() => {
-    if (loadingOlder) asked.current = true;
-    else if (asked.current) {
-      asked.current = false;
-      landed.current = true;
+    if (loadingOlder) {
+      asked.current = true;
+      return;
     }
-  }, [loadingOlder]);
+    if (!asked.current) return;
+    asked.current = false;
+    landed.current = true;
+    const scroller = list.current?.scrollElement;
+    if (scroller && correcting.current === null && rows === drawn.current) place.current = placeOf(scroller) ?? place.current;
+  }, [list, loadingOlder, rows]);
 
   // After the list's own layout for the new rows (a child's layout effects run first).
   useLayoutEffect(() => {
@@ -106,17 +129,22 @@ export function useKeepPlaceThroughOlderRows(list: RefObject<TranscriptListHandl
       // These are the page's rows. A reader the list holds at the end, or one with no row in view, is the list's.
       landed.current = false;
       const index = kept === null || handle.following ? -1 : rows.findIndex((row) => row.id === kept.id);
-      if (kept !== null && index >= 0 && !settle(scroller, kept)) {
-        handle.scrollToIndex(index, 'start');
-        finishAfterJump(scroller, kept);
+      if (kept !== null && index >= 0) {
+        // Drawn or not, the page's rows go on being measured over the next frames (the list draws them at its guesses,
+        // then at their size), each measurement above the reader moving them: the place is held until it holds.
+        if (!settle(scroller, kept)) handle.scrollToIndex(index, 'start');
+        holdPlace(scroller, kept);
+        drawn.current = rows;
         return;
       }
     }
     if (correcting.current === null) place.current = placeOf(scroller);
+    drawn.current = rows;
 
-    // The list jumps to the row and draws it over the next frames (measuring rows it had guessed, and scrolling again
-    // while its target moves): the offset is moved back each frame until it holds.
-    function finishAfterJump(scroller: HTMLElement, kept: Place): void {
+    // The list draws the page over the next frames (measuring rows it had guessed, and scrolling again while a jump's
+    // target moves): the offset is moved back each frame until it holds.
+    function holdPlace(scroller: HTMLElement, kept: Place): void {
+      if (correcting.current !== null) cancelAnimationFrame(correcting.current);
       let frames = 0;
       let steady = 0;
       const frame = () => {

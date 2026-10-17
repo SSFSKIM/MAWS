@@ -39,6 +39,12 @@ const presence = (hub: HubDouble, machine: string, session: string, status: stri
 const say = (hub: HubDouble, from: [string, string, string], to: Array<[string, string]> | '*', text: string) =>
   hub.append(PROJECT, { writer: `${from[2]}/${from[0]}`, kind: 'say', from: from[1], to: to === '*' ? '*' : to.map(([session, alias]) => ({ session, alias })), text });
 const FE: [string, string, string] = [S.works, 'maws-fe', 'SK.local'];
+
+// DC9's M3 draws a direct channel's center on a desktop as its session view (MAWS's report over the session's own
+// transcript, which this double does not serve), so the tests marked `fixme` below — which read the log-built stream of
+// a direct channel whose machine is online: its working-record folds, its lifecycle lines and deliveries, its request
+// cards, a landing on a card — wait for DC9's M4, which brings those into the session view (tail rows, the inline
+// requests, the end marker, the fallbacks) and moves these tests onto it.
 const M45: [string, string, string] = [S.asks, 'maws-45', 'mini'];
 
 test('the group chat draws the log as §4 says: messages, humans, lifecycle lines, and agent traffic folded per run', async ({ page, hub }) => {
@@ -123,7 +129,7 @@ test("posting follows sminos say's grammar, sealed by the member, and each recip
   await expect(deliveriesOf(allEvent)).toContainText('maws-fe: not delivered: the machine is read-only');
 });
 
-test('a direct channel: the exchange with the working record folded, and Send, Steer, Interrupt, model, and compact issuing sealed RPCs whose results render', async ({ page, hub }) => {
+test.fixme('a direct channel: the exchange with the working record folded, and Send, Steer, Interrupt, model, and compact issuing sealed RPCs whose results render', async ({ page, hub }) => {
   await stageProject(hub);
   await hub.append(PROJECT, { writer: `SK.local/${S.works}`, kind: 'message', from: 'maws-fe', to: 'host', text: 'the store is split', src: 'r5#0' });
   await open(page, hub);
@@ -213,7 +219,7 @@ test("controls a session cannot use are drawn disabled with §5's reason, by kin
   await expect(composer.getByTestId('composer-note')).toHaveText('starts a turn');
 });
 
-test('a retired session keeps its history with no Resume; an ended one offers Resume, a send to it shows as recorded, and retire and spawn go out as RPCs', async ({ page, hub }) => {
+test.fixme('a retired session keeps its history with no Resume; an ended one offers Resume, a send to it shows as recorded, and retire and spawn go out as RPCs', async ({ page, hub }) => {
   await stageProject(hub);
   hub.setMachines(PROJECT, [
     { machine: 'mini', online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [{ path: '/Users/new/MAWS', branch: 'main' }] },
@@ -320,7 +326,7 @@ test('a permission prompt is decided in place with the digest of exactly what it
   await expect(bg.getByRole('button', { name: 'Deny', exact: true })).toHaveCount(0);
 });
 
-test('a question is answered in place, a native one may be denied, an async one is answer-only', async ({ page, hub }) => {
+test.fixme('a question is answered in place, a native one may be denied, an async one is answer-only', async ({ page, hub }) => {
   await stageProject(hub);
   await open(page, hub, S.asks);
   const questions = [{ question: 'Which column do we keep?', header: 'Column', options: [{ label: 'user_id', description: 'what the API reads' }, { label: 'owner_id', description: 'the new name' }], multiSelect: false }];
@@ -385,7 +391,7 @@ test('an event or a request whose code fails is not drawn, and the view reports 
   await expect(page.getByTestId('project-view')).not.toContainText('paste your token here');
 });
 
-test("when a machine disconnects its sessions' presence and depth show as unavailable while the conversation stays", async ({ page, hub }) => {
+test.fixme("when a machine disconnects its sessions' presence and depth show as unavailable while the conversation stays", async ({ page, hub }) => {
   await stageProject(hub);
   await open(page, hub, S.asks);
   await hub.raise(PROJECT, 'mini', BASH);
@@ -431,7 +437,7 @@ const scrollToBottom = (page: Page) => scroller(page).evaluate((el) => (el as HT
 const scrollBackBy = (page: Page, px: number) => scroller(page).evaluate(setFromBottom, px);
 const gapOf = (page: Page) => scroller(page).evaluate(fromBottom);
 
-test('a channel opens at its tail and follows it while the reader is at the bottom; scrolled back, or landed on a card, it stays put', async ({ page, hub }) => {
+test.fixme('a channel opens at its tail and follows it while the reader is at the bottom; scrolled back, or landed on a card, it stays put', async ({ page, hub }) => {
   await stageProject(hub);
   const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rt${n}#0` });
   const first = await message(1);
@@ -595,7 +601,7 @@ test('a new message arriving below a reader scrolled back leaves the row they re
   expect(Math.abs(moved)).toBeLessThanOrEqual(1);
 });
 
-test('after a notification lands on its card, an earlier row that grows leaves the card where it was', async ({ page, hub }) => {
+test.fixme('after a notification lands on its card, an earlier row that grows leaves the card where it was', async ({ page, hub }) => {
   await stageProject(hub);
   await stageGrowingRun(hub, 25);
   let landing = { writer: '', seq: 0 };
