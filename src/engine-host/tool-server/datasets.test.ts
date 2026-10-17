@@ -3,7 +3,9 @@
 // `artifact_read`, over A's real store with the document and dashboard kinds registered, through the `maws` server's own
 // tool list. Validation precedes every write; the asset, the descriptor, the op row and the session's link land in one
 // commit; a replayed tool-use id answers its first result; the stale rule compares the addressed descriptor alone.
-import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { appendFileSync, constants, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { open as openFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -27,8 +29,9 @@ import { mawsTools } from './tools';
 // E2 M6 (panel P1, E's Decision Log 40): a hook run once just before the validated file is opened or read, by its real
 // path, where a concurrent workspace process could replace it; and one run once just after the opened file's own fstat
 // answers, before its bytes are read (`grown`), where the process could lengthen it; `readTotal` counts the bytes read
-// from that descriptor.
-const race = vi.hoisted(() => ({ path: null as string | null, swap: null as (() => void) | null, grown: null as { path: string; grow: () => void } | null, readTotal: 0 }));
+// from that descriptor; and one run once just before the resolved path is lstat'd (`resolved`), after realpath and the
+// containment check, where the process could turn a directory above the file into a link.
+const race = vi.hoisted(() => ({ path: null as string | null, swap: null as (() => void) | null, grown: null as { path: string; grow: () => void } | null, readTotal: 0, resolved: null as { path: string; swap: () => void } | null }));
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>();
   const fire = (path: unknown) => {
@@ -69,7 +72,15 @@ vi.mock('node:fs/promises', async (original) => {
     fire(args[0]);
     return actual.readFile(...args);
   }) as typeof actual.readFile;
-  return { ...actual, default: { ...actual, open, readFile }, open, readFile };
+  const lstat = (async (...args: Parameters<typeof actual.lstat>) => {
+    const resolved = race.resolved;
+    if (resolved !== null && String(args[0]) === resolved.path) {
+      race.resolved = null;
+      resolved.swap();
+    }
+    return actual.lstat(...args);
+  }) as typeof actual.lstat;
+  return { ...actual, default: { ...actual, open, readFile, lstat }, open, readFile, lstat };
 });
 
 const SELF = 'app-self' as AppSessionId;
@@ -111,7 +122,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   race.path = race.swap = null;
-  race.grown = null;
+  race.grown = race.resolved = null;
   close();
   rmSync(data, { recursive: true, force: true });
   rmSync(cwd, { recursive: true, force: true });
@@ -298,6 +309,78 @@ describe('artifact_dataset', () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  // E2 M6 (the retained review's residual, E's Decision Log 41): O_NOFOLLOW guards the last component alone, so a
+  // directory above the file turned into a link to an outside one after the containment check reached the outside
+  // file, its own inode then validated and opened.
+  // macOS: the kernel honours O_NOFOLLOW_ANY (0x20000000, macOS 11 and later), refusing a symlink anywhere on the path;
+  // Linux ignores the bit, and its unit lane documents the gap (MAWS ships on macOS alone).
+  it.skipIf(process.platform !== 'darwin')('refuses a directory above the file turned into an outside link after the containment check, writing nothing', async () => {
+    const { id, revision } = await created();
+    const outside = mkdtempSync(join(tmpdir(), 'maws-datasets-outside-'));
+    try {
+      mkdirSync(join(outside, 'data'));
+      writeFileSync(join(outside, 'data', 'sales.csv'), 'secret\n1\n2\n3\n4\n5\n');
+      mkdirSync(join(cwd, 'data'));
+      file(join('data', 'sales.csv'), SALES);
+      const toolUseId = 'toolu_ancestor' as ToolUseId;
+      race.resolved = {
+        path: realpathSync(join(cwd, 'data', 'sales.csv')),
+        swap: () => {
+          renameSync(join(cwd, 'data'), join(cwd, 'data-before'));
+          symlinkSync(join(outside, 'data'), join(cwd, 'data'));
+        },
+      };
+      expect(refusal(await bind({ baseRevision: revision, id: 'sales', path: 'data/sales.csv' }, { toolUseId }))).toMatchObject({ reason: 'invalid' });
+      expect(race.resolved).toBeNull(); // the swap ran, between the containment check and the lstat
+      expect(world.store.revision(id)).toBe(revision);
+      expect(world.store.listAssets(id)).toEqual([]);
+      expect(readDataset(world.service.live(id), 'sales')).toBeNull();
+      // the op recorded nothing: once the directory is the one it names, the same tool-use id binds it
+      unlinkSync(join(cwd, 'data'));
+      renameSync(join(cwd, 'data-before'), join(cwd, 'data'));
+      expect(json<Bound>(await bind({ baseRevision: revision, id: 'sales', path: 'data/sales.csv' }, { toolUseId }))).toMatchObject({ rows: 3 });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  // The guard under that refusal: if the kernel ignored the bit, the race above would silently reopen.
+  // macOS: the kernel honours O_NOFOLLOW_ANY (0x20000000, macOS 11 and later; another kernel ignores the bit), and
+  // refuses it beside O_NOFOLLOW (EINVAL), which is why the dataset read's flags carry it in O_NOFOLLOW's place.
+  it.skipIf(process.platform !== 'darwin')('has a kernel that honours O_NOFOLLOW_ANY: a link above the file is refused, and the flag beside O_NOFOLLOW is invalid', async () => {
+    const ANY = 0x20000000;
+    mkdirSync(join(cwd, 'real'));
+    file(join('real', 'a.csv'), SALES);
+    symlinkSync(join(cwd, 'real'), join(cwd, 'alias'));
+    const flags = constants.O_RDONLY | constants.O_NONBLOCK | ANY;
+    await expect(openFile(join(cwd, 'alias', 'a.csv'), flags)).rejects.toMatchObject({ code: 'ELOOP' });
+    await expect(openFile(join(realpathSync(cwd), 'real', 'a.csv'), flags | constants.O_NOFOLLOW)).rejects.toMatchObject({ code: 'EINVAL' });
+    const handle = await openFile(join(realpathSync(cwd), 'real', 'a.csv'), flags); // a realpath opens
+    await handle.close();
+  });
+
+  it('refuses a validated file replaced by a FIFO before it is opened, at once, and holds no thread (O_NONBLOCK)', async () => {
+    const { id, revision } = await created();
+    file('pipe.csv', SALES);
+    race.path = realpathSync(join(cwd, 'pipe.csv'));
+    race.swap = () => {
+      unlinkSync(join(cwd, 'pipe.csv'));
+      execFileSync('mkfifo', [join(cwd, 'pipe.csv')]);
+    };
+    const within = <T,>(promise: Promise<T>, ms: number): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<T>((_, reject) => (timer = setTimeout(() => reject(new Error(`not answered within ${ms} ms`)), ms)));
+      return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+    };
+    expect(refusal(await within(bind({ baseRevision: revision, id: 'sales', path: 'pipe.csv' }), 1_000))).toMatchObject({ reason: 'invalid' });
+    expect(race.path).toBeNull();
+    expect(world.store.listAssets(id)).toEqual([]);
+    // four binds at once would wait behind every threadpool thread a blocked open held; they complete
+    const names = [0, 1, 2, 3].map((k) => file(`ok${k}.csv`, SALES));
+    const answers = await within(Promise.all(names.map((name, k) => bind({ baseRevision: revision, id: `ok${k}`, path: name }))), 5_000);
+    expect(answers.every((answer) => !answer.isError)).toBe(true);
   });
 
   it('reads a file lengthened after its descriptor\'s fstat on to the cap: one byte over is refused with nothing written, and never read past', async () => {

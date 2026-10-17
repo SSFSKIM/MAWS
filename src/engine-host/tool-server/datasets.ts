@@ -64,12 +64,23 @@ async function realFileUnder(cwd: string, path: string): Promise<ValidatedFile> 
   return { named, real, root, dev: validated.dev, ino: validated.ino };
 }
 
-// E2 M6 (panel P1, E's Decision Log 40): the validated file's bytes read through one descriptor, never the path again.
-// The real path is opened without following a final link, and the opened file must be the regular file validated (its
-// device and inode), so a file replaced since validation, by a link out of the working directory or by another file, is
-// refused as the containment refusal; the read stops one byte past the cap, so a file grown since is refused by size.
+// macOS 11 and later: the kernel refuses a symlink anywhere on the path it walks, not only in its last component (as
+// src/main/files/service.ts:109-116 opens a session's files). Node's fs.constants does not carry it, so it is passed
+// numerically; it replaces O_NOFOLLOW, since macOS answers EINVAL for the two together, and refuses a last-component
+// link with ELOOP as well. Linux ignores the bit, so there the open guards the last component alone and a directory
+// above the file turned into a link after the containment check is a documented gap of the Linux unit lane (MAWS ships
+// on macOS; E's Decision Log 41). O_NONBLOCK: a FIFO put in the file's place opens at once and is refused as not a
+// regular file, never holding a thread.
+const O_NOFOLLOW_ANY = 0x20000000;
+const OPEN_FLAGS = process.platform === 'darwin' ? constants.O_RDONLY | constants.O_NONBLOCK | O_NOFOLLOW_ANY : constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW;
+
+// E2 M6 (panel P1, E's Decision Logs 40 and 41): the validated file's bytes read through one descriptor, never the path
+// again. The real path is opened through no link (OPEN_FLAGS), and the opened file must be the regular file validated
+// (its device and inode), so a file replaced since validation, by a link out of the working directory, by another file
+// or by a FIFO, is refused as the containment refusal; the read stops one byte past the cap, so a file grown since is
+// refused by size.
 async function readValidated(file: ValidatedFile): Promise<Uint8Array> {
-  const handle = await open(file.real, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => null);
+  const handle = await open(file.real, OPEN_FLAGS).catch(() => null);
   if (!handle) throw outsideCwd(file);
   try {
     const opened = await handle.stat();
