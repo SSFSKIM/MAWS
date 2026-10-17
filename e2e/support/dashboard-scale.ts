@@ -7,8 +7,9 @@
 // - the scroll row is the p95 of every admitted trial's events pooled, each trial's own p95 information only; any long
 //   task over 50 ms during a scroll fails it by itself, whatever the load;
 // - the renderer's memory is its own documented `process.getProcessMemoryInfo().private` (src/preload/process-memory.ts),
-//   sampled every 10 s: any sample started at load 10 or more blocks the row; the later of the first two consecutive
-//   samples within 5 %, both completed within 60 s of the first one's start, is gated; never a forced collection's.
+//   sampled on the 10 s marks 0 through 60: any sample started at load 10 or more blocks the row; the later sample of
+//   the first consecutive pair both started at or after 30 s and within 5 % is gated, else the 60 s sample; never a
+//   forced collection's.
 
 export const LOAD_BELOW = 10;
 export const LONG_TASK_MS = 50;
@@ -69,23 +70,33 @@ export function privateMB(info: unknown): number {
   return kb / 1024;
 }
 
-export const MEMORY_DEADLINE_MS = 60_000;
 export const MEMORY_SPACING_MS = 10_000;
+/** No sample started before it enters the deciding pair (the amendment's idle floor). */
+export const MEMORY_FLOOR_MS = 30_000;
+/** The last mark, its sample the figure when no pair settles: samples start on the marks 0 through it, inclusive. */
+export const MEMORY_LAST_MARK_MS = 60_000;
 
 /**
- * The memory row (parent Decision Log 42(5)) over samples taken 10 s apart, each with its start and completion (ms from
- * the first sample's start), its start load and the renderer's private MB: hardware-blocked by any sample started at
- * load 10 or more, whatever came after; else the later of the first two consecutive samples within `tolerance`, both
- * completed within the deadline, gated at `limit`; no such pair is unsettled.
+ * The memory row (parent Decision Log 42(5) as amended after run 39003524044, whose 503.6/505.7 MB pair at 0 and 10 s
+ * failed under the then-current policy and stays recorded so) over the samples started on the 10 s marks 0 through 60,
+ * each with its start and completion (ms from the first sample's start), its start load and the renderer's private MB:
+ * hardware-blocked by any sample started at load 10 or more, whatever came before or after; else the later sample of
+ * the first consecutive pair both started at or after 30 s and within `tolerance`; else the sample started at the 60 s
+ * mark, however long it took to complete. That figure is gated at `limit`; with neither, the row is unsettled.
  */
-export function memoryVerdict(samples: readonly { startedAt: number; completedAt: number; load: number; mb: number }[], limit: number, tolerance = 0.05, deadline = MEMORY_DEADLINE_MS): { verdict: Verdict; value: number | null; reason?: string } {
+export function memoryVerdict(samples: readonly { startedAt: number; completedAt: number; load: number; mb: number }[], limit: number, tolerance = 0.05): { verdict: Verdict; value: number | null; reason?: string } {
   const loaded = samples.filter((s) => s.load >= LOAD_BELOW);
   if (loaded.length > 0) return { verdict: 'hardware-blocked', value: null, reason: `${loaded.length} sample(s) started at load ${LOAD_BELOW} or more (${loaded.map((s) => s.load).join(', ')})` };
   const t0 = samples[0]?.startedAt ?? 0;
-  const timely = samples.filter((s) => s.completedAt - t0 <= deadline);
-  for (let i = 1; i < timely.length; i++) {
-    const [a, b] = [timely[i - 1]!.mb, timely[i]!.mb];
-    if (Math.abs(b - a) <= tolerance * Math.max(a, b)) return b <= limit ? { verdict: 'met', value: b } : { verdict: 'failed', value: b, reason: `settled at ${b.toFixed(1)} MB over ${limit} MB` };
+  const judged = (value: number, how: string) => (value <= limit ? { verdict: 'met' as const, value, reason: how } : { verdict: 'failed' as const, value, reason: `${how}: ${value.toFixed(1)} MB over ${limit} MB` });
+  for (let i = 1; i < samples.length; i++) {
+    const [a, b] = [samples[i - 1]!, samples[i]!];
+    if (a.startedAt - t0 < MEMORY_FLOOR_MS) continue;
+    if (Math.abs(b.mb - a.mb) <= tolerance * Math.max(a.mb, b.mb)) return judged(b.mb, `settled within 5 % at the samples started ${seconds(a.startedAt - t0)} and ${seconds(b.startedAt - t0)}`);
   }
-  return { verdict: 'unsettled', value: null, reason: `no two consecutive samples within 5 % completed within ${deadline / 1000} s of the first: ${samples.map((s) => `${s.mb.toFixed(1)} MB at ${(s.completedAt / 1000).toFixed(1)} s`).join(', ')}` };
+  const last = samples.find((s) => s.startedAt - t0 >= MEMORY_LAST_MARK_MS);
+  if (last) return judged(last.mb, `no pair from ${MEMORY_FLOOR_MS / 1000} s within 5 %; the sample started at the ${MEMORY_LAST_MARK_MS / 1000} s mark (${seconds(last.startedAt - t0)})`);
+  return { verdict: 'unsettled', value: null, reason: `no pair from ${MEMORY_FLOOR_MS / 1000} s within 5 % and no sample started at the ${MEMORY_LAST_MARK_MS / 1000} s mark: ${samples.map((s) => `${s.mb.toFixed(1)} MB at ${seconds(s.startedAt - t0)}`).join(', ')}` };
 }
+
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;

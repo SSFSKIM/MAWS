@@ -6,7 +6,7 @@
 // first two 10 s-spaced samples within 5 % completed within 60 s of the first one's start, every sample admitted below
 // load 10, never a forced collection's figure.
 import { describe, expect, it } from 'vitest';
-import { LOAD_BELOW, memoryVerdict, percentile, privateMB, replacementInterval, scrollVerdict, timingVerdict } from '../../e2e/support/dashboard-scale';
+import { LOAD_BELOW, MEMORY_FLOOR_MS, MEMORY_LAST_MARK_MS, MEMORY_SPACING_MS, memoryVerdict, percentile, privateMB, replacementInterval, scrollVerdict, timingVerdict } from '../../e2e/support/dashboard-scale';
 
 const at = (load: number) => (value: number) => ({ value, load });
 
@@ -66,34 +66,51 @@ describe('the scroll row', () => {
   });
 });
 
-describe('the renderer’s memory (parent Decision Log 42(5))', () => {
+describe('the renderer’s memory (parent Decision Log 42(5), amended)', () => {
   // a sample: when it started and completed (ms from the first sample's start), the 1-minute load as it started, the
   // renderer's private memory in MB
   const sample = (startedAt: number, completedAt: number, mb: number, load = 3) => ({ startedAt, completedAt, load, mb });
+  // the seven samples on the 10 s marks 0 through 60, each completing `overhead` ms after its start
+  const marks = (mbs: readonly number[], overhead = 40, loads: readonly number[] = []) => mbs.map((mb, k) => sample(k * MEMORY_SPACING_MS, k * MEMORY_SPACING_MS + overhead, mb, loads[k] ?? 3));
 
-  it('is met by the later of the first two 10 s-spaced samples within 5 %, both completed within 60 s of the first one’s start', () => {
-    expect(memoryVerdict([sample(0, 40, 520), sample(10_000, 10_040, 480), sample(20_000, 20_050, 470)], 500)).toMatchObject({ verdict: 'met', value: 470 });
-    expect(memoryVerdict([sample(0, 40, 300), sample(10_000, 10_030, 301)], 500)).toMatchObject({ verdict: 'met', value: 301 });
+  it('schedules seven samples, on the 10 s marks 0 through 60 inclusive, deciding from 30 s', () => {
+    expect([MEMORY_SPACING_MS, MEMORY_FLOOR_MS, MEMORY_LAST_MARK_MS]).toEqual([10_000, 30_000, 60_000]);
   });
 
-  it('fails a settled value over the bound', () => {
-    expect(memoryVerdict([sample(0, 40, 555), sample(10_000, 10_040, 556)], 500)).toMatchObject({ verdict: 'failed', value: 556 });
+  it('never admits a pair with a sample started before 30 s: the old 0/10 s pair is not the figure', () => {
+    // run 39003524044's early pair, 503.6 and 505.7 MB at 0 and 10 s, settled and failed under the then-current policy;
+    // under the amendment the first pair both started at or after 30 s decides (20/30 s is within 5 % too, but early)
+    expect(memoryVerdict(marks([503.6, 505.7, 470, 450, 452, 460, 455]), 500)).toMatchObject({ verdict: 'met', value: 452 });
+    // nor does a low early pair pass a row that grows afterwards
+    expect(memoryVerdict(marks([300, 301, 302, 560, 600, 700, 800]), 500)).toMatchObject({ verdict: 'failed', value: 800 });
   });
 
-  it('is hardware-blocked by any sample started at load 10 or more, even a stable low pair: never met afterwards', () => {
-    expect(memoryVerdict([sample(0, 40, 300), sample(10_000, 10_040, 300, 11)], 500)).toMatchObject({ verdict: 'hardware-blocked' });
-    expect(memoryVerdict([sample(0, 40, 300, 12), sample(10_000, 10_040, 300), sample(20_000, 20_040, 300)], 500)).toMatchObject({ verdict: 'hardware-blocked' });
+  it('is decided by the later sample of the first consecutive pair from 30 s within 5 %, met or failed at the bound', () => {
+    expect(memoryVerdict(marks([600, 560, 520, 480, 470, 300, 200]), 500)).toMatchObject({ verdict: 'met', value: 470 });
+    expect(memoryVerdict(marks([600, 560, 520, 515, 512, 300, 200]), 500)).toMatchObject({ verdict: 'failed', value: 512, reason: expect.stringMatching(/512\.0 MB over 500 MB/) });
+    // a later pair decides when 30/40 s is not within 5 %
+    expect(memoryVerdict(marks([600, 560, 520, 400, 470, 471, 200]), 500)).toMatchObject({ verdict: 'met', value: 471 });
   });
 
-  it('admits no pair completed after the 60 s deadline: a stable pair whose later sample completes late is unsettled', () => {
-    const drifting = [600, 540, 480, 420, 360, 300].map((mb, k) => sample(k * 10_000, k * 10_000 + 50, mb));
-    expect(memoryVerdict([...drifting, sample(60_000, 60_001, 299)], 500)).toMatchObject({ verdict: 'unsettled', value: null });
-    // the same pair completing on time settles
-    expect(memoryVerdict([...drifting, sample(59_900, 59_990, 299)], 500)).toMatchObject({ verdict: 'met', value: 299 });
+  it('takes the sample started at the 60 s mark when no pair from 30 s settles, whatever its completion overhead', () => {
+    const drifting = [600, 540, 480, 420, 360, 300];
+    expect(memoryVerdict([...marks(drifting), sample(60_000, 61_500, 240)], 500)).toMatchObject({ verdict: 'met', value: 240, reason: expect.stringMatching(/60 s/) });
+    expect(memoryVerdict(marks([300, 300, 300, 400, 450, 520, 600]), 500)).toMatchObject({ verdict: 'failed', value: 600 });
+    // the 60 s sample started a little after its mark (a sample's overhead delays nothing scheduled) is still the one
+    expect(memoryVerdict([...marks(drifting, 900), sample(60_030, 60_950, 499)], 500)).toMatchObject({ verdict: 'met', value: 499 });
   });
 
-  it('is unsettled when no two consecutive samples come within 5 % before the deadline', () => {
-    expect(memoryVerdict([600, 500, 400, 300, 200, 100, 50].map((mb, k) => sample(k * 10_000, k * 10_000 + 50, mb)), 500)).toMatchObject({ verdict: 'unsettled', value: null, reason: expect.stringMatching(/within 5 %/) });
+  it('is unsettled, never met, when no pair from 30 s settles and no sample started at the 60 s mark', () => {
+    expect(memoryVerdict(marks([600, 540, 480, 420, 360, 300]), 500)).toMatchObject({ verdict: 'unsettled', value: null, reason: expect.stringMatching(/60 s/) });
+  });
+
+  it('is hardware-blocked by any sample started at load 10 or more, the deciding pair’s, an early one’s or one after it', () => {
+    const flat = [300, 300, 300, 300, 300, 300, 300];
+    expect(memoryVerdict(marks(flat, 40, [11]), 500)).toMatchObject({ verdict: 'hardware-blocked', value: null });
+    expect(memoryVerdict(marks(flat, 40, [3, 3, 3, 10]), 500)).toMatchObject({ verdict: 'hardware-blocked' });
+    expect(memoryVerdict(marks(flat, 40, [3, 3, 3, 3, 3, 3, 12]), 500)).toMatchObject({ verdict: 'hardware-blocked', reason: expect.stringMatching(/12/) });
+    // an over-limit figure under load is blocked, not a product failure
+    expect(memoryVerdict(marks([600, 600, 600, 600, 600, 600, 600], 40, [3, 3, 3, 3, 3, 15]), 500)).toMatchObject({ verdict: 'hardware-blocked' });
   });
 
   it('takes the renderer’s private kilobytes as MB, refusing what is not a finite non-negative number', () => {

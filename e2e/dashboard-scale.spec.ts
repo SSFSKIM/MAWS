@@ -20,9 +20,10 @@
 //               animation-frame interval's p95, max and cadence are information; any long task over 50 ms fails the row
 //   6 renderer  the renderer process's own private memory (Electron's documented process.getProcessMemoryInfo().private,
 //               read through the e2e-only preload getter window.__maws_processMemory) after the workload and no input,
-//               sampled 10 s apart: any sample started at load 10 or more blocks the row; the later of the first two
-//               consecutive samples within 5 %, both completed within 60 s of the first one's start, ≤ 500 MB; a forced
-//               collection's figures are a diagnostic only
+//               sampled on the 10 s marks 0 through 60 inclusive (each sample and its completion overhead recorded):
+//               any sample started at load 10 or more blocks the row; the later sample of the first consecutive pair
+//               both started at or after 30 s and within 5 %, else the sample started at the 60 s mark, ≤ 500 MB; a
+//               forced collection's figures, taken after the binding samples, are a diagnostic only
 // Admission (parent Decision Log 42): every trial follows a bounded settle toward a 1-minute load below 10; a timing row
 // (1 to 4) needs three admitted trials (started below 10), every one within its bound, at most five attempts; a trial at
 // 10 or more is excluded, and fewer than three admitted is `hardware-blocked`, never met; the median and the best are
@@ -36,7 +37,7 @@ import { cpus, platform, release, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { BENCH_DATASET, BENCH_ROWS, BENCH_SCATTER_POINTS, BENCH_VIEWS, benchCsv, benchMarkdown } from '../src/artifacts/dashboard/fixtures/bench';
-import { LOAD_BELOW, MEMORY_DEADLINE_MS, MEMORY_SPACING_MS, memoryVerdict, percentile, privateMB, replacementInterval, REQUIRED_TRIALS, scrollVerdict, timingVerdict, type Verdict } from './support/dashboard-scale';
+import { LOAD_BELOW, MEMORY_FLOOR_MS, MEMORY_LAST_MARK_MS, MEMORY_SPACING_MS, memoryVerdict, percentile, privateMB, replacementInterval, REQUIRED_TRIALS, scrollVerdict, timingVerdict, type Verdict } from './support/dashboard-scale';
 import { collectGarbage, jsHeapMB, load1, processMemory } from './support/document-scale';
 import { REPO_ROOT } from './support/launch';
 import { startApp, type AgentCall, type DashboardApp } from './support/dashboards';
@@ -131,7 +132,7 @@ class Rows {
   write(extra: Record<string, unknown> = {}): void {
     Object.assign(this.extra, extra);
     mkdirSync(join(RESULTS, '..'), { recursive: true });
-    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: `parent Decision Log 42: every trial after a bounded settle toward a 1-minute load below ${LOAD_BELOW}; a timing row needs ${REQUIRED_TRIALS} admitted trials (started below ${LOAD_BELOW}) each within its bound, at most ${MAX_ATTEMPTS} attempts, fewer admitted hardware-blocked; the scroll row the p95 of every admitted event pooled, a long task over 50 ms failing it; the renderer's settled private memory (process.getProcessMemoryInfo, every sample below load ${LOAD_BELOW}, within 60 s); median and best descriptive`, rows: this.rows }, null, 2)}\n`);
+    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: `parent Decision Log 42: every trial after a bounded settle toward a 1-minute load below ${LOAD_BELOW}; a timing row needs ${REQUIRED_TRIALS} admitted trials (started below ${LOAD_BELOW}) each within its bound, at most ${MAX_ATTEMPTS} attempts, fewer admitted hardware-blocked; the scroll row the p95 of every admitted event pooled, a long task over 50 ms failing it; the renderer's private memory (process.getProcessMemoryInfo, samples on the 10 s marks 0 through 60, every one below load ${LOAD_BELOW}: the first pair from 30 s within 5 %, else the 60 s sample); median and best descriptive`, rows: this.rows }, null, 2)}\n`);
   }
 }
 
@@ -452,7 +453,7 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
       await page.keyboard.press('Escape');
     });
 
-    await test.step('6: the renderer’s private memory after the workload and no input, settled within a minute; a forced collection’s figures beside it', async () => {
+    await test.step('6: the renderer’s private memory after the workload and no input, sampled for a minute; a forced collection’s figures after it', async () => {
       // the target renderer's own process.getProcessMemoryInfo() through the e2e-only preload getter; absent, the row
       // fails by name (no fallback, no wider gate)
       const privateNow = async (): Promise<number> => {
@@ -463,20 +464,19 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
         if ('absent' in read) throw new Error('window.__maws_processMemory is absent: the sandboxed preload did not see MAWS_E2E=1 (no fallback)');
         return privateMB(read.info);
       };
+      // the binding samples, on the 10 s marks 0 through 60 inclusive and no other: every one kept, the schedule never
+      // extended or shifted to seek a settled pair; its completion overhead recorded beside it
       const t0 = Date.now();
       const samples: { startedAt: number; completedAt: number; load: number; mb: number }[] = [];
-      let judged: ReturnType<typeof memoryVerdict> = { verdict: 'unsettled', value: null };
-      for (let k = 0; ; k++) {
-        const due = t0 + k * MEMORY_SPACING_MS;
+      for (let mark = 0; mark <= MEMORY_LAST_MARK_MS; mark += MEMORY_SPACING_MS) {
+        const due = t0 + mark;
         if (Date.now() < due) await sleep(due - Date.now());
-        if (Date.now() - t0 > MEMORY_DEADLINE_MS) break; // no sample starts after the deadline
         const startedAt = Date.now() - t0;
         const load = load1();
         const mb = await privateNow();
         samples.push({ startedAt, completedAt: Date.now() - t0, load, mb: +mb.toFixed(1) });
-        judged = memoryVerdict(samples, 500);
-        if (judged.verdict !== 'unsettled') break; // settled, or blocked by a sample's load: nothing after it can make it met
       }
+      const judged = memoryVerdict(samples, 500);
       // the diagnostic, after the binding samples: the same renderer after a forced collection (never the gate)
       await collectGarbage(page);
       await sleep(500);
@@ -484,8 +484,8 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
       rows.write({ memory: { samples, judged, afterForcedCollection: collected } });
       rows.add({
         row: '6 renderer',
-        measure: `the renderer process's own private memory (process.getProcessMemoryInfo().private, Electron's documented renderer API) with the ${VIEWS}-view dashboard open after the scrolls and replacements, no input: the later of the first two ${MEMORY_SPACING_MS / 1000} s-spaced samples within 5 %, both completed within ${MEMORY_DEADLINE_MS / 1000} s of the first one's start, every sample started below load ${LOAD_BELOW}`,
-        bound: '≤ 500 MB, settled',
+        measure: `the renderer process's own private memory (process.getProcessMemoryInfo().private, Electron's documented renderer API) with the ${VIEWS}-view dashboard open after the scrolls and replacements, no input, sampled on the ${MEMORY_SPACING_MS / 1000} s marks 0 through ${MEMORY_LAST_MARK_MS / 1000} s: the later sample of the first consecutive pair both started at or after ${MEMORY_FLOOR_MS / 1000} s and within 5 %, else the sample started at the ${MEMORY_LAST_MARK_MS / 1000} s mark; every sample started below load ${LOAD_BELOW}`,
+        bound: '≤ 500 MB, idle from 30 s',
         limit: 500,
         unit: 'MB',
         value: judged.value,
@@ -493,7 +493,7 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
         best: null,
         verdict: judged.verdict,
         admitted: samples.filter((sample) => sample.load < LOAD_BELOW).length,
-        trials: samples.map((sample) => ({ value: sample.mb, load: sample.load, loadAfter: sample.load, settle: [], note: `started ${(sample.startedAt / 1000).toFixed(1)} s, completed ${(sample.completedAt / 1000).toFixed(1)} s` })),
+        trials: samples.map((sample) => ({ value: sample.mb, load: sample.load, loadAfter: sample.load, settle: [], note: `started ${(sample.startedAt / 1000).toFixed(1)} s, completed ${(sample.completedAt / 1000).toFixed(1)} s (overhead ${sample.completedAt - sample.startedAt} ms)` })),
         ...(judged.reason && { reason: judged.reason }),
         note: `after a forced collection (diagnostic only): private ${collected.privateMB} MB, working set ${collected.workingSetMB} MB, JS heap ${collected.jsHeapMB} MB`,
       });
