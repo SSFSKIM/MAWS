@@ -22,7 +22,7 @@
 
 ## Progress
 
-- [x] S1 — Shared edit: the ask tool classified as a question (2026-10-17, reviewed clean: a2fc6a2c..dd7c37ab; gate 39045490193; PR SSFSKIM/MAWS#26; merged into desk-dc9)
+- [x] S1 — Shared edit: the ask tool classified as a question (2026-10-17, reviewed clean: a2fc6a2c..dd7c37ab; gate 39045490193; PR SSFSKIM/MAWS#26, merged to master as 67710ddd after merging master 360f87b3, gate 39071873678)
 - [~] S2 — Shared edit: shell and monitor starts and `task_status` in MAWS's backfill — **parked** (2026-10-17; branch `desk-backfill-jobs` pushed, no PR; Decision Log)
 - [x] T0 — Mockups of the four taste surfaces (2026-10-17: `desk-dc9-mockups` 73ecf8f0, the owner's choices marked c73916fa)
 - [x] M1 — The hub's `output`, the widened bodies, and DX8's `output()` (2026-10-17, reviewed clean: d2c8fec5..af560476, fix 7098835a..89b2e560)
