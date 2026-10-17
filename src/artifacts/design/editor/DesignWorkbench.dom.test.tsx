@@ -5,7 +5,7 @@
 // without moving or panning anything, one undo stack for board and element edits, read-only, held and missing boards
 // written nothing, and Insert on a phone board at screen type. Layout, paint and real pointers are the e2e's.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyV1, diffV1, newDoc, stateVector, transact, type Doc } from '../../yjs';
 import * as Y from '../../yjs/slides';
 import { flushLayout } from '../../slides/canvas';
@@ -15,6 +15,7 @@ import { design, type BoardSeed } from '../fixtures/support';
 import { boardFrame, boardOrder, MISSING_SOURCE_KEY } from '../model';
 import { deleteBoard, setBoardFrame } from '../writers';
 import { DesignWorkbench } from './DesignWorkbench';
+import { DESIGN_COPY } from './copy';
 import { DesignView } from './viewport';
 
 const BOARDS: BoardSeed[] = [
@@ -583,5 +584,32 @@ describe('the screen chrome in register with the boards (M6: the pan a transform
     act(() => view.setZoom(2));
     expect(screen.getByRole('combobox', { name: 'Zoom' }).querySelector('option[value="current"]')!.textContent).toBe('200%');
     expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
+  });
+});
+
+describe('what a frame of a gesture costs (DL39’s bounded wave: work proportional to what changed)', () => {
+  it('a zoom or a pan formats no board’s size again; a title crossing the 160 px room does, once', () => {
+    const { container, view } = mount();
+    const size = vi.spyOn(DESIGN_COPY, 'size');
+    act(() => view.setViewport({ zoom: 0.9, x: 0, y: 0 }));
+    act(() => view.setViewport({ zoom: 0.8, x: 30, y: -10 }));
+    act(() => view.setViewport({ zoom: 0.8, x: 60, y: -20 })); // a pan alone
+    expect(size).not.toHaveBeenCalled();
+    act(() => view.setViewport({ zoom: 0.3, x: 0, y: 0 })); // the phone's title (117 px) loses its size; the others keep theirs
+    expect(title(container, 'b1').textContent).toBe('Phone');
+    expect(title(container, 'b2').textContent).toBe('Desktop1,440 × 1,024');
+    expect(size.mock.calls.length).toBeLessThanOrEqual(1);
+    size.mockRestore();
+  });
+
+  it('one board’s frame write renders that board’s list row and title alone; the list’s other rows and titles are untouched', () => {
+    const { doc, session } = mount();
+    const row = vi.spyOn(DESIGN_COPY, 'boardRow');
+    const size = vi.spyOn(DESIGN_COPY, 'size');
+    act(() => session.edit((origin) => setBoardFrame(doc, 'b2', { x: 640 }, origin)));
+    expect(row.mock.calls.map((c) => c[0])).toEqual(['Desktop']);
+    expect(new Set(size.mock.calls.map((c) => `${c[0]}×${c[1]}`))).toEqual(new Set(['1440×1024']));
+    row.mockRestore();
+    size.mockRestore();
   });
 });

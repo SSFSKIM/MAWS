@@ -14,7 +14,7 @@
 // past the model's cap. A press on the empty world clears the selection and pans; so does Space-drag or the middle
 // button anywhere. The wheel pans; ⌃-wheel (a pinch) or ⌥-wheel zooms about the pointer. A held or missing board, or a
 // read-only replica, is selected and inspected but never written.
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import type { AssetUrl, SlideCanvas } from '../../slides/canvas';
 import type { FaceAliases } from '../../slides/canvas/faces';
 import type { Guide, Handle, Pt } from '../../slides/geometry';
@@ -431,7 +431,7 @@ export function World(props: WorldProps) {
         )}
       </div>
       <div ref={pan} className="design-world-pan" data-design-pan>
-      <Titles boards={boards} zoom={zoom} activeId={active?.id ?? null} frameId={selectedFrame} onSelect={onSelectBoard} />
+      <Titles view={view} boards={boards} activeId={active?.id ?? null} frameId={selectedFrame} onSelect={onSelectBoard} />
       <Marks boards={boards} zoom={zoom} />
       <div className="design-world-screen" aria-hidden>
         {active?.frame && <div className="design-active-outline" style={screen(active.frame)} />}
@@ -483,38 +483,82 @@ const TITLE_FULL_PX = 160;
  * The boards' titles in screen px over the world (M6: drawn at the zoom, not counter-scaled inside the boards' layer,
  * so a zoom restyles no board), each as wide as its board is drawn: the name truncates, and below 160 px the size and
  * the held badge drop out; the name and size stay the button's accessible name and tooltip.
+ *
+ * DL39's bounded wave: a title renders when its own board, its active or selected state, or its room for the size
+ * (the 160 px threshold) changes; its place and width follow the zoom by three style writes from the view, so a zoom
+ * renders no title and formats no size, and one board's frame write renders that board's title alone.
  */
-const Titles = memo(function Titles(props: { boards: readonly BoardView[]; zoom: number; activeId: string | null; frameId: string | null; onSelect: (boardId: string) => void }) {
-  const { boards, zoom, activeId, frameId, onSelect } = props;
+const Titles = memo(function Titles(props: { view: DesignView; boards: readonly BoardView[]; activeId: string | null; frameId: string | null; onSelect: (boardId: string) => void }) {
+  const { view, boards, activeId, frameId, onSelect } = props;
+  const nodes = useRef(new Map<string, HTMLElement>());
+  const register = useCallback((boardId: string, node: HTMLElement | null) => {
+    if (node) nodes.current.set(boardId, node);
+    else nodes.current.delete(boardId);
+  }, []);
+  const latest = useRef(boards);
+  const placedAt = useRef<number | null>(null);
+  const place = useCallback(
+    (always: boolean) => {
+      const zoom = view.snapshot().viewport?.zoom ?? 1;
+      if (!always && zoom === placedAt.current) return; // a pan: the wrapper's transform moves them
+      placedAt.current = zoom;
+      for (const b of latest.current) {
+        const node = b.frame ? nodes.current.get(b.id) : undefined;
+        if (!node || !b.frame) continue;
+        node.style.left = `${b.frame.x * zoom}px`;
+        node.style.top = `${b.frame.y * zoom}px`;
+        node.style.width = `${b.frame.w * zoom}px`;
+      }
+    },
+    [view],
+  );
+  useLayoutEffect(() => {
+    latest.current = boards;
+    place(true);
+  }, [boards, place]);
+  useLayoutEffect(() => view.subscribe(() => place(false)), [view, place]);
+  // the boards whose title has room for its size: a string, so it changes only when a title crosses the threshold
+  const roomy = useSyncExternalStore(view.subscribe, () => {
+    const zoom = view.snapshot().viewport?.zoom ?? 1;
+    return boards.flatMap((b) => (b.frame && b.frame.w * zoom >= TITLE_FULL_PX ? [b.id] : [])).join(' ');
+  });
+  const full = useMemo(() => new Set(roomy.split(' ')), [roomy]);
   return (
     <>
-      {boards.map((b) => {
-        if (!b.frame) return null;
-        const f = b.frame;
-        const label = boardLabel(b);
-        const full = f.w * zoom >= TITLE_FULL_PX;
-        const selected = b.id === frameId;
-        return (
-          <button
-            key={b.id}
-            type="button"
-            className="design-screen-title"
-            data-board-title={b.id}
-            data-active={b.id === activeId || undefined}
-            data-frame-selected={selected || undefined}
-            aria-label={C.boardTitle(label)}
-            title={`${label}, ${C.size(f.w, f.h)}`}
-            aria-pressed={selected}
-            style={{ left: f.x * zoom, top: f.y * zoom, width: f.w * zoom }}
-            onClick={() => onSelect(b.id)}
-          >
-            <span className="design-board-title-name">{label}</span>
-            {full && <span className="design-board-title-size">{C.size(f.w, f.h)}</span>}
-            {full && b.held && <span className="design-board-badge">{C.held}</span>}
-          </button>
-        );
-      })}
+      {boards.map((b) =>
+        b.frame ? <Title key={b.id} board={b as BoardView & { frame: BoardFrame }} full={full.has(b.id)} active={b.id === activeId} selected={b.id === frameId} onSelect={onSelect} register={register} /> : null,
+      )}
     </>
+  );
+});
+
+/** One title: its words from its board alone (placed by `Titles`). */
+const Title = memo(function Title(props: { board: BoardView & { frame: BoardFrame }; full: boolean; active: boolean; selected: boolean; onSelect: (boardId: string) => void; register: (boardId: string, node: HTMLElement | null) => void }) {
+  const { board, full, active, selected, onSelect, register } = props;
+  const { id, frame } = board;
+  const ref = useCallback((node: HTMLButtonElement | null) => register(id, node), [register, id]);
+  const words = useMemo(() => {
+    const label = boardLabel(board);
+    const size = C.size(frame.w, frame.h);
+    return { label, size, aria: C.boardTitle(label), tooltip: `${label}, ${size}` };
+  }, [board, frame.w, frame.h]);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      className="design-screen-title"
+      data-board-title={id}
+      data-active={active || undefined}
+      data-frame-selected={selected || undefined}
+      aria-label={words.aria}
+      title={words.tooltip}
+      aria-pressed={selected}
+      onClick={() => onSelect(id)}
+    >
+      <span className="design-board-title-name">{words.label}</span>
+      {full && <span className="design-board-title-size">{words.size}</span>}
+      {full && board.held && <span className="design-board-badge">{C.held}</span>}
+    </button>
   );
 });
 

@@ -163,7 +163,15 @@ export function DesignCommentFrame({ api, activeId, surface, view, boards, canva
   const { session, author, readOnly, setActive } = api;
   const frame = useRef<HTMLDivElement>(null);
   const version = useDocVersion(session);
-  const viewport = useSyncExternalStore(view.subscribe, () => view.snapshot().viewport);
+  // DL39's bounded wave: the view reaches this frame only while something drawn here follows it, an open thread's pin
+  // or the card on screen (its thread active); else a pan or a zoom renders nothing here and asks nothing of the host
+  const threads = useDeckThreadStates(session.doc);
+  const follows = api.active !== null || threads.some((t) => t.status === 'open' && t.live);
+  const at = useSyncExternalStore(view.subscribe, () => {
+    const v = follows ? view.snapshot().viewport : null;
+    return v ? `${v.zoom}:${v.x}:${v.y}` : '';
+  });
+  const viewport = at === '' ? null : view.snapshot().viewport;
   const [layout, setLayout] = useState(0);
   const pending = useRef<number | null>(null);
   const moved = useCallback(() => {
@@ -211,11 +219,10 @@ export function DesignCommentFrame({ api, activeId, surface, view, boards, canva
     if (event.code !== 'KeyM' || !event.altKey || !(event.metaKey || event.ctrlKey) || event.shiftKey) return;
     if (api.comment() !== null) event.preventDefault();
   };
-  const at = viewport ? `${viewport.zoom}:${viewport.x}:${viewport.y}` : '';
   return (
     <div ref={frame} className="deck-comment-frame design-comment-frame" data-design-comment-frame onKeyDown={onKeyDown}>
       {children}
-      {viewport && <BoardPins api={api} activeId={activeId} boards={boards} canvases={canvases} version={version} zoom={viewport.zoom} x={viewport.x} y={viewport.y} />}
+      {viewport && <BoardPins api={api} threads={threads} activeId={activeId} boards={boards} canvases={canvases} version={version} zoom={viewport.zoom} x={viewport.x} y={viewport.y} />}
       {surface?.overlay({ ...reach, layoutKey: `${at}:${version}:${layout}` })}
     </div>
   );
@@ -235,9 +242,8 @@ function threadRect(canvases: ReadonlyMap<string, SlideCanvas>, frame: HTMLEleme
  * One pin per board carrying an open board-level thread, at its frame's top-right corner on screen; and C's element pins
  * on each inactive board carrying an open element thread, in a box at the board's place on screen.
  */
-function BoardPins(props: { api: DeckCommentsApi; activeId: string | null; boards: readonly BoardView[]; canvases: ReadonlyMap<string, SlideCanvas>; version: number; zoom: number; x: number; y: number }) {
-  const { api, activeId, boards, canvases, version, zoom, x, y } = props;
-  const threads = useDeckThreadStates(api.session.doc);
+function BoardPins(props: { api: DeckCommentsApi; threads: ReturnType<typeof useDeckThreadStates>; activeId: string | null; boards: readonly BoardView[]; canvases: ReadonlyMap<string, SlideCanvas>; version: number; zoom: number; x: number; y: number }) {
+  const { api, threads, activeId, boards, canvases, version, zoom, x, y } = props;
   const { byBoard, elementBoards } = useMemo(() => {
     const out = new Map<string, typeof threads>();
     const elements = new Set<string>();

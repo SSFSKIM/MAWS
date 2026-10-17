@@ -10,7 +10,9 @@ export const BOARD_PRESETS = [
 ] as const;
 export type BoardPreset = (typeof BOARD_PRESETS)[number];
 
-const size = (w: number, h: number) => `${w.toLocaleString('en-US')} × ${h.toLocaleString('en-US')}`;
+// one formatter for every size the chrome writes (M6, DL39: `toLocaleString` builds a formatter per call); same output
+const NUMBER = new Intl.NumberFormat('en-US');
+const size = (w: number, h: number) => `${NUMBER.format(w)} × ${NUMBER.format(h)}`;
 
 export const DESIGN_COPY = {
   toolbar: 'Design',

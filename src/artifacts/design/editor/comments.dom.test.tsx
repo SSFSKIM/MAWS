@@ -278,3 +278,25 @@ describe('Move to board…', () => {
     expect(session.snapshot().canUndo).toBe(false);
   });
 });
+
+describe('the comment frame’s cost while the world pans (DL39’s bounded wave)', () => {
+  it('with no pin and no card on screen a pan or a zoom asks nothing of the card host; a pin follows every pan; a card on screen is located again on every pan', async () => {
+    const { doc, view, overlay, container } = mount();
+    // each render of the frame hands the card host a new set of props: the same object means no render asked it
+    const asked = overlay();
+    act(() => view.setViewport({ zoom: 0.5, x: 40, y: 20 }));
+    act(() => view.setViewport({ zoom: 0.25, x: 40, y: 20 }));
+    expect(overlay()).toBe(asked);
+    // a board's open thread pins it: its pin follows the pan
+    act(() => void addThread(doc, { threadId: 't1', slideId: 'b1', elementId: ROOT, quote: 'Phone', by: { kind: 'human' }, at: 1 }, 'deck-comments'));
+    await act(async () => new Promise((r) => setTimeout(r, 80)));
+    act(() => view.setViewport({ zoom: 0.5, x: 70, y: 20 }));
+    const pin = container.querySelector<HTMLElement>('[data-board-pin="b1"]')!;
+    expect([pin.style.left, pin.style.top]).toEqual([`${70 + 390 * 0.5}px`, '20px']);
+    // a card on screen (its thread active): every pan moves its layout key, so the host locates it again
+    act(() => overlay().setActive('t1'));
+    const key = overlay().layoutKey;
+    act(() => view.setViewport({ zoom: 0.5, x: 90, y: 25 }));
+    expect(overlay().layoutKey).not.toBe(key);
+  });
+});
