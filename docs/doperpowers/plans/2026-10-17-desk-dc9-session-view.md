@@ -4,7 +4,7 @@
 > branch `smns-erb`; on this machine
 > `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/smns-erb/`), child
 > **DC9** (The web — the session view — plan). **Parent pin:** composite
-> MAWS commit `a87d7fa04` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`, `bd9c67b14`, `21ba47570`, `34defe9f6`, `f5df1687d`; Decision Log). The child's section there is its design; this
+> MAWS commit `4021c5bbb` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`, `bd9c67b14`, `21ba47570`, `34defe9f6`, `f5df1687d`, `a87d7fa04`; Decision Log). The child's section there is its design; this
 > document carries only the constraints and the milestones. Before M1 read
 > the composite's §9 whole, §4 as amended (the phone ruling is binding),
 > the DC9 child section, the Cross-Child Contracts DX3, DX4 and DX8 with
@@ -800,6 +800,12 @@ in their own worktrees.
   producer never modelled an adopt root (checked); the earlier entry that
   listed it is superseded on that point.
   Date/Author: 2026-10-17, controller (the composite's writer's notice).
+
+- Decision: **The owner keeps MAWS's shape for the Transcript side of the
+  toggle** (2026-10-17, after the real-session retake): finished turns stay
+  folded behind MAWS's "Worked for …" divider, one click opens them; the
+  build does not change. Parent re-pinned to `4021c5bbb`, which records it.
+  Date/Author: 2026-10-17, the owner via the composite's writer.
 
 ## Surprises & Discoveries
 - 2026-10-17 (M3): MAWS's report counts question rows as persistent, not
