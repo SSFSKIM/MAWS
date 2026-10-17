@@ -67,6 +67,9 @@ async function setUp(options: { memory?: Memory; script?: RpcScript; recordings?
   await fm.connect();
   await fm.play({ speed: 0 });
   const b = await BrowserClient.open(hub, ADMIN, project);
+  // The hub's connect sequence (welcome, machines, each session's stored presence, pending, deliveries) ends with
+  // `deliveries`: once it is in, a frame a test waits for after this point is a new one, never a replayed presence.
+  await b.next((f) => f.t === 'deliveries', 'the end of the connect sequence');
   const raised = (request: string) => fm.pendingRequests().find((r) => r.request === request) as Raised;
   const call = async (name: Rpc['rpc'], args: Record<string, unknown>, nonce = newNonce()) => {
     const rpc = await sealRpc(await KEY, { rpc: name, project, machine: fm.name, member, created: new Date().toISOString(), nonce, args } as unknown as RpcDraft);
