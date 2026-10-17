@@ -23,6 +23,13 @@
 //   its operations end unannounced, its connections close, and a later start at or below the floor is refused.
 // - `close` (main gone): every operation and outcome goes synchronously, the credential floors with the attachment, and
 //   every connection is invalidated (its processes' end follows within the pool's bound); `shutdown` also awaits that.
+// - P3-HD M3b (Decision Log 15, 18 and 21): a resolution naming a tool ranks main's directories by the artifact's
+//   existing grant, checked afresh and consuming nothing: the first candidate with known tool metadata the grant
+//   matches, else the first with none known that it matches (`grantBacked`: no readOnly is invented), else the first
+//   with known metadata (a new grant's). Known metadata is an agreeing engine report's annotation combined with the
+//   host-only hints (./direct-hints.ts) that the owner's discovery and every call's successful live listing publish in
+//   their synchronous post-list validity step; credential withdrawal and main's going forget them. At the call, a read
+//   grant whose live tool may write is the private `changed`, the durable grant untouched.
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrantMode } from '@shared/artifacts/connectors';
@@ -30,7 +37,8 @@ import type { CommandInput } from '@shared/ipc/schema';
 import type { DirectCallOutcome, DirectDiscoverAnswer, DirectOperationOutcome, DirectReason, DirectResolveAnswer, DirectSource } from '@shared/ipc/schema/connectors';
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
-import type { DirectConnectionPool, DirectFailure, DirectLease } from './direct-client';
+import type { DirectConnectionPool, DirectFailure, DirectLease, DirectTool } from './direct-client';
+import { DirectToolHints } from './direct-hints'; // P3-HD M3b
 import type { ConnectorSourceRefusal, ConnectorStatusCache, VerifiedConnectorSource } from './provenance';
 
 export const DIRECT_CALL_DEADLINE_MS = 180_000; // a discovery's too: connect, initialize, tools/list
@@ -90,6 +98,7 @@ interface Operation {
   readonly controller: AbortController;
   readonly credential?: Credential;
   readonly deadlineAt: number;
+  readonly admittedAt: number; // P3-HD M3b: its hint publication's order
   outcome?: DirectOperationOutcome;
   stop?: 'timeout'; // why its signal aborted, when it was not withdrawn
   revoked?: boolean; // its fence broke: a revoke, delete or replacing grant asked for while it ran or its outcome waited
@@ -127,6 +136,7 @@ export class DirectCalls {
   private readonly floors = new Map<string, number>(); // a credential's withdrawn epochs: every one at or below
   private readonly epochs = new Map<string, number>(); // the highest epoch seen of each credential
   private attachment = 0;
+  private readonly hints = new DirectToolHints(); // P3-HD M3b
   private readonly ttlMs: number;
   private readonly callDeadlineMs: number;
   private readonly resolveBoundMs: number;
@@ -183,12 +193,14 @@ export class DirectCalls {
   withdraw(connectionId?: string, credentialEpoch?: number): number {
     if (connectionId === undefined) {
       for (const [id, seen] of this.epochs) this.floors.set(id, Math.max(this.floors.get(id) ?? -1, seen));
+      this.hints.clear(); // P3-HD M3b
       const ended = this.endAll();
       void this.options.pool.invalidate(() => true);
       return ended;
     }
     const floor = Math.max(this.floors.get(connectionId) ?? -1, credentialEpoch ?? this.epochs.get(connectionId) ?? -1);
     this.floors.set(connectionId, floor);
+    this.hints.withdraw(connectionId, floor); // P3-HD M3b
     let ended = 0;
     for (const operation of [...this.operations.values()]) {
       if (operation.credential?.connectionId !== connectionId || operation.credential.credentialEpoch > floor) continue;
@@ -203,6 +215,7 @@ export class DirectCalls {
   // its own); every connection is invalidated, and the returned promise is their processes' end.
   close(): Promise<void> {
     this.attachment += 1;
+    this.hints.clear(); // P3-HD M3b
     this.endAll();
     this.floors.clear();
     this.epochs.clear();
@@ -221,7 +234,7 @@ export class DirectCalls {
     if (this.operations.has(operationId)) throw new Error(`direct operation ${operationId} is already known`);
     if (this.operations.size >= this.maxOperations) throw new HostCommandError(ipcError('internal', 'the engine host holds as many direct operations as it may'));
     if (credential) this.epochs.set(credential.connectionId, Math.max(this.epochs.get(credential.connectionId) ?? -1, credential.credentialEpoch));
-    const operation: Operation = { id: operationId, kind, controller: new AbortController(), deadlineAt: this.clock.now() + boundMs, ...(credential && { credential }) };
+    const operation: Operation = { id: operationId, kind, controller: new AbortController(), deadlineAt: this.clock.now() + boundMs, admittedAt: this.hints.admit(), ...(credential && { credential }) };
     this.operations.set(operation.id, operation);
     // its bound ends it with its late answer even while a step it awaits never settles
     operation.deadline = this.clock.setTimeout(() => {
@@ -293,26 +306,58 @@ export class DirectCalls {
 
   private async resolved(operation: Operation, input: DirectResolveInput): Promise<DirectResolveAnswer> {
     const { cache } = this.options;
+    const { tool } = input;
     let first: Extract<DirectResolveAnswer, { ready: false }>['why'] | null = null;
-    // Main's candidates in its order: the first that serves the server (and, named, the tool an agreeing report listed),
-    // as route E takes the first ready session. The grant's fingerprint (main's check, then the host's at the call) keeps
-    // another directory's server from passing as it; within one directory the cache admits no precedence at all.
-    for (const directory of input.directories) {
-      if (input.tool === undefined) {
+    const refusedWith = (why: Extract<DirectResolveAnswer, { ready: false }>['why']) => {
+      if (first === null && why !== 'unobserved') first = why;
+    };
+    // Main's candidates in its order, as route E takes the first ready session. Within one directory the cache admits
+    // no precedence at all; across them, the grant's fingerprint (main's check, then the host's at the call) keeps
+    // another directory's server from passing as the one granted.
+    if (tool === undefined) {
+      for (const directory of input.directories) {
         const answer = await cache.resolveSource(directory, input.server);
         if (!this.registered(operation)) return { ready: false, why: 'unavailable' };
         if (answer.ok) return { ready: true, source: publicSource(answer.source) };
-        if (first === null && answer.why !== 'unobserved') first = answer.why;
+        refusedWith(answer.why);
+      }
+      return { ready: false, why: first ?? 'unobserved' };
+    }
+    // P3-HD M3b: ranked by the artifact's existing grant (above)
+    let known: Extract<DirectResolveAnswer, { ready: true }> | null = null;
+    let grantBacked: Extract<DirectResolveAnswer, { ready: true }> | null = null;
+    for (const directory of input.directories) {
+      const answer = await cache.resolve(directory, input.server, tool);
+      if (!this.registered(operation)) return { ready: false, why: 'unavailable' };
+      if (!answer.ok) {
+        refusedWith(answer.why);
         continue;
       }
-      const answer = await cache.resolve(directory, input.server, input.tool);
+      const { fingerprint } = answer.tool;
+      const readOnly = combined(answer.tool.readOnly, this.hints.readOnly(answer.source, tool));
+      if (readOnly === null && grantBacked !== null) continue; // a later grant-backed candidate ranks no higher
+      const matches = await this.grantMatches(input.artifactId, { server: input.server, tool, fingerprint });
       if (!this.registered(operation)) return { ready: false, why: 'unavailable' };
-      const { readOnly } = answer.ok ? answer.tool : { readOnly: null };
-      if (answer.ok && readOnly !== null) return { ready: true, source: publicSource(answer.source), tool: { fingerprint: answer.tool.fingerprint, readOnly } };
-      const why = answer.ok ? 'toolMissing' : answer.why;
-      if (first === null && why !== 'unobserved') first = why;
+      const source = publicSource(answer.source);
+      if (readOnly !== null) {
+        const candidate = { ready: true as const, source, tool: { fingerprint, readOnly } };
+        if (matches) return candidate;
+        known ??= candidate;
+      } else if (matches) grantBacked = { ready: true, source, tool: { fingerprint, grantBacked: true } };
+      else refusedWith('toolMissing');
     }
-    return { ready: false, why: first ?? 'unobserved' };
+    return grantBacked ?? known ?? { ready: false, why: first ?? 'unobserved' };
+  }
+
+  // Whether the artifact's existing grant admits `call` now, consuming nothing; a store that cannot say matches nothing.
+  private async grantMatches(artifactId: string, call: ConnectorCallRef): Promise<boolean> {
+    const store = this.options.store();
+    if (!store) return false;
+    try {
+      return (await store.checkConnectorCall(artifactId, call)).granted;
+    } catch {
+      return false;
+    }
   }
 
   private async call(operation: Operation, input: DirectStartInput): Promise<DirectCallOutcome> {
@@ -359,13 +404,13 @@ export class DirectCalls {
     if (!acquired.ok) return check() ?? fromTransport(acquired, 'connection');
     const { lease } = acquired;
     try {
-      return await this.callOn(lease, operation, input, store, call, check);
+      return await this.callOn(lease, operation, input, read.source, store, call, check);
     } finally {
       lease.release();
     }
   }
 
-  private async callOn(lease: DirectLease, operation: Operation, input: DirectStartInput, store: DirectGrantStore, call: ConnectorCallRef, check: () => Failure | null): Promise<DirectCallOutcome> {
+  private async callOn(lease: DirectLease, operation: Operation, input: DirectStartInput, source: VerifiedConnectorSource, store: DirectGrantStore, call: ConnectorCallRef, check: () => Failure | null): Promise<DirectCallOutcome> {
     const { signal } = operation.controller;
     const connected = check();
     if (connected) return connected;
@@ -373,9 +418,11 @@ export class DirectCalls {
     const afterList = check();
     if (afterList) return afterList;
     if (!listed.ok) return fromTransport(listed, 'connection');
+    this.publish(operation, source, listed.tools); // P3-HD M3b: in the same synchronous step as the check above
     const tool = listed.tools.find((entry) => entry.name === input.tool);
     if (!tool) return unavailable('toolMissing');
-    if (input.mode === 'read' && !tool.readOnly) return refused('wrongMode', 'grant');
+    // P3-HD M3b (Decision Log 18): the live metadata no longer admits the grant's use; the grant is the owner's to review
+    if (input.mode === 'read' && !tool.readOnly) return unavailable('changed');
     // now, and only now, the durable use of an Allow once
     const authorization = await this.grantOf(() => store.authorizeConnectorCall(input.artifactId, call, input.mode));
     if ('ok' in authorization) return authorization;
@@ -427,10 +474,18 @@ export class DirectCalls {
       const after = check();
       if (after) return discoverFailure(after);
       if (!listed.ok) return discoverFailure(fromTransport(listed, 'connection'));
+      this.publish(operation, read.source, listed.tools); // P3-HD M3b: in the same synchronous step as the check above
       return { ok: true, tools: listed.tools.map(({ name, readOnly }) => ({ name, readOnly })) };
     } finally {
       acquired.lease.release();
     }
+  }
+
+  // P3-HD M3b: a live listing's hint, published only by the caller's synchronous post-list validity step (the operation
+  // registered, its source still valid, its credential not withdrawn, the same attachment).
+  private publish(operation: Operation, source: VerifiedConnectorSource, tools: readonly DirectTool[]): void {
+    const credential = operation.credential && { connectionId: operation.credential.connectionId, credentialEpoch: operation.credential.credentialEpoch };
+    this.hints.publish(source, tools, { admittedAt: operation.admittedAt, ...(credential && { credential }) });
   }
 
   // A connection's own validity, for its every write: the source as the entry's read verified it, the credential's
@@ -462,6 +517,9 @@ function publicSource(source: VerifiedConnectorSource): DirectSource {
     path: source.path, entryPath: [...source.entryPath], observedAt: source.observedAt, ...(source.url !== undefined && { resourceUrl: source.url }),
   };
 }
+
+// P3-HD M3b: an engine report's and a live listing's readOnly together, conservatively: either saying it may write wins.
+const combined = (reported: boolean | null, hinted: boolean | null): boolean | null => (reported === null ? hinted : hinted === null ? reported : reported && hinted);
 
 const sameSource = (source: VerifiedConnectorSource, input: { directory: string; sourceId: string; generation: number; server: string }) =>
   source.cwd === input.directory && source.sourceId === input.sourceId && source.generation === input.generation && source.server === input.server;

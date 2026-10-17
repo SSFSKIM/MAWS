@@ -17,9 +17,15 @@
 // - A call is bound to the target main selected: one `directStart` per call, never retried or moved to another route,
 //   even when an eligible engine appears meanwhile (the next resolution picks route E). Only fixed words reach the broker
 //   and the log: the host's answers are closed enums, and no SDK, server, file or token text exists to leak.
+// - P3-HD M3b (Decision Log 18, 19, 21 and 22): a resolution may answer a grant-backed candidate (no tool metadata, the
+//   existing grant matching), which reaches the broker as `readOnly: false` with `grantBacked`. An HTTP source's
+//   credential is prepared, when a preparer is supplied, only inside the selected target's call (after the broker's
+//   check) or the owner's discovery, within the operation's registered and bounded lifetime: its cancellation, its
+//   deadline, the host's loss, a close and stop each settle it at once and abort the preparation, and a late answer
+//   sends nothing. Resolution never prepares one. An `unauthorized` answer is reported with exactly the credential sent.
 import { randomUUID } from 'node:crypto';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
-import type { DirectCallOutcome, DirectDiscoverAnswer, DirectOperationOutcome, DirectResolveAnswer, DirectSource } from '@shared/ipc/schema/connectors';
+import type { DirectCallOutcome, DirectCredential, DirectDiscoverAnswer, DirectOperationOutcome, DirectResolveAnswer, DirectSource, DirectToolMetadata } from '@shared/ipc/schema/connectors';
 import type { ConnectorToolRef } from '@shared/artifacts/connectors';
 import { artifactDirectories, ownSessionOf } from './eligibility';
 import type { ConnectorRoute, ConnectorRouteAnswer, ConnectorRouteCallContext, ConnectorRouteTarget } from './route';
@@ -34,10 +40,24 @@ export interface DirectRouteDeps {
   realpath(path: string): string | null;
   streaming(): boolean; // the engine host's events reach main (hosts.streaming)
   log?: (line: string) => void;
+  // P3-HD M3b: an HTTP source's credential for a call or discovery (M3c's provider); absent, none is ever sent.
+  credentials?: DirectCredentialPreparation;
 }
 
-// The verified source a resolution answered, as the host names it for `directStart` and `directDiscover`.
-export type DirectSourceRef = Pick<DirectSource, 'directory' | 'sourceId' | 'generation' | 'server'>;
+// P3-HD M3b start: the credential preparation seam (Decision Log 19 and 21).
+export type DirectCredentialPurpose = 'call' | 'discover';
+export type DirectCredentialUse = Pick<DirectCredential, 'connectionId' | 'credentialEpoch'>;
+// `credential: null`: send none (no owned grant: open HTTP, or the entry's own literal header); `ok: false`: no usable
+// credential (withdrawn, or reconnection needed), so the operation is unavailable and nothing is sent.
+export type DirectCredentialPrepared = { ok: true; credential: DirectCredential | null } | { ok: false };
+export interface DirectCredentialPreparation {
+  // For the complete source the operation runs on, after the broker's check (a call) or for the owner's gesture (a
+  // discovery). `signal` aborts the moment the operation ends here; whatever is answered after that is dropped unsent.
+  prepare(request: { source: DirectSource; purpose: DirectCredentialPurpose; signal: AbortSignal }): Promise<DirectCredentialPrepared>;
+  // The host answered `unauthorized` for an operation prepared here, sent with `credential` (null: sent with none).
+  unauthorized(report: { source: DirectSource; purpose: DirectCredentialPurpose; credential: DirectCredentialUse | null }): void;
+}
+// P3-HD M3b end
 
 export interface DirectRoute extends ConnectorRoute {
   // `connectors.directOperation`: an operation ended (the broker is never told: its call answers)
@@ -51,9 +71,12 @@ export interface DirectRoute extends ConnectorRoute {
   // treat the host's direct work as ended.
   close(): Promise<{ ok: true; cancelled: number } | { ok: false; why: 'directClose failed' }>;
   // The verified source naming `server` for the artifact (no tool: an owner's Connect starts from it), or why not.
-  resolveSource(artifactId: string, server: string, signal: AbortSignal): Promise<{ ok: true; source: DirectSource } | { ok: false; why: Extract<DirectResolveAnswer, { ready: false }>['why'] }>;
-  // The owner's discovery of a source's tools: initialize and tools/list, never a tool call.
-  discover(source: DirectSourceRef, signal: AbortSignal): Promise<DirectDiscoverAnswer>;
+  // P3-HD M3b (Decision Log 22): with `tool`, the source the host's ranking selects for that tool (the one its existing
+  // grant matches first), with the tool's metadata: the same selection a call makes, for an owner action bound to it.
+  resolveSource(artifactId: string, server: string, signal: AbortSignal, tool?: string): Promise<{ ok: true; source: DirectSource; tool?: DirectToolMetadata } | { ok: false; why: Extract<DirectResolveAnswer, { ready: false }>['why'] }>;
+  // The owner's discovery of a source's tools: initialize and tools/list, never a tool call. P3-HD M3b: the complete
+  // source, for its credential's preparation; only its private reference crosses to the host.
+  discover(source: DirectSource, signal: AbortSignal): Promise<DirectDiscoverAnswer>;
 }
 
 // The host's own bounds are 8 s to resolve and 180 s for a call or discovery from its start; main takes or withdraws at
@@ -75,6 +98,7 @@ const lost = (lostWord: string, failure: Lost['failure'] = 'unavailable'): Lost 
 interface Pending {
   readonly kind: Kind;
   settle(result: DirectOperationOutcome | Lost): void;
+  sent: boolean; // P3-HD M3b: its command was sent (until then, preparing its credential: the host knows nothing of it)
   taking: boolean; // a `directTake` is in flight
   again?: { whenNone: Lost | null }; // an end or a deadline arrived meanwhile: ask once more
 }
@@ -112,6 +136,10 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
   function fetch(operationId: string, whenNone: Lost | null): void {
     const operation = pending.get(operationId);
     if (!operation) return;
+    if (!operation.sent) {
+      if (whenNone !== null) withdraw(operationId, whenNone); // P3-HD M3b: nothing in the host to take
+      return;
+    }
     if (operation.taking) {
       operation.again = { whenNone: whenNone ?? operation.again?.whenNone ?? null }; // an in-flight take may have answered before this end
       return;
@@ -141,7 +169,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     const operation = pending.get(operationId);
     if (!operation) return;
     operation.settle(result);
-    void deps.call('connectors.directCancel', { operationId }).catch(() => {});
+    if (operation.sent) void deps.call('connectors.directCancel', { operationId }).catch(() => {}); // P3-HD M3b
   }
 
   // Why no operation may start now, before anything is gathered or sent. Not streaming: its end could not reach main.
@@ -152,33 +180,79 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     return pending.size >= DIRECT_PENDING_LIMIT ? lost('too many direct operations are pending') : null;
   }
 
-  // Registers an operation, then sends its command: `send` receives the operation's id and answers its acknowledgment.
-  function run<K extends Kind>(kind: K, send: (operationId: string) => Promise<CommandResult<'connectors.directResolve' | 'connectors.directStart' | 'connectors.directDiscover'>>, deadlineMs: number, signal: AbortSignal): Promise<OutcomeOf<K> | Lost> {
+  // Registers an operation, then sends its command: `send` receives the operation's id (and, P3-HD M3b, the credential
+  // `prepare` answered, inside the operation's lifetime) and answers its acknowledgment.
+  function run<K extends Kind>(
+    kind: K,
+    send: (operationId: string, credential: DirectCredential | null) => Promise<CommandResult<'connectors.directResolve' | 'connectors.directStart' | 'connectors.directDiscover'>>,
+    deadlineMs: number,
+    signal: AbortSignal,
+    prepare?: (signal: AbortSignal) => Promise<DirectCredentialPrepared>,
+  ): Promise<{ result: OutcomeOf<K> | Lost; credential: DirectCredential | null }> {
     const refused = refusal(signal);
-    if (refused) return Promise.resolve(refused);
+    if (refused) return Promise.resolve({ result: refused, credential: null });
     const operationId = randomUUID();
-    return new Promise<OutcomeOf<K> | Lost>((resolve) => {
+    let credential: DirectCredential | null = null;
+    return new Promise((resolve) => {
+      const preparation = new AbortController();
       const deadline = setTimeout(() => fetch(operationId, lost('the operation outlived its deadline')), deadlineMs);
       const cancel = () => withdraw(operationId, lost('cancelled'));
-      pending.set(operationId, {
+      const operation: Pending = {
         kind,
         taking: false,
+        sent: false,
         settle: (result) => {
           if (!pending.delete(operationId)) return;
           clearTimeout(deadline);
           signal.removeEventListener('abort', cancel);
-          resolve(result as OutcomeOf<K> | Lost);
+          preparation.abort(); // P3-HD M3b: a preparation still running is told; its answer is dropped
+          resolve({ result: result as OutcomeOf<K> | Lost, credential });
         },
-      });
+      };
+      pending.set(operationId, operation);
       signal.addEventListener('abort', cancel, { once: true });
-      void send(operationId).then(
-        (started) => {
-          // the host may still have it (a dispatch that timed out): withdraw it, and answer now
-          if (!started.ok) withdraw(operationId, lost(`the host refused the operation: ${started.error.code}`));
-        },
-        () => withdraw(operationId, lost('the host could not be asked')),
-      );
+      void (async () => {
+        if (prepare) {
+          let prepared: DirectCredentialPrepared;
+          try {
+            prepared = await prepare(preparation.signal);
+          } catch {
+            prepared = { ok: false };
+          }
+          if (pending.get(operationId) !== operation) return; // it ended meanwhile: nothing is sent
+          if (!prepared.ok) return withdraw(operationId, lost('no credential could be prepared'));
+          if (!deps.streaming()) return withdraw(operationId, lost('the engine host is not streaming its events yet'));
+          credential = prepared.credential;
+        }
+        operation.sent = true;
+        let started;
+        try {
+          started = await send(operationId, credential);
+        } catch {
+          return withdraw(operationId, lost('the host could not be asked'));
+        }
+        // the host may still have it (a dispatch that timed out): withdraw it, and answer now
+        if (!started.ok) withdraw(operationId, lost(`the host refused the operation: ${started.error.code}`));
+      })();
     });
+  }
+
+  // P3-HD M3b: the preparation of `source`'s credential when a preparer is supplied and the source is HTTP (a credential
+  // is bound to the verified resource; a stdio server has none), else none.
+  function preparationOf(source: DirectSource, purpose: DirectCredentialPurpose): ((signal: AbortSignal) => Promise<DirectCredentialPrepared>) | undefined {
+    const { credentials } = deps;
+    if (!credentials || source.transport !== 'http') return undefined;
+    return (signal) => credentials.prepare({ source, purpose, signal });
+  }
+
+  // P3-HD M3b: the credential the host refused, exactly as sent (never the token), to the preparer that prepared it.
+  function unauthorized(source: DirectSource, purpose: DirectCredentialPurpose, credential: DirectCredential | null): void {
+    const used = credential && { connectionId: credential.connectionId, credentialEpoch: credential.credentialEpoch };
+    try {
+      deps.credentials?.unauthorized({ source, purpose, credential: used });
+    } catch {
+      log(`connectors: the credential preparer failed to take an unauthorized report for ${source.server}`);
+    }
   }
 
   async function resolveAnswer(artifactId: string, server: string, tool: string | undefined, signal: AbortSignal): Promise<DirectResolveAnswer | Lost> {
@@ -186,20 +260,22 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     if (refused) return refused;
     const directories = (await directoriesOf(artifactId)).slice(0, 16);
     if (directories.length === 0) return { ready: false, why: 'unobserved' };
-    const result = await run('resolve', (operationId) => deps.call('connectors.directResolve', { operationId, artifactId, directories, server, ...(tool === undefined ? {} : { tool }) }), DIRECT_RESOLVE_DEADLINE_MS, signal);
+    const { result } = await run('resolve', (operationId) => deps.call('connectors.directResolve', { operationId, artifactId, directories, server, ...(tool === undefined ? {} : { tool }) }), DIRECT_RESOLVE_DEADLINE_MS, signal);
     return 'lost' in result ? result : result.answer;
   }
 
-  function targetOf(source: DirectSource, tool: ConnectorToolRef, artifactId: string, fingerprint: string, readOnly: boolean): ConnectorRouteTarget {
-    return {
-      fingerprint,
-      readOnly, // an agreeing engine report's annotation; the host's live tools/list decides again at the call
-      call: async (args: Record<string, unknown>, context: ConnectorRouteCallContext): Promise<ConnectorRouteAnswer> => {
-        const sent = { artifactId, directory: source.directory, sourceId: source.sourceId, generation: source.generation, server: source.server, tool: tool.tool, arguments: args, fingerprint: context.fingerprint, mode: context.mode };
-        const result = await run('call', (operationId) => deps.call('connectors.directStart', { operationId, ...sent }), DIRECT_OPERATION_DEADLINE_MS, context.signal);
-        return 'lost' in result ? { ok: false, failure: result.failure, message: result.lost } : answerOf(result.outcome);
-      },
+  function targetOf(source: DirectSource, tool: ConnectorToolRef, artifactId: string, metadata: DirectToolMetadata): ConnectorRouteTarget {
+    const call = async (args: Record<string, unknown>, context: ConnectorRouteCallContext): Promise<ConnectorRouteAnswer> => {
+      const sent = { artifactId, directory: source.directory, sourceId: source.sourceId, generation: source.generation, server: source.server, tool: tool.tool, arguments: args, fingerprint: context.fingerprint, mode: context.mode };
+      const prepare = preparationOf(source, 'call'); // P3-HD M3b: after the broker's check, inside the operation
+      const { result, credential } = await run('call', (operationId, prepared) => deps.call('connectors.directStart', { operationId, ...sent, ...(prepared && { credential: prepared }) }), DIRECT_OPERATION_DEADLINE_MS, context.signal, prepare);
+      if ('lost' in result) return { ok: false, failure: result.failure, message: result.lost };
+      if (prepare && !result.outcome.ok && result.outcome.reason === 'unauthorized') unauthorized(source, 'call', credential);
+      return answerOf(result.outcome);
     };
+    // an agreeing engine report's annotation (with the host's live hints); the host's live tools/list decides again at
+    // the call. P3-HD M3b: grant-backed, none is known, and none is claimed.
+    return 'grantBacked' in metadata ? { fingerprint: metadata.fingerprint, readOnly: false, grantBacked: true, call } : { fingerprint: metadata.fingerprint, readOnly: metadata.readOnly, call };
   }
 
   function stopAll(word: string): void {
@@ -223,17 +299,21 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
         log(`connectors: no engine report listed ${named}; direct waits for the owner’s discovery`);
         return null;
       }
-      return targetOf(answer.source, tool, artifactId, answer.tool.fingerprint, answer.tool.readOnly);
+      return targetOf(answer.source, tool, artifactId, answer.tool);
     },
-    async resolveSource(artifactId, server, signal) {
-      const answer = await resolveAnswer(artifactId, server, undefined, signal);
+    async resolveSource(artifactId, server, signal, tool) {
+      const answer = await resolveAnswer(artifactId, server, tool, signal);
       if ('lost' in answer) return { ok: false, why: 'unavailable' };
-      return answer.ready ? { ok: true, source: answer.source } : { ok: false, why: answer.why };
+      if (!answer.ready) return { ok: false, why: answer.why };
+      return { ok: true, source: answer.source, ...(answer.tool && { tool: answer.tool }) };
     },
     async discover(source, signal) {
       const { directory, sourceId, generation, server } = source;
-      const result = await run('discover', (operationId) => deps.call('connectors.directDiscover', { operationId, directory, sourceId, generation, server }), DIRECT_OPERATION_DEADLINE_MS, signal);
-      return 'lost' in result ? { ok: false, failure: 'unavailable', reason: 'connection' } : result.answer;
+      const prepare = preparationOf(source, 'discover'); // P3-HD M3b
+      const { result, credential } = await run('discover', (operationId, prepared) => deps.call('connectors.directDiscover', { operationId, directory, sourceId, generation, server, ...(prepared && { credential: prepared }) }), DIRECT_OPERATION_DEADLINE_MS, signal, prepare);
+      if ('lost' in result) return { ok: false, failure: 'unavailable', reason: 'connection' };
+      if (prepare && !result.answer.ok && result.answer.reason === 'unauthorized') unauthorized(source, 'discover', credential);
+      return result.answer;
     },
     // an end announced: its outcome, or (taken already, expired) a failure
     operationEnded(operationId) {

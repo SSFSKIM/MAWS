@@ -109,8 +109,9 @@ export const DIRECT_SOURCE_REFUSALS = ['unobserved', 'ambiguous', 'engineOnly', 
 // refused it (main marks that credential unusable), `connection` the server could not be started, initialized or
 // reached, `capacity` a bound of the host's, `toolMissing` the live tools/list lacks it, `grant` the store's check,
 // `store` the store unavailable, `cancelled`/`timeout`, `transport` the exchange failed once started (never resent),
-// `notJson`/`tooLarge` the result.
-export const DIRECT_REASONS = ['source', 'credential', 'unauthorized', 'connection', 'capacity', 'toolMissing', 'grant', 'store', 'cancelled', 'timeout', 'transport', 'notJson', 'tooLarge'] as const;
+// `notJson`/`tooLarge` the result. P3-HD M3b: `changed`, the live tools/list no longer admits the grant's use (a read
+// grant's tool that may write now): the page reads paused/unavailable, the durable grant is left for the owner.
+export const DIRECT_REASONS = ['source', 'credential', 'unauthorized', 'connection', 'capacity', 'toolMissing', 'grant', 'store', 'cancelled', 'timeout', 'transport', 'notJson', 'tooLarge', 'changed'] as const;
 const Reason = z.enum(DIRECT_REASONS);
 export const DirectCredentialSchema = z.strictObject({ connectionId: z.uuid(), credentialEpoch: CredentialEpoch, accessToken: z.string().min(1).max(16_384), expiresAt: Time.optional() });
 export const DirectSourceSchema = z.strictObject({
@@ -132,10 +133,17 @@ export const DirectResolveInputSchema = z.strictObject({
   server: ConnectorToolRefSchema.shape.server,
   tool: ConnectorToolRefSchema.shape.tool.optional(), // absent: the source alone (an owner's discovery of a needs-auth server)
 });
-// With a tool named, ready only where an agreeing engine report listed it (its fingerprint and readOnly annotation;
-// the live tools/list still decides at the call); `toolMissing` where the source is verified but no report lists it.
+// With a tool named, ready where tool metadata is known (an agreeing engine report's readOnly annotation, combined
+// with the host's own live listing hints; the live tools/list still decides at the call), or, P3-HD M3b (Decision Log
+// 18), `grantBacked` where none is known but the artifact's existing grant matches the identified entry's fingerprint:
+// no readOnly is invented for it. Main's directories are ranked: the first known candidate the grant matches, else the
+// first grant-backed one, else the first known one. `toolMissing` where a source is verified but none of these stands.
+const DirectToolMetadataSchema = z.union([
+  z.strictObject({ fingerprint: ConnectorGrantRequestSchema.shape.fingerprint, readOnly: z.boolean() }),
+  z.strictObject({ fingerprint: ConnectorGrantRequestSchema.shape.fingerprint, grantBacked: z.literal(true) }), // P3-HD M3b
+]);
 export const DirectResolveAnswerSchema = z.discriminatedUnion('ready', [
-  z.strictObject({ ready: z.literal(true), source: DirectSourceSchema, tool: z.strictObject({ fingerprint: ConnectorGrantRequestSchema.shape.fingerprint, readOnly: z.boolean() }).optional() }),
+  z.strictObject({ ready: z.literal(true), source: DirectSourceSchema, tool: DirectToolMetadataSchema.optional() }),
   z.strictObject({ ready: z.literal(false), why: z.enum([...DIRECT_SOURCE_REFUSALS, 'toolMissing']) }),
 ]);
 const DirectSourceRef = { directory: Directory, sourceId: SourceId, generation: Generation, server: ConnectorToolRefSchema.shape.server };
@@ -173,6 +181,8 @@ export type DirectCallOutcome = z.infer<typeof DirectCallOutcomeSchema>;
 export type DirectDiscoverAnswer = z.infer<typeof DirectDiscoverAnswerSchema>;
 export type DirectOperationOutcome = z.infer<typeof DirectOperationOutcomeSchema>;
 export type DirectReason = (typeof DIRECT_REASONS)[number];
+export type DirectToolMetadata = z.infer<typeof DirectToolMetadataSchema>; // P3-HD M3b
+export type DirectCredential = z.infer<typeof DirectCredentialSchema>; // P3-HD M3b
 const Started = z.strictObject({ operationId: OperationId });
 // P3-HD end
 

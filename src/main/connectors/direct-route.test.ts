@@ -490,7 +490,7 @@ describe('call (one submission, bound to the target main selected)', () => {
     release();
     expect(await resolving).toBeNull();
     expect(await found.call({}, context())).toEqual({ ok: false, failure: 'unavailable', message: 'main is stopping' });
-    expect(await route.discover({ directory: '/repo', sourceId: SOURCE_ID, generation: 3, server: 'fixture' }, signalOf().signal)).toMatchObject({ ok: false });
+    expect(await route.discover(source(), signalOf().signal)).toMatchObject({ ok: false });
     host.gates.clear();
     expect(await route.resolve(ART, ROWS, signalOf().signal)).toBeNull();
     expect(host.of('connectors.directResolve')).toHaveLength(1); // the first target’s alone
@@ -558,7 +558,7 @@ describe('the owner’s discovery (typed answer through the same operation machi
     const found = await pending;
     expect(found).toMatchObject({ ok: true, source: { sourceId: SOURCE_ID, transport: 'stdio' } });
     const answer: DirectDiscoverAnswer = { ok: true, tools: [{ name: 'rows', readOnly: true }] };
-    const discovery = route.discover((found as { ok: true; source: { directory: string; sourceId: string; generation: number; server: string } }).source, signalOf().signal);
+    const discovery = route.discover((found as { ok: true; source: ReturnType<typeof source> }).source, signalOf().signal);
     await settle();
     const start = host.last('connectors.directDiscover').input;
     expect(start).toEqual({ operationId: expect.any(String), directory: '/repo', sourceId: SOURCE_ID, generation: 3, server: 'fixture' });
@@ -572,7 +572,7 @@ describe('the owner’s discovery (typed answer through the same operation machi
     await settle();
     host.finish(host.last('connectors.directResolve').input.operationId as string, notReady('engineOnly'));
     expect(await pending).toEqual({ ok: false, why: 'engineOnly' });
-    const discovery = route.discover({ directory: '/repo', sourceId: SOURCE_ID, generation: 3, server: 'fixture' }, signalOf().signal);
+    const discovery = route.discover(source(), signalOf().signal);
     await settle();
     route.hostLost();
     expect(await discovery).toEqual({ ok: false, failure: 'unavailable', reason: 'connection' });

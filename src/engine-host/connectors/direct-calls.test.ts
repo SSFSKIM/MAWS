@@ -393,12 +393,14 @@ describe('DirectCalls: the grant at the actual write', () => {
     });
   }
 
+  // P3-HD M3b (Decision Log 18): the live metadata's mismatch is the private `changed`, the durable grant left untouched
   it('refuses a read grant’s call when the live tools/list says the tool is no longer read-only, before any write', async () => {
     const grant = await granted();
     pool.tools = [{ name: 'rows', readOnly: false }];
     const input = grant.start();
     calls.start(input);
-    expect(await callOutcome(input.operationId)).toEqual({ ok: false, failure: 'refused', refusal: 'wrongMode', reason: 'grant' });
+    expect(await callOutcome(input.operationId)).toEqual({ ok: false, failure: 'unavailable', reason: 'changed' });
+    expect(await documents.store.connectorGrants(artifactId)).toMatchObject([{ tool: 'rows', mode: 'read' }]);
     expect(toolCalls()).toEqual([]);
   });
 
