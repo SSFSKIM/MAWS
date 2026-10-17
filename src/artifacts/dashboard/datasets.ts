@@ -40,26 +40,34 @@ const FileSourceSchema = z.strictObject({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
   size: z.number().int().nonnegative(),
 });
-// E3's (reserved, parent §2): a granted tool's result, validated as a file is, its snapshot a JSON asset.
+// E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R2, R4; E's Decision Log 48 (4)): a granted tool's
+// result, validated as a file is, its snapshot a JSON asset. `snapshot` is null until the first successful fetch (a
+// configured query never fetched: no rows, no columns, no `updated`); `schedule` is whole seconds within
+// QUERY_SCHEDULE_SECONDS, absent meaning manual; `staleAfter` positive whole seconds, independent of the schedule.
+export const QUERY_SCHEDULE_SECONDS = { min: 30, max: 86_400 } as const;
 const QuerySourceSchema = z.strictObject({
   kind: z.literal('query'),
   server: z.string().min(1).max(200),
   tool: z.string().min(1).max(200),
   args: z.record(z.string(), z.unknown()),
-  schedule: z.number().int().positive().optional(),
+  schedule: z.number().int().min(QUERY_SCHEDULE_SECONDS.min).max(QUERY_SCHEDULE_SECONDS.max).optional(),
   staleAfter: z.number().int().positive().optional(),
-  snapshot: z.strictObject({ ref: z.string().startsWith('assets/').max(1_000), at: Time }),
+  snapshot: z.strictObject({ ref: z.string().startsWith('assets/').max(1_000), at: Time }).nullable(),
 });
-const DescriptorSchema = z.strictObject({
-  title: z.string().min(1).max(200),
-  description: Text.optional(),
-  source: z.discriminatedUnion('kind', [FileSourceSchema, QuerySourceSchema]),
-  columns: z.array(ColumnSchema).max(DATASET_LIMITS.columns),
-  rows: z.number().int().nonnegative().max(DATASET_LIMITS.rows),
-  rowKey: z.string().min(1).max(DATASET_LIMITS.columnName).optional(),
-  updated: z.strictObject({ at: Time, by: ActorSchema }),
-  state: z.strictObject({ status: z.enum(['ok', 'error', 'stale', 'paused']), message: Text.optional(), at: Time }),
-});
+// E3 end
+const DescriptorSchema = z
+  .strictObject({
+    title: z.string().min(1).max(200),
+    description: Text.optional(),
+    source: z.discriminatedUnion('kind', [FileSourceSchema, QuerySourceSchema]),
+    columns: z.array(ColumnSchema).max(DATASET_LIMITS.columns),
+    rows: z.number().int().nonnegative().max(DATASET_LIMITS.rows),
+    rowKey: z.string().min(1).max(DATASET_LIMITS.columnName).optional(),
+    updated: z.strictObject({ at: Time, by: ActorSchema }).optional(), // E3: absent exactly while a query was never fetched
+    state: z.strictObject({ status: z.enum(['ok', 'error', 'stale', 'paused']), message: Text.optional(), at: Time }),
+  })
+  // E3: `updated` is the successful fetch's (or the file's bind's) provenance, so it is present exactly when a snapshot is
+  .refine((d) => (d.updated !== undefined) === (d.source.kind === 'file' || d.source.snapshot !== null), { message: 'updated is present exactly when the dataset has a snapshot' });
 
 export type DatasetColumn = z.infer<typeof ColumnSchema>;
 export type FileSource = z.infer<typeof FileSourceSchema>;
@@ -73,13 +81,17 @@ export interface DatasetDescriptor {
   columns: DatasetColumn[];
   rows: number;
   rowKey?: string;
-  updated: { at: number; by: Actor };
+  /** E3: absent exactly while a `query` dataset was never fetched (its `snapshot` null); a file's always. */
+  updated?: { at: number; by: Actor };
   state: DatasetState;
 }
 
-/** The immutable snapshot a descriptor names: its asset ref and the format its bytes are read in. */
-export function snapshotOf(descriptor: DatasetDescriptor): { ref: string; format: DatasetFormat } {
-  return descriptor.source.kind === 'file' ? { ref: descriptor.source.ref, format: descriptor.source.format } : { ref: descriptor.source.snapshot.ref, format: 'json' };
+/** The immutable snapshot a descriptor names: its asset ref and the format its bytes are read in. E3: null for a query
+ * never fetched, which has no bytes to read. */
+export function snapshotOf(descriptor: DatasetDescriptor): { ref: string; format: DatasetFormat } | null {
+  const { source } = descriptor;
+  if (source.kind === 'file') return { ref: source.ref, format: source.format };
+  return source.snapshot === null ? null : { ref: source.snapshot.ref, format: 'json' };
 }
 
 /** Why `id` cannot name a dataset, or null. `__proto__` is refused: a Y.Node takes no such attribute. */

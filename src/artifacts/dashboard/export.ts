@@ -16,7 +16,7 @@ import type { ExportView, ExportViewTable, ViewRenderer } from '../document/expo
 import type { Doc } from '../yjs';
 import { datasetIdFromSource, readDataset, snapshotOf, type DatasetDescriptor } from './datasets';
 import { legacyDashboardFiles, legacyDashboardReason } from './legacy';
-import { captionOf, renderView, svgSize, THEME_PROPERTIES, themeFrom, viewPreview, type Theme, type ViewTable } from './render';
+import { captionOf, renderFailure, renderView, svgSize, THEME_PROPERTIES, themeFrom, viewPreview, type Theme, type ViewTable } from './render';
 import { parseSpec } from './spec';
 import type { SnapshotRef } from './snapshots';
 import { DATASET_STATES, mismatchNotes, sourceLabel } from './states';
@@ -77,7 +77,7 @@ export interface ViewInput {
   datasetId: string;
   /** The captured state's descriptor of it, or null when none is bound. */
   descriptor: DatasetDescriptor | null;
-  /** The snapshot's rows (null with no descriptor). */
+  /** The snapshot's rows (null with no descriptor, or E3: a query never fetched). */
   table: ViewTable | null;
   theme: Theme;
   /** The updater's name in the label. */
@@ -88,14 +88,16 @@ export interface ViewInput {
 export function exportView({ spec, datasetId, descriptor, table, theme, by }: ViewInput): ExportView {
   const parsed = parseSpec(spec);
   const caption = parsed.ok ? captionOf(parsed.spec, datasetId) : (parsed.title ?? 'Chart');
-  const rendered = renderView(spec, table, theme, datasetId);
+  // E3: a query never fetched draws E2's no-data presentation, labelled as such
+  const notFetched = descriptor !== null && snapshotOf(descriptor) === null;
+  const rendered = notFetched ? renderFailure(spec, theme, datasetId, DATASET_STATES.notFetched) : renderView(spec, table, theme, datasetId);
   const label = descriptor ? sourceLabel(descriptor, by) : DATASET_STATES.noDataset(datasetId);
   // what the editor notes under the label: the descriptor's validation notes, and what the view could not show unless
   // its frame already says so
   const drawnInPlace = rendered.svg?.includes('<desc>This view cannot be drawn: ') ?? false;
   const warnings = [...new Set([...(descriptor ? mismatchNotes(descriptor) : []), ...(drawnInPlace ? [] : rendered.warnings)])];
 
-  const preview = table === null ? ({ ok: false, error: DATASET_STATES.noDataset(datasetId) } as const) : viewPreview(spec, table, datasetId);
+  const preview = table === null ? ({ ok: false, error: notFetched ? DATASET_STATES.notFetched : DATASET_STATES.noDataset(datasetId) } as const) : viewPreview(spec, table, datasetId);
   // the preview's notes under its rows, the warnings below the label as every other format places them (E2 M6), each once
   const notes = preview.ok ? preview.table.notes : [];
   const below = warnings.filter((warning) => !notes.includes(warning));
@@ -132,8 +134,8 @@ export async function prepareViews(doc: Doc, options: ViewExportOptions): Promis
   });
   const snapshots = new Map<string, Promise<ViewTable>>();
   const tableOf = (descriptor: DatasetDescriptor | null): Promise<ViewTable> | null => {
-    if (!descriptor) return null;
-    const snapshot = snapshotOf(descriptor);
+    const snapshot = descriptor && snapshotOf(descriptor);
+    if (!snapshot) return null; // E3: none bound, or a query never fetched (no bytes to read)
     const key = `${snapshot.format}\u0000${snapshot.ref}`;
     if (!snapshots.has(key)) snapshots.set(key, options.read(snapshot));
     return snapshots.get(key)!;
@@ -142,7 +144,7 @@ export async function prepareViews(doc: Doc, options: ViewExportOptions): Promis
   await Promise.all(
     blocks.map(async ({ key, spec, datasetId, descriptor }) => {
       const table = await tableOf(descriptor);
-      if (!views.has(key)) views.set(key, exportView({ spec, datasetId, descriptor, table, theme: options.theme, by: descriptor ? options.authorName(descriptor.updated.by) : '' }));
+      if (!views.has(key)) views.set(key, exportView({ spec, datasetId, descriptor, table, theme: options.theme, by: descriptor?.updated ? options.authorName(descriptor.updated.by) : '' }));
     }),
   );
   const { picture } = options;

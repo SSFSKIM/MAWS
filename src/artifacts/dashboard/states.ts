@@ -1,7 +1,7 @@
 // The dashboard's error and status wording (P3-E2; parent §2 "Error and stale states", XE5: the states bind in meaning,
 // their wording is E2's, in this one module the editor, the exporters, the host's answers and E3 reuse). Times are
 // formatted in UTC, explicitly, so neither the machine's locale nor its time zone changes a label or an export.
-import type { ColumnType, DatasetDescriptor } from './datasets';
+import type { ColumnType, DatasetDescriptor, DatasetState } from './datasets';
 
 export const DATASET_STATES = {
   noDataset: (id: string) => `no dataset "${id}"`,
@@ -10,6 +10,7 @@ export const DATASET_STATES = {
   unreadable: (id: string) => `the file of "${id}" could not be read`,
   staleSince: (at: number) => `stale since ${utcTime(at)}`,
   paused: 'paused: no live session',
+  notFetched: 'not fetched', // E3: a configured query before its first successful fetch (no snapshot, no rows)
 } as const;
 
 // P3-E2 M3: what a view says about the rows it could not draw as asked, drawn in place or noted under the figure.
@@ -42,14 +43,37 @@ export const VIEW_STATES = {
  * it was last bound, and its state when not `ok`. `by` is the actor's shown name (the human "You", a session its title).
  */
 export function sourceLabel(descriptor: DatasetDescriptor, by: string): string {
-  const { source, state } = descriptor;
+  const { source, state, updated } = descriptor;
   const from = source.kind === 'file' ? `from ${source.name}` : `${source.server} · ${source.tool}`;
-  const parts = [descriptor.title, from, `updated ${utcTime(descriptor.updated.at)} by ${by}`];
+  // E3: a query never fetched has no fetch time or author to name
+  const parts = [descriptor.title, from, updated ? `updated ${utcTime(updated.at)} by ${by}` : DATASET_STATES.notFetched];
   if (state.status === 'stale') parts.push(DATASET_STATES.staleSince(state.at));
   else if (state.status === 'paused') parts.push(DATASET_STATES.paused);
   else if (state.status === 'error') parts.push(state.message ?? 'the last refresh failed');
   return parts.join(' · ');
 }
+
+// E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R4; E's Decision Log 48 (4)): the dataset's state
+// as a view presents it at `now`, computed at render time and never written because the clock moved. `state` is the
+// stored operational state (ok, error, paused) unchanged; `notFetched` a query with no snapshot yet; `staleSince`, when
+// the snapshot is older than its `staleAfter` (from `snapshot.at + staleAfter`, not from a failed fetch), the time it
+// became stale: a label shown beside the operational state, never replacing it. A dataset with no snapshot is never
+// stale.
+export interface DatasetPresentation {
+  state: DatasetState;
+  notFetched: boolean;
+  staleSince?: number;
+}
+
+export function datasetStateAt(descriptor: DatasetDescriptor, now: number): DatasetPresentation {
+  const { source, state } = descriptor;
+  if (source.kind !== 'query') return { state, notFetched: false };
+  if (source.snapshot === null) return { state, notFetched: true };
+  if (source.staleAfter === undefined) return { state, notFetched: false };
+  const since = source.snapshot.at + source.staleAfter * 1000;
+  return now >= since ? { state, notFetched: false, staleSince: since } : { state, notFetched: false };
+}
+// E3 end
 
 /** The descriptor's validation notes: "<n> of <rows> values in <column> are not <type>", one per column that has any. */
 export function mismatchNotes(descriptor: DatasetDescriptor): string[] {

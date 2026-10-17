@@ -147,7 +147,7 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       }
       const button = element('button', 'dash-source-label');
       button.type = 'button';
-      button.textContent = sourceLabel(descriptor, deps.actorName(descriptor.updated.by));
+      button.textContent = sourceLabel(descriptor, descriptor.updated ? deps.actorName(descriptor.updated.by) : ''); // E3: a query never fetched names no author
       button.setAttribute('aria-label', `Source of “${caption}”: ${button.textContent}`);
       const captured: SourceCapture = { datasetId, descriptor: structuredClone(descriptor), view: { spec: structuredClone(spec), caption } };
       button.addEventListener('click', () => deps.openSource(captured));
@@ -188,12 +188,13 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       let rendered: Rendered;
       let started: number | null = null;
       try {
-        const table = descriptor ? await deps.reader.read(snapshotOf(descriptor)) : null;
+        const snapshot = descriptor && snapshotOf(descriptor); // E3: null for a query never fetched, nothing to read
+        const table = snapshot ? await deps.reader.read(snapshot) : null;
         if (!(await placed(mine))) return;
         const theme = themeOf(into);
         drawnTheme = JSON.stringify(theme);
         started = performance.now();
-        rendered = renderView(spec, table, theme, datasetId);
+        rendered = descriptor && !snapshot ? renderFailure(spec, theme, datasetId, DATASET_STATES.notFetched) : renderView(spec, table, theme, datasetId);
       } catch {
         if (!(await placed(mine))) return;
         const theme = themeOf(into);

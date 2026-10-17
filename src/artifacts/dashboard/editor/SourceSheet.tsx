@@ -98,8 +98,9 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
   const [failed, setFailed] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>(null);
   const [status, setStatus] = useState('');
-  const snapshot = useMemo(() => snapshotOf(descriptor), [descriptor]);
+  const snapshot = useMemo(() => snapshotOf(descriptor), [descriptor]); // E3: null for a query never fetched
   useEffect(() => {
+    if (!snapshot) return;
     let current = true;
     reader.read(snapshot).then(
       (read) => current && setSource(read),
@@ -137,6 +138,7 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
   };
   const name = descriptor.source.kind === 'file' ? descriptor.source.name : `${id}.json`;
   const download = async () => {
+    if (!snapshot) return;
     setStatus('');
     try {
       const { path } = await host.downloadAsset(artifactId, snapshot.ref, { name });
@@ -147,7 +149,7 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
   };
   return (
     <div className="dash-sheet-body">
-      <p className="dash-sheet-label">{sourceLabel(descriptor, actorName(descriptor.updated.by))}</p>
+      <p className="dash-sheet-label">{sourceLabel(descriptor, descriptor.updated ? actorName(descriptor.updated.by) : '')}</p>
       {descriptor.description && <p className="dash-sheet-description">{descriptor.description}</p>}
       {mismatchNotes(descriptor).map((note) => (
         <p key={note} className="dash-sheet-note">
@@ -162,7 +164,7 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
           </li>
         ))}
       </ul>
-      {view && (
+      {view && snapshot && (
         <div className="dash-sheet-shown" role="group" aria-label="Rows shown">
           <button type="button" className="doc-tool" aria-pressed={shown === 'view'} data-active={shown === 'view' ? '' : undefined} onClick={() => choose('view')}>
             {viewed?.ok ? `This view’s rows (${viewed.table.rows.length.toLocaleString('en-US')})` : 'This view’s rows'}
@@ -177,9 +179,11 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
         <button type="button" className="doc-tool" disabled={!table} onClick={() => void copy()}>
           Copy rows
         </button>
-        <button type="button" className="doc-tool" aria-label={`Download ${name}`} onClick={() => void download()}>
-          Download
-        </button>
+        {snapshot && (
+          <button type="button" className="doc-tool" aria-label={`Download ${name}`} onClick={() => void download()}>
+            Download
+          </button>
+        )}
       </div>
       <p className="dash-sheet-status" role="status">
         {status}
@@ -191,7 +195,9 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
             {note}
           </p>
         ))}
-      {failed !== null ? (
+      {!snapshot ? (
+        <p className="dash-sheet-note">This query has not been fetched yet; there are no rows to show.</p>
+      ) : failed !== null ? (
         <p className="dash-sheet-note" role="alert">{`The rows could not be read: ${failed}`}</p>
       ) : shown === 'view' && viewed && !viewed.ok ? (
         <p className="dash-sheet-note" role="alert">{`This view cannot be drawn: ${viewed.error}`}</p>

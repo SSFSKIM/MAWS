@@ -51,7 +51,8 @@ export interface DashboardDatasetSummary {
   columns: { name: string; type: string; mismatches?: number }[];
   rows: number;
   rowKey?: string;
-  updated: { at: string; by: 'user' | 'this session' | 'another session'; appSessionId?: string };
+  updated?: { at: string; by: 'user' | 'this session' | 'another session'; appSessionId?: string }; // E3: absent while notFetched
+  notFetched?: true; // E3: a query dataset configured but never fetched (no snapshot, no rows yet)
   state?: { status: string; message?: string }; // when not ok
 }
 

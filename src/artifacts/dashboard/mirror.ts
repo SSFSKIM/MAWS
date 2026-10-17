@@ -41,24 +41,28 @@ export const dashboardMirrorWriter: MirrorWriter = ({ artifact, doc, assets = []
   const files: Record<string, string | MirrorCopy> = { [`${slug}.md`]: exportMarkdown(exportSource(doc, artifact.title)) };
   const datasets: Record<string, unknown> = {};
   for (const { id, descriptor } of listDatasets(doc)) {
-    const { ref, format } = snapshotOf(descriptor);
-    const asset = assets.find((each) => each.ref === ref);
-    const file = asset && readAsset ? `data/${snapshotFileName(asset.name, ref, format)}` : null;
-    if (file) files[`${slug}/${file}`] = { read: () => readAsset!(ref) };
-    const { source } = descriptor;
+    const snapshot = snapshotOf(descriptor); // E3: null for a query never fetched, which has no file to copy
+    const ref = snapshot?.ref ?? null;
+    const format = snapshot?.format ?? 'json';
+    const asset = ref === null ? undefined : assets.find((each) => each.ref === ref);
+    const file = asset && readAsset ? `data/${snapshotFileName(asset.name, asset.ref, format)}` : null;
+    if (file) files[`${slug}/${file}`] = { read: () => readAsset!(asset!.ref) };
+    const { source, updated } = descriptor;
+    const updatedAt = updated ? new Date(updated.at).toISOString() : null;
     datasets[id] = {
       title: descriptor.title,
       ...(descriptor.description !== undefined && { description: descriptor.description }),
       file,
-      ...(file === null && { problem: DATASET_STATES.unreadable(id) }),
+      ...(file === null && snapshot !== null && { problem: DATASET_STATES.unreadable(id) }),
+      ...(snapshot === null && { notFetched: true }), // E3
       format,
       rows: descriptor.rows,
       columns: descriptor.columns,
       ...(descriptor.rowKey !== undefined && { rowKey: descriptor.rowKey }),
       snapshot:
         source.kind === 'file'
-          ? { ref, source: source.name, sha256: source.sha256, size: source.size, updated: new Date(descriptor.updated.at).toISOString() }
-          : { ref, source: `${source.server} · ${source.tool}`, fetched: new Date(source.snapshot.at).toISOString(), updated: new Date(descriptor.updated.at).toISOString() },
+          ? { ref, source: source.name, sha256: source.sha256, size: source.size, updated: updatedAt }
+          : { ref, source: `${source.server} · ${source.tool}`, fetched: source.snapshot ? new Date(source.snapshot.at).toISOString() : null, ...(updatedAt !== null && { updated: updatedAt }) },
       ...(descriptor.state.status !== 'ok' && { state: { status: descriptor.state.status, ...(descriptor.state.message !== undefined && { message: descriptor.state.message }) } }),
     };
   }
