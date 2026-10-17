@@ -3,7 +3,8 @@
 // recording's `subagents/*.meta.json`, growing as the agents start and following each to its end — and opening an
 // agent subscribes with its `agentId` and draws its transcript and stream as the main thread's are drawn, through a
 // reconnect, a hub restart, and a chunk the snapshot already held, with no gap and no duplicated text. A subagent's
-// disruption never resets the main thread's view, nor the reverse.
+// disruption never resets the main thread's view, nor the reverse. Since DC9's M3 the main thread is drawn in the
+// center's session view, over the subscription the column's tree reads.
 import type { Locator, Page } from '@playwright/test';
 import { DepthPlayer, type AgentTrack, type PlayerOptions } from './depth-player';
 import { expect, seedKey, test } from './fixtures';
@@ -65,11 +66,11 @@ async function settleAgentAnswer(track: AgentTrack, detail: Locator, answer: str
   track.advance(track.script.length);
 }
 
-/** Plays the main transcript into its final answer until `prefix` of it is drawn as streaming text. */
-async function midMainAnswer(player: DepthPlayer, depth: Locator, prefix: string): Promise<void> {
+/** Plays the main transcript into its final answer until `prefix` of it is drawn as streaming text in the center. */
+async function midMainAnswer(player: DepthPlayer, main: Locator, prefix: string): Promise<void> {
   player.advanceTo((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text' && String(item.body.chunk.text).startsWith('<message>'));
   player.advance(1);
-  while (!(await streamingRows(depth).last().textContent())?.includes(prefix)) {
+  while (!(await streamingRows(main).last().textContent())?.includes(prefix)) {
     player.advance(1);
     await sleep(20);
   }
@@ -175,7 +176,8 @@ test('chunks a subagent’s snapshot already held, sent again while it was built
 
 test('a subagent’s disruption never resets the main thread’s view, nor the main thread’s the subagent’s', async ({ page, hub }) => {
   const { player, depth } = await openDepth(page, hub);
-  await midMainAnswer(player, depth, 'Both sub'); // the words.txt agent still runs
+  const main = page.getByTestId('session-view');
+  await midMainAnswer(player, main, 'Both sub'); // the words.txt agent still runs
   const detail = await openAgent(depth, WORDS.agentId);
   const track = player.agent(WORDS.agentId);
   await midAgentAnswer(track, detail, 'The last word');
@@ -190,18 +192,16 @@ test('a subagent’s disruption never resets the main thread’s view, nor the m
   await expect(streamingRows(detail).last()).toHaveText(agentDrawn!);
   await expect(detail.getByTestId('depth-subagent-status')).toHaveText('');
 
-  // The agent's discontinuity: it alone subscribes again; the main thread's view, beneath this tab, keeps its place.
+  // The agent's discontinuity: it alone subscribes again; the main thread's view, in the center, keeps its place.
   track.end('discontinuity');
   await expect.poll(() => track.answered).toBe(2);
   await expect(streamingRows(detail).last()).toHaveText(agentDrawn!);
   expect(subscribes(hub, null)).toBe(mainBefore + 1);
   await settleAgentAnswer(track, detail, 'The last word');
 
-  await depth.getByTestId('depth-tab-transcript').click();
-  const main = depth.getByRole('tabpanel', { name: 'Transcript' });
   await expect(streamingRows(main).last()).toContainText('Both sub');
-  await expect(depth.getByTestId('depth-reconnecting')).toHaveCount(0);
-  await expect(depth.getByTestId('depth-status')).toHaveText('');
+  await expect(main.getByTestId('depth-reconnecting')).toHaveCount(0);
+  await expect(page.getByTestId('session-status')).toHaveText('');
   player.advance(player.script.length);
   await expect(streamingRows(main)).toHaveCount(0);
   await expect.poll(() => occurrences(main, MAIN_ANSWER)).toBe(1);

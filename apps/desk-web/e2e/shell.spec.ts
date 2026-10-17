@@ -67,7 +67,9 @@ test('a project opens into its channels, the selected channel, and the depth slo
   await expect(page).toHaveURL(new RegExp(`/p/${PROJECT}/s/${S.asks}$`));
   await expect(center.getByTestId('channel-header')).toContainText('maws-45');
   await expect(center.getByTestId('channel-header')).toContainText('@mini');
-  await expect(center).toContainText('the migration is merged');
+  // On a desktop with its machine online, a direct channel's center is its session view (DC9's M3): the session's own
+  // transcript, which this double does not serve (the session view's suites draw it from a recording).
+  await expect(center.getByTestId('session-view')).toHaveAttribute('data-session', S.asks);
   await expect(center).not.toContainText('retired');
   const depth = page.getByRole('complementary', { name: 'Session depth' });
   await expect(depth.locator('[data-slot="depth"]')).toContainText('maws-45');

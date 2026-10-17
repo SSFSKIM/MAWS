@@ -3,7 +3,9 @@
 // fake machine is reached): the transcript streams and settles into the same rows a reload shows; the subagent tree
 // matches the recording's `subagents/*.meta.json`; the diff renders; a reconnect in the middle of a response, a hub
 // restart, and a chunk arriving while the snapshot is built each end with no gap and no duplicated text, in the main
-// thread and in a subagent. Context use and cost come from the recording's `usage`.
+// thread and in a subagent. Context use and cost come from the recording's `usage`. Since DC9's M3 the main thread is
+// drawn in the center's session view and the tree, the diff and the info in the column, over one subscription; the
+// working record's folds, which unfolded the transcript in the center, are gone with it (DC9's M4 retires their code).
 import type { Locator, Page } from '@playwright/test';
 import type { Step } from 'desk-hub/fake-machine';
 import { FakeMachineReplay } from './fake-machine';
@@ -56,7 +58,7 @@ test.afterEach(() => {
 });
 
 /** The fake machine enrolled in the project with its session joined, and the browser on that session's channel. */
-async function openSession(page: Page, hub: HubDouble): Promise<{ fm: FakeMachineReplay; depth: Locator }> {
+async function openSession(page: Page, hub: HubDouble): Promise<{ fm: FakeMachineReplay; depth: Locator; view: Locator }> {
   await stageProject(hub);
   const replay = (fm = new FakeMachineReplay(hub, { project: PROJECT, machine: MACHINE }));
   const policy = { read_only: false, ceiling: 'default' };
@@ -70,9 +72,11 @@ async function openSession(page: Page, hub: HubDouble): Promise<{ fm: FakeMachin
   await seedKey(page, hub);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${replay.session}`);
   const depth = page.getByTestId('depth');
+  const view = page.getByTestId('session-view');
   await expect(depth).toHaveAttribute('data-session', replay.session);
+  await expect(view).toHaveAttribute('data-session', replay.session);
   await expect.poll(() => replay.subscriptions()).toBe(1);
-  return { fm: replay, depth };
+  return { fm: replay, depth, view };
 }
 
 /** The recorded `<message>` answer's row. */
@@ -101,12 +105,12 @@ async function endsWhole(page: Page, replay: FakeMachineReplay, depth: Locator):
 }
 
 test('the transcript streams and settles into the rows a reload shows; usage gives context use and cost', async ({ page, hub }) => {
-  const { fm, depth } = await openSession(page, hub);
+  const { fm, depth, view } = await openSession(page, hub);
   const first = fm.playThrough(textChunk(null));
-  await expect(streamingRows(depth).last()).toContainText(first?.k === 'chunk' ? String(first.chunk.text).trim() : '');
-  await midAnswer(fm, depth);
-  expect(await occurrences(depth, 'You chose')).toBe(1);
-  await endsWhole(page, fm, depth);
+  await expect(streamingRows(view).last()).toContainText(first?.k === 'chunk' ? String(first.chunk.text).trim() : '');
+  await midAnswer(fm, view);
+  expect(await occurrences(view, 'You chose')).toBe(1);
+  await endsWhole(page, fm, view);
 
   await depth.getByTestId('depth-tab-info').click();
   await expect(depth.getByTestId('depth-info-model')).toContainText('haiku');
@@ -136,61 +140,32 @@ test("the subagent tree matches the recording's metas, and the diff renders", as
 
 test.describe('the main thread', () => {
   test('a reconnect in the middle of a response ends with no gap and no duplicated text', async ({ page, hub }) => {
-    const { fm, depth } = await openSession(page, hub);
-    await midAnswer(fm, depth);
+    const { fm, view } = await openSession(page, hub);
+    await midAnswer(fm, view);
     fm.drop();
     await expect.poll(() => fm.subscriptions()).toBe(1); // the client subscribed again
-    await expect(streamingRows(depth).last()).toContainText('You chose');
-    await endsWhole(page, fm, depth);
+    await expect(streamingRows(view).last()).toContainText('You chose');
+    await endsWhole(page, fm, view);
   });
 
   test('a hub restart loses what was in flight; the fresh snapshot holds it', async ({ page, hub }) => {
-    const { fm, depth } = await openSession(page, hub);
-    await midAnswer(fm, depth);
+    const { fm, view } = await openSession(page, hub);
+    await midAnswer(fm, view);
     fm.drop();
     fm.step(8); // applied while nobody was subscribed: never delivered live
     await expect.poll(() => fm.subscriptions()).toBe(1);
-    await endsWhole(page, fm, depth);
+    await endsWhole(page, fm, view);
   });
 
   test('chunks arriving while the snapshot is built, and handed again after it, are drawn once', async ({ page, hub }) => {
-    const { fm, depth } = await openSession(page, hub);
-    await midAnswer(fm, depth);
+    const { fm, view } = await openSession(page, hub);
+    await midAnswer(fm, view);
     fm.raceNextSnapshot({ agentId: null, advance: 3, overlap: true });
     fm.drop();
     await expect.poll(() => fm.subscriptions()).toBe(1);
-    await expect.poll(() => occurrences(depth, 'You chose')).toBe(1);
-    await endsWhole(page, fm, depth);
+    await expect.poll(() => occurrences(view, 'You chose')).toBe(1);
+    await endsWhole(page, fm, view);
   });
-});
-
-test("a fold bounded by the recorded question resolves its bound in the transcript (the raised request's toolUseId)", async ({ page, hub }) => {
-  const { fm, depth } = await openSession(page, hub);
-  fm.playThrough();
-  await expect(depth).toContainText(ANSWER);
-  // The question, raised as the machine raised it (its request the ask dialog's own id, its toolUseId the transcript's
-  // call), then the session's `<message>`, as its machine logged them: the channel folds the record at each.
-  const raised = await fm.raiseRecordedQuestion();
-  expect(raised.toolUseId).toBeDefined();
-  expect(raised.toolUseId).not.toBe(raised.request);
-  const [message] = fm.recordedMessages();
-  await hub.append(PROJECT, { writer: `${MACHINE}/${fm.session}`, kind: 'message', from: message.from, to: message.to, text: message.text, src: message.src });
-  const folds = page.getByTestId('working-record');
-  await expect(folds).toHaveCount(3); // before the question, between it and the message, and the live one after
-
-  await folds.nth(0).click();
-  const before = page.getByTestId('fold-transcript').last();
-  await expect(before).toContainText('The two subagents are still running');
-  await expect(before.getByTestId('fold-unresolved')).toHaveCount(0); // its end, the question's call, is found
-  await folds.nth(0).click();
-
-  await folds.nth(1).click();
-  const after = page.getByTestId('fold-transcript').last();
-  await expect(after).toBeVisible();
-  await expect(after.getByTestId('fold-unresolved')).toHaveCount(0); // its start, the question's call, is found
-  await expect(after).not.toContainText('The two subagents are still running'); // so not drawn from the start
-  await expect(after).not.toContainText('Your questions have been answered'); // the question's answer is the channel's
-  await expect(after).not.toContainText(ANSWER); // the bounding message's span
 });
 
 /** Opens an agent from the tree, once the tree shows it. */
