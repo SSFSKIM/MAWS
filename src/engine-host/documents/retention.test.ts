@@ -200,6 +200,18 @@ describe('collection after the commit', () => {
     await vi.waitFor(() => expect(rowOf(id, a)).toBeUndefined());
     expect(existsSync(fileOf(id, sha256))).toBe(false);
   });
+
+  it('called right after a publication’s durable commit (M2’s refresh), it collects at once, in that call', async () => {
+    const id = await dashboard();
+    const a = await refresh(id, 'live', 'A');
+    await refresh(id, 'live', 'B');
+    await refresh(id, 'live', 'C'); // resolved: its commit is durable
+    expect(documents.storage.batchOpen).toBe(false);
+    const { sha256 } = rowOf(id, a)!;
+    store().collectRetiredAssets(id);
+    expect(rowOf(id, a)).toBeUndefined(); // no deferral, no unrelated trigger awaited
+    expect(existsSync(fileOf(id, sha256))).toBe(false);
+  });
 });
 
 describe('the invariants under reuse, failure and concurrency', () => {

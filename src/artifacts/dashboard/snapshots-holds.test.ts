@@ -21,6 +21,7 @@ function host(options: { refuse?: string[]; failRead?: string[] } = {}) {
     held.set(id, [...refs]);
     log.push(`hold ${refs.join(',')}`);
     return {
+      invalidated: new Promise<void>(() => {}), // no restart in these cases
       release: () => {
         if (held.delete(id)) log.push(`release ${refs.join(',')}`);
       },

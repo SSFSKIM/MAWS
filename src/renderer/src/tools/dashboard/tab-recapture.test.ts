@@ -48,7 +48,7 @@ function world() {
 const settle = async () => {
   for (let i = 0; i < 10; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 };
-let tabs: DashboardTabState[] = [];
+const tabs: DashboardTabState[] = [];
 afterEach(() => {
   vi.useRealTimers();
   for (const tab of tabs.splice(0)) tab.dispose();
