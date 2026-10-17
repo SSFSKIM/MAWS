@@ -702,7 +702,15 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
    (the identity provider's redirect leaves the app's scope, so the Access
    cookie must land in the standalone context); Access session lifetime
    against a push tapped hours later. The passphrase path covers missing
-   PRF.
+   PRF. Resolved by the owner's walk against the deployment (2026-10-15/16):
+   a passkey with PRF unlocks the org key in Safari and Chrome on the Mac and
+   in the iOS home-screen app; Access sign-in carries into the standalone app
+   (it opened signed in); the passphrase unlocks in about 3 s on the Mac and
+   the iPhone; a push arrives in about 5 s and its tap lands on the request
+   card, where the answer reaches the machine; tapped 23 hours after the
+   phone's last session, the app was still signed in, landed on the card, and
+   the key was still unlocked. The phone is on iOS 26 or older, without
+   native scroll anchoring (the channel's fallback, Decision Log).
 5. **The path to watch.** The engine's channel servers (an MCP server
    declaring `claude/channel` that pushes messages into a session, which
    replies through a tool) are the engine's own shape for "an outside
@@ -3057,15 +3065,21 @@ deployment, so they never switch the production Worker's org, is deferred.
 **The owner's first steps** (DX7's ordering): sign in, set up the org key first (the first unlock method), then
 enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the code pasted at its hidden prompt).
 
-**State** (2026-10-15, night):
-- **Deployed:** `hub@b11ea5f8 web@smns-erb-web.3de8a15e` (Worker version `bf5e8232`): DC3's whole branch after its
-  panel wave (the hub's code at `36d6bae3`) and DC5's web after its Task 6, so DX3's paged `resume` runs on both
-  sides. The deploy reconciled Access with no change and left the walk's machine, project, push subscription, and
-  org key as they were. Before it: `hub@85e83830 web@smns-erb-web.fdb7b406`.
+**State** (2026-10-16, evening):
+- **Deployed:** `hub@47fa64ff web@master.47fa64ff` (Worker version `09cc96e0`), adding machine removal in the web
+  (#17), over `hub@2ee490bc web@master.2ee490bc` (Worker `c44f4cd4`): MAWS master after DC3, DC5, DC6 and the
+  channel's anchoring fallback (#16) merged, built from a clean checkout of master. The hub's code is
+  byte-identical to the previous deploy's (no migration, the same variables, bindings and secrets); the web gained
+  DC5's panel fixes and column-reverse channel, DC6's session depth, and #16. Access reconciled with no change; the
+  org key and the walk's machine untouched. Before it: `hub@b11ea5f8 web@smns-erb-web.3de8a15e` (Worker `bf5e8232`),
+  held through the owner's P2.11 so the step measured an unchanged build.
 - **Org key:** set up by the owner in the phone walk's Part 2 (fingerprint `8133-6dc8-be8e`), with a passkey and a
   passphrase.
 - **Machines:** `phone-walk`, the fake machine enrolled from an owner-made code for the walk's pushed requests, with
-  its project "phone walk"; removed when the walk ends. No real machine is enrolled yet.
+  its project "phone walk"; the walk has ended and its stand-in is stopped. The web had no way to remove a machine
+  (the hub's `DELETE /api/machines/<name>` had no caller); MAWS #17 adds an admin's Remove to the Machines dialog,
+  with a confirmation step, proven against the double and the real local hub (the stream ends within one heartbeat,
+  the reconnect is refused). The owner removes `phone-walk` with it. No real machine is enrolled yet.
 - **Leftovers:** the proofs' throwaway org `dc3-m5-test` keeps its Durable Objects' storage on the same Worker,
   unreachable from `ssfskim`.
 
@@ -3494,6 +3508,22 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: An admin removes a machine from the web's Machines dialog (MAWS #17). DX7 specified
+  `DELETE /api/machines/<name>` and the hub served it, but no child's web scope named the action, so after the walk
+  the owner had no way to remove its stand-in machine. Removal is a full confirmation step, because what it means
+  needs more than a row holds: the machine is disconnected and its credential deleted, it keeps the org key it was
+  enrolled with, and it needs a new code to return. It asks for no key method, since the hub treats removal as a
+  member's admin action, not a key operation. A non-admin is told an admin does it. Rejected: typing the machine's
+  name to confirm (heavier than an owner-only org needs); inline confirmation on the row (too little room for the
+  consequences).
+  Date/Author: 2026-10-16, design session (the owner found the gap).
+- Decision: §8 unknown 4 is resolved and holds as designed: the owner's walk on the deployment proved PRF unlock
+  with an iCloud Keychain passkey on the Mac (Safari, Chrome) and in the iOS home-screen app, Access carried into the
+  standalone app, a passphrase unlock of about 3 s on both devices, a push in about 5 s landing on its request card,
+  and (P2.11) a push tapped 23 hours after the phone's last session opening signed in, on the card, with the key
+  still unlocked. Nothing in §4–§7 changes. Rejected: re-walking P2.11 on the new build (the deploy it waited for
+  changes the web app, not Access's session or the stored key, which are what the step measured).
+  Date/Author: 2026-10-16, owner's walk (DC5's P1–P2).
 - Decision: The channel follows its tail as a `column-reverse` scroller with the browser's own scroll anchoring (DC5).
   The list keeps its chronological DOM, keyboard and accessibility order inside a reversed container, so the bottom
   is the scroll origin: opening at the tail needs no code, and a reader scrolled back keeps their place through
@@ -3503,9 +3533,13 @@ a hub that connects into machines (§2).
   headless Chromium), growth above the reader (native anchoring moved `scrollTop` and read as a return to the
   tail), shrink above (the browser clamps before the hook runs), growth inside the one long row being read, and an
   unreported scroll-up landing with a collapse. Every one of those is now a browser regression. Safari has scroll
-  anchoring only from 27.0; Playwright's WebKit (26.6) held the row within a pixel, but a phone on iOS 26 or older
-  may move about one row when a message arrives below a reader scrolled back, so the owner's iOS version decides
-  whether that needs a follow-up. Rejected: a fourth hand-rolled pass (it was rebuilding scroll anchoring case by
+  anchoring only from 27.0, and the owner's phone is on iOS 26 or older, so an engine without it gets a fallback
+  (MAWS #16, `4c70f5c8`): feature-detected by `overflow-anchor` (WebKit gates the property and the anchoring on one
+  setting), active only while the reader is off the tail, it keeps the row at the top of their view in place when the
+  list changes size below them. Playwright's WebKit has the anchoring setting on, which is why it held the row; with
+  anchoring forced off it shows the phone's one-row jump, and the fallback's browser case proves the hold in Chromium
+  and WebKit. A reader less than a shrink's height from the oldest edge still moves (tech debt), and whether setting
+  the scroll position cuts an iOS flick short is for the walk. Rejected: a fourth hand-rolled pass (it was rebuilding scroll anchoring case by
   case); a follow-output component (none fit the stack without a heavy dependency). DC6's transcript and subagent
   panes are unaffected: they follow through MAWS's virtualized `Transcript` list, the desktop app's own chat-mode
   follow, and hand-roll only the paging of older rows.

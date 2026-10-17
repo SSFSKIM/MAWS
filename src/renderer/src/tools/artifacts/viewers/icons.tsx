@@ -23,3 +23,9 @@ export const OpenAsFileIcon = ({ className }: { className?: string }) => (
     <path d="M6.5 8.5 5 10l1.5 1.5M9.5 8.5 11 10l-1.5 1.5" />
   </Icon>
 );
+// P3-H H4: the Connectors action, a plug
+export const ConnectorsIcon = ({ className }: { className?: string }) => (
+  <Icon className={className}>
+    <path d="M6 2.5v3M10 2.5v3M4.5 5.5h7V8a3.5 3.5 0 0 1-7 0zM8 11.5v2" />
+  </Icon>
+);

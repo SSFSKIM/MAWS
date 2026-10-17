@@ -144,6 +144,9 @@ export default defineConfig({
             // P3-D (the P3 spec's Decision Log 61): B's page bound to D's scope as built, where the compiler would memoize a hook
             // B called inside a memo
             'src/renderer/src/artifacts/design-system/documents.test.tsx',
+            // P3-H (the P3 spec's Decision Log 92): the library's components as built, where the first Export of a kind
+            // never showed (its formats read from the module's cache in render, memoized on the kind)
+            'src/renderer/src/library/**/*.test.tsx',
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

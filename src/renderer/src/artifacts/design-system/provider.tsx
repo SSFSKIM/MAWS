@@ -22,6 +22,10 @@ function lazyHost(get: () => ArtifactHost): ArtifactHost {
     uploadAsset: (artifactId, bytes, meta) => get().uploadAsset(artifactId, bytes, meta),
     copyAsset: (from, ref, to) => get().copyAsset(from, ref, to), // P3-C (Decision Log 25)
     identity: () => get().identity(),
+    openConnectors: (artifactId) => get().openConnectors(artifactId), // P3-H H4: the connector family
+    connectorGrants: (artifactId) => get().connectorGrants(artifactId),
+    grantConnectorTool: (artifactId, tool) => get().grantConnectorTool(artifactId, tool),
+    revokeConnectorTool: (artifactId, tool) => get().revokeConnectorTool(artifactId, tool),
   };
 }
 

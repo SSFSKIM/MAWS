@@ -11,6 +11,7 @@ import {
   ArtifactListInputSchema,
   ArtifactListResultSchema,
   ArtifactDeliverySchema,
+  artifactExportName,
   ArtifactPublishInputSchema,
   ArtifactPublishResultSchema,
   ArtifactReadInputSchema,
@@ -377,3 +378,14 @@ describe('P3-D: the design_system ask', () => {
   });
 });
 // P3-D end
+
+// P3 Decision Log 91 / E's Decision Log 33: an export's managed name, the cache's by revision and format, or a file of
+// its own that also names the id main minted for it
+describe('an export’s file name', () => {
+  it('is the revision and format, and the export’s own id beside them when it has one', () => {
+    expect(artifactExportName(4, 'pdf')).toBe('4-pdf.pdf');
+    expect(artifactExportName(7, 'claude')).toBe('7-claude.zip');
+    expect(artifactExportName(4, 'pdf', '0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a')).toBe('4-pdf-0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a.pdf');
+    expect(artifactExportName(3, 'pptx', '0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a')).not.toBe(artifactExportName(3, 'pptx'));
+  });
+});

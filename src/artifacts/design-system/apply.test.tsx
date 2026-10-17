@@ -68,6 +68,13 @@ function fakeHost(systems: Record<string, Doc>, versions: Record<string, Uint8Ar
     uploadAsset: async () => ({ assetId: '', ref: '' }),
     copyAsset: async () => ({ assetId: '', ref: '' }), // P3-C (Decision Log 25)
     identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '#000000' }),
+    // P3-H H4: the connector family, which these tests never reach
+    openConnectors: () => {
+      throw new Error('no connectors here');
+    },
+    connectorGrants: async () => [],
+    grantConnectorTool: async () => ({ ok: false, state: 'paused', reason: 'noRoute' }),
+    revokeConnectorTool: async () => false,
   };
   return { host, open, closed, versionState };
 }

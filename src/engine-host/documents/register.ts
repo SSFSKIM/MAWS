@@ -29,7 +29,7 @@ import { suggestionKey, type DocumentService } from './service';
 import type { Documents } from '.';
 import type { ArtifactStore, ByteContent } from './store';
 
-type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.open' | 'artifacts.export'> | keyof typeof SpaceCommands;
+type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.open' | 'artifacts.export' | 'artifacts.connectorGrants' | 'artifacts.grantConnectorTool' | 'artifacts.revokeConnectorTool' /* P3-H H3b: main's */> | keyof typeof SpaceCommands;
 
 export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShape> = {
   'artifacts.list': 'immediate', 'artifacts.get': 'immediate', 'artifacts.create': 'immediate', 'artifacts.update': 'immediate',

@@ -4,7 +4,8 @@
 // from the audit record's `decided`); RPC states, `uncertain` among them, and its retry under the same nonce; each
 // recipient's delivery outcome surviving a reload; a machine gone offline leaving the conversation with its presence
 // and depth unavailable; an event and a request whose code fails not drawn; and §5's controls by the session's kind as
-// the machine's real presence says it.
+// the machine's real presence says it. And a connected machine removed from the Machines dialog: off the list, its
+// stream ended, and its credential refused.
 //
 // The fake machine replays the committed recording (a haiku session with two subagents, a Bash permission prompt, a
 // question, a `<message>`, an interrupted turn). Where its API does not reach, a DX2 test client (test/local/machine.ts)
@@ -17,7 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type BrowserContext, type Page, type WebSocket } from '@playwright/test';
 import { FakeMachine, loadRecording, TWO_SUBAGENTS, type FakeMachineOptions, type Recording, type Step } from 'desk-hub/fake-machine';
-import { base64urlEncode, encodeEnrollmentCode, seal, type EnrollmentIssued, type LogEvent, type ProjectUp, type Raised, type Rpc } from 'desk-hub/protocol';
+import { base64urlEncode, encodeEnrollmentCode, seal, type EnrollmentIssued, type LogEvent, type MachineRecord, type ProjectUp, type Raised, type Rpc } from 'desk-hub/protocol';
 import { LocalHub } from '../test/local/hub';
 import { TestMachine } from '../test/local/machine';
 import { revokeMachines } from '../test/local/revoke';
@@ -444,4 +445,44 @@ test('G2: a session that ended without being retired keeps its channel and offer
   await expect(header).toContainText('Resumed; it rejoins in a moment', { timeout: 15_000 });
   expect(fm.rpcs).toMatchObject([{ rpc: 'resume', executed: true, outcome: { state: 'done' } }]);
   await expect(nav(page).locator(`[data-group="idle"] [data-session="${rec.session}"]`)).toBeVisible({ timeout: 15_000 });
+});
+
+test('an admin removes a connected machine from the Machines dialog: it leaves the list, its stream ends at once, and its credential is refused', async () => {
+  test.setTimeout(60_000);
+  const fm = await fakeMachine({ recordings: [] });
+  expect(fm.isConnected).toBe(true);
+  await page.goto(hub.localhost);
+  await page.getByRole('button', { name: 'Machines', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Machines' });
+  const row = dialog.locator(`[data-machine="${fm.name}"]`);
+  await expect(row).toContainText('enrolled');
+
+  await row.getByRole('button', { name: `Remove ${fm.name}` }).click();
+  const confirm = dialog.getByTestId('remove-confirm');
+  await expect(confirm.getByTestId('remove-meaning')).toContainText('disconnects it at once and deletes its credential');
+  // Timed from the confirming click, on a monotonic clock, by a watcher that samples every 20 ms (expect.poll's
+  // intervals stretch to 1 s and would blur the measurement); it is capped at 30 s so a stream that never ends fails
+  // on the assertion below, not by hanging.
+  const since = performance.now();
+  const ended = (async () => {
+    while (fm.isConnected && performance.now() - since < 30_000) await new Promise((resolve) => setTimeout(resolve, 20));
+    return Math.round(performance.now() - since);
+  })();
+  await confirm.getByRole('button', { name: `Remove ${fm.name}` }).click();
+  await expect(dialog.getByTestId('machines-notice')).toHaveText(`Removed ${fm.name}. To use it with the desk again, enroll it again.`);
+  await expect(row).toHaveCount(0);
+  const listed = (await (await fetch(`${hub.url}/api/machines`)).json()) as { machines: MachineRecord[] };
+  expect(listed.machines.map((m) => m.name)).not.toContain(fm.name);
+  enrolledNames.splice(enrolledNames.indexOf(fm.name), 1); // revoked here: the teardown has nothing left to revoke for it
+
+  // The hub ended its stream with the revocation, not at a lapsed lease. Under the local command that is bounded like
+  // M1's offline step: DX2 has a close seen within one heartbeat there (wrangler dev's proxy closes gracefully, noticed
+  // at the next write), plus a margin for the chain after the abort.
+  const endedAfter = await ended;
+  const endBound = hub.heartbeatMs + 500;
+  test.info().annotations.push({ type: 'stream end after the confirming click (ms)', description: String(endedAfter) });
+  expect(fm.isConnected).toBe(false);
+  expect(endedAfter, `the stream ended ${endedAfter} ms after the click; bound ${endBound} ms`).toBeLessThanOrEqual(endBound);
+  // Reconnecting with the credential it holds, as its daemon would, is refused.
+  await expect(fm.connect()).rejects.toMatchObject({ status: 403 });
 });

@@ -1,4 +1,4 @@
-// Enrolling a machine from the browser (§6, DX7). The browser asks the hub for a one-time token (`POST
+// Enrolling a machine from the browser (§6, DX7), and removing one.The browser asks the hub for a one-time token (`POST
 // /api/enrollments`, an admin's) and builds the enrollment code around it with the org key, which the hub never sees;
 // the owner carries the code by hand to the machine, runs `sminos hub enroll` there and pastes it at its prompt, and
 // the CLI redeems the token at `/machine/enroll`. The code is the only way the key leaves the browser: it is built after the owner confirms the
@@ -22,6 +22,13 @@ export function createEnrollment(ttl_s?: number): Promise<EnrollmentIssued> {
 
 export async function listMachines(): Promise<MachineRecord[]> {
   return (await hubJson<{ machines: MachineRecord[] }>('/api/machines')).machines;
+}
+
+/** Revokes a machine (an admin's): the hub ends its stream, deletes its service token and its record, and releases its
+ * name, so using it again means enrolling it again. Answers the name revoked; `not-admin` and `unknown-machine` are
+ * raised as `HubRequestError`s. */
+export function removeMachine(name: string): Promise<{ revoked: string }> {
+  return hubJson(`/api/machines/${encodeURIComponent(name)}`, { method: 'DELETE' });
 }
 
 /** Why `name` cannot be the next machine's, or null: DX7's grammar, and unique in the org without regard to case. */

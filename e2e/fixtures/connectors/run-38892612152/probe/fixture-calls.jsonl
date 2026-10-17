@@ -1,0 +1,9 @@
+{"at":"2026-10-16T11:17:01.661Z","server":"sentinel","pid":64598,"method":"server/discover"}
+{"at":"2026-10-16T11:17:01.662Z","server":"first-candidate","pid":64600,"method":"server/discover"}
+{"at":"2026-10-16T11:17:01.666Z","server":"sentinel","pid":64598,"method":"initialize"}
+{"at":"2026-10-16T11:17:01.666Z","server":"first-candidate","pid":64600,"method":"initialize"}
+{"at":"2026-10-16T11:17:01.668Z","server":"sentinel","pid":64598,"method":"notifications/initialized"}
+{"at":"2026-10-16T11:17:01.668Z","server":"sentinel","pid":64598,"method":"tools/list"}
+{"at":"2026-10-16T11:17:01.668Z","server":"first-candidate","pid":64600,"method":"notifications/initialized"}
+{"at":"2026-10-16T11:17:01.669Z","server":"first-candidate","pid":64600,"method":"tools/list"}
+{"at":"2026-10-16T11:17:01.901Z","server":"sentinel","pid":64598,"method":"tools/call","tool":"probe","arguments":{}}

@@ -448,3 +448,12 @@ export type ReloadSkillsResponse = z.infer<typeof ReloadSkillsResponseSchema>;
 export const McpMessageRequestSchema = z.looseObject({ subtype: z.literal('mcp_message'), server_name: z.string(), message: z.unknown() });
 export type McpMessageRequest = z.infer<typeof McpMessageRequestSchema>;
 // E1 end
+// P3-H start: `mcp_call` (P3 Decision Log 24), route E's control: runs an MCP tool the engine has connected with no model
+// turn and no engine permission check (spikes/p3-connectors/fixtures/engine-mcp-call.jsonl seqs 10 to 23, 2.1.296). A
+// plain call only: `expires_at`, `timeout_ms` and staged files route the engine through its staging lane (Agent SDK
+// 0.3.259 sdk.d.ts SDKControlMcpCallRequest), so the request has no room for them. `content` is the tool's result after
+// the engine's processing, a string or content blocks (seqs 11 and 17).
+export interface McpCallRequest { tool: string; arguments: Record<string, unknown> }
+export const McpCallResponseSchema = z.looseObject({ content: z.union([z.string(), z.array(z.unknown())]), structuredContent: z.unknown().optional(), _meta: z.unknown().optional() });
+export type McpCallResponse = z.infer<typeof McpCallResponseSchema>;
+// P3-H end

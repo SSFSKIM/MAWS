@@ -8,6 +8,7 @@
 // an HTML artifact a session made (on C3's replay transport, `support/library-session.ts`) in the panel's Artifacts
 // tool, its versions, P2's comment card and its Side thread, Open in tab and Export to PDF; a PDF, a video and an audio
 // file played from the library. M6b: a profile with X12 records and an index at version 9 upgrades into the library.
+// P3-H (P3 Decision Log 92): a row menu's Export on its first opening.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -124,6 +125,18 @@ test('the library lists, finds, pins, files into a Space, renames and deletes, a
   await library.getByRole('radio', { name: 'Pinned' }).click();
   await expect.poll(titles).toEqual(['Launch plan']);
   await library.getByRole('radio', { name: 'All' }).click();
+
+  // P3-H (the P3 spec's Decision Log 92): the row's own Export on the menu's first opening, the window's first ask for an
+  // HTML page's formats (the viewer headers' cases always followed an earlier mount that had answered the kind)
+  await row('Pricing page').getByRole('button', { name: 'Actions for Pricing page' }).click();
+  await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: 'PDF', exact: true })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'PNG', exact: true })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Send to Google Drive…', exact: true })).toBeVisible();
+  await expect(async () => {
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0, { timeout: 1_000 });
+  }, 'the menu closes').toPass({ timeout: 10_000 });
 
   // a Space made, an artifact moved into it, shown under By Space
   await library.getByRole('button', { name: 'New Space' }).click();

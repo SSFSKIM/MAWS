@@ -1,11 +1,13 @@
 // Enrollment from the browser (DX7; the DC5 plan's M2): the hub's one-time token asked for, and the code built around
-// it in the browser — the only way the org key leaves it. The endpoints themselves are proved against the local hub
-// (e2e/local-hub.spec.ts); here, what the browser makes of their answers.
+// it in the browser — the only way the org key leaves it — and a machine removed (revoked). The endpoints themselves are
+// proved against the local hub (e2e-hub/); here, what the browser asks and makes of their answers.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { base64urlEncode, decodeEnrollmentCode } from 'desk-hub/protocol';
+import { MachinesDouble } from '../../test/double/machines';
+import { ME } from '../../test/me';
 import { VECTOR_KEY } from '../../test/vectors';
 import { HubRequestError } from '../hub/http';
-import { createEnrollment, enrollmentCode, machineNameProblem } from './enrollment';
+import { createEnrollment, enrollmentCode, listMachines, machineNameProblem, removeMachine } from './enrollment';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -48,5 +50,36 @@ describe('createEnrollment', () => {
     const refused = await createEnrollment().catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(HubRequestError);
     expect(refused).toMatchObject({ status: 403, code: 'not-admin' });
+  });
+});
+
+describe('removeMachine', () => {
+  it("asks the hub to revoke the machine by its name, and answers the name revoked", async () => {
+    const fetch = vi.fn(async () => Response.json({ revoked: 'Mini.local' }));
+    vi.stubGlobal('fetch', fetch);
+    expect(await removeMachine('Mini.local')).toEqual({ revoked: 'Mini.local' });
+    expect(fetch).toHaveBeenCalledWith('/api/machines/Mini.local', expect.objectContaining({ method: 'DELETE' }));
+  });
+
+  it('takes the machine off the list the hub serves, matched without case as the hub matches names', async () => {
+    const hub = new MachinesDouble();
+    hub.add('mini');
+    hub.add('studio');
+    vi.stubGlobal('fetch', hub.fetch(ME.member));
+    expect(await removeMachine('MINI')).toEqual({ revoked: 'mini' });
+    expect((await listMachines()).map((m) => m.name)).toEqual(['studio']);
+  });
+
+  it("carries the hub's refusals by their codes: not an admin, and a machine it does not hold", async () => {
+    const hub = new MachinesDouble();
+    hub.add('mini');
+    vi.stubGlobal('fetch', hub.fetch({ ...ME.member, role: 'member' }));
+    expect(await removeMachine('mini').catch((error: unknown) => error)).toMatchObject({ status: 403, code: 'not-admin' });
+    expect(hub.machines.map((m) => m.name)).toEqual(['mini']);
+
+    vi.stubGlobal('fetch', hub.fetch(ME.member));
+    const unknown = await removeMachine('studio').catch((error: unknown) => error);
+    expect(unknown).toBeInstanceOf(HubRequestError);
+    expect(unknown).toMatchObject({ status: 404, code: 'unknown-machine' });
   });
 });

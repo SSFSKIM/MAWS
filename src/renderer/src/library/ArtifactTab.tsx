@@ -21,7 +21,7 @@ import type { LibraryRow } from '@shared/ipc/schema/library';
 import { formatAgo } from '../app/date-format';
 import { panelInMain } from '../app/regions';
 import { useNow } from '../app/use-now';
-import { heldArtifactEditorState, holdArtifactEditorState, releaseArtifactEditorState, useArtifactEditor, type RegisteredArtifactEditor } from '../artifacts/registry';
+import { holdArtifactEditorState, releaseArtifactEditorState, useArtifactEditor, useHeldArtifactEditorState, type RegisteredArtifactEditor } from '../artifacts/registry';
 import { ipc } from '../ipc/client';
 import { registerReplaceVerdict } from '../keymap/actions-runtime';
 import { editorHostOf, useEditorHost, type EditorHostScope } from '../panel/editor-host';
@@ -53,7 +53,7 @@ export function ArtifactView({ artifactId, scope, visible }: { artifactId: strin
   const indexless = read.value === null;
   const artifact = read.value ?? (indexless && host.answer?.status === 'present' ? host.answer.row : undefined);
   // What the tab showed until now, kept while the artifact cannot be confirmed (the host unreachable, or still asked).
-  const kept = heldArtifactEditorState(scope);
+  const kept = useHeldArtifactEditorState(scope); // P3-H (Decision Log 93): selected, so a compiled render follows it
   const held = kept?.artifactId === artifactId ? kept : null;
   const editor = useArtifactEditor(artifact?.kind ?? held?.kind ?? null);
   if (artifact && editor) return <MountedEditor artifactId={artifact.id} kind={artifact.kind} editor={editor} scope={scope} visible={visible} />;
