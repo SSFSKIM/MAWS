@@ -4,7 +4,7 @@
 > branch `smns-erb`; on this machine
 > `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/smns-erb/`), child
 > **DC9** (The web — the session view — plan). **Parent pin:** composite
-> MAWS commit `bd9c67b14` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`; Decision Log). The child's section there is its design; this
+> MAWS commit `21ba47570` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`, `bd9c67b14`; Decision Log). The child's section there is its design; this
 > document carries only the constraints and the milestones. Before M1 read
 > the composite's §9 whole, §4 as amended (the phone ruling is binding),
 > the DC9 child section, the Cross-Child Contracts DX3, DX4 and DX8 with
@@ -680,6 +680,11 @@ in their own worktrees.
   `TaskRows.tsx` with Stop drawn disabled with its reason, as decided.
   Date/Author: 2026-10-17, the composite's writer (composite amendment to
   §9.5, DC9.G6 in flight), folded by the controller.
+
+- Decision: Parent re-pinned to `21ba47570`: §9.5 records the backfill
+  edit leaving DC9, DC9.G6 is one shared PR (S1), with its Decision Log
+  entry — what the S2-parked entry above already carries.
+  Date/Author: 2026-10-17, controller.
 
 ## Surprises & Discoveries
 - 2026-10-17: reviewers and workers dispatched from this controller
