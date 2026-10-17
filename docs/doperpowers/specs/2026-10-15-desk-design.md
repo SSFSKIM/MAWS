@@ -2647,7 +2647,7 @@ holds (`unknown-task` otherwise), only at the path the session's own rows named 
 `outputFilePath`, a notification's `<output-file>`, a Bash result's "Output is being written to:" — and only when
 **both** hold: the path carries the suffix `<session id>/tasks/<taskId>.output`, and the realpath of the target as
 opened (symlinks resolved) equals `<realpath of one root>/<taskId>.output` exactly and is a regular file — exact, not a
-component prefix, which would accept a symlink to another task's file under the same root (DC8, 2026-10-17). So a symlink under the root whose target keeps all three suffix
+component prefix, which would accept a symlink to another task's file under the same root (DC8, 2026-10-17); the check runs again on the opened descriptor (its path, `F_GETPATH` on macOS, `/proc/self/fd` on Linux), so nothing swapped in between check and open is read, and a descriptor that cannot be named is refused. So a symlink under the root whose target keeps all three suffix
 components elsewhere (`…/<same session>/tasks/<same task>.output` under another root) is refused, an ordinary
 symlink to a file of another name is refused, and an agent task's `.output` — a symlink the engine makes into the
 agent's transcript under `~/.claude/projects/` (SPEC ch. 20) — is refused, the agent being read through its own
