@@ -4,7 +4,7 @@
 > branch `smns-erb`; on this machine
 > `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/smns-erb/`), child
 > **DC9** (The web — the session view — plan). **Parent pin:** composite
-> MAWS commit `52a17353e` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`, `bd9c67b14`, `21ba47570`, `34defe9f6`, `f5df1687d`, `a87d7fa04`, `4021c5bbb`; Decision Log). The child's section there is its design; this
+> MAWS commit `d447cfe97` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`, `bd9c67b14`, `21ba47570`, `34defe9f6`, `f5df1687d`, `a87d7fa04`, `4021c5bbb`, `52a17353e`; Decision Log). The child's section there is its design; this
 > document carries only the constraints and the milestones. Before M1 read
 > the composite's §9 whole, §4 as amended (the phone ruling is binding),
 > the DC9 child section, the Cross-Child Contracts DX3, DX4 and DX8 with
@@ -847,6 +847,24 @@ in their own worktrees.
   fourth check: a desk Steer or a queued send mid-turn is never read as a
   marker — the engine's exact marker text and row shape, not a prefix a
   typed prompt could carry.
+
+- Decision: Parent re-pinned to `d447cfe97` (DC8's panel fix wave): an
+  agent is known as background by `meta.requestShape`, `spawn.background`,
+  the persisted call's `input.run_in_background` (`true` or `"true"`;
+  `false` proves nothing), or its result's exact launch text —
+  `Async agent launched successfully.` then a line `agentId: …`, or a
+  fork's `Fork started — processing in background` — either text being
+  `async_launched` running evidence at precedence (3); a launch without a
+  `toolUseResult` names no `outputFile`. DC8's fixture moves to
+  doperpowers `c81b77fc` (77/77; the legacy case split into a cold open, a
+  list-seeded reload, and an agent known as background only from its
+  spawn), pushed once DC8's review and CI pass. The fake machine's
+  derivation follows it in a small task once the fixture is pushed (a cold
+  open would otherwise show older launches and every fork `completed`
+  where the live view shows `exited`). DX5's `resync.refused` is
+  machine-only.
+  Date/Author: 2026-10-17, the composite's writer relaying DC8, folded by
+  the controller.
 
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
