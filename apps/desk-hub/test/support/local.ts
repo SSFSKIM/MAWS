@@ -20,6 +20,7 @@ import {
   PROJECT_ARCHIVE_HOLD_PATH,
   PROJECT_BACKLOG_PATH,
   PROJECT_CALLS_PATH,
+  PROJECT_FORGET_FAULT_PATH,
   PROJECT_HOLD_PATH,
   PROJECT_LEASE_PATH,
   PROJECT_LIFE_PATH,
@@ -28,6 +29,9 @@ import {
   PROJECT_VISIBLE_PATH,
   PROJECTS_PATH,
   SEND_FAULT_PATH,
+  REVOKE_FAULT_PATH,
+  REVOKE_HELD_PATH,
+  REVOKE_RELEASE_PATH,
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   TIMING_PATH,
@@ -239,6 +243,23 @@ export async function startLocalHub() {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     },
+    /** Holds the answer to the machine's next revocation until `releaseRevoke`, or loses it once the revocation is
+     * stored (`lose`), as a slow or a lost RPC answer would (the suites' Worker only). */
+    async faultNextRevoke(machine: string, mode: 'hold' | 'lose') {
+      await seam('MACHINE', machine, `${REVOKE_FAULT_PATH}?mode=${mode}`);
+    },
+    /** Whether the answer to a revocation of the machine is held. */
+    async revokeHeld(machine: string): Promise<boolean> {
+      return (await seam('MACHINE', machine, REVOKE_HELD_PATH)) === 'held';
+    },
+    /** Releases the held answer to the machine's revocation, once it is held (waiting for it to be). */
+    async releaseRevoke(machine: string) {
+      const deadline = Date.now() + 10_000;
+      while ((await seam('MACHINE', machine, REVOKE_RELEASE_PATH)) !== 'released') {
+        if (Date.now() > deadline) throw new Error(`no revocation of ${machine} was held`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    },
     /** Holds, or releases, a project's lookups of its archive machine (an upload of a legacy/ feed makes one). */
     async holdArchiveLookups(project: string, hold: boolean) {
       await seam('PROJECT', project, PROJECT_ARCHIVE_HOLD_PATH, { hold });
@@ -250,6 +271,10 @@ export async function startLocalHub() {
     /** Has a project queue a frame for a machine's stream of `generation`, as a reply on a retired stream is queued. */
     async projectSend(project: string, machine: string, generation: number, frame: unknown) {
       await seam('PROJECT', project, PROJECT_SEND_PATH, { machine, generation, frame });
+    },
+    /** Makes a project's next `forget` throw, as a failed RPC from the Registry would (the suites' Worker only). */
+    async failNextForget(project: string) {
+      await seam('PROJECT', project, PROJECT_FORGET_FAULT_PATH);
     },
     /** How many pages of `hello` backlogs a project has read. */
     async backlogPages(project: string): Promise<number> {

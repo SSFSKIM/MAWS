@@ -3,7 +3,9 @@
 Phase 1 of the desk (`docs/doperpowers/specs/2026-10-15-desk-design.md`, the composite, at MAWS master `9cacd717`)
 closes when Parent-Level Acceptance 1–12 holds on the owner's two Macs and phone, checked by hand and recorded with
 evidence. This sheet is that check. Every child is merged; the hub and the web are deployed at
-`https://desk-hub.opencognita-platform.workers.dev`, build `hub@47fa64ff web@master.47fa64ff`. The phone walk
+`https://desk-hub.opencognita-platform.workers.dev`. The walk runs on a build of master that carries the fixes found
+while preparing it (branch `desk-walk-fixes`; the build before them was `hub@47fa64ff web@master.47fa64ff`): the
+controller deploys it before Part 0, as in F3, and notes its `X-Desk-Build`. The phone walk
 (`2026-10-15-desk-dc5-phone-walk.md`) already proved the org key, Access in the home-screen app, and push.
 
 Two people work it. **The owner** does each step on the device it names and writes down each **Record** line in the
@@ -23,25 +25,26 @@ Timings ("within 2 seconds") are read from a screen recording with the terminal 
 
 What is true now (read on 2026-10-16): both Macs run Claude Code 2.1.302 with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`
 in `~/.claude/settings.json`, so every session loads the bridge; the MacBook has doperpowers 7.160.2 and the mini
-7.162.0, both carrying the bridge (7.155.0), the uplink (7.156.0) and the machine's controls (7.157.0); neither runs
-the sminos daemon or is enrolled; no repository on either has a `.smns`. Both default to permission mode `auto`, and
-both run a Bash guardrail hook that allows every command it does not call destructive, so a permission dialog appears
-only for a destructive command such as `rm -rf <dir>` outside `/tmp` (Parts B and H use that).
+7.162.0, both carrying the bridge (7.155.0), the uplink (7.156.0) and the machine's controls (7.157.0), and neither yet
+the walk-prep fixes of 7.162.1 (doperpowers #205); neither runs the sminos daemon or is enrolled; no repository on
+either has a `.smns`. Both default to permission mode `auto`, and both run a Bash guardrail hook that allows every
+command it does not call destructive, so a permission dialog appears only for a destructive command such as
+`rm -rf <dir>` outside `/tmp` (Parts B and H use that).
 
-0.1. **The same plugin on both Macs.** On the MacBook:
+0.1. **The same plugin on both Macs.** On each Mac, the MacBook and the mini:
 
         claude plugin marketplace update doperpowers
         claude plugin update doperpowers@doperpowers
 
-   Then `claude plugin list` on each Mac names doperpowers **7.162.0** (or the same later version on both). Restart
+   Then `claude plugin list` on each Mac names doperpowers **7.162.1** or later, the same version on both. Restart
    any Claude session you will use in the walk; a session keeps the bridge it started with.
 
 0.2. **sminos in your shell.** It is not on PATH by design. In each Mac's terminal (and in `~/.zshrc` if you like):
 
         alias sminos=~/.claude/plugins/marketplaces/doperpowers/skills/sminos/scripts/sminos
 
-   `python3 --version` must print 3.10 or later in that shell (sminos does not import under macOS's own 3.9). Both
-   Macs pass today (3.12 and 3.14).
+   sminos runs on the first `python3` on PATH, which must be 3.10 or later; an older one (macOS's own is 3.9)
+   stops, saying what fixes it. Both Macs pass today (3.12 and 3.14).
 
 0.3. **The desk.** In Safari on the MacBook open the hub, sign in, **Locked** → unlock with the passkey, and tick
    **Keep unlocked on this device**. The
@@ -62,11 +65,11 @@ only for a destructive command such as `rm -rf <dir>` outside `/tmp` (Parts B an
 
         sminos hub enroll --name mini
 
-0.6. **The daemon, on each Mac**, from a plain terminal (the service keeps that shell's PATH; on the MacBook use a
-   Terminal.app window, not cmux, whose per-window directory comes first on PATH and would wrap every `claude --bg` the
-   daemon starts):
+0.6. **The daemon, on each Mac**, from a plain terminal (the service keeps that shell's PATH, from which it starts
+   `claude`; on the MacBook use a Terminal.app window, not cmux, whose per-window directory comes first on PATH and
+   would wrap every `claude --bg` the daemon starts):
 
-        sminos daemon install
+        sminos daemon install                     # prints the Python it pinned into the agent: 3.10 or later
         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.doperpowers.sminos-daemon.plist
         sminos daemon status                      # the loop and the uplink running
 
@@ -92,8 +95,8 @@ only for a destructive command such as `rm -rf <dir>` outside `/tmp` (Parts B an
 
    **Record W0.1:** the project id. In the desk, the grid shows **desk-walk** within a few seconds.
 
-0.8. **Sessions only after the `.smns`.** A session started in the checkout before its `.smns` existed keeps writing
-   to the old local project for its whole life. Open every walk session after 0.7.
+0.8. **Sessions already open need nothing.** A session running in the checkout before the Mac enrolled or before its
+   `.smns` named the hub writes to the hub project from its next message, under the enrolled name; no restart.
 
 0.9. **For the controller's reads** (Parts B, F, G): on the MacBook, once, `cloudflared access login
    https://desk-hub.opencognita-platform.workers.dev` (a browser sign-in). It lets `deployment counts` read the hub
@@ -139,7 +142,7 @@ B1. **A blocking question on B** (item 3). Tell walk-b:
     `Ask me with AskUserQuestion, blocking (not async), which colour to use: red, green or blue. Then tell me which you got in a <message>.`
     The terminal on the mini draws the question dialog. In the desk, the question appears in `# desk-walk` and in
     walk-b's channel with its three choices (header "Asks"); the grid card, if you look, shows "1 waiting on you"
-    (**W1.2**). Pick **blue** and **Submit** in the web (not "Skip": see Findings).
+    (**W1.2**). Pick **blue** and **Submit** in the web.
     - Expected: the card reads "Answered from the web by you"; the mini's terminal dialog closes within about a
       second; walk-b continues and its `<message>` says blue.
     - **Record W3.1:** what each surface showed, and whether the mini's dialog closed by itself.
@@ -148,7 +151,8 @@ B2. **An async question on B.** Tell walk-b:
     `Ask me with mcp__doperpowers__AskUserQuestion with async true which shape to use: circle or square, and meanwhile run python3 -c 'import time; time.sleep(40)'. When the answer arrives, tell me in a <message>.`
     The card is tagged "· it keeps working while it waits". Answer **square** from the web.
     - Expected: walk-b's terminal band of open questions clears; its next step (or its next turn) has the answer, and
-      the `<message>` says square.
+      the `<message>` says square. In the desk the question stays drawn with its text, "Which shape…", and
+      "Answered: square" under it.
     - **Record W3.2.**
 
 B3. **Deny from the web** (item 4). walk-a runs in `default` mode. Tell it:
@@ -289,7 +293,8 @@ F3. While it runs, in this order:
           printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "CF_DESK_HUB_SERVICE_TOKENS=$(cat $S/CF_DESK_HUB_SERVICE_TOKENS)" \
             | pnpm --filter desk-hub deployment deploy --assets "$PWD/apps/desk-web/dist" --web master.<sha>.walk
 
-      The label must differ from the live one (`master.47fa64ff`): Cloudflare restarts objects for new code only.
+      The label must differ from the live one (the build the walk started on): Cloudflare restarts objects for new
+      code only.
       `--assets` is absolute because pnpm runs the command in `apps/desk-hub`, where a relative path would resolve.
     - Two minutes later, **restart the mini's daemon**: `launchctl kickstart -k gui/$(id -u)/com.doperpowers.sminos-daemon`.
     - Six minutes after the deploy (the objects restart at about +5:15 to +5:30), **reload the desk** in the browser.
@@ -309,7 +314,9 @@ F4. When both loops have ended and a minute has passed, take the counts again as
 
 The owner decided this part (2026-10-16): two cases are checked live from a browser console, and three are covered by
 the suites named below rather than re-forged by hand. This part runs after Part F, because what the two live cases
-forge stays in the hub's log for good (the counts then explain them as refused).
+forge stays in the hub's log for good (the counts then explain them as refused). Every forgery here carries a wrong
+code, so a daemon refuses it `bad-code`; since 7.162.1 an event that verifies but differs from the one a machine holds
+at its position is refused `conflict` instead, which nothing here forges.
 
 The live cases use `apps/desk-hub/deploy/walk-console.js`, pasted into the desk's own DevTools console while signed in.
 It opens one socket to the walk project, sends exactly two frames — a `human` and a `steer` RPC, each with a wrong
@@ -354,10 +361,14 @@ G6. **A read-only machine.** First spawn a seat on the mini (+ Session, as D1), 
 
         sminos daemon policy --read-only on
 
-    From the desk: send `ping` to walk-b (live), and `@web-xxxxxx ping` in `# desk-walk` (the stopped seat).
+    Within a few seconds walk-b's channel says so before you send anything: the banner "mini is read-only: it runs
+    nothing sent from outside it, so what you send walk-b is recorded and not delivered…", its Steer, Interrupt,
+    Model, Compact and Retire disabled with that reason as their tooltip, and the composer's note "recorded, not
+    delivered: mini is read-only"; **+ Session** lists mini as "(read-only)" and does not offer it. From the desk: send
+    `ping` to walk-b (live), and `@web-xxxxxx ping` in `# desk-walk` (the stopped seat).
     - Expected: neither starts anything on the mini; each delivery line reads "…: not delivered: the machine is
-      read-only"; a Steer to walk-b fails "mini is read-only: it runs nothing sent from outside it". The desk does not
-      show the machine as read-only before you act (see Findings).
+      read-only — this machine is read-only: nothing written outside it is delivered" (the mini's reason after the
+      outcome).
     - Then `sminos daemon policy --read-only off`. What arrived while read-only stays undelivered.
     - **Record W8.6.**
 
@@ -393,8 +404,8 @@ H2. The same with a permission: send walk-p `Create the directory walk-scratch-p
 
 Pick the project you will really work in for a day (it must be checked out on both Macs). Convert it as in 0.7
 (`sminos project init --hub` on one Mac, commit and push the `.smns`, pull and `sminos project init --hub` on the
-other) and restart the sessions you keep there (0.8). Then work the day across both Macs from the desk, opening a
-terminal only when something sends you to one.
+other); the sessions you keep there write to it from their next message (0.8). Then work the day across both Macs
+from the desk, opening a terminal only when something sends you to one.
 
 - **Record W11.1:** your verdict, and each time something sent you to a terminal, what it was.
 
@@ -454,11 +465,6 @@ test/deploy/walk-console.test.ts`): the snippet sends exactly the two frames and
 - The web does not draw a refused RPC it did not send, and the hub does not audit daemons' RPC refusals: item 8's
   "the refusal shows in the web" holds for events (the banner) and not for a forged RPC. The owner accepted the
   console's `rpc-state` and the daemon log as the evidence for the RPC, and backlogged drawing it (2026-10-16).
-- The web never shows a machine's read-only policy; it arrives in the `machines` frame and nothing reads it.
-- **Skip** on a question sends an empty answer, which the daemon refuses (`bad-shape`).
-- An answered async question draws its question text blank: the log's `question.text` is a list, which the web reads
-  as a string.
-- The Diff tab shows "No changes against " for a failed diff (the daemon's error is not drawn).
 - A send's prompt carries a one-line `[sminos chat …]` header before the text (item 6's "whose prompt is the sent
   text").
 

@@ -1,7 +1,7 @@
 // What a project's session plane keeps in its `Project` object's storage (SQLite), so it survives an eviction while
 // sockets stay open, a hibernation, and a restart (§2): each machine's lease and presence, each session's latest
-// presence, the pending set, the latest delivery outcome per event and recipient, the RPC records by nonce, and the
-// browsers' subscriptions. The logic that moves these lives in `project.ts`; this is their storage and nothing else.
+// presence, the pending set, the latest delivery outcome per event and recipient, the RPC records by nonce, the
+// browsers' subscriptions, and the machines revoked from the org. The logic that moves these lives in `project.ts`; this is their storage and nothing else.
 import type { Delivery, MachinePresence, Raised, SessionMessage } from '../protocol/session';
 import type { Rpc, RpcOutcome, RpcState } from '../protocol/rpc';
 
@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS rpcs (
 CREATE INDEX IF NOT EXISTS rpcs_by_machine ON rpcs (machine, state);
 CREATE TABLE IF NOT EXISTS settled (
   machine TEXT NOT NULL, session TEXT NOT NULL, request TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (machine, session, request));
+CREATE TABLE IF NOT EXISTS revoked (machine TEXT PRIMARY KEY, generation INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS subs (
   sub TEXT PRIMARY KEY, socket TEXT NOT NULL, machine TEXT NOT NULL, session TEXT NOT NULL, agent_id TEXT,
   generation INTEGER NOT NULL);
@@ -76,6 +77,21 @@ export class SessionStore {
   /** Leases still marked online whose time is up, for the lapse to act on. */
   lapsed(now: number): Lease[] {
     return this.leases().filter((lease) => lease.online && lease.expires <= now);
+  }
+
+  // Revocations: a machine revoked from the org, up to the stream generation it had reached then.
+
+  revoke(machine: string, generation: number): void {
+    this.sql.exec(
+      'INSERT INTO revoked (machine, generation) VALUES (?, ?) ON CONFLICT (machine) DO UPDATE SET generation = MAX(generation, excluded.generation)',
+      machine,
+      generation,
+    );
+  }
+
+  /** The newest stream generation of `machine` that was revoked, or null when none was. */
+  revokedThrough(machine: string): number | null {
+    return this.sql.exec<{ generation: number }>('SELECT generation FROM revoked WHERE machine = ?', machine).toArray()[0]?.generation ?? null;
   }
 
   // Presence.

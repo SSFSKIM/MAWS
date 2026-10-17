@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 // A request card is its request's alone: two sessions whose bridges raised a question under the same id each keep their
-// own draft (MAWS's question stepper keeps drafts by the id the card hands it).
-import { cleanup, fireEvent, render, within } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+// own draft (MAWS's question stepper keeps drafts by the id the card hands it). A question's Skip sends only what DX6
+// takes: the answers given, or — every question skipped — the native question declined; an async one, never declined,
+// sends nothing.
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Raised } from 'desk-hub/protocol';
 import { VECTOR_PROJECT as PROJECT } from '../../../test/vectors';
 import { memoryLogRecord } from '../../log/record';
@@ -33,11 +35,12 @@ const session = (id: string, alias: string): DeskSession => ({
   machineOnline: true,
 });
 const QUESTIONS = [{ question: 'Which column do we keep?', header: 'Column', options: [{ label: 'user_id' }, { label: 'owner_id' }], multiSelect: false }];
-const record = (id: string): RequestRecord => {
-  const raised = { request: 'request-1', session: id, tool: 'AskUserQuestion', input: { questions: QUESTIONS }, mac: { nonce: 'n', value: 'v' } } as unknown as Raised;
-  const key = requestKey({ machine: 'mini', session: id, request: 'request-1' });
-  return { key, request: 'request-1', machine: 'mini', raised, at: 0, pending: true, terminalOnly: false, settled: null };
+const record = (id: string, request = 'request-1', more: { questions?: unknown[]; tool?: string; async?: true } = {}): RequestRecord => {
+  const raised = { request, session: id, tool: more.tool ?? 'AskUserQuestion', input: { questions: more.questions ?? QUESTIONS }, ...(more.async && { async: true }), mac: { nonce: 'n', value: 'v' } } as unknown as Raised;
+  const key = requestKey({ machine: 'mini', session: id, request });
+  return { key, request, machine: 'mini', raised, at: 0, pending: true, terminalOnly: false, settled: null };
 };
+const MEMBER = '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c';
 
 let connection: ProjectConnection;
 beforeEach(() => {
@@ -47,6 +50,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   connection.stop();
+  vi.restoreAllMocks();
 });
 
 it("keeps each session's draft of a question raised under the same id as another session's", () => {
@@ -57,7 +61,7 @@ it("keeps each session's draft of a question raised under the same id as another
     [B, session(B, 'maws-fe')],
   ]);
   const view = render(
-    <DeskContext.Provider value={{ connection, member: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', sessions }}>
+    <DeskContext.Provider value={{ connection, member: MEMBER, sessions }}>
       <RequestCard request={a.key} />
       <RequestCard request={b.key} />
     </DeskContext.Provider>,
@@ -67,4 +71,47 @@ it("keeps each session's draft of a question raised under the same id as another
   fireEvent.click(within(cardA).getByRole('radio', { name: /user_id/ }));
   expect(picked(cardA)).toBe('true');
   expect(picked(cardB)).toBe('false');
+});
+
+describe('Skip', () => {
+  /** One card, its RPCs caught before they are sealed. */
+  function card(r: RequestRecord) {
+    connection.conversation.store.setState({ requests: { [r.key]: r } });
+    const answer = vi.spyOn(connection, 'answer').mockResolvedValue('nonce');
+    const decide = vi.spyOn(connection, 'decide').mockResolvedValue('nonce');
+    render(
+      <DeskContext.Provider value={{ connection, member: MEMBER, sessions: new Map([[A, session(A, 'maws-45')]]) }}>
+        <RequestCard request={r.key} />
+      </DeskContext.Provider>,
+    );
+    return { answer, decide };
+  }
+
+  it('declines a native question whose every question was skipped, as Esc in the terminal does, and never sends an empty answer', () => {
+    const r = record(A, 'request-skip-native');
+    const { answer, decide } = card(r);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
+    expect(answer).not.toHaveBeenCalled();
+    expect(decide).toHaveBeenCalledWith(MEMBER, r, 'deny');
+  });
+
+  it('sends the answers given when some questions were skipped', () => {
+    const questions = [...QUESTIONS, { question: 'Rename the index too?', header: 'Index', options: [{ label: 'yes' }, { label: 'no' }], multiSelect: false }];
+    const r = record(A, 'request-skip-one', { questions });
+    const { answer, decide } = card(r);
+    fireEvent.click(screen.getByRole('radio', { name: /user_id/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
+    expect(answer).toHaveBeenCalledWith(MEMBER, r, { 'Which column do we keep?': 'user_id' });
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing for an async question whose every question was skipped, and says why', () => {
+    const r = record(A, 'request-skip-async', { tool: 'mcp__doperpowers__AskUserQuestion', async: true });
+    const { answer, decide } = card(r);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
+    expect(answer).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
+    expect(screen.getByTestId('skip-note').textContent).toBe('Nothing was sent: an async question waits for an answer to at least one of its questions, and cannot be declined.');
+  });
 });
