@@ -24,8 +24,8 @@
 
 - [ ] S1 — Shared edit: the ask tool classified as a question (own PR)
 - [ ] S2 — Shared edit: shell and monitor starts and `task_status` in MAWS's backfill (own PR)
-- [ ] T0 — Mockups of the four taste surfaces (to the owner through the composite's writer)
-- [ ] M1 — The hub's `output`, the widened bodies, and DX8's `output()`
+- [x] T0 — Mockups of the four taste surfaces (2026-10-17: `desk-dc9-mockups` 73ecf8f0, the owner's choices marked c73916fa)
+- [x] M1 — The hub's `output`, the widened bodies, and DX8's `output()` (2026-10-17, reviewed clean: d2c8fec5..af560476, fix 7098835a..89b2e560)
 - [ ] M2 — The fake machine's part: the session-view recording, jobs and status, `output`, pages after the replay
 - [ ] M3 — The per-session owner and the session view
 - [ ] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements
@@ -640,6 +640,15 @@ in their own worktrees.
   the fixture pins. The executors' copy at
   `.doperpowers/sde/2026-10-17-desk-dc9-session-view/dc8/` is refreshed.
   Date/Author: 2026-10-17, the composite's writer, folded by the controller.
+
+- Decision (M1 fix): `SubagentSpawn.name` is optional (a `$.agent.list()`
+  seed carries none); every body and output case of DC8's fixture at
+  `8b34237b` typechecks against the protocol types (a throwaway check). The
+  fixture's `refused` cases leave `reason` out of their `expect` — its
+  `about` compares `reason` only as a non-empty string, and DC8's runner
+  pops it — so M2's vendored runner does the same, while `TaskOutput`
+  keeps `reason` required.
+  Date/Author: 2026-10-17, M1 executor, folded by the controller.
 
 ## Surprises & Discoveries
 - 2026-10-17: reviewers and workers dispatched from this controller
