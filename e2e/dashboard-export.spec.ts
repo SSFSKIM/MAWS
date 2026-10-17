@@ -42,8 +42,18 @@ const pngSize = (png: Uint8Array) => {
   const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
   return { width: view.getUint32(16), height: view.getUint32(20) };
 };
-const pdfText = (path: string) => execFileSync(join(POPPLER, 'pdftotext'), ['-layout', path, '-'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
-const pdfFonts = (path: string) => execFileSync(join(POPPLER, 'pdffonts'), [path], { encoding: 'utf8' });
+/** A PDF's text (pdftotext's layout), kept beside it as evidence. */
+const pdfText = (path: string, evidence: string) => {
+  const text = execFileSync(join(POPPLER, 'pdftotext'), ['-layout', path, '-'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  writeFileSync(`${PROOF}/${evidence}.pdftotext.txt`, text);
+  return text;
+};
+/** A PDF's fonts (pdffonts' table), kept beside it as evidence. */
+const pdfFonts = (path: string, evidence: string) => {
+  const fonts = execFileSync(join(POPPLER, 'pdffonts'), [path], { encoding: 'utf8' });
+  writeFileSync(`${PROOF}/${evidence}.pdffonts.txt`, fonts);
+  return fonts;
+};
 /** The PDF's first page as a PNG beside it, for the evidence. */
 const pdfPicture = (path: string, out: string) => execFileSync(join(POPPLER, 'pdftoppm'), ['-png', '-r', '96', '-f', '1', '-l', '1', '-singlefile', path, out]);
 /** A figure or table as the page's engine serialises it, parsed from `html`. */
@@ -144,7 +154,8 @@ test('the four exports draw the editor’s figure and native table with snapshot
   await test.step('PDF: the captions, Korean labels, table values and the snapshot’s UTC time are its text; its first page pictured', async () => {
     const pdf = await exported('pdf');
     expect(pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
-    const text = pdfText(`${PROOF}/export-board.pdf`);
+    const text = pdfText(`${PROOF}/export-board.pdf`, 'export-board');
+    pdfFonts(`${PROOF}/export-board.pdf`, 'export-board');
     for (const word of ['Totals by region.', '지역별 매출', 'Sales table', '서울', '부산', '제주', '120', '98', '40', `Sales · from sales.csv · ${OLD_TIME}`]) expect(text).toContain(word);
     expect(text).not.toContain('Chart: sales');
     pdfPicture(`${PROOF}/export-board.pdf`, `${PROOF}/export-board-pdf`);
@@ -190,8 +201,8 @@ test('governed by a system with uploaded faces: the editor’s figure is the exp
   expect(await svgOf(page, svgs[0])).toBe(editorSvg);
   writeFileSync(`${PROOF}/official-board-docx-fallback.png`, pngs[0]);
   await exported('pdf');
-  expect(pdfFonts(`${PROOF}/official-board.pdf`)).toMatch(/NotoSerifKR/);
-  expect(pdfText(`${PROOF}/official-board.pdf`)).toContain('서울');
+  expect(pdfFonts(`${PROOF}/official-board.pdf`, 'official-board')).toMatch(/NotoSerifKR/);
+  expect(pdfText(`${PROOF}/official-board.pdf`, 'official-board')).toContain('서울');
   pdfPicture(`${PROOF}/official-board.pdf`, `${PROOF}/official-board-pdf`);
   expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
@@ -257,6 +268,7 @@ test('the agent exports a dashboard through the real server: Markdown, HTML, DOC
         expect(result.isError, resultText(result)).toBeUndefined();
         return JSON.parse(resultText(result)) as { status: string; format: string; path: string };
       };
+      writeFileSync(`${PROOF}/agent-export-results.json`, JSON.stringify([1, 2, 3, 4].map(exported), null, 2));
       const md = readFileSync(exported(1).path, 'utf8');
       expect(md).toContain('**Sales by region**\n\n| region | total |\n| --- | ---: |\n| North | 10 |\n| South | 20 |');
       expect(md).toContain(OLD_TIME);
@@ -269,7 +281,7 @@ test('the agent exports a dashboard through the real server: Markdown, HTML, DOC
       expect(document).toContain('Sales by region');
       const pdf = exported(4).path;
       copyFileSync(pdf, `${PROOF}/agent-export.pdf`);
-      const text = pdfText(pdf);
+      const text = pdfText(pdf, 'agent-export');
       for (const word of ['Sales by region', 'Sales table', 'North', '10', OLD_TIME]) expect(text).toContain(word);
     });
   } finally {
@@ -286,7 +298,7 @@ test('the owner’s comment on a chart, replied to in the rail, is a Word commen
   const id = artifact.id;
   const record = await openInPanel(page, id);
   await bindCsv(page, id, 'sales', { title: 'Sales', name: 'sales.csv', csv: 'region,total\nNorth,10\nSouth,20\nWest,15\n', at: OLD.at });
-  await insertBlocks(record, [paragraph('Sales rose in every region.'), chart('sales', { view: 'bar', x: 'region', y: 'total', title: 'Sales by region' })]);
+  await insertBlocks(record, [paragraph('Sales rose in every region.'), chart('sales', { view: 'bar', x: 'region', y: 'total', title: 'Sales by region' }), paragraph('Notes follow.')]);
   await expect(figures(record).first().locator('.dash-figure > svg')).toBeVisible({ timeout: 15_000 });
   const chartBlock = record.locator('.doc-chart');
 
