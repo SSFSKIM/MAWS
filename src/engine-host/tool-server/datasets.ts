@@ -4,15 +4,17 @@
 //   1. A repeated tool-use id answers its first result, before anything is read (a source file deleted since cannot
 //      make a successful retry fail).
 //   2. Everything the write stands on is read and validated before anything is written: the dashboard, the file (under
-//      the session's real working directory, symlinks resolved; at most 16 MiB) or the asset the dashboard holds, its
-//      format by its name's extension, the host's parse and the row key. Nothing is held over the disk read.
+//      the session's real working directory, symlinks resolved, read through one descriptor of the very file validated;
+//      at most 16 MiB) or the asset the dashboard holds, its format by its name's extension, the host's parse and the
+//      row key. Nothing is held over the disk read.
 //   3. One serialized commit (`ArtifactStore.writeWithAssets`): its `prepare`, synchronous with the write, refuses a
 //      future base and a descriptor that changed since `baseRevision` (the dashboard adapter's derived change index:
 //      only the addressed dataset's descriptor is compared, so prose and other datasets merge); then the asset's row,
 //      the session's `edited` link, the descriptor and the op's answer, all in one savepoint. The commit is the
 //      operation's linearization point; a refusal or a failure leaves no asset, descriptor or op.
 import { createHash } from 'node:crypto';
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, realpath, stat } from 'node:fs/promises';
 import { basename, isAbsolute, relative } from 'node:path';
 import { DATASET_LIMITS, readDataset, removeDataset, setDataset, datasetSlotProblem, type DatasetDescriptor, type DatasetFormat } from '@artifacts/dashboard/datasets';
 import { DatasetError, parseDataset, rowKeyProblem, type ParsedDataset } from '@artifacts/dashboard/parse';
@@ -35,16 +37,55 @@ function formatOf(name: string): DatasetFormat | null {
 }
 
 // A path under the working directory once every symlink on it and on the directory is resolved (`pathUnderCwd` checks
-// the words; this checks where they lead).
-async function realFileUnder(cwd: string, path: string): Promise<string> {
+// the words; this checks where they lead), with the identity of the regular file found there.
+interface ValidatedFile {
+  named: string;
+  real: string;
+  root: string;
+  dev: number;
+  ino: number;
+}
+const outsideCwd = (file: Pick<ValidatedFile, 'named' | 'real' | 'root'>) =>
+  refuse(TOOL, { reason: 'invalid', path: file.named }, `${file.named} leads to ${file.real}, outside the working directory ${file.root}`);
+const tooLarge = (named: string, size: number) =>
+  refuse(TOOL, { reason: 'tooLarge', size, limit: DATASET_LIMITS.bytes }, `${named} is ${size} bytes; a dataset is at most ${DATASET_LIMITS.bytes}`);
+
+async function realFileUnder(cwd: string, path: string): Promise<ValidatedFile> {
   const named = pathUnderCwd(TOOL, cwd, path);
   const found = await stat(named).catch(() => null);
   if (!found?.isFile()) throw new ToolRefusal(TOOL_ERRORS.artifactNotAFile(TOOL, named));
   const [real, root] = await Promise.all([realpath(named), realpath(cwd)]);
   const inside = relative(root, real);
-  if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw refuse(TOOL, { reason: 'invalid', path: named }, `${named} leads to ${real}, outside the working directory ${root}`);
-  if (found.size > DATASET_LIMITS.bytes) throw refuse(TOOL, { reason: 'tooLarge', size: found.size, limit: DATASET_LIMITS.bytes }, `${named} is ${found.size} bytes; a dataset is at most ${DATASET_LIMITS.bytes}`);
-  return real;
+  if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw outsideCwd({ named, real, root });
+  // the resolved path itself, not followed: what the read must open
+  const validated = await lstat(real).catch(() => null);
+  if (!validated?.isFile()) throw outsideCwd({ named, real, root });
+  if (validated.size > DATASET_LIMITS.bytes) throw tooLarge(named, validated.size);
+  return { named, real, root, dev: validated.dev, ino: validated.ino };
+}
+
+// E2 M6 (panel P1, E's Decision Log 40): the validated file's bytes read through one descriptor, never the path again.
+// The real path is opened without following a final link, and the opened file must be the regular file validated (its
+// device and inode), so a file replaced since validation, by a link out of the working directory or by another file, is
+// refused as the containment refusal; the read stops one byte past the cap, so a file grown since is refused by size.
+async function readValidated(file: ValidatedFile): Promise<Uint8Array> {
+  const handle = await open(file.real, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => null);
+  if (!handle) throw outsideCwd(file);
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.dev !== file.dev || opened.ino !== file.ino) throw outsideCwd(file);
+    const buffer = new Uint8Array(DATASET_LIMITS.bytes + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null);
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > DATASET_LIMITS.bytes) throw tooLarge(file.named, Math.max(opened.size, length));
+    return buffer.subarray(0, length);
+  } finally {
+    await handle.close();
+  }
 }
 
 export function artifactDatasetTool(deps: ArtifactToolDeps): McpToolDefinition {
@@ -69,11 +110,11 @@ export function artifactDatasetTool(deps: ArtifactToolDeps): McpToolDefinition {
         let table: ParsedDataset | null = null;
         if (!input.remove) {
           if (input.path !== undefined) {
-            const real = await realFileUnder(ctx.cwd, input.path);
+            const validated = await realFileUnder(ctx.cwd, input.path);
             const name = basename(input.path);
             const format = formatOf(name);
-            if (!format) throw refuse(TOOL, { reason: 'invalid', path: real }, `${name} is not a .csv, .tsv or .json file`);
-            source = { bytes: await readFile(real), name, format };
+            if (!format) throw refuse(TOOL, { reason: 'invalid', path: validated.real }, `${name} is not a .csv, .tsv or .json file`);
+            source = { bytes: await readValidated(validated), name, format };
           } else {
             const asset = await store.readCommitted(() => store.listAssets(artifactId).find((candidate) => candidate.ref === input.ref));
             if (!asset) throw refuse(TOOL, { reason: 'notFound', ref: input.ref }, `${input.artifact} holds no asset ${input.ref}; artifact_list_assets lists them`);

@@ -3,10 +3,10 @@
 // `artifact_read`, over A's real store with the document and dashboard kinds registered, through the `maws` server's own
 // tool list. Validation precedes every write; the asset, the descriptor, the op row and the session's link land in one
 // commit; a replayed tool-use id answers its first result; the stale rule compares the addressed descriptor alone.
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readDataset, snapshotOf, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
 import { applyV2, newDoc, stateV2 } from '@artifacts/yjs';
 import { datasetReaderOf } from '../dashboards/read';
@@ -23,6 +23,28 @@ import { HostBridge } from './bridge';
 import { PaneBridge } from './panes';
 import type { McpToolContext, McpToolDefinition, McpToolResult } from './server';
 import { mawsTools } from './tools';
+
+// E2 M6 (panel P1, E's Decision Log 40): a hook run once just before the validated file is opened or read, by its real
+// path, where a concurrent workspace process could replace it.
+const race = vi.hoisted(() => ({ path: null as string | null, swap: null as (() => void) | null }));
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  const fire = (path: unknown) => {
+    if (race.path === null || String(path) !== race.path) return;
+    const swap = race.swap;
+    race.path = race.swap = null;
+    swap?.();
+  };
+  const open = (async (...args: Parameters<typeof actual.open>) => {
+    fire(args[0]);
+    return actual.open(...args);
+  }) as typeof actual.open;
+  const readFile = (async (...args: Parameters<typeof actual.readFile>) => {
+    fire(args[0]);
+    return actual.readFile(...args);
+  }) as typeof actual.readFile;
+  return { ...actual, default: { ...actual, open, readFile }, open, readFile };
+});
 
 const SELF = 'app-self' as AppSessionId;
 const OTHER = 'app-other' as AppSessionId;
@@ -62,6 +84,7 @@ beforeEach(() => {
   world = open();
 });
 afterEach(() => {
+  race.path = race.swap = null;
   close();
   rmSync(data, { recursive: true, force: true });
   rmSync(cwd, { recursive: true, force: true });
@@ -204,6 +227,50 @@ describe('artifact_dataset', () => {
       rmSync(outside, { recursive: true, force: true });
     }
     expect(refusal(await bind({ baseRevision: revision, id: 'sales', path: file('a.xlsx', SALES) }))).toMatchObject({ reason: 'invalid' });
+  });
+
+  it('refuses a validated file replaced before it is opened, by a link outside, another file or a longer one, writing nothing (panel P1)', async () => {
+    const { id, revision } = await created();
+    const outside = mkdtempSync(join(tmpdir(), 'maws-datasets-outside-'));
+    const nothingWritten = () => {
+      expect(world.store.revision(id)).toBe(revision);
+      expect(world.store.listAssets(id)).toEqual([]);
+      expect(readDataset(world.service.live(id), 'sales')).toBeNull();
+    };
+    try {
+      writeFileSync(join(outside, 'secret.csv'), 'secret\n1\n2\n3\n4\n5\n');
+      const arm = (name: string, swap: () => void) => {
+        race.path = realpathSync(join(cwd, name));
+        race.swap = swap;
+      };
+      const toolUseId = 'toolu_race' as ToolUseId;
+      file('sales.csv', SALES);
+      arm('sales.csv', () => {
+        unlinkSync(join(cwd, 'sales.csv'));
+        symlinkSync(join(outside, 'secret.csv'), join(cwd, 'sales.csv'));
+      });
+      expect(refusal(await bind({ baseRevision: revision, id: 'sales', path: 'sales.csv' }, { toolUseId }))).toMatchObject({ reason: 'invalid' });
+      expect(race.path).toBeNull(); // the swap ran
+      nothingWritten();
+
+      file('swapped.csv', SALES);
+      file('other.csv', 'other\n1\n');
+      arm('swapped.csv', () => renameSync(join(cwd, 'other.csv'), join(cwd, 'swapped.csv')));
+      expect(refusal(await bind({ baseRevision: revision, id: 'sales', path: 'swapped.csv' }))).toMatchObject({ reason: 'invalid' });
+      nothingWritten();
+
+      file('grown.csv', SALES);
+      arm('grown.csv', () => appendFileSync(join(cwd, 'grown.csv'), new Uint8Array(16 * 1024 * 1024)));
+      expect(refusal(await bind({ baseRevision: revision, id: 'sales', path: 'grown.csv' }))).toMatchObject({ reason: 'tooLarge', limit: 16 * 1024 * 1024 });
+      nothingWritten();
+
+      // the refused op recorded nothing: its tool-use id binds the file afresh once the file is the one it names
+      unlinkSync(join(cwd, 'sales.csv'));
+      file('sales.csv', SALES);
+      expect(json<Bound>(await bind({ baseRevision: revision, id: 'sales', path: 'sales.csv' }, { toolUseId }))).toMatchObject({ rows: 3 });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('binds an asset the dashboard holds by ref, its format by its name; a ref it does not hold is refused', async () => {
