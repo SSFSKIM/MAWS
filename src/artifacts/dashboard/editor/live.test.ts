@@ -5,7 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import type { DatasetDescriptor } from '../datasets';
 import { DATASET_STATES, sourceLabel, utcTime } from '../states';
-import { livePauseLabel, livePauseOf, queryIdentity, scheduleWords, type LiveQueryStatus } from './live';
+import { queryIdentity } from '../query';
+import { livePauseLabel, livePauseOf, scheduleWords, type LiveQueryStatus } from './live';
 
 const AT = Date.UTC(2026, 9, 17, 9, 0);
 const fetched = (patch: Partial<DatasetDescriptor> = {}): DatasetDescriptor =>
@@ -53,6 +54,12 @@ describe('the live pause (E3 M3)', () => {
     expect(livePauseOf(status({ permission: 'read', pause: 'allowChanged' }))).toBe('allowChanged');
     expect(livePauseOf(status())).toBeNull();
     expect(livePauseOf(undefined)).toBeNull();
+  });
+
+  it('says a concrete refusal over a missing grant (E3 M3 fix): the tool may write, a failed refresh, the watch limit', () => {
+    expect(livePauseOf(status({ permission: 'none', pause: 'mayWrite' }))).toBe('mayWrite');
+    expect(livePauseOf(status({ permission: 'none', pause: 'failed' }))).toBe('failed');
+    expect(livePauseOf(status({ permission: 'none', pause: 'watchLimit' }))).toBe('watchLimit');
   });
 
   it('says each pause in a closed string of the states module, the no-route one E2’s own', () => {

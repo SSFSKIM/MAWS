@@ -82,16 +82,18 @@ export interface ViewInput {
   theme: Theme;
   /** The updater's name in the label. */
   by: string;
+  /** E3 M3 fix: the export's captured clock, at which a query's staleness is labelled; absent, the saved label. */
+  now?: number;
 }
 
 /** One view as the exporters take it: the renderer's figure or table, its caption, label, warnings and Markdown. */
-export function exportView({ spec, datasetId, descriptor, table, theme, by }: ViewInput): ExportView {
+export function exportView({ spec, datasetId, descriptor, table, theme, by, now }: ViewInput): ExportView {
   const parsed = parseSpec(spec);
   const caption = parsed.ok ? captionOf(parsed.spec, datasetId) : (parsed.title ?? 'Chart');
   // E3: a query never fetched draws E2's no-data presentation, labelled as such
   const notFetched = descriptor !== null && snapshotOf(descriptor) === null;
   const rendered = notFetched ? renderFailure(spec, theme, datasetId, DATASET_STATES.notFetched) : renderView(spec, table, theme, datasetId);
-  const label = descriptor ? sourceLabel(descriptor, by) : DATASET_STATES.noDataset(datasetId);
+  const label = descriptor ? sourceLabel(descriptor, by, now === undefined ? undefined : { now }) : DATASET_STATES.noDataset(datasetId); // E3 M3 fix
   // what the editor notes under the label: the descriptor's validation notes, and what the view could not show unless
   // its frame already says so
   const drawnInPlace = rendered.svg?.includes('<desc>This view cannot be drawn: ') ?? false;
@@ -119,6 +121,9 @@ export interface ViewExportOptions {
   authorName(actor: Actor): string;
   /** A PNG of a chart's SVG at its size (Word's fallback picture), when the format embeds one. */
   picture?(svg: string, size: { width: number; height: number }): Promise<Uint8Array>;
+  /** E3 M3 fix: the one clock the export captured with its state, every view's staleness labelled at it (however long
+   * its read takes); absent (a retained version's export), the saved labels. */
+  now?: number;
 }
 
 /**
@@ -144,7 +149,7 @@ export async function prepareViews(doc: Doc, options: ViewExportOptions): Promis
   await Promise.all(
     blocks.map(async ({ key, spec, datasetId, descriptor }) => {
       const table = await tableOf(descriptor);
-      if (!views.has(key)) views.set(key, exportView({ spec, datasetId, descriptor, table, theme: options.theme, by: descriptor?.updated ? options.authorName(descriptor.updated.by) : '' }));
+      if (!views.has(key)) views.set(key, exportView({ spec, datasetId, descriptor, table, theme: options.theme, by: descriptor?.updated ? options.authorName(descriptor.updated.by) : '', ...(options.now !== undefined && { now: options.now }) }));
     }),
   );
   const { picture } = options;

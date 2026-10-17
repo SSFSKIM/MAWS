@@ -25,7 +25,8 @@
 //   to relabel; it calls nothing.
 import type { ArtifactHost, ConnectorSurface } from '@artifacts/host';
 import { listDatasets, type QuerySource } from '@artifacts/dashboard/datasets';
-import { queryIdentity, type LiveDatasets, type LivePause, type LiveQueryStatus, type LiveSnapshot, type LiveStart } from '@artifacts/dashboard/editor/live';
+import { queryIdentity } from '@artifacts/dashboard/query'; // E3 M3 fix: the shared identity
+import { type LiveDatasets, type LivePause, type LiveQueryStatus, type LiveSnapshot, type LiveStart } from '@artifacts/dashboard/editor/live';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 import { connectorToolKey, type ConnectorCallOutcome, type ConnectorGrant, type ConnectorGrantOutcome, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -51,7 +52,12 @@ interface Query {
   watch: { token: object; id: string | null } | null;
   pause: LivePause | null;
   busy: LiveQueryStatus['busy'];
+  heardAt?: number; // E3 M3 fix: when its watch's last refresh was heard
+  probe?: ReturnType<typeof setTimeout>; // E3 M3 fix: asks its handle at its due time, while shown
 }
+
+// E3 M3 fix: the longest delay a timer takes (a longer one fires at once); a later boundary is reached by re-arming.
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 const INITIAL: LiveSnapshot = { shown: false, queries: new Map(), needsStart: false, start: { phase: 'idle' } };
 
@@ -115,7 +121,11 @@ export class LiveDatasetsController implements LiveDatasets {
     if (this.disposed || shown === this.shown) return;
     this.shown = shown;
     if (shown && !this.surface) this.ensureSurface(); // opened visible
-    else this.surface?.setVisible(shown);
+    else {
+      this.surface?.setVisible(shown);
+      if (shown) this.recover();
+      else for (const query of this.queries.values()) this.stopProbe(query);
+    }
     this.armStale();
     this.publish();
   }
@@ -126,10 +136,7 @@ export class LiveDatasetsController implements LiveDatasets {
     const surface = this.ensureSurface();
     if (!surface) return;
     if (query.source.schedule !== undefined) {
-      if (query.watch?.id) {
-        void surface.refreshWatch(query.watch.id).catch((error: unknown) => this.log(`a watch refresh failed: ${messageOf(error)}`));
-        return;
-      }
+      if (query.watch?.id) return this.probe(query); // E3 M3 fix: an evicted handle is registered again
       if (query.watch) return; // its start is in flight; it refreshes at once
       query.pause = null;
       this.startWatch(query);
@@ -204,7 +211,10 @@ export class LiveDatasetsController implements LiveDatasets {
     this.waiting = null;
     if (this.staleTimer !== null) clearTimeout(this.staleTimer);
     this.stopGrants?.();
-    for (const query of this.queries.values()) query.watch = null;
+    for (const query of this.queries.values()) {
+      this.stopProbe(query); // E3 M3 fix
+      query.watch = null;
+    }
     this.queries.clear();
     if (this.surface) {
       this.surface.setVisible(false);
@@ -312,15 +322,68 @@ export class LiveDatasetsController implements LiveDatasets {
   }
 
   private endWatch(query: Query): void {
+    this.stopProbe(query); // E3 M3 fix
     const id = query.watch?.id;
     query.watch = null;
     if (id && this.surface) void this.surface.unwatchTool(id).catch(() => {});
   }
 
   private heard(query: Query, update: ConnectorCallOutcome): void {
+    query.heardAt = this.now(); // E3 M3 fix
     if (!update.ok && update.state === 'invalid') query.watch = null; // H ended the watch
     const pause = pauseOf(update);
     if (pause !== undefined) this.patch(query, { pause });
+  }
+
+  // ── E3 M3 fix: a watch that yielded its slot at the cap while hidden (Decision Log 11, 12) ──
+
+  // Shown again: each watch's handle asked once it is due (at once if it is, else at its due time while shown), and a
+  // query paused at the cap tries its watch again. A watch cannot yield while shown, so one answer per showing suffices.
+  private recover(): void {
+    const now = this.now();
+    for (const query of this.queries.values()) {
+      const schedule = query.source.schedule;
+      if (schedule === undefined) continue;
+      if (!query.watch) {
+        if (query.pause === 'watchLimit') {
+          query.pause = null;
+          this.startWatch(query);
+        }
+        continue;
+      }
+      if (!query.watch.id) continue; // its start is in flight
+      const wait = query.heardAt === undefined ? 0 : query.heardAt + schedule * 1000 - now;
+      this.stopProbe(query);
+      if (wait <= 0) void this.probe(query);
+      else
+        query.probe = setTimeout(() => {
+          delete query.probe;
+          void this.probe(query);
+        }, Math.min(wait, MAX_TIMER_MS));
+    }
+  }
+
+  // Asks the watch's handle for a refresh: false is a handle the broker no longer has (a running dataset watch answers
+  // true), so it is unwatched and registered again, which refreshes at once. Never two watches for one query.
+  private async probe(query: Query): Promise<void> {
+    const surface = this.surface;
+    const watch = query.watch;
+    if (!surface || !watch?.id || !this.shown) return;
+    let kept: boolean;
+    try {
+      kept = await surface.refreshWatch(watch.id);
+    } catch (error) {
+      this.log(`a watch refresh failed: ${messageOf(error)}`);
+      return;
+    }
+    if (kept || this.disposed || !this.shown || this.queries.get(query.id) !== query || query.watch !== watch) return;
+    this.endWatch(query);
+    this.startWatch(query);
+  }
+
+  private stopProbe(query: Query): void {
+    if (query.probe !== undefined) clearTimeout(query.probe);
+    delete query.probe;
   }
 
   // ── grants and gestures ──
@@ -378,11 +441,13 @@ export class LiveDatasetsController implements LiveDatasets {
       if (since > now) next = Math.min(next, since);
     }
     if (next === Infinity) return;
+    // E3 M3 fix: a boundary past the longest timer is reached by re-arming; the views are told once it has passed
     this.staleTimer = setTimeout(() => {
       this.staleTimer = null;
+      const passed = this.now() >= next;
       this.armStale();
-      this.publish();
-    }, next - now);
+      if (passed) this.publish();
+    }, Math.min(next - now, MAX_TIMER_MS));
   }
 
   // ── publication ──

@@ -186,4 +186,18 @@ describe('a live dashboard in L’s surfaces (E3 M3)', () => {
     expect(starts()).toEqual([]); // no context: nothing started
     expect(editorHostOf(scope)?.actions?.at(-1)?.id).toBe('datasets');
   });
+
+  it('an open sheet loses its live controls while a history preview or suggestion review runs, and gets them back (E3 M3 fix)', async () => {
+    const m = mount();
+    await until(() => document.querySelector('button.dash-source-label') !== null && surface.listeners.length > 0, 'the view');
+    act(() => document.querySelector<HTMLButtonElement>('button.dash-source-label')!.click());
+    const dialog = screen.getByRole('dialog');
+    await until(() => within(dialog).queryByRole('button', { name: 'Revoke fixture · rows' }) !== null, 'the live controls');
+    act(() => m.state.document.setPreviewing(true));
+    expect(within(dialog).queryByRole('group', { name: 'Live query' })).toBeNull();
+    expect(within(dialog).queryAllByRole('button', { name: /Allow|Revoke|Refresh|Start/ })).toHaveLength(0);
+    expect(within(dialog).getByText(/Live sales · fixture · rows · updated/)).toBeTruthy(); // the captured label stays
+    act(() => m.state.document.setPreviewing(false));
+    expect(within(dialog).getByRole('button', { name: 'Revoke fixture · rows' })).toBeTruthy();
+  });
 });

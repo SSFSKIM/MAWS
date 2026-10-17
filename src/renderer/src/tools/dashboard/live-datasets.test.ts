@@ -423,6 +423,23 @@ describe('a dashboard tab’s live datasets: the owner’s gestures (E3 M3)', ()
     expect(w.live.snapshot().queries.get('sales')?.pause).toBe('mayWrite');
   });
 
+  it('a not-read-only refusal lasts until the query’s source changes (E3 M3 fix)', async () => {
+    const w = world({ grants: [] });
+    setDataset(w.doc, 'sales', query());
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    w.host.grantConnectorTool.mockResolvedValueOnce({ ok: false, state: 'invalid', reason: 'notReadOnly' });
+    await w.live.grant('sales');
+    expect(w.live.snapshot().queries.get('sales')?.pause).toBe('mayWrite');
+    setDataset(w.doc, 'sales', query({ schedule: 60 })); // a policy change alone keeps it
+    await settle();
+    expect(w.live.snapshot().queries.get('sales')?.pause).toBe('mayWrite');
+    setDataset(w.doc, 'sales', query({ tool: 'rows-read' }));
+    await settle();
+    expect(w.live.snapshot().queries.get('sales')?.pause).toBeNull();
+  });
+
   it('revokes through H at once and reads not allowed after, the descriptor untouched', async () => {
     const w = world();
     setDataset(w.doc, 'sales', query({ schedule: 60 }, { ref: 'assets/query-1.json', at: AT }));
@@ -523,5 +540,125 @@ describe('a dashboard tab’s live datasets: the stale label’s clock (E3 M3)',
     expect(w.surface.callTool).not.toHaveBeenCalled();
     expect(w.startSession).not.toHaveBeenCalled();
     stop();
+  });
+});
+
+// E3 M3 fix (Decision Log 11, 12): at the watch cap a hidden dashboard's watch may yield its slot to a visible request.
+// Shown again, the dashboard asks each watch's handle (`refreshWatch`) once it is due (at once if it is, else at its due
+// time while shown); false means the handle is gone, so the watch is unwatched and registered again, once. A handle that
+// answers true (kept, or its refresh running) is never registered twice; a query paused at the cap tries again.
+describe('a dashboard tab’s live datasets: a watch that yielded its slot (E3 M3 fix)', () => {
+  async function shownThenHidden(heardAt: number) {
+    const w = world();
+    setDataset(w.doc, 'sales', query({ schedule: 60 }));
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    w.setClock(heardAt);
+    w.listeners.get('w1')!(DATASET('sales'));
+    w.live.setShown(false);
+    return w;
+  }
+
+  it('shown after its interval, finds the evicted handle and registers it again once', async () => {
+    const w = await shownThenHidden(AT);
+    w.setClock(AT + 120_000);
+    w.surface.refreshWatch.mockResolvedValueOnce(false);
+    w.live.setShown(true);
+    await settle();
+    expect(w.surface.refreshWatch).toHaveBeenCalledWith('w1');
+    expect(w.log.filter((line) => /^(unwatch|watch)/.test(line)).slice(-2)).toEqual(['unwatch w1', `watch w2 rows {"region":"north"} 60000 {"dataset":{"id":"sales"}}`]);
+    w.live.setShown(false);
+    w.live.setShown(true);
+    await settle();
+    expect(w.surface.watchTool).toHaveBeenCalledTimes(2);
+  });
+
+  it('a handle that answers true (kept or running) is not registered again', async () => {
+    const w = await shownThenHidden(AT);
+    w.setClock(AT + 120_000);
+    w.live.setShown(true);
+    await settle();
+    expect(w.surface.refreshWatch).toHaveBeenCalledTimes(1);
+    expect(w.surface.watchTool).toHaveBeenCalledTimes(1);
+    expect(w.surface.unwatchTool).not.toHaveBeenCalled();
+  });
+
+  it('shown before it is due, asks at its due time while shown, never while hidden', async () => {
+    const w = await shownThenHidden(AT);
+    w.setClock(AT + 10_000);
+    w.live.setShown(true);
+    await settle();
+    expect(w.surface.refreshWatch).not.toHaveBeenCalled();
+    w.live.setShown(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(w.surface.refreshWatch).not.toHaveBeenCalled();
+    w.setClock(AT + 70_000);
+    w.surface.refreshWatch.mockResolvedValueOnce(false);
+    w.live.setShown(true);
+    await settle();
+    expect(w.surface.refreshWatch).toHaveBeenCalledTimes(1);
+    expect(w.surface.watchTool).toHaveBeenCalledTimes(2);
+
+    const v = await shownThenHidden(AT);
+    v.setClock(AT + 10_000);
+    v.live.setShown(true);
+    await vi.advanceTimersByTimeAsync(49_999);
+    expect(v.surface.refreshWatch).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(v.surface.refreshWatch).toHaveBeenCalledWith('w1');
+  });
+
+  it('the owner’s Refresh of an evicted handle registers it again', async () => {
+    const w = world();
+    setDataset(w.doc, 'sales', query({ schedule: 60 }));
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    w.surface.refreshWatch.mockResolvedValueOnce(false);
+    await w.live.refresh('sales');
+    await settle();
+    expect(w.log.filter((line) => /^(unwatch|watch)/.test(line)).slice(-2)).toEqual(['unwatch w1', `watch w2 rows {"region":"north"} 60000 {"dataset":{"id":"sales"}}`]);
+  });
+
+  it('a query paused at the cap tries its watch again when shown again', async () => {
+    const w = world();
+    setDataset(w.doc, 'sales', query({ schedule: 60 }));
+    w.live.follow(w.doc);
+    const limited = deferred<ConnectorWatchStart>();
+    w.watchGate.next = limited;
+    w.live.setShown(true);
+    await settle();
+    limited.resolve({ ok: false, state: 'invalid', reason: 'watchLimit' });
+    await settle();
+    w.live.setShown(false);
+    w.live.setShown(true);
+    await settle();
+    expect(w.surface.watchTool).toHaveBeenCalledTimes(2);
+    expect(w.live.snapshot().queries.get('sales')?.pause).toBeNull();
+  });
+});
+
+// E3 M3 fix: a stale boundary past the platform's longest timer (staleAfter of 30 days) is reached by re-arming capped
+// delays, telling the views only once it has passed; nothing is called.
+describe('a dashboard tab’s live datasets: a long stale threshold (E3 M3 fix)', () => {
+  it('re-arms toward a boundary beyond the longest timer and tells the views only at it', async () => {
+    const w = world();
+    const days30 = 30 * 86_400;
+    setDataset(w.doc, 'sales', query({ staleAfter: days30 }, { ref: 'assets/query-1.json', at: AT }));
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    const told = vi.fn();
+    w.live.subscribe(told);
+    const MAX = 2 ** 31 - 1;
+    w.setClock(AT + MAX);
+    await vi.advanceTimersByTimeAsync(MAX);
+    expect(told).not.toHaveBeenCalled(); // the capped timer fired early and re-armed
+    w.setClock(AT + days30 * 1000);
+    await vi.advanceTimersByTimeAsync(days30 * 1000 - MAX);
+    expect(told).toHaveBeenCalledTimes(1);
+    expect(w.surface.callTool).not.toHaveBeenCalled();
+    expect(w.startSession).not.toHaveBeenCalled();
   });
 });

@@ -15,7 +15,8 @@ import { setDataset, type DatasetDescriptor } from '../datasets';
 import { SnapshotReader } from '../snapshots';
 import { DATASET_STATES, utcTime } from '../states';
 import { createChartRenderer } from './chart-view';
-import { queryIdentity, type LiveDatasets, type LiveQueryStatus, type LiveSnapshot } from './live';
+import { queryIdentity } from '../query';
+import { type LiveDatasets, type LiveQueryStatus, type LiveSnapshot } from './live';
 import { SourceSheet } from './SourceSheet';
 import { SourceSheetState } from './sheet';
 
@@ -227,5 +228,58 @@ describe('the source sheet’s live query (E3 M3)', () => {
     act(() => m.sheet.open([{ id: 'file', descriptor: file }]));
     await settle();
     expect(within(screen.getByRole('dialog')).queryByRole('group', { name: 'Live query' })).toBeNull();
+  });
+});
+
+// E3 M3 fix (Decision Log 12): the sheet says the concrete refusal, not a generic "allow it", and does not offer the
+// gesture that was just refused; reopening offers it once more. A history preview or suggestion review that begins while
+// the sheet is open takes its live controls away, its captured rows and hold kept, and returns them when it ends.
+describe('the source sheet’s live query after a refusal (E3 M3 fix)', () => {
+  it('a grant refused as not read-only says so, takes Allow and Refresh away, and offers Allow again on reopening', async () => {
+    const live = new FakeLive({ permission: 'none' });
+    const m = mountSheet(live);
+    act(() => m.sheet.open([{ id: 'sales', descriptor: fetched() }]));
+    await settle();
+    fireEvent.click(within(block()).getByRole('button', { name: 'Allow fixture · rows to read' }));
+    act(() => live.set({}, { permission: 'none', pause: 'mayWrite' }));
+    expect(within(block()).getByText('This tool may change data, so it cannot refresh a dataset.')).toBeTruthy();
+    expect(within(block()).queryByText('Allow it to read before this dashboard can refresh it.')).toBeNull();
+    expect(within(block()).queryByRole('button', { name: /^Allow/ })).toBeNull();
+    expect(within(block()).getByRole('button', { name: 'Refresh Live sales' }).hasAttribute('disabled')).toBe(true);
+    act(() => m.sheet.open([{ id: 'sales', descriptor: fetched() }])); // the owner opens it again: one more try
+    await settle();
+    expect(within(block()).getByText('This tool may change data, so it cannot refresh a dataset.')).toBeTruthy();
+    fireEvent.click(within(block()).getByRole('button', { name: 'Allow fixture · rows to read' }));
+    expect(live.grant).toHaveBeenCalledTimes(2);
+    act(() => live.set({}, { permission: 'none', pause: 'mayWrite' })); // refused again
+    expect(within(block()).queryByRole('button', { name: /^Allow/ })).toBeNull();
+  });
+
+  it('a refresh that failed or the watch limit is said as itself, even with no read grant', async () => {
+    const live = new FakeLive({ permission: 'none', pause: 'failed' });
+    const m = mountSheet(live);
+    act(() => m.sheet.open([{ id: 'sales', descriptor: fetched() }]));
+    await settle();
+    expect(within(block()).getByText('The last refresh did not reach the dashboard.')).toBeTruthy();
+    act(() => live.set({}, { permission: 'none', pause: 'watchLimit' }));
+    expect(within(block()).getByText(/Too many live tools are open in MAWS/)).toBeTruthy();
+  });
+
+  it('a history preview or suggestion review begun while the sheet is open takes its controls away until it ends', async () => {
+    const live = new FakeLive();
+    const m = mountSheet(live);
+    const lease = { ready: Promise.resolve(), invalidated: new Promise<void>(() => {}), release: vi.fn() };
+    act(() => m.sheet.open([{ id: 'sales', descriptor: fetched() }], 'sales', lease));
+    await settle();
+    expect(within(block()).getByRole('button', { name: 'Revoke fixture · rows' })).toBeTruthy();
+    act(() => m.sheet.setPreviewing(true));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByRole('group', { name: 'Live query' })).toBeNull();
+    expect(within(dialog).queryAllByRole('button', { name: /Allow|Revoke|Refresh|Start/ })).toHaveLength(0);
+    expect(within(dialog).getAllByRole('row')).toHaveLength(2); // the captured rows stay, read once, still held
+    expect(lease.release).not.toHaveBeenCalled();
+    act(() => m.sheet.setPreviewing(false));
+    expect(within(block()).getByRole('button', { name: 'Revoke fixture · rows' })).toBeTruthy();
+    expect(m.readDataset).toHaveBeenCalledTimes(1);
   });
 });

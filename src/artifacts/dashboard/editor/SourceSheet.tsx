@@ -85,7 +85,7 @@ export function SourceSheet({ artifactId, sheet, reader, host, actorName, live, 
         </label>
       )}
       {shown ? (
-        <DatasetDetail key={`${state.opened}:${state.capture}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} hold={state.hold} reader={reader} host={host} actorName={actorName} live={state.preview ? undefined : live} onReopen={onReopen} />
+        <DatasetDetail key={`${state.opened}:${state.capture}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} hold={state.hold} reader={reader} host={host} actorName={actorName} live={state.preview || state.previewing ? undefined : live /* E3 M3 fix: no live controls while a preview runs */} onReopen={onReopen} />
       ) : (
         <p className="dash-sheet-empty">No data is bound to this dashboard yet. An agent binds a file with artifact_dataset.</p>
       )}

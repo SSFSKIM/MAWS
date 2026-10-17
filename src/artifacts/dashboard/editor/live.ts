@@ -3,7 +3,6 @@
 // watches, the grants and the owner's Start); the editor reads it through this portable interface, so the chart view and
 // the sheet stay free of window.maws. A query's live status is transient presentation only: the descriptor in the doc
 // stays the data's authority, and nothing here writes it.
-import type { QuerySource } from '../datasets';
 import { DATASET_STATES } from '../states';
 
 /** Why a live query's refreshes are paused, as the bridge last answered it (a closed list, never a server's words). */
@@ -14,7 +13,7 @@ export type LivePermission = 'unknown' | 'read' | 'none';
 
 /** One query dataset of the live document, as the tab follows it. */
 export interface LiveQueryStatus {
-  identity: string; // `queryIdentity` of the live source
+  identity: string; // `queryIdentity` (../query.ts) of the live source
   server: string;
   tool: string;
   schedule?: number;
@@ -50,27 +49,14 @@ export interface LiveDatasets {
   openSession(appSessionId: string): void;
 }
 
-// JSON with its object keys sorted, so two argument objects are one query whatever order their keys came in (the
-// host's own rule, engine-host/dashboards/refresh.ts, which the editor cannot import).
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .sort()
-      .filter((key) => record[key] !== undefined)
-      .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value) ?? 'null';
-}
+// E3 M3 fix: a refusal that says what is wrong, which a missing grant does not cover
+const CONCRETE: readonly LivePause[] = ['mayWrite', 'failed', 'watchLimit'];
 
-/** A query's identity: its server, tool and arguments, never its schedule, staleness or the dataset's metadata. */
-export const queryIdentity = (source: Pick<QuerySource, 'server' | 'tool' | 'args'>): string => canonical([source.server, source.tool, source.args]);
-
-/** The pause a view says: no read grant first, else what the bridge last answered. */
+/** The pause a view says: a concrete refusal first (the tool may write, a failed refresh, the watch limit), then no read
+ * grant, else what the bridge last answered. */
 export function livePauseOf(status: LiveQueryStatus | undefined): LivePause | null {
   if (!status) return null;
+  if (status.pause !== null && CONCRETE.includes(status.pause)) return status.pause;
   if (status.permission === 'none') return 'notAllowed';
   return status.pause;
 }

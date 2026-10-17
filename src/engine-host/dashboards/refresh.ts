@@ -24,6 +24,7 @@ import { readDataset, setDataset, type DatasetDescriptor, type QuerySource } fro
 import { legacyDashboardFiles } from '@artifacts/dashboard/legacy';
 import { DatasetError, parseDataset, rowKeyProblem, type ParsedDataset } from '@artifacts/dashboard/parse';
 import { DATASET_STATES } from '@artifacts/dashboard/states';
+import { canonicalQueryValue, queryIdentity } from '@artifacts/dashboard/query'; // E3 M3 fix
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactDatasetResult } from '@shared/maws/dashboard-tools';
 import { ArtifactStoreError } from '../documents/errors';
@@ -89,25 +90,12 @@ class Discard extends Error {
   }
 }
 
-// JSON with its object keys sorted: two argument objects are the same query whatever order their keys came in.
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .sort()
-      .filter((key) => record[key] !== undefined)
-      .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value) ?? 'null';
-}
-
-/** Whether two JSON values are the same, whatever order their objects' keys came in. */
-export const sameJson = (a: unknown, b: unknown): boolean => canonical(a) === canonical(b);
+/** Whether two JSON values are the same, whatever order their objects' keys came in (E3 M3 fix: the shared rule). */
+export const sameJson = (a: unknown, b: unknown): boolean => canonicalQueryValue(a) === canonicalQueryValue(b);
 /** Whether two queries are one: the same server, tool and arguments (their keys in any order). Its schedule, staleness
- * and the dataset's metadata are no part of a query's identity (the architect's M2 ruling). */
-export const sameQueryIdentity = (a: Pick<QuerySource, 'server' | 'tool' | 'args'>, b: Pick<QuerySource, 'server' | 'tool' | 'args'>): boolean => a.server === b.server && a.tool === b.tool && sameJson(a.args, b.args);
+ * and the dataset's metadata are no part of a query's identity (the architect's M2 ruling); E3 M3 fix: the identity the
+ * editor's live controls read too. */
+export const sameQueryIdentity = (a: Pick<QuerySource, 'server' | 'tool' | 'args'>, b: Pick<QuerySource, 'server' | 'tool' | 'args'>): boolean => queryIdentity(a) === queryIdentity(b);
 const sameQuery = (source: QuerySource, call: Pick<RefreshStart, 'server' | 'tool' | 'arguments'>) => sameQueryIdentity(source, { server: call.server, tool: call.tool, args: call.arguments });
 
 export function datasetRefresher(store: ArtifactStore, options: { now?: () => number; log?: (line: string) => void } = {}): { admit(start: RefreshStart, scope: RefreshScope): Promise<RefreshAdmission> } {

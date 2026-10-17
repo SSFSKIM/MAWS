@@ -30,9 +30,11 @@ export interface SourceSheetSnapshot {
   capture: number;
   /** E3 M3: opened over a history preview: what it shows is a retained version's, with no live controls. */
   preview: boolean;
+  /** E3 M3 fix: a history preview or suggestion review runs now (the editor is read-only): no live controls meanwhile. */
+  previewing: boolean;
 }
 
-const CLOSED: SourceSheetSnapshot = { open: false, datasets: [], selected: null, opened: 0, hold: 'held', capture: 0, preview: false };
+const CLOSED: SourceSheetSnapshot = { open: false, datasets: [], selected: null, opened: 0, hold: 'held', capture: 0, preview: false, previewing: false };
 
 const copiesOf = (datasets: readonly SheetDataset[]): SheetDataset[] => datasets.map(({ id, descriptor, view }) => ({ id, descriptor: structuredClone(descriptor), ...(view && { view: structuredClone(view) }) }));
 
@@ -40,6 +42,7 @@ export class SourceSheetState {
   private current = CLOSED;
   private readonly listeners = new Set<() => void>();
   private lease: SnapshotLease | null = null; // E3: the hold over the captured snapshots, until the sheet closes or reopens
+  private previewingNow = false; // E3 M3 fix
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -55,7 +58,7 @@ export class SourceSheetState {
     const copies = copiesOf(datasets);
     const shown = copies.find((dataset) => dataset.id === selected)?.id ?? copies[0]?.id ?? null;
     const opened = this.current.opened + 1;
-    this.take(hold ?? null, { open: true, datasets: copies, selected: shown, opened, hold: hold ? 'pending' : 'held', capture: 0, preview }, recapture);
+    this.take(hold ?? null, { open: true, datasets: copies, selected: shown, opened, hold: hold ? 'pending' : 'held', capture: 0, preview, previewing: this.previewingNow }, recapture);
   }
   select(id: string): void {
     if (this.current.datasets.some((dataset) => dataset.id === id)) this.set({ ...this.current, selected: id });
@@ -63,7 +66,13 @@ export class SourceSheetState {
   close(): void {
     this.lease?.release(); // E3
     this.lease = null;
-    if (this.current.open) this.set({ ...CLOSED, opened: this.current.opened });
+    if (this.current.open) this.set({ ...CLOSED, opened: this.current.opened, previewing: this.previewingNow });
+  }
+
+  /** E3 M3 fix: whether a history preview or suggestion review runs now; the open sheet keeps its capture and hold. */
+  setPreviewing(previewing: boolean): void {
+    this.previewingNow = previewing;
+    if (this.current.previewing !== previewing) this.set({ ...this.current, previewing });
   }
 
   // E3: shows `next` on `hold`, letting the earlier lease go, and follows the new one's settling and loss

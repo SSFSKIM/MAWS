@@ -74,6 +74,7 @@ export class DashboardTabState {
     const { handle, previewing } = this.document.snapshot();
     if (handle && !this.disposed) this.live.follow(handle.doc);
     this.live.setShown(this.bodyShown && !previewing);
+    this.sheet.setPreviewing(previewing); // E3 M3 fix: an open sheet's live controls go while a preview runs
     const state = this.document.snapshot().document;
     const now = state?.phase === 'live' && state.synced;
     if (now && !this.synced) {

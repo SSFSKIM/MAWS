@@ -43,7 +43,11 @@
 //   host's publication; at its end the work is aborted (`paused: unavailable`) and may no longer publish. E3 M2
 //   residual (the architect's terminal-ownership ruling): an aborted dataset call is not answered "nothing published"
 //   while its commit may land. Once dispatched, its route settles it through the host's cancel: the abort's refusal
-//   when the cancel won, else the publication's durable end, which stands as the outcome (`settledBy`).
+//   when the cancel won, else the publication's durable end, which stands as the outcome (`settledBy`). E3 M3 fix (the
+//   architect's watch priority ruling): at the 64-watch cap a visible surface's request ends the oldest dormant dataset
+//   watch (hidden, nothing running), never one of H's generic watches or a visible one; its dashboard finds the handle
+//   gone (`refreshWatch` false) when shown and registers it again. A dataset watch whose refresh runs answers
+//   `refreshWatch` true, so a running handle never reads as an evicted one; H's generic answers are unchanged.
 import { randomUUID } from 'node:crypto';
 import * as z from 'zod';
 import {
@@ -253,7 +257,7 @@ export class ConnectorBroker {
     if (sink === false || sink?.baseRevision !== undefined) return invalid('request'); // E3
     const tool = { server: parsed.data.server, tool: parsed.data.tool };
     if (!lease.declared.has(connectorToolKey(tool))) return invalid('undeclared');
-    if (this.watches.size >= CONNECTOR_WATCH_LIMIT) return invalid('watchLimit');
+    if (this.watches.size >= CONNECTOR_WATCH_LIMIT && !(this.visible(lease) && this.yieldDormantDataset())) return invalid('watchLimit'); // E3 M3 fix
     const watch: Watch = { id: randomUUID(), lease, tool, key: workKey(lease.artifactId, tool), args, intervalMs: clampWatchInterval(parsed.data.intervalMs), listener, ...(sink && { dataset: sink }) /* E3 */, waitingForGrant: false, waitingSince: 0 };
     this.watches.set(watch.id, watch);
     lease.watches.add(watch);
@@ -278,6 +282,8 @@ export class ConnectorBroker {
       void this.recheck(watch);
       return true;
     }
+    // E3 M3 fix: a dataset watch's refresh in flight is the one asked, so its handle answers true (false is an evicted one)
+    if (watch?.dataset && watch.running && this.visible(watch.lease)) return true;
     if (!watch || !this.visible(watch.lease) || watch.waitingForGrant || watch.running) return false;
     clearTimeout(watch.timer);
     void this.refresh(watch);
@@ -588,6 +594,18 @@ export class ConnectorBroker {
     if (this.stopped || !this.watches.has(watch.id) || !watch.waitingForGrant || this.revoking.has(key)) return;
     if ((this.revocations.get(key) ?? 0) !== revocations || this.generation(key) !== generation) return;
     if (held.some((grant) => grant.server === tool.server && grant.tool === tool.tool && grant.mode === 'read')) this.granted(artifactId, tool);
+  }
+
+  // E3 M3 fix (the architect's watch priority ruling): at the cap, the oldest dormant E3 dataset watch (its surface hidden,
+  // nothing running) ends, so a visible request is served; H's generic watches and visible ones never yield. Its owner
+  // finds it gone (`refreshWatch` false) when shown and registers it again. True when one ended.
+  private yieldDormantDataset(): boolean {
+    for (const watch of this.watches.values()) {
+      if (!watch.dataset || watch.running || this.visible(watch.lease)) continue;
+      this.end(watch);
+      return true;
+    }
+    return false;
   }
 
   // The watch waits, timerless, for a grant after `generation`.

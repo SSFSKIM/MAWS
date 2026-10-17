@@ -4,11 +4,14 @@
 // read-only), Revoke, Refresh (while the dashboard is on screen) and, paused for want of a session, Start, with Open
 // session for the session a card or refusal names (H's connector sheet's rules and words). It acts on the live query
 // only while it is the one the sheet captured; a newer fetch or a replaced query asks for an explicit reopening, so the
-// captured rows and time are never changed underneath.
-import { useSyncExternalStore } from 'react';
+// captured rows and time are never changed underneath. E3 M3 fix: a concrete refusal is said as itself, and a tool
+// refused as one that may change data is not offered Allow or Refresh again in this opening (reopening tries once more;
+// a change of the query's source clears the refusal in the tab).
+import { useState, useSyncExternalStore } from 'react';
 import type { QuerySource } from '../datasets';
 import { utcTime } from '../states';
-import { LIVE_COPY as C, queryIdentity, scheduleWords, type LiveDatasets, type LivePause, type LiveStart } from './live';
+import { queryIdentity } from '../query'; // E3 M3 fix: the shared identity
+import { LIVE_COPY as C, scheduleWords, type LiveDatasets, type LivePause, type LiveStart } from './live';
 
 export interface LiveQueryProps {
   id: string;
@@ -23,6 +26,9 @@ const startWords = (start: LiveStart): string => (start.phase === 'asking' ? C.a
 export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProps) {
   const snapshot = useSyncExternalStore(live.subscribe, live.snapshot);
   const status = snapshot.queries.get(id);
+  // E3 M3 fix: a not-read-only refusal standing when this opening began is tried once more; one met in it stands
+  const [refusedBefore] = useState(() => status?.pause === 'mayWrite');
+  const [tried, setTried] = useState(false);
   const reopen = onReopen && (() => onReopen(id));
   if (!status || status.identity !== queryIdentity(captured)) {
     return (
@@ -41,9 +47,11 @@ export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProp
   const name = `${status.server} · ${status.tool}`;
   const changed = status.pause === 'allowChanged';
   const permission = changed ? C.changed : status.permission === 'read' ? C.allowedRead : status.permission === 'none' ? C.notAllowed : C.checking;
-  // why it pauses: no session first (a grant refused for want of one too), then how to allow it; the permission line
-  // says a changed or lost grant itself
-  const detail: LivePause | null = status.pause === 'noRoute' ? 'noRoute' : status.permission === 'none' ? 'notAllowed' : changed || status.pause === 'notAllowed' ? null : status.pause;
+  // why it pauses: no session first (a grant refused for want of one too), then a concrete refusal, then how to allow it;
+  // the permission line says a changed or lost grant itself
+  const concrete = status.pause === 'noRoute' || status.pause === 'mayWrite' || status.pause === 'failed' || status.pause === 'watchLimit';
+  const detail: LivePause | null = concrete ? status.pause : status.permission === 'none' ? 'notAllowed' : null;
+  const mayWrite = status.pause === 'mayWrite' && (!refusedBefore || tried); // refused in this opening
   const busy = status.busy !== null;
   const { start } = snapshot;
   const starting = start.phase === 'asking' || start.phase === 'starting';
@@ -72,8 +80,17 @@ export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProp
         </p>
       )}
       <div className="dash-sheet-live-actions">
-        {(status.permission !== 'read' || changed) && (
-          <button type="button" className="doc-tool" disabled={busy || status.permission === 'unknown'} aria-label={changed ? C.allowAgainLabel(name) : C.allowLabel(name)} onClick={() => void live.grant(id)}>
+        {(status.permission !== 'read' || changed) && !mayWrite && (
+          <button
+            type="button"
+            className="doc-tool"
+            disabled={busy || status.permission === 'unknown'}
+            aria-label={changed ? C.allowAgainLabel(name) : C.allowLabel(name)}
+            onClick={() => {
+              setTried(true);
+              void live.grant(id);
+            }}
+          >
             {changed ? C.allowAgain : C.allow}
           </button>
         )}
@@ -82,7 +99,7 @@ export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProp
             {C.revoke}
           </button>
         )}
-        <button type="button" className="doc-tool" disabled={busy || !snapshot.shown || status.permission === 'none' || changed} aria-label={C.refreshLabel(title)} onClick={() => void live.refresh(id)}>
+        <button type="button" className="doc-tool" disabled={busy || !snapshot.shown || status.permission === 'none' || changed || mayWrite} aria-label={C.refreshLabel(title)} onClick={() => void live.refresh(id)}>
           {C.refresh}
         </button>
         {status.pause === 'noRoute' && (
