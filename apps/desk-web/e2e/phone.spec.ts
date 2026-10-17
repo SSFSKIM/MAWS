@@ -7,7 +7,7 @@
 // cases need Chromium's DevTools protocol to deliver a push, so they run there alone. Installing to an iPhone's home
 // screen, Access, the passkey, and a real push service are the owner's walk (the plan's M4).
 import { inputSha256, seal, verifyRpc, importOrgKey, type PushNotice, type Raised } from 'desk-hub/protocol';
-import type { BrowserContext, Page } from '@playwright/test';
+import type { BrowserContext, Locator, Page } from '@playwright/test';
 import { DOUBLE_MEMBER, type HubDouble } from '../test/double/hub-double';
 import { VECTOR_KEY } from '../test/vectors';
 import { expect, seedKey, test } from './fixtures';
@@ -120,8 +120,8 @@ test('@layout request cards fit the phone: a question answerable in place, a per
 });
 
 test('@layout a channel opens at its tail and follows it; a reader scrolled back keeps their row as a message arrives below', async ({ browserName, page, hub }) => {
-  // Holding a reader in place against a row arriving below them is the engine's scroll anchoring; Safari has it only
-  // from 27.0 (iOS 26 and older have none), so on WebKit the row may move by the new row's height.
+  // Holding a reader in place against a row arriving below them is the engine's scroll anchoring, where it has any; an
+  // engine with none (Safari before 27) takes the channel's fallback, which the next case proves.
   await stageProject(hub);
   const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rw${n}#0` });
   for (let n = 1; n <= 30; n++) await message(n);
@@ -145,6 +145,76 @@ test('@layout a channel opens at its tail and follows it; a reader scrolled back
   test.info().annotations.push({ type: `row moved (px), ${browserName}`, description: moved.toFixed(2) });
   console.log(`row moved ${moved.toFixed(2)} px in ${browserName}`);
   expect(Math.abs(moved)).toBeLessThanOrEqual(1);
+});
+
+test('@layout on an engine without scroll anchoring (Safari before 27), a reader scrolled back keeps their row as a message arrives below and as a row below or above them grows or shrinks; at the tail the channel follows', async ({ browserName, page, hub }) => {
+  // The engine's own anchoring is turned off in the channel and `overflow-anchor` reported unsupported, so the channel
+  // takes its fallback and nothing else can hold the reader: the owner's phone on iOS 26 or older.
+  await page.addInitScript(() => {
+    const supports = CSS.supports.bind(CSS) as (...args: string[]) => boolean;
+    (window as { nativeAnchoring?: boolean }).nativeAnchoring = supports('overflow-anchor', 'auto');
+    Object.defineProperty(CSS, 'supports', { value: (...args: string[]) => !args.join(' ').includes('overflow-anchor') && supports(...args) });
+    const off = document.createElement('style');
+    off.textContent = '[data-testid="channel-events"], [data-testid="channel-events"] * { overflow-anchor: none !important; }';
+    document.addEventListener('DOMContentLoaded', () => document.head?.append(off));
+  });
+  await stageProject(hub);
+  const say = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'say', from: 'maws-45', to: [{ session: S.works, alias: 'maws-fe' }], text: `say ${n}` });
+  const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rf${n}#0` });
+  for (let n = 1; n <= 8; n++) await say(n); // a run of agent traffic far above the reader
+  for (let n = 1; n <= 30; n++) await message(n);
+  for (let n = 9; n <= 16; n++) await say(n); // and one just below them
+  await message(31);
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}`);
+  await page.getByRole('navigation', { name: 'Channels' }).getByRole('button', { name: /MAWS/ }).click();
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  const events = center(page).getByTestId('channel-events');
+  await expect(line(31)).toBeInViewport();
+  const native = await page.evaluate(() => (window as { nativeAnchoring?: boolean }).nativeAnchoring);
+  expect(await page.evaluate(() => CSS.supports('overflow-anchor', 'auto'))).toBe(false);
+  if (native) expect(await events.evaluate((el) => getComputedStyle(el).overflowAnchor)).toBe('none');
+
+  // At the tail the scroll origin follows, with nothing to hold.
+  await message(32);
+  await expect(line(32)).toBeInViewport();
+  expect(await events.evaluate((el) => el.scrollTop)).toBeCloseTo(0, 0);
+
+  await events.evaluate((el) => (el.scrollTop = -150));
+  await page.waitForTimeout(300);
+  await expect(line(28)).toBeInViewport();
+  const runs = center(page).getByTestId('agent-run');
+  /** Unfolds or folds a run without scrolling to it, as a row changing on its own. */
+  const toggle = async (run: Locator, open: boolean) => {
+    await run.getByRole('button').evaluate((b) => (b as HTMLButtonElement).click());
+    await expect(run.getByTestId('agent-run-messages')).toHaveCount(open ? 1 : 0);
+  };
+  const moves: string[] = [];
+  /** How far the reader's row moved through `change`; under 1 px is whole-pixel rounding. */
+  const holds = async (what: string, row: Locator, change: () => Promise<unknown>) => {
+    const before = (await row.boundingBox())!.y;
+    await change();
+    await page.waitForTimeout(300);
+    const moved = (await row.boundingBox())!.y - before;
+    moves.push(`${what}: ${moved.toFixed(2)}`);
+    expect.soft(Math.abs(moved), `${what}, moved ${moved.toFixed(2)} px`).toBeLessThanOrEqual(1);
+  };
+  await holds('a message arriving below', line(28), async () => {
+    await message(33);
+    await expect(line(33)).toBeAttached();
+  });
+  await holds('a row below growing', line(28), () => toggle(runs.nth(1), true));
+  await holds('a row above growing', line(28), () => toggle(runs.first(), true));
+  await holds('a row below shrinking', line(28), () => toggle(runs.nth(1), false));
+  // At the oldest edge a list that shrinks has the browser clamp the reader, and the edge is their place.
+  await toggle(runs.nth(1), true);
+  await events.evaluate((el) => el.scrollBy(0, -1e7));
+  await page.waitForTimeout(300);
+  const oldest = center(page).getByText('the migration is merged', { exact: true });
+  await expect(oldest).toBeInViewport();
+  await holds('a row below shrinking, at the oldest edge', oldest, () => toggle(runs.nth(1), false));
+  test.info().annotations.push({ type: `row moved (px), ${browserName}, no anchoring (native: ${native})`, description: moves.join('; ') });
+  console.log(`row moved in ${browserName} without anchoring (native: ${native}): ${moves.join('; ')}`);
 });
 
 type Shown ={ title: string; options: { body?: string; tag?: string; data?: { url?: string }; actions?: unknown[] } };
