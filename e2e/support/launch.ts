@@ -125,6 +125,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();
     const consoleErrors = await collectConsoleErrors(page);
+    await sizeForGroup(app, page); // P3-F1
     await reportForeground(app);
     return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, cleanup };
   } catch (error) {
@@ -146,6 +147,20 @@ export const test = base.extend<{ maws: MawsLaunch; mawsEnv: Record<string, stri
     }
   },
 });
+
+// P3-F1 (docs/doperpowers/ledgers/2026-10-17-P3-F1.md): a group whose fixture needs a bigger first window than the
+// default 1280 × 820 names it in its package script as `MAWS_E2E_WINDOW_SIZE=<width>x<height>` (the test process's
+// environment, so the app runs as it always does): `e2e:document`'s two replicas side by side need 720 px each to keep the
+// document editor's rail beside the page. The window's content is set to that size before the launch returns.
+async function sizeForGroup(app: ElectronApplication, page: Page): Promise<void> {
+  const value = process.env.MAWS_E2E_WINDOW_SIZE;
+  if (!value) return;
+  const size = /^(\d+)x(\d+)$/.exec(value);
+  if (!size) throw new Error(`MAWS_E2E_WINDOW_SIZE is <width>x<height>, not ${value}`);
+  const [width, height] = [Number(size[1]), Number(size[2])];
+  await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(w, h), [width, height] as const);
+  await page.waitForFunction(([w, h]) => window.innerWidth === w && window.innerHeight === h, [width, height] as const);
+}
 
 // Under MAWS_E2E_FOREGROUND=1 (src/main/window-show.ts) the app activates and its window
 // becomes key. Whether macOS granted that is said once per worker in the run's output, so a run on a desktop where

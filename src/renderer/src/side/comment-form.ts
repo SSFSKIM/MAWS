@@ -33,12 +33,13 @@ export interface CommentFormInput {
   // P3-B (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): told as a send sets out; the call it returns is told
   // whether the send went, whether or not the presentation is still there (a document keeps the thread the comment names)
   onSending?: (sending: { text: string; destination: CommentDestination }) => (went: boolean) => void;
+  destination?: CommentDestination; // P3-F1: the one the form starts on (CommentContext's), Side thread when absent
 }
 
-export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending }: CommentFormInput) {
+export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending, destination: initial }: CommentFormInput) { // P3-F1: initial
   const status = useSessions((s) => s.engine.get(parent) ?? null);
   const [text, setText] = useState('');
-  const [destination, setDestination] = useState<CommentDestination>('thread');
+  const [destination, setDestination] = useState<CommentDestination>(initial ?? 'thread'); // P3-F1: initial
   const [screenshot, setScreenshot] = useState<AnchorScreenshot | null>(anchor.screenshot ?? null);
   const [phase, setPhase] = useState<CommentFormPhase>({ kind: 'editing' });
   const ready = status?.process === 'ready';

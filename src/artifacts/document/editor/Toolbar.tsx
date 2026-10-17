@@ -2,6 +2,8 @@
 // redo, the block style, the marks and a link, the lists, quote and code, the Insert menu for every other block kind of
 // the schema, the table's row and column controls while the caret is in a table, a code block's language, Comment and
 // the comments rail (M4), version history (M5), and Find.
+// P3-F1: one row in any width, the tools scrolling in a strip and the comment, history and find controls after it, the
+// menus placed by the toolbar so the strip does not clip them (toolbar-strip.ts).
 // An inserted atom (math, a diagram, a chip, a pending section) is selected with its field focused, so the person types
 // its content next.
 import type { Editor, JSONContent } from '@tiptap/core';
@@ -13,6 +15,7 @@ import { nanoid8 } from '../schema';
 import type { EditorHost } from './host-types';
 import { MentionPicker, type MentionSource } from './MentionPicker';
 import { tableJSON } from './nodes/table';
+import { useToolbarStrip } from './toolbar-strip'; // P3-F1
 
 const BLOCK_STYLES = [
   ['p', 'Normal text'],
@@ -117,6 +120,17 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
   const [menu, setMenu] = useState<'insert' | 'link' | 'mention' | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const imageFile = useRef<HTMLInputElement>(null);
+  // P3-F1: one row, its tools in a scrolling strip and the comment, history and find controls after it (toolbar-strip.ts)
+  const bar = useRef<HTMLDivElement>(null);
+  const strip = useRef<HTMLDivElement>(null);
+  const linkAnchor = useRef<HTMLSpanElement>(null);
+  const insertAnchor = useRef<HTMLSpanElement>(null);
+  useToolbarStrip({ bar, strip, anchor: menu === 'link' ? linkAnchor : menu === null ? null : insertAnchor, menu, tools: `${state.table}:${state.codeBlock}:${uploadError !== null}` });
+  // an upload's error is scrolled to in the strip as it appears
+  const uploadErrorRow = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (uploadError) uploadErrorRow.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [uploadError]);
   const run = () => editor.chain().focus();
   // every change is checked when it is made, not when its control was drawn (the store may have turned read-only since)
   const write = (change: () => unknown) => () => void (writable(editor) && change());
@@ -174,160 +188,163 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
 
   const disabled = !state.editable;
   return (
-    <div role="toolbar" aria-label="Formatting" className="doc-toolbar">
-      <Tool label="Undo" disabled={disabled || !state.canUndo} onClick={write(() => run().undo().run())}>
-        ↶
-      </Tool>
-      <Tool label="Redo" disabled={disabled || !state.canRedo} onClick={write(() => run().redo().run())}>
-        ↷
-      </Tool>
-      <span className="doc-toolbar-separator" />
-      <select className="doc-toolbar-select" aria-label="Block style" disabled={disabled} value={state.block} onChange={(event) => setStyle(event.target.value)}>
-        {BLOCK_STYLES.map(([value, label]) => (
-          <option key={value} value={value}>
-            {label}
-          </option>
-        ))}
-      </select>
-      <span className="doc-toolbar-separator" />
-      <Tool label="Bold" active={state.bold} disabled={disabled} onClick={write(() => run().toggleBold().run())}>
-        <b>B</b>
-      </Tool>
-      <Tool label="Italic" active={state.italic} disabled={disabled} onClick={write(() => run().toggleItalic().run())}>
-        <i>I</i>
-      </Tool>
-      <Tool label="Underline" active={state.underline} disabled={disabled} onClick={write(() => run().toggleUnderline().run())}>
-        <u>U</u>
-      </Tool>
-      <Tool label="Strikethrough" active={state.strike} disabled={disabled} onClick={write(() => run().toggleStrike().run())}>
-        <s>S</s>
-      </Tool>
-      <Tool label="Inline code" active={state.code} disabled={disabled} onClick={write(() => run().toggleCode().run())}>
-        {'</>'}
-      </Tool>
-      <Tool label="Highlight" active={state.highlight} disabled={disabled} onClick={write(() => run().toggleHighlight().run())}>
-        ▍
-      </Tool>
-      <span className="doc-menu-anchor">
-        <Tool label="Link" active={state.link} disabled={disabled} expanded={menu === 'link'} onClick={() => setMenu(menu === 'link' ? null : 'link')}>
-          🔗
+    <div ref={bar} role="toolbar" aria-label="Formatting" className="doc-toolbar doc-format-toolbar">
+      <div ref={strip} className="doc-toolbar-tools">
+        <Tool label="Undo" disabled={disabled || !state.canUndo} onClick={write(() => run().undo().run())}>
+          ↶
         </Tool>
-        {menu === 'link' && (
-          <LinkForm
-            href={state.href}
-            onDone={(href) => {
-              setMenu(null);
-              if (href === null || !writable(editor)) return;
-              if (href) run().extendMarkRange('link').setLink({ href }).run();
-              else run().extendMarkRange('link').unsetLink().run();
-            }}
-          />
-        )}
-      </span>
-      <span className="doc-toolbar-separator" />
-      <Tool label="Bulleted list" active={state.bulletList} disabled={disabled} onClick={write(() => run().toggleBulletList().run())}>
-        •
-      </Tool>
-      <Tool label="Numbered list" active={state.orderedList} disabled={disabled} onClick={write(() => run().toggleOrderedList().run())}>
-        1.
-      </Tool>
-      <Tool label="Checklist" active={state.taskList} disabled={disabled} onClick={write(() => run().toggleTaskList().run())}>
-        ☑
-      </Tool>
-      <Tool label="Quote" active={state.blockquote} disabled={disabled} onClick={write(() => run().toggleBlockquote().run())}>
-        ❝
-      </Tool>
-      <Tool label="Code block" active={state.codeBlock} disabled={disabled} onClick={write(() => run().toggleCodeBlock().run())}>
-        {'{ }'}
-      </Tool>
-      {state.codeBlock && (
-        <select
-          className="doc-toolbar-select"
-          aria-label="Code language"
-          disabled={disabled}
-          value={state.language}
-          onChange={(event) => write(() => run().updateAttributes('codeBlock', { language: event.target.value || null }).run())()}
-        >
-          {(LANGUAGES.includes(state.language) ? LANGUAGES : [...LANGUAGES, state.language]).map((language) => (
-            <option key={language} value={language}>
-              {language || 'Plain text'}
+        <Tool label="Redo" disabled={disabled || !state.canRedo} onClick={write(() => run().redo().run())}>
+          ↷
+        </Tool>
+        <span className="doc-toolbar-separator" />
+        <select className="doc-toolbar-select" aria-label="Block style" disabled={disabled} value={state.block} onChange={(event) => setStyle(event.target.value)}>
+          {BLOCK_STYLES.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
             </option>
           ))}
         </select>
-      )}
-      <span className="doc-toolbar-separator" />
-      <span className="doc-menu-anchor">
-        <Tool label="Insert" disabled={disabled} expanded={menu === 'insert'} onClick={() => setMenu(menu === 'insert' ? null : 'insert')}>
-          Insert ▾
+        <span className="doc-toolbar-separator" />
+        <Tool label="Bold" active={state.bold} disabled={disabled} onClick={write(() => run().toggleBold().run())}>
+          <b>B</b>
         </Tool>
-        {menu === 'insert' && (
-          <div role="menu" className="doc-menu">
-            {inserts.map(([label, insert]) => (
-              <button
-                key={label}
-                type="button"
-                role="menuitem"
-                onMouseDown={keepSelection}
-                onClick={() => {
-                  setMenu(null);
-                  insert();
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-        {menu === 'mention' && mentions && (
-          <MentionPicker
-            source={mentions}
-            onClose={() => {
-              setMenu(null);
-              run().run();
-            }}
-            onPick={({ kind, ref, label }) => {
-              setMenu(null);
-              insertInline(editor, { type: 'mention', attrs: { kind, ref, label } }, false);
-            }}
-          />
-        )}
-      </span>
-      <input ref={imageFile} type="file" accept="image/*" aria-label="Image file" hidden onChange={(event) => void uploadImage(event)} />
-      {uploadError && (
-        <span className="doc-toolbar-error">
-          <span role="alert">{uploadError}</span>
-          <Tool label="Dismiss upload error" onClick={() => setUploadError(null)}>
-            ×
+        <Tool label="Italic" active={state.italic} disabled={disabled} onClick={write(() => run().toggleItalic().run())}>
+          <i>I</i>
+        </Tool>
+        <Tool label="Underline" active={state.underline} disabled={disabled} onClick={write(() => run().toggleUnderline().run())}>
+          <u>U</u>
+        </Tool>
+        <Tool label="Strikethrough" active={state.strike} disabled={disabled} onClick={write(() => run().toggleStrike().run())}>
+          <s>S</s>
+        </Tool>
+        <Tool label="Inline code" active={state.code} disabled={disabled} onClick={write(() => run().toggleCode().run())}>
+          {'</>'}
+        </Tool>
+        <Tool label="Highlight" active={state.highlight} disabled={disabled} onClick={write(() => run().toggleHighlight().run())}>
+          ▍
+        </Tool>
+        <span ref={linkAnchor} className="doc-menu-anchor">
+          <Tool label="Link" active={state.link} disabled={disabled} expanded={menu === 'link'} onClick={() => setMenu(menu === 'link' ? null : 'link')}>
+            🔗
           </Tool>
+          {menu === 'link' && (
+            <LinkForm
+              href={state.href}
+              onDone={(href) => {
+                setMenu(null);
+                if (href === null || !writable(editor)) return;
+                if (href) run().extendMarkRange('link').setLink({ href }).run();
+                else run().extendMarkRange('link').unsetLink().run();
+              }}
+            />
+          )}
         </span>
-      )}
-      {state.table && (
-        <>
-          <span className="doc-toolbar-separator" />
-          {tableControls.map(([label, command]) => (
-            <Tool key={label} label={label} disabled={disabled} onClick={command}>
-              {label}
+        <span className="doc-toolbar-separator" />
+        <Tool label="Bulleted list" active={state.bulletList} disabled={disabled} onClick={write(() => run().toggleBulletList().run())}>
+          •
+        </Tool>
+        <Tool label="Numbered list" active={state.orderedList} disabled={disabled} onClick={write(() => run().toggleOrderedList().run())}>
+          1.
+        </Tool>
+        <Tool label="Checklist" active={state.taskList} disabled={disabled} onClick={write(() => run().toggleTaskList().run())}>
+          ☑
+        </Tool>
+        <Tool label="Quote" active={state.blockquote} disabled={disabled} onClick={write(() => run().toggleBlockquote().run())}>
+          ❝
+        </Tool>
+        <Tool label="Code block" active={state.codeBlock} disabled={disabled} onClick={write(() => run().toggleCodeBlock().run())}>
+          {'{ }'}
+        </Tool>
+        {state.codeBlock && (
+          <select
+            className="doc-toolbar-select"
+            aria-label="Code language"
+            disabled={disabled}
+            value={state.language}
+            onChange={(event) => write(() => run().updateAttributes('codeBlock', { language: event.target.value || null }).run())()}
+          >
+            {(LANGUAGES.includes(state.language) ? LANGUAGES : [...LANGUAGES, state.language]).map((language) => (
+              <option key={language} value={language}>
+                {language || 'Plain text'}
+              </option>
+            ))}
+          </select>
+        )}
+        <span className="doc-toolbar-separator" />
+        <span ref={insertAnchor} className="doc-menu-anchor">
+          <Tool label="Insert" disabled={disabled} expanded={menu === 'insert'} onClick={() => setMenu(menu === 'insert' ? null : 'insert')}>
+            Insert ▾
+          </Tool>
+          {menu === 'insert' && (
+            <div role="menu" className="doc-menu">
+              {inserts.map(([label, insert]) => (
+                <button
+                  key={label}
+                  type="button"
+                  role="menuitem"
+                  onMouseDown={keepSelection}
+                  onClick={() => {
+                    setMenu(null);
+                    insert();
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {menu === 'mention' && mentions && (
+            <MentionPicker
+              source={mentions}
+              onClose={() => {
+                setMenu(null);
+                run().run();
+              }}
+              onPick={({ kind, ref, label }) => {
+                setMenu(null);
+                insertInline(editor, { type: 'mention', attrs: { kind, ref, label } }, false);
+              }}
+            />
+          )}
+        </span>
+        <input ref={imageFile} type="file" accept="image/*" aria-label="Image file" hidden onChange={(event) => void uploadImage(event)} />
+        {uploadError && (
+          <span ref={uploadErrorRow} className="doc-toolbar-error">
+            <span role="alert">{uploadError}</span>
+            <Tool label="Dismiss upload error" onClick={() => setUploadError(null)}>
+              ×
             </Tool>
-          ))}
-        </>
-      )}
-      <span className="doc-toolbar-spacer" />
-      {comments.comment && (
-        <Tool label="Comment" disabled={disabled || !state.selected} onClick={comments.comment}>
-          Comment
+          </span>
+        )}
+        {state.table && (
+          <>
+            <span className="doc-toolbar-separator" />
+            {tableControls.map(([label, command]) => (
+              <Tool key={label} label={label} disabled={disabled} onClick={command}>
+                {label}
+              </Tool>
+            ))}
+          </>
+        )}
+      </div>
+      <div className="doc-toolbar-end">
+        {comments.comment && (
+          <Tool label="Comment" disabled={disabled || !state.selected} onClick={comments.comment}>
+            Comment
+          </Tool>
+        )}
+        <Tool label={`Comments (${comments.openCount} open)`} active={comments.railOpen} onClick={comments.toggleRail}>
+          Comments{comments.openCount > 0 ? ` ${comments.openCount}` : ''}
         </Tool>
-      )}
-      <Tool label={`Comments (${comments.openCount} open)`} active={comments.railOpen} onClick={comments.toggleRail}>
-        Comments{comments.openCount > 0 ? ` ${comments.openCount}` : ''}
-      </Tool>
-      {history && (
-        <Tool label="Version history" active={history.open} onClick={history.toggle}>
-          History
+        {history && (
+          <Tool label="Version history" active={history.open} onClick={history.toggle}>
+            History
+          </Tool>
+        )}
+        <Tool label="Find" onClick={onFind}>
+          Find
         </Tool>
-      )}
-      <Tool label="Find" onClick={onFind}>
-        Find
-      </Tool>
+      </div>
     </div>
   );
 }
