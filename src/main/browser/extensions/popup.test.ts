@@ -6,10 +6,16 @@ import type { EventName, EventPayload } from '@shared/ipc/schema';
 import type { LinkTarget } from '../window-open';
 import type { LoadedAction } from './actions';
 
-vi.mock('electron', () => ({ WebContentsView: class {} }));
+// P3-F1: a view as Electron makes it, with the page's webContents saying what was asked of it
+vi.mock('electron', () => ({
+  WebContentsView: class {
+    readonly webContents = { calls: [] as string[], setWebRTCIPHandlingPolicy(policy: string) { this.calls.push(`policy ${policy}`); } };
+    constructor(readonly options?: unknown) {}
+  },
+}));
 
 const { TabStore } = await import('../tabs');
-const { ExtensionPopups, POPUP_REOPEN_GUARD_MS, popupBounds } = await import('./popup');
+const { ExtensionPopups, POPUP_REOPEN_GUARD_MS, createPopupView, popupBounds } = await import('./popup'); // P3-F1: createPopupView
 
 const A = 'App-A' as AppSessionId;
 const PART = 'persist:maws-chrome-Default';
@@ -157,6 +163,16 @@ function harness({ linkTarget = 'in-app' as LinkTarget, backgroundFailed = false
 // The popup's page laid out at a size; and its load finished (which focuses it).
 const sized = (view: FakePopupView, width = 344, height = 179) => view.webContents.emit('preferred-size-changed', {}, { width, height });
 const loaded = (view: FakePopupView) => view.webContents.emit('did-finish-load');
+
+// P3-F1 (docs/doperpowers/ledgers/2026-10-17-P3-F1.md): main turns WebRtcHideLocalIpsWithMdns off app-wide, so a popup's
+// page, extension script like a tab's, is held to the default public interface for WebRTC, as a tab's is (../view.ts)
+describe('createPopupView (P3-F1)', () => {
+  it('makes the popup in the partition with MAWS\'s preferences, its page held to the default public interface before anything loads', () => {
+    const view = createPopupView(PART) as unknown as { options: unknown; webContents: { calls: string[] } };
+    expect(view.options).toEqual({ webPreferences: { partition: PART, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, enablePreferredSizeMode: true } });
+    expect(view.webContents.calls).toEqual(['policy default_public_interface_only']);
+  });
+});
 
 describe('popupBounds', () => {
   const content = { width: 1000, height: 700 };
