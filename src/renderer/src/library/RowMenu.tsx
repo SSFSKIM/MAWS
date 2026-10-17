@@ -4,7 +4,8 @@
 // and the list shows it once main's index has it; a refusal is toasted, or said in the sheet that asked. Delete asks
 // first; a design system still styling artifacts is refused `designSystemInUse`, answered by a sheet that names them,
 // each opening in a tab. M5b: Export, a submenu of the formats main's exporters serve for the kind and, for a File
-// artifact, "Save a copy…" (export.ts), shown when the kind has either.
+// artifact, "Save a copy…" (export.ts), shown when the kind has either. P3-H (Decision Log 87): below the formats, Send to
+// Google Drive… and Send to Notion…, a confirmation sheet (SendToSheet.tsx) for a kind with a format to send.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { LibraryRow } from '@shared/ipc/schema/library';
@@ -12,8 +13,10 @@ import { ipc } from '../ipc/client';
 import { Sheet, SheetForm } from '../sessions/Sheet';
 import { DANGER, FIELD, PRIMARY, SECONDARY } from '../sessions/ui';
 import { deleteArtifact, duplicateArtifact, moveArtifactToSpace, openArtifactTab, renameArtifact, setArtifactPinned } from './actions';
-import { DIALOG_COPY as D, ROW_COPY as R } from './copy';
+import { DIALOG_COPY as D, ROW_COPY as R, SEND_TO_COPY } from './copy';
 import { exportArtifact, saveArtifactCopy, useExportFormats } from './export';
+import { SEND_TARGETS, type SendTarget } from './send-to';
+import { openSendTo } from './SendToSheet';
 import { VIEWERS_COPY } from '../tools/artifacts/viewers/copy';
 import { closeLibraryDialog, openLibraryDialog, replaceLibraryDialog, toastFailure, type ArtifactRef, type SheetOf } from './dialogs';
 import { MoreIcon } from './icons';
@@ -107,6 +110,16 @@ function ExportItems({ M, row }: { M: Menu; row: LibraryRow }) {
             <M.Item className={MENU_ITEM} onSelect={() => void saveArtifactCopy(row.id)}>
               {VIEWERS_COPY.saveCopy}
             </M.Item>
+          )}
+          {formats.length > 0 && (
+            <>
+              <M.Separator className="my-1 h-px bg-border" />
+              {(Object.keys(SEND_TARGETS) as SendTarget[]).map((target) => (
+                <M.Item key={target} className={MENU_ITEM} onSelect={() => openSendTo(row, target)}>
+                  {SEND_TO_COPY.item(SEND_TARGETS[target].name)}
+                </M.Item>
+              ))}
+            </>
           )}
         </M.SubContent>
       </M.Portal>

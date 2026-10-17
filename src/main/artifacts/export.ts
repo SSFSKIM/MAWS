@@ -23,6 +23,12 @@
 // publication all end at its deadline, after which nothing is written and the answer is the timeout. It is shorter than
 // the host's EXPORT_ANSWER_MS by a margin, so an export the bridge gave up on never later lands. At most
 // EXPORT_CONCURRENCY exports run at once, and one still waiting for a slot after EXPORT_QUEUE_MS is answered busy.
+//
+// P3-H (P3 Decision Log 91, the interface ledger's X31 `ownFile` row; E's Decision Log 33): an export asked for as a
+// file of its own (the library's `ownFile`, Send to's) or of a design names the opaque `exportId` main mints as it is
+// taken, before its snapshot and rendering, in its file's name (`<revision>-<format>-<exportId>.<ext>`, in the directory
+// asked) and answers it: no later export of the same revision and format, whatever its options, can replace the file
+// its caller still holds. Every other export keeps the revision-and-format cache name.
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -63,6 +69,7 @@ export interface ExportRequest {
   fonts?: ArtifactExportFonts; // P3-C (H2-4): a presentation's PPTX faces; omitted, named
   width?: number;
   height?: number;
+  exportId?: string; // P3-H (Decision Log 91): a file of its own, its id in `path`'s name
 }
 
 // What the service gives an exporter (A's side of P3-B's `DocumentExportContext`).
@@ -230,7 +237,7 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
       await rename(temp, path);
       temps.delete(temp);
     }
-    return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }) };
+    return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }), ...(request.exportId !== undefined && { exportId: request.exportId }) /* P3-H */ };
   } catch (error) {
     return { ok: false, error: messageOf(error) };
   } finally {
@@ -278,7 +285,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
       } else {
         const live = await time.within(required('artifacts.state', { artifactId: request.artifactId }));
         state = live.bytes;
-        taken = { ...request, revision: live.revision, path: join(dirname(request.path), artifactExportName(live.revision, request.format)) };
+        taken = { ...request, revision: live.revision, path: join(dirname(request.path), artifactExportName(live.revision, request.format, request.exportId /* P3-H */)) };
       }
     }
     return {
@@ -311,12 +318,15 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
     };
   };
   // A request run in its turn within `time`, the budget its receipt started (a kind and format no exporter serves is
-  // answered at once). Never rejects; ends the budget.
-  const queued = async (request: ExportRequest, time: ExportBudget): Promise<MawsArtifactExportAnswer> => {
-    if (!registry.get(request.kind, request.format)) {
+  // answered at once). Never rejects; ends the budget. P3-H (Decision Log 91): `ownFile`, or a design, takes its own
+  // file here, its id minted before anything is read or rendered.
+  const queued = async (asked: ExportRequest, time: ExportBudget, ownFile = false): Promise<MawsArtifactExportAnswer> => {
+    if (!registry.get(asked.kind, asked.format)) {
       time.end();
-      return { ok: false, unavailable: true, error: unavailableMessage(request.kind, request.format) };
+      return { ok: false, unavailable: true, error: unavailableMessage(asked.kind, asked.format) };
     }
+    const exportId = ownFile || asked.kind === 'design' ? randomUUID() : undefined;
+    const request = exportId === undefined ? asked : { ...asked, exportId, path: join(dirname(asked.path), artifactExportName(asked.revision, asked.format, exportId)) };
     const answered = await slot(async () => {
       let taken: Awaited<ReturnType<typeof snapshot>>;
       try {
@@ -338,7 +348,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   });
 
   return {
-    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height }) {
+    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height, ownFile /* P3-H */ }) {
       const time = new ExportBudget(EXPORT_BUDGET_MS);
       let artifact: CommandOutput<'artifacts.get'>['artifact'];
       try {
@@ -367,9 +377,9 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
       }
       const path = join(root, artifactId, 'exports', artifactExportName(revision, format));
       const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }) };
-      const result = await queued(request, time);
+      const result = await queued(request, time, ownFile === true);
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
-      return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }) };
+      return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }), ...(result.exportId !== undefined && { exportId: result.exportId }) /* P3-H */ };
     },
     stop,
   };

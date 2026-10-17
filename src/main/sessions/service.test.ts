@@ -1069,3 +1069,78 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
   });
 });
 // P2-C end
+
+// P3-H (P3 Decision Log 88): `requireEmptyMessage` marks a start that must run no model turn (a connector's owner Start).
+// Main refuses it while a first message is in the request or retained for the session (an intent's, or a resume's
+// behind a card), changing nothing: the message stays where it was, for the owner to send or discard. Without the
+// option, every start keeps today's semantics (covered above).
+describe('a start that requires no message (P3-H, Decision Log 88)', () => {
+  let h: SessionHarness;
+  beforeEach(async () => {
+    h = await new SessionHarness().start();
+  });
+  afterEach(() => h.dispose());
+
+  const EMPTY = { requireEmptyMessage: true } as const;
+  const create = async () => (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } })).appSessionId;
+  const recordAt = () => h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0xd88), directory: h.work })).record;
+
+  it('refuses an intent holding a first message a card kept, and keeps the message; the plain start still sends it', async () => {
+    const id = await create();
+    expect(await h.service.startSession(id, { message: OK_MESSAGE, options: {} })).toMatchObject({ status: 'needs_trust' });
+    expect(intentFile(h, id)).toMatchObject({ message: OK_MESSAGE });
+    expect(await h.service.startSession(id, { message: null, options: { ...EMPTY, trust: 'accepted' } })).toMatchObject({ status: 'refused', appSessionId: id });
+    expect(intentFile(h, id)).toMatchObject({ message: OK_MESSAGE, trust: 'unanswered' });
+    expect(h.host.launches).toEqual([]);
+    await h.service.startSession(id, { message: null, options: { trust: 'accepted' } });
+    expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+    expect(h.host.calledWith('session.send')).toHaveLength(1);
+  });
+
+  it('refuses one carrying a message itself, persisting nothing of it', async () => {
+    const id = await create();
+    expect(await h.service.startSession(id, { message: OK_MESSAGE, options: EMPTY })).toMatchObject({ status: 'refused' });
+    expect(intentFile(h, id)).toMatchObject({ message: null });
+    expect(h.host.launches).toEqual([]);
+  });
+
+  it('starts an intent with no message, and runs no turn', async () => {
+    const id = await create();
+    expect(await h.service.startSession(id, { message: null, options: { ...EMPTY, trust: 'accepted' } })).toMatchObject({ status: 'starting' });
+    expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
+    expect(h.host.calledWith('session.send')).toEqual([]);
+  });
+
+  it('refuses a record’s resume while a resume’s message is retained behind a card, and the message stays retained', async () => {
+    const record = recordAt();
+    expect(await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} })).toMatchObject({ status: 'needs_trust' });
+    expect(await h.service.startSession(record.appId, { message: null, options: { ...EMPTY, trust: 'accepted' } })).toMatchObject({ status: 'refused' });
+    expect(h.host.launches).toEqual([]);
+    await h.service.startSession(record.appId, { message: null, options: { trust: 'accepted' } });
+    expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready' });
+    expect(h.host.calledWith('session.send')).toHaveLength(1); // the retained message, sent by the owner's own start
+  });
+
+  it('refuses an acquisition for a read while a resume’s message is retained, and resumes once none is', async () => {
+    const record = recordAt();
+    expect(await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} })).toMatchObject({ status: 'needs_trust' });
+    expect(await h.service.acquire(record.appId, 'read', { ...EMPTY, trust: 'accepted' })).toMatchObject({ status: 'refused', appSessionId: record.appId });
+    expect(h.host.launches).toEqual([]);
+    expect(await h.service.release(record.appId)).toBeNull();
+    expect(await h.service.acquire(record.appId, 'read', { ...EMPTY, trust: 'accepted' })).toMatchObject({ status: 'ready', launched: true });
+    expect(h.host.calledWith('session.send')).toEqual([]);
+  });
+
+  // Send to's acquisition for its own send (the human prompt path's fallback when the session went cold): the retained
+  // message neither goes nor is dropped; the owner's own start sends it later
+  it('refuses an acquisition for a send while a resume’s message is retained, keeping the message for the owner', async () => {
+    const record = recordAt();
+    expect(await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} })).toMatchObject({ status: 'needs_trust' });
+    expect(await h.service.acquire(record.appId, 'send', { ...EMPTY, trust: 'accepted' })).toMatchObject({ status: 'refused', appSessionId: record.appId });
+    expect(h.host.launches).toEqual([]);
+    expect(h.host.calledWith('session.send')).toEqual([]);
+    await h.service.startSession(record.appId, { message: null, options: { trust: 'accepted' } });
+    expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready' });
+    expect(h.host.calledWith('session.send')).toHaveLength(1); // the retained message, still there for the owner's start
+  });
+});
