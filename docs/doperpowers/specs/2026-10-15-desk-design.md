@@ -4588,6 +4588,21 @@ a hub that connects into machines (§2).
   killed mid-turn, a cut replay) still reads "working", and is logged
   as debt. Rejected earlier: ending a turn on idle presence, which
   corrupted turn history.
+  2026-10-17, the bridge's interrupt row (doperpowers #225, 7.170.0).
+  The bridge wrote one row, `[Request interrupted by user from the
+  desk]` followed by "Task …" lines, which no reader takes as the
+  engine's marker. It now writes the engine's exact marker as a row of
+  its own, then a note row (where the interrupt came from, each
+  background task stopped). Both are meta rows with origin `{kind:
+  plugin, name: doperpowers}`, since a plugin cannot append any other
+  kind. A steer is the same kind of row, so the bridge refuses a steer
+  whose text is exactly a marker or begins with the old form. The desk
+  ends a turn on the exact marker from Esc (no origin) or from the
+  doperpowers plugin. It keeps reading the legacy shape strictly, and
+  draws the note row as nothing. The residual is a human steering the
+  exact marker text through an older plugin, logged as debt. Rejected:
+  telling the rows apart by an append field, since 2.1.300's
+  `$.session.append` offers none.
   2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
   desk-dc8 370662a2, c81b77fc, 578b11b8):
   - DX5's `resync` gains `refused`, so a refusal whose post failed is not
