@@ -7,7 +7,7 @@
 // tab); deleted, it is orphaned again and is resolved and reopened in the rail; a restore of the version brings the chart
 // back to its first tab with the thread live, every reply kept. Evidence shots go to test-results/dashboard-proof/.
 import { expect, test, type Locator } from '@playwright/test';
-import { bindCsv, chart, durable, edit, figures, insertBlocks, ok, openInPanel, paragraph, pinArtifactsTool, railOf, reply, selectChart, startApp, type DashboardApp } from './support/dashboards';
+import { bindCsv, chart, closeDrawer, durable, edit, figures, insertBlocks, ok, openInPanel, paragraph, pinArtifactsTool, railOf, reply, selectChart, startApp, type DashboardApp } from './support/dashboards';
 
 const PROOF = 'test-results/dashboard-proof';
 const SALES_CSV = 'region,total\nNorth,10\nSouth,20\nWest,15\n';
@@ -90,12 +90,14 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
     await record.getByRole('button', { name: 'Add tab' }).click();
     await expect(tabs.getByRole('tab')).toHaveCount(2);
     await expect(tabs.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
-    // the rail open over the page's right side (P3-F1's drawer in the narrow panel): the owner clicks the new tab's page
-    // where the drawer leaves it, at its left
-    await record.locator('.ds-doc .ProseMirror').first().click({ position: { x: 16, y: 8 } });
+    // the rail is P3-F1's drawer over the narrow panel's page: the owner closes it to click into the new tab's page, and
+    // opens it again to read the thread
+    await closeDrawer(record);
+    await record.locator('.ds-doc .ProseMirror').first().click();
     await edit(launch, 'paste');
     await expect(figures(record)).toHaveCount(1, { timeout: 10_000 });
     await expect(figures(record).first().locator('.dash-figure > svg')).toBeVisible({ timeout: 15_000 });
+    await railOf(record);
     await expect(chartBlock).toHaveClass(new RegExp(`\\bcomment-${threadId}\\b`));
     await expect(item).not.toHaveAttribute('data-orphan');
     await expect.poll(async () => {
