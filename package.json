@@ -78,6 +78,7 @@
     "e2e:document-scale": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document-scale.spec.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "node-pty": "1.1.0",
     "zod": "^4.6.5"
   },
