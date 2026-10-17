@@ -1107,7 +1107,13 @@ mod can make, or a surface transport for terminal sessions.
 {key, outcome: "entered", uuid}`, emitted once the submitted prompt's row
 is named by `session.append` (`PromptSubmitResult` carries no row id), for
 an exact match of a delivered send to its row where the frame's identity
-(9.1) is not enough. The `$.agent.list()` seed, optional in the first
+(9.1) is not enough. DC8 built it and leaves it on the bridge's stream
+(2026-10-17): the frame's `(writer, seq)` matched all 174 bridge
+deliveries in this machine's transcripts, so the uuid matters only where
+the engine rewrites a frame, and carrying it to the web needs a contract
+change — a `row` on DX4's sealed `delivery`, a hub change, or a relay
+message on the main subscription — deferred; meanwhile such a send's tail
+row stays, visible, as §9.1 says. The `$.agent.list()` seed, optional in the first
 draft, is mandatory (9.3; the review, 2026-10-17): without it an agent that
 predates the module has no evidence while it runs.
 
@@ -2515,7 +2521,7 @@ and `streaming` are that agent's own.
 | `block-row` | yes | `{uuid, turnId, agentId, step, index}`: the engine wrote the row `uuid` for content block `index` of that step; sent before the row itself arrives |
 | `step-end` | yes | `{turnId, agentId, step}`: that model request ended — finished, aborted, or cut off by its turn's end — from DX5's `step end` or `turn complete`; sent after every `block-row` of the step, so a block of it still without one never gets one, and the browser drops its partial text |
 | `rows` | yes | `{rows, before, more}`: older rows of the sub's transcript, newest first, answering a `rows` request |
-| `subagents` | yes | `{subagents: [{agentId, meta, status, evidence, running?, spawn?, outcome?, file?}], jobs: [Job], mcp: [{name}]}` **[2026-10-17]**: each `meta` a `subagents/*.meta.json` verbatim (a main-scope sub's the session's tree, an agent-scope sub's that agent's own, as before); `status` one of `running \| completed \| failed \| stopped \| exited \| unknown` (MAWS's `TaskStatus` words, so the web patches without a mapping) and `evidence` what it rests on, `bridge \| rows \| parent \| session \| none` (below); `running` the bridge's, present while the bridge holds the agent; `spawn` the bridge's spawn record, `{parentAgentId, subagentType, description, name, background, model, toolUseId}` (DX5 `agent` spawn, or the `$.agent.list()` seed's `{parentAgentId, subagentType, description}` for an agent the module did not see spawn — the engine's list has no `name` (DC8, 2026-10-17)), present when it holds one; `outcome` from the rows — the loop's, or for a nested agent its parent agent's transcript — `{status, raw, at, summary?, outputFile?}`, `raw` the engine's own word before the normalization table below; `file` the agent transcript's `{size, mtimeMs, firstAt, lastAt}`, read only when size or mtime changed. `jobs`: the loop's background shells and monitors, `{taskId, kind: "shell" \| "monitor", toolUseId, startedAt, description, command?, outputFile: string \| null, status, endedAt?, summary?}`, `status` as above less `unknown`, `outputFile` null until a row names one (a Monitor's result names none; a notification or a `task_status` may). `mcp`: the server names the loop's `mcp_instructions_delta` attachments added and did not remove, in order; names only. Sent in the snapshot and whenever any of it changes (the metas today, every `METAS_EVERY`; now also a status, a job, a name). A consumer older than DC9 reads `subagents[*].agentId` and `meta` and ignores the rest; a producer older than DC8 sends the two fields alone, and the web then shows an agent as it does today |
+| `subagents` | yes | `{subagents: [{agentId, meta, status, evidence, running?, spawn?, outcome?, file?}], jobs: [Job], mcp: [{name}]}` **[2026-10-17]**: each `meta` a `subagents/*.meta.json` verbatim (a main-scope sub's the session's tree, an agent-scope sub's that agent's own, as before); `status` one of `running \| completed \| failed \| stopped \| exited \| unknown` (MAWS's `TaskStatus` words, so the web patches without a mapping) and `evidence` what it rests on, `bridge \| rows \| parent \| session \| none` (below); `running` the bridge's, present while the bridge holds the agent; `spawn` the bridge's spawn record, `{parentAgentId, subagentType, description, name, background, model, toolUseId}` (DX5 `agent` spawn, or the `$.agent.list()` seed's `{parentAgentId, subagentType, description, name?}` for an agent the module did not see spawn — `name` when the engine's list gives one (DC8, 2026-10-17)), present when it holds one; `outcome` from the rows — the loop's, or for a nested agent its parent agent's transcript — `{status, raw, at, summary?, outputFile?}`, `raw` the engine's own word before the normalization table below; `file` the agent transcript's `{size, mtimeMs, firstAt, lastAt}`, read only when size or mtime changed. `jobs`: the loop's background shells and monitors, `{taskId, kind: "shell" \| "monitor", toolUseId, startedAt, description, command?, outputFile: string \| null, status, endedAt?, summary?}`, `status` as above less `unknown`, `outputFile` null until a row names one (a Monitor's result names none; a notification or a `task_status` may). `mcp`: the server names the loop's `mcp_instructions_delta` attachments added and did not remove, in order; names only. Sent in the snapshot and whenever any of it changes (the metas today, every `METAS_EVERY`; now also a status, a job, a name). A consumer older than DC9 reads `subagents[*].agentId` and `meta` and ignores the rest; a producer older than DC8 sends the two fields alone, and the web then shows an agent as it does today |
 | `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
 | `output` | yes | **[2026-10-17]** `{taskId, result, …}`, answering an `output` request, one of four variants by `result`: **`ok`** `{taskId, result: "ok", path, size, from, text, truncated}` — `path` the output file as the session's rows named it, `size` the file's bytes, `text` its last `tail` bytes decoded UTF-8 with replacement, cut forward to the first line break inside the window when the window does not start the file, `from` the byte offset `text` starts at, `truncated` whether anything precedes it; **`missing`** `{taskId, result: "missing", path: string \| null}` — the task is known and there is nothing to read: `path` a string when the rows named a file, it passed containment, and no file is there (the engine writes them under the temporary directory), or null when no row has named a file for the task yet (a monitor just started; `Job.outputFile` null) — never `refused`, which is the containment refusal alone (the review's round 2); **`refused`** `{taskId, result: "refused", path, reason}` — the path the rows named fails containment (below), `reason` a sentence for the human; **`unknown-task`** `{taskId, result: "unknown-task"}` — the loop's index holds no such task. No variant carries a field another variant's rule leaves out. The consumer: `ok` draws the tail, with how many bytes precede it when `truncated`; `missing` says the file is gone, or that the task has no output file yet when `path` is null, leaves the row's own summary standing, and stays retry-eligible — when a later `subagents` supplies or changes the task's `outputFile`, the web may ask again; `refused` draws as a warning with `reason` and offers no retry; `unknown-task` waits for the next `subagents` to carry the task (the request raced the index) and otherwise says the task is unknown to the machine. Read on the thread that reads pages |
 | `usage` | yes | `{context: {tokens?, window, percent?}, cost: {usd} \| null}`: the bridge's `usage` event (DX5) verbatim (`tokens` and `percent` absent until a response has reported the window's fill; `cost` null where the engine keeps no ledger), after each main turn, on main-transcript subscriptions only. It is the one source of a session's context use and cost on the web: the transcript's rows do not carry them (the engine's `cost-state` records have no `uuid` and are not rows here), so a session without a bridge shows both as unavailable |
@@ -3240,6 +3246,21 @@ a full backlog refuses too). The child's listen backlog is 128.
   `delivery` for the key, `failed` with that reason (the child keeps `submitted` keys
   alone today). `delivered {outcome: "entered", uuid}`, the row the submitted prompt
   became, stays optional (DC8.G6).
+- **As built at DC8's M3 [2026-10-17]:** a seeded agent still running is `agent` spawn
+  `{agentId, parentAgentId, subagentType, description, name?}` (`name` when the engine's
+  list gives one: `AgentInfo.name?`, 2.1.300); one already over at load is a spawn then a
+  stop. The list's `completed`, `failed`, `killed` are over; `pending`, `running`,
+  `waiting`, `idle` are running; an agent that leaves the list is over. The list refreshes
+  every 500 ms while any agent runs, at each heartbeat, and when an unknown loop starts a
+  turn. The child keeps the last 100 refusals in its `<id>.json` as `refused`, each reason
+  capped at 1,000 characters; the daemon's `deliver_owed`, under the session's delivery
+  lock and for settled events only, records the second `delivery` once per key (ledger
+  `refused/<session>.json`): `failed`, "the session dropped it after taking it, so it
+  never entered the conversation: <the bridge's reason>" — after a `delivered` or an
+  `uncertain` alike, since the text never entered. `delivered {outcome: "entered",
+  uuid}` is emitted when a main-loop prompt row this plugin submitted as the human's words
+  has a first text block equal to exactly one waiting delivery's text, nothing when
+  ambiguous or rewritten; it stays on the bridge's stream (§9.7).
 
 ### DX6 — RPC shapes (owner DC3; G1; the hub's record built at M3)
 
@@ -4075,8 +4096,8 @@ DX6 RPC to the bridge's `TaskStop`, optional in DC8); history left under an old 
 `/clear`, and sessions on a machine whose daemon predates DC8 (the web
 falls back to the log-built channel); the desk as a remote mod surface,
 until the engine adds a render call a mod can make or a surface transport
-for terminal sessions (§9.6); the bridge's `delivered.uuid`, should DC8
-leave it (§9.7; its `$.agent.list()` seed is mandatory since the review).
+for terminal sessions (§9.6); the bridge's `delivered.uuid` carried to the
+web, which DC8 left on the bridge's stream (§9.7; its `$.agent.list()` seed is mandatory since the review).
 
 **Explicitly out of scope (standing exclusions):** the hub storing
 transcripts (§3); hosting sessions on the SDK wire (§2); depending on
@@ -4461,8 +4482,13 @@ a hub that connects into machines (§2).
   `output` containment is exact — the opened target's realpath equals
   `<realpath of one root>/<taskId>.output` — since a component prefix
   would accept a symlink to another task's file in the same root; the
-  `$.agent.list()` seed carries no `name`, which the engine's list lacks
-  (DX5 as amended).
+  `$.agent.list()` seed carries `name` only when the engine's list gives
+  one (DX5 as amended; corrected at DC8's M3, which found `AgentInfo.name?`
+  in 2.1.300). At DC8's M3: the seed's and the refused delivery's shapes
+  (DX5, "As built"), and `delivered.uuid` left on the bridge's stream —
+  the frame matched all 174 observed deliveries; carrying the uuid to the
+  web is a sealed-contract change deferred (§9.7). Rejected: a `row` on
+  DX4 `delivery` now, a hub change for a case no delivery showed.
   2026-10-17, §9.5's backfill edit leaves DC9: its review showed backfill
   alone gives the desktop app's disk-only sessions no shells or monitors
   (the store reads no `session.events` for them, drops events without a
