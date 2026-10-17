@@ -4489,6 +4489,13 @@ a hub that connects into machines (§2).
   the first follow-up after DC8 and DC9; the end marker as drawn. The ask
   mod's question shows as its card at the tail while pending and as its
   transcript row, which points to the card, then carries the answer (§9.1).
+  2026-10-17, the owner, on DC9's screenshots of the session view over a
+  copy of a real session: the Transcript side of the toggle keeps the
+  MAWS app's shape. Each finished turn folds behind its "Worked for …"
+  divider, and one click opens its tool calls. Rejected: opening every
+  turn by default. That would make the toggle's Transcript mean
+  something other than the MAWS app's, and long sessions would get much
+  longer to scroll.
   2026-10-17, DC8's shared fixture (doperpowers `tests/sminos/dx4-jobs.json`)
   binds both producers, its `about` normative where DX4's prose is silent;
   `output` containment is exact — the opened target's realpath equals
