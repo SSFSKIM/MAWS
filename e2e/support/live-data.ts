@@ -11,6 +11,7 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { DATASET_STATES, utcTime } from '../../src/artifacts/dashboard/states';
 import { invoke, SERVER, TOOL, value, wait, type ConnectorScene, type FixtureRow, type LiveEngine, type Run } from './connector-scene';
 import { AgentSeam, ok, openInMain, revisionOf, refusalOf, tipsOf, type AgentCall } from './dashboards';
+import { boundsProblems, type BlockMeasure } from './live-data-bounds';
 
 export const BOARD = 'Signups board';
 export const DATASET = 'signups';
@@ -227,20 +228,19 @@ export async function windowSize(run: Run, width: number, height: number): Promi
   await run.maws.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0]!.setSize(w!, h!), [width, height]);
 }
 
-/** Whether each of the live block's controls lies whole inside the sheet and the window (none clipped or scrolled off). */
+/** What keeps the live block's controls from lying wholly inside the sheet and the window, on both axes (none when
+ * all do): measured in the page, judged by live-data-bounds.ts. */
 export async function unclipped(block: Locator): Promise<string[]> {
-  return block.evaluate((el) => {
-    const sheet = el.closest('.dash-sheet')!.getBoundingClientRect();
-    const view = { right: window.innerWidth, bottom: window.innerHeight };
-    const problems: string[] = [];
-    if (el.scrollWidth > el.clientWidth + 1) problems.push(`the block scrolls sideways (${el.scrollWidth} > ${el.clientWidth})`);
-    for (const button of Array.from(el.querySelectorAll('button'))) {
-      const box = button.getBoundingClientRect();
-      const name = button.getAttribute('aria-label') ?? button.textContent ?? '';
-      if (box.left < sheet.left - 1 || box.right > sheet.right + 1 || box.right > view.right + 1) problems.push(`${name} overflows sideways`);
-      if (button.scrollWidth > button.clientWidth + 1) problems.push(`${name} clips its text`);
-    }
-    return problems;
+  const measured: BlockMeasure = await block.evaluate((el) => {
+    const rect = (r: DOMRect) => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    return {
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      sheet: rect(el.closest('.dash-sheet')!.getBoundingClientRect()),
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      controls: Array.from(el.querySelectorAll('button')).map((button) => ({ name: button.getAttribute('aria-label') ?? button.textContent ?? '', box: rect(button.getBoundingClientRect()), scrollWidth: button.scrollWidth, clientWidth: button.clientWidth })),
+    };
   });
+  return boundsProblems(measured);
 }
 

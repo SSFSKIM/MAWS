@@ -7,8 +7,9 @@
 // dashboard's rendered views and source sheet are the witness of what the owner sees.
 //
 // One scene, in order (each later step stands on the state the earlier left):
-//   1. the agent writes the dashboard and configures its query: drawn not fetched, paused for want of a session; the
-//      sheet opens and closes from the keyboard, its live block whole at wide and narrow widths
+//   1. the agent writes the dashboard and configures its query: drawn not fetched and not allowed (the view says the
+//      missing grant before the missing session, editor/live.ts `livePauseOf`); the sheet says no live session and offers
+//      Start, opens and closes from the keyboard, its live block whole at wide and narrow widths
 //   2. the owner's Start from the sheet: one session, no message; nothing is called before the grant, and the agent's
 //      own refresh is refused for want of it
 //   3. Allow: the page's refresh draws the fetched rows, `server 路 tool`, the fetch time, by You
@@ -116,11 +117,12 @@ test('granted live dataset: the owner鈥檚 grant, Start and controls, the agent鈥
       let views: Locator;
       let firstAt = 0;
 
-      await test.step('1. the agent writes the dashboard and configures its query; the owner sees it not fetched, paused for want of a session', async () => {
+      await test.step('1. the agent writes the dashboard and configures its query; the owner sees it not fetched and not allowed, the sheet offering Start for want of a session', async () => {
         id = await createBoard(scene, page, agent);
         tab = await openInMain(page, id);
         views = liveViews(tab);
-        await expect(labelOf(views)).toHaveText(`${NOT_FETCHED} 路 ${DATASET_STATES.paused}`, { timeout: 20_000 });
+        // ungranted, the view names the grant first; the sheet below says the session is missing too
+        await expect(labelOf(views)).toHaveText(`${NOT_FETCHED} 路 ${DATASET_STATES.notAllowed}`, { timeout: 20_000 });
         await expect(tableRows(views)).toHaveCount(0);
         // the keyboard's way to the sheet and back
         await labelOf(views).focus();
@@ -130,7 +132,8 @@ test('granted live dataset: the owner鈥檚 grant, Start and controls, the agent鈥
         await expect(sheet.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
         const block = liveBlock(sheet);
         await expect(block.getByText(TOOL_NAME, { exact: true })).toBeVisible();
-        await expect(block).toContainText('No live session for this dashboard has this server.');
+        await expect(block).toContainText('Not allowed');
+        await expect(block, 'the watch found no live route').toContainText('No live session for this dashboard has this server.', { timeout: 20_000 });
         await expect(block.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
         expect(await unclipped(block), 'the live block whole at 1440 px').toEqual([]);
         await shot(page, 'paused-no-session-wide');
@@ -154,6 +157,7 @@ test('granted live dataset: the owner鈥檚 grant, Start and controls, the agent鈥
         expect(scene.launches(engine.appSessionId)).toEqual({ spawns: 1, exits: 0 });
         await expect(block).toContainText('Not allowed', { timeout: 30_000 });
         await expect(block).toContainText('Allow it to read before this dashboard can refresh it.');
+        await expect(block.getByRole('button', { name: 'Start session', exact: true }), 'the route found: no Start offered').toHaveCount(0);
         await expect(labelOf(views)).toHaveText(`${NOT_FETCHED} 路 ${DATASET_STATES.notAllowed}`);
         await shot(page, 'not-allowed-wide');
         const refused = await agentDataset(page, agent, engine.appSessionId, id, { refresh: true });
