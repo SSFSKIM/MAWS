@@ -103,14 +103,17 @@ describe('openStore', () => {
 
 // P3-H: schema 2, the connector grants beside the artifacts (P3 Decision Log 80; the X15 slot "host artifacts store
 // schema 2"), over the real migration list.
+// E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, the authorized exemption): bound to the schema-2 list it
+// was written for, as A's baseline is to V1; schema 3's cases are in migrations-e3.test.ts.
+const V2 = STORE_MIGRATIONS.slice(0, 2);
 describe('openStore: schema 2 (P3-H, artifact_connector_grants)', () => {
   const GRANT_COLUMNS = ['artifactId', 'server', 'tool', 'fingerprint', 'mode', 'grantedAt'];
   const tables = (db: DatabaseSync) => (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map((row) => row.name);
   const artifact = "INSERT INTO artifacts (id, kind, title, createdBy, createdAt, updatedAt) VALUES ('a1', 'html', 'Page', 'human', 1, 1)";
 
   it('creates a fresh store at schema version 2 with the grants table, tied to its artifact and keyed per tool', () => {
-    expect(STORE_MIGRATIONS.map((migration) => migration.version)).toEqual([1, 2]);
-    const { db, status, applied } = openStore(join(fresh(), 'store.sqlite'), STORE_MIGRATIONS, quiet);
+    expect(V2.map((migration) => migration.version)).toEqual([1, 2]);
+    const { db, status, applied } = openStore(join(fresh(), 'store.sqlite'), V2, quiet);
     expect(status).toBe('ok');
     expect(applied).toEqual([1, 2]);
     expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
@@ -138,7 +141,7 @@ describe('openStore: schema 2 (P3-H, artifact_connector_grants)', () => {
     first.db.prepare("INSERT INTO artifact_updates (artifactId, actor, at, content) VALUES ('a1', 'human', 1, '{}')").run();
     first.db.close();
 
-    const upgraded = openStore(path, STORE_MIGRATIONS, quiet);
+    const upgraded = openStore(path, V2, quiet);
     expect(upgraded.status).toBe('ok');
     expect(upgraded.applied).toEqual([2]);
     expect(upgraded.db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 });
@@ -148,7 +151,7 @@ describe('openStore: schema 2 (P3-H, artifact_connector_grants)', () => {
     upgraded.db.prepare("INSERT INTO artifact_connector_grants (artifactId, server, tool, fingerprint, mode, grantedAt) VALUES ('a1', 'fixture', 'rows', 'f1', 'read', 2)").run();
     upgraded.db.close();
 
-    const again = openStore(path, STORE_MIGRATIONS, quiet);
+    const again = openStore(path, V2, quiet);
     expect(again.applied).toEqual([]);
     expect(again.db.prepare('SELECT server, tool, mode FROM artifact_connector_grants').all()).toEqual([{ server: 'fixture', tool: 'rows', mode: 'read' }]);
     again.db.close();
@@ -156,7 +159,7 @@ describe('openStore: schema 2 (P3-H, artifact_connector_grants)', () => {
 
   it('opens a schema-2 store read-only under a schema-1 list, leaving it at 2 (the rule A’s baseline proves at 99)', () => {
     const path = join(fresh(), 'store.sqlite');
-    openStore(path, STORE_MIGRATIONS, quiet).db.close();
+    openStore(path, V2, quiet).db.close();
     const older = openStore(path, V1, quiet);
     expect(older.status).toBe('readOnly');
     older.db.close();
