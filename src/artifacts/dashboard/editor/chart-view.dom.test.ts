@@ -80,6 +80,21 @@ describe('the chart view', () => {
     expect(w.readDataset).toHaveBeenCalledWith('dash1', 'assets/sales.csv', { format: 'csv' });
   });
 
+  it('reads its dataset id from the fence body as history and the exports do: trimmed, blank lines included; else none (E2 panel)', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const w = world();
+    const { into } = mount(w.renderChart, doc, node('\n  sales  \n\n'));
+    await settle();
+    expect(tips(into)).toEqual(['서울 · sales: 12', '부산 · sales: 7', '제주 · sales: 3']);
+    into.querySelector<HTMLButtonElement>('button.dash-source-label')!.click();
+    expect(w.opened[0]?.datasetId).toBe('sales');
+    const odd = mount(w.renderChart, doc, node(42 as unknown as string, { view: 'bar', x: 'region', y: 'sales' })).into;
+    await settle();
+    expect(odd.querySelector('.dash-caption')?.textContent).toBe('Bar chart of ');
+    expect(odd.querySelector('.dash-source')?.textContent).toBe('no dataset ""');
+  });
+
   it('times each drawing as a `dash:view` User Timing entry naming its dataset and caption, and keeps none in the timeline (E2 M6)', async () => {
     const measure = vi.spyOn(performance, 'measure');
     const cleared = vi.spyOn(performance, 'clearMeasures');

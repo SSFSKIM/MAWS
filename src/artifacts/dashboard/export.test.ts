@@ -14,6 +14,9 @@ import { defaultSystem } from '../types/design_system/defaults';
 import { substituteVars, type DesignSystemExport } from '../document/export/design-system';
 import { exportSource, defaultAuthorName, type ExportView } from '../document/export/source';
 import { newDoc } from '../yjs';
+import { schemaFor } from '../document/schema';
+import { createDocument } from '../document/tabs';
+import { setDataset } from './datasets';
 import { exportTheme, exportView, prepareViews, viewKey } from './export';
 import { BAR, BOUND_AT, descriptor, exportDashboard, OLD_REF, SNAPSHOTS, TABLE, MISSING, UNREADABLE } from './fixtures/export';
 import { renderFailure, renderView, THEME_PROPERTIES, themeFrom, type ViewTable } from './render';
@@ -91,6 +94,18 @@ describe('prepareViews', () => {
     const svgs = new Set([...nodes.values()].map((node) => views(node)!.svg).filter(Boolean));
     expect(picture).toHaveBeenCalledTimes(svgs.size);
     expect(picture).toHaveBeenCalledWith(views(nodes.get('c1')!)!.svg, { width: views(nodes.get('c1')!)!.width, height: views(nodes.get('c1')!)!.height });
+  });
+
+  it('reads a block’s dataset id from its fence body as the editor does: an imported padded body draws the bound view (E2 panel)', async () => {
+    const doc = newDoc();
+    createDocument(doc, { title: 'Imported', body: schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'chart', attrs: { id: 'c9', source: '\n  sales  \n\n', spec: BAR } }] }) });
+    setDataset(doc, 'sales', descriptor(OLD_REF, BOUND_AT));
+    const views = await prepareViews(doc, { read: reader(), theme, authorName: defaultAuthorName });
+    const node = exportSource(doc, 'Board').tabs[0]!.body.firstChild!;
+    expect(views(node)!.svg).toBe(renderView(BAR, SNAPSHOTS[OLD_REF], theme, 'sales').svg);
+    expect(views(node)!.sourceLabel).toBe('Sales · from sales.csv · updated 2026-10-01 09:00 UTC by Claude');
+    // the same view as a block naming `sales` exactly: one key
+    expect(viewKey(node)).toBe(viewKey({ attrs: { source: 'sales', spec: BAR } }));
   });
 
   it('answers undefined for a node that is not one of the state’s charts', async () => {

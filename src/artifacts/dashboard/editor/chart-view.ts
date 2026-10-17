@@ -12,7 +12,7 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ViewEnvironment } from '../../document/editor/nodes/views';
 import { onUpdate, type Doc } from '../../yjs';
-import { readDataset, snapshotOf, type DatasetDescriptor } from '../datasets';
+import { datasetIdFromSource, readDataset, snapshotOf, type DatasetDescriptor } from '../datasets';
 import { dsOverrides } from '../../document/meta';
 import { captionOf, renderFailure, renderView, themeFrom, THEME_PROPERTIES, type Rendered, type Theme } from '../render';
 import { parseSpec } from '../spec';
@@ -92,7 +92,7 @@ function timed(start: number, dataset: string, caption: string): void {
 
 export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEnvironment['renderChart']> {
   return (into: HTMLElement, node: PMNode, env: ViewEnvironment) => {
-    const datasetId = typeof node.attrs.source === 'string' ? node.attrs.source.trim() : '';
+    const datasetId = datasetIdFromSource(node.attrs.source);
     const spec: unknown = node.attrs.spec ?? null;
     const parsed = parseSpec(spec);
     const caption = parsed.ok ? captionOf(parsed.spec, datasetId) : (parsed.title ?? 'Chart');
@@ -108,13 +108,13 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
     source.setAttribute('data-atom-controls', ''); // its button's clicks and keys are its own, not the editor's (B's atom view)
     view.append(title, frame, source);
     into.append(view);
-    // E2 M6 (the tracker's last-block row; provisional, its cause not established): a press on the view is left to the
-    // editor. Run 38992236787's selection log observed the click's block selection, the editor's focus, then a late
-    // selectionchange at the document's first paragraph that ProseMirror read as the pointer's, replacing the block
-    // selection; the hypothesis is the browser's own focus caret from the press's default, and that run fell in a window
-    // of unstable window activation on the Mac runner. The default is refused once the press has bubbled past the editor
-    // (ProseMirror ignores a press already refused), so the editor focuses itself and selects the block on the click;
-    // the source label's controls keep their own presses.
+    // E2 M6 (the tracker's last-block row): a press on the view is left to the editor. The default is refused once the
+    // press has bubbled past the editor (ProseMirror ignores a press already refused), so the editor focuses itself and
+    // selects the block on the click; the source label's controls keep their own presses. The evidence is one matched
+    // stable-runner reproduction of the original layout, not a universal account of browser focus: without the refusal
+    // (run 39001816938 at 30d7035fd) the Word comment case fails, 9/10, its log showing the block selection, the
+    // editor's focus, a DOM caret in the first paragraph and a text selection replacing the block's; with it (run
+    // 39002799612 at e6168906c) 10/10 pass, the editor's own DOM range and its NodeSelection held through Comment.
     const pressed = (event: MouseEvent) => {
       if (event.button === 0 && view.contains(event.target as Node) && !source.contains(event.target as Node)) event.preventDefault();
     };

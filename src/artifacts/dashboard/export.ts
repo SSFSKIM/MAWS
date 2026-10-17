@@ -14,7 +14,7 @@ import type { TokenOverrides } from '../document/meta';
 import { dsValue, exportDesign, houseSystem, type DesignSystemExport } from '../document/export/design-system';
 import type { ExportView, ExportViewTable, ViewRenderer } from '../document/export/source';
 import type { Doc } from '../yjs';
-import { readDataset, snapshotOf, type DatasetDescriptor } from './datasets';
+import { datasetIdFromSource, readDataset, snapshotOf, type DatasetDescriptor } from './datasets';
 import { legacyDashboardFiles, legacyDashboardReason } from './legacy';
 import { captionOf, renderView, svgSize, THEME_PROPERTIES, themeFrom, viewPreview, type Theme, type ViewTable } from './render';
 import { parseSpec } from './spec';
@@ -52,8 +52,9 @@ export const VIEW_CSS = `
 }
 `;
 
-/** Which view a chart node draws: its dataset and its spec (two blocks naming both draw one view). */
-export const viewKey = (node: Pick<PMNode, 'attrs'>): string => JSON.stringify([typeof node.attrs.source === 'string' ? node.attrs.source : '', node.attrs.spec ?? null]);
+/** Which view a chart node draws: its dataset (its fence body as `datasetIdFromSource` reads it) and its spec (two blocks
+ * naming both draw one view). */
+export const viewKey = (node: Pick<PMNode, 'attrs'>): string => JSON.stringify([datasetIdFromSource(node.attrs.source), node.attrs.spec ?? null]);
 
 // ---- Markdown ----
 
@@ -126,7 +127,7 @@ export async function prepareViews(doc: Doc, options: ViewExportOptions): Promis
   const held = legacyDashboardFiles(doc);
   if (held) throw new Error(legacyDashboardReason(held));
   const blocks = chartSpecs(doc).map(({ source, spec }) => {
-    const datasetId = source.trim();
+    const datasetId = datasetIdFromSource(source);
     return { key: viewKey({ attrs: { source, spec } }), spec, datasetId, descriptor: readDataset(doc, datasetId) };
   });
   const snapshots = new Map<string, Promise<ViewTable>>();
