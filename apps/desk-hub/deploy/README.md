@@ -106,6 +106,22 @@ is the hub's replay after `caught-up`, its latest 100 rows. `--audit` also print
 those rows (`decided` carries who settled each request); `--json` prints the
 hub's half alone.
 
+## `walk-console.js` (the walk's item 8, read into DevTools)
+
+`deploy/walk-console.js` is not a `deployment` command: it is a snippet the owner
+pastes into the desk's own DevTools console while signed in, for Part G of the
+recomposition walk (`docs/doperpowers/plans/2026-10-16-desk-recomposition-walk.md`,
+G1 and G3). Having set `DESK_WALK = { project, session, machine }`, it opens one
+project socket, sends exactly two frames — a `human` event and a `steer` RPC,
+each sealed with a wrong code the org key never signed — prints what comes back,
+and closes. Both are meant to be refused: the hub holds no key, so it stores the
+`human` and the daemons refuse it on import (`bad-code`, drawn as the desk's
+audit banner), while the `steer` is forwarded and the machine refuses it
+`bad-code`, relayed back as `rpc-state` failed. It sends nothing else and never
+touches the org key, and it refuses to run against any project but the one in
+`DESK_WALK` (it checks the socket's `welcome`). Proven against the local hub in
+`test/deploy/walk-console.test.ts`.
+
 ## The checks (DC3.G2, G4, G6)
 
 Each runs against the deployment through Access and enrolls throwaway
