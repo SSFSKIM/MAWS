@@ -89,7 +89,7 @@ const register: HostRegister = (on, emit, client) => {
   const presentations = registerPresentations({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-C: the deck's adapter and its mirror writer, kept fresh under its governing system (Decision Log 29)
   if (documents && presentationsScaleSeamRequested(process.env)) startPresentationsScaleSeam(documents.store, join(userData, 'presentations-scale')); // P3-C M10: the scale gate's seam, MAWS_E2E=1 and MAWS_PRESENTATIONS_SCALE=1 only
   const designs = registerDesigns({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-E (E1's M2): the design's adapter (its legacy migration among its hooks) and its mirror writer, kept fresh under its governing system
-  let connectors: { close(): void } | null = null; // P3-H H3b: below, over the process table
+  let connectors: { close(): void; closeDirect(): Promise<void> } | null = null; // P3-H H3b: below, over the process table
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
@@ -101,6 +101,7 @@ const register: HostRegister = (on, emit, client) => {
       designs.close(); // P3-E
       documents?.close(); // P3-A
     },
+    duringShutdown: async () => connectors?.closeDirect(), // P3-HD M2: route D's owned processes, ended beside the sessions
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
     replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,

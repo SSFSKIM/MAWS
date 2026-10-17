@@ -100,7 +100,14 @@ export interface ConnectorObservedTool {
 
 export type ConnectorSourceAnswer = { ok: true; source: VerifiedConnectorSource } | { ok: false; why: ConnectorSourceRefusal };
 export type ConnectorToolAnswer = { ok: true; source: VerifiedConnectorSource; tool: ConnectorObservedTool } | { ok: false; why: ConnectorSourceRefusal };
+// P3-HD M2: `readEntryForWrite`'s `stillValid`, synchronous, answers whether the cache still stands behind the entry exactly as this lookup
+// verified it, so route D's last check at the actual transport write needs no await (the lookup's own fence ends when
+// its promise settles). It holds across a newer report or another launch that only repeats the same facts (an engine
+// appearing for the same source: the next call picks route E, this one is not cancelled); it fails for a clear, a
+// contradiction, the server's changed meaning, a failed or refused context, saturation, another config home reporting
+// the server there, or an agreeing launch with other launch facts, every one of which a fresh lookup would re-judge.
 export type ConnectorEntryAnswer = { ok: true; source: VerifiedConnectorSource; entry: ConnectorLaunchEntry } | { ok: false; why: ConnectorSourceRefusal };
+export type ConnectorWriteEntryAnswer = (Extract<ConnectorEntryAnswer, { ok: true }> & { stillValid: () => boolean }) | Extract<ConnectorEntryAnswer, { ok: false }>;
 
 // `launches`: sessions and launches tracked for replacement (current plus replaced), across every context.
 export const CONNECTOR_STATUS_BOUNDS = { contexts: 128, serversPerContext: 256, launchesPerContext: 64, toolsPerServer: 1024, launches: 1024 } as const;
@@ -231,6 +238,18 @@ export class ConnectorStatusCache {
     return this.lookup(source.cwd, source.server, (verified): ConnectorEntryAnswer =>
       verified.source.sourceId !== source.sourceId || verified.source.generation !== source.generation ? { ok: false, why: 'changed' } : { ok: true, source: verified.source, entry: verified.entry },
     );
+  }
+
+  // P3-HD M2: `readEntry` for route D's write, with its synchronous `stillValid` (above).
+  readEntryForWrite(source: VerifiedConnectorSource): Promise<ConnectorWriteEntryAnswer> {
+    return this.lookup(source.cwd, source.server, (verified): ConnectorWriteEntryAnswer => {
+      if (verified.source.sourceId !== source.sourceId || verified.source.generation !== source.generation) return { ok: false, why: 'changed' };
+      // taken in the same synchronous step as the lookup's completion fence, so nothing lands between them (a clear
+      // forgets the minted source id, and a later lookup mints another)
+      const standing = this.standing(source.cwd, source.server);
+      const stillValid = () => standing !== null && this.standing(source.cwd, source.server) === standing;
+      return { ok: true, source: verified.source, entry: verified.entry, stillValid };
+    });
   }
 
   // Main detached, or the host shuts down: every observation goes, and nothing begun before lands.
@@ -437,6 +456,30 @@ export class ConnectorStatusCache {
     };
     return { source, entry: launch, visible, observation, positives: positives.map((positive) => positive.observation) };
   }
+
+  // P3-HD M2 start: what a verified answer for `server` at `cwd` rests on in the cache's memory, without the file: null
+  // when a fresh lookup would refuse it from memory alone. Every fact verifyOnce reads before its file read is here
+  // (saturation, a refused directory, a failed context, a contest, which context holds it positively, that context's
+  // revision of the server, the source id it minted) with the launch facts its materialization ran under (each agreeing
+  // launch's SDK-minimal environment, legacy file and local key), as a set: a launch repeating the same facts adds none.
+  private standing(cwd: string, server: string): string | null {
+    if (this.saturated || this.refused.has(cwd)) return null;
+    const states = [...this.contexts.values()].filter((state) => state.cwd === cwd);
+    if (states.some((state) => state.failed || state.contested.has(server))) return null;
+    const holding = states.filter((state) => [...state.snapshots.values()].some((snapshot) => snapshot.servers.get(server)?.kind === 'positive'));
+    if (holding.length !== 1) return null;
+    const state = holding[0]!;
+    const known = this.sources.get(`${state.key}\0${server}`);
+    if (!known) return null;
+    const facts = new Set<string>();
+    for (const snapshot of state.snapshots.values()) {
+      if (snapshot.servers.get(server)?.kind !== 'positive') continue;
+      const { environment, legacyConfigFile, localKey } = snapshot.context;
+      facts.add(this.mac(canonicalJson([environment, legacyConfigFile, localKey])));
+    }
+    return canonicalJson([state.key, state.revisions.get(server) ?? 0, known.sourceId, known.generation, [...facts].sort()]);
+  }
+  // P3-HD M2 end
 
   // A local-scope identity includes the `projects` key its launch captured, so two launches that captured different keys
   // contradict each other at observation, stickily; a user-scope identity never carries one.

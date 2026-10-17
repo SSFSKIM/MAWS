@@ -17,12 +17,17 @@ import type { DeadlineShape } from '../ipc';
 import type { EngineSession } from '../session';
 import { ConnectorCalls } from './calls';
 import { ConnectorStatusCache } from './provenance'; // P3-HD
+import { DirectCalls } from './direct-calls'; // P3-HD M2
+import { DirectConnectionPool } from './direct-client'; // P3-HD M2
 
 type HostConnectorCommand = { [N in keyof typeof ConnectorCommands]: (typeof ConnectorCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof ConnectorCommands];
 
 export const CONNECTORS_DEADLINE_SHAPES: Record<HostConnectorCommand, DeadlineShape> = {
   'connectors.grants': 'immediate', 'connectors.grant': 'immediate', 'connectors.revoke': 'immediate', 'connectors.check': 'immediate',
   'connectors.resolve': 'bounded', 'connectors.start': 'immediate', 'connectors.take': 'immediate', 'connectors.cancel': 'immediate',
+  // P3-HD M2: route D's, each answered from the operation table at once (a lookup or connection is an operation's)
+  'connectors.directResolve': 'immediate', 'connectors.directStart': 'immediate', 'connectors.directDiscover': 'immediate',
+  'connectors.directTake': 'immediate', 'connectors.directCancel': 'immediate', 'connectors.directClose': 'immediate',
 };
 
 export interface ConnectorsSurfaceDeps {
@@ -30,13 +35,16 @@ export interface ConnectorsSurfaceDeps {
   store: ArtifactStore | null; // null: the store failed to open this run
   calls?: ConnectorCalls; // tests
   statusCache?: ConnectorStatusCache; // P3-HD: tests
+  direct?: DirectCalls; // P3-HD M2: tests
 }
 
 function refused(reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}, code: 'invalid_input' | 'internal' = 'invalid_input'): HostCommandError {
   return new HostCommandError(ipcError(code, message, { reason, data } satisfies ArtifactRefusal));
 }
 
-export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onClientGone'>, deps: ConnectorsSurfaceDeps): { close(): void; statusCache: ConnectorStatusCache } {
+// `close` (the end of the host's shutdown) ends everything. P3-HD M2: `closeDirect`, which the shutdown starts beside the
+// sessions' stop and awaits, ends route D's work and resolves once every owned process of its connections is gone.
+export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onClientGone'>, deps: ConnectorsSurfaceDeps): { close(): void; closeDirect(): Promise<void>; statusCache: ConnectorStatusCache } {
   const { store } = deps;
   // P3-HD: route D's observations, host memory for main's attachment only (cleared with the operations below)
   const statusCache = deps.statusCache ?? new ConnectorStatusCache();
@@ -48,6 +56,10 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
       completed: (operationId) => void emit('connectors.operation', { operationId }),
       statusCache, // P3-HD
     });
+  // P3-HD M2: route D's host half over the same store and observations; its connections live for main's attachment
+  const direct =
+    deps.direct ??
+    new DirectCalls({ cache: statusCache, pool: new DirectConnectionPool(), store: () => store, completed: (operationId) => void emit('connectors.directOperation', { operationId }) });
   const storeOf = (): ArtifactStore => {
     if (!store) throw refused('unavailable', 'the artifact store could not be opened this run', {}, 'internal');
     return store;
@@ -72,11 +84,22 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
   serve('connectors.start', (input) => calls.start(input));
   serve('connectors.take', ({ operationId }) => ({ outcome: calls.take(operationId) }));
   serve('connectors.cancel', ({ operationId }) => ({ cancelled: calls.cancel(operationId) }));
+  // P3-HD M2 start
+  serve('connectors.directResolve', (input) => direct.resolve(input));
+  serve('connectors.directStart', (input) => direct.start(input));
+  serve('connectors.directDiscover', (input) => direct.discover(input));
+  serve('connectors.directTake', ({ operationId }) => ({ outcome: direct.take(operationId) }));
+  serve('connectors.directCancel', ({ operationId }) => ({ cancelled: direct.cancel(operationId) }));
+  serve('connectors.directClose', ({ connectionId, credentialEpoch }) => ({ cancelled: direct.withdraw(connectionId, credentialEpoch) }));
+  // P3-HD M2 end
 
   const stopFeed = store?.onConnectorGrantChange((change) => void emit('connectors.grantChanged', change));
+  // Main's going ends its attachment, not the host: everything of it goes now (P3-HD: the observations, and direct work
+  // with its credentials, whose processes' end follows), and the next attachment starts afresh.
   const stopGone = client.onClientGone(() => {
     calls.close();
     statusCache.clear(); // P3-HD
+    void direct.close(); // P3-HD M2
   });
   return {
     close: () => {
@@ -84,7 +107,9 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
       stopGone();
       calls.close();
       statusCache.clear(); // P3-HD
+      void direct.shutdown(); // P3-HD M2: already under way when the shutdown awaited closeDirect
     },
+    closeDirect: () => direct.shutdown(), // P3-HD M2
     statusCache, // P3-HD: M2's direct route reads it
   };
 }

@@ -91,6 +91,91 @@ export const ConnectorAuthorizationSchema = z.discriminatedUnion('granted', [
   z.strictObject({ granted: z.literal(false), refusal: z.enum(['notGranted', 'fingerprintChanged', 'wrongMode']) }),
 ]);
 
+// P3-HD start: route D's host half, main ↔ engine host (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md,
+// M2; P3 co-work Decision Log 98 and its follow-up). MAWS's own MCP connection runs in the host, beside the grant
+// store, so the last check of a call is synchronous with its actual transport write. Every command answers at once:
+// a resolution reads a config file, a discovery and a call connect a server, so each is an operation whose end is
+// `connectors.directOperation` (its id alone) and whose typed answer main takes with `connectors.directTake`. Answers
+// carry closed reasons, never an SDK's, a server's or a file's text, and never a header, env value or token. A
+// `credential` is main's transient access token for one verified HTTP resource (M3), never a refresh token or secret.
+const Directory = z.string().min(1).max(4096);
+const SourceId = z.uuid();
+const Generation = z.number().int().positive();
+const CredentialEpoch = z.number().int().nonnegative();
+// why a server is no verified direct source (./connectors/provenance.ts's refusals)
+export const DIRECT_SOURCE_REFUSALS = ['unobserved', 'ambiguous', 'engineOnly', 'unidentified', 'changed', 'unattested', 'unresolved', 'unavailable'] as const;
+// why a direct operation did not answer: `source` the verified source no longer stands (`sourceRefusal` says why
+// when a lookup said), `credential` its credential was withdrawn (`connectors.directClose`), `unauthorized` the server
+// refused it (main marks that credential unusable), `connection` the server could not be started, initialized or
+// reached, `capacity` a bound of the host's, `toolMissing` the live tools/list lacks it, `grant` the store's check,
+// `store` the store unavailable, `cancelled`/`timeout`, `transport` the exchange failed once started (never resent),
+// `notJson`/`tooLarge` the result.
+export const DIRECT_REASONS = ['source', 'credential', 'unauthorized', 'connection', 'capacity', 'toolMissing', 'grant', 'store', 'cancelled', 'timeout', 'transport', 'notJson', 'tooLarge'] as const;
+const Reason = z.enum(DIRECT_REASONS);
+export const DirectCredentialSchema = z.strictObject({ connectionId: z.uuid(), credentialEpoch: CredentialEpoch, accessToken: z.string().min(1).max(16_384), expiresAt: Time.optional() });
+export const DirectSourceSchema = z.strictObject({
+  directory: Directory, // the candidate directory it was observed in (the engine's attested spawn cwd)
+  sourceId: SourceId,
+  generation: Generation,
+  server: ConnectorToolRefSchema.shape.server,
+  scope: z.enum(['user', 'local']),
+  transport: z.enum(['stdio', 'http']),
+  path: z.string().min(1).max(4096), // the config file
+  entryPath: z.array(z.string().max(4096)).max(8), // the JSON location in it
+  observedAt: z.iso.datetime(),
+  resourceUrl: z.string().min(1).max(8192).optional(), // http: the resource a credential is bound to
+});
+export const DirectResolveInputSchema = z.strictObject({
+  operationId: OperationId,
+  artifactId: ArtifactId,
+  directories: z.array(Directory).min(1).max(16), // main's canonical candidates, in its order: the first that observed the server decides
+  server: ConnectorToolRefSchema.shape.server,
+  tool: ConnectorToolRefSchema.shape.tool.optional(), // absent: the source alone (an owner's discovery of a needs-auth server)
+});
+// With a tool named, ready only where an agreeing engine report listed it (its fingerprint and readOnly annotation;
+// the live tools/list still decides at the call); `toolMissing` where the source is verified but no report lists it.
+export const DirectResolveAnswerSchema = z.discriminatedUnion('ready', [
+  z.strictObject({ ready: z.literal(true), source: DirectSourceSchema, tool: z.strictObject({ fingerprint: ConnectorGrantRequestSchema.shape.fingerprint, readOnly: z.boolean() }).optional() }),
+  z.strictObject({ ready: z.literal(false), why: z.enum([...DIRECT_SOURCE_REFUSALS, 'toolMissing']) }),
+]);
+const DirectSourceRef = { directory: Directory, sourceId: SourceId, generation: Generation, server: ConnectorToolRefSchema.shape.server };
+// One tool run under the source a resolution answered and the grant main's check admitted.
+export const DirectStartSchema = z.strictObject({
+  operationId: OperationId,
+  artifactId: ArtifactId,
+  ...DirectSourceRef,
+  tool: ConnectorToolRefSchema.shape.tool,
+  arguments: z.record(z.string(), z.unknown()),
+  fingerprint: ConnectorGrantRequestSchema.shape.fingerprint,
+  mode: z.enum(CONNECTOR_GRANT_MODES),
+  credential: DirectCredentialSchema.optional(),
+});
+// The owner's discovery (Connect's bootstrap): initialize and tools/list on the source, never tools/call.
+export const DirectDiscoverSchema = z.strictObject({ operationId: OperationId, ...DirectSourceRef, credential: DirectCredentialSchema.optional() });
+const DirectRefusal = z.strictObject({ ok: z.literal(false), failure: z.literal('refused'), refusal: z.enum(CONNECTOR_REFUSAL_REASONS.revoked), reason: Reason });
+export const DirectCallOutcomeSchema = z.union([
+  z.strictObject({ ok: z.literal(true), result: JsonValueSchema }),
+  z.strictObject({ ok: z.literal(false), failure: z.enum(['unavailable', 'failed', 'tooLarge']), reason: Reason, sourceRefusal: z.enum(DIRECT_SOURCE_REFUSALS).optional() }),
+  DirectRefusal,
+]);
+export const DirectDiscoverAnswerSchema = z.union([
+  z.strictObject({ ok: z.literal(true), tools: z.array(z.strictObject({ name: ConnectorToolRefSchema.shape.tool, readOnly: z.boolean() })).max(1_024) }),
+  z.strictObject({ ok: z.literal(false), failure: z.enum(['unavailable', 'failed']), reason: Reason, sourceRefusal: z.enum(DIRECT_SOURCE_REFUSALS).optional() }),
+]);
+export const DirectOperationOutcomeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('resolve'), answer: DirectResolveAnswerSchema }),
+  z.strictObject({ kind: z.literal('call'), outcome: DirectCallOutcomeSchema }),
+  z.strictObject({ kind: z.literal('discover'), answer: DirectDiscoverAnswerSchema }),
+]);
+export type DirectSource = z.infer<typeof DirectSourceSchema>;
+export type DirectResolveAnswer = z.infer<typeof DirectResolveAnswerSchema>;
+export type DirectCallOutcome = z.infer<typeof DirectCallOutcomeSchema>;
+export type DirectDiscoverAnswer = z.infer<typeof DirectDiscoverAnswerSchema>;
+export type DirectOperationOutcome = z.infer<typeof DirectOperationOutcomeSchema>;
+export type DirectReason = (typeof DIRECT_REASONS)[number];
+const Started = z.strictObject({ operationId: OperationId });
+// P3-HD end
+
 const ToolOf = z.strictObject({ artifactId: ArtifactId, ...ConnectorToolRefSchema.shape });
 export const ConnectorGrantChangedSchema = z.strictObject({ ...ToolOf.shape, change: z.enum(['granted', 'revoked', 'consumed']) });
 
@@ -123,6 +208,18 @@ export const commands = {
   // null: no such operation (taken, cancelled, expired, or still running)
   'connectors.take': host(z.strictObject({ operationId: OperationId }), z.strictObject({ outcome: ConnectorOperationOutcomeSchema.nullable() })),
   'connectors.cancel': host(z.strictObject({ operationId: OperationId }), z.strictObject({ cancelled: z.boolean() })),
+  // P3-HD start: route D's host half (above); each answers at once, its operation's end is `connectors.directOperation`
+  'connectors.directResolve': host(DirectResolveInputSchema, Started),
+  'connectors.directStart': host(DirectStartSchema, Started),
+  'connectors.directDiscover': host(DirectDiscoverSchema, Started),
+  // null: no such operation (taken, cancelled, expired, or still running)
+  'connectors.directTake': host(z.strictObject({ operationId: OperationId }), z.strictObject({ outcome: DirectOperationOutcomeSchema.nullable() })),
+  'connectors.directCancel': host(z.strictObject({ operationId: OperationId }), z.strictObject({ cancelled: z.boolean() })),
+  // A credential withdrawn (its `credentialEpoch`, absent every epoch seen, and every earlier one of `connectionId`, for
+  // main's attachment), or with no `connectionId` all direct work: its operations end unannounced and its connections
+  // admit no further write before this answers, and a later start at a withdrawn epoch is refused. `cancelled`: ended.
+  'connectors.directClose': host(z.strictObject({ connectionId: z.uuid().optional(), credentialEpoch: CredentialEpoch.optional() }), z.strictObject({ cancelled: z.number().int().nonnegative() })),
+  // P3-HD end
 } as const satisfies Record<`connectors.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -132,4 +229,6 @@ export const events = {
   'connectors.operation': z.strictObject({ operationId: OperationId }),
   // the engine host's: a committed grant change (the store's onConnectorGrantChange), the tool and the change alone
   'connectors.grantChanged': ConnectorGrantChangedSchema,
+  // P3-HD: the engine host's: a direct operation ended (its answer waits for `connectors.directTake`)
+  'connectors.directOperation': z.strictObject({ operationId: OperationId }),
 } as const satisfies Record<`connectors.${string}`, z.ZodType>;
