@@ -226,6 +226,13 @@ describe('blankResumeStartupRejection / journalFrameShapes: the one inbound erro
     expect(failures(withResult({ errors: ['EACCES'] }))).toContain('errorMatch');
     expect(failures(withResult({ errors: undefined }))).toContain('errorMatch');
     expect(blankResumeStartupRejection(withResult({ errors: undefined, result: 'No conversation found with session ID: x' })).ok).toBe(true);
+    // the engine’s refusal text is the evidence: a subtype or code alone, or one beside other error text, is not
+    expect(failures(withResult({ subtype: 'no_conversation_found', errors: ['EACCES'] }))).toContain('errorMatch');
+    expect(failures(withResult({ subtype: 'No conversation found', errors: undefined }))).toContain('errorMatch');
+    expect(failures(withResult({ errors: ['no_conversation_found'] }))).toContain('errorMatch');
+    expect(failures(withResult({ errors: undefined, error: 'NoConversationFound' }))).toContain('errorMatch');
+    expect(journalFrameShapes(withResult({ subtype: 'no_conversation_found', errors: ['EACCES'] })).results[0]!.errorMatch).toBe(false);
+    expect(blankResumeStartupRejection(withResult({ errors: undefined, error: 'No conversation found with session ID: x' })).ok).toBe(true);
   });
 
   it('rejects unknown, missing, nonzero or non-numeric turns, cost and usage', () => {
@@ -239,6 +246,15 @@ describe('blankResumeStartupRejection / journalFrameShapes: the one inbound erro
     expect(failures(withResult({ usage: [] }))).toContain('usage');
     expect(failures(withResult({ usage: {} }))).toContain('usage');
     expect(failures(withResult({ usage: { output_tokens: 0 } }))).toContain('usage');
+    const noCreation = { ...usage, cache_creation_input_tokens: undefined };
+    const noRead = { ...usage, cache_read_input_tokens: undefined };
+    expect(failures(withResult({ usage: noCreation }))).toContain('usage');
+    expect(failures(withResult({ usage: noRead }))).toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, cache_creation_input_tokens: null } }))).toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, cache_read_input_tokens: null } }))).toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, input_tokens: null } }))).toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, cache_creation_input_tokens: 3 } }))).toContain('usage');
+    expect(blankResumeStartupRejection(withResult({ usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } })).ok).toBe(true);
     expect(failures(withResult({ usage: { ...usage, input_tokens: 1 } }))).toContain('usage');
     expect(failures(withResult({ usage: { ...usage, cache_read_input_tokens: 5 } }))).toContain('usage');
     expect(failures(withResult({ usage: { ...usage, server_tool_use: { web_search_requests: 2 } } }))).toContain('usage');

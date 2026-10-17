@@ -202,7 +202,8 @@ function zeroTree(value: unknown): boolean {
   return Object.values(value).every(zeroTree);
 }
 
-const NO_CONVERSATION = /no[ _-]?conversation[ _-]?found/i;
+const API_TOKEN_COUNTERS = ['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'] as const; // each explicitly 0 (null or absent fails)
+const NO_CONVERSATION = /no\s+conversation\s+found/i; // the engine’s refusal text, as it is written
 
 export interface ResultProjection {
   spawn: number; // the launch (1-based, by spawn rows before it) the frame arrived in; 0 before any
@@ -239,7 +240,7 @@ const projectRows = (rows: readonly { direction: string; frame: unknown }[]): Pr
 };
 
 const errorMatches = (frame: Record<string, unknown>): boolean =>
-  [frame.result, frame.subtype, frame.error, ...(Array.isArray(frame.errors) ? frame.errors : [])].some((text) => typeof text === 'string' && NO_CONVERSATION.test(text));
+  [frame.result, frame.error, ...(Array.isArray(frame.errors) ? frame.errors : [])].some((text) => typeof text === 'string' && NO_CONVERSATION.test(text));
 
 // What a journal's frames show of themselves, in safe fields only, in the journal's own order (callers sort its files).
 export function journalFrameShapes(rows: readonly { direction: string; frame: unknown }[]): FrameShapes {
@@ -267,8 +268,8 @@ export function journalFrameShapes(rows: readonly { direction: string; frame: un
 }
 
 // The one inbound frame an engine's refused resume may leave without being a model turn (Decision Log 42): exactly one
-// `result` in the journal, inbound, in the second launch, an error naming the missing conversation, with explicit zero
-// turns, cost and API-token usage (usage with input and output tokens present, every number in it and in a present
+// `result` in the journal, inbound, in the second launch, an error whose result/error text is the engine’s missing-conversation refusal, with explicit zero
+// turns, cost and API-token usage (usage with the four API token counters present and 0, every number in it and in a present
 // modelUsage zero), the same launch's init_failed row, and no assistant, stream or user frame anywhere. `failures` names
 // each unmet condition by a closed word.
 export function blankResumeStartupRejection(rows: readonly { direction: string; frame: unknown }[]): { ok: boolean; failures: string[]; result: ResultProjection | null } {
@@ -289,7 +290,7 @@ export function blankResumeStartupRejection(rows: readonly { direction: string; 
     if (!errorMatches(frame)) failures.push('errorMatch');
     if (frame.num_turns !== 0) failures.push('numTurns');
     if (frame.total_cost_usd !== 0) failures.push('totalCostUsd');
-    if (usage === null || typeof usage !== 'object' || Array.isArray(usage) || (usage as Record<string, unknown>).input_tokens !== 0 || (usage as Record<string, unknown>).output_tokens !== 0 || !zeroTree(usage)) failures.push('usage');
+    if (usage === null || typeof usage !== 'object' || Array.isArray(usage) || API_TOKEN_COUNTERS.some((counter) => (usage as Record<string, unknown>)[counter] !== 0) || !zeroTree(usage)) failures.push('usage');
     const modelUsage = frame.modelUsage;
     if (modelUsage !== undefined && (modelUsage === null || typeof modelUsage !== 'object' || Array.isArray(modelUsage) || !zeroTree(modelUsage))) failures.push('modelUsage');
   }
