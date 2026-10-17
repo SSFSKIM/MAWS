@@ -76,26 +76,38 @@ export class OwnedStdioTransport implements Transport {
     return this.child?.pid;
   }
 
+  // Ready once both the server and its group's lifeline started; either failing to start fails the start and ends
+  // the group.
   start(): Promise<void> {
     if (this.child || this.stopped) return Promise.reject(new DirectWireRefusal('the direct connection was already started'));
     const plan = stdioSpawnPlan(this.entry);
-    return new Promise<void>((resolve, reject) => {
-      const child = this.spawn(plan.server.command, plan.server.args, plan.server.options);
-      this.child = child;
-      child.once('error', () => {
-        reject(new DirectWireRefusal('the server could not be started'));
-        void this.close();
-      });
-      child.once('spawn', () => resolve());
-      child.once('exit', () => {
-        this.leaderExited = true;
-        void this.close();
-      });
-      child.stdin?.on('error', () => {}); // a write after the server's exit; the exit closes the connection
-      child.stdout?.on('error', () => {});
-      child.stdout?.on('data', (chunk: Buffer) => this.read(chunk));
-      if (child.pid !== undefined) this.watch(plan.lifeline(child.pid));
+    let failed!: (error: Error) => void;
+    const fail = new Promise<never>((_resolve, reject) => (failed = reject));
+    void fail.catch(() => {});
+    const failing = (words: string) => () => {
+      failed(new DirectWireRefusal(words));
+      void this.close();
+    };
+    const child = this.spawn(plan.server.command, plan.server.args, plan.server.options);
+    this.child = child;
+    const server = new Promise<void>((resolve) => child.once('spawn', () => resolve()));
+    child.once('error', failing('the server could not be started'));
+    child.once('exit', () => {
+      this.leaderExited = true;
+      void this.close();
     });
+    child.stdin?.on('error', () => {}); // a write after the server's exit; the exit closes the connection
+    child.stdout?.on('error', () => {});
+    child.stdout?.on('data', (chunk: Buffer) => this.read(chunk));
+    if (child.pid === undefined) return Promise.race([server, fail]);
+    let lifelineUp: Promise<void>;
+    try {
+      lifelineUp = this.watch(plan.lifeline(child.pid), failing('the server could not be given its lifeline'));
+    } catch {
+      failing('the server could not be given its lifeline')();
+      return fail;
+    }
+    return Promise.race([Promise.all([server, lifelineUp]).then(() => {}), fail]);
   }
 
   // No await before the write: the wire's check and stdin's write are one step.
@@ -114,12 +126,20 @@ export class OwnedStdioTransport implements Transport {
     return this.stopped;
   }
 
-  // Held open, never written, for as long as the group is owned.
-  private watch(plan: { command: string; args: string[]; options: SpawnOptions }): void {
+  // Held open, never written, for as long as the group is owned. Its failing to start, or its going while the group
+  // is still owned, is `lost`: the group no longer has its host-death cover, so it is ended now.
+  private watch(plan: { command: string; args: string[]; options: SpawnOptions }, lost: () => void): Promise<void> {
     const lifeline = this.spawn(plan.command, plan.args, plan.options);
     this.lifeline = lifeline;
-    lifeline.on('error', () => {}); // no shell: the group is still owned and closed by `stop`
+    const up = new Promise<void>((resolve) => lifeline.once('spawn', () => resolve()));
+    lifeline.once('error', () => {
+      if (this.lifeline === lifeline) lost();
+    });
+    lifeline.once('exit', () => {
+      if (this.lifeline === lifeline) lost();
+    });
     lifeline.stdin?.on('error', () => {});
+    return up;
   }
 
   private read(chunk: Buffer): void {

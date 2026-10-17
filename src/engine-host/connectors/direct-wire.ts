@@ -58,6 +58,12 @@ export class DirectWire {
     if (this.armed === request) this.armed = null;
   }
 
+  // Over without its answer: no cancellation is written for it any more.
+  settle(request: WireRequest): void {
+    request.answered = true;
+    this.forget(request);
+  }
+
   forget(request: WireRequest): void {
     if (request.id !== null && this.requests.get(request.id) === request) this.requests.delete(request.id);
   }

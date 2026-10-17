@@ -26,7 +26,7 @@ import type { VerifiedConnectorSource } from './provenance';
 import type { ConnectorLaunchEntry } from './source-entry';
 import { directHttpTransport } from './direct-http';
 import { OwnedStdioTransport } from './direct-stdio';
-import { DirectWire, WireTransport, type WireFault, type WireRequest } from './direct-wire';
+import { DirectWire, DirectWireRefusal, WireTransport, type WireFault, type WireRequest } from './direct-wire';
 
 export const DIRECT_POOL_BOUNDS = { connections: 64, idleMs: 5_000, terminateMs: 5_000, startupMs: 60_000, callTimeoutMs: 180_000, toolPages: 16, tools: 1_024 } as const;
 // One inbound frame or answer body: a whole result at H's bound, with room for its JSON-RPC envelope.
@@ -241,11 +241,22 @@ class Connection {
     try {
       return { ok: true, value: await pending };
     } catch (error) {
-      return this.failureOf(request, error, signal);
+      const outcome = this.failureOf(request, error, signal);
+      this.dispose(request, controller);
+      return outcome;
     } finally {
       signal.removeEventListener('abort', withdraw);
       this.wire.forget(request);
     }
+  }
+
+  // A request that failed without its answer (refused or failed at its send, an answer that could not be framed) is
+  // still open in the SDK, its response handler and abort listener kept. Its own abort disposes of them; the wire
+  // settles it first, so that abort writes no cancellation (it may have completed on the server; nothing claims it was
+  // cancelled). A timeout's or an operation's cancellation was already sent by then, once.
+  private dispose(request: WireRequest, controller: AbortController): void {
+    this.wire.settle(request);
+    if (!controller.signal.aborted) controller.abort(new DirectWireRefusal('the request ended without its answer'));
   }
 
   private failureOf(request: WireRequest, error: unknown, signal: AbortSignal): DirectFailure {
@@ -258,7 +269,12 @@ class Connection {
       this.retire();
       return failure('timeout', admitted, 'the server did not answer in time');
     }
-    if (!admitted || request.fault !== null || (error instanceof McpError && error.code === ErrorCode.ConnectionClosed)) return failure('unavailable', admitted, admitted ? 'the connection failed after the request was sent' : 'the request was not sent');
+    // No JSON-RPC answer arrived for it (a send that failed, a closed connection, a body that is not a framed message):
+    // a transport fault, and the connection is not reused. An answered error below is the server's, and it keeps it.
+    if (!request.answered) {
+      this.retire();
+      return failure('unavailable', admitted, admitted ? 'the connection failed after the request was sent' : 'the request was not sent');
+    }
     if (error instanceof McpError) return failure('failed', true, `the server answered error ${error.code}`);
     return failure('failed', true, 'the server answered something the client could not accept');
   }
@@ -270,13 +286,23 @@ class Connection {
     if (this.demand === 0 && this.state !== 'starting') void this.close();
   }
 
+  // The whole connect is bounded, its initialized notification included (the SDK's request timeout covers only the
+  // initialize request); at the bound the connection is closed.
   private async start(): Promise<DirectFailure | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<'expired'>((resolve) => (timer = setTimeout(() => resolve('expired'), this.bounds.startupMs)));
     try {
-      await this.client.connect(this.transport, { timeout: this.bounds.startupMs });
+      const outcome = await Promise.race([this.client.connect(this.transport, { timeout: this.bounds.startupMs }).then(() => 'connected' as const), expired]);
+      if (outcome === 'expired') {
+        void this.close();
+        return failure('unavailable', false, 'the server did not complete its start in time');
+      }
     } catch {
       const unauthorized = this.fault === 'unauthorized';
       void this.close();
       return failure(unauthorized ? 'unauthorized' : 'unavailable', false, unauthorized ? 'the server refused the credential' : 'the server could not be connected');
+    } finally {
+      clearTimeout(timer);
     }
     if (this.state === 'closed') return failure('unavailable', false, CLOSED);
     this.state = 'ready';

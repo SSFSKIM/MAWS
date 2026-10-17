@@ -188,6 +188,11 @@ export class FakeLifeline extends EventEmitter {
     this.killed = signal;
     return true;
   }
+
+  // It went by itself (a shell killed from outside, a resource failure after its start).
+  exitEarly(): void {
+    this.emit('exit', 1, null);
+  }
 }
 
 export class FakeProcesses {
@@ -197,6 +202,8 @@ export class FakeProcesses {
   readonly groups = new Map<number, Set<number>>(); // group id → live members
   behaviour: FakeBehaviour = { exitOnStdinEnd: true, exitOn: ['SIGTERM', 'SIGKILL'] };
   failSpawn = false;
+  // 'spawn': it starts; 'error': its spawn fails (EAGAIN); 'held': it starts only at `lifelines[i].emit('spawn')`
+  lifelineStart: 'spawn' | 'error' | 'held' = 'spawn';
   private nextPid = 4_000;
 
   constructor(private readonly server: FakeMcpServer) {}
@@ -205,6 +212,8 @@ export class FakeProcesses {
     if (command === '/bin/sh') {
       const lifeline = new FakeLifeline((this.nextPid += 10), args, options);
       this.lifelines.push(lifeline);
+      if (this.lifelineStart === 'spawn') process.nextTick(() => lifeline.emit('spawn'));
+      if (this.lifelineStart === 'error') process.nextTick(() => lifeline.emit('error', Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' })));
       return lifeline;
     }
     const pid = (this.nextPid += 10);

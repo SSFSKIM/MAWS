@@ -1,6 +1,7 @@
 // P3-HD M2: MAWS's own MCP connections (./direct-client.ts) driven through the real SDK Client 1.32.1, over the guarded
 // HTTP transport with an in-memory fetch and over the owned stdio transport with modelled processes
 // (./direct-test-fakes.ts). The write guard is proved where the bytes would leave: the fake fetch and the fake stdin.
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DirectConnectionPool, directConnectionKey, type DirectConnectionSpec, type DirectPoolOptions } from './direct-client';
 import { FakeMcpServer, FakeProcesses, fakeFetch, fakeSource } from './direct-test-fakes';
@@ -143,6 +144,110 @@ describe('a tools/call over HTTP', () => {
     const outcome = await lease.callTool(call, { admit: () => true, signal: new AbortController().signal });
     expect(outcome).toMatchObject({ ok: false, failure: 'failed', admitted: true });
     expect(JSON.stringify(outcome)).not.toContain('secret');
+  });
+});
+
+describe("the SDK's own request state", () => {
+  // The SDK Client of each connection, captured at its connect (Protocol keeps a response handler per open request).
+  function clients() {
+    const seen: Client[] = [];
+    const connect = Client.prototype.connect;
+    vi.spyOn(Client.prototype, 'connect').mockImplementation(function (this: Client, ...args: Parameters<Client['connect']>) {
+      seen.push(this);
+      return connect.apply(this, args);
+    });
+    return seen;
+  }
+  const handlers = (client: Client) => (client as unknown as { _responseHandlers: Map<number, unknown> })._responseHandlers.size;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('keeps no response handler for a call refused at its write, on a connection that stays open', async () => {
+    const seen = clients();
+    const { pool, http } = httpPool();
+    const lease = await leaseOf(pool, httpSpec());
+    expect(await lease.callTool(call, { admit: () => false, signal: new AbortController().signal })).toMatchObject({ failure: 'refused' });
+    await flush();
+    expect(handlers(seen[0]!)).toBe(0);
+    expect(http.seen.map((entry) => entry.message?.method)).not.toContain('notifications/cancelled');
+    expect((await lease.callTool(call, { admit: () => true, signal: new AbortController().signal })).ok).toBe(true); // still open
+  });
+
+  it('keeps no response handler for a stdio call refused at its write', async () => {
+    const seen = clients();
+    const { pool, processes } = stdioPool();
+    const lease = await leaseOf(pool, stdioSpec());
+    await lease.callTool(call, { admit: () => false, signal: new AbortController().signal });
+    await flush();
+    expect(handlers(seen[0]!)).toBe(0);
+    expect(processes.children[0]!.written().map((message) => message.method)).not.toContain('notifications/cancelled');
+  });
+
+  it('sends one cancellation, not two, for a call that timed out after its write', async () => {
+    vi.useFakeTimers();
+    const seen = clients();
+    const { pool, http, server } = httpPool();
+    server.holdCalls = true;
+    const lease = await leaseOf(pool, httpSpec());
+    const pending = lease.callTool(call, { admit: () => true, signal: new AbortController().signal, timeoutMs: 1_000 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await pending).toMatchObject({ failure: 'timeout', admitted: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(http.seen.filter((entry) => entry.message?.method === 'notifications/cancelled')).toHaveLength(1);
+    expect(handlers(seen[0]!)).toBe(0);
+  });
+});
+
+describe('an answer the transport cannot frame', () => {
+  const initializes = (http: ReturnType<typeof fakeFetch>) => http.seen.filter((entry) => entry.message?.method === 'initialize').length;
+
+  for (const [name, answer] of [
+    ['malformed JSON', () => new Response('{"jsonrpc":', { status: 200, headers: { 'content-type': 'application/json' } })],
+    ['an unexpected content type', () => new Response('hello', { status: 200, headers: { 'content-type': 'text/plain' } })],
+    ['a body that is no JSON-RPC message', () => new Response('{"hello":1}', { status: 200, headers: { 'content-type': 'application/json' } })],
+  ] as const) {
+    it(`(${name}) fails its call unanswered and retires the connection`, async () => {
+      const { pool, http } = httpPool((message) => (message?.method === 'tools/call' ? answer() : undefined));
+      const lease = await leaseOf(pool, httpSpec());
+      expect(await lease.callTool(call, { admit: () => true, signal: new AbortController().signal })).toMatchObject({ ok: false, failure: 'unavailable', admitted: true });
+      expect(http.calls()).toHaveLength(1);
+      await flush();
+      // it may have completed on the server: disposing of it claims no cancellation
+      expect(http.seen.map((entry) => entry.message?.method)).not.toContain('notifications/cancelled');
+      lease.release();
+      await leaseOf(pool, httpSpec());
+      expect(initializes(http)).toBe(2);
+    });
+  }
+
+  it('is distinct from an answered JSON-RPC error, which keeps the connection', async () => {
+    const { pool, http, server } = httpPool();
+    server.error = (message) => (message.method === 'tools/call' ? { code: -32602, message: 'no such tool' } : undefined);
+    const lease = await leaseOf(pool, httpSpec());
+    expect(await lease.callTool(call, { admit: () => true, signal: new AbortController().signal })).toMatchObject({ ok: false, failure: 'failed', admitted: true });
+    lease.release();
+    await leaseOf(pool, httpSpec());
+    expect(initializes(http)).toBe(1);
+  });
+});
+
+describe('a startup', () => {
+  it('is bounded as a whole, initialized notification included, and closed at its bound', async () => {
+    vi.useFakeTimers();
+    const { pool, http } = httpPool((message, init) =>
+      message?.method === 'notifications/initialized' ? new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))) : undefined,
+    );
+    let outcome: unknown = null;
+    void pool.acquire(httpSpec(), new AbortController().signal).then((value) => (outcome = value));
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(outcome).toBeNull();
+    expect(http.seen.map((entry) => entry.message?.method)).toEqual(['initialize', 'notifications/initialized']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toMatchObject({ ok: false, failure: 'unavailable', admitted: false });
+    await pool.settled();
+    expect(pool.size).toBe(0);
   });
 });
 

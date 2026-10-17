@@ -86,6 +86,53 @@ describe('OwnedStdioTransport', () => {
     expect(onclose).toHaveBeenCalledTimes(1);
   });
 
+  it('is not ready before its lifeline started', async () => {
+    const processes = new FakeProcesses(new FakeMcpServer());
+    processes.lifelineStart = 'held';
+    let ready = false;
+    void transport(processes).start().then(() => (ready = true));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(processes.children).toHaveLength(1);
+    expect(ready).toBe(false);
+    processes.lifelines[0]!.emit('spawn');
+    await vi.waitFor(() => expect(ready).toBe(true));
+  });
+
+  it('fails its start and ends the group when the lifeline cannot be started', async () => {
+    vi.useFakeTimers();
+    const processes = new FakeProcesses(new FakeMcpServer());
+    processes.lifelineStart = 'error';
+    const owned = transport(processes);
+    const onclose = vi.fn();
+    owned.onclose = onclose;
+    const started = owned.start().then(
+      () => 'ready',
+      () => 'failed',
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await started).toBe('failed');
+    expect(onclose).toHaveBeenCalledTimes(1);
+    expect(processes.children[0]!.stdinEnded).toBe(true);
+    await vi.advanceTimersByTimeAsync(STDIO_STOP.giveUpAfterMs);
+    expect(processes.alive(processes.children[0]!.pid)).toEqual([]);
+  });
+
+  it('closes, ending the group, when its lifeline exits while the group is owned', async () => {
+    vi.useFakeTimers();
+    const processes = new FakeProcesses(new FakeMcpServer());
+    const owned = transport(processes);
+    const onclose = vi.fn();
+    owned.onclose = onclose;
+    const started = owned.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await started;
+    processes.lifelines[0]!.exitEarly();
+    expect(onclose).toHaveBeenCalledTimes(1);
+    expect(processes.children[0]!.stdinEnded).toBe(true);
+    await vi.advanceTimersByTimeAsync(STDIO_STOP.giveUpAfterMs);
+    expect(processes.alive(processes.children[0]!.pid)).toEqual([]);
+  });
+
   it('delivers framed messages, skipping a broken line', async () => {
     const processes = new FakeProcesses(new FakeMcpServer());
     const owned = transport(processes);
