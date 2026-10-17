@@ -9,17 +9,20 @@ import type { ExtraChange } from '../document/history';
 import { listTabs, tabBody } from '../document/tabs';
 import { deletedBy, insertedBy, type ContentMap, type Doc, type Node } from '../yjs';
 import { YNode } from '../yjs/document';
-import { DATASETS_ROOT } from './datasets';
+import { DATASETS_ROOT, datasetIdFromSource } from './datasets';
 
-/** The chart blocks of `doc` by the dataset each names, in display order: tab by tab, each body in document order. */
+/** The chart blocks of `doc` by the dataset each names (read as the editor and the exporters read it), in display
+ * order: tab by tab, each body in document order. */
 function boundBlocks(doc: Doc): Map<string, { tabId: string; blockId: string }[]> {
   const out = new Map<string, { tabId: string; blockId: string }[]>();
   const walk = (node: Node, tabId: string): void => {
     for (const child of node.toArray()) {
       if (!(child instanceof YNode)) continue;
-      const source: unknown = child.getAttr('source');
       const blockId: unknown = child.getAttr('id');
-      if (child.name === 'chart' && typeof source === 'string' && typeof blockId === 'string') out.set(source, [...(out.get(source) ?? []), { tabId, blockId }]);
+      if (child.name === 'chart' && typeof blockId === 'string') {
+        const source = datasetIdFromSource(child.getAttr('source'));
+        if (source !== '') out.set(source, [...(out.get(source) ?? []), { tabId, blockId }]);
+      }
       else walk(child, tabId);
     }
   };

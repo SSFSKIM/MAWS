@@ -6,9 +6,10 @@
 import { describe, expect, it } from 'vitest';
 import { changeList, countChanges, documentChanges, mergeExtraChanges, openDiff, renderDiff } from '../document/history';
 import { AGENT_1, AGENT_2, HUMAN, HistoryHub, TAB, block, body } from '../document/history.fixture';
+import { importMarkdown } from '../document/import/markdown';
 import { schemaFor } from '../document/schema';
 import { addTab, createDocument } from '../document/tabs';
-import { removeDataset, setDataset, type DatasetDescriptor } from './datasets';
+import { datasetIdFromSource, removeDataset, setDataset, type DatasetDescriptor } from './datasets';
 import { datasetChanges } from './history';
 
 const actorOf = (key: string) => (key === HUMAN ? { kind: 'human' as const } : { kind: 'session' as const, appSessionId: key.slice('session:'.length) as never });
@@ -160,6 +161,49 @@ describe('a dashboard’s dataset changes in the history (P3-E2 M4)', () => {
       expect(datasetChanges(empty.prevDoc, empty.nextDoc, plain.attributions())).toEqual([]);
     } finally {
       empty.destroy();
+    }
+  });
+
+  // E2 M6 (the panel's supplemental high lens, E's Decision Log 40): an imported fence may pad its dataset id or wrap it
+  // in blank lines; the editor and the exporters read such a block as bound (`datasetIdFromSource`), and so must history
+  it('an imported fence with a padded id and blank lines is bound: its block is highlighted, reached and counted', () => {
+    const markdown = [
+      'Intro ^p1',
+      '',
+      `:::chart {spec-json='{"view":"bar","x":"region","y":"total","title":"Padded"}'}`,
+      '   sales   ',
+      ':::',
+      '^c1',
+      '',
+      `:::chart {spec-json='{"view":"table","title":"Blank lines"}'}`,
+      '',
+      'sales',
+      '',
+      ':::',
+      '^c2',
+    ].join('\n');
+    const hub = new HistoryHub();
+    hub.write(HUMAN, (doc) => {
+      createDocument(doc, { title: 'Main', id: TAB, body: importMarkdown(markdown) });
+      setDataset(doc, 'sales', descriptor('a', HUMAN));
+    });
+    const before = hub.version('before', HUMAN);
+    const sources = ['c1', 'c2'].map((id) => block(hub.connect(AGENT_1), id).getAttr('source') as unknown);
+    expect(sources.every((source) => typeof source === 'string' && source !== 'sales' && datasetIdFromSource(source) === 'sales')).toBe(true);
+    setDataset(hub.connect(AGENT_1), 'sales', descriptor('b', AGENT_1));
+    const after = hub.version('after', AGENT_1);
+    const { diff, extras } = compare(hub, before, after);
+    try {
+      expect(extras.map(({ key, tabId, blockId, who }) => ({ key, tabId, blockId, who }))).toEqual([
+        { key: 'dataset:sales:c1', tabId: TAB, blockId: 'c1', who: AGENT_1 },
+        { key: 'dataset:sales:c2', tabId: TAB, blockId: 'c2', who: AGENT_1 },
+      ]);
+      const pm = renderDiff(body(diff.nextDoc), diff.renderer);
+      expect(mergeExtraChanges(pm, changeList(pm), extras).map((change) => change.where)).toEqual(['chart#c1', 'chart#c2']);
+      expect(documentChanges(diff, extras).map((tab) => tab.body)).toEqual([2]);
+      expect(countChanges(diff, extras)).toBe(2);
+    } finally {
+      diff.destroy();
     }
   });
 });
