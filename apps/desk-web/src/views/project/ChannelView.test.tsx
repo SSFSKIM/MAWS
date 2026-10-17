@@ -13,7 +13,7 @@ import { ChannelView } from './ChannelView';
 
 const A = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
 const B = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a';
-const session = (id: string, alias: string): DeskSession => ({
+const session = (id: string, alias: string, title: string | null = null): DeskSession => ({
   project: PROJECT,
   session: id,
   alias,
@@ -21,6 +21,7 @@ const session = (id: string, alias: string): DeskSession => ({
   cwd: '/w',
   worktree: null,
   seat: '',
+  title,
   member: true,
   ended: null,
   charge: null,
@@ -116,4 +117,56 @@ it('says when the machine is read-only, before anything is sent: a send is recor
   expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false);
   // While a turn runs the note says why Steer is off too.
   expect(screen.getByTestId('composer-note').textContent).toBe('recorded, not delivered: mini is read-only · mini is read-only: it runs nothing sent from outside it');
+});
+
+it("heads a direct channel as a sidebar row names it — the title, its machine online, the alias under — and names it so below; by its alias without one", () => {
+  const long = 'Codex native Computer Use internals, its approval prompts, and the native helper';
+  const sessions = new Map([
+    [A, session(A, 'maws-4d', long)],
+    [B, session(B, 'maws-fe')],
+  ]);
+  const view = (id: string) => (
+    <DeskContext.Provider value={{ connection, member: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', sessions }}>
+      <ChannelView name="MAWS" channel={{ kind: 'session', session: id }} session={sessions.get(id)!} events={[]} />
+    </DeskContext.Provider>
+  );
+  const { rerender } = render(view(A));
+  const header = () => screen.getByTestId('channel-header');
+  const name = header().querySelector('[data-testid="session-name"]') as HTMLElement;
+  expect(name.textContent).toBe(long);
+  expect(name.className).toContain('truncate'); // cut to the header's width, and whole on hover
+  expect(name.title).toBe(long);
+  expect(name.parentElement?.textContent).toBe(`${long}@minionline`);
+  expect(header().querySelector('[data-testid="alias"]')?.textContent).toBe('maws-4d');
+  expect(screen.getByRole('textbox', { name: `Message ${long}` })).toBeTruthy();
+
+  rerender(view(B));
+  expect(header().querySelector('[data-testid="session-name"]')?.textContent).toBe('maws-fe');
+  expect(header().querySelector('[data-testid="machine"]')?.textContent).toBe('@mini');
+  expect(header().querySelector('[data-testid="alias"]')).toBeNull();
+  expect(header().querySelector('[data-testid="liveness"]')).toBeNull(); // the header as it was: no word
+  expect(screen.getByRole('textbox', { name: 'Message maws-fe' })).toBeTruthy();
+});
+
+it('gives the actions their width first: the name and the charge truncate in one group beside them, a confirmation included', () => {
+  const long = 'Codex native Computer Use internals, its approval prompts, and the native helper';
+  const titled = { ...session(A, 'maws-4d', long), charge: 'owner artifacts page' };
+  render(
+    <DeskContext.Provider value={{ connection, member: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', sessions: new Map([[A, titled]]) }}>
+      <ChannelView name="MAWS" channel={{ kind: 'session', session: A }} session={titled} events={[]} />
+    </DeskContext.Provider>,
+  );
+  const header = screen.getByTestId('channel-header');
+  const group = screen.getByTestId('channel-name');
+  const [first, actions] = [...header.children];
+  expect(header.children).toHaveLength(2);
+  expect(first).toBe(group);
+  // The group takes what the actions leave and no more: it grows from nothing, shrinks, and clips.
+  expect(group.className.split(' ')).toEqual(expect.arrayContaining(['flex-1', 'min-w-0', 'overflow-hidden']));
+  expect(group.querySelector('[data-testid="session-name"]')?.textContent).toBe(long);
+  expect(group.textContent).toContain('· owner artifacts page');
+  expect(actions.contains(screen.getByRole('button', { name: 'Retire…' }))).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Retire…' }));
+  expect(actions.textContent).toContain(`Retire ${long}?`);
+  expect(group.textContent).not.toContain('Retire');
 });

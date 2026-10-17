@@ -11,6 +11,7 @@ import { useStore } from 'zustand';
 import { address } from '../../conversation/address';
 import { complete, completionAt, insertTag, type Completion } from '../../conversation/completion';
 import { capabilities, turnRunning, type Capability } from '../../conversation/capabilities';
+import { sessionName } from '../../log/projection';
 import { useNarrow } from '../../shell/viewport';
 import type { DeskSession } from '../../shell/sessions';
 import { useProjectModels } from '../../state/models';
@@ -37,7 +38,7 @@ export function GroupComposer({ name }: { name: string }) {
   const [caret, setCaret] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
-  const addressable = [...sessions.values()].map((s) => ({ session: s.session, alias: s.alias, member: s.member, live: s.member && s.group !== 'ended' }));
+  const addressable = [...sessions.values()].map((s) => ({ session: s.session, alias: s.alias, member: s.member, live: s.member && s.group !== 'ended', title: s.title }));
   const at = completionAt(text, caret);
   const choices = at ? complete(at.query, addressable) : [];
   const pick = (choice: Completion) => {
@@ -79,8 +80,9 @@ export function GroupComposer({ name }: { name: string }) {
               }}
               className="flex min-h-10 cursor-pointer items-center gap-2 rounded-sm px-2.5 text-ui hover:bg-bg-hover"
             >
-              <span className="font-medium">{choice.tag}</span>
-              {choice.session && <span className="truncate text-ui-sm text-fg-muted">@{sessions.get(choice.session)?.machine}</span>}
+              <span className="shrink-0 font-medium">{choice.tag}</span>
+              {choice.title && <span className="min-w-0 truncate text-ui-sm text-fg">{choice.title}</span>}
+              {choice.session && <span className="shrink-0 text-ui-sm text-fg-muted">@{sessions.get(choice.session)?.machine}</span>}
               {!choice.session && <span className="text-ui-sm text-fg-muted">every live member</span>}
             </li>
           ))}
@@ -155,13 +157,13 @@ export function SessionComposer({ session }: { session: DeskSession }) {
   return (
     <div className="shrink-0 border-t border-border px-4 py-3" data-testid="composer">
       <textarea
-        aria-label={`Message ${session.alias}`}
+        aria-label={`Message ${sessionName(session)}`}
         rows={2}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={submitOnEnter(running && can.steer.can ? steer : send, narrow)}
         className={BOX}
-        placeholder={running && can.steer.can ? `Steer ${session.alias}${narrow ? '' : ' (Enter)'}, or Send to queue it` : `Message ${session.alias}`}
+        placeholder={running && can.steer.can ? `Steer ${sessionName(session)}${narrow ? '' : ' (Enter)'}, or Send to queue it` : `Message ${sessionName(session)}`}
       />
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         {/* On a phone the primary leads the row (05-phone.html, 5A): Steer while a turn runs, never beside Interrupt. */}
