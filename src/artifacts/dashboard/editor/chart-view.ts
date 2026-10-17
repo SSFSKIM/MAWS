@@ -19,6 +19,7 @@ import { captionOf, renderFailure, renderView, themeFrom, THEME_PROPERTIES, type
 import { parseSpec } from '../spec';
 import { DATASET_STATES, mismatchNotes, sourceLabel } from '../states';
 import { attachHover } from './hover';
+import { livePauseLabel, livePauseOf, type LiveDatasets } from './live'; // E3
 import type { SnapshotReader } from '../snapshots';
 
 /** What the source sheet opens on: the dataset as the view drew it (a copy of its descriptor, never a live lookup) and
@@ -34,6 +35,8 @@ export interface ChartRendererDeps {
   /** The name an actor's updates are credited to (the human "You", a session its title, else "Claude"). */
   actorName(actor: Actor): string;
   openSource(capture: SourceCapture): void;
+  /** E3 M3: the tab's live datasets, whose pause and clock a live view's label says (never a history preview's). */
+  live?: LiveDatasets;
 }
 
 const CONNECT_MS = 2_000; // how long a view drawn detached (a preview's editor's) waits to be placed before it draws anyway
@@ -137,7 +140,27 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
     let drawnKey: string | null = null; // the descriptor last asked for, as JSON ('' for none)
     let stopDoc = () => {};
 
+    // E3 M3: the label at the live clock with the live pause, for a view of a document that is not a retained version
+    const labelText = (descriptor: DatasetDescriptor): string => {
+      const by = descriptor.updated ? deps.actorName(descriptor.updated.by) : ''; // E3: a query never fetched names no author
+      const live = deps.live;
+      if (!live || descriptor.source.kind !== 'query' || env.displayed?.current().revision !== undefined) return sourceLabel(descriptor, by);
+      const pause = livePauseOf(live.snapshot().queries.get(datasetId));
+      return sourceLabel(descriptor, by, { now: live.now(), pause: pause && livePauseLabel(pause) });
+    };
+    const named = (button: HTMLElement) => button.setAttribute('aria-label', `Source of “${caption}”: ${button.textContent}`);
+    let labelled: DatasetDescriptor | null = null; // the descriptor the label names, relabelled as the live status moves
+    const relabel = () => {
+      const button = source.querySelector<HTMLElement>('button.dash-source-label');
+      if (released || !labelled || !button) return;
+      const text = labelText(labelled);
+      if (button.textContent === text) return;
+      button.textContent = text;
+      named(button);
+    };
+    const stopLive = deps.live?.subscribe(relabel) ?? (() => {});
     const label = (descriptor: DatasetDescriptor | null) => {
+      labelled = descriptor; // E3
       source.replaceChildren();
       if (!descriptor) {
         const missing = element('span', 'dash-source-label');
@@ -147,8 +170,8 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       }
       const button = element('button', 'dash-source-label');
       button.type = 'button';
-      button.textContent = sourceLabel(descriptor, descriptor.updated ? deps.actorName(descriptor.updated.by) : ''); // E3: a query never fetched names no author
-      button.setAttribute('aria-label', `Source of “${caption}”: ${button.textContent}`);
+      button.textContent = labelText(descriptor); // E3 M3
+      named(button);
       const captured: SourceCapture = { datasetId, descriptor: structuredClone(descriptor), view: { spec: structuredClone(spec), caption } };
       button.addEventListener('click', () => deps.openSource(captured));
       source.append(button);
@@ -249,6 +272,7 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       due.delete(recheck);
       stopDoc();
       stopDisplayed();
+      stopLive(); // E3
       detachHover();
       into.ownerDocument.removeEventListener('mousedown', pressed);
     };

@@ -11,6 +11,12 @@ export const DATASET_STATES = {
   staleSince: (at: number) => `stale since ${utcTime(at)}`,
   paused: 'paused: no live session',
   notFetched: 'not fetched', // E3: a configured query before its first successful fetch (no snapshot, no rows)
+  // E3 M3 (R4's closed permission strings): why a live query's refreshes pause, as its view says beside its state
+  notAllowed: 'paused: not allowed',
+  allowChanged: 'paused: changed since it was allowed',
+  mayWrite: 'paused: the tool may change data',
+  watchLimit: 'paused: too many live tools are open',
+  refreshFailed: 'paused: the last refresh did not reach the dashboard',
 } as const;
 
 // P3-E2 M3: what a view says about the rows it could not draw as asked, drawn in place or noted under the figure.
@@ -42,14 +48,18 @@ export const VIEW_STATES = {
  * The source label under a view (parent §2 "Views"): the dataset's title, where its snapshot came from, when and by whom
  * it was last bound, and its state when not `ok`. `by` is the actor's shown name (the human "You", a session its title).
  */
-export function sourceLabel(descriptor: DatasetDescriptor, by: string): string {
+export function sourceLabel(descriptor: DatasetDescriptor, by: string, live?: { now: number; pause?: string | null }): string {
   const { source, state, updated } = descriptor;
   const from = source.kind === 'file' ? `from ${source.name}` : `${source.server} · ${source.tool}`;
   // E3: a query never fetched has no fetch time or author to name
   const parts = [descriptor.title, from, updated ? `updated ${utcTime(updated.at)} by ${by}` : DATASET_STATES.notFetched];
-  if (state.status === 'stale') parts.push(DATASET_STATES.staleSince(state.at));
-  else if (state.status === 'paused') parts.push(DATASET_STATES.paused);
-  else if (state.status === 'error') parts.push(state.message ?? 'the last refresh failed');
+  // E3 M3 (R4): a live view's label at `now`: the stale time beside the operational state, and the live bridge's pause
+  // after it (a closed string, said once); without `live` (an export, a history preview) E2's label as it was
+  const staleSince = live ? datasetStateAt(descriptor, live.now).staleSince : undefined;
+  if (staleSince !== undefined) parts.push(DATASET_STATES.staleSince(staleSince));
+  const stored = state.status === 'stale' ? DATASET_STATES.staleSince(state.at) : state.status === 'paused' ? DATASET_STATES.paused : state.status === 'error' ? (state.message ?? 'the last refresh failed') : null;
+  if (stored !== null && (staleSince === undefined || stored !== DATASET_STATES.staleSince(staleSince))) parts.push(stored);
+  if (live?.pause && live.pause !== stored) parts.push(live.pause);
   return parts.join(' · ');
 }
 

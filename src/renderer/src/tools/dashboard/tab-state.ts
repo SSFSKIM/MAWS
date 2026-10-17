@@ -3,7 +3,9 @@
 // dashboard's own beside it: the snapshot reader every view and the source sheet share, the charts' renderer, the
 // source sheet's state, and the datasets of the document the editor shows (captured as values whenever it changes, so
 // the header's Datasets action reads what is on screen, a version's in history included, without keeping a preview's
-// document past its life). M4: its dataset changes join B's history through the tab's history hook.
+// document past its life). M4: its dataset changes join B's history through the tab's history hook. E3 M3: its live
+// datasets (./live-datasets.ts), following the live document and shown while the body is, its window's document is and
+// no history preview or suggestion review is (B's `previewing`, the header's read-only state).
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import { listDatasets, snapshotOf, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
 import { datasetChanges } from '@artifacts/dashboard/history';
@@ -13,10 +15,15 @@ import { SnapshotReader } from '@artifacts/dashboard/snapshots';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import { DocumentTabState, type DocumentTabDeps } from '../document/tab-state';
+import { LiveDatasetsController } from './live-datasets'; // E3
+import type { DashboardLiveDeps } from './live-start'; // E3
 
 /** E3: how long an open source sheet whose hold the host's restart took waits for the displayed document to sync again
  * before it says the snapshot is unavailable (the host has not come back). */
 export const RECAPTURE_SYNC_MS = 15_000;
+
+// E3 M3: a tab made without the window's Start (a test's) refuses it in words rather than starting anything.
+const NO_START: DashboardLiveDeps = { startSession: async () => ({ status: 'refused', appSessionId: null, words: 'Starting a session is not available here' }) };
 
 export class DashboardTabState {
   readonly artifactId: string;
@@ -24,6 +31,8 @@ export class DashboardTabState {
   readonly sheet = new SourceSheetState();
   readonly reader: SnapshotReader;
   readonly renderChart: ReturnType<typeof createChartRenderer>;
+  readonly live: LiveDatasetsController; // E3 M3
+  private bodyShown = false; // E3 M3: the body on screen and its window's document visible
   private shown: SheetDataset[] = [];
   private stopShown = () => {};
   // E3: how many times the live replica has come to be live and synced (a host restart's reconnection is one more)
@@ -36,21 +45,35 @@ export class DashboardTabState {
   constructor(
     target: ArtifactEditorTarget,
     private readonly deps: DocumentTabDeps,
+    liveDeps: DashboardLiveDeps = NO_START, // E3 M3
   ) {
     this.artifactId = target.artifactId;
+    this.live = new LiveDatasetsController({
+      artifactId: target.artifactId,
+      host: deps.host,
+      onGrantChanged: (listener) => deps.ipc.on('connectors.grantChanged', (change) => listener(change.artifactId)),
+      startSession: (previous) => liveDeps.startSession(target.artifactId, previous),
+      ...(liveDeps.openSession && { openSession: liveDeps.openSession as (appSessionId: string) => void }),
+      log: deps.log,
+    });
     this.document = new DocumentTabState(target, { ...deps, extraChanges: datasetChanges }); // M4: B's history counts its dataset changes
     this.reader = new SnapshotReader(deps.host, target.artifactId);
     this.renderChart = createChartRenderer({
       reader: this.reader,
       actorName: this.actorName,
       openSource: ({ datasetId, descriptor, view }) => this.openSheet([{ id: datasetId, descriptor, ...(view && { view }) }], datasetId),
+      live: this.live, // E3 M3
     });
     this.stopSync = this.document.subscribe(() => this.followSync());
     this.followSync();
   }
 
-  // E3: counts each arrival of the live replica at live and synced
+  // E3: counts each arrival of the live replica at live and synced. E3 M3: and follows the live document and the
+  // preview for the live datasets.
   private followSync(): void {
+    const { handle, previewing } = this.document.snapshot();
+    if (handle && !this.disposed) this.live.follow(handle.doc);
+    this.live.setShown(this.bodyShown && !previewing);
     const state = this.document.snapshot().document;
     const now = state?.phase === 'live' && state.synced;
     if (now && !this.synced) {
@@ -73,6 +96,21 @@ export class DashboardTabState {
     this.stopShown = onUpdate(doc, capture);
   };
 
+  /** E3 M3: the editor's report that its body is on screen with its window's document visible (false once it unmounts). */
+  setBodyShown = (shown: boolean): void => {
+    this.bodyShown = shown;
+    if (!this.disposed) this.live.setShown(shown && !this.document.snapshot().previewing);
+  };
+
+  /** E3 M3: the sheet opened again on the current capture of its datasets (each with the view it was opened from),
+   * `selected` shown: the owner's explicit way to a newer fetch or a replaced query. */
+  reopenSheet = (selected: string): void => {
+    const views = new Map(this.sheet.snapshot().datasets.map(({ id, view }) => [id, view]));
+    const ids = this.sheet.snapshot().open ? [...views.keys()] : [selected];
+    const datasets = this.shown.filter(({ id }) => ids.includes(id)).map((dataset) => ({ ...dataset, ...(views.get(dataset.id) && { view: views.get(dataset.id) }) }));
+    this.openSheet(datasets, selected);
+  };
+
   /** The header's Datasets: the sheet on the shown document's datasets, or closed when it is open. */
   toggleDatasets = (): void => {
     if (this.sheet.snapshot().open) this.sheet.close();
@@ -83,7 +121,7 @@ export class DashboardTabState {
   // opening (a painted view's cached hold duplicated at once) to its close; a hold the host's restart takes is answered by
   // one recapture of the latest, once the replica has synced again since the hold was taken
   private openSheet(datasets: readonly SheetDataset[], selected?: string): void {
-    this.sheet.open(datasets, selected, this.holdShown(datasets.map(({ descriptor }) => descriptor)), this.recapture(this.syncs));
+    this.sheet.open(datasets, selected, this.holdShown(datasets.map(({ descriptor }) => descriptor)), this.recapture(this.syncs), this.document.snapshot().previewing /* E3 M3 */);
   }
 
   private holdShown(descriptors: readonly DatasetDescriptor[]) {
@@ -122,6 +160,7 @@ export class DashboardTabState {
   dispose(): void {
     this.disposed = true; // E3
     this.stopSync();
+    this.live.dispose(); // E3 M3: its surface closes, ending its watches and calls
     for (const wake of [...this.syncWaiters]) wake();
     this.stopShown();
     this.stopShown = () => {};

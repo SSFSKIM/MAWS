@@ -28,9 +28,11 @@ export interface SourceSheetSnapshot {
   hold: 'pending' | 'held' | 'unavailable';
   /** E3: a new serial for each capture the opening shows (its first, then a recapture after the host's restart). */
   capture: number;
+  /** E3 M3: opened over a history preview: what it shows is a retained version's, with no live controls. */
+  preview: boolean;
 }
 
-const CLOSED: SourceSheetSnapshot = { open: false, datasets: [], selected: null, opened: 0, hold: 'held', capture: 0 };
+const CLOSED: SourceSheetSnapshot = { open: false, datasets: [], selected: null, opened: 0, hold: 'held', capture: 0, preview: false };
 
 const copiesOf = (datasets: readonly SheetDataset[]): SheetDataset[] => datasets.map(({ id, descriptor, view }) => ({ id, descriptor: structuredClone(descriptor), ...(view && { view: structuredClone(view) }) }));
 
@@ -47,12 +49,13 @@ export class SourceSheetState {
 
   /** Opens on `datasets` (copied), `selected` shown first (else the first, else none). E3: `hold`, the lease over the
    * snapshots they name, gates what the sheet shows until it is in place and is let go when the sheet closes or reopens;
-   * a hold lost while open (the host restarted) is answered by one `recapture` of the latest, else by `unavailable`. */
-  open(datasets: readonly SheetDataset[], selected?: string, hold?: SnapshotLease, recapture?: SheetRecapture): void {
+   * a hold lost while open (the host restarted) is answered by one `recapture` of the latest, else by `unavailable`.
+   * E3 M3: `preview`, the datasets are a history preview's (no live controls). */
+  open(datasets: readonly SheetDataset[], selected?: string, hold?: SnapshotLease, recapture?: SheetRecapture, preview = false): void {
     const copies = copiesOf(datasets);
     const shown = copies.find((dataset) => dataset.id === selected)?.id ?? copies[0]?.id ?? null;
     const opened = this.current.opened + 1;
-    this.take(hold ?? null, { open: true, datasets: copies, selected: shown, opened, hold: hold ? 'pending' : 'held', capture: 0 }, recapture);
+    this.take(hold ?? null, { open: true, datasets: copies, selected: shown, opened, hold: hold ? 'pending' : 'held', capture: 0, preview }, recapture);
   }
   select(id: string): void {
     if (this.current.datasets.some((dataset) => dataset.id === id)) this.set({ ...this.current, selected: id });
