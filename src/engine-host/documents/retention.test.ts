@@ -145,18 +145,42 @@ describe('the latest two distinct snapshots per query', () => {
     expect(retired(id, a)).toBe(true);
   });
 
-  it('never enrolls an ordinary asset a refresh deduplicates to, and never retires it', async () => {
+  it('an ordinary asset a refresh deduplicates to takes its place in the recency, and is never retired or collected', async () => {
     const id = await dashboard();
     const upload = await store().uploadAsset(id, bytes(CONTENT.A), { name: 'mine.json', mime: 'application/json' }, human);
     expect(await refresh(id, 'live', 'A')).toBe(upload.ref);
     expect(rowOf(id, upload.ref)).toMatchObject({ querySnapshot: 0, retiredAt: null });
-    expect(members(id, 'live')).toEqual([]);
+    expect(members(id, 'live')).toEqual([upload.ref]); // a member by recency, never by eligibility
     await refresh(id, 'live', 'B');
     await refresh(id, 'live', 'C');
     await refresh(id, 'live', 'D');
+    expect(members(id, 'live')).toHaveLength(2);
     expect(rowOf(id, upload.ref)).toMatchObject({ querySnapshot: 0, retiredAt: null });
     store().collectRetiredAssets();
     expect(rowOf(id, upload.ref)).toBeDefined();
+  });
+
+  it('managed A → managed B → ordinary C trims A and keeps B and C, C never collectible; the order survives a restart and C’s reuse counts', async () => {
+    const id = await dashboard();
+    const a = await refresh(id, 'live', 'A');
+    const b = await refresh(id, 'live', 'B');
+    const ordinary = await store().uploadAsset(id, bytes(CONTENT.C), { name: 'mine.json', mime: 'application/json' }, human);
+    expect(await refresh(id, 'live', 'C')).toBe(ordinary.ref);
+    expect(members(id, 'live')).toEqual([b, ordinary.ref]);
+    expect([retired(id, a), retired(id, b)]).toEqual([true, false]);
+    store().collectRetiredAssets(id);
+    expect(rowOf(id, a)).toBeUndefined();
+    close();
+    open();
+    const d = await refresh(id, 'live', 'D');
+    expect(members(id, 'live')).toEqual([ordinary.ref, d]); // B, the oldest, falls out
+    expect(retired(id, b)).toBe(true);
+    expect(await refresh(id, 'live', 'C')).toBe(ordinary.ref); // reused: the latest again
+    const e = await refresh(id, 'live', 'E');
+    expect(members(id, 'live')).toEqual([ordinary.ref, e]);
+    expect(retired(id, d)).toBe(true);
+    store().collectRetiredAssets();
+    expect(rowOf(id, ordinary.ref)).toMatchObject({ querySnapshot: 0, retiredAt: null });
   });
 });
 
@@ -249,15 +273,16 @@ describe('membership across the dataset lifecycle', () => {
     expect(retired(id, c)).toBe(true);
   });
 
-  it('a file dataset bound to a managed snapshot adopts it: ordinary, out of every membership, never collected', async () => {
+  it('a file dataset bound to a managed snapshot adopts it: ordinary and never collected, its place in the recency kept', async () => {
     const id = await dashboard();
     const a = await refresh(id, 'live', 'A');
     const b = await refresh(id, 'live', 'B');
     const at = Date.now();
     await store().writeWithAssets(id, agent, [], (doc) => setDataset(doc, 'file', { title: 'Kept', source: { kind: 'file', ref: a, name: 'kept.json', format: 'json', sha256: rowOf(id, a)!.sha256, size: 9 }, columns: [{ name: 'v', type: 'number' }], rows: 1, updated: { at, by: agent }, state: { status: 'ok', at } }));
     expect(rowOf(id, a)).toMatchObject({ querySnapshot: 0, retiredAt: null });
-    expect(members(id, 'live')).toEqual([b]);
-    await refresh(id, 'live', 'C');
+    expect(members(id, 'live')).toEqual([a, b]); // eligibility changed, recency kept
+    const c = await refresh(id, 'live', 'C');
+    expect(members(id, 'live')).toEqual([b, c]);
     await refresh(id, 'live', 'D');
     await store().service.writeAs(id, human, (doc) => removeDataset(doc, 'file'));
     store().collectRetiredAssets(id);
@@ -271,7 +296,7 @@ describe('membership across the dataset lifecycle', () => {
     const b = await refresh(id, 'live', 'B');
     expect((await store().uploadAsset(id, bytes(CONTENT.A), { name: 'again.json', mime: 'application/json' }, human)).ref).toBe(a);
     expect(rowOf(id, a)).toMatchObject({ querySnapshot: 0, retiredAt: null });
-    expect(members(id, 'live')).toEqual([b]);
+    expect(members(id, 'live')).toEqual([a, b]); // adopted, its recency kept
     const c = await refresh(other, 'live', 'C');
     expect((await store().copyAsset(id, b, other, human)).ref).not.toBe(c);
     expect((await store().copyAsset(id, b, id, human)).ref).toBe(b); // the copy deduplicates to the managed row: adopted
@@ -362,19 +387,20 @@ describe('versions, restore and duplicate', () => {
     expect(members(id, 'live')).toEqual([a, d]);
   });
 
-  it('a live duplicate copies the active rows, starts membership with the current snapshot and retires the copied candidate it does not need', async () => {
+  it('a live duplicate copies the snapshots its state names and the ordinary assets, never the query snapshots it cannot name; its import version pins its state alone', async () => {
     const id = await dashboard();
     const a = await refresh(id, 'live', 'A');
     const b = await refresh(id, 'live', 'B');
+    const picture = await store().uploadAsset(id, bytes('a picture'), { name: 'p.png', mime: 'image/png' }, human);
     const sourceHold = store().holdAsset(id, a); // a hold of the source is never copied
     const copy = await store().duplicate(id, {}, human);
-    expect(rowOf(copy.id, a)).toMatchObject({ querySnapshot: 1 });
+    expect(rowOf(copy.id, a)).toBeUndefined(); // the source's previous snapshot: its copy's state cannot name it
+    expect(rowOf(copy.id, b)).toMatchObject({ querySnapshot: 1, retiredAt: null });
+    expect(rowOf(copy.id, picture.ref)).toMatchObject({ querySnapshot: 0 });
     expect(members(copy.id, 'live')).toEqual([b]);
-    expect(retired(copy.id, a)).toBe(true);
     const imported = store().listVersions(copy.id).find((version) => version.kind === 'import')!;
-    expect(versionRefs(copy.id, imported.id)).toEqual([b]);
-    store().collectRetiredAssets(copy.id);
-    expect(rowOf(copy.id, a)).toBeUndefined(); // the source's hold of A did not travel with the copy
+    expect(versionRefs(copy.id, imported.id).sort()).toEqual([b, picture.ref].sort());
+    expect(existsSync(fileOf(copy.id, rowOf(id, a)!.sha256))).toBe(false);
     expect(members(id, 'live')).toEqual([a, b]); // the source unchanged
     expect(rowOf(id, a)).toMatchObject({ retiredAt: null });
     sourceHold.release();
@@ -397,6 +423,19 @@ describe('versions, restore and duplicate', () => {
     expect(members(copy.id, 'live')).toEqual([a]);
     const imported = store().listVersions(copy.id).find((version) => version.kind === 'import')!;
     expect(versionRefs(copy.id, imported.id)).toEqual([a]);
+  });
+
+  it('a version duplicate leaves out the version’s pinned snapshots its state cannot name', async () => {
+    const id = await dashboard();
+    const a = await refresh(id, 'live', 'A');
+    const b = await refresh(id, 'live', 'B');
+    const v2 = (await store().createVersion(id, { kind: 'named', actor: human, label: 'With B' }))!;
+    expect(versionRefs(id, v2).sort()).toEqual([a, b].sort()); // A was still a member when v2 was taken
+    const copy = await store().duplicate(id, { versionId: v2 }, human);
+    expect(rowOf(copy.id, a)).toBeUndefined();
+    expect(members(copy.id, 'live')).toEqual([b]);
+    const imported = store().listVersions(copy.id).find((version) => version.kind === 'import')!;
+    expect(versionRefs(copy.id, imported.id)).toEqual([b]);
   });
 });
 

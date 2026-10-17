@@ -451,7 +451,8 @@ export class ArtifactStore {
     const at = this.now();
     const content = isDocKind(source.kind) ? null : this.byteContentOf(source, version ? (JSON.parse(version.content!) as ContentRef) : this.contentRef(artifactId).ref);
     const state = !isDocKind(source.kind) ? null : version ? this.versions.state(artifactId, version.id) : this.service.readState(artifactId).state;
-    const assets = version ? (JSON.parse(version.assetRefs) as string[]) : this.assetIds(artifactId);
+    const pinned = version ? (JSON.parse(version.assetRefs) as string[]) : this.assetIds(artifactId);
+    const assets = state ? this.retention.copiedAssets(artifactId, pinned, state) : pinned; // E3: never a snapshot its state cannot name
     const entity = () => {
       this.storage.actorInBatch(actor, at);
       this.storage.db

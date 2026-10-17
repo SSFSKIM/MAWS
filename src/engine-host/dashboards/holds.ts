@@ -5,23 +5,10 @@
 // nothing, and the client's going releases them all (a hold taken while it went is released at once), so no hold
 // outlives the main process that owns it. Main binds a window's handle to one of these (src/main/dashboard/holds.ts).
 import { randomUUID } from 'node:crypto';
-import { listDatasets, snapshotOf } from '@artifacts/dashboard/datasets';
-import { applyV2, newDoc } from '@artifacts/yjs';
 import { isDocKind } from '@shared/artifacts/entity';
 import { ArtifactStoreError } from '../documents/errors';
-import type { AssetHold } from '../documents/retention';
+import { datasetRefsOf, type AssetHold } from '../documents/retention';
 import type { ArtifactStore } from '../documents/store';
-
-/** The snapshot refs a document state's descriptors name (a query never fetched names none). */
-export function datasetRefsOf(state: Uint8Array): string[] {
-  const doc = newDoc();
-  try {
-    applyV2(doc, state);
-    return [...new Set(listDatasets(doc).flatMap(({ descriptor }) => snapshotOf(descriptor)?.ref ?? []))];
-  } finally {
-    doc.destroy();
-  }
-}
 
 export class ConnectionHolds {
   private readonly held = new Map<string, AssetHold>();

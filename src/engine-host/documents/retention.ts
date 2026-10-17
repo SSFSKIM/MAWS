@@ -6,7 +6,9 @@
 // it: a query's membership (the latest two distinct snapshots each query published, `artifact_query_snapshots`, ordered
 // by `lastUsedSeq`, the revision that last published it, so a reuse counts and the order survives a restart), a current
 // descriptor of the dashboard (any dataset, a shared or deduplicated ref included), a retained version's `assetRefs`, or
-// a hold. Every other asset is never a candidate. What falls out of the first two is retired (`retiredAt`) in the very
+// a hold. Every other asset is never a candidate. Membership is recency, not eligibility (the M1 review): a snapshot a
+// query published that deduplicated to an ordinary asset holds its place among the latest two, and an adopted one keeps
+// its place, yet neither is ever retired or collected. What falls out of the first two is retired (`retiredAt`) in the very
 // frame that dropped it: later versions leave it out (`ArtifactStore.assetIds`), earlier versions keep naming it. A
 // retired asset is collected (its row, then its bytes) only after a commit, and only when no current descriptor, no
 // version and no hold names it at that moment: after a hold's release, the nightly thinning, the owner's prune, the
@@ -15,8 +17,8 @@
 // Membership follows the dataset (`reconcile`, from the dashboard kind's hooks in every write's frame): a dataset
 // removed, no longer a query, or configured anew (its snapshot null) loses its membership; a restore resets each query's
 // membership to the one snapshot its restored descriptor names; a query with a snapshot and no membership (a copy's, a
-// restore's) is enrolled with it. A file dataset naming a managed asset adopts it: ordinary, out of every membership,
-// never collected; an upload or a copy deduplicating to one adopts it too (store.ts).
+// restore's) is enrolled with it. A file dataset naming a managed asset adopts it: ordinary, never collected, its place in
+// any query's recency kept; an upload or a copy deduplicating to one adopts it too (store.ts).
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { listDatasets, snapshotOf } from '@artifacts/dashboard/datasets';
@@ -62,6 +64,17 @@ function currentOf(doc: Doc): { refs: Set<string>; queries: Map<string, string>;
   return { refs, queries, files };
 }
 
+/** The snapshot refs a document state's descriptors name (a query never fetched names none). */
+export function datasetRefsOf(state: Uint8Array): string[] {
+  const doc = newDoc();
+  try {
+    applyV2(doc, state);
+    return [...currentOf(doc).refs];
+  } finally {
+    doc.destroy();
+  }
+}
+
 export class SnapshotRetention {
   // per artifact: the hold groups open and how many of them hold each ref
   private readonly holds = new Map<string, { groups: Set<object>; refs: Map<string, number> }>();
@@ -102,21 +115,28 @@ export class SnapshotRetention {
     return this.db.prepare('SELECT 1 FROM artifact_assets WHERE artifactId = ? AND assetId = ? AND querySnapshot = 1').get(artifactId, assetId) !== undefined;
   }
 
+  /** A duplicate's assets (the M1 review's ruling): of `assetIds`, every ordinary asset and only the query snapshots the
+   * copied `state` names, so its first version pins its state alone and no irrelevant retired snapshot travels. */
+  copiedAssets(artifactId: string, assetIds: string[], state: Uint8Array): string[] {
+    const named = new Set(datasetRefsOf(state));
+    const managed = new Map(this.managed(artifactId).map((row) => [row.assetId, refOf(row.name)]));
+    return assetIds.filter((assetId) => !managed.has(assetId) || named.has(managed.get(assetId)!));
+  }
+
   // ── inside a write's frame ──
 
-  /** Adoption: the managed asset becomes ordinary (active, out of every membership, never collected). */
+  /** Adoption: the managed asset becomes ordinary (active, never collected); its place in any query's recency stays. */
   adoptInFrame(artifactId: string, assetId: string): void {
     this.db.prepare('UPDATE artifact_assets SET querySnapshot = 0, retiredAt = NULL WHERE artifactId = ? AND assetId = ?').run(artifactId, assetId);
-    this.db.prepare('DELETE FROM artifact_query_snapshots WHERE artifactId = ? AND assetId = ?').run(artifactId, assetId);
   }
 
   /** `ArtifactStore.retainQuerySnapshots`: `ref` published by `datasetId` at `revision`, the query trimmed to its latest
-   * two, and whatever no longer protected retired, in the caller's frame. An ordinary asset is never enrolled. */
+   * two, and whatever no longer protected retired, in the caller's frame. An ordinary asset takes its place in the
+   * recency and is never retired. */
   retain(artifactId: string, datasetId: string, ref: string, revision: number): void {
     this.requireFrame('retainQuerySnapshots');
     const row = this.row(artifactId, ref);
     if (!row) throw new ArtifactStoreError('notFound', `no asset ${ref} in ${artifactId}`, { artifactId, ref });
-    if (row.querySnapshot !== 1) return;
     this.db
       .prepare('INSERT INTO artifact_query_snapshots (artifactId, datasetId, assetId, lastUsedSeq) VALUES (?, ?, ?, ?) ON CONFLICT (artifactId, datasetId, assetId) DO UPDATE SET lastUsedSeq = MAX(lastUsedSeq, excluded.lastUsedSeq)')
       .run(artifactId, datasetId, row.assetId, revision);
@@ -129,14 +149,12 @@ export class SnapshotRetention {
   /** The dashboard kind's hook after each write (`restored`: a restore's, which resets each query to its one snapshot). */
   reconcile(artifactId: string, doc: Doc, options: { restored?: boolean } = {}): void {
     this.requireFrame('reconcileQuerySnapshots');
-    if (this.db.prepare('SELECT 1 FROM artifact_assets WHERE artifactId = ? AND querySnapshot = 1 LIMIT 1').get(artifactId) === undefined) return;
+    const managed = this.db.prepare('SELECT 1 FROM artifact_assets WHERE artifactId = ? AND querySnapshot = 1 LIMIT 1').get(artifactId) !== undefined;
+    if (!managed && this.db.prepare('SELECT 1 FROM artifact_query_snapshots WHERE artifactId = ? LIMIT 1').get(artifactId) === undefined) return;
     const current = currentOf(doc);
-    const byRef = new Map(this.managed(artifactId).map((row) => [refOf(row.name), row]));
     for (const ref of current.files) {
-      const row = byRef.get(ref);
-      if (!row) continue;
-      this.adoptInFrame(artifactId, row.assetId);
-      byRef.delete(ref);
+      const row = this.row(artifactId, ref);
+      if (row?.querySnapshot === 1) this.adoptInFrame(artifactId, row.assetId);
     }
     const memberships = this.db.prepare('SELECT datasetId, assetId FROM artifact_query_snapshots WHERE artifactId = ?').all(artifactId) as { datasetId: string; assetId: string }[];
     const drop = this.db.prepare('DELETE FROM artifact_query_snapshots WHERE artifactId = ? AND datasetId = ? AND assetId = ?');
@@ -148,8 +166,8 @@ export class SnapshotRetention {
     const revision = this.store.revision(artifactId);
     const enroll = this.db.prepare('INSERT INTO artifact_query_snapshots (artifactId, datasetId, assetId, lastUsedSeq) VALUES (?, ?, ?, ?)');
     for (const [datasetId, ref] of current.queries) {
-      const row = byRef.get(ref);
-      if (row && !enrolled.has(datasetId)) enroll.run(artifactId, datasetId, row.assetId, revision);
+      const row = enrolled.has(datasetId) ? undefined : this.row(artifactId, ref);
+      if (row) enroll.run(artifactId, datasetId, row.assetId, revision);
     }
     this.sweep(artifactId, current.refs);
   }
