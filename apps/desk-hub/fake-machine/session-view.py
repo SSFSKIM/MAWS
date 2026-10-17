@@ -9,7 +9,8 @@ each group below names the row shapes it copies (DC8's shared vectors, dx4/dx4-j
 row's uuid under its group, with those sources. What it adds:
 
 - older history: earlier turns of the same session, before the recorded segment, so the main transcript is more than
-  one snapshot at the fake machine's budget (SNAPSHOT_ROW_BUDGET);
+  one snapshot at the fake machine's budget (SNAPSHOT_ROW_BUDGET), with an automatic compaction between two of them
+  (its boundary and summary), so paging to the first row crosses it;
 - in the first turn, three background shells and a monitor started, and an async question of the ask mod asked;
 - in alpha's transcript, a nested agent launched in the background, its own transcript, and its notification;
 - mid-turn, a shell's completion notice, a monitor's event notice, and a `task_status` naming the monitor's file;
@@ -215,6 +216,7 @@ def at(row, ms):
 # result, `toolUseResult {type: text, file}`, contents replaced by generated lines)
 history = []
 parent = None
+COMPACTED_AFTER = 6  # the older turn after which the session compacted: early enough that pages, not the snapshot, hold it
 base = datetime(2026, 10, 15, 16, 30, tzinfo=timezone.utc).timestamp() * 1000
 
 
@@ -240,6 +242,21 @@ for k in range(1, 25):
     for r in (prompt, call, res, reply):
         history.append(note("older history", r))
     parent = reply["uuid"]
+    if k == COMPACTED_AFTER:
+        # An automatic compaction between two turns of the older history (shapes: MAWS's committed disk fixture
+        # test/fixtures/transcripts/w1-compact.jsonl lines 28-29, the boundary and its summary): the boundary starts a
+        # new chain (parentUuid null, logicalParentUuid the last row before it), the summary hangs from it, and the next
+        # prompt from the summary. The rows before it stay in the same file, so paging reaches them across it.
+        boundary = {"parentUuid": None, "logicalParentUuid": parent, "isSidechain": False, "type": "system", "subtype": "compact_boundary",
+                    "content": "Conversation compacted", "isMeta": False, "timestamp": hts(2 * k, 30), "uuid": uid("h-compact-boundary"),
+                    "level": "info", "compactMetadata": {"trigger": "auto", "preTokens": 160214, "durationMs": 7309, "postTokens": 9873, "cumulativeDroppedTokens": 150341},
+                    **ENVELOPE}
+        summary = {"parentUuid": boundary["uuid"], "isSidechain": False, "promptId": uid("h-compact-prompt-id"), "type": "user",
+                   "message": {"role": "user", "content": "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. Primary Request and Intent:\n   The human asked for the notes, one part at a time; parts 01 to %02d were read and summarized.\n\n2. Pending Tasks:\n   - Read the remaining parts as asked." % k},
+                   "isVisibleInTranscriptOnly": True, "isCompactSummary": True, "uuid": uid("h-compact-summary"), "timestamp": hts(2 * k, 30), **ENVELOPE}
+        for r in (boundary, summary):
+            history.append(note("older history", r))
+        parent = summary["uuid"]
 
 # ---- the first turn: three background shells and a monitor, then an async question (shapes: the vectors' case
 # "background shells and monitors" — Bash with run_in_background, its result with toolUseResult.backgroundTaskId and the
@@ -452,7 +469,7 @@ write(os.path.join(OUT, "tasks", "%s.output" % SHELLS[0][0]), suite_log + "96 te
 write(os.path.join(OUT, "tasks", "%s.output" % MONITOR[0]), "FAIL test_plane\n")
 
 SOURCES = {
-    "older history": "the recording's own user prompt and assistant text rows; a real 2.1.300 Read call and its result (toolUseResult {type: text, file}), contents generated",
+    "older history": "the recording's own user prompt and assistant text rows; a real 2.1.300 Read call and its result (toolUseResult {type: text, file}), contents generated; the compaction's boundary and summary from MAWS's committed disk fixture test/fixtures/transcripts/w1-compact.jsonl (lines 28-29), trigger auto, summary text generated",
     "background shells and a monitor": "dx4-jobs.json case 'background shells and monitors' (Bash run_in_background, its result's backgroundTaskId and 'Output is being written to:' text, Monitor and its result's {taskId, timeoutMs, persistent}); the envelope of the recording's own rows",
     "the ask mod's async question": "a real 2.1.300 mcp__doperpowers__AskUserQuestion call with async true and its accepted result (sminos.py ASYNC_RESULT); the raised event's form as DX4 and the recording's own raised lines carry it",
     "the nested agent, in its parent's transcript": "the recording's own Agent call and async_launched result in alpha's envelope; dx4-jobs.json's nested metas (parentAgentId, spawnDepth 2) and queued_command notification; DX5 agent spawn and stop as the recording's bridge wrote them",

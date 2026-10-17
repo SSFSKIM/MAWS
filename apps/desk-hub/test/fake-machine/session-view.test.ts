@@ -83,6 +83,16 @@ describe('the session-view recording', () => {
     const bytes = recording.rows.main.reduce((n, r) => n + JSON.stringify(r).length, 0);
     expect(bytes).toBeGreaterThan(SNAPSHOT_ROW_BUDGET);
     expect(recording.rows.main.slice(0, synthesized('older history').length).map((r) => r.uuid)).toEqual(synthesized('older history'));
+    // An automatic compaction inside the older history, its boundary and summary as the engine writes them, with rows
+    // before it in the same file, and far enough back that a snapshot at the default budget never reaches it: paging to
+    // the first row crosses it (DC9's G2, the plan's M6).
+    const boundary = recording.rows.main.findIndex((r) => r.type === 'system' && r.subtype === 'compact_boundary');
+    expect(boundary).toBeGreaterThan(0);
+    expect(boundary).toBeLessThan(synthesized('older history').length);
+    expect(recording.rows.main[boundary]).toMatchObject({ parentUuid: null, logicalParentUuid: recording.rows.main[boundary - 1].uuid, compactMetadata: { trigger: 'auto' } });
+    expect(recording.rows.main[boundary + 1]).toMatchObject({ type: 'user', isCompactSummary: true, parentUuid: recording.rows.main[boundary].uuid });
+    const newer = recording.rows.main.slice(boundary).reduce((n, r) => n + JSON.stringify(r).length, 0);
+    expect(newer).toBeGreaterThan(SNAPSHOT_ROW_BUDGET);
     // A nested agent, spawned by alpha, its meta and the bridge's spawn naming its parent.
     expect(recording.meta[NESTED]).toMatchObject({ parentAgentId: ALPHA, spawnDepth: 2, requestShape: 'background' });
     expect(recording.steps.find((s) => s.k === 'agent' && s.agentId === NESTED)).toMatchObject({ spawn: { parentAgentId: ALPHA, background: true } });

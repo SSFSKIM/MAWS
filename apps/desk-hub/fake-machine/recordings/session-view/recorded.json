@@ -15,7 +15,7 @@
     "built by": "fake-machine/session-view.py from recordings/two-subagents",
     "rows": {
       "older history": {
-        "source": "the recording's own user prompt and assistant text rows; a real 2.1.300 Read call and its result (toolUseResult {type: text, file}), contents generated",
+        "source": "the recording's own user prompt and assistant text rows; a real 2.1.300 Read call and its result (toolUseResult {type: text, file}), contents generated; the compaction's boundary and summary from MAWS's committed disk fixture test/fixtures/transcripts/w1-compact.jsonl (lines 28-29), trigger auto, summary text generated",
         "uuids": [
           "d26aa443-b8f9-54a3-9994-b48a7abed810",
           "0ff4397e-484a-518f-9653-5a81c8291837",
@@ -41,6 +41,8 @@
           "2fd64a96-7b57-55db-9c4a-d3936b106f37",
           "df2bdd87-79ce-5dbf-b9af-4a17df5b6b3a",
           "2a6c3afd-e867-559f-aff8-7252c0fbfc6c",
+          "58643cd8-050f-5300-8f4e-2b09f0fdd094",
+          "b8533d75-7aab-54be-bf0f-284860691e85",
           "1c33bb25-8e47-59f3-ba9c-b7c55e7826b1",
           "082a7115-646d-5e5d-8775-ca32e19c379e",
           "84b2071c-a626-5dd8-99bc-fe051d29be7b",
