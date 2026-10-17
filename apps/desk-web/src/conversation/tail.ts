@@ -20,6 +20,7 @@
 // the view holds the transcript back to its first row. A send whose journey ended without a row (recorded, refused by
 // a read-only machine, failed) stays at the tail whatever history is held.
 import type { Delivery, JsonObject, LogEvent, Recipient } from 'desk-hub/protocol';
+import { deliveredLines } from './delivery-frame';
 import { failureOf, resultOf } from './outcome';
 import { failureText } from './words';
 import { deliveryKey, type OutboxItem, type RpcEntry } from '../project/conversation';
@@ -77,32 +78,6 @@ export function framePattern(event: { writer: string; seq: number; from?: unknow
   if (str(event.msg_id) !== '') return new RegExp(`^${escape(`[sminos message from ${str(event.via) || str(event.from)} id=${str(event.msg_id)}]`)}$`);
   const tail = ` ${writerShort(event.writer)}:${event.seq} from ${str(event.from)} → ${event.wake === true ? '@all' : '@you'}`;
   return new RegExp(`^\\[sminos chat .+${escape(tail)}(?: \\| unread [1-9][0-9]*)?\\]$`);
-}
-
-const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
-
-/**
- * The first lines of the prompts a row carries that may be a delivery: a user row's text or text blocks (never a
- * tool's result), a queued command's prompt. The row must mark a delivery's provenance: the bridge submits as a plugin
- * (`$.prompt.submit({asUser: true})` writes a user row whose `origin` is `{kind: "plugin", asUser: true}`), and the
- * other last hops queue the prompt as a peer's (`origin.kind` `peer`). A prompt typed at the terminal (`human`), or a
- * row that marks no origin — which MAWS reads as an ordinary prompt — is never one; the web's sends exist only on
- * engines with the bridge, which mark it.
- */
-function deliveredLines(row: JsonObject): string[] {
-  const firstLine = (text: string) => text.split('\n', 1)[0];
-  if (row.type === 'user') {
-    const origin = object(row.origin);
-    if (origin?.kind !== 'plugin' || origin.asUser !== true) return [];
-    const content = object(row.message)?.content;
-    if (typeof content === 'string') return [firstLine(content)];
-    if (Array.isArray(content)) return content.flatMap((block) => (object(block)?.type === 'text' && typeof object(block)!.text === 'string' ? [firstLine(object(block)!.text as string)] : []));
-    return [];
-  }
-  const attachment = object(row.attachment);
-  if (row.type !== 'attachment' || attachment?.type !== 'queued_command' || typeof attachment.prompt !== 'string') return [];
-  const origin = object(attachment.origin);
-  return origin?.kind === 'peer' || origin?.kind === 'plugin' ? [firstLine(attachment.prompt)] : [];
 }
 
 /** What the held rows say of the sends: the first lines that may be deliveries, the uuids, the oldest row's time. */

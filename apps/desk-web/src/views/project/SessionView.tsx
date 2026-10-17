@@ -11,7 +11,9 @@
 // its delivery state in its bubble's foot; then the session's pending requests as the channel's cards, answered in
 // place, with an "N waiting ↓" pill while none of them is in view; then an ended or retired session's end marker. The ask
 // mod's async question rows carry the log's question and answer. A session whose machine serves no transcript for it
-// (its subscription ended at n 0) draws the channel built from the log instead, saying why (`fallback`).
+// (its subscription ended at n 0) draws the channel built from the log instead, saying why (`fallback`). A tapped
+// notification lands on its request's card at the tail, or on its `<message>`'s row in the transcript. A send's row
+// draws without its delivery frame line, a peer's send labelled with who sent it (`conversation/delivery-frame.ts`).
 //
 // Two decorations of MAWS's view are the desk's own (`styles/app.css`, under `data-session-view`): a gutter that keeps
 // every row, breakouts included, clear of MAWS's floating "Jump to latest"; and, while the session is at rest, that
@@ -35,6 +37,7 @@ import { useDeskLayout } from '../../shell/layout';
 import type { SessionPlane } from '../../shell/session-plane';
 import type { DeskSession } from '../../shell/sessions';
 import { useDesk } from '../conversation/desk-context';
+import { useLandOnMessage } from './landed-message';
 import { ReportToggle } from './ReportToggle';
 import { QuestionOverlays, type QuestionOverlayFact } from './tail/QuestionOverlay';
 import { renderTailRow, TailProvider, tailRows, type TailItem } from './tail/session-tail';
@@ -47,6 +50,8 @@ type Props = {
   events?: ReadonlyArray<{ offset: number; event: LogEvent }>;
   /** The request a tapped notification landed on, when this channel is the one it opened. */
   landedRequest?: string | null;
+  /** The `src` of the `<message>` a tapped notification landed on (`<row uuid>#<span>`), when this channel is the one it opened. */
+  landedMessage?: string | null;
   /** What the view draws when the session's machine serves no transcript for it: the log-built channel, with why. */
   fallback?: (why: string) => ReactNode;
 };
@@ -56,7 +61,7 @@ const NO_EVENTS: ReadonlyArray<{ offset: number; event: LogEvent }> = [];
 /** The session is at rest as its machine reports it: idle, or no process. Not while its presence is unknown. */
 const atRest = (session: DeskSession) => session.machineOnline !== false && session.presence != null && (session.presence.record === null || session.presence.record.status === 'idle');
 
-export default function SessionView({ project, session, plane, events = NO_EVENTS, landedRequest = null, fallback }: Props) {
+export default function SessionView({ project, session, plane, events = NO_EVENTS, landedRequest = null, landedMessage = null, fallback }: Props) {
   const owner = useSessionOwner(project, session, plane);
   const state = useKeptTranscript(owner.keeper);
   const list = useRef<TranscriptListHandle>(null);
@@ -70,6 +75,11 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
       openSubagent: (ref: SubagentRef) => {
         owner.openSubagent(ref);
         if (!useDeskLayout.getState().depth.open) useDeskLayout.getState().setDepth({ open: true });
+      },
+      // A peer's send keeps who sent it, its frame line drawn as this label under the bubble (the line itself is not).
+      userRowMark: (row) => {
+        const from = row.messageUuid === null ? null : owner.main.senderOf(row.messageUuid);
+        return from === null ? null : `From ${from}`;
       },
     }),
     [owner],
@@ -127,6 +137,7 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
 
   const unavailable = useNoTranscript(state, heldCount);
   useLandOnCard(root, landedRequest, requests.some((r) => r.request === landedRequest));
+  useLandOnMessage(root, owner.main, landedMessage);
 
   if (unavailable && fallback)
     return fallback(`${session.machine} serves no transcript for this session: its daemon predates the session view, or a /clear left the history under another id. What it sent and was sent stays here, from the project's log.`);

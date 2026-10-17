@@ -62,6 +62,13 @@
   background: currentColor;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3v10M3.5 8.5 8 13l4.5-4.5'/%3E%3C/svg%3E") center / contain no-repeat;
 }
+/* DC9 M6: the transcript row a tapped notification's <message> landed on, its reading column outlined as a landed card
+   is, just outside the reading column's text. An outline takes no space, so the list's measurements stay as they are. */
+[data-session-view] [data-row-id][data-landed] .transcript-row {
+  border-radius: var(--radius);
+  outline: 1px solid var(--warning);
+  outline-offset: -8px;
+}
 
 /* DC9 M4: a send at the session view's tail (the owner's 1B, mockups/desk/09-session-view.html): MAWS's user bubble
    with its delivery state as a foot under a hairline. A send still on its way dims its words as MAWS dims a held

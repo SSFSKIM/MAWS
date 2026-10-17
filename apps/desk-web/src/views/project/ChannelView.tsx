@@ -8,7 +8,8 @@
 // the owner into another session's channel.
 //
 // A channel a tapped notification opened lands on its card (`useLanding`): the card is marked once it is drawn, and
-// until then, or when it will not be, the channel says why. On a phone (mockups/desk/05-phone.html, 5A) Retire sits
+// until then, or when it will not be, the channel says why. In the session view a request's card is at the tail and a
+// `<message>`'s is its transcript row (`landed-message.ts`). On a phone (mockups/desk/05-phone.html, 5A) Retire sits
 // behind ⋯ with the note that depth opens on a computer, and an ended session shows Resume in place of the composer.
 //
 // On a desktop whose session's machine is online, a direct channel's center is its session view (DC9,
@@ -62,6 +63,7 @@ export function ChannelView(props: {
   const outbox = Object.values(outboxAll).filter((o) => channel.kind === 'group' || (o.to !== '*' && o.to.some((r) => r.session === channel.session)));
   const landed = useLanded(channel, items);
   const landedRequest = useLanding((s) => (s.landed?.landing.kind === 'request' && s.landed.project === connection.project && channel.kind === 'session' && s.landed.session === channel.session ? s.landed.landing.request : null));
+  const landedMessage = useLandedMessage(channel, events);
   const sessionView = channel.kind === 'session' && drawsSessionView(session, phone) ? session : null;
   // Keyed by channel, so each opens at its own tail (the composer beside it is keyed by the session alone).
   const stream = (workLabel: string) => (
@@ -128,6 +130,7 @@ export function ChannelView(props: {
               plane={connection.client}
               events={events}
               landedRequest={landedRequest}
+              landedMessage={landedMessage}
               fallback={(why) => (
                 <>
                   <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-fg-muted" role="status" data-testid="no-transcript">
@@ -186,6 +189,20 @@ function useLanded(channel: Channel, items: ReturnType<typeof buildStream>) {
       : refused(failed).some((e) => e.event?.writer === landing.writer && e.event?.seq === landing.seq);
   const status = landingStatus({ landing, found: item !== null, ready: landingReady(caughtUp, { checked }, failed), unverified: bad });
   return { item, notice: status.kind === 'shown' ? null : status };
+}
+
+/**
+ * The transcript row a tapped notification's `<message>` came from, when this channel is the one it opened: the `src` of
+ * the log's `message` event it names (`<row uuid>#<span>`), for the session view to land on.
+ */
+function useLandedMessage(channel: Channel, events: Array<{ offset: number; event: LogEvent }>): string | null {
+  const { connection } = useDesk();
+  const landing = useLanding((s) => (s.landed?.landing.kind === 'event' && s.landed.project === connection.project && channel.kind === 'session' && s.landed.session === channel.session ? s.landed.landing : null));
+  return useMemo(() => {
+    if (landing?.kind !== 'event') return null;
+    const event = events.find((e) => e.event.writer === landing.writer && e.event.seq === landing.seq)?.event;
+    return event?.kind === 'message' && typeof event.src === 'string' ? event.src : null;
+  }, [landing, events]);
 }
 
 /** "Retired by <who>", from the log's `retired`. */
