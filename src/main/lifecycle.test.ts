@@ -21,7 +21,7 @@ const fake = vi.hoisted(() => {
     getAppPath: () => appPath, // E11 F2b: where the development build of main is read from (`out/main/index.js`)
     isPackaged: false,
     setPath: vi.fn(),
-    commandLine: { appendSwitch: vi.fn() },
+    commandLine: { appendSwitch: vi.fn(), getSwitchValue: vi.fn(() => '') }, // P3-F1: Electron's answer for a switch not given
     quit: vi.fn(),
     exit: vi.fn(),
   };

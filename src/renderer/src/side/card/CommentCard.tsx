@@ -13,6 +13,7 @@ import { useEffect, useRef, type CSSProperties, type KeyboardEvent } from 'react
 import type { AppSessionId } from '@shared/graph/ids';
 import { GlyphMark } from '../../attention/GlyphMark';
 import { glyphFor } from '../../attention/glyph';
+import { displayTitle } from '../../sessions/title'; // P3-F1
 import { FIELD, PRIMARY, QUIET } from '../../sessions/ui';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useSessions } from '../../stores/sessions';
@@ -112,6 +113,7 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss }: 
           </svg>
         </button>
       </header>
+      {!thread && frame.namesParent && <ParentName parent={card.parent} /> /* P3-F1 */}
       {thread ? <CardThread card={card} child={thread.child} echo={thread.echo} frame={frame} visible={visible} /> : <CardComposer card={card} frame={frame} onDismiss={onDismiss} />}
     </div>
   );
@@ -125,13 +127,24 @@ function ThreadGlyph({ child }: { child: AppSessionId }) {
   return record === null ? null : <GlyphMark glyph={glyphFor(record, digest, pending)} className="w-[12px] shrink-0" />;
 }
 
+// P3-F1: the session a composing card's comment goes to, for a host with no chat beside it.
+function ParentName({ parent }: { parent: AppSessionId }) {
+  const title = useSessions((s) => displayTitle(s.records.get(parent)));
+  return (
+    <p data-card-parent={parent} className="m-0 shrink-0 truncate text-ui-sm text-fg-muted" title={title}>
+      {COPY.parent(title)}
+    </p>
+  );
+}
+
 // The composer half. Its Side thread is not revealed while the card holds it (the card becomes the thread); a card closed
 // or replaced before the fork answered asks for the reveal, so a thread is never created unseen. Send to main closes it.
 function CardComposer({ card, frame, onDismiss }: { card: OpenCard; frame: CardFrame; onDismiss(): void }) {
   const { anchor, parent, serial } = card;
   const gone = () => cardGone(serial);
   const { onSending } = frame; // P3-B
-  const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent: ({ child, text }) => (child ? enterThread(serial, child, text) : onDismiss()), ...(onSending && { onSending: (sending) => onSending(card, sending) }) });
+  const initial = card.phase.kind === 'composing' ? card.phase.destination : undefined; // P3-F1
+  const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent: ({ child, text }) => (child ? enterThread(serial, child, text) : onDismiss()), ...(onSending && { onSending: (sending) => onSending(card, sending) }), ...(initial && { destination: initial }) /* P3-F1 */ });
   return (
     <>
       {form.screenshot !== null && <ScreenshotThumbnail parent={parent} screenshot={form.screenshot} disabled={form.sending} onRemove={form.removeScreenshot} />}

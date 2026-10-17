@@ -41,6 +41,9 @@ export interface CardFrame {
   actions?(card: OpenCard): ReactNode;
   onSending?(card: OpenCard, sending: { text: string; destination: 'thread' | 'main' }): (went: boolean) => void;
   // P3-B end
+  // P3-F1 (the P3 interface ledger's X23 row of fix 2): the host has no chat beside it, so the composing card names the
+  // session its comment goes to
+  namesParent?: true;
 }
 
 interface Props {

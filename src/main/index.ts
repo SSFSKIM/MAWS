@@ -1,4 +1,5 @@
 import { guardStdio } from './stdio-guard'; // cua board #97
+import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
 import { totalmem } from 'node:os'; // C12: the default memory budget
@@ -147,6 +148,8 @@ if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DA
 // The smoke runs unattended, so nothing may wait on a person: Chromium keeps its storage key in a mock keychain
 // instead of asking the login keychain, whose access prompt an unsigned or re-signed build can raise.
 if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
+// P3-F1 fix 3: no mDNS responder on *:5353 when a frame gathers ICE candidates (see chromium-features.ts); one merged switch.
+disableChromiumFeatures(app.commandLine, STARTUP_DISABLED_FEATURES);
 // E2: the store's scheme is privileged before the app is ready (protocol.registerSchemesAsPrivileged); P3-A M7: the
 // artifact store's; P3-L M6b: the deliverable store's no more
 registerStoreSchemes();

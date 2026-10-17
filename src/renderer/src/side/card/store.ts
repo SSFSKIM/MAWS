@@ -22,7 +22,7 @@ export type CardTarget =
   | { kind: 'browser'; pageUrl: string }
   | { kind: 'artifact-page'; artifactId: string; revision: ArtifactUrlRevision | null; version?: number }
   | { kind: 'artifact'; artifactId: string; threadId: string }; // P3-B (docs/doperpowers/plans/2026-10-12-p3-b-documents.md D9): a comment thread of a document artifact
-export type CardPhase = { kind: 'composing' } | { kind: 'thread'; child: AppSessionId; echo: string | null };
+export type CardPhase = { kind: 'composing'; destination?: 'thread' | 'main' /* P3-F1: CommentContext's */ } | { kind: 'thread'; child: AppSessionId; echo: string | null };
 export type CardHostKind = 'browser' | 'artifact-page' | 'artifact' /* P3-B */;
 export type CardHostMode = 'panel' | 'tab';
 
@@ -80,7 +80,7 @@ export function openCard(anchor: Anchor, context: CommentContext & { phase?: Car
     openedAt: Date.now(),
     target,
     rect: placement?.rect ?? null,
-    phase: context.phase ?? { kind: 'composing' },
+    phase: context.phase ?? { kind: 'composing', ...(context.destination && { destination: context.destination }) /* P3-F1 */ },
   };
   useCommentCard.setState({ open: card });
   if (card.hostId === null) {
