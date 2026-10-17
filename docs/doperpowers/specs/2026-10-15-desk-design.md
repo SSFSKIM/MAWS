@@ -4540,6 +4540,22 @@ a hub that connects into machines (§2).
   shells fall under the original-cwd slug anyway is unmeasured.
   Rejected: taking that root from the adopting session's rows, which
   would undo containment.
+  2026-10-17, DC9's M5: the session view ends an open turn at an
+  interrupt marker row ("[Request interrupted by user]", and its "for
+  tool use" form), whether the interrupt came from the desk or from Esc.
+  Only 11 of 171 markers in 60 transcripts are followed by a
+  `system/turn_duration`. MAWS's backfill only clears the tool loop
+  there, and MAWS's live path ends the turn from the SDK result, which
+  the web never receives. Without this, every interrupt leaves the turn
+  reading "working" until the next prompt. The marker is an engine row,
+  read in order, and the `turn.ended` takes an id derived from its uuid
+  and position, so a reset, a rebuild or an older page replays it the
+  same way. Rejected for now: relaying the bridge's DX5 turn end as a
+  DX4 kind, which is more exact but changes a sealed contract. It is
+  kept as residue. A turn with no end row and no marker (a process
+  killed mid-turn, a cut replay) still reads "working", and is logged
+  as debt. Rejected earlier: ending a turn on idle presence, which
+  corrupted turn history.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
