@@ -153,18 +153,30 @@ function editorReach(): CommentOverlayProps {
   };
 }
 
-function Editor({ reach, onOpen, given }: { reach: CommentOverlayProps; onOpen(open: (p: typeof passage) => void): void; given: { appSessionId: AppSessionId } | { context: ArtifactSessionContext } }) {
-  const comments = useDocumentComments({ artifactId: ARTIFACT, ...given, title: 'Q3 plan', mode: 'tab' });
+function Editor({ artifactId, reach, onOpen, given }: { artifactId: string; reach: CommentOverlayProps; onOpen(open: (p: typeof passage) => void): void; given: { appSessionId: AppSessionId } | { context: ArtifactSessionContext } }) {
+  const comments = useDocumentComments({ artifactId, ...given, title: 'Q3 plan', mode: 'tab' });
   onOpen(comments.opened);
   return <div className="relative">{comments.overlay(reach)}</div>;
 }
 
-function mount(given: { appSessionId: AppSessionId } | { context: ArtifactSessionContext }) {
+type Given = { appSessionId: AppSessionId } | { context: ArtifactSessionContext };
+function mount(given: Given) {
   const reach = editorReach();
   let open: ((p: typeof passage) => void) | null = null;
-  const view = render(<Editor reach={reach} given={given} onOpen={(o) => (open = o)} />);
-  return { reach, view, comment: () => act(() => open!(passage)) };
+  const onOpen = (o: (p: typeof passage) => void) => (open = o);
+  const artifactId = crypto.randomUUID(); // each case's own, so no start of an earlier case's is this one's
+  const view = render(<Editor artifactId={artifactId} reach={reach} given={given} onOpen={onOpen} />);
+  return {
+    reach,
+    view,
+    comment: (p: typeof passage = passage) => act(() => open!(p)),
+    // the artifact's context moved (its Space linked elsewhere, another project): the same editor, a new context
+    move: (next: Given) => view.rerender(<Editor artifactId={artifactId} reach={reach} given={next} onOpen={onOpen} />),
+  };
 }
+const OTHER: ArtifactSessionContext = { kind: 'directory', path: '/work/p2', projectId: null };
+const LATER = 'a4444444-4444-4444-8444-444444444444' as AppSessionId;
+const second = { threadId: 'p7q1w3ze', tabId: 'tab1', tabTitle: 'Main', quote: 'with design review' };
 const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
 const notice = () => document.querySelector<HTMLElement>('[data-comment-context]');
 const destination = () => (screen.getAllByRole('radio') as HTMLInputElement[]).find((radio) => radio.checked)?.value;
@@ -296,6 +308,71 @@ describe('a comment from a document with no chat beside it', () => {
     await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
     await act(async () => fake.event('session.setup', ready(STARTED)));
     expect(useCommentCard.getState().open).toMatchObject({ parent: OWN, hostId: 'elsewhere' });
+  });
+
+  it('a context that moved starts in its new directory, never resuming the session the old one started', async () => {
+    const { comment, move } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(async () => fake.event('session.setup', ready(STARTED)));
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    const s = useSessions.getState();
+    useSessions.setState({ records: new Map([...s.records, [STARTED, record(STARTED, { projectId: P1 })]]), recordsVersion: s.recordsVersion + 1 });
+    move({ context: OTHER });
+    comment();
+    await act(async () => {});
+    expect(fake.invoked('session.acquire'), 'the old directory’s session is not this one’s').toEqual([]);
+    expect(fake.invoked('session.create')).toEqual([
+      { projectId: P1, location: { kind: 'directory', path: '/work/p1' } },
+      { projectId: null, location: { kind: 'directory', path: '/work/p2' } },
+    ]);
+    await act(() => fake.reply('session.create', { appSessionId: LATER, intent: intent(LATER) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: LATER }));
+    await act(async () => fake.event('session.setup', ready(LATER)));
+    expect(useCommentCard.getState().open).toMatchObject({ parent: LATER });
+  });
+
+  it('a Comment replacing one whose start has not answered joins that start: one session, the card for the latest only', async () => {
+    const { reach, comment } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    comment(second);
+    await act(async () => {});
+    expect(reach.discard, 'the replaced comment’s draft withdrawn').toHaveBeenCalledWith(passage.threadId);
+    expect(fake.invoked('session.create'), 'one creation for both').toHaveLength(1);
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    expect(fake.invoked('session.start')).toHaveLength(1);
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(async () => fake.event('session.setup', ready(STARTED)));
+    expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED, target: { threadId: second.threadId } });
+    expect(reach.discard).not.toHaveBeenCalledWith(second.threadId);
+    expect(fake.invoked('session.create')).toHaveLength(1);
+  });
+
+  it('an old context’s start answering after the new one’s opens nothing and is no session of the new context', async () => {
+    const { comment, move } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    move({ context: OTHER });
+    comment(second);
+    await act(async () => {});
+    await act(() => fake.reply('session.create', { appSessionId: LATER, intent: intent(LATER) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: LATER }));
+    await act(async () => fake.event('session.setup', ready(LATER)));
+    expect(useCommentCard.getState().open).toMatchObject({ parent: LATER, target: { threadId: second.threadId } });
+    await act(async () => fake.event('session.setup', ready(STARTED))); // the old directory's, late
+    expect(useCommentCard.getState().open).toMatchObject({ parent: LATER, target: { threadId: second.threadId } });
+    // the new context's next comment resumes its own session, never the old one's
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    const s = useSessions.getState();
+    useSessions.setState({ records: new Map([...s.records, [STARTED, record(STARTED)], [LATER, record(LATER)]]), recordsVersion: s.recordsVersion + 1 });
+    comment();
+    await act(async () => {});
+    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: LATER, reason: 'read', options: { requireEmptyMessage: true } }]);
   });
 
   it('the editor going withdraws a pending comment, and its start then opens nothing', async () => {

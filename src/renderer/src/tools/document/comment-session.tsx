@@ -9,13 +9,15 @@
 // While a start runs, or when it is refused or there is no context, a notice stands where the card would: one per
 // window, as the card is (the latest gesture wins), naming why in H's words, with Open session when a session it made
 // holds the reason. Close, Escape, a later card anywhere, or the editor going withdraws it, and its comment's draft with
-// it (B's drafts read `pendingThreadOf`); a start that settles after that opens nothing. A card opened on a session
-// started for the comment starts on Send to main: a blank session has no conversation a side thread could fork.
+// it (B's drafts read `pendingThreadOf`); a start that settles after that opens nothing. One start runs per artifact
+// and directory at a time (a Comment meanwhile joins it), and the session it made is reused only in that directory. A
+// card opened on a session started for the comment starts on Send to main: a blank session has no conversation a side
+// thread could fork.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
 import { create } from 'zustand';
 import type { PassageRect } from '@artifacts/document/editor/comments/surface';
 import type { AppSessionId } from '@shared/graph/ids';
-import { NO_SESSION_CONTEXT, startArtifactSession, useArtifactSessionContext, type ArtifactSessionContext } from '../../artifacts/session-context';
+import { NO_SESSION_CONTEXT, startArtifactSession, useArtifactSessionContext, type ArtifactSessionContext, type ArtifactSessionEnd } from '../../artifacts/session-context';
 import { useLibraryRow, useLibrarySpaces } from '../../library/store';
 import { shownSession } from '../../panel/host';
 import { SECONDARY } from '../../sessions/ui';
@@ -76,16 +78,44 @@ interface Pending {
 
 const usePending = create<{ pending: Pending | null }>()(() => ({ pending: null }));
 let serials = 0;
-let stopStart: (() => void) | null = null; // the running start's listener, H's `cancel`
 let stopWatch: (() => void) | null = null; // the card store's watch for a later card
 
-// The session a comment of each artifact started in this window: the next comment's `previous` (H's reuse).
-const startedFor = new Map<string, AppSessionId>();
+// The starts of each artifact's directory in this window, by the artifact and the directory (and project) it starts in:
+// the session the last one made (the next one's `previous`, H's reuse, so a context that moved never resumes the old
+// directory's session) and the start still on its way, which a Comment arriving meanwhile joins rather than making a
+// second session. A start runs to its end whatever becomes of the notices waiting on it; only the latest opens a card.
+interface Starts {
+  previous: AppSessionId | null;
+  running: Promise<ArtifactSessionEnd> | null;
+}
+const starts = new Map<string, Starts>();
+const startKey = (artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>) => JSON.stringify([artifactId, context.path, context.projectId]);
+
+function startIn(artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>): Promise<ArtifactSessionEnd> {
+  const key = startKey(artifactId, context);
+  let entry = starts.get(key);
+  if (!entry) starts.set(key, (entry = { previous: null, running: null }));
+  const own = entry;
+  if (own.running) return own.running;
+  const running = (async (): Promise<ArtifactSessionEnd> => {
+    try {
+      const answer = await startArtifactSession(context, own.previous);
+      if (answer.appSessionId !== null) own.previous = answer.appSessionId;
+      return answer.status === 'starting' ? await answer.settled : answer;
+    } catch (error) {
+      return { status: 'refused', appSessionId: null, words: error instanceof Error ? error.message : String(error) };
+    }
+  })();
+  own.running = running;
+  void running.then(() => {
+    if (own.running === running) own.running = null;
+  });
+  return running;
+}
 
 function clear(): void {
-  stopStart?.();
   stopWatch?.();
-  stopStart = stopWatch = null;
+  stopWatch = null;
   if (usePending.getState().pending !== null) usePending.setState({ pending: null });
 }
 
@@ -106,7 +136,7 @@ interface StartInput {
   artifactId: string;
   threadId: string;
   label: string;
-  context: ArtifactSessionContext; // a directory or none: an own session opens the card at once, never here
+  context: Extract<ArtifactSessionContext, { kind: 'directory' | 'none' }>; // an own session opens the card at once, never here
   open(appSessionId: AppSessionId): void; // the card, on the session the start answered
 }
 
@@ -126,31 +156,11 @@ export function startCommentSession({ hostId, artifactId, threadId, label, conte
   const say = (notice: Notice) => {
     if (mine()) usePending.setState({ pending: { ...usePending.getState().pending!, notice } });
   };
-  const settle = (end: { status: 'ready' | 'card' | 'refused'; appSessionId: AppSessionId | null; words?: string }) => {
-    if (!mine()) return;
-    if (end.status === 'ready') open(end.appSessionId!); // the card's open clears the notice
-    else say({ status: end.status, words: end.words ?? COULD_NOT_START, appSessionId: end.appSessionId });
-  };
-  void (async () => {
-    let answer;
-    try {
-      answer = await startArtifactSession(context, startedFor.get(artifactId) ?? null);
-    } catch (error) {
-      settle({ status: 'refused', appSessionId: null, words: error instanceof Error ? error.message : String(error) });
-      return;
-    }
-    if (answer.appSessionId !== null) startedFor.set(artifactId, answer.appSessionId);
-    if (answer.status !== 'starting') {
-      settle(answer);
-      return;
-    }
-    if (!mine()) {
-      answer.cancel();
-      return;
-    }
-    stopStart = answer.cancel;
-    settle(await answer.settled);
-  })();
+  void startIn(artifactId, context).then((end) => {
+    if (!mine()) return; // replaced, closed or gone meanwhile: the start's session stays for the next comment
+    if (end.status === 'ready') open(end.appSessionId); // the card's open clears the notice
+    else say({ status: end.status, words: end.words || COULD_NOT_START, appSessionId: end.appSessionId });
+  });
 }
 
 // ---- the notice --------------------------------------------------------------------------------------------------------

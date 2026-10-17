@@ -147,7 +147,7 @@ export function useDocumentComments({ artifactId, appSessionId, context, title, 
       // registered after, so the window's card closing for the notice keeps it)
       const session = appSessionId ?? (context?.kind === 'session' ? context.appSessionId : undefined);
       if (session === undefined) {
-        startCommentSession({ hostId, artifactId, threadId: passage.threadId, label: anchor.label, context: context ?? { kind: 'none' }, open: (started) => openCommentComposer(anchor, { appSessionId: started, placement, destination: 'main' }) });
+        startCommentSession({ hostId, artifactId, threadId: passage.threadId, label: anchor.label, context: context?.kind === 'directory' ? context : { kind: 'none' }, open: (started) => openCommentComposer(anchor, { appSessionId: started, placement, destination: 'main' }) });
         draftsOf(hostId).opened(passage.threadId);
         return;
       }
