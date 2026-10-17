@@ -234,6 +234,18 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     readDataset: (artifactId, ref, { format, offset, limit }) => call('artifacts.readDataset', { artifactId, ref, format, ...(offset !== undefined && { offset }), ...(limit !== undefined && { limit }) }),
     // P3-E (E2 M3): the source sheet's Download, main's Save dialog over the artifact's own asset
     downloadAsset: (artifactId, ref, options) => call('artifacts.downloadAsset', { artifactId, ref, ...(options?.name !== undefined && { name: options.name }) }),
+    // E3: main's window-bound hold over snapshot bytes, its release sent once
+    holdDatasets: async (artifactId, refs) => {
+      const { holdId } = await call('artifacts.holdDatasets', { artifactId, refs: [...refs] });
+      let released = false;
+      return {
+        release: () => {
+          if (released) return;
+          released = true;
+          call('artifacts.releaseDatasets', { holdId }).catch((error: unknown) => log(`a dataset hold was not released: ${error instanceof Error ? error.message : String(error)}`));
+        },
+      };
+    },
     identity: () => ({ actor: HUMAN, ...actorDisplay(HUMAN) }),
     ...createConnectorHost(ipc), // P3-H H4: a page's connector surface and the owner's grants
   };

@@ -165,6 +165,24 @@ describe('the latest two distinct snapshots per query', () => {
   });
 });
 
+describe('collection after the commit', () => {
+  it('asked while a batch is open, never unlinks inside it: it runs once that batch has committed', async () => {
+    const id = await dashboard();
+    const a = await refresh(id, 'live', 'A');
+    await refresh(id, 'live', 'B');
+    await refresh(id, 'live', 'C');
+    const { sha256 } = rowOf(id, a)!;
+    const writing = store().service.writeAs(id, human, (doc) => doc.get('root').setAttr('note', 'x')); // a batch now open
+    expect(documents.storage.batchOpen).toBe(true);
+    store().collectRetiredAssets(id);
+    expect(rowOf(id, a)).toBeDefined();
+    expect(existsSync(fileOf(id, sha256))).toBe(true);
+    await writing;
+    await vi.waitFor(() => expect(rowOf(id, a)).toBeUndefined());
+    expect(existsSync(fileOf(id, sha256))).toBe(false);
+  });
+});
+
 describe('membership across the dataset lifecycle', () => {
   it('removing the dataset, or configuring another source, clears its membership and retires what nobody uses', async () => {
     const id = await dashboard();

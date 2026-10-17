@@ -222,7 +222,11 @@ export class SnapshotRetention {
   private defer(artifactId: string | undefined): void {
     const first = this.deferred === null;
     if (artifactId === undefined || this.deferred === 'all') this.deferred = 'all';
-    else (this.deferred ??= new Set()).add(artifactId);
+    else {
+      const ids: Set<string> = this.deferred ?? new Set();
+      ids.add(artifactId);
+      this.deferred = ids;
+    }
     if (!first) return;
     const run = () => {
       const asked = this.deferred;

@@ -12,7 +12,7 @@ import type { ArtifactHost } from '../../host';
 import { snapshotOf, type Cell, type DatasetDescriptor } from '../datasets';
 import { compareCells, viewRows, type ViewTable } from '../render';
 import { mismatchNotes, sourceLabel, VIEW_STATES } from '../states';
-import type { SheetDataset, SourceSheetState } from './sheet';
+import type { SheetDataset, SourceSheetSnapshot, SourceSheetState } from './sheet';
 import type { SnapshotReader } from '../snapshots';
 import { toTsv } from './tsv';
 import './sheet.css';
@@ -78,7 +78,7 @@ export function SourceSheet({ artifactId, sheet, reader, host, actorName }: Sour
         </label>
       )}
       {shown ? (
-        <DatasetDetail key={`${state.opened}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} reader={reader} host={host} actorName={actorName} />
+        <DatasetDetail key={`${state.opened}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} hold={state.hold} reader={reader} host={host} actorName={actorName} />
       ) : (
         <p className="dash-sheet-empty">No data is bound to this dashboard yet. An agent binds a file with artifact_dataset.</p>
       )}
@@ -92,7 +92,7 @@ type Sort = { column: number; dir: 'ascending' | 'descending' } | null;
 // snapshot as bound. A sheet opened from the header, on no view, shows the snapshot alone.
 type Shown = 'view' | 'source';
 
-function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorName }: { artifactId: string; id: string; descriptor: DatasetDescriptor; view?: SheetDataset['view'] } & Pick<SourceSheetProps, 'reader' | 'host' | 'actorName'>) {
+function DatasetDetail({ artifactId, id, descriptor, view, hold, reader, host, actorName }: { artifactId: string; id: string; descriptor: DatasetDescriptor; view?: SheetDataset['view']; hold: SourceSheetSnapshot['hold'] } & Pick<SourceSheetProps, 'reader' | 'host' | 'actorName'>) {
   const [source, setSource] = useState<ViewTable | null>(null);
   const [shown, setShown] = useState<Shown>(view ? 'view' : 'source');
   const [failed, setFailed] = useState<string | null>(null);
@@ -100,7 +100,7 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
   const [status, setStatus] = useState('');
   const snapshot = useMemo(() => snapshotOf(descriptor), [descriptor]); // E3: null for a query never fetched
   useEffect(() => {
-    if (!snapshot) return;
+    if (!snapshot || hold !== 'held') return; // E3: nothing read before the captured snapshot is held
     let current = true;
     reader.read(snapshot).then(
       (read) => current && setSource(read),
@@ -109,7 +109,7 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
     return () => {
       current = false;
     };
-  }, [reader, snapshot]);
+  }, [reader, snapshot, hold]);
   // the view's rows: the interpretation the view itself draws (renderView's transform), never a second one
   const viewed = useMemo(() => (view && source ? viewRows(view.spec, source, id) : null), [view, source, id]);
   const table = shown === 'view' ? (viewed?.ok ? viewed.table : null) : source;
@@ -179,8 +179,8 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
         <button type="button" className="doc-tool" disabled={!table} onClick={() => void copy()}>
           Copy rows
         </button>
-        {snapshot && (
-          <button type="button" className="doc-tool" aria-label={`Download ${name}`} onClick={() => void download()}>
+        {snapshot && hold !== 'unavailable' && (
+          <button type="button" className="doc-tool" aria-label={`Download ${name}`} disabled={hold !== 'held'} onClick={() => void download()}>
             Download
           </button>
         )}
@@ -197,6 +197,8 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
         ))}
       {!snapshot ? (
         <p className="dash-sheet-note">This query has not been fetched yet; there are no rows to show.</p>
+      ) : hold === 'unavailable' ? (
+        <p className="dash-sheet-note" role="alert">This snapshot is no longer available; open the source again to see the current one.</p>
       ) : failed !== null ? (
         <p className="dash-sheet-note" role="alert">{`The rows could not be read: ${failed}`}</p>
       ) : shown === 'view' && viewed && !viewed.ok ? (

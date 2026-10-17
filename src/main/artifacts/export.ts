@@ -282,13 +282,31 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   // The export's snapshot, taken as it starts: its title, and a document's state with the revision it is at (the
   // version's, else the live doc's read with its revision), which then names the file. A byte kind's content at the
   // request's revision is immutable, so its request stands as it was asked.
-  const snapshot = async (request: ExportRequest, time: ExportBudget): Promise<{ request: ExportRequest; sources: ExportSources }> => {
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): a dashboard's state is captured with a hold over
+  // every snapshot it names, in one host read (`artifacts.captureDatasetState`), so a refresh retiring one meanwhile
+  // never takes its bytes before the exporter reads them; `release` ends the hold when the run does.
+  const snapshot = async (request: ExportRequest, time: ExportBudget): Promise<{ request: ExportRequest; sources: ExportSources; release?: () => Promise<void> }> => {
     // P3-E (Decision Log 22): a retained version's export reads the row alone, never preparing the live document
     const { artifact } = await time.within(required('artifacts.get', { artifactId: request.artifactId, ...(request.versionId !== undefined && { prepare: false }) }));
     if (!artifact) throw new Error(`no artifact ${request.artifactId}`);
     let state: Uint8Array | null = null;
     let taken = request;
-    if (isDocKind(request.kind)) {
+    let release: (() => Promise<void>) | undefined; // E3
+    if (request.kind === 'dashboard') {
+      // E3: the state and its snapshots' hold in one read; the live one names the file by its revision as below
+      const unhold = (assetHoldId: string) => call('artifacts.releaseAssets', { assetHoldId }).then(() => {}, (error: unknown) => console.warn(`[artifacts] an export's hold was not released: ${messageOf(error)}`));
+      const capturing = required('artifacts.captureDatasetState', { artifactId: request.artifactId, ...(request.versionId !== undefined && { versionId: request.versionId }) });
+      let captured: CommandOutput<'artifacts.captureDatasetState'>;
+      try {
+        captured = await time.within(capturing);
+      } catch (error) {
+        capturing.then((late) => unhold(late.assetHoldId), () => {}); // past the budget: a capture landing later is let go
+        throw error;
+      }
+      release = () => unhold(captured.assetHoldId);
+      state = captured.bytes;
+      if (request.versionId === undefined) taken = { ...request, revision: captured.revision, path: join(dirname(request.path), artifactExportName(captured.revision, request.format, request.exportId)) };
+    } else if (isDocKind(request.kind)) {
       if (request.versionId !== undefined) {
         state = (await time.within(required('artifacts.versionState', { artifactId: request.artifactId, versionId: request.versionId }))).bytes;
       } else {
@@ -324,6 +342,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
         },
         print,
       },
+      ...(release && { release }), // E3
     };
   };
   // A request run in its turn within `time`, the budget its receipt started (a kind and format no exporter serves is
@@ -344,7 +363,11 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
       } catch (error) {
         return { ok: false, error: messageOf(error) } satisfies MawsArtifactExportAnswer;
       }
-      return runExport(registry, taken.request, taken.sources, time);
+      try {
+        return await runExport(registry, taken.request, taken.sources, time);
+      } finally {
+        await taken.release?.(); // E3: the dashboard's snapshot holds end with the run
+      }
     }, busy);
     time.end();
     return answered;

@@ -43,7 +43,8 @@ describe('the query descriptor (E3)', () => {
   it('refuses the inconsistent arms: an unfetched query with updated, a fetched one without, a file without updated', () => {
     const doc = newDoc();
     expect(() => setDataset(doc, 'a', { ...unfetched(), updated: { at: AT, by: { kind: 'human' } } })).toThrow();
-    const { updated: _drop, ...noUpdated } = fetched();
+    const noUpdated: DatasetDescriptor = { ...fetched() };
+    delete noUpdated.updated;
     expect(() => setDataset(doc, 'b', noUpdated)).toThrow();
     const file: DatasetDescriptor = {
       title: 'Sales',
@@ -54,7 +55,8 @@ describe('the query descriptor (E3)', () => {
       state: { status: 'ok', at: AT },
     };
     setDataset(doc, 'c', file);
-    const { updated: _gone, ...fileWithout } = file;
+    const fileWithout: DatasetDescriptor = { ...file };
+    delete fileWithout.updated;
     expect(() => setDataset(doc, 'd', fileWithout)).toThrow();
     // a value written by a replica in an inconsistent arm reads as no descriptor, never throwing
     doc.get('datasets').setAttr('junk', { ...unfetched(), updated: { at: AT, by: { kind: 'human' } } });
@@ -67,7 +69,9 @@ describe('the query descriptor (E3)', () => {
     for (const schedule of [30, 3_600, 86_400]) setDataset(doc, `ok${schedule}`, unfetched({ schedule }));
     for (const schedule of [29, 86_401, 30.5, 0]) expect(() => setDataset(doc, 'bad', unfetched({ schedule })), String(schedule)).toThrow();
     for (const staleAfter of [0, -1, 1.5]) expect(() => setDataset(doc, 'bad', unfetched({ staleAfter })), String(staleAfter)).toThrow();
-    const { schedule: _s, staleAfter: _t, ...manual } = unfetched().source as Extract<DatasetDescriptor['source'], { kind: 'query' }>;
+    const manual = { ...(unfetched().source as Extract<DatasetDescriptor['source'], { kind: 'query' }>) };
+    delete manual.schedule;
+    delete manual.staleAfter;
     setDataset(doc, 'manual', { ...unfetched(), source: manual });
     expect(readDataset(doc, 'manual')?.source).toEqual(manual);
   });
@@ -92,7 +96,8 @@ describe('the query states (E3)', () => {
     const paused = { ...d, state: { status: 'paused' as const, at: AT + 200_000 } };
     expect(datasetStateAt(paused, AT + 500_000)).toEqual({ state: paused.state, notFetched: false, staleSince: AT + 120_000 });
     expect(datasetStateAt(unfetched(), AT + 10_000_000)).toEqual({ state: unfetched().state, notFetched: true });
-    const { staleAfter: _n, ...never } = (d.source as Extract<DatasetDescriptor['source'], { kind: 'query' }>);
+    const never = { ...(d.source as Extract<DatasetDescriptor['source'], { kind: 'query' }>) };
+    delete never.staleAfter;
     expect(datasetStateAt({ ...d, source: never }, AT + 10_000_000)).toEqual({ state: d.state, notFetched: false });
     const file: DatasetDescriptor = { ...d, source: { kind: 'file', ref: 'assets/s.csv', name: 's.csv', format: 'csv', sha256: 'a'.repeat(64), size: 3 } };
     expect(datasetStateAt(file, AT + 10_000_000)).toEqual({ state: d.state, notFetched: false });

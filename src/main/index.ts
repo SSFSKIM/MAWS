@@ -135,6 +135,7 @@ import { registerPresenter } from './presentations/present'; // P3-C M6
 // P3-D end
 // P3-E start
 import { registerAssetDownload } from './dashboard/download';
+import { holdAsset, registerDatasetHolds } from './dashboard/holds'; // E3
 import { registerDashboardExporters } from './dashboard/export'; // E2 M5
 // P3-E end
 import { startConnectors } from './connectors'; // P3-H H3b
@@ -636,6 +637,7 @@ void startWithProfileLock(app, () => {
   // main's dialog under Downloads
   registerAssetDownload(registerMainHandler, {
     call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+    hold: (artifactId, ref) => holdAsset((name, input) => hosts.dispatch('engine-host', name, input) as never, artifactId, ref), // E3: its own hold through the dialog and the copy
     downloads: () => app.getPath('downloads'),
     showSaveDialog: (options, sender) => {
       const win = sender ? BrowserWindow.fromWebContents(sender) : null;
@@ -644,6 +646,15 @@ void startWithProfileLock(app, () => {
     env: process.env,
   });
   // P3-E end
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): a window's holds over a dashboard's snapshots, each
+  // released by its window alone or with it; the host's going takes the host's holds with it
+  shutdown.add(
+    'dataset-holds',
+    registerDatasetHolds(registerMainHandler, {
+      call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+      onHostLost: (listener) => hosts.onState('engine-host', (state) => (state.state === 'ready' ? undefined : listener())),
+    }),
+  );
   openWindow();
 
   // E5 start: each window's unsaved editor files for the quit guard (E5 execution document, M5): the page pushes its

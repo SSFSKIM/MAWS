@@ -84,7 +84,7 @@ describe('captureWithAssets and holdAsset', () => {
     const two = await refresh(id, 'two');
     const captured = await store().captureWithAssets(id, captureLive(id));
     expect(captured.value.revision).toBe(store().revision(id));
-    for (const _ of [1, 2, 3]) {
+    for (let round = 0; round < 3; round++) {
       await refresh(id, 'one');
       await refresh(id, 'two');
     }

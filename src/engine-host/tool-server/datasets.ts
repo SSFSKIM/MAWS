@@ -124,96 +124,108 @@ export function artifactDatasetTool(deps: ArtifactToolDeps): McpToolDefinition {
         // what the write stands on, read and validated first
         let source: { bytes: Uint8Array; name: string; format: DatasetFormat; ref?: string } | null = null;
         let table: ParsedDataset | null = null;
-        if (!input.remove) {
-          if (input.path !== undefined) {
-            const validated = await realFileUnder(ctx.cwd, input.path);
-            const name = basename(input.path);
-            const format = formatOf(name);
-            if (!format) throw refuse(TOOL, { reason: 'invalid', path: validated.real }, `${name} is not a .csv, .tsv or .json file`);
-            source = { bytes: await readValidated(validated), name, format };
-          } else {
-            const asset = await store.readCommitted(() => store.listAssets(artifactId).find((candidate) => candidate.ref === input.ref));
-            if (!asset) throw refuse(TOOL, { reason: 'notFound', ref: input.ref }, `${input.artifact} holds no asset ${input.ref}; artifact_list_assets lists them`);
-            const format = formatOf(asset.name);
-            if (!format) throw refuse(TOOL, { reason: 'invalid', ref: input.ref }, `${input.ref} is not a .csv, .tsv or .json asset`);
-            source = { bytes: store.files.readAsset(artifactId, asset.sha256), name: asset.name, format, ref: asset.ref };
+        // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1): a bound asset is held from its lookup to the
+        // end of the write, so a query snapshot retired meanwhile keeps its bytes for the descriptor that names it (which
+        // then adopts it)
+        let held: { release(): void } | null = null;
+        try {
+          if (!input.remove) {
+            if (input.path !== undefined) {
+              const validated = await realFileUnder(ctx.cwd, input.path);
+              const name = basename(input.path);
+              const format = formatOf(name);
+              if (!format) throw refuse(TOOL, { reason: 'invalid', path: validated.real }, `${name} is not a .csv, .tsv or .json file`);
+              source = { bytes: await readValidated(validated), name, format };
+            } else {
+              const asset = await store.readCommitted(() => {
+                const found = store.listAssets(artifactId).find((candidate) => candidate.ref === input.ref);
+                if (found) held = store.holdAsset(artifactId, found.ref); // E3: in the lookup's turn
+                return found;
+              });
+              if (!asset) throw refuse(TOOL, { reason: 'notFound', ref: input.ref }, `${input.artifact} holds no asset ${input.ref}; artifact_list_assets lists them`);
+              const format = formatOf(asset.name);
+              if (!format) throw refuse(TOOL, { reason: 'invalid', ref: input.ref }, `${input.ref} is not a .csv, .tsv or .json asset`);
+              source = { bytes: store.files.readAsset(artifactId, asset.sha256), name: asset.name, format, ref: asset.ref };
+            }
+            const result = parseDataset(source.bytes, source.format);
+            if (result instanceof DatasetError) {
+              throw refuse(TOOL, { reason: result.kind, ...(result.line !== undefined && { line: result.line }), message: result.reason }, `${source.name} was refused: ${result.reason}; nothing was written`);
+            }
+            const keyProblem = input.rowKey === undefined ? null : rowKeyProblem(result, input.rowKey);
+            if (keyProblem) throw refuse(TOOL, { reason: 'invalid', rowKey: input.rowKey, message: keyProblem }, `${keyProblem}; nothing was written`);
+            table = result;
           }
-          const result = parseDataset(source.bytes, source.format);
-          if (result instanceof DatasetError) {
-            throw refuse(TOOL, { reason: result.kind, ...(result.line !== undefined && { line: result.line }), message: result.reason }, `${source.name} was refused: ${result.reason}; nothing was written`);
-          }
-          const keyProblem = input.rowKey === undefined ? null : rowKeyProblem(result, input.rowKey);
-          if (keyProblem) throw refuse(TOOL, { reason: 'invalid', rowKey: input.rowKey, message: keyProblem }, `${keyProblem}; nothing was written`);
-          table = result;
-        }
-        const sha256 = source && createHash('sha256').update(source.bytes).digest('hex');
-        const actor = actorOf(ctx);
-        const at = (deps.now?.() ?? new Date()).getTime();
+          const sha256 = source && createHash('sha256').update(source.bytes).digest('hex');
+          const actor = actorOf(ctx);
+          const at = (deps.now?.() ?? new Date()).getTime();
 
-        const answer = await store.writeCommitted(() =>
-          store.withOp(
-            opIdOf(ctx),
-            TOOL,
-            artifactId,
-            async (op) => {
-              let existing: DatasetDescriptor | null = null;
-              let recorded: ArtifactDatasetResult | undefined;
-              // the final check, inside the write's savepoint and synchronous with it
-              const prepare = () => {
-                if (!store.get(artifactId)) throw new ToolRefusal(TOOL_ERRORS.noArtifact(TOOL, input.artifact));
-                const doc = store.service.live(artifactId);
-                // a dashboard made from files before E2 is held (fix wave R1): checked here, at the write, so one that
-                // became it while the file was read (a restore) is refused with nothing written
-                const held = legacyDashboardFiles(doc);
-                if (held) throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard', held }, `${input.artifact}: ${legacyDashboardReason(held)}; nothing was written`);
-                const live = store.revision(artifactId);
-                if (input.baseRevision > live) throw refuse(TOOL, { reason: 'invalid', liveRevision: live }, `baseRevision ${input.baseRevision} is newer than the live revision ${live}`);
-                existing = readDataset(doc, input.id);
-                if (adapter.lastChange(artifactId, input.id) > input.baseRevision) {
-                  const detail = existing ? 'replaced since your read' : 'removed since your read';
-                  throw refuse(TOOL, { reason: 'conflict', dataset: input.id, detail, liveRevision: live }, `dataset "${input.id}" was ${detail.replace(' since your read', '')} since your read (revision ${input.baseRevision}); read the dashboard again`);
-                }
-                if (input.remove && !existing) throw refuse(TOOL, { reason: 'notFound', dataset: input.id }, `${DATASET_STATES.noDataset(input.id)} to remove`);
-                const slot = input.remove ? null : datasetSlotProblem(doc, input.id);
-                if (slot) throw refuse(TOOL, { reason: 'invalid', dataset: input.id }, slot);
-              };
-              const assets = source && source.ref === undefined ? [{ bytes: source.bytes, name: source.name, mime: mimeOf(source.name) }] : [];
-              await store.writeWithAssets(
-                artifactId,
-                actor,
-                assets,
-                (doc, refs) => {
-                  if (!source || !table) return removeDataset(doc, input.id);
-                  const prior = existing as DatasetDescriptor | null;
-                  const title = input.title ?? prior?.title ?? input.id;
-                  const description = input.description ?? prior?.description;
-                  setDataset(doc, input.id, {
-                    title,
-                    ...(description !== undefined && { description }),
-                    source: { kind: 'file', ref: source.ref ?? refs[0]!.ref, name: source.name, format: source.format, sha256: sha256!, size: source.bytes.length },
-                    columns: table.columns,
-                    rows: table.rows.length,
-                    ...(input.rowKey !== undefined && { rowKey: input.rowKey }),
-                    updated: { at, by: actor },
-                    state: { status: 'ok', at },
-                  });
-                },
-                {
-                  prepare,
-                  inFrame: (revision) => {
-                    recorded = table
-                      ? { status: 'dataset', artifactId, id: input.id, revision, columns: table.columns, rows: table.rows.length, ...(table.warnings.length > 0 && { warnings: table.warnings }) }
-                      : { status: 'dataset', artifactId, id: input.id, revision };
-                    op.record(recorded);
+          const answer = await store.writeCommitted(() =>
+            store.withOp(
+              opIdOf(ctx),
+              TOOL,
+              artifactId,
+              async (op) => {
+                let existing: DatasetDescriptor | null = null;
+                let recorded: ArtifactDatasetResult | undefined;
+                // the final check, inside the write's savepoint and synchronous with it
+                const prepare = () => {
+                  if (!store.get(artifactId)) throw new ToolRefusal(TOOL_ERRORS.noArtifact(TOOL, input.artifact));
+                  const doc = store.service.live(artifactId);
+                  // a dashboard made from files before E2 is held (fix wave R1): checked here, at the write, so one that
+                  // became it while the file was read (a restore) is refused with nothing written
+                  const held = legacyDashboardFiles(doc);
+                  if (held) throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard', held }, `${input.artifact}: ${legacyDashboardReason(held)}; nothing was written`);
+                  const live = store.revision(artifactId);
+                  if (input.baseRevision > live) throw refuse(TOOL, { reason: 'invalid', liveRevision: live }, `baseRevision ${input.baseRevision} is newer than the live revision ${live}`);
+                  existing = readDataset(doc, input.id);
+                  if (adapter.lastChange(artifactId, input.id) > input.baseRevision) {
+                    const detail = existing ? 'replaced since your read' : 'removed since your read';
+                    throw refuse(TOOL, { reason: 'conflict', dataset: input.id, detail, liveRevision: live }, `dataset "${input.id}" was ${detail.replace(' since your read', '')} since your read (revision ${input.baseRevision}); read the dashboard again`);
+                  }
+                  if (input.remove && !existing) throw refuse(TOOL, { reason: 'notFound', dataset: input.id }, `${DATASET_STATES.noDataset(input.id)} to remove`);
+                  const slot = input.remove ? null : datasetSlotProblem(doc, input.id);
+                  if (slot) throw refuse(TOOL, { reason: 'invalid', dataset: input.id }, slot);
+                };
+                const assets = source && source.ref === undefined ? [{ bytes: source.bytes, name: source.name, mime: mimeOf(source.name) }] : [];
+                await store.writeWithAssets(
+                  artifactId,
+                  actor,
+                  assets,
+                  (doc, refs) => {
+                    if (!source || !table) return removeDataset(doc, input.id);
+                    const prior = existing as DatasetDescriptor | null;
+                    const title = input.title ?? prior?.title ?? input.id;
+                    const description = input.description ?? prior?.description;
+                    setDataset(doc, input.id, {
+                      title,
+                      ...(description !== undefined && { description }),
+                      source: { kind: 'file', ref: source.ref ?? refs[0]!.ref, name: source.name, format: source.format, sha256: sha256!, size: source.bytes.length },
+                      columns: table.columns,
+                      rows: table.rows.length,
+                      ...(input.rowKey !== undefined && { rowKey: input.rowKey }),
+                      updated: { at, by: actor },
+                      state: { status: 'ok', at },
+                    });
                   },
-                },
-              );
-              return recorded!;
-            },
-            { actor },
-          ),
-        );
-        return toolText(answer);
+                  {
+                    prepare,
+                    inFrame: (revision) => {
+                      recorded = table
+                        ? { status: 'dataset', artifactId, id: input.id, revision, columns: table.columns, rows: table.rows.length, ...(table.warnings.length > 0 && { warnings: table.warnings }) }
+                        : { status: 'dataset', artifactId, id: input.id, revision };
+                      op.record(recorded);
+                    },
+                  },
+                );
+                return recorded!;
+              },
+              { actor },
+            ),
+          );
+          return toolText(answer);
+        } finally {
+          (held as { release(): void } | null)?.release(); // E3
+        }
       }),
     ),
   );

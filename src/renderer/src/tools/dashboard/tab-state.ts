@@ -5,7 +5,7 @@
 // the header's Datasets action reads what is on screen, a version's in history included, without keeping a preview's
 // document past its life). M4: its dataset changes join B's history through the tab's history hook.
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
-import { listDatasets } from '@artifacts/dashboard/datasets';
+import { listDatasets, snapshotOf, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
 import { datasetChanges } from '@artifacts/dashboard/history';
 import { createChartRenderer } from '@artifacts/dashboard/editor/chart-view';
 import { SourceSheetState, type SheetDataset } from '@artifacts/dashboard/editor/sheet';
@@ -33,7 +33,7 @@ export class DashboardTabState {
     this.renderChart = createChartRenderer({
       reader: this.reader,
       actorName: this.actorName,
-      openSource: ({ datasetId, descriptor, view }) => this.sheet.open([{ id: datasetId, descriptor, ...(view && { view }) }], datasetId),
+      openSource: ({ datasetId, descriptor, view }) => this.sheet.open([{ id: datasetId, descriptor, ...(view && { view }) }], datasetId, this.holdShown([descriptor])),
     });
   }
 
@@ -53,13 +53,20 @@ export class DashboardTabState {
   /** The header's Datasets: the sheet on the shown document's datasets, or closed when it is open. */
   toggleDatasets = (): void => {
     if (this.sheet.snapshot().open) this.sheet.close();
-    else this.sheet.open(this.shown);
+    else this.sheet.open(this.shown, undefined, this.holdShown(this.shown.map(({ descriptor }) => descriptor)));
   };
+
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): the snapshots a sheet captured, held from its
+  // opening (a painted view's cached hold duplicated at once) to its close
+  private holdShown(descriptors: readonly DatasetDescriptor[]) {
+    return this.reader.holdAll(descriptors.flatMap((descriptor) => snapshotOf(descriptor)?.ref ?? []));
+  }
 
   dispose(): void {
     this.stopShown();
     this.stopShown = () => {};
     this.sheet.close();
+    this.reader.dispose(); // E3: the reader's holds go with the tab
     this.document.dispose();
   }
 }

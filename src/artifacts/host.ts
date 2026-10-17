@@ -210,6 +210,12 @@ export interface ArtifactHost {
   // by the displayed descriptor's ref) where they choose, `name` the suggestion; `path` null when they cancel. Main reads
   // and copies the bytes; the editor never fetches them.
   downloadAsset(artifactId: string, ref: string, options?: { name?: string }): Promise<{ path: string | null }>;
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b; the ledger's E3 hold-IPC row): one hold over the
+  // snapshots `refs` names (1 to 64 of the artifact's assets), all or none, so their bytes outlast a refresh retiring
+  // them while this window still reads them (the source sheet's captured snapshots, the painted cache's). It is main's,
+  // bound to this window: released by `release` (once, however often called) or when the window closes or navigates.
+  // Rejects with nothing held when a ref is no longer available or the artifact's hold bounds are reached.
+  holdDatasets(artifactId: string, refs: readonly string[]): Promise<{ release(): void }>;
   identity(): { actor: Actor; name: string; color: string };
   // P3-H H4 (the X9 amendment, Decision Log 80): a page's connector surface, and the owner's grants of one artifact's
   // tools (the editor header's, never a page's). A grant is taken under the fingerprint of the route that has the tool
