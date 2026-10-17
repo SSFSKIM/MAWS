@@ -28,8 +28,8 @@
 - [x] M1 — The hub's `output`, the widened bodies, and DX8's `output()` (2026-10-17, reviewed clean: d2c8fec5..af560476, fix 7098835a..89b2e560)
 - [x] M2 — The fake machine's part: the session-view recording, jobs and status, `output`, pages after the replay (2026-10-17, reviewed clean: 36131d48..6bb8bb4f, fixes 45c4d172..62c4fbd3 and 62c4fbd3..c4a17632)
 - [x] M3 — The per-session owner and the session view (2026-10-17, reviewed clean: 36131d48..57320abd on `desk-dc9-m3`, fixes ..6b2ddded, ..2388b1f3, ..55c6e118; merged at 582aecfd)
-- [ ] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements
-- [ ] M5 — The column: agents with real status, the jobs view, `output`, MCP names
+- [ ] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements (in review: built 7e2bbe64, fix 1b05db7a; fix wave 2 — affirmative provenance — in flight on `desk-dc9`)
+- [ ] M5 — The column: agents with real status, the jobs view, `output`, MCP names (building on `desk-dc9-m5` in `/tmp/desk-dc9-m5`; to be reviewed, then merged)
 - [ ] M6 — The acceptance, the phone's bundle, and the gate
 
 ## Constraints that bind every milestone
