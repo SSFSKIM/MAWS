@@ -36,6 +36,23 @@ describe('complete', () => {
     expect(complete('cua', sessions).map((c) => c.tag)).toEqual(['@"cua repl"']);
   });
 
+  it('finds a member by its title or a word of it, lists the title, and still inserts the tag of its alias', () => {
+    const titled: Addressable[] = [
+      { session: S1, alias: 'maws-4d', member: true, live: true, title: 'cua_repl' },
+      { session: S2, alias: 'maws-e3', member: true, live: true, title: 'GUI AI agent workspace charter' },
+      { session: S3, alias: 'maws-45', member: true, live: true },
+    ];
+    expect(complete('cua', titled)).toEqual([{ tag: '@maws-4d', alias: 'maws-4d', session: S1, title: 'cua_repl' }]);
+    expect(complete('REPL', titled).map((c) => c.tag)).toEqual(['@maws-4d']);
+    expect(complete('work', titled).map((c) => c.tag)).toEqual(['@maws-e3']);
+    expect(complete('maws', titled).map((c) => [c.tag, c.title])).toEqual([
+      ['@maws-45', null],
+      ['@maws-4d', 'cua_repl'],
+      ['@maws-e3', 'GUI AI agent workspace charter'],
+    ]);
+    expect(complete('ent', titled)).toEqual([]); // inside a word is not a match
+  });
+
   it('never offers a member that left, and every tag it offers addresses exactly its session', () => {
     expect(complete('maws-o', sessions)).toEqual([]);
     for (const candidate of complete('', sessions).filter((c) => c.session)) {

@@ -1,5 +1,6 @@
 // The center column: the selected channel, drawn only from verified log events and verified requests (§4). The group
-// chat and a direct channel are one stream (`buildStream`); a direct channel's header carries the session's actions —
+// chat and a direct channel are one stream (`buildStream`); a direct channel's header names the session as its sidebar
+// row does (`SessionLabel`: the title, its machine, the alias under it) and carries the session's actions —
 // Retire while it is a member, Resume once it ended (never once retired: it says who retired it) — each drawn
 // disabled with §5's reason when the session cannot,
 // and says when the machine is offline: the conversation stays, presence and depth are unavailable. A direct channel's
@@ -16,6 +17,7 @@ import { buildStream, byWhom, placedRequest, type PlacedRequest } from '../../co
 import { capabilities, kindOf, retiredBy } from '../../conversation/capabilities';
 import { landedItem, landingReady, landingStatus } from '../../conversation/landing';
 import { refused } from '../../log/project-log';
+import { sessionName } from '../../log/projection';
 import { useLanding } from '../../pwa/service-worker';
 import { useNarrow } from '../../shell/viewport';
 import type { Channel } from '../../shell/layout';
@@ -24,6 +26,7 @@ import { GroupComposer, SessionComposer } from '../composer/Composer';
 import { useConnected, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
 import { StreamView } from '../conversation/StreamView';
+import { SessionLabel } from '../../shell/SessionLabel';
 
 export function ChannelView(props: {
   name: string;
@@ -53,8 +56,11 @@ export function ChannelView(props: {
           </span>
         ) : (
           <>
-            <span className="text-ui font-semibold">{session?.alias ?? channel.session.slice(0, 8)}</span>
-            {session && <span className="text-ui-sm text-fg-muted">@{session.machine}</span>}
+            {session ? (
+              <SessionLabel session={session} name="text-ui font-semibold" muted="text-ui-sm text-fg-muted" />
+            ) : (
+              <span className="text-ui font-semibold">{channel.session.slice(0, 8)}</span>
+            )}
             {session?.charge && <span className="min-w-0 truncate text-ui-sm text-fg-muted">· {session.charge}</span>}
             {session && <SessionActions key={session.session} session={session} phone={phone} />}
           </>
@@ -62,12 +68,12 @@ export function ChannelView(props: {
       </header>
       {session?.machineOnline === false && (
         <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-warning" role="status" data-testid="machine-offline">
-          {session.machine} is offline: {session.alias}'s presence and depth are unavailable until it reconnects; everything it sent stays here.
+          {session.machine} is offline: {sessionName(session)}'s presence and depth are unavailable until it reconnects; everything it sent stays here.
         </div>
       )}
       {session?.machineOnline !== false && session?.machineReadOnly && (
         <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-warning" role="status" data-testid="machine-read-only">
-          {session.machine} is read-only: it runs nothing sent from outside it, so what you send {session.alias} is recorded and not delivered, and only its terminal can answer or steer it.
+          {session.machine} is read-only: it runs nothing sent from outside it, so what you send {sessionName(session)} is recorded and not delivered, and only its terminal can answer or steer it.
         </div>
       )}
       {landed.notice && (
@@ -140,7 +146,7 @@ function ResumeBar({ session }: { session: DeskSession }) {
         title={can.reason ?? undefined}
         onClick={async () => setRpc(await connection.rpc(member, session.machine, 'resume', { session: session.session }))}
       >
-        Resume {session.alias}
+        Resume {sessionName(session)}
       </button>
       {can.reason && <p className="m-0 text-ui-sm text-fg-faint">{can.reason}</p>}
       <RpcStatus nonce={rpc} />
@@ -159,7 +165,7 @@ function SessionActions({ session, phone }: { session: DeskSession; phone: boole
   if (phone && ended) return null; // Resume (or who retired it) replaces the composer
   if (phone && !opened)
     return (
-      <button type="button" className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-hover" aria-label={`${session.alias}: Retire, and what opens on a computer`} onClick={() => setOpened(true)}>
+      <button type="button" className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-hover" aria-label={`${sessionName(session)}: Retire, and what opens on a computer`} onClick={() => setOpened(true)}>
         ⋯
       </button>
     );
@@ -167,7 +173,7 @@ function SessionActions({ session, phone }: { session: DeskSession; phone: boole
   return (
     // The header's own width bounds it: a confirmation's words truncate rather than run under the depth column.
     <span className={['ml-auto flex min-w-0 items-center gap-2', phone ? 'w-full flex-wrap' : ''].join(' ')}>
-      {phone && <span className="w-full text-ui-sm text-fg-muted">{session.alias}'s transcript, subagents and diff open on a computer.</span>}
+      {phone && <span className="w-full text-ui-sm text-fg-muted">{sessionName(session)}'s transcript, subagents and diff open on a computer.</span>}
       <RpcStatus nonce={rpc} />
       {retired !== null ? (
         // Retired is the owner's taking it out of the project: its machine refuses Resume, so none is offered.
@@ -181,7 +187,7 @@ function SessionActions({ session, phone }: { session: DeskSession; phone: boole
       ) : confirming ? (
         <>
           <span className="min-w-0 truncate text-ui-sm text-fg-muted" title={can.retire.note ? `This ${can.retire.note}.` : 'Its job stops.'}>
-            {can.retire.note ? `Retire ${session.alias}? This ${can.retire.note}.` : `Retire ${session.alias}? Its job stops.`}
+            {can.retire.note ? `Retire ${sessionName(session)}? This ${can.retire.note}.` : `Retire ${sessionName(session)}? Its job stops.`}
           </span>
           <button
             type="button"

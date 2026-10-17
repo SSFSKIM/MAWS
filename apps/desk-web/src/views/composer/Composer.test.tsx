@@ -19,6 +19,7 @@ const session = (id: string, alias: string, group: DeskSession['group'] = 'idle'
   cwd: '/w',
   worktree: null,
   seat: '',
+  title: null,
   member: true,
   ended: null,
   charge: null,

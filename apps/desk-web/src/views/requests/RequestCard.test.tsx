@@ -24,6 +24,7 @@ const session = (id: string, alias: string): DeskSession => ({
   cwd: '/w',
   worktree: null,
   seat: '',
+  title: null,
   member: true,
   ended: null,
   charge: null,

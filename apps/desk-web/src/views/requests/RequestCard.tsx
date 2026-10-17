@@ -18,6 +18,7 @@ import { QuestionBody } from '../../../../../src/renderer/src/request-card/varia
 import { capabilities } from '../../conversation/capabilities';
 import { cardState, isAsyncQuestion, isQuestion, type CardState } from '../../conversation/card-state';
 import { settledText } from '../../conversation/words';
+import { sessionName } from '../../log/projection';
 import type { RequestRecord, RpcEntry } from '../../project/conversation';
 import { useConnected, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
@@ -67,7 +68,7 @@ export function RequestCard({ request, embedded = false }: { request: string; em
   const capability = session ? capabilities(session, connected)[question ? 'answer' : 'decide'] : { can: false, reason: 'the session is not in this project’s log yet' };
   const rpc = latestRpc(rpcs, request);
   const state = cardState(record, rpc, capability, session?.machineOnline ?? null, connected);
-  const who = session?.alias ?? record.raised.session.slice(0, 8);
+  const who = session ? sessionName(session) : record.raised.session.slice(0, 8);
   const agent = record.raised.agentId ?? null;
   const verb = question ? 'asks' : `wants to ${toolVerb(asPermission(record.raised))}`;
   // A subagent's request names the subagent asking, as the session's.
@@ -83,6 +84,7 @@ export function RequestCard({ request, embedded = false }: { request: string; em
         {!embedded && (
           <>
             <span className="font-semibold text-fg">{who}</span>
+            {session?.title && <span className="text-fg-muted">{session.alias}</span>}
             <span className="text-fg-muted">@{record.machine}</span>
           </>
         )}
