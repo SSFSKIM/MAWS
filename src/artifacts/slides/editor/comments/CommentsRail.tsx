@@ -14,7 +14,17 @@ import { COMMENTS_COPY as C } from './copy';
 import { useDeckThreadStates } from './use-threads';
 import './comments.css';
 
-export function CommentsRail({ api, onClose }: { api: DeckCommentsApi; onClose(): void }) {
+/**
+ * P3-E (E1 M4; the P3-E spec's Decision Log 29): the rail's words for an artifact whose threads are not on slides (a
+ * design's boards): the empty text, and per thread where it is, its Show button's name and its orphan note (`index`: the
+ * thread's slide's place, 1-based, null when it is gone). Absent, C's own words.
+ */
+export interface CommentsRailLabels {
+  empty: string;
+  target(thread: DeckThreadState, index: number | null): { location: string; show: string; orphan: string };
+}
+
+export function CommentsRail({ api, onClose, labels }: { api: DeckCommentsApi; onClose(): void; labels?: CommentsRailLabels /* P3-E */ }) {
   const { session, author, readOnly, active } = api;
   const doc = session.doc;
   const threads = useDeckThreadStates(doc);
@@ -29,6 +39,7 @@ export function CommentsRail({ api, onClose }: { api: DeckCommentsApi; onClose()
       key={thread.id}
       thread={thread}
       slide={numbers.get(thread.slideId) ?? null}
+      copy={labels?.target(thread, numbers.get(thread.slideId) ?? null)} // P3-E
       selected={thread.id === active}
       readOnly={readOnly}
       onShow={() => api.show(thread)}
@@ -46,7 +57,7 @@ export function CommentsRail({ api, onClose }: { api: DeckCommentsApi; onClose()
         </button>
       </header>
       <div className="deck-comments-body">
-        {open.length === 0 ? <p className="deck-comments-empty">{C.empty}</p> : open.map(item)}
+        {open.length === 0 ? <p className="deck-comments-empty">{labels?.empty ?? C.empty /* P3-E */}</p> : open.map(item)}
         {resolved.length > 0 && (
           <section className="deck-comments-resolved" aria-label={C.resolved(resolved.length)}>
             <button type="button" className="deck-comments-section" aria-expanded={showResolved} onClick={() => setShowResolved(!showResolved)}>
@@ -63,6 +74,8 @@ export function CommentsRail({ api, onClose }: { api: DeckCommentsApi; onClose()
 interface ItemProps {
   thread: DeckThreadState;
   slide: number | null;
+  /** P3-E: the thread's words from the rail's labels, else C's. */
+  copy?: { location: string; show: string; orphan: string };
   selected: boolean;
   readOnly: boolean;
   onShow(): void;
@@ -71,7 +84,7 @@ interface ItemProps {
   onReopen(): void;
 }
 
-function ThreadItem({ thread, slide, selected, readOnly, onShow, onReply, onResolve, onReopen }: ItemProps) {
+function ThreadItem({ thread, slide, copy, selected, readOnly, onShow, onReply, onResolve, onReopen }: ItemProps) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView?.({ block: 'nearest' });
@@ -87,11 +100,11 @@ function ThreadItem({ thread, slide, selected, readOnly, onShow, onReply, onReso
       data-orphan={thread.orphan ? '' : undefined}
       data-element={thread.elementId}
     >
-      <button type="button" className="deck-thread-quote" aria-label={C.show(thread.quote)} onClick={onShow}>
-        <span className="deck-thread-slide">{C.slide(slide)}</span>
+      <button type="button" className="deck-thread-quote" aria-label={copy?.show ?? C.show(thread.quote) /* P3-E */} onClick={onShow}>
+        <span className="deck-thread-slide">{copy?.location ?? C.slide(slide) /* P3-E */}</span>
         <span className="deck-thread-quote-text">{thread.quote}</span>
       </button>
-      {thread.orphan && <p className="deck-thread-note">{C.orphan}</p>}
+      {thread.orphan && <p className="deck-thread-note">{copy?.orphan ?? C.orphan /* P3-E */}</p>}
       {thread.messages.length > 0 && (
         <ol className="deck-thread-messages">
           {thread.messages.map((message) => {

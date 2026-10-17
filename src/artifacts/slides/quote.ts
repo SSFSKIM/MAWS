@@ -13,6 +13,19 @@ export const QUOTE_MAX = 500;
 export const blocksText = (blocks: readonly TextBlock[]): string => blocks.map((b) => b.inline.map((r) => ('text' in r ? r.text : ' ')).join('')).join('\n');
 export const clipQuote = (text: string): string => (text.length <= QUOTE_MAX ? text : `${text.slice(0, QUOTE_MAX - 1)}…`);
 
+/**
+ * P3-E (E1; the P3-E spec's Decision Log 13 (2)): a design's board is a slide node carrying its frame as plain numbers
+ * (`x`, `y`, `w`, `h`), and a board-level comment anchors its `ROOT`. Its quote is the board's title, else its id; null
+ * when the slide is not a board (a deck's slide has no frame, so a deck's anchors read as before).
+ */
+export function boardQuote(doc: Doc, slideId: string): string | null {
+  if (!Y.hasSlide(doc, slideId)) return null;
+  const s = Y.slideScalars(doc, slideId);
+  if (![s.x, s.y, s.w, s.h].every((v) => typeof v === 'number')) return null;
+  const title = typeof s.title === 'string' ? s.title.trim() : '';
+  return clipQuote(title || slideId);
+}
+
 /** An element's quote: its text, a container's descendants' text, else its tag with alt or aria-label, or its kind. */
 export function quoteOf(e: FlatElement, lists: ReadonlyMap<string, FlatElement[]>): string {
   const texts: string[] = [];
@@ -51,7 +64,7 @@ export function storeRemovedQuotes(doc: Doc, slideId: string, removed: ReadonlyS
   const byId = new Map(flat.map((e) => [e.id, e]));
   for (const t of anchored) {
     const e = byId.get(t.elementId);
-    const quote = e ? quoteOf(e, lists) : null;
+    const quote = e ? quoteOf(e, lists) : t.elementId === '' && removed === null ? boardQuote(doc, slideId) : null; // P3-E: a board's ROOT
     if (quote !== null && quote !== t.quote) Y.setThreadKey(doc, t.id, 'quote', quote);
   }
 }
