@@ -831,6 +831,19 @@ in their own worktrees.
   none after).
   Date/Author: 2026-10-17, M3 executor, folded by the controller.
 
+- Decision: An interrupted turn ends at its interrupt marker on the desk
+  side (M5, in the adapter). Of 171 interrupt markers in the 60 latest
+  local transcripts, 11 are followed by a `turn_duration`; MAWS's backfill
+  only clears its tool loop at a marker and its live path ends the turn
+  from the SDK result, which the desk never gets; DX4 relays no DX5 turn
+  end. The marker row is engine-written and ordered, so the adapter emits
+  a `turn.ended` with an id derived from the marker's uuid at its position
+  — replayed identically through resets, rebuilds and pages, MAWS's
+  backfill unedited. Rejected for now: a relayed DX4 turn-end kind (a
+  contract change, DC8 producing it), kept as residue. The debt row then
+  covers a process killed mid-turn and a cut replay.
+  Date/Author: 2026-10-17, controller (at the composite's writer's ask).
+
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
   transcript never ended it. The engine writes a `system/turn_duration`
