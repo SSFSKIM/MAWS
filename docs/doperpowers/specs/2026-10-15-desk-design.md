@@ -971,8 +971,11 @@ transcript. Its sources, per transcript:
 - the loop's rows: a `tool_result` for the meta's `toolUseId` (for a
   background agent the result is its start, and only a notification or a
   `task_status` ends it); a task-notification (a user row's
-  `queued_command` attachment with `commandMode: "task-notification"`:
-  `<task-id>`, `<tool-use-id>`, `<output-file>`, `<status>`, `<summary>`);
+  `queued_command` attachment with `commandMode: "task-notification"`, or
+  a plain user row whose text is the notification, the form the engine
+  writes when it starts a turn on one — both read, as MAWS's backfill
+  does (DC9, 2026-10-17): `<task-id>`, `<tool-use-id>`, `<output-file>`,
+  `<status>`, `<summary>`);
   a `task_status` attachment (`{taskId, taskType, description, status,
   deltaSummary, outputFilePath}`, observed for `local_agent`);
 - a nested agent's outcome from its parent agent's transcript file
@@ -2584,8 +2587,9 @@ on the machine from the rows the subscription already parses — at the open and
 bridge's agent state (DX5's `agent` spawn and stop events, and `resync.agents`, which DC7 dropped and DC8 forwards)
 and disk facts about each agent's transcript. The rows read, as the engine writes them (2.1.300–2.1.301; engine
 internals, Risks): a `tool_result` for a call; a user row's `queued_command` attachment with `commandMode:
-"task-notification"`, whose prompt carries `<task-id>`, `<tool-use-id>`, `<output-file>`, `<status>` and
-`<summary>`; a user row's `task_status` attachment `{taskId, taskType, description, status, deltaSummary,
+"task-notification"`, or a plain user row whose text is the notification — the form the engine writes when it starts
+a turn on one (76 of 300 recent transcripts; DC9, 2026-10-17) — both read, as MAWS's backfill does, carrying
+`<task-id>`, `<tool-use-id>`, `<output-file>`, `<status>` and `<summary>`; a user row's `task_status` attachment `{taskId, taskType, description, status, deltaSummary,
 outputFilePath}`; a Bash result whose `toolUseResult.backgroundTaskId` is set, its text naming the file after
 "Output is being written to:"; a Monitor result's `toolUseResult {taskId, timeoutMs, persistent}`; a `TaskStop` call
 (`input.task_id`) with a result that is not an error; `mcp_instructions_delta` (`addedNames`, `removedNames`). A
@@ -4489,6 +4493,13 @@ a hub that connects into machines (§2).
   the frame matched all 174 observed deliveries; carrying the uuid to the
   web is a sealed-contract change deferred (§9.7). Rejected: a `row` on
   DX4 `delivery` now, a hub change for a case no delivery showed.
+  2026-10-17, DC9's M2: a task-notification is read in both of the
+  engine's forms — the `queued_command` attachment and a plain user row
+  whose text is the notification, written when the engine starts a turn
+  on one (76 of 300 recent transcripts) — by both producers, as MAWS's
+  backfill reads them; the shared fixture gains a plain-row case. Reading
+  the attachment alone would leave such an agent `running`, then
+  `exited`, never its terminal word.
   2026-10-17, §9.5's backfill edit leaves DC9: its review showed backfill
   alone gives the desktop app's disk-only sessions no shells or monitors
   (the store reads no `session.events` for them, drops events without a
