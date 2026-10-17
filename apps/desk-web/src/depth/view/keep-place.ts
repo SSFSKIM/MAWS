@@ -16,7 +16,10 @@ import type { TranscriptListHandle } from '../../../../../src/renderer/src/trans
 /** Rows keyed by their turn (which a rebuild can rename: the report's working record too) or drawn by the stream (which a row replaces). */
 const VOLATILE = /^(time|divider|owner-record|desk-stream):/;
 /** What only a reader does to the scroller (the list's own scrolling raises none of it): their move ends a correction. */
-const INTENT = ['wheel', 'touchstart', 'pointerdown'] as const;
+const INTENT = ['wheel', 'touchstart', 'touchmove', 'pointerdown'] as const;
+/** A press or a touch, from its start on the scroller until it ends anywhere: while one is down, a scroll is the reader's. */
+const GESTURE_START = ['touchstart', 'pointerdown'] as const;
+const GESTURE_END = ['touchend', 'touchcancel', 'pointerup', 'pointercancel'] as const;
 const NAVIGATION_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 /** Frames the offset must hold, after an index jump, before the place is the list's again; and the most it waits. */
 const STEADY_FRAMES = 5;
@@ -63,17 +66,23 @@ export function useKeepPlaceThroughOlderRows(list: RefObject<TranscriptListHandl
   useEffect(() => {
     const scroller = list.current?.scrollElement;
     if (!scroller) return;
-    const scrolled = () => {
-      if (correcting.current === null) place.current = placeOf(scroller);
-    };
     // A reader who wheels, touches, presses on the list or its scrollbar, or pages with the keys takes their place back:
     // a correction still running stops, and their scroll is their place. The list's own scrolling (its jump, its
-    // realignments while it measures) raises no such event, so it never stops one.
+    // realignments while it measures) raises no such event, so it never stops one. A gesture already under way when a
+    // page lands (a finger down, a scrollbar held while the page was out) raised its start before there was anything to
+    // stop: while it is down, its moves and the scrolls it makes are the reader's and stop the hold the page began.
+    let gesture = false;
     const yieldToReader = () => {
       if (correcting.current === null) return;
       cancelAnimationFrame(correcting.current);
       correcting.current = null;
     };
+    const scrolled = () => {
+      if (gesture) yieldToReader();
+      if (correcting.current === null) place.current = placeOf(scroller);
+    };
+    const began = () => void (gesture = true);
+    const ended = () => void (gesture = false);
     const keyed = (event: KeyboardEvent) => {
       if (NAVIGATION_KEYS.has(event.key)) yieldToReader();
     };
@@ -81,10 +90,14 @@ export function useKeepPlaceThroughOlderRows(list: RefObject<TranscriptListHandl
     scroller.addEventListener('scroll', scrolled, { passive: true });
     for (const kind of INTENT) scroller.addEventListener(kind, yieldToReader, { passive: true });
     scroller.addEventListener('keydown', keyed);
+    for (const kind of GESTURE_START) scroller.addEventListener(kind, began, { passive: true });
+    for (const kind of GESTURE_END) addEventListener(kind, ended, { passive: true });
     return () => {
       scroller.removeEventListener('scroll', scrolled);
       for (const kind of INTENT) scroller.removeEventListener(kind, yieldToReader);
       scroller.removeEventListener('keydown', keyed);
+      for (const kind of GESTURE_START) scroller.removeEventListener(kind, began);
+      for (const kind of GESTURE_END) removeEventListener(kind, ended);
       yieldToReader();
     };
   }, [list]);
