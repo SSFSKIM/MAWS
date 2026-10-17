@@ -90,7 +90,9 @@ test('a chart’s comment follows it through a cut and a paste into another tab,
     await record.getByRole('button', { name: 'Add tab' }).click();
     await expect(tabs.getByRole('tab')).toHaveCount(2);
     await expect(tabs.getByRole('tab').nth(1)).toHaveAttribute('aria-selected', 'true');
-    await record.locator('.ds-doc .ProseMirror').first().click();
+    // the rail open over the page's right side (P3-F1's drawer in the narrow panel): the owner clicks the new tab's page
+    // where the drawer leaves it, at its left
+    await record.locator('.ds-doc .ProseMirror').first().click({ position: { x: 16, y: 8 } });
     await edit(launch, 'paste');
     await expect(figures(record)).toHaveCount(1, { timeout: 10_000 });
     await expect(figures(record).first().locator('.dash-figure > svg')).toBeVisible({ timeout: 15_000 });

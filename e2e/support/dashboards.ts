@@ -162,8 +162,18 @@ export async function edit(launch: MawsLaunch, command: 'copy' | 'cut' | 'paste'
 }
 
 // P3-E2 M5 (moved from dashboard-comments.spec.ts, shared with dashboard-export.spec.ts): the owner's block comment steps.
-/** Selects the drawn chart as a person does, with a click on its caption: the block selected whole, the editor focused. */
+/**
+ * Selects the drawn chart as a person does, with a click on its caption: the block selected whole, the editor focused.
+ * In a narrow panel an open rail is P3-F1's drawer over the page's right side (rail-layout.ts), the caption under it, so
+ * the owner closes it first, as they would, with its Close button; the rail opens again where a step reads it (`railOf`).
+ */
 export async function selectChart(record: Locator): Promise<void> {
+  const body = record.locator('.doc-editor-body').first();
+  if ((await body.getAttribute('data-rail-layout')) === 'drawer') {
+    expect(await body.locator('.doc-rail textarea').evaluateAll((fields) => fields.filter((field) => (field as HTMLTextAreaElement).value !== '').length), 'no draft in the drawer it closes').toBe(0);
+    await body.locator('.doc-rail-header').getByRole('button', { name: /^Close / }).click(); // the comments' or the history's
+    await expect(body).not.toHaveAttribute('data-rail-layout');
+  }
   await figures(record).first().locator('.dash-caption').click();
   await expect(record.locator('.doc-chart.ProseMirror-selectednode')).toHaveCount(1);
   await expect.poll(() => record.locator('.ds-doc .ProseMirror').first().evaluate((el) => el.contains(document.activeElement)), { message: 'the editor has the focus' }).toBe(true);
