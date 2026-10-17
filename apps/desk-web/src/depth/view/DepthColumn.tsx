@@ -1,10 +1,11 @@
 // The depth column (DX8's `depth` slot): the selected direct channel's session in depth. Its tabs are the desk's state:
 // **Subagents**, the session's subagent tree, where opening an agent subscribes to that agent's own transcript;
-// **Diff**, the working tree against its base branch, asked for when the tab opens and on Refresh; and **Info**, where
-// the session runs, its model, and its context use and cost. They read the session's main transcript through its
-// per-session owner (`owner/session-owner.ts`), which the center's session view holds too, so the tree, the diff and
-// the usage come over the one subscription that draws the transcript there (DC9: the Transcript tab moved to the
-// center, and the status word with it). An `Agent` row in the center opens its agent here, through the owner's
+// **Jobs**, the session's background shells and monitors, a shell's output opened under its row, and its MCP servers
+// (DC9, `JobsPane.tsx`); **Diff**, the working tree against its base branch, asked for when the tab opens and on
+// Refresh; and **Info**, where the session runs, its model, and its context use and cost. They read the session's main
+// transcript through its per-session owner (`owner/session-owner.ts`), which the center's session view holds too, so
+// the tree, the jobs, the diff and the usage come over the one subscription that draws the transcript there (DC9: the
+// Transcript tab moved to the center, and the status word with it). An `Agent` row in the center opens its agent here, through the owner's
 // open-agent request. Loaded as a chunk of its own the first time a session is selected.
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
@@ -15,9 +16,11 @@ import { sessionName } from '../../log/projection';
 import type { DepthSlotProps } from '../../shell/slots';
 import { SessionLabel } from '../../shell/SessionLabel';
 import type { DeskSession } from '../../shell/sessions';
+import { jobsTabLabel } from '../jobs/jobs-copy';
 import { useSessionOwner, type SessionOwner } from '../owner/session-owner';
 import { DESK_ACTIONS } from './actions';
 import { createDiffView, DiffPane } from './DiffPane';
+import { JobsPane } from './JobsPane';
 import { SessionInfo } from './SessionInfo';
 import { SubagentDetail } from './SubagentDetail';
 import { INITIAL_TREE_VIEW, SubagentTree, type TreeView } from './SubagentTree';
@@ -35,7 +38,7 @@ export default function DepthColumn({ project, session, plane }: DepthSlotProps)
   return <SessionDepth key={`${session.machine}\u0000${session.session}`} project={project} session={session} plane={plane} />;
 }
 
-type Tab = 'subagents' | 'diff' | 'info';
+type Tab = 'subagents' | 'jobs' | 'diff' | 'info';
 
 function SessionDepth({ project, session, plane }: { project: string; session: DeskSession; plane: DepthSlotProps['plane'] }) {
   const owner = useSessionOwner(project, session, plane);
@@ -64,6 +67,9 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
         <TabButton tab="subagents" current={tab} onSelect={setTab}>
           Subagents{tasks.order.length > 0 ? ` · ${running > 0 ? `${running} running` : tasks.order.length}` : ''}
         </TabButton>
+        <TabButton tab="jobs" current={tab} onSelect={setTab}>
+          {jobsTabLabel(state.jobs)}
+        </TabButton>
         <TabButton tab="diff" current={tab} onSelect={setTab}>
           Diff
         </TabButton>
@@ -75,10 +81,15 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
         {tab === 'subagents' && (
           <div role="tabpanel" aria-label="Subagents" className="absolute inset-0 flex flex-col">
             {agent === null ? (
-              <SubagentTree tasks={tasks} view={treeView} onView={setTreeView} onOpen={setAgent} />
+              <SubagentTree tasks={tasks} view={treeView} onView={setTreeView} onOpen={setAgent} statusesKnown={state.jobs !== null} />
             ) : (
               <SubagentDetail key={agent} project={project} session={session} plane={plane} agentId={agent} node={tasks.tasks.get(agent as never)} actions={actions} onBack={() => setAgent(null)} />
             )}
+          </div>
+        )}
+        {tab === 'jobs' && (
+          <div role="tabpanel" aria-label="Jobs" className="absolute inset-0 flex flex-col">
+            <JobsPane controller={main} state={state} machine={session.machine} />
           </div>
         )}
         {tab === 'diff' && (
