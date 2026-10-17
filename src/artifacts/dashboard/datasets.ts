@@ -89,6 +89,15 @@ export function datasetIdProblem(id: string): string | null {
   return null;
 }
 
+/**
+ * The dataset id a chart block's `source` (its fence body) names: the string trimmed (an imported fence may pad the id
+ * or surround it with blank lines), anything else empty. The one reading the editor, history and the exporters share
+ * (P3-E2 M6; E's Decision Log 40).
+ */
+export function datasetIdFromSource(source: unknown): string {
+  return typeof source === 'string' ? source.trim() : '';
+}
+
 const rootOf = (doc: Doc) => doc.get(DATASETS_ROOT);
 
 /** The descriptor `id` names, or null when none does or the value there is not a descriptor (a replica wrote junk). */

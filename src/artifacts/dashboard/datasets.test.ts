@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { applyV1, diffV1, newDoc } from '../yjs';
-import { DATASET_LIMITS, DATASETS_ROOT, datasetIdProblem, listDatasets, readDataset, removeDataset, setDataset, type DatasetDescriptor } from './datasets';
+import { DATASET_LIMITS, DATASETS_ROOT, datasetIdFromSource, datasetIdProblem, listDatasets, readDataset, removeDataset, setDataset, type DatasetDescriptor } from './datasets';
 
 const descriptor = (over: Partial<DatasetDescriptor> = {}): DatasetDescriptor => ({
   title: 'Sales',
@@ -42,6 +42,14 @@ describe('datasets', () => {
     expect(readDataset(doc, 'absent')).toBeNull();
     expect(readDataset(doc, '__proto__')).toBeNull();
     expect(listDatasets(doc)).toEqual([]);
+  });
+
+  it('reads a chart block\'s source as the dataset id it names: a string trimmed of its padding, anything else empty', () => {
+    expect(datasetIdFromSource('sales')).toBe('sales');
+    expect(datasetIdFromSource('  sales\n')).toBe('sales');
+    expect(datasetIdFromSource('\n\nsales\n\n')).toBe('sales');
+    expect(datasetIdFromSource('   ')).toBe('');
+    for (const other of [undefined, null, 7, true, ['sales'], { id: 'sales' }]) expect(datasetIdFromSource(other)).toBe('');
   });
 
   it('takes ids of 1 to 64 letters, digits, _ and -, never a prototype key', () => {
