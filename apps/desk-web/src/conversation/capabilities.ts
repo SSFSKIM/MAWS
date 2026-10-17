@@ -1,7 +1,9 @@
 // What each kind of session can do from the web (§5's second table, binding): the web reads it to draw what a session
 // cannot do, and why, instead of failing when a button is pressed. The kind comes from presence (whether a process is
 // live and whether its bridge is attached), the seat its `joined` names (a `--bg` seat, against a terminal session),
-// and the machine's lease. `note` says how an action that can be taken will land.
+// and the machine's lease. A machine its owner set read-only (§6, its policy in DX4's `machine` presence) executes no
+// RPC and delivers nothing sent from outside it, whatever the kind. `note` says how an action that can be taken will
+// land.
 import type { SessionPresence } from 'desk-hub/protocol';
 import type { SessionGroup } from '../log/projection';
 
@@ -13,6 +15,8 @@ export type CapabilityInput = {
   /** The seat its `joined` names, `''` for a session sminos did not spawn (a terminal session). */
   seat: string;
   machineOnline: boolean | null;
+  /** The machine's policy says read-only (DX4 `machine` presence); absent or false until it says so. */
+  machineReadOnly?: boolean;
   presence: SessionPresence | null;
   /** The log's latest `retired`, while it stands (DX8's `DeskSession.ended`). */
   ended?: { by: string; reason: string } | null;
@@ -69,6 +73,10 @@ export function capabilities(s: CapabilityInput, connected = true): Record<Verb,
 
 function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
   const kind = kindOf(s);
+  if (s.machineReadOnly === true && kind !== 'offline') {
+    const ro = no(`${s.machine} is read-only: it runs nothing sent from outside it`);
+    return { send: yes(`recorded, not delivered: ${s.machine} is read-only`), steer: ro, interrupt: ro, answer: ro, decide: ro, model: ro, compact: ro, retire: ro, resume: ro };
+  }
   const running = turnRunning(s);
   const retire = s.member ? yes(s.seat ? undefined : 'records it retired; the process stays yours to close') : no(`${s.alias} is retired`);
   switch (kind) {
