@@ -145,6 +145,31 @@ describe('the hold commands (E3)', () => {
     expect(await call('artifacts.releaseAssets', { assetHoldId: captured.assetHoldId })).toEqual({ released: false });
   });
 
+  it('across a host restart a held, retired snapshot is collected at the reopen: its old id releases nothing, a fresh hold on it is refused as unavailable, the latest holds', async () => {
+    const board = await documents.store.create({ kind: 'dashboard', title: 'Board' }, human);
+    const old = await refresh(board.id, 'live');
+    const { assetHoldId } = await call('artifacts.holdAssets', { artifactId: board.id, refs: [old] });
+    await churn(board.id, 'live');
+    expect(exists(board.id, old)).toBe(true); // held, retired
+    // the host process goes and comes back: its holds lived only as long as it
+    surface.close();
+    dashboards.close();
+    documents.close();
+    documents = openDocuments(dir, () => {})!;
+    dashboards = registerDashboards({ documents });
+    handlers = new Map();
+    gone = [];
+    const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
+    surface = registerArtifacts(on, () => true, { onDocPort: () => {}, onClientGone: (hook) => (gone.push(hook), () => {}) }, { documents, env: {} });
+    expect(exists(board.id, old)).toBe(false); // collected at the reopen
+    expect(await call('artifacts.releaseAssets', { assetHoldId })).toEqual({ released: false });
+    const refused = await call('artifacts.holdAssets', { artifactId: board.id, refs: [old] }).catch((error: unknown) => error);
+    expect((refused as HostCommandError).ipcError).toMatchObject({ issues: { reason: 'notFound', data: { snapshotUnavailable: true } } });
+    const latest = await call('artifacts.captureDatasetState', { artifactId: board.id });
+    expect(refsOf(latest.bytes).every((ref) => ref !== undefined && exists(board.id, ref))).toBe(true);
+    await call('artifacts.releaseAssets', { assetHoldId: latest.assetHoldId });
+  });
+
   it('refuses a capture of an artifact that has no document, and bounds the refs one hold names', async () => {
     const page = await documents.store.create({ kind: 'html', title: 'Page', content: { bytes: new TextEncoder().encode('<p>x</p>') } }, human);
     const refused = await call('artifacts.captureDatasetState', { artifactId: page.id }).catch((error: unknown) => error);

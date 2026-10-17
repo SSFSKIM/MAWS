@@ -98,3 +98,74 @@ describe('a dashboard export’s capture (E3)', () => {
     service.stop();
   });
 });
+
+// E3 M1 fix wave (task review finding 6; the architect's restart ruling): a host restart between a dashboard export's
+// capture and the end of its run leaves its hold's ownership stale, whether the run failed or not. The export then
+// captures once more (a live export the latest state, a versioned one the same version, else it is unavailable) and runs
+// once more; a second restart answers a failure, never a third run.
+function restarting(run: Exporter['run'], options: { versionGone?: boolean } = {}) {
+  let generation = 0;
+  let captures = 0;
+  const log: string[] = [];
+  const call = async (name: CommandName, input: unknown): Promise<CommandResult<CommandName>> => {
+    const answer = (value: unknown) => ({ ok: true, value }) as CommandResult<CommandName>;
+    log.push(name);
+    if (name === 'artifacts.get') return answer({ artifact: { id: BOARD, kind: 'dashboard', title: 'Board', revision: 7 } });
+    if (name === 'artifacts.captureDatasetState') {
+      captures += 1;
+      const { versionId } = input as { versionId?: number };
+      if (versionId !== undefined && options.versionGone && captures > 1) return { ok: false, error: { code: 'invalid_input', message: `no version ${versionId} of ${BOARD}`, issues: { reason: 'notFound', data: {} } } } as CommandResult<CommandName>;
+      return answer({ revision: versionId === undefined ? 6 + captures : 5, bytes: bytes(versionId === undefined ? `live@${6 + captures}` : `version ${versionId}`), assetHoldId: `00000000-0000-4000-8000-00000000000${captures}` });
+    }
+    if (name === 'artifacts.releaseAssets') return answer({ released: true });
+    if (name === 'artifacts.versions') return answer({ versions: [{ id: 3, seq: 5 }] });
+    throw new Error(`unexpected ${name}`);
+  };
+  const registry = new ExporterRegistry();
+  registry.register({ kind: 'dashboard', format: 'md', run });
+  const deps: ExportServiceDeps = { registry, root, call: call as ExportServiceDeps['call'], onEvent: () => () => {}, answer: async () => {}, print: async () => bytes('%PDF'), hostGeneration: () => generation };
+  return { deps, log, restart: () => void (generation += 1), captures: () => captures };
+}
+
+describe('a dashboard export across a host restart (E3)', () => {
+  it('a live export whose run succeeded across a restart captures the latest once more and answers that run', async () => {
+    const seen: string[] = [];
+    const w = restarting(async (request, context) => {
+      seen.push(new TextDecoder().decode(await context.state()));
+      if (seen.length === 1) w.restart(); // between the capture and the run's last read
+      await context.writeFile(request.path, '# Board');
+    });
+    const service = startExportService(w.deps);
+    const { revision } = await service.exportForLibrary({ artifactId: BOARD, format: 'md' });
+    expect(seen).toEqual(['live@7', 'live@8']);
+    expect(revision).toBe(8);
+    expect(w.log.filter((name) => name === 'artifacts.releaseAssets')).toHaveLength(2);
+    service.stop();
+  });
+
+  it('a versioned export recaptures the same version, and answers it unavailable when the version is gone', async () => {
+    const w = restarting(async (_request, context) => {
+      await context.state();
+      w.restart();
+      throw new Error('the snapshot assets/q1.json could not be read: the engine host is restarting');
+    }, { versionGone: true });
+    const service = startExportService(w.deps);
+    await expect(service.exportForLibrary({ artifactId: BOARD, format: 'md', versionId: 3 })).rejects.toThrow(/no version 3/);
+    expect(w.captures()).toBe(2);
+    service.stop();
+  });
+
+  it('a second restart during the one retry answers a failure, never a third run', async () => {
+    let runs = 0;
+    const w = restarting(async (request, context) => {
+      runs += 1;
+      await context.state();
+      w.restart();
+      await context.writeFile(request.path, '# Board');
+    });
+    const service = startExportService(w.deps);
+    await expect(service.exportForLibrary({ artifactId: BOARD, format: 'md' })).rejects.toThrow(/restarted/);
+    expect(runs).toBe(2);
+    service.stop();
+  });
+});

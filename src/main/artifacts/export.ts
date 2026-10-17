@@ -261,13 +261,16 @@ export interface ExportServiceDeps {
   onEvent(name: 'maws.artifact.export', listener: (request: MawsArtifactExport) => void): () => void;
   answer(input: CommandInput<'maws.artifact.exported'>): Promise<unknown>;
   print?: PdfPrinter; // printHtmlToPdf in the app; a test's stand-in
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b, the restart ruling): how many times the engine
+  // host's connection has gone, so a dashboard export whose snapshot holds a restart took captures once more
+  hostGeneration?: () => number;
 }
 
 const refusal = (reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}) =>
   new CommandFailure(ipcError('invalid_input', message, { reason, data } satisfies ArtifactRefusal));
 
 // Main's side of the export bridge and the library's command over one queue. Answers the library's export and `stop`.
-export function startExportService({ registry, root, call, onEvent, answer, print = printHtmlToPdf }: ExportServiceDeps): {
+export function startExportService({ registry, root, call, onEvent, answer, print = printHtmlToPdf, hostGeneration }: ExportServiceDeps): {
   exportForLibrary(input: CommandInput<'artifacts.export'>): Promise<CommandOutput<'artifacts.export'>>;
   stop(): void;
 } {
@@ -356,18 +359,32 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
     }
     const exportId = ownFile || asked.kind === 'design' ? randomUUID() : undefined;
     const request = exportId === undefined ? asked : { ...asked, exportId, path: join(dirname(asked.path), artifactExportName(asked.revision, asked.format, exportId)) };
-    const answered = await slot(async () => {
+    // One capture and its run, the dashboard's snapshot holds released when the run ends (E3).
+    const attempt = async (budget: ExportBudget): Promise<MawsArtifactExportAnswer> => {
       let taken: Awaited<ReturnType<typeof snapshot>>;
       try {
-        taken = await snapshot(request, time);
+        taken = await snapshot(request, budget);
       } catch (error) {
+        budget.end();
         return { ok: false, error: messageOf(error) } satisfies MawsArtifactExportAnswer;
       }
       try {
-        return await runExport(registry, taken.request, taken.sources, time);
+        return await runExport(registry, taken.request, taken.sources, budget);
       } finally {
-        await taken.release?.(); // E3: the dashboard's snapshot holds end with the run
+        await taken.release?.();
       }
+    };
+    const answered = await slot(async () => {
+      // E3 (the architect's restart ruling): the engine host's restart between a dashboard's capture and its run's end
+      // left the capture's holds to a host that is gone, whatever the run answered: one fresh capture (the latest live
+      // state, or the same version) and run, a fresh budget of its own; a second restart is a failure
+      const watched = request.kind === 'dashboard' && hostGeneration !== undefined;
+      const before = hostGeneration?.();
+      const first = await attempt(time);
+      if (!watched || hostGeneration!() === before) return first;
+      const again = hostGeneration!();
+      const retried = await attempt(new ExportBudget(EXPORT_BUDGET_MS));
+      return hostGeneration!() === again ? retried : ({ ok: false, error: 'the engine host restarted twice while the dashboard was exported; try again' } satisfies MawsArtifactExportAnswer);
     }, busy);
     time.end();
     return answered;
