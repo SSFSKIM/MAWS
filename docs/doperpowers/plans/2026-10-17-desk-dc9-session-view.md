@@ -686,7 +686,47 @@ in their own worktrees.
   entry — what the S2-parked entry above already carries.
   Date/Author: 2026-10-17, controller.
 
+- Decision (M2, as built at `6bb8bb4fb`): the widened body and `output`
+  sit behind `producer: 'dc8'` (on `SessionDepth`, `FakeMachine`, the
+  command's `--producer`, and `FakeMachineReplay`); the default `'dc3'`
+  keeps `two-subagents`' behaviour and gives M5 an older producer to test
+  against. Containment: one canonical root per slug of DX4's set
+  (`/private/tmp/claude-501/<slug>/<session>/tasks/`), mapped onto the
+  recording's `tasks/`, checked by the same `answerOutput` the fixture
+  pins; `output` answers from the subscription's own loop. File facts are
+  the rows' bytes and the last row's time, deterministic. The bridge's
+  agent state comes only from the timeline (`agent` spawn and stop; a
+  `snapshot`/`resync` `agents` step as the reload seed). `session-view` is
+  built by a committed, deterministic `session-view.py`; its synthesized
+  rows are released by `row-seen` events merged by time, and
+  `recorded.json` lists every synthesized row's uuid by group with its
+  source. **Where each shape came from:** DC8's fixture first (background
+  Bash calls and results, Monitor calls and results, completion notices,
+  statusless monitor events, `task_status`, the `killed` notice, nested
+  metas); `two-subagents`' own rows (the Agent call, the `async_launched`
+  result and row envelopes, `mcp_instructions_delta`, DX5 `agent` events);
+  real 2.1.300 transcripts read for shape only, scrubbed (the ask mod's
+  async call and result text, the plugin-prompt delivery row, `TaskStop`
+  results, the `queued_command` and `task_status` envelopes, a Read
+  result); sminos code (the log's `question`/`answered`, `human`, the
+  `recorded` reason). The vendored fixture (`fake-machine/dx4/`) passes
+  60/60 checks (the table, 14 body cases by `subagents`/`jobs`/`mcp`, 17
+  output cases).
+  Date/Author: 2026-10-17, M2 executor, folded by the controller.
+
 ## Surprises & Discoveries
+- 2026-10-17 (M2): engine 2.1.300 also writes a `<task-notification>` as a
+  plain user row when it opens a turn on one, besides the `queued_command`
+  attachment DX4 and the fixture read: `two-subagents`' own notifications
+  are that form, and 76 of the last 300 local transcripts hold it. MAWS's
+  backfill reads both; the fake reads both (one marked branch), with every
+  fixture case still passing. Sent to the composite's writer for DC8 (a
+  plane reading only the attachment would disagree on every such agent).
+  An agent the bridge reports stopped before its notification lands shows
+  `exited`/`bridge` until the notification row (DX4's precedence; about
+  2.5 s for alpha), which M5 draws as it comes. Engine metas carry
+  `requestShape: "background"` even for a call without
+  `run_in_background`.
 - 2026-10-17: reviewers and workers dispatched from this controller
   inherit a worktree guard that refuses git commands aimed outside the
   dispatching session's own checkout (`git -C /tmp/...` is refused, as are
