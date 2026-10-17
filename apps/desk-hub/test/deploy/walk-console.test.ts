@@ -80,7 +80,7 @@ describe('the walk console', () => {
     }
   });
 
-  it('refuses to run against a project other than the one it is given', async () => {
+  it('stops before any frame when the project it is given has no socket at the hub', async () => {
     const name = `wc-${Math.random().toString(36).slice(2, 7)}`;
     const project = randomUUID();
     const credentials = await enroll(hub, ADMIN, name);

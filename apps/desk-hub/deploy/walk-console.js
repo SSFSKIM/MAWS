@@ -33,7 +33,7 @@
   const wrongMac = () => ({ nonce: b64url(16), value: b64url(32) });
   const now = () => new Date().toISOString();
 
-  const url = `${location.origin.replace(/^http/, 'ws')}/api/projects/${cfg.project}/socket`;
+  const url = `${globalThis.location.origin.replace(/^http/, 'ws')}/api/projects/${encodeURIComponent(cfg.project)}/socket`;
   const ws = new WebSocket(url);
   const sent = [];
   const got = [];
@@ -83,8 +83,9 @@
   };
   send(human);
   const humanNonce = human.event.mac.nonce;
-  const humanAnswer = await waitFor((f) => (f.t === 'human-ack' || f.t === 'refused') && f.nonce === humanNonce, 'answer to the forged human');
-  const rejected = await waitFor((f) => f.t === 'rejected' && f.rejection?.event?.writer === `hub/${member}`, 'a daemon rejecting the forged human', 12000);
+  // The hub acks a stored human by its nonce; a refusal of its own (bad-shape, writer-not-yours) carries it in `refusal`.
+  const humanAnswer = await waitFor((f) => (f.t === 'human-ack' && f.nonce === humanNonce) || (f.t === 'refused' && f.refusal?.nonce === humanNonce), 'answer to the forged human');
+  const rejected = await waitFor((f) => f.t === 'rejected' && f.rejection?.nonce === humanNonce, 'a daemon rejecting the forged human', 12000);
 
   // 2. The forged `steer` RPC.
   const rpc = {

