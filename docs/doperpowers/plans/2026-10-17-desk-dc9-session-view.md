@@ -626,5 +626,11 @@ in their own worktrees.
   Date/Author: 2026-10-17, M1 executor, folded by the controller.
 
 ## Surprises & Discoveries
+- 2026-10-17: reviewers and workers dispatched from this controller
+  inherit a worktree guard that refuses git commands aimed outside the
+  dispatching session's own checkout (`git -C /tmp/...` is refused, as are
+  complex shell commands). A review's range is therefore written to a diff
+  file under `/tmp/desk-review/` (or the SDE workspace's review package) by
+  the controller, and the brief names that path.
 
 ## Outcomes & Retrospective
