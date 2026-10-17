@@ -112,13 +112,26 @@ describe('the source sheet', () => {
     const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get(this: HTMLElement) { return this.classList.contains('dash-sheet-table') ? height : 0; } });
     const observers = new Set<{ callback: ResizeObserverCallback; targets: Set<Element> }>();
-    vi.stubGlobal('ResizeObserver', class {
-      private readonly entry: { callback: ResizeObserverCallback; targets: Set<Element> };
-      constructor(callback: ResizeObserverCallback) { observers.add((this.entry = { callback, targets: new Set() })); }
-      observe(target: Element) { this.entry.targets.add(target); }
-      unobserve(target: Element) { this.entry.targets.delete(target); }
-      disconnect() { this.entry.targets.clear(); observers.delete(this.entry); }
-    });
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        private readonly entry: { callback: ResizeObserverCallback; targets: Set<Element> };
+        constructor(callback: ResizeObserverCallback) {
+          this.entry = { callback, targets: new Set() };
+          observers.add(this.entry);
+        }
+        observe(target: Element) {
+          this.entry.targets.add(target);
+        }
+        unobserve(target: Element) {
+          this.entry.targets.delete(target);
+        }
+        disconnect() {
+          this.entry.targets.clear();
+          observers.delete(this.entry);
+        }
+      },
+    );
     const frames = new Map<number, FrameRequestCallback>();
     let next = 1;
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => (frames.set(next, callback), next++));
