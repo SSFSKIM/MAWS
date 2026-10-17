@@ -7,11 +7,14 @@
 # Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
 # /tmp/maws-review/gates/ci-<short>/, keeps the whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the
-# ref (unless --keep) and exits with the run's status (0 green, 1 anything else).
+# ref (unless --keep) and exits with the run's status (0 green, 1 anything else). When the mini refused jobs (ci-kit's
+# job-started check: a dialog or the wrong app in front), the last line before the run's status names the refused, the
+# green and the red, and the --gates that relaunches the refused and the red on the same tree (Decision Log 58(c), 59(1)).
 #
 #   <worktree-or-sha>  a worktree path (its HEAD is tested) or a commit
 #   --gates            narrow to static, unit, unit:darwin, packaged (macOS), probes or e2e:<group>; default: class 1a
-#                      (static, unit, probes), plus unit:darwin and every class-1 e2e group when the e2e lane is macOS
+#                      (static, unit, probes), plus unit:darwin and every class-1 e2e group when the e2e lane is macOS.
+#                      e2e:default is the bare `pnpm e2e` less the specs the run's other e2e groups collect
 #   --runner           the e2e lane, linux or macos (default: $MAWS_GATE_RUNNER, else the repository's variables)
 #   --class1a          class 1a's runner (static, unit, probes): linux, macos or pool, ci-kit's Hetzner box (default:
 #                      the repository's variable GATE_RUNNER, else linux)
@@ -28,7 +31,7 @@ set -uo pipefail
 
 REPO=SSFSKIM/MAWS
 usage() {
-  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -150,13 +153,37 @@ while :; do
 done
 rm -f "$view_err"
 conclusion=$(gh -R "$REPO" run view "$run_id" --json conclusion --jq .conclusion)
-gh -R "$REPO" run view "$run_id" --json jobs --jq '.jobs[] | "\(.conclusion // .status)\t\(.name)"' | sort -k2
+jobs=$(gh -R "$REPO" run view "$run_id" --json jobs --jq '.jobs[] | "\(.conclusion // .status)\t\(.name)"' | sort -k2)
+printf '%s\n' "$jobs"
+
+# Decision Log 58(c), 59(1): when ci-kit's job-started check refused jobs on the mini (its `ci-kit: … rerun` line in a
+# job's log, before any of the job's steps ran), one line of the refused against the finished, green and red, and the
+# relaunch of the refused and the red on the same tree. Nothing when no job was refused.
+refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
+  local refused relaunch="scripts/ci-gate.sh $sha"
+  refused=$(printf '%s\n' "$2" | perl -ne 'print "$1\n" if /^([^\t]+)\t[^\t]*\t\S+ ci-kit: .*rerun\s*$/' | sort -u | tr '\n' ' ')
+  [[ -n $refused ]] || return 0
+  [[ -n $runner ]] && relaunch+=" --runner $runner"
+  [[ -n $class1a ]] && relaunch+=" --class1a $class1a"
+  printf '%s\n' "$1" | awk -F'\t' -v refused="$refused" -v relaunch="$relaunch" -v label="$label" '
+    BEGIN { n = split(refused, names, " "); for (i = 1; i <= n; i++) isrefused[names[i]] = 1 }
+    $2 == "plan" || $1 == "skipped" { next }
+    $2 in isrefused { r = r " " $2; gates = gates "," $2; nr++; next }
+    $1 == "success" { g = g " " $2; ng++; next }
+    { d = d " " $2 ($1 == "failure" ? "" : " (" $1 ")"); gates = gates "," $2; nd++ }
+    END {
+      printf "ci-gate: refused by the mini (%d):%s; green (%d):%s; red (%d):%s; relaunch the refused and the red (less any red baseline, Decision Log 58(c)): %s --gates %s --label %s --evidence\n",
+        nr, r, ng, (ng ? g : " none"), nd, (nd ? d : " none"), relaunch, substr(gates, 2), label
+    }'
+}
 
 if [[ $conclusion != success ]]; then
   rm -rf "$out/ci-$short"
   if gh -R "$REPO" run download "$run_id" -D "$out/ci-$short" 2>/dev/null; then echo "ci-gate: failed jobs' reports in $out/ci-$short/"; fi
+  failed_log=$(gh -R "$REPO" run view "$run_id" --log-failed | perl -pe 's/(\e|\^\[)\[[0-9;]*[A-Za-z]//g')
   # The failed steps' last lines, each under its job's name, colours and timestamps stripped.
-  gh -R "$REPO" run view "$run_id" --log-failed | perl -pe 's/(\e|\^\[)\[[0-9;]*[A-Za-z]//g; s/^([^\t]*)\t[^\t]*\t\S+ /$1  /' | tail -80
+  printf '%s\n' "$failed_log" | perl -pe 's/^([^\t]*)\t[^\t]*\t\S+ /$1  /' | tail -80
+  refusals "$jobs" "$failed_log"
 fi
 echo "ci-gate: run $run_id $conclusion"
 [[ $conclusion == success ]] && finish 0
