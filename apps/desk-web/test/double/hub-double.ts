@@ -1,6 +1,7 @@
 // The DX3 protocol double (the DC5 plan's Decision Log, "Building ahead of the hub"): a local stand-in for the hub's
 // browser side, for the web app's suites while DC3's local hub and fake machine are still to land. It speaks
-// `desk-hub/protocol`'s types and nothing of its own: `/api/me`, DX7's wrapped keys (./org-keys.ts), the project
+// `desk-hub/protocol`'s types and nothing of its own: `/api/me` (an admin, or a member as `role` says), DX7's wrapped
+// keys (./org-keys.ts) and machine records (./machines.ts: listed and revoked; enrollment is not served), the project
 // socket (`ProjectUp` / `ProjectDown`), and the registry socket (`GridDown`); it numbers stored events with project offsets, seals what it appends with the org
 // key the way a machine's daemon would (DX1), serves DX7's Web Push endpoints (./push.ts; it sends no pushes: the browser
 // suites deliver one to the service worker directly), and serves a built app from a directory with the single-page fallback the
@@ -46,11 +47,13 @@ import {
   type Settled,
   type Decision,
   type RpcState,
+  type Role,
   type SessionBodies,
   type SubscriptionKind,
   RPC_FRESHNESS_MS,
 } from 'desk-hub/protocol';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { MachinesDouble } from './machines';
 import { OrgKeysDouble } from './org-keys';
 import { PushDouble } from './push';
 
@@ -106,6 +109,10 @@ export class HubDouble {
   /** Answer each `human` with `human-ack` (true), or hold the acknowledgement as a hub that dropped mid-write would. */
   ackHumans = true;
   admit: 'member' | 'not-a-member';
+  /** The signed-in member's role in the org, as `/api/me` answers it and the endpoints judge it: an admin by default. */
+  role: Role = 'admin';
+  /** DX7's machine records (`/api/machines`): listed, and revoked by an admin. */
+  readonly machineRecords = new MachinesDouble();
   /** DX7's wrapped keys (`/api/org/keys`), with the hub's rules: `not-key-holder`, `different-key`, `last-key`. */
   readonly orgKeys = new OrgKeysDouble();
   /** DX7's Web Push endpoints: the VAPID key and the member's subscriptions. */
@@ -598,12 +605,14 @@ export class HubDouble {
       json(res, 403, { error: 'not-a-member' });
       return;
     }
+    const member: MemberRecord = { ...DOUBLE_MEMBER, role: this.role };
     if (path === '/api/me') {
-      json(res, 200, { org: { ...DOUBLE_ORG, key_check: this.orgKeys.key_check }, member: DOUBLE_MEMBER });
+      json(res, 200, { org: { ...DOUBLE_ORG, key_check: this.orgKeys.key_check }, member });
       return;
     }
     const body = await readJson(req);
-    const answer = (await this.orgKeys.handle(DOUBLE_MEMBER, req.method ?? 'GET', path, body)) ?? (await this.push.handle(DOUBLE_MEMBER, req.method ?? 'GET', path, body));
+    const method = req.method ?? 'GET';
+    const answer = (await this.orgKeys.handle(member, method, path, body)) ?? (await this.push.handle(member, method, path, body)) ?? this.machineRecords.handle(member, method, path);
     if (answer) {
       json(res, answer.status, answer.body);
       return;
