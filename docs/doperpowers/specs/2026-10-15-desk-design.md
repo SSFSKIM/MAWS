@@ -973,9 +973,12 @@ transcript. Its sources, per transcript:
   `task_status` ends it); a task-notification (a user row's
   `queued_command` attachment with `commandMode: "task-notification"`, or
   a plain user row whose text is the notification, the form the engine
-  writes when it starts a turn on one — both read, as MAWS's backfill
-  does (DC9, 2026-10-17): `<task-id>`, `<tool-use-id>`, `<output-file>`,
-  `<status>`, `<summary>`);
+  writes when it starts a turn on one — both read (DC9, 2026-10-17); a
+  plain row counts only when its `origin.kind` is `task-notification` and
+  its text is the notification, or, in a subagent's transcript, the
+  engine's fixed `[SYSTEM NOTIFICATION - NOT USER INPUT]` preamble, a
+  blank line, then the notification (DC8, 2026-10-17):
+  `<task-id>`, `<tool-use-id>`, `<output-file>`, `<status>`, `<summary>`);
   a `task_status` attachment (`{taskId, taskType, description, status,
   deltaSummary, outputFilePath}`, observed for `local_agent`);
 - a nested agent's outcome from its parent agent's transcript file
@@ -2588,7 +2591,10 @@ bridge's agent state (DX5's `agent` spawn and stop events, and `resync.agents`, 
 and disk facts about each agent's transcript. The rows read, as the engine writes them (2.1.300–2.1.301; engine
 internals, Risks): a `tool_result` for a call; a user row's `queued_command` attachment with `commandMode:
 "task-notification"`, or a plain user row whose text is the notification — the form the engine writes when it starts
-a turn on one (76 of 300 recent transcripts; DC9, 2026-10-17) — both read, as MAWS's backfill does, carrying
+a turn on one (76 of 300 recent transcripts; DC9, 2026-10-17) — both read, a plain row only when it is a user row
+whose `origin.kind` is `task-notification` and whose text starts with `<task-notification>` or, in a subagent's
+transcript, with the engine's fixed `[SYSTEM NOTIFICATION - NOT USER INPUT]` preamble and the notification after the
+blank line (the shared fixture's `about`; a typed prompt or a peer message never carries that origin), carrying
 `<task-id>`, `<tool-use-id>`, `<output-file>`, `<status>` and `<summary>`; a user row's `task_status` attachment `{taskId, taskType, description, status, deltaSummary,
 outputFilePath}`; a Bash result whose `toolUseResult.backgroundTaskId` is set, its text naming the file after
 "Output is being written to:"; a Monitor result's `toolUseResult {taskId, timeoutMs, persistent}`; a `TaskStop` call
@@ -4496,8 +4502,15 @@ a hub that connects into machines (§2).
   2026-10-17, DC9's M2: a task-notification is read in both of the
   engine's forms — the `queued_command` attachment and a plain user row
   whose text is the notification, written when the engine starts a turn
-  on one (76 of 300 recent transcripts) — by both producers, as MAWS's
-  backfill reads them; the shared fixture gains a plain-row case. Reading
+  on one (76 of 300 recent transcripts) — by both producers; the shared
+  fixture gains a plain-row case (doperpowers b7511dd9). DC8's survey
+  (300 transcripts: 2,166 plain rows in main transcripts, 262 in
+  subagent ones, 838 and 162 events in no other form) set the rule: the
+  row's `origin.kind` must be `task-notification`, and a subagent's
+  transcript writes the notification behind a fixed preamble. Rejected:
+  MAWS's backfill's start-only check, which a typed prompt beginning
+  with the tag passes; that backfill also misses the preamble form, so
+  it loses nested agents' notifications (for the parked S2 work). Reading
   the attachment alone would leave such an agent `running`, then
   `exited`, never its terminal word.
   2026-10-17, §9.5's backfill edit leaves DC9: its review showed backfill
