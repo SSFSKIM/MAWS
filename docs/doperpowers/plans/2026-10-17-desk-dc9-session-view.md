@@ -726,6 +726,24 @@ in their own worktrees.
   one, which the optional `spawn.name` fits.
   Date/Author: 2026-10-17, controller (the composite's writer's notice).
 
+- Decision: DC8's fixture moves to doperpowers `b7511dd9` (`jobs_parity`
+  71/71), with the case "notifications as plain rows". A plain row is a
+  task-notification only when it is a user row, its `origin.kind` is
+  `task-notification`, and its text starts with `<task-notification>` or
+  with the engine's `[SYSTEM NOTIFICATION - NOT USER INPUT]` preamble, a
+  blank line, then the notification (the form subagent transcripts write,
+  with `isMeta: true`); it feeds the same derivation as the attachment
+  (agents, jobs, monitor expiry). The case holds an agent ending on a plain
+  row, a nested agent ending on a preamble-form row in its parent's file, a
+  shell failing, a monitor expiring, a monitor event that changes nothing,
+  and three forgeries that change nothing (a typed prompt, a peer message,
+  text before the notification). The fake's derivation requires the
+  origin — stricter than MAWS's start-only check — and reads the preamble
+  form; M2's fix wave re-vendors this fixture. (MAWS's backfill misses the
+  preamble form too; that belongs to the parked S2 follow-up.)
+  Date/Author: 2026-10-17, the composite's writer relaying DC8, folded by
+  the controller.
+
 ## Surprises & Discoveries
 - 2026-10-17 (M2): engine 2.1.300 also writes a `<task-notification>` as a
   plain user row when it opens a turn on one, besides the `queued_command`
