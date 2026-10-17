@@ -4,7 +4,7 @@
 > branch `smns-erb`; on this machine
 > `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/smns-erb/`), child
 > **DC9** (The web — the session view — plan). **Parent pin:** composite
-> MAWS commit `f60dd668b` (re-pinned 2026-10-17 from `77e82d832`; Decision Log). The child's section there is its design; this
+> MAWS commit `896f04acc` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`; Decision Log). The child's section there is its design; this
 > document carries only the constraints and the milestones. Before M1 read
 > the composite's §9 whole, §4 as amended (the phone ruling is binding),
 > the DC9 child section, the Cross-Child Contracts DX3, DX4 and DX8 with
@@ -221,7 +221,8 @@ typechecks; desk-web's `project-client.test.ts` covers `output()` and the
   known task whose `outputFile` is still null), `unknown-task`, `refused`
   with its reason, containment only (a path that does not carry
   `<session>/tasks/<taskId>.output`, or one outside the recording's tasks
-  directory once resolved); `FakeMachineReplay`
+  directory once resolved; where the fake models a canonical root it uses
+  DX4's set of roots, not one); `FakeMachineReplay`
   (desk-web's e2e double) answers it the same way.
 - **After the replay.** A subscription stays open and answers `rows` (and
   `output`) after the replayed session ends; the fake sends
@@ -508,6 +509,17 @@ in their own worktrees.
   accepted residual: a background agent resumed after its notification
   shows `completed` until its next notification). Nothing else changed.
   Date/Author: 2026-10-17, controller.
+- Decision: Parent re-pinned to `896f04acc`, two DX4 additions DC8 found:
+  (1) a background agent's launch result (`toolUseResult.status`
+  `"async_launched"`) is `running` evidence from the rows at precedence
+  (3), carried as `outcome {status: "running", raw: "async_launched"}`,
+  and process death still turns it `exited` — M2's derivation reads it;
+  (2) the `output` containment root is a set (the slugs of the
+  transcript's directory, the joined cwd and the session record's cwd,
+  plus `adoptShellOutputRoot`) — a machine-side matter, which the fake
+  follows where it models containment. Both are cases in DC8's shared
+  fixture.
+  Date/Author: 2026-10-17, controller (the composite's writer's notice).
 
 ## Surprises & Discoveries
 
