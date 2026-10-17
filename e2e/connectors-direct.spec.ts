@@ -22,7 +22,17 @@
 //          route D would start (the launch's), the gap P3-F's effective-environment attestation owns.
 //   negative: a positive report, its engine gone, then another launch of the same context without the server (and one
 //          with it disabled): engine-only until the cache is cleared, then admitted again from a fresh report.
-import { execFileSync } from 'node:child_process';
+// P3-HD M2's transport scenes drive MAWS's own connections (src/engine-host/connectors/direct-client.ts) against the
+// same fixture server, with no engine and no artifact grant (the host's operations and main's disconnect are the
+// host scenes'):
+//   transport stdio: two instances through an npx stand-in wrapper (support/connector-direct-transport.ts) with an
+//          EOF-ignoring grandchild: distinct pids, exactly the launch's argv/cwd/env, one tools/call per admitted call
+//          and none for a refused one, then the pool's close ends wrapper, server and grandchild inside its bound.
+//   transport idle: no lease left, the instance's group is gone after the 5 s idle bound and its stop.
+//   transport http: the 127.0.0.1 fixture through the guarded fetch: POST only, no standalone GET, one call per
+//          admitted call, none for a refused one.
+//   transport host death: a stand-in host starts the same plan and is SIGKILLed; the lifeline alone ends the group.
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,6 +41,12 @@ import type { McpStatusResponse } from '@shared/wire/control';
 import { ConnectorStatusCache } from '../src/engine-host/connectors/provenance';
 import { connectorToolState } from '../src/engine-host/connectors/status';
 import { launchPathOf, PROBE_ARG, PROBE_VALUE, probeLayout, readLog, startHttpFixture, startProbeEngine, stdioEntry, type ProbeEngine, type ProbeLayout } from './support/connector-direct-probe';
+// P3-HD M2 start
+import { DirectConnectionPool, type DirectConnectionSpec, type DirectLease } from '../src/engine-host/connectors/direct-client';
+import { stdioSpawnPlan } from '../src/engine-host/connectors/direct-stdio';
+import type { VerifiedConnectorSource } from '../src/engine-host/connectors/provenance';
+import { alive, DIRECT_HOST, until, wrappedLaunch, wrapperPids, writeWrapper } from './support/connector-direct-transport';
+// P3-HD M2 end
 
 test.skip(process.env.MAWS_CONNECTORS_DIRECT_E2E !== '1', 'the direct-route e2e runs under pnpm e2e:connectors-direct (MAWS_CONNECTORS_DIRECT_E2E=1)');
 test.describe.configure({ timeout: 180_000 });
@@ -408,3 +424,139 @@ test('negative: positive, exit, then a launch without it or with it disabled is 
     layout.close();
   }
 });
+
+// P3-HD M2 start: the transport scenes.
+const directSource = (layout: ProbeLayout, id: string, transport: 'stdio' | 'http', url?: string): VerifiedConnectorSource => ({ sourceId: `source-${id}`, generation: 1, cwd: layout.project, server: id, scope: 'user', transport, ...(url && { url }), path: join(layout.config, '.claude.json'), entryPath: ['mcpServers', id], observedAt: new Date().toISOString(), entryDigest: `digest-${id}` });
+
+async function leased(pool: DirectConnectionPool, spec: DirectConnectionSpec): Promise<DirectLease> {
+  const acquired = await pool.acquire(spec, new AbortController().signal);
+  if (!acquired.ok) throw new Error(`acquire: ${acquired.failure} (${acquired.message})`);
+  return acquired.lease;
+}
+
+const live = () => new AbortController().signal;
+
+test('transport stdio: own instances through a wrapper, exact launch, one call per admission, the whole group gone at close', async () => {
+  const info = test.info();
+  const layout = probeLayout();
+  const pool = new DirectConnectionPool();
+  try {
+    const wrapper = writeWrapper(layout);
+    const a = await leased(pool, { source: directSource(layout, 'owna', 'stdio'), entry: wrappedLaunch(layout, wrapper, 'owna'), fence: () => true });
+    const b = await leased(pool, { source: directSource(layout, 'ownb', 'stdio'), entry: wrappedLaunch(layout, wrapper, 'ownb'), fence: () => true });
+    expect(await a.listTools(live())).toEqual({ ok: true, tools: [{ name: 'rows', readOnly: true }] });
+    expect(await a.callTool({ name: 'rows', arguments: { q: 1 } }, { admit: () => true, signal: live() })).toMatchObject({ ok: true, result: { structuredContent: { server: 'owna', tool: 'rows', n: 1 } } });
+    expect(await a.callTool({ name: 'rows', arguments: { q: 2 } }, { admit: () => false, signal: live() })).toMatchObject({ ok: false, failure: 'refused', admitted: false });
+    expect((await b.callTool({ name: 'rows', arguments: {} }, { admit: () => true, signal: live() })).ok).toBe(true);
+
+    const log = readLog(layout);
+    const starts = log.filter((entry) => entry.event === 'start');
+    const pids = wrapperPids(wrapper.log);
+    const calls = log.filter((entry) => entry.method === 'tools/call').map((entry) => entry.server);
+    const scrub = (value: string | undefined) => value?.replaceAll(layout.scratch, '<scratch>');
+    await evidence(info, 'transport-stdio-instances', { starts: starts.map(({ server, cwd, argv, env, sdk }) => ({ server, cwd: scrub(cwd), argv: argv?.map(scrub), env: Object.fromEntries(Object.entries(env ?? {}).map(([key, value]) => [key, scrub(value)])), sdk: Object.fromEntries(Object.entries(sdk ?? {}).map(([key, value]) => [key, scrub(value)])) })), wrappers: pids.wrappers.length, sleepers: pids.sleepers.length, calls });
+    expect(starts.map((entry) => entry.server)).toEqual(['owna', 'ownb']);
+    const serverPids = starts.map((entry) => entry.pid);
+    expect(new Set([...serverPids, ...pids.wrappers, process.pid]).size, 'two wrappers, two servers and this process are distinct').toBe(5);
+    for (const start of starts) {
+      expect(start.cwd).toBe(layout.project);
+      expect(start.argv).toEqual(['stdio', '--id', start.server, '--log', layout.log, 'an arg with spaces', '$NOT_EXPANDED']);
+      expect(start.env).toEqual({ MAWS_PROBE_PLAIN: `plain-${start.server}`, MAWS_PROBE_WRAPPER_LOG: wrapper.log });
+      expect(start.sdk).toEqual({ HOME: layout.home, PATH: '/usr/bin:/bin' });
+    }
+    expect(calls).toEqual(['owna', 'ownb']);
+    const members = [...serverPids, ...pids.wrappers, ...pids.sleepers];
+    expect(members.every(alive)).toBe(true);
+
+    const started = Date.now();
+    await pool.close();
+    const closedMs = Date.now() - started;
+    const gone = members.filter((pid) => !alive(pid));
+    await evidence(info, 'transport-stdio-close', { closedMs, members: members.length, gone: gone.length });
+    expect(closedMs).toBeLessThan(5_000);
+    expect(gone).toEqual(members);
+    expect(pool.size).toBe(0);
+  } finally {
+    await pool.close();
+    layout.close();
+  }
+});
+
+test('transport idle: with no lease left the instance and its group are gone after the 5 s idle bound', async () => {
+  const info = test.info();
+  const layout = probeLayout();
+  const pool = new DirectConnectionPool();
+  try {
+    const wrapper = writeWrapper(layout);
+    const lease = await leased(pool, { source: directSource(layout, 'idle', 'stdio'), entry: wrappedLaunch(layout, wrapper, 'idle'), fence: () => true });
+    const server = readLog(layout).find((entry) => entry.event === 'start')!.pid;
+    const pids = wrapperPids(wrapper.log);
+    const members = [server, ...pids.wrappers, ...pids.sleepers];
+    lease.release();
+    const released = Date.now();
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    expect(members.every(alive), 'still open inside the idle bound').toBe(true);
+    await until(() => members.every((pid) => !alive(pid)), 10_000);
+    const goneMs = Date.now() - released;
+    await evidence(info, 'transport-idle', { goneMs, members: members.length });
+    expect(goneMs).toBeGreaterThanOrEqual(5_000);
+    expect(goneMs).toBeLessThan(10_000);
+  } finally {
+    await pool.close();
+    layout.close();
+  }
+});
+
+test('transport http: the 127.0.0.1 fixture through the guarded fetch, POST only, one call per admission', async () => {
+  const info = test.info();
+  const layout = probeLayout();
+  const fixture = await startHttpFixture(layout, 'ownhttp');
+  const pool = new DirectConnectionPool();
+  try {
+    expect(new URL(fixture.url).hostname).toBe('127.0.0.1');
+    const lease = await leased(pool, { source: directSource(layout, 'ownhttp', 'http', fixture.url), entry: { transport: 'http', url: fixture.url, headers: { 'x-probe-header': 'configured-literal' } }, fence: () => true });
+    expect(await lease.listTools(live())).toEqual({ ok: true, tools: [{ name: 'rows', readOnly: true }] });
+    expect(await lease.callTool({ name: 'rows', arguments: {} }, { admit: () => true, signal: live() })).toMatchObject({ ok: true, result: { structuredContent: { server: 'ownhttp', n: 1 } } });
+    expect(await lease.callTool({ name: 'rows', arguments: {} }, { admit: () => false, signal: live() })).toMatchObject({ ok: false, failure: 'refused', admitted: false });
+    lease.release();
+    await pool.close();
+    const http = readLog(layout).filter((entry) => entry.event === 'http') as Array<{ method?: string | null; httpMethod?: string; path?: string; probeHeader?: string | null }>;
+    await evidence(info, 'transport-http', http.map(({ method, httpMethod, path, probeHeader }) => ({ method, httpMethod, path, probeHeader })));
+    expect(http.map((entry) => entry.httpMethod)).toEqual(http.map(() => 'POST')); // the standalone GET never left
+    expect(http.every((entry) => entry.probeHeader === 'configured-literal')).toBe(true);
+    expect(http.filter((entry) => entry.method === 'tools/call')).toHaveLength(1);
+  } finally {
+    await pool.close();
+    fixture.close();
+    layout.close();
+  }
+});
+
+test('transport host death: a host killed outright leaves no member of its instance behind', async () => {
+  const info = test.info();
+  const layout = probeLayout();
+  try {
+    const wrapper = writeWrapper(layout);
+    const plan = stdioSpawnPlan(wrappedLaunch(layout, wrapper, 'orphan'));
+    const host = spawn(process.execPath, [DIRECT_HOST, JSON.stringify({ server: plan.server, lifeline: plan.lifeline(-1) })], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const started = await new Promise<{ server: number; lifeline: number }>((resolve, reject) => {
+      host.stdout!.once('data', (chunk: Buffer) => resolve(JSON.parse(chunk.toString('utf8').split('\n')[0]!) as { server: number; lifeline: number }));
+      host.once('exit', (code) => reject(new Error(`the stand-in host exited (${code})`)));
+    });
+    await until(() => readLog(layout).some((entry) => entry.event === 'start') && wrapperPids(wrapper.log).sleepers.length === 1, 10_000);
+    const fixture = readLog(layout).find((entry) => entry.event === 'start')!.pid;
+    const pids = wrapperPids(wrapper.log);
+    expect(pids.wrappers).toEqual([started.server]); // the wrapper is the spawned leader; the fixture is its child
+    const members = [started.server, fixture, ...pids.sleepers];
+    expect([...members, started.lifeline].every(alive)).toBe(true);
+    const killed = Date.now();
+    host.kill('SIGKILL');
+    await until(() => members.every((pid) => !alive(pid)) && !alive(started.lifeline), 5_000);
+    const goneMs = Date.now() - killed;
+    await evidence(info, 'transport-host-death', { goneMs, members: members.length });
+    expect(goneMs).toBeLessThan(5_000);
+  } finally {
+    layout.close();
+  }
+});
+// P3-HD M2 end
