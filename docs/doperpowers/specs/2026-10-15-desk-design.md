@@ -800,8 +800,14 @@ table (9.5).
 What only the log or the hub knows joins the transcript:
 - **A send not yet in the transcript** — an outbox item, or a `human`
   event addressed to the session whose user row has not been observed —
-  is a tail row in MAWS's held-prompt shape (`derive.ts:131-135`,
-  `heldRow`), carrying the desk's delivery line. **Delivered is not "the
+  is a tail row: MAWS's user bubble with the delivery state in its foot,
+  under a hairline, and the whole bubble tinted when the send will not
+  arrive (`recorded`, `refused-read-only`, `failed`), a long reason in its
+  tooltip. The owner chose it (2026-10-17) over a caption under MAWS's
+  held-prompt shape (`derive.ts:131-135`, `heldRow`): a send that will not
+  arrive is visible from a scroll away. The foot is a component of its
+  own beside an unchanged bubble, since the owner means to suggest the
+  same style to the MAWS app. **Delivered is not "the
   row exists"** (the review, 2026-10-17): the bridge answers `submitted`
   before `$.prompt.submit` resolves (`hooks/mods/bridge.tsx:451-476`; the
   submit is not awaited, and a `drop` comes later as `refused`), and the
@@ -834,17 +840,22 @@ What only the log or the hub knows joins the transcript:
   reaches no DX4 outcome today (the child keeps `submitted` keys alone,
   `sminos_bridge.py:642-646`), so DC8 relays it — and the tail row shows
   that state; its row never comes.
-- **Pending requests** are a band of request cards above the composer,
-  the cards the channel draws today from the hub's pending set, so a
-  request is answered in the session view as in the channel. Rejected:
+- **Pending requests** are request cards at the transcript's tail, after
+  any tail sends, scrolling with it — the cards the channel draws today
+  from the hub's pending set, so a request is answered in the session view
+  as in the channel — with a "N waiting ↓" pill that jumps to them while
+  the reader is scrolled up. The owner chose it (2026-10-17) over a band
+  above the composer, which kept them in reach at any scroll but took
+  about half the center with two open. They come after the last working
+  record, so a request is never folded inside one. Rejected:
   synthesizing `permission.requested` and `question.requested` events into
   the source so MAWS draws `request_slot` rows at the call
   (`Transcript.tsx:229`, `derive.ts:1320-1323`): `request_slot` is a work
   row in MAWS's derivation (`derive.ts:743`), hidden under a closed
   working record in the report, so the request a turn is blocked on could
   sit folded; making it persistent is a change to MAWS's own report view
-  with no evidence behind it. The band also serves the fallback channel
-  and the phone unchanged.
+  with no evidence behind it. The cards are the channel's own, so the
+  fallback channel and the phone draw them unchanged.
 - **An async question** (the ask mod's, `mcp__doperpowers__AskUserQuestion`)
   draws from its transcript row once classified; the log's `question` and
   `answered` events overlay it, joined by the event's `src`, the call's
@@ -1043,10 +1054,15 @@ it does not know (`objects/project.ts` `dispatch`, `bad-shape`) and a
 session message of a kind it does not list (`:391-392`,
 `SUBSCRIPTION_KINDS`), and the uplink passes an unknown frame by
 (`sminos_uplink.py:587`), so the hub ships before any uplink answers
-`output`, and an old daemon under a new hub simply never answers. Stopping
-a job from the web is optional (DX6 RPC → bridge command →
-`$.tool.call({tool: 'TaskStop', task_id})`, the call the bridge already
-makes). MCP servers appear by name only, from the rows'
+`output`, and an old daemon under a new hub simply never answers. A job's
+output opens under its row in the column, a few lines high, the list
+staying in view (the owner, 2026-10-17, over the column's whole pane).
+Stopping a job from the web is not in this round: MAWS's rows draw Stop
+on a running job, and the desk draws it disabled with its reason,
+"Stopping a job runs from its terminal" (§5); web Stop (DX6 RPC → bridge
+command → `$.tool.call({tool: 'TaskStop', task_id})`, the call the bridge
+already makes) is the first follow-up once DC8 and DC9 land (the owner,
+2026-10-17). MCP servers appear by name only, from the rows'
 `mcp_instructions_delta` attachments (`addedNames`, `removedNames`); their
 status needs the SDK host's `mcp_status` (MAWS `engine-host/controls.ts`),
 so it is deferred.
@@ -1504,7 +1520,7 @@ predates the module has no evidence while it runs.
     tail row stays and shows the `failed` state); a send whose row never
     arrives because the session ends first (it stays as a delivered entry
     at the tail, ahead of the end marker); a pending permission and a
-    pending question are answered from the band and the cards leave; the
+    pending question are answered from their cards at the tail and the cards leave; the
     ended session's channel shows its end marker and Resume. Streaming in
     the report: a marked response folds its turn and shows the mark live
     before its first row flush; unmarked streaming text later in an
@@ -1562,7 +1578,9 @@ predates the module has no evidence while it runs.
   store, the toggle about twenty lines calling the transcript store's
   `setView`; taste surfaces (the tail row's delivery line, the band, the
   end marker, the jobs view) go to the owner as mockups before polish, as
-  DC5's did.
+  DC5's did; the owner's verdicts (2026-10-17): the delivery state in the
+  bubble's foot, requests inline at the tail, a job's output under its
+  row, Stop disabled, the end marker as drawn.
 - **Required:** required.
 - **Status:** cut 2026-10-17; not started.
 
@@ -4341,7 +4359,7 @@ a hub that connects into machines (§2).
   dropped) and cached disk facts, carries it in the widened `subagents`
   body, and answers `output {taskId, tail}` under a containment rule; DC9
   builds the session view over the shared main subscription, the tail rows
-  for undelivered sends, the request band, the fallbacks, the column's
+  for undelivered sends, the request cards, the fallbacks, the column's
   agents with real status and its jobs view, the hub's `output` frame and
   kind and the fake machine's part, retires the folds and DX8's
   `transcript` slot, and lands the two shared MAWS edits (the ask-tool
@@ -4406,6 +4424,17 @@ a hub that connects into machines (§2).
   evidence from the rows at precedence (3), so a bridgeless running
   session's background agent is not `unknown` with a result in hand; the
   shared fixture pins it, and DC9's fake machine applies the same rule.
+  2026-10-17, the owner's verdicts on DC9's taste mockups
+  (`mockups/desk/09-session-view.html`): a send's delivery state sits in
+  its bubble's foot and a send that will not arrive tints the bubble,
+  over a caption under MAWS's held bubble (the owner means to suggest the
+  same style to the MAWS app, so the foot is its own component); pending
+  requests are cards inline at the transcript's tail with a "N waiting ↓"
+  pill, over a band above the composer; a job's output opens under its
+  row, over the column's whole pane; web Stop draws disabled now and is
+  the first follow-up after DC8 and DC9; the end marker as drawn. The ask
+  mod's question shows as its card at the tail while pending and as its
+  transcript row, which points to the card, then carries the answer (§9.1).
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
