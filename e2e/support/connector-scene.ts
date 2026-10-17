@@ -83,6 +83,13 @@ export interface LiveEngine {
   pid: number;
 }
 
+// P3-HD M4 start: a scene may configure the fixture server differently (route D's disconnect scene runs it through a
+// wrapper); H's scenes pass nothing and keep the plain stdio entry.
+export interface ConnectorSceneOptions {
+  server?: (scene: ConnectorScene) => Record<string, unknown>;
+}
+// P3-HD M4 end
+
 export class ConnectorScene {
   readonly root: string;
   readonly userData: string;
@@ -95,7 +102,7 @@ export class ConnectorScene {
   private readonly timeline: { at: string; event: string; detail?: unknown }[] = [];
   private readonly engine = installedEngine();
 
-  constructor(name: string) {
+  constructor(name: string, private readonly options: ConnectorSceneOptions = {}) {
     this.root = realpathSync(mkdtempSync(join(tmpdir(), `maws-connectors-${name}-`)));
     this.userData = join(this.root, 'ud');
     this.home = join(this.root, 'home');
@@ -117,7 +124,7 @@ export class ConnectorScene {
       env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', MAWS_E2E_ENGINE_BIN: this.engine.bin, HOME: this.home, DISABLE_AUTOUPDATER: '1' },
       prepare: ({ claudeConfigDir }) => {
         if (!first) return;
-        const mcpServers = { [SERVER]: { type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', 'series', '--log', this.log, '--tools', JSON.stringify([TOOL])] } };
+        const mcpServers = { [SERVER]: this.options.server?.(this) ?? { type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', 'series', '--log', this.log, '--tools', JSON.stringify([TOOL])] } }; // P3-HD M4: the optional server entry
         writeFileSync(join(claudeConfigDir, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, mcpServers, projects: { [this.project]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
       },
     });
@@ -341,8 +348,8 @@ export class ConnectorScene {
   }
 }
 
-export async function withScene(name: string, info: TestInfo, body: (scene: ConnectorScene) => Promise<void>): Promise<void> {
-  const scene = new ConnectorScene(name);
+export async function withScene(name: string, info: TestInfo, body: (scene: ConnectorScene) => Promise<void>, options: ConnectorSceneOptions = {}): Promise<void> {
+  const scene = new ConnectorScene(name, options); // P3-HD M4: the optional scene options
   let failed = false;
   try {
     await body(scene);

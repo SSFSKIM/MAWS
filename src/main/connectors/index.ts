@@ -31,6 +31,7 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import type { HostSupervisor } from '../hosts/supervisor';
 import type { registerMainHandler } from '../ipc/router';
 import { ConnectorBroker } from './broker';
+import type { DirectRoute, DirectRouteDeps } from './direct-route';
 import { createEngineRoute, type EngineRouteDeps } from './engine-route';
 import type { ConnectorGrantAuthority, ConnectorRoute } from './route';
 
@@ -50,6 +51,9 @@ export interface ConnectorsDeps {
   // P3-H H4: the native window that owns a webContents (production: `BrowserWindow.fromWebContents`), or null
   windowOf: (sender: ConnectorSender) => ConnectorWindow | null;
   log?: (line: string) => void;
+  // P3-HD (Decision Log 14): route D's factory, supplied by the application's composition root (`createDirectRoute`),
+  // which the service composes after route E. H's own engine-only service tests omit it: there is then no route D.
+  direct?: (deps: DirectRouteDeps) => DirectRoute;
 }
 
 const canonical = (path: string): string | null => {
@@ -60,7 +64,7 @@ const canonical = (path: string): string | null => {
   }
 };
 
-export function startConnectors({ hosts, register, index, realpath = canonical, windowOf, log = (line) => console.warn(`[connectors] ${line}`) }: ConnectorsDeps): { stop(): void } {
+export function startConnectors({ hosts, register, index, realpath = canonical, windowOf, log = (line) => console.warn(`[connectors] ${line}`), direct: createDirect }: ConnectorsDeps): { stop(): void } {
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const host = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const result = await call(name, input);
@@ -74,7 +78,9 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
     check: (artifactId, ref) => host('connectors.check', { artifactId, call: ref }),
   };
   const engine = createEngineRoute({ call, sessions: index.sessions, projects: index.projects, realpath, streaming: () => hosts.streaming('engine-host'), log });
-  const routes: ConnectorRoute[] = [engine]; // route D joins after it (P3-H's brief: E first)
+  // P3-HD: route D joins after E (P3-H's brief: E first), when the root supplies it; its host leg is the direct operation family
+  const direct = createDirect?.({ call, sessions: index.sessions, projects: index.projects, realpath, streaming: () => hosts.streaming('engine-host'), log });
+  const routes: ConnectorRoute[] = direct ? [engine, direct] : [engine];
   const broker = new ConnectorBroker({ routes, grants, log, recheckWindow: (owner) => followed.get(owner)?.read() });
 
   // ── the owner windows ──
@@ -158,20 +164,26 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
   register('artifacts.revokeConnectorTool', async ({ artifactId, server, tool }) => ({ revoked: await broker.revokeTool(artifactId, { server, tool }) }));
 
   const stopEnded = hosts.onEvent('connectors.operation', ({ operationId }) => engine.operationEnded(operationId));
+  const stopDirectEnded = hosts.onEvent('connectors.directOperation', ({ operationId }) => direct?.operationEnded(operationId)); // P3-HD
   const stopGrants = hosts.onEvent('connectors.grantChanged', (change) => broker.onGrantChange(change));
   const stopDeletes = hosts.onEvent('artifacts.changed', (change) => {
     if (change.change === 'deleted') broker.onArtifactDeleted(change.artifactId);
   });
   const stopState = hosts.onState('engine-host', (state: HostState) => {
-    if (state.state !== 'ready') engine.hostLost();
+    if (state.state !== 'ready') {
+      engine.hostLost();
+      direct?.hostLost(); // P3-HD
+    }
   });
   const stopStreaming = hosts.onStreaming('engine-host', () => {
     engine.reconcile();
+    direct?.reconcile(); // P3-HD
     broker.recheckGrants();
   });
   return {
     stop: () => {
       stopEnded();
+      stopDirectEnded(); // P3-HD
       stopGrants();
       stopDeletes();
       stopState();
@@ -181,6 +193,7 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
       followed.clear();
       broker.stop();
       engine.stop();
+      direct?.stop(); // P3-HD: terminal, each pending operation withdrawn from the host
     },
   };
 }

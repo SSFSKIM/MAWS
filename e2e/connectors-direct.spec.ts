@@ -22,6 +22,11 @@
 //          route D would start (the launch's), the gap P3-F's effective-environment attestation owns.
 //   negative: a positive report, its engine gone, then another launch of the same context without the server (and one
 //          with it disabled): engine-only until the cache is cleared, then admitted again from a fresh report.
+// P3-HD M4's disconnect scene is the built app (support/connector-scene.ts), with no host or route double:
+//   disconnect: the owner starts a session (no message, no model), allows a page's read, the page reads through the
+//          engine; the engine is stopped and the page's next refresh reads through MAWS's own stdio instance (route D,
+//          via direct, no session, no engine started); that scratch main is then killed and every member of the instance
+//          (wrapper, EOF-ignoring grandchild, server) is gone within 5 s while the detached host stays up.
 // P3-HD M2's transport scenes drive MAWS's own connections (src/engine-host/connectors/direct-client.ts) against the
 // same fixture server, with no engine and no artifact grant (the host's operations and main's disconnect are the
 // host scenes'):
@@ -47,6 +52,10 @@ import { stdioSpawnPlan } from '../src/engine-host/connectors/direct-stdio';
 import type { VerifiedConnectorSource } from '../src/engine-host/connectors/provenance';
 import { alive, DIRECT_HOST, until, wrappedLaunch, wrapperPids, writeWrapper } from './support/connector-direct-transport';
 // P3-HD M2 end
+// P3-HD M4 start
+import { invoke as appInvoke, value as appValue, TOOL_NAME, WATCH_MS, withScene } from './support/connector-scene';
+import { newMembers, wrappedServer } from './support/connector-direct-scene';
+// P3-HD M4 end
 
 test.skip(process.env.MAWS_CONNECTORS_DIRECT_E2E !== '1', 'the direct-route e2e runs under pnpm e2e:connectors-direct (MAWS_CONNECTORS_DIRECT_E2E=1)');
 test.describe.configure({ timeout: 180_000 });
@@ -560,3 +569,58 @@ test('transport host death: a host killed outright leaves no member of its insta
   }
 });
 // P3-HD M2 end
+// P3-HD M4 start
+test('disconnect: the page reads through MAWS’s own instance after the engine stops, and killing main ends every member of it within 5 s', async () => {
+  test.setTimeout(300_000);
+  const info = test.info();
+  await withScene(
+    'direct',
+    info,
+    async (scene) => {
+      const run = await scene.launch();
+      const artifactId = await scene.createPage(run.page);
+      const { frame } = await scene.openPage(run.page, artifactId);
+      await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+
+      // the owner's one session and grant: the page reads through the engine
+      const engine = await scene.ownerStart(run.page);
+      await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+      const sheet = await scene.openSheet(run.page);
+      await sheet.locator(`[data-connector-tool="${TOOL_NAME}"]`).getByRole('button', { name: `Allow ${TOOL_NAME} to read` }).click();
+      await scene.closeSheet(run.page);
+      await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: 20_000 });
+      const engineServer = scene.toolCalls()[0]!.pid;
+
+      // the engine exits: its instance's members stay the engine's; the page then reads through MAWS's own
+      appValue(await appInvoke(run.page, 'session.stop', { appSessionId: engine.appSessionId, reason: 'stop' }));
+      await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: 'the engine stopped' }).toBe(false);
+      expect(await scene.live(run.page), 'no engine is live').toEqual([]);
+      const before = { wrappers: [] as number[], sleepers: [] as number[] };
+      const engineMembers = newMembers(scene, before);
+      await expect(frame.locator('#last')).toHaveText('ok n=1 via=direct', { timeout: WATCH_MS + 30_000 });
+      expect(await scene.live(run.page), 'route D started no engine').toEqual([]);
+      expect(scene.launches(engine.appSessionId).spawns, 'the owner’s one launch, never another').toBe(1);
+
+      // MAWS's own instance: a new wrapper, grandchild and server, none of them the engine's
+      const own = newMembers(scene, engineMembers);
+      expect(own.wrappers, 'one new wrapper').toHaveLength(1);
+      expect(own.sleepers, 'one new grandchild').toHaveLength(1);
+      const directServer = scene.toolCalls().at(-1)!.pid;
+      expect(directServer, 'a server other than the engine’s').not.toBe(engineServer);
+      const members = [...own.wrappers, ...own.sleepers, directServer];
+      expect(members.every(alive), 'MAWS’s instance is running').toBe(true);
+      const supervisor = await scene.supervisor(run.page);
+      scene.note('direct instance', { members, supervisor });
+
+      // that scratch main is killed: the detached host sees its client go and ends the whole instance
+      await scene.killApp(run);
+      await expect
+        .poll(() => members.filter(alive), { timeout: 5_000, intervals: [100], message: 'wrapper, grandchild and server are gone within 5 s of main’s death' })
+        .toEqual([]);
+      expect(scene.pidAlive(supervisor), 'the detached host outlived main, so it was its own client-gone cleanup that ended the instance').toBe(true);
+      await info.attach('direct-members.json', { body: JSON.stringify({ engineMembers, own, directServer }, null, 2), contentType: 'application/json' });
+    },
+    { server: wrappedServer },
+  );
+});
+// P3-HD M4 end
