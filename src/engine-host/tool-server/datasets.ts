@@ -74,15 +74,20 @@ async function readValidated(file: ValidatedFile): Promise<Uint8Array> {
   try {
     const opened = await handle.stat();
     if (!opened.isFile() || opened.dev !== file.dev || opened.ino !== file.ino) throw outsideCwd(file);
-    const buffer = new Uint8Array(DATASET_LIMITS.bytes + 1);
+    // sized by the opened file, one byte over to see it grow; a file that did grow is read on, never past the cap
+    const chunks: Uint8Array[] = [];
     let length = 0;
-    while (length < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, null);
+    let room = Math.min(opened.size, DATASET_LIMITS.bytes) + 1;
+    while (length <= DATASET_LIMITS.bytes) {
+      const chunk = new Uint8Array(Math.min(room, DATASET_LIMITS.bytes + 1 - length));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
       if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
       length += bytesRead;
+      room = 1024 * 1024;
     }
     if (length > DATASET_LIMITS.bytes) throw tooLarge(file.named, Math.max(opened.size, length));
-    return buffer.subarray(0, length);
+    return chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks);
   } finally {
     await handle.close();
   }
