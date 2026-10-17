@@ -1074,7 +1074,17 @@ changes the desktop app too: the classify entry, so
 backfill (`engine-host/fs/backfill.ts`: a Bash result with
 `backgroundTaskId` as `task.started` of `local_bash`, a Monitor result's
 `taskId` as `task.started` of a monitor, `task_status` read), so MAWS's own
-disk-only sessions gain them.
+disk-only sessions gain them. **The second left DC9 (2026-10-17):** its
+review found backfill alone delivers nothing — the desktop app's
+background-task store reads only sidecars and workflow runs for a
+disk-only session, rejects events without a `seq`, and BackgroundTool
+hides a job without an engine status, by C8b's documented line "shells
+and monitors are known only while the session runs here". Delivering it
+is a product change to the MAWS app (a disk-only `session.events` read,
+an exited rule, the live gate dropped, Stop hidden for a reconstructed
+job), its architect's to decide, and the desk does not need it (its jobs
+come from DC8's body), so the backfill branch (`desk-backfill-jobs`) is
+parked for that follow-up rather than landed without a consumer.
 
 **9.6 Rejected: the desk as a remote mod surface.** MAWS's engine host
 attaches as surface `"desktop"` over `ui_attach` and asks `ui_render` per
@@ -1563,10 +1573,10 @@ predates the module has no evidence while it runs.
     task, a deleted file, a monitor with no path answering `missing` with
     `path: null`);
     `test/session-plane.test.ts` covers the new frame and kind.
-  - **G6 (shared edits):** two MAWS PRs, each reviewed on its own:
-    `mcp__doperpowers__AskUserQuestion` classified as a question; shell
-    and monitor starts, and `task_status`, in `backfill.ts`, with MAWS's
-    own tests.
+  - **G6 (shared edits):** one MAWS PR, reviewed on its own:
+    `mcp__doperpowers__AskUserQuestion` classified as a question, with
+    MAWS's own tests. (The backfill edit left DC9 for a MAWS-app
+    follow-up, §9.5.)
 - **Edges:** blocked-by: DC5, DC6 (merged), this document's DX4 and DX8
   amendments (written 2026-10-17); blocks: — (DC8's `output` is proved end
   to end once the hub is deployed).
@@ -4453,6 +4463,16 @@ a hub that connects into machines (§2).
   would accept a symlink to another task's file in the same root; the
   `$.agent.list()` seed carries no `name`, which the engine's list lacks
   (DX5 as amended).
+  2026-10-17, §9.5's backfill edit leaves DC9: its review showed backfill
+  alone gives the desktop app's disk-only sessions no shells or monitors
+  (the store reads no `session.events` for them, drops events without a
+  `seq`, and hides jobs without an engine status, by C8b's line), and
+  delivering it reverses that product line in the MAWS app; the desk
+  takes its jobs from DC8's body. The branch `desk-backfill-jobs` (with
+  its review's fixes: expiry, a re-delivered result keeping its start) is
+  parked for a MAWS-app follow-up that owns the whole feature, offered to
+  its architect. Rejected: landing the backfill without a consumer, a
+  half-feature on master that contradicts C8b's documented line.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
