@@ -3912,8 +3912,16 @@ registration wins; `useSlot(name)` gives the registered component or the
 shell's fallback (a quiet note of what will be there); `resetSlots()` for
 tests. DC6 registered both slots from one `connectDepth()` called once from
 `apps/desk-web/src/main.tsx`, as MAWS's `connectTranscript()` is called
-from `App.tsx`; **[2026-10-17]** DC9 registers `depth` alone there, and
-the session view is the center's own, not a slot.
+from `App.tsx`; **[2026-10-17]** DC9 registers `depth` alone there
+(`connectDepth()` returns the unregistration of `registerSlot('depth',
+Depth)`), and the session view is the center's own component, not a slot:
+`ChannelView` mounts it for a direct channel on the desktop layout while
+`machineOnline !== false`. The session's main transcript is held per
+(machine, session) by one reference-counted owner
+(`depth/owner/session-owner.ts`, DC9's M3), which keeps the open-agent
+request and the status word; the center passes MAWS's `ownerLane`, and the
+Report · Transcript choice is kept per transcript key for the page's life
+(as built at DC9's M4, desk-dc9 `7e2bbe642`).
 
 | slot | props | where the shell mounts it |
 | --- | --- | --- |
@@ -3928,7 +3936,9 @@ fallback go with it.
 **The working record's range** [retired 2026-10-17]. The fold's `range:
 {from, to}` of exchange-item `src`s, clipped at span granularity, has no
 consumer once the slot is gone; the per-turn record is MAWS's projection
-over the transcript's own turns (§9.1 [binding — owner]).
+over the transcript's own turns (§9.1 [binding — owner]). `range.ts` is
+deleted, and `DeskTranscript` loses its range options, its `bounds` state
+and the key suffix they added.
 
 **The session plane** (`session-plane.ts`), handed to both slots as `plane`:
 
@@ -3959,7 +3969,8 @@ the subscription while the view is open, and closes it when the view
 goes, so a socket's 32 subscriptions are not spent on sessions nobody is
 reading. `close()` ends it silently and it is never re-subscribed. Older
 rows arrive as a `rows` message through `message`, a task's output as an
-`output` message. The target's `agentId` scopes the subscription to one
+`output` message (`output()` clamps `tail` to 1..524288 and sends nothing
+for a task id outside `[A-Za-z0-9_-]{1,64}`). The target's `agentId` scopes the subscription to one
 transcript, as DX3's `subscribe` carries it; per-block streaming
 (`block-row` settling a block when its row arrives) is the consumer's,
 passed through as DX4 has it.
