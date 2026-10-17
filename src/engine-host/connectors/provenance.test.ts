@@ -594,3 +594,101 @@ describe('ConnectorStatusCache: the fence holds to the public completion', () =>
     }
   }
 });
+// Final-local review: a contradiction in captured launch facts is sticky until the attachment resets, as one in the
+// reports is. A neutral (pending, failed) newer report of the launch that contradicted, or that launch's exit, never
+// makes the other launch's meaning eligible again; a clear and a fresh observation do.
+describe('ConnectorStatusCache: captured launch-fact contradictions are sticky', () => {
+  const local = (status = 'connected') => report({ ...stdio('localtoy', ['local']), status, scope: 'local', source: 'local' });
+  const neutral = (name: string, status: 'pending' | 'failed') => (answer: McpStatusResponse): McpStatusResponse => ({ mcpServers: (answer.mcpServers as Server[]).map((server) => (server.name === name ? { ...server, status, tools: undefined } : server)) });
+
+  for (const status of ['pending', 'failed'] as const) {
+    it(`two local keys for one server stay ambiguous after the contradicting launch reports it ${status}, until a reset`, async () => {
+      writeConfig((file) => ((file.projects as Record<string, unknown>)[dir] = { mcpServers: { localtoy: { command: 'toy', args: ['local'] } } }));
+      const cache = new ConnectorStatusCache();
+      observed(cache, launch('app-1', 'L1'), local());
+      const second = launch('app-2', 'L2', {}, project, { kind: 'repository', key: dir });
+      observed(cache, second, local());
+      expect(await cache.resolveSource(project, 'localtoy')).toEqual({ ok: false, why: 'ambiguous' });
+      observed(cache, second, local(status)); // its newer report, then its engine exits: nothing more is observed
+      expect(await cache.resolveSource(project, 'localtoy')).toEqual({ ok: false, why: 'ambiguous' });
+      cache.clear();
+      observed(cache, launch('app-3', 'L3'), local());
+      expect(await cache.resolveSource(project, 'localtoy')).toMatchObject({ ok: true });
+    });
+
+    it(`two launch PATHs giving one entry two meanings stay ambiguous after the second reports it ${status}, until a reset`, async () => {
+      writeConfig();
+      const other = join(dir, 'other-bin');
+      mkdirSync(other);
+      writeFileSync(join(other, 'toy'), '#!/bin/sh\n');
+      chmodSync(join(other, 'toy'), 0o755);
+      const cache = new ConnectorStatusCache();
+      observed(cache, launch('app-1', 'L1'), USER_REPORT());
+      const second = launch('app-2', 'L2', { PATH: other });
+      observed(cache, second, USER_REPORT());
+      expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'ambiguous' });
+      observed(cache, second, neutral('usertoy', status)(USER_REPORT()));
+      expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'ambiguous' });
+      expect(await cache.resolveSource(project, 'userhttp')).toMatchObject({ ok: true }); // the contradiction is the server's alone
+      cache.clear();
+      observed(cache, launch('app-3', 'L3', { PATH: other }), USER_REPORT());
+      expect(await cache.resolveSource(project, 'usertoy')).toMatchObject({ ok: true });
+    });
+  }
+
+  it('a literal configured env that makes the instances identical despite different launch baselines stays admissible', async () => {
+    writeConfig((file) => ((file.mcpServers as Record<string, { env: Record<string, string> }>).usertoy.env = { PATH: bin, HOME: home, SHELL: '/bin/zsh', TERM: 'dumb', USER: 'u', LOGNAME: 'u' }));
+    const cache = new ConnectorStatusCache();
+    observed(cache, launch('app-1', 'L1'), USER_REPORT());
+    observed(cache, launch('app-2', 'L2', { PATH: '/elsewhere', SHELL: '/bin/bash' }), USER_REPORT());
+    expect(await cache.resolveSource(project, 'usertoy')).toMatchObject({ ok: true });
+  });
+
+  it('local keys never enter a user-scope identity: two keys, one user server, one source', async () => {
+    writeConfig();
+    const cache = new ConnectorStatusCache();
+    observed(cache, launch('app-1', 'L1'), USER_REPORT());
+    observed(cache, launch('app-2', 'L2', {}, project, { kind: 'repository', key: dir }), without(USER_REPORT(), 'localtoy'));
+    expect(await cache.resolveSource(project, 'usertoy')).toMatchObject({ ok: true });
+    const ready = connectorToolState(USER_REPORT(), 'usertoy', 'metrics_snapshot');
+    const resolved = await cache.resolve(project, 'usertoy', 'metrics_snapshot');
+    expect(ready.ready && resolved.ok && resolved.tool.fingerprint === ready.fingerprint, "H's fingerprint is untouched").toBe(true);
+  });
+});
+
+describe('ConnectorStatusCache: marking a contradiction moves the fence', () => {
+  it('a lookup suspended before another established the contradiction answers ambiguous, as a fresh one would', async () => {
+    const other = join(dir, 'other-bin');
+    mkdirSync(other);
+    writeFileSync(join(other, 'toy'), '#!/bin/sh\n');
+    chmodSync(join(other, 'toy'), 0o755);
+    // a literal PATH makes both launches' instances one: consistent while the first lookup reads
+    writeConfig((file) => ((file.mcpServers as Record<string, { env: Record<string, string> }>).usertoy.env = { PATH: bin }));
+    let release!: () => void;
+    let started!: () => void;
+    const reading = new Promise<void>((resolve) => (started = resolve));
+    let first = true;
+    const files: SourceFiles = {
+      ...nodeSourceFiles,
+      read: async (path, max) => {
+        const text = await nodeSourceFiles.read(path, max);
+        if (first) {
+          first = false;
+          const held = new Promise<void>((resolve) => (release = resolve));
+          started();
+          await held; // holds the neutralizing contents it read
+        }
+        return text;
+      },
+    };
+    const cache = new ConnectorStatusCache({ files });
+    observed(cache, launch('app-1', 'L1'), USER_REPORT());
+    observed(cache, launch('app-2', 'L2', { PATH: other }), USER_REPORT());
+    const suspendedLookup = cache.resolveSource(project, 'usertoy');
+    await reading;
+    writeConfig(); // the literal PATH removed: the two launches now run it differently
+    expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'ambiguous' }); // establishes it
+    release();
+    expect(await suspendedLookup).toEqual({ ok: false, why: 'ambiguous' });
+  });
+});

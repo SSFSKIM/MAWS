@@ -195,7 +195,7 @@ export class ConnectorStatusCache {
   observe(ticket: ConnectorStatusTicket, answer: McpStatusResponse): void {
     const state = this.admit(ticket);
     if (!state) return;
-    const servers = this.parse(answer);
+    const servers = this.parse(answer, ticket.context);
     const launch = launchKeyOf(ticket.context);
     if (servers === null || (!state.snapshots.has(launch) && state.snapshots.size >= CONNECTOR_STATUS_BOUNDS.launchesPerContext)) return this.fail(state);
     const names = new Set([...state.names, ...servers.keys()]);
@@ -282,7 +282,7 @@ export class ConnectorStatusCache {
   }
 
   // null: past a bound
-  private parse(answer: McpStatusResponse): Map<string, Observation> | null {
+  private parse(answer: McpStatusResponse, context: ConnectorLaunchContext): Map<string, Observation> | null {
     if (answer.mcpServers.length > CONNECTOR_STATUS_BOUNDS.serversPerContext) return null;
     const servers = new Map<string, Observation>();
     for (const entry of answer.mcpServers as Record<string, unknown>[]) {
@@ -291,14 +291,14 @@ export class ConnectorStatusCache {
         servers.set(name, { kind: 'conflicted' });
         continue;
       }
-      const observation = this.observation(entry);
+      const observation = this.observation(entry, context);
       if (observation === null) return null;
       servers.set(name, observation);
     }
     return servers;
   }
 
-  private observation(entry: Record<string, unknown>): Observation | null {
+  private observation(entry: Record<string, unknown>, context: ConnectorLaunchContext): Observation | null {
     const status = entry.status as string;
     if (NEUTRAL.has(status)) return { kind: 'neutral' };
     if (!POSITIVE.has(status)) return NEGATIVE; // disabled, blocked, excluded, or a status this build does not know
@@ -316,7 +316,7 @@ export class ConnectorStatusCache {
     const source = typeof entry.source === 'string' ? entry.source : null;
     const visible = reportedVisible(entry.config);
     const shape = visible ?? ['unsupported', typeof config?.type === 'string' ? config.type : null];
-    return { kind: 'positive', identity: this.identity(scope, source, shape), scope, source, transport: visible?.transport ?? null, argsReported: Array.isArray(config?.args), tools };
+    return { kind: 'positive', identity: this.identity(scope, source, shape, context.localKey), scope, source, transport: visible?.transport ?? null, argsReported: Array.isArray(config?.args), tools };
   }
 
   // One server across a context's reports: contested (sticky) on any disagreement; its revision moves with its meaning.
@@ -414,9 +414,11 @@ export class ConnectorStatusCache {
       const after = moved();
       if (after) return after;
       if (typeof result === 'string') return result;
-      if (this.identity(observation.scope, observation.source, result.visible) !== observation.identity) return 'changed';
+      if (this.identity(observation.scope, observation.source, result.visible, snapshot.context.localKey) !== observation.identity) return 'changed';
       const digest = this.mac(canonicalJson(result.launch));
-      if (entryDigest !== undefined && digest !== entryDigest) return 'ambiguous'; // the agreeing launches would run it differently
+      // The agreeing launches would run it differently (another PATH or SDK-minimal key the configured env does not
+      // override): an established contradiction, sticky like a reported one until the attachment resets.
+      if (entryDigest !== undefined && digest !== entryDigest) return this.contest(state, server);
       entryDigest = digest;
       made ??= result;
     }
@@ -436,8 +438,17 @@ export class ConnectorStatusCache {
     return { source, entry: launch, visible, observation, positives: positives.map((positive) => positive.observation) };
   }
 
-  private identity(scope: string | null, source: string | null, shape: unknown): string {
-    return this.mac(canonicalJson(['maws.connector-source/1', scope, source, shape]));
+  // A local-scope identity includes the `projects` key its launch captured, so two launches that captured different keys
+  // contradict each other at observation, stickily; a user-scope identity never carries one.
+  private identity(scope: string | null, source: string | null, shape: unknown, localKey: ConnectorLocalKey): string {
+    return this.mac(canonicalJson(['maws.connector-source/1', scope, source, shape, scope === 'local' ? localKey : null]));
+  }
+
+  private contest(state: ContextState, name: string): 'ambiguous' {
+    state.contested.add(name);
+    this.settle(state, name);
+    this.version += 1;
+    return 'ambiguous';
   }
 
   private mac(text: string): string {
