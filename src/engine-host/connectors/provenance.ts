@@ -5,8 +5,9 @@
 // engine live, until main detaches.
 //
 // - An observation is one complete report of one launch (`ConnectorLaunchContext`: the launch's directory and the
-//   environment MAWS attests it handed that engine: the launch plan's environment, plus the env of the flag settings
-//   MAWS passed where the plan lacks a key; never a settings file). A launch's newer report replaces its older one,
+//   environment MAWS attests it handed that engine: the launch plan's environment with the env of the flag settings
+//   MAWS passed over it, as the engine applies settings env over its process environment; never a settings file;
+//   and the local-scope key the host captured before the spawn, ./local-key.ts). A launch's newer report replaces its older one,
 //   removals included; an answer to an older request, or from a launch its session has since replaced, never lands;
 //   `clear` invalidates every observation begun before it. Session and launch bookkeeping is bounded: past it the cache
 //   saturates (every answer unavailable, nothing more tracked) until main reattaches.
@@ -17,16 +18,17 @@
 // - Retained: identity digests (keyed per attachment, so a header value is never recoverable from one), tool names
 //   with their readOnly annotation, observation times and the launch reference. Never a header, env, args or OAuth
 //   field of a report or a file.
-// - A server becomes a `VerifiedConnectorSource` at each use, never once: the scope must be user (local stays
-//   engine-only until a probe attests the engine's `projects` key, ./source-entry.ts), the launch must name one file,
-//   the one entry the scope names there must reproduce the reported visible fields under every agreeing launch's
-//   environment and give the whole entry one meaning under all of them, under the settings ruling's reference policy.
+// - A server becomes a `VerifiedConnectorSource` at each use, never once: the scope must be user or local (local only
+//   where every agreeing launch captured one and the same identified `projects` key), the launch must name one file,
+//   the one literal entry the scope names there must reproduce the reported visible fields and give the whole entry one
+//   meaning under every agreeing launch (./source-entry.ts).
 //   A lookup that any mutation of the cache overtakes while it reads starts again from the cache as it is then (a
 //   bounded number of times, then unavailable), so a suspended lookup never answers what a fresh one would not; a
 //   clear makes it unavailable. `readEntry` returns the whole entry for MAWS's own instance, transiently; this module
 //   keeps none of it.
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { McpStatusResponse } from '@shared/wire/control';
+import type { ConnectorLocalKey } from './local-key';
 import { connectorFingerprint } from './status';
 import {
   CONFIG_FILE_MAX_BYTES,
@@ -37,9 +39,8 @@ import {
   materializeEntry,
   nodeSourceFiles,
   reportedVisible,
-  CONNECTOR_REFERENCE_POLICY,
+  SDK_ENVIRONMENT_KEYS,
   type ConnectorLaunchEntry,
-  type ReferencePolicy,
   type ConnectorSourceRefusal,
   type ConnectorTransport,
   type SourceFiles,
@@ -49,9 +50,12 @@ import {
 export type { ConnectorLaunchEntry, ConnectorSourceRefusal } from './source-entry';
 
 // The launch facts an engine was started with, captured from its launch plan (EngineSession.connectorLaunchContext).
-// `environment` is the attested environment: the plan's own object when the flag settings add nothing, else the plan's
-// values over the flag settings' string env. Host memory only: never serialized, journaled or sent over IPC. The config
-// file and the engine's legacy file come from the plan's environment alone (settings never move the config home).
+// `environment` holds only the SDK-minimal keys MAWS's own instance is started with (./source-entry.ts), as the launch
+// attests them: the plan's values with the string env of the flag settings MAWS passed over them, the engine applying
+// settings env over its process environment. No other launch variable is retained (entries are literal-only, so none
+// is expanded). The config file and the engine's legacy file are selected from the plan's environment at capture
+// (settings never move the config home); `localKey` is what the host captured before the spawn. Host memory only:
+// never serialized, journaled or sent over IPC.
 export interface ConnectorLaunchContext {
   readonly appSessionId: string;
   readonly launchId: string;
@@ -59,13 +63,15 @@ export interface ConnectorLaunchContext {
   readonly configFile: string | null; // the file user scope lives in, or null when the launch names none
   readonly legacyConfigFile: string | null; // the engine's legacy file, which would win over it when present
   readonly environment: Readonly<Record<string, string>>;
+  readonly localKey: ConnectorLocalKey;
 }
 
-export function connectorLaunchContext(facts: { appSessionId: string; launchId: string; cwd: string; environment: Readonly<Record<string, string>>; flagSettings?: Readonly<Record<string, unknown>> }): ConnectorLaunchContext {
+export function connectorLaunchContext(facts: { appSessionId: string; launchId: string; cwd: string; environment: Readonly<Record<string, string>>; flagSettings?: Readonly<Record<string, unknown>>; localKey?: ConnectorLocalKey }): ConnectorLaunchContext {
   const flagEnv = typeof facts.flagSettings?.env === 'object' && facts.flagSettings.env !== null && !Array.isArray(facts.flagSettings.env) ? (facts.flagSettings.env as Record<string, unknown>) : {};
-  const filling = Object.entries(flagEnv).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && !Object.hasOwn(facts.environment, entry[0]));
-  const environment = filling.length === 0 ? facts.environment : Object.freeze({ ...Object.fromEntries(filling), ...facts.environment });
-  return Object.freeze({ appSessionId: facts.appSessionId, launchId: facts.launchId, cwd: facts.cwd, configFile: configFileOf(facts.environment), legacyConfigFile: legacyConfigFileOf(facts.environment), environment });
+  const attested: Record<string, unknown> = { ...facts.environment, ...flagEnv };
+  const environment = Object.freeze(Object.fromEntries(SDK_ENVIRONMENT_KEYS.flatMap((key) => (typeof attested[key] === 'string' ? [[key, attested[key]]] : []))));
+  const localKey = facts.localKey ?? { kind: 'unidentified', why: 'notCaptured' };
+  return Object.freeze({ appSessionId: facts.appSessionId, launchId: facts.launchId, cwd: facts.cwd, configFile: configFileOf(facts.environment), legacyConfigFile: legacyConfigFileOf(facts.environment), environment, localKey });
 }
 
 // A fingerprint-matched entry located in the one file the engine's reported scope and the launch context name. Host
@@ -111,7 +117,6 @@ export interface ConnectorStatusTicket {
 export interface ConnectorStatusCacheOptions {
   files?: SourceFiles;
   now?: () => Date;
-  references?: ReferencePolicy; // tests; production takes the settings ruling's CONNECTOR_REFERENCE_POLICY
 }
 
 // Statuses that attest the reported configuration (needs-auth included: the owner's first Connect starts from it), and
@@ -154,7 +159,6 @@ const record = (value: unknown): Record<string, unknown> | null => (typeof value
 export class ConnectorStatusCache {
   private readonly files: SourceFiles;
   private readonly now: () => Date;
-  private readonly references: ReferencePolicy;
   private version = 0; // moves with every change a lookup's answer can depend on
   private key = randomBytes(32);
   private epoch = 0;
@@ -170,7 +174,6 @@ export class ConnectorStatusCache {
   constructor(options: ConnectorStatusCacheOptions = {}) {
     this.files = options.files ?? nodeSourceFiles;
     this.now = options.now ?? (() => new Date());
-    this.references = options.references ?? CONNECTOR_REFERENCE_POLICY;
   }
 
   begin(context: ConnectorLaunchContext): ConnectorStatusTicket {
@@ -363,10 +366,17 @@ export class ConnectorStatusCache {
     const { state, positives } = holding[0]!;
     const observation = positives[0]!.observation; // every positive of an uncontested server has this identity
     if (observation.transport === null || (observation.scope !== 'user' && observation.scope !== 'local')) return 'engineOnly';
-    // Local scope's `projects` key is the engine's own derivation (the canonical git root inside a repository); until a
-    // probe attests it, no key is looked up.
-    if (observation.scope === 'local') return 'unidentified';
     const scope = observation.scope;
+    // Local scope: the `projects` key every agreeing launch captured before its spawn; an unidentified one, or two
+    // launches that captured different keys (a repository made or removed between them), are never resolved further.
+    let key = cwd;
+    if (scope === 'local') {
+      const keys = positives.map(({ snapshot }) => snapshot.context.localKey);
+      if (keys.some((captured) => captured.kind === 'unidentified')) return 'unidentified';
+      const named = new Set(keys.map((captured) => (captured as { key: string }).key));
+      if (named.size > 1) return 'ambiguous';
+      key = [...named][0]!;
+    }
     // every agreeing launch's legacy file (one config file can be named by CLAUDE_CONFIG_DIR in one launch, HOME in another)
     const legacies = [...new Set(positives.map(({ snapshot }) => snapshot.context.legacyConfigFile))];
     if (state.configFile === null || legacies.includes(null)) return 'unidentified';
@@ -393,14 +403,14 @@ export class ConnectorStatusCache {
     } catch {
       return 'unavailable';
     }
-    const located = locateEntry(file, scope, cwd, server);
+    const located = locateEntry(file, scope, key, server);
     if (located === 'changed') return 'changed';
 
     let made: { visible: VisibleConfig; launch: ConnectorLaunchEntry } | undefined;
     let entryDigest: string | undefined;
     for (const { snapshot } of positives) {
       const environment = snapshot.context.environment;
-      const result = await materializeEntry(located.entry, environment, cwd, this.files, this.references);
+      const result = await materializeEntry(located.entry, environment, cwd, this.files);
       const after = moved();
       if (after) return after;
       if (typeof result === 'string') return result;
@@ -411,7 +421,7 @@ export class ConnectorStatusCache {
       made ??= result;
     }
     const { visible, launch } = made!;
-    const meaning = `${observation.identity}\0${revision}`;
+    const meaning = `${observation.identity}\0${revision}\0${scope === 'local' ? key : ''}`;
     const sourceKey = `${state.key}\0${server}`;
     let known = this.sources.get(sourceKey);
     if (known?.meaning !== meaning) {

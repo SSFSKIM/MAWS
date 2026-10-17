@@ -12,6 +12,7 @@ import type { McpStatusResponse } from '@shared/wire/control';
 import { connectorToolState } from './status';
 import { CONNECTOR_STATUS_BOUNDS, ConnectorStatusCache, connectorLaunchContext, type ConnectorLaunchContext } from './provenance';
 import { nodeSourceFiles, type SourceFiles } from './source-entry';
+import type { ConnectorLocalKey } from './local-key';
 
 type Private = { current: Map<string, string>; retired: Set<string> };
 
@@ -66,7 +67,9 @@ function writeConfig(edit: (file: Record<string, unknown>) => void = () => {}): 
   writeFileSync(join(config, '.claude.json'), JSON.stringify(file));
 }
 const environment = (extra: Record<string, string> = {}) => ({ HOME: home, CLAUDE_CONFIG_DIR: config, PATH: bin, USER: 'u', LOGNAME: 'u', SHELL: '/bin/zsh', TERM: 'dumb', TMPDIR: '/t', XDG_TOY: 'expanded', XDG_HEADER: HEADER, ...extra });
-const launch = (appSessionId = 'app-1', launchId = 'L1', extra: Record<string, string> = {}, cwd = project): ConnectorLaunchContext => connectorLaunchContext({ appSessionId, launchId, cwd, environment: environment(extra) });
+// the key the launcher captured: the scratch project is no repository, so its own key unless a case names another
+const launch = (appSessionId = 'app-1', launchId = 'L1', extra: Record<string, string> = {}, cwd = project, localKey: ConnectorLocalKey = { kind: 'directory', key: cwd }): ConnectorLaunchContext =>
+  connectorLaunchContext({ appSessionId, launchId, cwd, environment: environment(extra), localKey });
 const USER_REPORT = () => report(stdio('usertoy'), userhttp(), { ...stdio('localtoy', ['local']), scope: 'local', source: 'local' }, spikeServer('projtoy'), spikeServer('dyntoy'));
 
 function observed(cache: ConnectorStatusCache, context: ConnectorLaunchContext, answer: McpStatusResponse): void {
@@ -145,14 +148,47 @@ describe('ConnectorStatusCache: a verified source from one live report', () => {
     expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'changed' });
   });
 
-  it('keeps local scope engine-only until the engine’s projects key is attested, and reads no other key for it', async () => {
+  it('admits a local entry at the projects key its launch captured: the cwd outside a repository', async () => {
+    writeConfig();
+    const cache = new ConnectorStatusCache();
+    observed(cache, launch(), USER_REPORT());
+    const local = await cache.resolveSource(project, 'localtoy');
+    expect(local).toMatchObject({ ok: true, source: { scope: 'local', path: join(config, '.claude.json'), entryPath: ['projects', project, 'mcpServers', 'localtoy'] } });
+    if (!local.ok) return;
+    expect(await cache.readEntry(local.source)).toMatchObject({ ok: true, entry: { transport: 'stdio', args: ['local'], cwd: project } });
+  });
+
+  it('admits a local entry at a repository root’s key from its child directory, the cwd’s own key unread', async () => {
+    const sub = join(project, 'sub');
+    mkdirSync(sub);
+    writeConfig((file) => ((file.projects as Record<string, unknown>)[sub] = { mcpServers: { localtoy: { command: 'toy', args: ['child'] } } }));
+    const cache = new ConnectorStatusCache();
+    observed(cache, launch('app-1', 'L1', {}, sub, { kind: 'repository', key: project }), report({ ...stdio('localtoy', ['local']), scope: 'local', source: 'local' }));
+    expect(await cache.resolveSource(sub, 'localtoy')).toMatchObject({ ok: true, source: { cwd: sub, entryPath: ['projects', project, 'mcpServers', 'localtoy'] } });
+  });
+
+  it('keeps local scope engine-only where its launch captured no key, reading no file and no other key', async () => {
     writeConfig((file) => ((file.projects as Record<string, unknown>)[dir] = { mcpServers: { localtoy: { command: 'toy', args: ['local'] } } }));
-    let reads = 0;
-    const files: SourceFiles = { ...nodeSourceFiles, read: async (path, max) => (reads++, nodeSourceFiles.read(path, max)) };
-    const cache = new ConnectorStatusCache({ files });
-    observed(cache, launch(), report({ ...stdio('localtoy', ['local']), scope: 'local', source: 'local' }));
-    expect(await cache.resolveSource(project, 'localtoy')).toEqual({ ok: false, why: 'unidentified' });
-    expect(reads).toBe(0); // refused before any lookup, so no candidate key is ever scanned
+    for (const localKey of [{ kind: 'unidentified', why: 'linkedCheckout' }, { kind: 'unidentified', why: 'notCaptured' }] as const) {
+      let reads = 0;
+      const files: SourceFiles = { ...nodeSourceFiles, read: async (path, max) => (reads++, nodeSourceFiles.read(path, max)) };
+      const cache = new ConnectorStatusCache({ files });
+      observed(cache, launch('app-1', 'L1', {}, project, localKey), report({ ...stdio('localtoy', ['local']), scope: 'local', source: 'local' }));
+      expect(await cache.resolveSource(project, 'localtoy'), localKey.why).toEqual({ ok: false, why: 'unidentified' });
+      expect(reads, localKey.why).toBe(0);
+    }
+    const context = connectorLaunchContext({ appSessionId: 'app-1', launchId: 'L1', cwd: project, environment: environment() });
+    expect(context.localKey).toEqual({ kind: 'unidentified', why: 'notCaptured' });
+  });
+
+  it('two agreeing launches that captured different keys (a repository made between them) are ambiguous, never retargeted', async () => {
+    writeConfig((file) => ((file.projects as Record<string, unknown>)[dir] = { mcpServers: { localtoy: { command: 'toy', args: ['local'] } } }));
+    const cache = new ConnectorStatusCache();
+    const local = report({ ...stdio('localtoy', ['local']), scope: 'local', source: 'local' });
+    observed(cache, launch('app-1', 'L1'), local);
+    expect(await cache.resolveSource(project, 'localtoy')).toMatchObject({ ok: true });
+    observed(cache, launch('app-2', 'L2', {}, project, { kind: 'repository', key: dir }), local);
+    expect(await cache.resolveSource(project, 'localtoy')).toEqual({ ok: false, why: 'ambiguous' });
   });
 });
 
@@ -438,35 +474,42 @@ describe('ConnectorStatusCache: bounds and fences fail closed', () => {
   });
 });
 
-describe('ConnectorStatusCache: references under the settings ruling', () => {
-  const referencing = (file: Record<string, unknown>) => ((file.mcpServers as Record<string, unknown>).usertoy = { type: 'stdio', command: 'toy', args: ['toy-server.mjs', '${XDG_TOY}'] });
-  const answer = () => report(stdio('usertoy', ['toy-server.mjs', 'expanded']));
-
-  it('literal-only by default: an entry with any reference is unattested, its report notwithstanding', async () => {
-    writeConfig(referencing);
+describe('ConnectorStatusCache: literal entries only, under the attested launch environment', () => {
+  it('an entry with any reference is unattested, its report notwithstanding (branch B: settings override the launch)', async () => {
+    writeConfig((file) => ((file.mcpServers as Record<string, unknown>).usertoy = { type: 'stdio', command: 'toy', args: ['toy-server.mjs', '${XDG_TOY}'] }));
     const cache = new ConnectorStatusCache();
-    observed(cache, launch(), answer());
+    observed(cache, launch(), report(stdio('usertoy', ['toy-server.mjs', 'expanded'])));
     expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unattested' });
   });
 
-  it('attestedPresent: a visible reference to a present variable matches its report; an absent one refuses, its default too', async () => {
-    writeConfig(referencing);
-    const cache = new ConnectorStatusCache({ references: 'attestedPresent' });
-    observed(cache, launch(), answer());
-    expect(await cache.resolveSource(project, 'usertoy')).toMatchObject({ ok: true });
-    writeConfig((file) => ((file.mcpServers as Record<string, unknown>).usertoy = { command: 'toy', args: ['toy-server.mjs', '${XDG_ABSENT:-expanded}'] }));
-    expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unattested' });
-  });
-
-  it('the attested environment is the launch plan’s plus the flag settings env MAWS passed, filling only what the plan lacks', async () => {
-    const context = connectorLaunchContext({ appSessionId: 'app-1', launchId: 'L1', cwd: project, environment: environment(), flagSettings: { env: { XDG_FLAG: 'from-flag', XDG_TOY: 'flag-loses', CLAUDE_CONFIG_DIR: join(dir, 'elsewhere'), ODD: 7 } } });
-    expect(context.environment).toMatchObject({ XDG_FLAG: 'from-flag', XDG_TOY: 'expanded' });
-    expect(context.environment).not.toHaveProperty('ODD');
+  it('the flag settings env MAWS passed overrides the plan’s, a present SDK key included; the config home stays the plan’s', async () => {
+    const flagBin = join(dir, 'flag-bin');
+    mkdirSync(flagBin);
+    writeFileSync(join(flagBin, 'toy'), '#!/bin/sh\n');
+    chmodSync(join(flagBin, 'toy'), 0o755);
+    const context = connectorLaunchContext({ appSessionId: 'app-1', launchId: 'L1', cwd: project, environment: environment(), flagSettings: { env: { PATH: flagBin, XDG_FLAG: 'from-flag', CLAUDE_CONFIG_DIR: join(dir, 'elsewhere'), ODD: 7 } }, localKey: { kind: 'directory', key: project } });
+    expect(context.environment).toEqual({ HOME: home, LOGNAME: 'u', PATH: flagBin, SHELL: '/bin/zsh', TERM: 'dumb', USER: 'u' });
     expect(context.configFile).toBe(join(config, '.claude.json')); // settings never move the config home
-    writeConfig((file) => ((file.mcpServers as Record<string, unknown>).usertoy = { command: 'toy', args: ['toy-server.mjs', '${XDG_FLAG}'] }));
-    const cache = new ConnectorStatusCache({ references: 'attestedPresent' });
-    observed(cache, context, report(stdio('usertoy', ['toy-server.mjs', 'from-flag'])));
-    expect(await cache.resolveSource(project, 'usertoy')).toMatchObject({ ok: true });
+    writeConfig();
+    const cache = new ConnectorStatusCache();
+    observed(cache, context, USER_REPORT());
+    const source = await cache.resolveSource(project, 'usertoy');
+    if (!source.ok) throw new Error(source.why);
+    expect(await cache.readEntry(source.source)).toMatchObject({ ok: true, entry: { executable: join(flagBin, 'toy'), env: { PATH: flagBin } } });
+  });
+
+  it('retains no launch variable beyond the SDK-minimal keys: an unrelated credential in the plan never enters the cache', async () => {
+    const SENTINEL = 'sentinel-launch-credential-5d1e';
+    const context = connectorLaunchContext({ appSessionId: 'app-1', launchId: 'L1', cwd: project, environment: environment({ ANTHROPIC_API_KEY: SENTINEL, XDG_OTHER: SENTINEL }), flagSettings: { env: { ANTHROPIC_AUTH_TOKEN: SENTINEL } }, localKey: { kind: 'directory', key: project } });
+    expect(Object.keys(context.environment).sort()).toEqual(['HOME', 'LOGNAME', 'PATH', 'SHELL', 'TERM', 'USER']);
+    writeConfig();
+    const cache = new ConnectorStatusCache();
+    observed(cache, context, USER_REPORT());
+    const source = await cache.resolveSource(project, 'usertoy');
+    if (!source.ok) throw new Error(source.why);
+    const read = await cache.readEntry(source.source);
+    expect(inspect(cache, { depth: Infinity, showHidden: true })).not.toContain(SENTINEL);
+    expect(JSON.stringify(read)).not.toContain(SENTINEL);
   });
 });
 

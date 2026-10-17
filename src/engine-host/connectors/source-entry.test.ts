@@ -1,7 +1,7 @@
 // P3-HD M1: route D's source lookup and its one file entry (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md,
-// "Source truth and lifetime"; P3 co-work Decision Log 98 (1) and (2), with P3-HD's settings ruling). The file a launch's
-// environment names, the one JSON location a scope names in it (never another key), `${…}` references admitted only
-// as the reference policy attests them, the visible fields compared as mcp_status reports them
+// "Source truth and lifetime"; P3 co-work Decision Log 98 (1) and (2), with P3-HD's settings ruling, branch B from probe
+// run 39007800364). The file a launch's environment names, the one JSON location a scope names in it (never another
+// key), literal entries only (any `${…}` reference is unattested), the visible fields compared as mcp_status reports them
 // (spikes/p3-connectors/fixtures/engine-mcp-call.jsonl seq 5), the whole entry made into what MAWS's own instance would
 // run, and the config file read under a cap that holds on the bytes actually read.
 import { execFileSync } from 'node:child_process';
@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { McpStatusResponse } from '@shared/wire/control';
-import { CONNECTOR_REFERENCE_POLICY, configFileOf, expandVariables, legacyConfigFileOf, locateEntry, materializeEntry, nodeSourceFiles, reportedVisible, visibleKey, visibleOfEntry } from './source-entry';
+import { configFileOf, legacyConfigFileOf, locateEntry, materializeEntry, nodeSourceFiles, reportedVisible, visibleKey, visibleOfEntry } from './source-entry';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
 const SPIKE = (() => {
@@ -53,30 +53,6 @@ describe('the config file a launch names', () => {
   });
 });
 
-describe('references under the settings ruling', () => {
-  const env = { XDG_A: 'alpha', XDG_EMPTY: '', HOMEBREW_GITHUB_API_TOKEN: 't' };
-
-  it('is literal-only until the probe attests otherwise: no reference is expanded, a literal `$` passes', () => {
-    expect(CONNECTOR_REFERENCE_POLICY).toBe('literalOnly');
-    for (const value of ['${XDG_A}', 'a-${XDG_A}-b', '${XDG_MISSING:-fallback}', '${XDG_A:=x}']) expect(expandVariables(value, env), value).toBeNull();
-    expect(expandVariables('$XDG_A and plain', env)).toBe('$XDG_A and plain');
-    expect(expandVariables('plain', env)).toBe('plain');
-  });
-
-  it('attestedPresent: a variable present in the attested environment, empty included; absent refuses even with a default', () => {
-    const x = (value: string) => expandVariables(value, env, 'attestedPresent');
-    expect(x('a-${XDG_A}-b')).toBe('a-alpha-b');
-    expect(x('${XDG_EMPTY:-fallback}')).toBe('');
-    expect(x('${XDG_A:-fallback}')).toBe('alpha');
-    expect(x('${XDG_MISSING:-fallback}')).toBeNull(); // settings may supply it
-    expect(x('${XDG_MISSING}')).toBeNull();
-    expect(x('${XDG_A:=x}')).toBeNull();
-    expect(x('${not valid}')).toBeNull();
-    expect(x('${}')).toBeNull();
-    expect(x('${HOMEBREW_GITHUB_API_TOKEN}')).toBe('t'); // no credential-name heuristic: a visible field meets the report
-  });
-});
-
 describe('locateEntry (exactly the JSON location it is given)', () => {
   const file = {
     mcpServers: { top: { command: 'a' } },
@@ -99,27 +75,28 @@ describe('locateEntry (exactly the JSON location it is given)', () => {
 });
 
 describe('the visible fields, as mcp_status reports them and as the file gives them', () => {
-  it('matches the spike’s reported stdio entry, and its http entry from the referencing file only where attested', () => {
+  it('matches the spike’s reported stdio entry and a literal http entry; the spike’s referencing http entry is unattested', () => {
     const stdio = reportedVisible(reported('usertoy'))!;
     const fileStdio = { type: 'stdio', command: (reported('usertoy') as { command: string }).command, args: (reported('usertoy') as { args: string[] }).args };
-    expect(visibleKey(visibleOfEntry(fileStdio, {}) as never)).toBe(visibleKey(stdio));
+    expect(visibleKey(visibleOfEntry(fileStdio) as never)).toBe(visibleKey(stdio));
     // engine-mcp-call-probe.mjs wrote `${PROBE_FAKE_SECRET}` and the report carries its expanded value
     const http = reportedVisible(reported('userhttp'))!;
     const fileHttp = { type: 'http', url: 'http://127.0.0.1:47831/mcp', headers: { 'X-Probe-Header': '${PROBE_FAKE_SECRET}' } };
-    expect(visibleOfEntry(fileHttp, { PROBE_FAKE_SECRET: 'fake-value-not-a-credential' })).toBe('unattested');
-    expect(visibleKey(visibleOfEntry(fileHttp, { PROBE_FAKE_SECRET: 'fake-value-not-a-credential' }, 'attestedPresent') as never)).toBe(visibleKey(http));
-    expect(visibleKey(visibleOfEntry(fileHttp, { PROBE_FAKE_SECRET: 'other' }, 'attestedPresent') as never)).not.toBe(visibleKey(http));
+    expect(visibleOfEntry(fileHttp)).toBe('unattested');
+    const literal = { type: 'http', url: 'http://127.0.0.1:47831/mcp', headers: { 'X-Probe-Header': 'fake-value-not-a-credential' } };
+    expect(visibleKey(visibleOfEntry(literal) as never)).toBe(visibleKey(http));
+    expect(visibleKey(visibleOfEntry({ ...literal, headers: { 'X-Probe-Header': 'other' } }) as never)).not.toBe(visibleKey(http));
   });
 
   it('reads a missing type as stdio, missing args as none and streamable-http as http', () => {
-    expect(visibleKey(visibleOfEntry({ command: 'x' }, {}) as never)).toBe(visibleKey(reportedVisible({ type: 'stdio', command: 'x', args: [] })!));
-    expect(visibleKey(visibleOfEntry({ type: 'streamable-http', url: 'http://h/m' }, {}) as never)).toBe(visibleKey(reportedVisible({ type: 'http', url: 'http://h/m' })!));
+    expect(visibleKey(visibleOfEntry({ command: 'x' }) as never)).toBe(visibleKey(reportedVisible({ type: 'stdio', command: 'x', args: [] })!));
+    expect(visibleKey(visibleOfEntry({ type: 'streamable-http', url: 'http://h/m' }) as never)).toBe(visibleKey(reportedVisible({ type: 'http', url: 'http://h/m' })!));
   });
 
   it('has no supported shape for sse, ws, sdk or claude.ai entries, or a malformed one', () => {
     for (const config of [{ type: 'sse', url: 'http://h' }, { type: 'ws', url: 'ws://h' }, { type: 'sdk', name: 'x' }, { type: 'claudeai-proxy', url: 'https://x', id: '1' }, { type: 'stdio' }, { type: 'stdio', command: 'x', args: [1] }, undefined]) {
       expect(reportedVisible(config), JSON.stringify(config)).toBeNull();
-      expect(visibleOfEntry((config ?? {}) as Record<string, unknown>, {}), JSON.stringify(config)).toBeNull();
+      expect(visibleOfEntry((config ?? {}) as Record<string, unknown>), JSON.stringify(config)).toBeNull();
     }
   });
 });
@@ -151,24 +128,23 @@ describe('materializeEntry (the whole entry, for MAWS’s own instance)', () => 
     expect(await materializeEntry({ command: join(dir, 'absent') }, {}, dir, nodeSourceFiles)).toBe('unresolved');
   });
 
-  it('reads an http entry’s headers transiently; a referencing header only where attested', async () => {
+  it('reads an http entry’s headers transiently; a referencing url or header is unattested', async () => {
     expect(await materializeEntry({ type: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'literal' } }, {}, '/w', nodeSourceFiles)).toEqual({
       visible: { transport: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'literal' } },
       launch: { transport: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'literal' } },
     });
     const referencing = { type: 'http', url: 'http://127.0.0.1:1/${XDG_P}', headers: { 'X-H': 'v-${XDG_P}' } };
     expect(await materializeEntry(referencing, { XDG_P: 'mcp' }, '/w', nodeSourceFiles)).toBe('unattested');
-    expect(await materializeEntry(referencing, { XDG_P: 'mcp' }, '/w', nodeSourceFiles, 'attestedPresent')).toMatchObject({ launch: { url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'v-mcp' } } });
+    expect(await materializeEntry({ type: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'v-${XDG_P}' } }, { XDG_P: 'mcp' }, '/w', nodeSourceFiles)).toBe('unattested');
   });
 
-  it('refuses any reference in an omitted stdio env value under either policy, and a referencing argument unless attested', async () => {
+  it('is unattested for any reference in the command, an argument or an env value, its variable present or not', async () => {
     const tool = executable(join(dir, 'tool'));
-    for (const policy of ['literalOnly', 'attestedPresent'] as const) {
-      for (const value of ['${XDG_V}', '${XDG_V:-d}', '${XDG_NONE:-d}', 'x${XDG_V}']) expect(await materializeEntry({ command: tool, env: { K: value } }, { XDG_V: 'v' }, dir, nodeSourceFiles, policy), `${policy} ${value}`).toBe('unattested');
-    }
-    expect(await materializeEntry({ command: tool, args: ['${XDG_V}'] }, { XDG_V: 'v' }, dir, nodeSourceFiles)).toBe('unattested');
-    expect(await materializeEntry({ command: tool, args: ['${XDG_V}'] }, { XDG_V: 'v' }, dir, nodeSourceFiles, 'attestedPresent')).toMatchObject({ launch: { args: ['v'] } });
-    expect(await materializeEntry({ command: tool, args: ['${XDG_NONE:-d}'] }, {}, dir, nodeSourceFiles, 'attestedPresent')).toBe('unattested');
+    const env = { XDG_V: 'v', PATH: dir };
+    for (const entry of [{ command: '${XDG_V}' }, { command: tool, args: ['${XDG_V}'] }, { command: tool, args: ['x${XDG_NONE:-d}'] }, { command: tool, env: { K: '${XDG_V}' } }, { command: tool, env: { K: '${XDG_NONE:-d}' } }])
+      expect(await materializeEntry(entry, env, dir, nodeSourceFiles), JSON.stringify(entry)).toBe('unattested');
+    // `$VAR` without braces is literal text to the engine and here
+    expect(await materializeEntry({ command: tool, args: ['$XDG_V'], env: { K: 'a$b' } }, env, dir, nodeSourceFiles)).toMatchObject({ launch: { args: ['$XDG_V'], env: { K: 'a$b' } } });
   });
 
   it('is engine-only for helpers, manual OAuth clients, unknown options and unsupported transports', async () => {

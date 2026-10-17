@@ -1,20 +1,25 @@
 // P3-HD's direct-route group (`pnpm e2e:connectors-direct`, MAWS_CONNECTORS_DIRECT_E2E=1; the spec skips itself
 // otherwise, so `pnpm e2e` is unchanged). docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md, M1; P3 co-work
-// Decision Log 98 (1)-(3) and (9), with P3-HD's settings ruling. M1's cases are the no-model scratch-source probe: the
+// Decision Log 98 (1)-(3) and (9), with P3-HD's settings ruling (branch B, literal entries only) and local-scope key, both
+// from run 39007800364 (e2e/fixtures/connectors-direct/run-39007800364). M1's cases are the no-model scratch-source probe: the
 // installed engine launched as MAWS launches it under a scratch HOME and config home (support/connector-direct-probe.ts),
 // its real mcp_status answers observed by route D's cache (src/engine-host/connectors/provenance.ts), and what that cache
 // would hand MAWS's own instance compared with the instance the engine actually started from the same file (the
 // fixture's start log). No owner configuration is read, no model is called, no tool is called. Every listener is
 // 127.0.0.1. Each expectation below is what the 2.1.300 readable bundle says the engine does; a different observation
 // fails the case, and the wire and the sources summary it printed are the evidence.
-//   sources: user entries from a CLAUDE_CONFIG_DIR admitted as the engine ran them (PATH, cwd, argv, env, the SDK-minimal
-//          keys, H's fingerprint, an HTTP header as sent); a needs-auth server's source without tool metadata; a
-//          referencing entry unattested; local, project and dynamic entries never direct.
+//   sources: user and local (outside a repository) entries from a CLAUDE_CONFIG_DIR admitted as the engine ran them
+//          (PATH, cwd, argv, env, the SDK-minimal keys, H's fingerprint, an HTTP header as sent); a needs-auth server's
+//          source without tool metadata; a referencing entry unattested; project and dynamic entries never direct.
 //   home: with no CLAUDE_CONFIG_DIR the file is $HOME/.claude.json.
 //   settings: what the engine hands a stdio server for a variable only settings set (with and without a default), one
 //          settings override over the launch, a benign credential-shaped name, a known-withheld synthetic name and one
 //          set nowhere; the reference policy keeps that entry unattested whichever way the override goes.
-//   git root: the `projects` key the engine reads at a repository's root and in its child directory.
+//   git root: the `projects` key the engine reads at a repository's root and in its child directory, and route D's
+//          local source from it, run as the engine ran it.
+//   worktree: the key the engine reads in a linked worktree, recorded; route D keeps local scope unidentified there.
+//   settings sdk: what the engine hands a stdio server when file settings set PATH and SHELL, recorded beside what
+//          route D would start (the launch's), the gap P3-F's effective-environment attestation owns.
 //   negative: a positive report, its engine gone, then another launch of the same context without the server (and one
 //          with it disabled): engine-only until the cache is cleared, then admitted again from a fresh report.
 import { execFileSync } from 'node:child_process';
@@ -25,7 +30,7 @@ import { test, expect, type TestInfo } from '@playwright/test';
 import type { McpStatusResponse } from '@shared/wire/control';
 import { ConnectorStatusCache } from '../src/engine-host/connectors/provenance';
 import { connectorToolState } from '../src/engine-host/connectors/status';
-import { PROBE_ARG, PROBE_VALUE, probeLayout, readLog, startHttpFixture, startProbeEngine, stdioEntry, type ProbeEngine, type ProbeLayout } from './support/connector-direct-probe';
+import { launchPathOf, PROBE_ARG, PROBE_VALUE, probeLayout, readLog, startHttpFixture, startProbeEngine, stdioEntry, type ProbeEngine, type ProbeLayout } from './support/connector-direct-probe';
 
 test.skip(process.env.MAWS_CONNECTORS_DIRECT_E2E !== '1', 'the direct-route e2e runs under pnpm e2e:connectors-direct (MAWS_CONNECTORS_DIRECT_E2E=1)');
 test.describe.configure({ timeout: 180_000 });
@@ -100,7 +105,7 @@ async function expectSameInstance(cache: ConnectorStatusCache, layout: ProbeLayo
   expect(Object.fromEntries(Object.entries(entry.env).filter(([key]) => SDK_KEYS.includes(key))), `${name}'s SDK-minimal keys`).toEqual(started!.sdk);
 }
 
-test('sources: user entries are admitted as the engine ran them; a needs-auth source without tools; referencing, local, project and dynamic entries never direct', async () => {
+test('sources: user and local entries are admitted as the engine ran them; a needs-auth source without tools; referencing, project and dynamic entries never direct', async () => {
   const info = test.info();
   const layout = probeLayout();
   const http = await startHttpFixture(layout, 'userhttp');
@@ -149,7 +154,9 @@ test('sources: user entries are admitted as the engine ran them; a needs-auth so
       expect(await cache.resolveSource(layout.project, 'userref')).toEqual({ ok: false, why: 'unattested' });
 
       expect(named(status, 'localtoy'), 'localtoy').toMatchObject({ status: 'connected', scope: 'local' });
-      expect(await cache.resolveSource(layout.project, 'localtoy')).toEqual({ ok: false, why: 'unidentified' });
+      expect(engine.context.localKey, 'outside a repository the cwd is the key').toEqual({ kind: 'directory', key: layout.project });
+      expect(await cache.resolveSource(layout.project, 'localtoy')).toMatchObject({ ok: true, source: { scope: 'local', entryPath: ['projects', layout.project, 'mcpServers', 'localtoy'] } });
+      await expectSameInstance(cache, layout, engine, layout.project, 'localtoy');
       expect(named(status, 'projtoy'), 'projtoy').toMatchObject({ status: 'connected', scope: 'project' });
       expect(named(status, 'dyntoy'), 'dyntoy').toMatchObject({ status: 'connected', scope: 'dynamic' });
       for (const name of ['projtoy', 'dyntoy']) expect(await cache.resolveSource(layout.project, name), name).toEqual({ ok: false, why: 'engineOnly' });
@@ -222,9 +229,8 @@ test('settings: what the engine hands a stdio server for settings-only, overridd
       const args = (named(status, 'envtoy')!.config?.args as string[] | undefined) ?? [];
       const observed = { env: started!.env, sdk: started!.sdk, reportedArgs: args.slice(args.indexOf('--overridden')), launchPath: engine.env.PATH };
       await evidence(info, 'settings-observed', observed);
-      const overridden = started!.env!.MAWS_PROBE_OVERRIDDEN;
-      info.annotations.push({ type: 'settings-branch', description: overridden === 'from-launch' ? 'A: process values win, settings fill only absent' : overridden === 'from-settings' ? 'B: settings override present process values' : `unexpected: ${String(overridden)}` });
-      expect(['from-launch', 'from-settings'], 'a present variable settings also set').toContain(overridden);
+      // run 39007800364 settled branch B: file settings override a variable the launch held
+      const overridden = 'from-settings';
       expect(started!.env).toEqual({
         MAWS_PROBE_PLAIN: 'plain-envtoy',
         MAWS_PROBE_ABSENT: 'from-settings', // absent from the launch: settings supply it
@@ -237,11 +243,8 @@ test('settings: what the engine hands a stdio server for settings-only, overridd
       });
       expect(observed.reportedArgs, 'the visible arguments expand as the env does').toEqual(['--overridden', overridden, '--setting', 'from-settings']);
       expect(started!.sdk!.PATH, 'settings left the PATH the launch gave').toBe(engine.env.PATH);
-      // whichever branch holds, an entry referencing in its env stays unattested
+      // so an entry with any reference is engine-only: its values depend on settings MAWS did not hand the engine
       expect(await cache.resolveSource(layout.project, 'envtoy')).toEqual({ ok: false, why: 'unattested' });
-      const presentOnly = new ConnectorStatusCache({ references: 'attestedPresent' });
-      presentOnly.observe(presentOnly.begin(engine.context), status);
-      expect(await presentOnly.resolveSource(layout.project, 'envtoy')).toEqual({ ok: false, why: 'unattested' });
     });
   } finally {
     layout.close();
@@ -275,10 +278,81 @@ test('git root: the projects key the engine reads at a repository root and in it
         expect(named(status, 'rootkey'), `${label}: the repository's key`).toMatchObject({ status: 'connected', scope: 'local' });
         expect(named(status, 'childkey'), `${label}: the child directory's own key is not read`).toBeUndefined();
         expect(lastStart(layout, 'rootkey')?.cwd, `${label}: started in the launch cwd`).toBe(cwd);
-        expect(await cache.resolveSource(cwd, 'rootkey'), `${label}: local stays engine-only until the ruling`).toEqual({ ok: false, why: 'unidentified' });
+        expect(engine.context.localKey, `${label}: the key captured before the spawn`).toEqual({ kind: 'repository', key: repo });
+        expect(await cache.resolveSource(cwd, 'rootkey'), `${label}: route D's local source`).toMatchObject({ ok: true, source: { scope: 'local', entryPath: ['projects', repo, 'mcpServers', 'rootkey'] } });
+        await expectSameInstance(cache, layout, engine, cwd, 'rootkey');
       });
     }
     await evidence(info, 'git-keys', seen);
+  } finally {
+    layout.close();
+  }
+});
+
+test('worktree: the projects key the engine reads in a linked worktree is recorded; route D keeps it unidentified', async () => {
+  const info = test.info();
+  const layout = probeLayout();
+  try {
+    const repo = join(layout.scratch, 'main');
+    const worktree = join(layout.scratch, 'linked');
+    mkdirSync(repo);
+    const git = (args: string[], cwd = repo) => execFileSync('git', ['-c', 'user.name=probe', '-c', 'user.email=probe@example.invalid', ...args], { cwd, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+    git(['init', '-q', repo]);
+    git(['commit', '-q', '--allow-empty', '-m', 'probe']);
+    git(['worktree', 'add', '-q', worktree]);
+    writeJson(join(layout.config, '.claude.json'), {
+      hasCompletedOnboarding: true,
+      projects: {
+        [repo]: { hasTrustDialogAccepted: true, mcpServers: { mainkey: stdioEntry(layout, 'mainkey') } },
+        [worktree]: { hasTrustDialogAccepted: true, mcpServers: { linkedkey: stdioEntry(layout, 'linkedkey') } },
+      },
+    });
+    await withEngine(info, 'worktree', layout, { cwd: worktree, configDir: true }, async (engine) => {
+      const status = await engine.settled();
+      const cache = new ConnectorStatusCache();
+      cache.observe(cache.begin(engine.context), status);
+      await summarize(info, 'worktree', cache, worktree, status);
+      const keys = { mainkey: named(status, 'mainkey')?.status ?? null, linkedkey: named(status, 'linkedkey')?.status ?? null };
+      await evidence(info, 'worktree-keys', keys);
+      // the bundle's reading (cli.pretty.js:30725-30780): a linked worktree folds to its main checkout's key
+      expect(keys, 'the engine reads the main checkout’s key').toEqual({ mainkey: 'connected', linkedkey: null });
+      expect(engine.context.localKey, 'a `.git` file is not captured until this evidence is ruled on').toEqual({ kind: 'unidentified', why: 'linkedCheckout' });
+      for (const name of ['mainkey', 'linkedkey']) expect(await cache.resolveSource(worktree, name), name).toEqual({ ok: false, why: named(status, name) ? 'unidentified' : 'unobserved' });
+    });
+  } finally {
+    layout.close();
+  }
+});
+
+// A diagnostic, not a restriction: what file settings do to the SDK-minimal keys a stdio server starts with. Route D
+// starts its instance with the launch's (and MAWS's flag settings'); file settings are not attested (P3-F's lift).
+test('settings sdk: file settings PATH and SHELL reach the engine’s server; route D’s instance keeps the launch’s', async () => {
+  const info = test.info();
+  const layout = probeLayout();
+  try {
+    const settingsBin = join(layout.scratch, 'settings-bin');
+    mkdirSync(settingsBin);
+    const settingsPath = `${settingsBin}:${launchPathOf(layout)}`;
+    writeJson(join(layout.config, 'settings.json'), { env: { PATH: settingsPath, SHELL: '/bin/sh' } });
+    writeJson(join(layout.config, '.claude.json'), { hasCompletedOnboarding: true, mcpServers: { sdktoy: stdioEntry(layout, 'sdktoy') } });
+    await withEngine(info, 'settings-sdk', layout, { cwd: layout.project, configDir: true }, async (engine) => {
+      const status = await engine.settled();
+      const cache = new ConnectorStatusCache();
+      cache.observe(cache.begin(engine.context), status);
+      await summarize(info, 'settings-sdk', cache, layout.project, status);
+      expect(named(status, 'sdktoy')).toMatchObject({ status: 'connected', scope: 'user' });
+      const started = lastStart(layout, 'sdktoy');
+      expect(started, 'the engine started sdktoy').toBeDefined();
+      const source = await cache.resolveSource(layout.project, 'sdktoy');
+      expect(source).toMatchObject({ ok: true });
+      const read = source.ok ? await cache.readEntry(source.source) : null;
+      const routeD = read?.ok && read.entry.transport === 'stdio' ? Object.fromEntries(Object.entries(read.entry.env).filter(([key]) => SDK_KEYS.includes(key))) : null;
+      await evidence(info, 'settings-sdk-observed', { engineServer: started!.sdk, routeD, settings: { PATH: settingsPath, SHELL: '/bin/sh' } });
+      // branch B's rule for these keys too, recorded; route D's instance is the launch's either way
+      expect([settingsPath, launchPathOf(layout)], 'the server’s PATH').toContain(started!.sdk!.PATH);
+      info.annotations.push({ type: 'settings-sdk', description: JSON.stringify({ path: started!.sdk!.PATH === settingsPath ? 'settings' : 'launch', shell: started!.sdk!.SHELL }) });
+      expect(routeD).toMatchObject({ PATH: launchPathOf(layout), SHELL: engine.env.SHELL });
+    });
   } finally {
     layout.close();
   }

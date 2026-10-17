@@ -34,6 +34,7 @@
     // P3-H: the connector runs drive a scratch engine through the host's control client and route E's call
     "src/engine-host/controls.ts",
     // P3-HD: the direct-route probe observes real reports through route D's cache and compares H's fingerprint
+    "src/engine-host/connectors/local-key.ts",
     "src/engine-host/connectors/provenance.ts",
     "src/engine-host/connectors/source-entry.ts",
     "src/engine-host/connectors/status.ts",

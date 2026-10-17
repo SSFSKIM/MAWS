@@ -29,6 +29,7 @@ import type { EngineTransport } from './transport';
 import { unsettledPrompts } from './prompt-history'; // P2-C
 import type { ObservedFactsService } from './observed-facts'; // P2-A
 import type { ArtifactStore } from './documents/store'; // P3-A (M6)
+import { captureLocalKey, type ConnectorLocalKey } from './connectors/local-key'; // P3-HD
 
 export const REPLAY_PRELUDE = 'test/fixtures/engine/replay-handshake.jsonl'; // relative to the launcher's cwd
 
@@ -49,6 +50,9 @@ export interface LauncherDeps {
   hasClient?: () => boolean; // E10: the runtime's, handed to each session's bridges
   observedFacts?: ObservedFactsService; // P2-A (X17): each launch records what the engine reports
   artifacts?: () => ArtifactStore | null; // P3-A (M6): the artifact store the sessions' artifact tools write through
+  // P3-HD: the local-scope key of a live launch's cwd, captured beside the probes, before the spawn (bounded, never failing
+  // the launch: a failure is an unidentified key); tests inject it
+  captureLocalKey?: (cwd: string) => Promise<ConnectorLocalKey>;
 }
 
 function readJournal(path: string): JournalRow[] {
@@ -73,6 +77,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     let captured: Record<string, string> = {};
     let journal: JournalRow[] | null = null;
     let relayHealth: RelayHealth | undefined;
+    let connectorLocalKey: ConnectorLocalKey | undefined; // P3-HD: live launches only
     let engine: { bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean }; // P2-C: the flag's declaration
     if (spec.replay !== null) {
       const fixture = resolve(deps.cwd, spec.replay);
@@ -80,12 +85,16 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       prelude ??= readJournal(resolve(deps.cwd, REPLAY_PRELUDE));
       engine = { bin: fixture, engineVersion: TESTED_ENGINE_VERSION };
     } else {
-      const [binary, relay, env] = await Promise.all([deps.binaryProbe(), spec.gateway === 'gateway' ? deps.checkRelay(false) : Promise.resolve(null), deps.captureEnv()]);
+      const [binary, relay, env, localKey] = await Promise.all([
+        deps.binaryProbe(), spec.gateway === 'gateway' ? deps.checkRelay(false) : Promise.resolve(null), deps.captureEnv(),
+        (deps.captureLocalKey ?? captureLocalKey)(spec.cwd).catch((): ConnectorLocalKey => ({ kind: 'unidentified', why: 'unreadable' })), // P3-HD
+      ]);
       // W13: a missing binary and one that printed no version refuse; a version other than the tested one never does
       if (!binary.ok || binary.version === null) return refused('binary_missing', binary.error ?? `no engine binary at ${binary.path}`);
       if (relay && !relay.ok) return { status: 'relay_unreachable', health: relay };
       captured = env;
       relayHealth = relay ?? undefined;
+      connectorLocalKey = localKey; // P3-HD
       engine = { bin: binary.path, engineVersion: binary.version, declaresSystemPromptSnapshot: binary.declaresSystemPromptSnapshot }; // P2-C
     }
 
@@ -114,6 +123,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
         observedFacts: deps.observedFacts, // P2-A
         artifactScope, // P2-E1
         artifacts: deps.artifacts, // P3-A (M6)
+        connectorLocalKey, // P3-HD
       });
       deps.wire(session, plan, spec);
       return session;

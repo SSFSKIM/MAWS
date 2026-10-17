@@ -3,7 +3,8 @@
 // captured environment the probe writes itself; no `--strict-mcp-config`), so user, local and project servers load
 // from scratch files, never the owner's. It sends control requests only: no user message, no model turn, no
 // credentials. MAWS's own flag settings go in `--settings` as a launch passes them (mergeFlagSettings), and each launch's
-// ConnectorLaunchContext is built from the exact environment and flag settings handed to that engine. A case may add
+// ConnectorLaunchContext is built from the exact environment and flag settings handed to that engine, with the
+// local-scope key captured before the spawn as the launcher captures it (src/engine-host/connectors/local-key.ts). A case may add
 // synthetic variables MAWS's allowlist would drop (`syntheticEnv`), recorded by name in the spawn row, to observe what
 // the engine does with them. Listeners are 127.0.0.1 only.
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -13,6 +14,7 @@ import { join } from 'node:path';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { McpStatusResponse } from '@shared/wire/control';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
+import { captureLocalKey } from '../../src/engine-host/connectors/local-key';
 import { connectorLaunchContext, type ConnectorLaunchContext } from '../../src/engine-host/connectors/provenance';
 import { mcpStatus } from '../../src/engine-host/controls';
 import { buildEnvironment, ENGINE_FLAGS, mergeFlagSettings, RELAY_URL, type LaunchPlan } from '../../src/engine-host/launch';
@@ -75,6 +77,9 @@ export async function startHttpFixture(layout: ProbeLayout, id: string, options:
   return { url: `http://127.0.0.1:${port}/mcp`, close: () => void child.kill('SIGTERM') };
 }
 
+// The PATH a probe launch hands its engine: the layout's bin first, then the runner's.
+export const launchPathOf = (layout: ProbeLayout) => `${layout.bin}:${process.env.PATH ?? '/usr/bin:/bin'}`;
+
 export interface ProbeEngine {
   client: ControlClient;
   context: ConnectorLaunchContext;
@@ -92,7 +97,7 @@ export async function startProbeEngine(layout: ProbeLayout, options: { cwd: stri
   const engine = installedEngine();
   launches += 1;
   const captured: Record<string, string> = {
-    HOME: layout.home, PATH: `${layout.bin}:${process.env.PATH ?? '/usr/bin:/bin'}`, USER: process.env.USER ?? 'probe', LOGNAME: process.env.LOGNAME ?? process.env.USER ?? 'probe', SHELL: process.env.SHELL ?? '/bin/sh', TMPDIR: tmpdir(), LANG: 'en_US.UTF-8',
+    HOME: layout.home, PATH: launchPathOf(layout), USER: process.env.USER ?? 'probe', LOGNAME: process.env.LOGNAME ?? process.env.USER ?? 'probe', SHELL: process.env.SHELL ?? '/bin/sh', TMPDIR: tmpdir(), LANG: 'en_US.UTF-8',
     XDG_MAWS_PROBE_VALUE: PROBE_VALUE, XDG_MAWS_PROBE_ARG: PROBE_ARG, // pass MAWS's allowlist (XDG_), as an owner's exported variable would
     ...(options.configDir && { CLAUDE_CONFIG_DIR: layout.config }),
     ...options.launchEnv,
@@ -102,11 +107,12 @@ export async function startProbeEngine(layout: ProbeLayout, options: { cwd: stri
   const flagSettings = mergeFlagSettings(spec);
   const args = [...ENGINE_FLAGS, ...(options.dynamic ? ['--mcp-config', JSON.stringify(options.dynamic)] : []), '--settings', JSON.stringify(flagSettings)];
   const launchId = `PROBE-${launches}`;
-  const context = connectorLaunchContext({ appSessionId: options.appSessionId ?? `probe-${launches}`, launchId, cwd: options.cwd, environment: env, flagSettings });
+  const localKey = await captureLocalKey(options.cwd); // before the spawn, as the launcher does
+  const context = connectorLaunchContext({ appSessionId: options.appSessionId ?? `probe-${launches}`, launchId, cwd: options.cwd, environment: env, flagSettings, localKey });
 
   const rows: JournalRow[] = [];
   const sink = { row: (direction: JournalDirection, frame: unknown): JournalRow => { const row = { seq: rows.length + 1, direction, at: new Date().toISOString(), frame }; rows.push(row); return row; } };
-  sink.row('meta', { event: 'spawn', engineVersion: engine.version, args, cwd: options.cwd, envKeys: Object.keys(env).sort(), syntheticEnvKeys: Object.keys(options.syntheticEnv ?? {}).sort() });
+  sink.row('meta', { event: 'spawn', engineVersion: engine.version, args, cwd: options.cwd, envKeys: Object.keys(env).sort(), syntheticEnvKeys: Object.keys(options.syntheticEnv ?? {}).sort(), localKey });
   const transport = spawnEngine({ bin: engine.bin, args, cwd: options.cwd, env } as Pick<LaunchPlan, 'bin' | 'args' | 'cwd' | 'env'> as LaunchPlan, { maxLineChars: MAX_LINE_CHARS });
   const client = new ControlClient(transport, sink, launchId);
   let stderr = '';
