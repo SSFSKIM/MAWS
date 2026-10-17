@@ -255,6 +255,25 @@ describe('renderView', () => {
     expect(tips(renderView({ view: 'pie', x: 'k', y: 'v' }, { columns: t.columns, rows: t.rows.slice(1) }, theme, 't').svg!).map((tip) => tip.split(':')[0])).toEqual(['b', 'c', 'd', 'e', 'f', 'g']);
   });
 
+  it('names the categories whose unaggregated bars overlap within one series and measure, pointing at agg (E2 panel)', () => {
+    const repeatOf = (warnings: string[]) => warnings.filter((w) => w.includes('bars overlap'));
+    const t: ViewTable = { columns: [{ name: 'k', type: 'string' }, { name: 'v', type: 'number' }, { name: 'w', type: 'number' }, { name: 's', type: 'string' }], rows: [['A', 4, 1, 's1'], ['A', 10, 2, 's2'], ['B', 3, 3, 's1']] };
+    const { svg = '', warnings } = renderView({ view: 'bar', x: 'k', y: 'v', title: 'Kept' }, t, theme, 't');
+    expect(repeatOf(warnings)).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
+    expect(tips(svg)).toHaveLength(3); // every row still drawn, the caption kept, no layout change
+    expect(svg).toContain('aria-label="Kept"');
+    // past three, the rest counted; in the order the axis shows them, as it names them
+    const many: ViewTable = { columns: t.columns, rows: ['E', 'D', 'C', 'B', 'A', 'Z'].flatMap((k) => (k === 'Z' ? [[k, 1, 1, 's1']] : [[k, 1, 1, 's1'], [k, 2, 1, 's1']])) };
+    expect(repeatOf(renderView({ view: 'bar', x: 'k', y: 'v' }, many, theme, 't').warnings)).toEqual(['k repeats E, D, C and 2 more; bars overlap. Set agg to combine repeated categories.']);
+    // the same category in two series (side by side), in two measures, aggregated, or with only one drawable value: no overlap
+    expect(repeatOf(renderView({ view: 'bar', x: 'k', y: 'v', series: 's' }, t, theme, 't').warnings)).toEqual([]);
+    expect(repeatOf(renderView({ view: 'bar', x: 'k', y: ['v', 'w'] }, { columns: t.columns, rows: [t.rows[0], t.rows[2]] }, theme, 't').warnings)).toEqual([]);
+    expect(repeatOf(renderView({ view: 'bar', x: 'k', y: 'v', agg: 'sum' }, t, theme, 't').warnings)).toEqual([]);
+    expect(repeatOf(renderView({ view: 'bar', x: 'k', y: 'v' }, { columns: t.columns, rows: [['A', null, 1, 's1'], ['A', 3, 1, 's1']] }, theme, 't').warnings)).toEqual([]);
+    // a line or a scatter at a repeated x is not a bar overlap
+    expect(repeatOf(renderView({ view: 'scatter', x: 'w', y: 'v' }, { columns: t.columns, rows: [['A', 1, 1, 's1'], ['A', 2, 1, 's1']] }, theme, 't').warnings)).toEqual([]);
+  });
+
   it('keeps series identity from the unfiltered snapshot: a filter never changes a surviving series\' form', () => {
     const spec = { view: 'scatter', x: 'flipper_length_mm', y: 'body_mass_g', series: 'species_ko' };
     const three = renderView(spec, penguins, theme, 'penguins').svg!;

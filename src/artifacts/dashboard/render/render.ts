@@ -416,6 +416,7 @@ function cartesian(v: View): Rendered {
       if (spec.view !== 'scatter') s.marks = s.marks.map((m, i) => ({ m, i })).sort((a, b) => xValue(a.m.x)! - xValue(b.m.x)! || a.i - b.i).map(({ m }) => m);
     }
   } else for (const s of all) s.marks = s.marks.filter((m) => !(m.x === null && m.y === null));
+  if (spec.view === 'bar' && spec.agg === undefined) repeatedBars(all, xCol, xFormat, warnings);
   const named = si !== undefined && (faceted || all.length > 1);
   for (const s of all) for (const m of s.marks) m.tip = `${formatCell(m.x, xCol, xFormat)}${named ? ` · ${s.seriesName}` : ''} · ${s.measure}: ${formatCell(m.y, undefined, s.format)}`;
 
@@ -599,6 +600,35 @@ function cartesian(v: View): Rendered {
   const among = faceted ? ` in ${all.length} ${all.length === 1 ? 'panel' : 'panels'} sharing one scale (${all.map((s) => s.label).join(', ')})` : all.length > 1 ? ` in ${all.length} series (${all.map((s) => s.label).join(', ')})` : '';
   const desc = `${cap(spec.view)} chart of ${measured} by ${xCol.name}${spec.series ? ` and ${spec.series}` : ''}, ${points} ${points === 1 ? 'value' : 'values'}${among}. The values are in the source table under the figure.`;
   return { svg: frame(theme, height, v.caption, desc, body), warnings };
+}
+
+/**
+ * An unaggregated bar view draws every row, so two drawable rows of one series and measure at one category stand on one
+ * another: the warning names those categories (the first three as the axis names them, in its order, then how many
+ * more) and points at `agg` (E2 panel). The same category in two series or two measures sits side by side, no overlap.
+ */
+function repeatedBars(all: Series[], xCol: ViewColumn, xFormat: ValueFormat | undefined, warnings: string[]): void {
+  const repeated = new Set<string>();
+  for (const s of all) {
+    const seen = new Set<string>();
+    for (const m of s.marks) {
+      if (m.y === null) continue;
+      const key = typedKey(m.x);
+      if (seen.has(key)) repeated.add(key);
+      else seen.add(key);
+    }
+  }
+  if (repeated.size === 0) return;
+  const names: string[] = [];
+  const named = new Set<string>();
+  for (const s of all)
+    for (const m of s.marks) {
+      const key = typedKey(m.x);
+      if (names.length === 3 || !repeated.has(key) || named.has(key)) continue;
+      named.add(key);
+      names.push(nameOf(m.x, xCol, xFormat));
+    }
+  warnings.push(VIEW_STATES.repeatedX(xCol.name, names, repeated.size - names.length));
 }
 
 /** A line's end labels (four series or fewer), each in its measure's format, or none when two would sit closer than a line apart. */
