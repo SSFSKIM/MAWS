@@ -118,7 +118,7 @@ function Item({ item }: { item: StreamItem }) {
     case 'message': {
       const session = item.session ? sessions.get(item.session) : undefined;
       return (
-        <Said who={item.from} machine={session?.machine} ts={item.event.ts}>
+        <Said {...author(item.from, session)} machine={session?.machine} ts={item.event.ts}>
           <Prose text={item.text} />
         </Said>
       );
@@ -152,19 +152,32 @@ function RequestItem({ request }: { request: string }) {
   if (!record) return null;
   const session = sessions.get(record.raised.session);
   return (
-    <Said who={session?.alias ?? record.raised.session.slice(0, 8)} machine={record.machine} ts={null}>
+    <Said {...author(session?.alias ?? record.raised.session.slice(0, 8), session)} machine={record.machine} ts={null}>
       <RequestCard request={request} embedded />
     </Said>
   );
 }
 
-function Said({ who, machine, ts, children }: { who: string; machine?: string; ts: string | null; children: React.ReactNode }) {
+/**
+ * Who a session's item is from: the alias it went out under, or — when its session has a title — the title, with that
+ * alias muted beside it (`sessionName`).
+ */
+function author(from: string, session: { title: string | null } | undefined): { who: string; alias?: string } {
+  return session?.title ? { who: session.title, alias: from } : { who: from };
+}
+
+/** An item under its author's line: one line, where a long name (a title) truncates, whole on hover, and the alias,
+ * machine and time keep their width. */
+function Said({ who, alias, machine, ts, children }: { who: string; alias?: string; machine?: string; ts: string | null; children: React.ReactNode }) {
   return (
     <div className="py-1.5">
       <div className="flex items-baseline gap-2">
-        <span className="text-ui font-semibold" data-testid="said-who">{who}</span>
-        {machine && <span className="text-ui-sm text-fg-muted">@{machine}</span>}
-        {ts && <span className="text-ui-sm text-fg-faint">{time(ts)}</span>}
+        <span className="min-w-0 truncate text-ui font-semibold" data-testid="said-who" title={alias ? who : undefined}>
+          {who}
+        </span>
+        {alias && <span className="shrink-0 text-ui-sm text-fg-muted" data-testid="said-alias">{alias}</span>}
+        {machine && <span className="shrink-0 text-ui-sm text-fg-muted">@{machine}</span>}
+        {ts && <span className="shrink-0 text-ui-sm text-fg-faint">{time(ts)}</span>}
       </div>
       {children}
     </div>
@@ -223,7 +236,7 @@ function QuestionItem({ item }: { item: Extract<StreamItem, { kind: 'question' }
   const pending = useStore(connection.conversation.store, (s) => s.requests[item.ref]);
   const session = item.session ? sessions.get(item.session) : undefined;
   return (
-    <Said who={item.from} machine={session?.machine} ts={item.event.ts}>
+    <Said {...author(item.from, session)} machine={session?.machine} ts={item.event.ts}>
       {pending && !item.answered ? (
         <RequestCard request={item.ref} embedded />
       ) : (
