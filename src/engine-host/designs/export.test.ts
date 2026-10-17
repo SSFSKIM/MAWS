@@ -270,6 +270,26 @@ describe('managed export files (Decision Log 33)', () => {
     expect([readFileSync(first.path, 'utf8'), readFileSync(second.path, 'utf8')]).toEqual(['png:phone', 'png:poster']);
   });
 
+  it('P3-H’s ownFile with a design’s selectors (P3 Decision Log 91): one id, minted once, the board and scale reaching the exporter, Save As copying it', async () => {
+    const id = await created();
+    const input = artifactCommands['artifacts.export'].input.parse({ artifactId: id, format: 'png', board: 'poster', scale: 0.9102, ownFile: true });
+    expect(input).toEqual({ artifactId: id, format: 'png', board: 'poster', scale: 0.9102, ownFile: true });
+    const sent = await service.exportForLibrary(input);
+    expect(sent.path).toMatch(MANAGED);
+    expect(sent.path.split(sent.exportId!)).toHaveLength(2); // the one id, once in the name
+    expect(readFileSync(sent.path, 'utf8')).toBe('png:poster');
+    expect(captured.at(-1)).toEqual({ slideId: 'poster', size: { width: 983, height: 8192 } });
+    const other = await service.exportForLibrary({ artifactId: id, format: 'png', board: 'phone', ownFile: true });
+    expect(other.exportId).not.toBe(sent.exportId);
+    expect([readFileSync(sent.path, 'utf8'), readFileSync(other.path, 'utf8')]).toEqual(['png:poster', 'png:phone']);
+    // its refusal is still the design's, named
+    const refused = await service.exportForLibrary({ artifactId: id, format: 'png', board: 'poster', ownFile: true }).catch((error: unknown) => error);
+    expect((refused as InstanceType<typeof CommandFailure>).error.issues).toMatchObject({ reason: 'exportTooLarge', data: { board: 'poster', maxScale: 0.9102 } });
+    const to = join(userData, 'sent.png');
+    await libraryFiles(async () => to).saveAs({ artifactId: id, source: { export: { revision: sent.revision, format: 'png', exportId: sent.exportId! } } });
+    expect(readFileSync(to, 'utf8')).toBe('png:poster');
+  });
+
   it('Save As takes an export id only as an id: a path is refused by the schema, an id with no file by name', async () => {
     const id = await created();
     const exported = await service.exportForLibrary({ artifactId: id, format: 'png', board: 'phone' });
