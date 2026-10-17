@@ -111,6 +111,11 @@ jobs:
       - run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm typecheck
       - if: ${{ !cancelled() }}
         run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm lint
+      # The gate scripts' own tests (gate-plan, e2e-default-specs, ci-gate-alerts), seconds and no lane: vitest collects
+      # no .github/ file, and e2e-default-specs pins default's own specs at the head, so a branch that adds a spec or a
+      # group without moving the pin goes red here rather than unseen (P3-HD's 73 against the tree's 74, 2026-10-17).
+      - if: ${{ !cancelled() }}
+        run: .github/scripts/gate-run.sh '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' node --test .github/scripts/*.test.mjs scripts/*.test.mjs
 
   unit:
     needs: plan
