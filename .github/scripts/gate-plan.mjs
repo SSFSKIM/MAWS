@@ -17,7 +17,8 @@ import process from 'node:process';
 const env = process.env;
 const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
 const words = (text = '') => text.split(/[\s,]+/).filter(Boolean);
-// `default` is the bare `pnpm e2e` set (after `pnpm build`, as `verify` orders them); every other group is `e2e:<group>`.
+// `default` is the bare `pnpm e2e` set (after `pnpm build`, as `verify` orders them), which the e2e job narrows to the specs
+// no other e2e group of the run collects (e2e-default-specs.mjs, Decision Log 60(2)); every other group is `e2e:<group>`.
 const scriptOf = (group) => (group === 'default' ? 'e2e' : `e2e:${group}`);
 const refuse = (message) => {
   process.stderr.write(`gate-plan: ${message}\n`);

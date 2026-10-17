@@ -547,7 +547,7 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
 
 // ---- G1 and G7 in the app: E0a's round trip ------------------------------------------------------------------------
 
-test('the SDK MCP round trip: the app answers the engine’s handshake with the sixteen tools and refuses the probe’s own tool', async () => {
+test('the SDK MCP round trip: the app answers the engine’s handshake with the seventeen tools and refuses the probe’s own tool', async () => {
   // The probe's journal: its scratch directory is the engine cwd, and from seq 96 on it holds at the probe's own writes,
   // which the app never makes (M1's decisions), so the case ends after the first turn.
   await scene({ titles: ['E1 tools: round trip'] }, async (s) => {
@@ -577,6 +577,8 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
       ['artifact_upload_asset', { title: 'Upload artifact asset', readOnlyHint: false, openWorldHint: false }],
       ['artifact_list_assets', { title: 'List artifact assets', readOnlyHint: true, openWorldHint: false }],
       ['artifact_export', { title: 'Export artifact', readOnlyHint: false, openWorldHint: false }],
+      // P3-E (E2 M2, ledger X25): the dashboard's dataset writer, listed after A's tools and before B's; not read-only
+      ['artifact_dataset', { title: 'Bind dashboard dataset', readOnlyHint: false, openWorldHint: false }],
       // P3-B (M7): the document tools, appended after A's
       ['artifact_edit', { title: 'Edit document', readOnlyHint: false, openWorldHint: false }],
       ['artifact_comments', { title: 'List document comments', readOnlyHint: true, openWorldHint: false }],

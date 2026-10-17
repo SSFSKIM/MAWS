@@ -33,7 +33,7 @@ import { allBlocks, applyRepair, planRepair, repairNeeded } from './repair';
 import { nanoid8 } from './schema';
 import { createDocument, listTabs } from './tabs';
 import { deepSlotIds, formatAt, itemAt, itemOf, locateSlot, nodeAt, slotKey, textblocksY, charSlots } from './structs';
-import { THREADS, getThread, isCommentKey, listThreads, refreshAnchors, stripMarklessComments, type Thread } from './threads';
+import { THREADS, blockThreads /* P3-E */, getThread, isCommentKey, listThreads, refreshAnchors, stripMarklessComments, type Thread } from './threads';
 
 export interface DocumentAdapter extends KindAdapter {
   /** The carries of a batch the tool handler just applied on the agent's replica (S4's `registerCarry`). */
@@ -340,6 +340,13 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
       stripMarklessComments(doc, undefined, byTab);
       const scope = threadScope(doc, new Set(live));
       if (scope.threads.size > 0) refreshAnchors(doc, undefined, scope);
+    }
+    // P3-E (E2 M4): a block thread carries no mark, so the scope above never names it; a block (re)inserted under its id
+    // (a move, between tabs too) refreshes the threads on it. A document without block threads reads its map and stops.
+    const insertedIds = new Set([...inserted].map((node) => node.getAttr('id')).filter((id): id is string => typeof id === 'string'));
+    if (insertedIds.size > 0) {
+      const onInserted = [...blockThreads(doc)].filter(([, blockId]) => insertedIds.has(blockId)).map(([id]) => id);
+      if (onInserted.length > 0) refreshAnchors(doc, undefined, { threads: new Set(onInserted), blocks: () => [] });
     }
     registry.prune(doc);
     const mirror = mirrorRows(doc, threads);

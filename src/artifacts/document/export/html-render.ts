@@ -3,11 +3,13 @@
 // read back, so the file looks like the page and re-imports as the content. Math is KaTeX's MathML (Chromium, Safari
 // and Firefox draw it with no stylesheet or font to embed); code carries shiki's tokens as inline colours; a diagram
 // is its mermaid source (mermaid needs a live DOM to lay out; a capture window may draw it from `pre[data-diagram]`);
-// a chart and a pending block are their labelled placeholders, as in the editor. Comment marks are not drawn: a
+// a chart and a pending block are their labelled placeholders, as in the editor (P3-E: a chart the kind draws,
+// `RenderEnvironment.view`, is its figure or table under its caption and label). Comment marks are not drawn: a
 // thread lives in the document, and a file read back carries none. Pure: no DOM, so it runs in main.
 import katex from 'katex';
 import type { Mark, Node as PMNode } from '@tiptap/pm/model';
 import type { ThemedToken } from 'shiki';
+import type { ExportView, ViewRenderer } from './source'; // P3-E
 import { chipText } from './values';
 
 export interface RenderedImage {
@@ -21,7 +23,18 @@ export interface RenderEnvironment {
   /** The token colour to use: shiki's light or dark one, by the system's ground. */
   dark: boolean;
   image(node: PMNode): RenderedImage;
+  /** P3-E (E2 M5): a chart block's drawn view, else its placeholder. */
+  view?: ViewRenderer;
 }
+
+// P3-E start (E2 M5; E's Decision Logs 32 and 35): a drawn view in the editor's own structure (its classes, which the
+// page's view CSS styles): the caption, the figure (the renderer's SVG or table, inlined as it is: escaped and script-free
+// by its grade), and under it the source label and the warnings.
+function viewFigure(view: ExportView): string {
+  const warnings = view.warnings?.length ? `<span class="dash-notes">${escapeText(view.warnings.join(' · '))}</span>` : '';
+  return `<figure class="dash-view"><div class="dash-caption">${escapeText(view.caption)}</div><div class="dash-figure">${view.svg ?? view.html}</div><figcaption class="dash-source"><span class="dash-source-label">${escapeText(view.sourceLabel)}</span>${warnings}</figcaption></figure>`;
+}
+// P3-E end
 
 export const escapeText = (text: string): string => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 export const escapeAttr = (text: string): string => escapeText(text).replace(/"/g, '&quot;');
@@ -204,14 +217,16 @@ function block(node: PMNode, env: RenderEnvironment): string {
         ['class', 'doc-diagram-source'],
         ['data-diagram', ''],
       ])}>${escapeText(String(a.source ?? ''))}</pre>`;
-    case 'chart':
+    case 'chart': {
+      const view = env.view?.(node); // P3-E (E2 M5): drawn, its block's attributes kept for a re-import
       return `<div${attrs([
-        ['class', 'doc-chart'],
+        ['class', view ? 'doc-chart dash-export' : 'doc-chart'],
         ['data-chart', ''],
         ['data-source', a.source],
         ['data-spec', typeof a.spec === 'string' ? a.spec : null],
         ['data-spec-json', a.spec != null && typeof a.spec !== 'string' ? JSON.stringify(a.spec) : null],
-      ])}><span class="doc-placeholder-label">Chart</span> <span>${escapeText(String(a.source ?? ''))}</span></div>`;
+      ])}>${view ? viewFigure(view) : `<span class="doc-placeholder-label">Chart</span> <span>${escapeText(String(a.source ?? ''))}</span>`}</div>`;
+    }
     case 'pending':
       return `<div${attrs([
         ['class', 'doc-pending'],

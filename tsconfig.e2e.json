@@ -7,6 +7,7 @@
   },
   "include": [
     "playwright.config.ts",
+    "playwright.dashboard.config.ts", // P3-E (E2 M6): the dashboard acceptance invocation's own config
     "e2e/**/*",
     "src/renderer/src/env.d.ts",
     "src/shared/**/*",
@@ -92,7 +93,14 @@
     "src/artifacts/document/ids.ts",
     "src/artifacts/document/schema.ts",
     "src/artifacts/document/tabs.ts",
-    "src/artifacts/document/threads.ts"
+    "src/artifacts/document/threads.ts",
+    // P3-E (E2 M3): e2e/dashboard.spec.ts binds M1's vendored tables, parsed by the host's own parser
+    "src/artifacts/dashboard/fixtures/datasets.ts",
+    "src/artifacts/dashboard/parse.ts",
+    "src/artifacts/dashboard/datasets.ts",
+    "src/artifacts/dashboard/states.ts",
+    // P3-E (E2 M6): e2e/dashboard-scale.spec.ts binds and draws the scale bench
+    "src/artifacts/dashboard/fixtures/bench.ts"
   ],
   "exclude": ["src/shared/**/*.test.ts", "src/shared/**/*.test-d.ts", "src/artifacts/**/*.test.ts"]
 }

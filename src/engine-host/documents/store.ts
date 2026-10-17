@@ -26,7 +26,7 @@ import { ArtifactStoreError, StoreTooNewError } from './errors'; // P3-H: StoreT
 import { Maintenance } from './maintenance';
 import { OpLedger, type OpScope } from './ops';
 import { restoreArtifact } from './restore';
-import type { Committed, DocumentService } from './service';
+import type { Committed, DocumentService, WriteOptions } from './service';
 import type { SqliteDocumentStorage } from './storage';
 import { actorFromKey, VersionStore, type DesignSystemRef, type VersionKind } from './versions';
 
@@ -685,33 +685,113 @@ export class ArtifactStore {
     if (!name) throw new ArtifactStoreError('invalid', `the asset name ${JSON.stringify(meta.name)} is not usable`);
     const stage = this.files.stage(artifactId, bytes);
     try {
-      const existing = this.storage.db.prepare('SELECT assetId, name FROM artifact_assets WHERE artifactId = ? AND sha256 = ?').get(artifactId, stage.sha256) as { assetId: string; name: string } | undefined;
+      const existing = this.existingAsset(artifactId, stage.sha256);
       if (existing) {
-        const same = { assetId: existing.assetId, ref: `assets/${existing.name}` };
         // Nothing to write, yet the answer names a row that may still sit in the open batch (a concurrent upload of the
         // same bytes): it waits for that batch's commit, and fails with it. The seam still runs, in a frame of its own.
-        if (inFrame) await this.service.inBatch(() => inFrame(same));
+        if (inFrame) await this.service.inBatch(() => inFrame(existing));
         else await this.service.whenCommitted();
-        return same;
+        return existing;
       }
-      const taken = new Set((this.storage.db.prepare('SELECT name FROM artifact_assets WHERE artifactId = ?').all(artifactId) as { name: string }[]).map((row) => row.name));
-      const unique = uniqueName(name, taken);
-      const assetId = randomUUID();
+      const unique = uniqueName(name, this.assetNames(artifactId));
       const at = this.now();
-      await this.service.inBatch(() => {
+      const asset = await this.service.inBatch(() => {
         this.storage.actorInBatch(actor, at);
-        if (!this.files.exists(artifactId, ArtifactFiles.assetPath(stage.sha256))) this.files.place(artifactId, stage.temp, ArtifactFiles.assetPath(stage.sha256));
-        this.storage.db
-          .prepare('INSERT INTO artifact_assets (artifactId, assetId, name, mime, size, sha256, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(artifactId, assetId, unique, meta.mime, stage.size, stage.sha256, at, actorKey(actor));
-        inFrame?.({ assetId, ref: `assets/${unique}` });
+        const placed = this.placeAssetInFrame(artifactId, stage, { name: unique, mime: meta.mime }, actor, at);
+        inFrame?.(placed);
+        return placed;
       });
       this.emit(artifactId, 'updated');
-      return { assetId, ref: `assets/${unique}` };
+      return asset;
     } finally {
       this.files.discard(stage.temp);
     }
   }
+
+  // P3-E start (docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md M2; ledger X23, the parent's Decision Log 6): a
+  // document write and the assets it names as one operation (E2's `artifact_dataset`, E3's refresh). The bytes are
+  // staged before the frame (a staged or placed file no row names is not live state: a later write of the same bytes
+  // reuses it). Inside the write's one savepoint, in order: `options.prepare` (the caller's final check), each asset's
+  // row (identical bytes answer the ref the artifact already holds, a new name is made unique, within this call too),
+  // the session's `edited` link, `edit` given the refs in the order of `assets`, the kind's hooks, `afterWrite`, then
+  // `options.inFrame`. A `prepare` that throws refuses the write: nothing else of it is written (it must write nothing
+  // before it throws), the document stays loaded, and the promise rejects with its error once the batch open then has
+  // committed. A throw anywhere later takes the whole frame back, as `writeAs` does. Resolves with the revision.
+  async writeWithAssets(
+    artifactId: string,
+    actor: Actor,
+    assets: { bytes: Uint8Array; name: string; mime: string }[],
+    edit: (doc: Doc, assets: { assetId: string; ref: string }[]) => void,
+    options?: WriteOptions,
+  ): Promise<number> {
+    const row = this.requireLive(artifactId);
+    if (!isDocKind(row.kind)) throw new ArtifactStoreError('invalid', `a ${row.kind} artifact has no document to write`);
+    const named = assets.map((asset) => {
+      if (asset.bytes.length > ARTIFACT_MAX_BYTES) throw new ArtifactStoreError('tooLarge', `the asset is ${asset.bytes.length} bytes; the limit is ${ARTIFACT_MAX_BYTES}`, { size: asset.bytes.length, limit: ARTIFACT_MAX_BYTES });
+      const name = safeName(asset.name);
+      if (!name) throw new ArtifactStoreError('invalid', `the asset name ${JSON.stringify(asset.name)} is not usable`);
+      return { ...asset, name };
+    });
+    const stages: ReturnType<ArtifactFiles['stage']>[] = [];
+    try {
+      for (const asset of named) stages.push(this.files.stage(artifactId, asset.bytes));
+      const refs: { assetId: string; ref: string }[] = [];
+      let refused: { error: unknown } | null = null;
+      const at = this.now();
+      const revision = await this.service.writeAs(artifactId, actor, (doc) => (refused ? undefined : edit(doc, refs)), {
+        prepare: () => {
+          try {
+            options?.prepare?.();
+          } catch (error) {
+            refused = { error };
+            return;
+          }
+          this.storage.actorInBatch(actor, at);
+          const taken = this.assetNames(artifactId);
+          named.forEach((asset, k) => {
+            const existing = this.existingAsset(artifactId, stages[k]!.sha256);
+            if (existing) return void refs.push(existing);
+            const unique = uniqueName(asset.name, taken);
+            taken.add(unique);
+            refs.push(this.placeAssetInFrame(artifactId, stages[k]!, { name: unique, mime: asset.mime }, actor, at));
+          });
+          if (actor.kind === 'session') this.linkInFrame(artifactId, actor.appSessionId, 'edited', at);
+        },
+        afterWrite: options?.afterWrite && ((doc) => (refused ? undefined : options.afterWrite!(doc))),
+        inFrame: (reached) => {
+          if (!refused) options?.inFrame?.(reached);
+        },
+      });
+      if (refused) throw (refused as { error: unknown }).error;
+      this.emit(artifactId, 'updated');
+      if (actor.kind === 'session') this.emit(artifactId, 'linked');
+      return revision;
+    } finally {
+      for (const stage of stages) this.files.discard(stage.temp);
+    }
+  }
+
+  // The asset of `artifactId` holding these bytes, if any (assets are deduplicated by content within an artifact).
+  private existingAsset(artifactId: string, sha256: string): { assetId: string; ref: string } | undefined {
+    const row = this.storage.db.prepare('SELECT assetId, name FROM artifact_assets WHERE artifactId = ? AND sha256 = ?').get(artifactId, sha256) as { assetId: string; name: string } | undefined;
+    return row && { assetId: row.assetId, ref: `assets/${row.name}` };
+  }
+
+  private assetNames(artifactId: string): Set<string> {
+    return new Set((this.storage.db.prepare('SELECT name FROM artifact_assets WHERE artifactId = ?').all(artifactId) as { name: string }[]).map((row) => row.name));
+  }
+
+  // Inside a savepoint: one new asset's file in place (an orphan of a crash replaced or reused) and its row, under the
+  // unique name given.
+  private placeAssetInFrame(artifactId: string, stage: { temp: string; sha256: string; size: number }, meta: { name: string; mime: string }, actor: Actor, at: number): { assetId: string; ref: string } {
+    const assetId = randomUUID();
+    if (!this.files.exists(artifactId, ArtifactFiles.assetPath(stage.sha256))) this.files.place(artifactId, stage.temp, ArtifactFiles.assetPath(stage.sha256));
+    this.storage.db
+      .prepare('INSERT INTO artifact_assets (artifactId, assetId, name, mime, size, sha256, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(artifactId, assetId, meta.name, meta.mime, stage.size, stage.sha256, at, actorKey(actor));
+    return { assetId, ref: `assets/${meta.name}` };
+  }
+  // P3-E end
 
   // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, Decision Log 25; the parent's 65): an asset of one
   // artifact copied into another, generic (a deck's pasted picture, a document's): the source's bytes written through

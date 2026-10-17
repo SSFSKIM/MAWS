@@ -44,7 +44,7 @@ import type { AnyExtension, JSONContent } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { MarkdownManager } from '@tiptap/markdown';
 import { Marked } from 'marked';
-import { BLOCKS_TABLE, MARKDOWN, gfmTable, letteredItem, rawRegion } from './markdown-syntax';
+import { BLOCKS_TABLE, CHART_MARKDOWN /* P3-E */, MARKDOWN, gfmTable, letteredItem, rawRegion } from './markdown-syntax';
 import { BLOCK_TYPES, extensions, nanoid8, schemaFor } from './schema';
 
 export interface SerializeOptions {
@@ -52,7 +52,19 @@ export interface SerializeOptions {
   ids?: boolean;
   /** The threads whose comments are written as `<c:ID>…</c:ID>` milestones; comment marks are dropped otherwise. */
   milestones?: ReadonlySet<string> | null;
+  /** P3-E (E2 M5; E's Decision Log 32): a chart block's drawn view as Markdown, by block id, written in its place
+   * (nested where the block is) instead of the dialect's `:::chart`; an export's only, absent for the lossless dialect. */
+  charts?: ReadonlyMap<string, string>;
 }
+
+// P3-E start: the charts' Markdown carried in the temporary serialisation JSON (never the doc), for the chart's form
+function withCharts(node: Json, charts: ReadonlyMap<string, string> | undefined): Json {
+  if (!charts?.size) return node;
+  const id = node.attrs?.id;
+  if (node.type === 'chart' && typeof id === 'string' && charts.has(id)) return { ...node, attrs: { ...node.attrs, [CHART_MARKDOWN]: charts.get(id) } };
+  return node.content ? { ...node, content: (node.content as Json[]).map((child) => withCharts(child, charts)) } : node;
+}
+// P3-E end
 
 export interface ParseOptions {
   /** Mints the id of every block the markdown does not name. */
@@ -529,18 +541,18 @@ export class DocMarkdown {
   private readonly md = new MarkdownManager({ marked: new Marked() as unknown as typeof import('marked').marked, extensions: markdownExtensions() });
 
   /** A doc (a tab body) or one block as the dialect; blocks are separated by a blank line. */
-  serialize(node: PMNode, { ids = true, milestones = null }: SerializeOptions = {}): string {
+  serialize(node: PMNode, { ids = true, milestones = null, charts }: SerializeOptions = {}): string {
     const blocks: PMNode[] = [];
     if (node.type.name === 'doc') node.forEach((block) => blocks.push(block));
     else blocks.push(node);
-    return blocks.map((block) => this.block(block, { ids, milestones })).join('\n\n');
+    return blocks.map((block) => this.block(block, { ids, milestones, charts })).join('\n\n');
   }
 
   /** One top-level block as the dialect, its `^id` included when `ids` is on. */
-  block(block: PMNode, { ids = true, milestones = null }: SerializeOptions = {}): string {
+  block(block: PMNode, { ids = true, milestones = null, charts }: SerializeOptions = {}): string {
     const tables: Tables = { ids: [], threads: [] };
     const doc: Json = { type: 'doc', content: [] };
-    const prepared = prepare(mapStrings(block.toJSON() as Json, toLiteral), doc, milestones ?? new Set(), tables, ids, {});
+    const prepared = prepare(mapStrings(withCharts(block.toJSON() as Json, charts) /* P3-E */, toLiteral), doc, milestones ?? new Set(), tables, ids, {});
     const text = restore(this.md.serialize({ type: 'doc', content: [prepared] }).replace(/^\n+|\n+$/g, ''), tables);
     const id = block.attrs.id as string | null | undefined;
     return ids && id && !TEXTBLOCKS.has(block.type.name) ? `${text}\n^${id}` : text;

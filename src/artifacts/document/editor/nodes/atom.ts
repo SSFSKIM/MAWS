@@ -16,8 +16,8 @@ export interface AtomField {
 
 export interface AtomSpec {
   inline: boolean;
-  /** Draws the node into `into` (emptied first). */
-  draw(into: HTMLElement, node: PMNode): void;
+  /** Draws the node into `into` (emptied first); P3-E: may answer the drawing's disposer, called before the next draw and when the view goes. */
+  draw(into: HTMLElement, node: PMNode): void | (() => void);
   field?: AtomField;
   /** The interactive element inside the drawing whose events are its own (a dropdown's select). */
   interactive?: (dom: HTMLElement) => HTMLElement | null;
@@ -42,7 +42,7 @@ export const atomView =
     const drawing = document.createElement(tag);
     drawing.className = 'doc-atom-view';
     dom.append(drawing);
-    spec.draw(drawing, node);
+    let release = spec.draw(drawing, node); // P3-E: the drawing's disposer, if it answered one
 
     let panel: HTMLElement | null = null;
     let input: HTMLInputElement | HTMLTextAreaElement | null = null;
@@ -86,8 +86,9 @@ export const atomView =
         const changed = next.attrs !== node.attrs && JSON.stringify(next.attrs) !== JSON.stringify(node.attrs);
         node = next;
         if (changed) {
+          release?.(); // P3-E
           drawing.replaceChildren();
-          spec.draw(drawing, node);
+          release = spec.draw(drawing, node);
         }
         if (input && field && document.activeElement !== input) input.value = String(node.attrs[field.attr] ?? '');
         return true;
@@ -106,6 +107,11 @@ export const atomView =
         return (panel?.contains(target) ?? false) || (spec.interactive?.(dom)?.contains(target) ?? false);
       },
       ignoreMutation: () => true,
+      // P3-E: the drawing released when the node leaves the document or the editor goes
+      destroy() {
+        release?.();
+        release = undefined;
+      },
     };
     return view;
   };

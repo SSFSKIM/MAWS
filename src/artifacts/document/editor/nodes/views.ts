@@ -8,6 +8,7 @@ import type { NodeView } from '@tiptap/pm/view';
 import katex from 'katex';
 import { CALLOUT_TONES } from '../../schema';
 import type { EditorHost } from '../host-types';
+import type { Doc } from '../../../yjs'; // P3-E
 import { atomView, setAttr } from './atom';
 
 export interface ViewEnvironment {
@@ -15,7 +16,40 @@ export interface ViewEnvironment {
   host: EditorHost;
   /** A mermaid source drawn as SVG markup; `into` is the element it will be shown in (its computed style themes it). */
   renderDiagram: (source: string, into: HTMLElement) => Promise<string>;
+  // P3-E start (E2 M3; ledger X26 as amended, E's Decision Log 6 and 19): a dashboard's chart block drawn by E's renderer
+  // into `into`, answering the disposer that releases it (its subscriptions, its pending paints) before a redraw and when
+  // the node or the editor goes; absent, B's placeholder draws. `displayed` is the document this editor shows (the live
+  // one, a version's in history, the suggestion replica), so a chart reads the data of what is shown, never the live doc.
+  renderChart?: (into: HTMLElement, node: PMNode, env: ViewEnvironment) => () => void;
+  displayed?: DisplayedDocument;
+  // P3-E end
 }
+
+// P3-E start (E2 M3): the document an editor shows, and its revision when that is a retained version's; a history
+// preview's editor is put on another version without being made again, so the value moves and its readers are told.
+export interface DisplayedDocument {
+  current(): { doc: Doc; revision?: number };
+  subscribe(listener: () => void): () => void;
+}
+
+/** A displayed document that `set` moves (telling the subscribers only when the document or revision changes). */
+export function displayedDocument(doc: Doc, revision?: number): DisplayedDocument & { set(doc: Doc, revision?: number): void } {
+  let shown = { doc, ...(revision !== undefined && { revision }) };
+  const listeners = new Set<() => void>();
+  return {
+    current: () => shown,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    set(next, nextRevision) {
+      if (next === shown.doc && nextRevision === shown.revision) return;
+      shown = { doc: next, ...(nextRevision !== undefined && { revision: nextRevision }) };
+      for (const listener of [...listeners]) listener();
+    },
+  };
+}
+// P3-E end
 
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] => {
   const el = document.createElement(tag);
@@ -168,10 +202,14 @@ export function nodeViews(env: ViewEnvironment): Record<string, NodeViewRenderer
       draw: (into, node) => into.append(element('span', 'doc-placeholder-label', 'Pending'), element('span', 'doc-placeholder-text', String(node.attrs.intent ?? ''))),
     }),
     // E's Dashboard block, drawn as a labelled placeholder with its source until E lands (D2)
-    chart: atomView({
-      inline: false,
-      draw: (into, node) => into.append(element('span', 'doc-placeholder-label', 'Chart'), element('span', 'doc-placeholder-text', String(node.attrs.source ?? ''))),
-    }),
+    // P3-E: through the environment's `renderChart` when given (a dashboard's editor), its disposer kept by the atom view;
+    // the drawing's own controls (`[data-atom-controls]`, a source label's button) take their events, not the editor
+    chart: env.renderChart
+      ? atomView({ inline: false, interactive: (dom) => dom.querySelector('[data-atom-controls]'), draw: (into, node) => env.renderChart!(into, node, env) })
+      : atomView({
+          inline: false,
+          draw: (into, node) => into.append(element('span', 'doc-placeholder-label', 'Chart'), element('span', 'doc-placeholder-text', String(node.attrs.source ?? ''))),
+        }),
     callout: calloutView(),
   };
 }

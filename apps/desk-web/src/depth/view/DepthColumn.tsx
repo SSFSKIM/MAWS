@@ -12,7 +12,9 @@ import { agentTree } from '../../../../../src/renderer/src/tools/agents/model/ta
 import type { SubagentRef } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
+import { sessionName } from '../../log/projection';
 import type { DepthSlotProps } from '../../shell/slots';
+import { SessionLabel } from '../../shell/SessionLabel';
 import type { DeskSession } from '../../shell/sessions';
 import { DeskTranscript } from '../source/desk-transcript';
 import { DESK_ACTIONS } from './actions';
@@ -66,11 +68,10 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
   const { tasks } = state;
   const running = agentTree(tasks).running;
   return (
-    <section className="flex h-full min-h-0 flex-col" data-slot="depth" data-testid="depth" data-session={session.session} aria-label={`${session.alias} in depth`}>
+    <section className="flex h-full min-h-0 flex-col" data-slot="depth" data-testid="depth" data-session={session.session} aria-label={`${sessionName(session)} in depth`}>
       <header className="flex items-baseline gap-2 border-b border-border px-4 py-2">
-        <span className="truncate text-ui font-medium text-fg">{session.alias}</span>
-        <span className="text-ui-sm text-fg-muted">@{session.machine}</span>
-        <span className="ml-auto text-ui-sm text-fg-muted" data-testid="depth-status">
+        <SessionLabel session={session} name="text-ui font-medium text-fg" muted="text-ui-sm text-fg-muted" />
+        <span className="ml-auto shrink-0 text-ui-sm text-fg-muted" data-testid="depth-status">
           {transcriptStatus(state)}
         </span>
       </header>

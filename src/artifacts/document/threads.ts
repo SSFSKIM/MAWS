@@ -34,6 +34,22 @@ export interface ThreadAnchor {
   block: unknown;
 }
 
+// P3-E start (E2 M4; E's Decision Log 28): a thread on a whole block (a dashboard's chart), with no mark. The thread's
+// own `tabId`, `blockId` and `quote` say where it is; the anchor says only that the block, not a passage, is commented.
+// Live while some tab holds a block with that id (ids are stable across moves, between tabs too); orphaned, its quote
+// kept, when none does.
+export interface BlockAnchor {
+  kind: 'block';
+  // no positions: a reader of a passage's pair (`anchor?.start`) reads none here
+  start?: undefined;
+  end?: undefined;
+  block?: undefined;
+}
+export const isBlockAnchor = (anchor: unknown): anchor is BlockAnchor => typeof anchor === 'object' && anchor !== null && (anchor as { kind?: unknown }).kind === 'block';
+/** B's anchor of a passage (the stored relative positions, whatever they resolve to). */
+export const isTextAnchor = (anchor: unknown): anchor is ThreadAnchor => typeof anchor === 'object' && anchor !== null && !isBlockAnchor(anchor);
+// P3-E end
+
 export interface ThreadMessage {
   id: string;
   by: Actor;
@@ -46,7 +62,7 @@ export interface Thread {
   tabId: string;
   blockId: string | null;
   quote: string;
-  anchor: ThreadAnchor | null;
+  anchor: ThreadAnchor | BlockAnchor | null; // P3-E: | BlockAnchor
   status: ThreadStatus;
   createdBy: Actor;
   createdAt: number;
@@ -77,7 +93,7 @@ function readThread(node: Node, id: string): Thread {
     tabId: String(attr<string>('tabId') ?? ''),
     blockId: attr<string>('blockId'),
     quote: String(attr<string>('quote') ?? ''),
-    anchor: attr<ThreadAnchor>('anchor'),
+    anchor: attr<ThreadAnchor | BlockAnchor>('anchor'), // P3-E: | BlockAnchor
     status: attr<ThreadStatus>('status') ?? 'open',
     createdBy: attr<Actor>('createdBy') ?? { kind: 'human' },
     createdAt: Number(attr<number>('createdAt') ?? 0),
@@ -120,7 +136,7 @@ export interface NewThread {
   tabId: string;
   blockId: string | null;
   quote: string;
-  anchor: ThreadAnchor;
+  anchor: ThreadAnchor | BlockAnchor; // P3-E: | BlockAnchor
   by: Actor;
   at: number;
   /** The first message, if the comment was written with one. */
@@ -248,15 +264,59 @@ export function markExtentsOf(nodes: Iterable<Node>): Map<string, Extent> {
 /** The thread ids live text carries under `root` (a tab body). */
 export const liveIdsY = (root: Node): Set<string> => new Set(markExtents(root).keys());
 
-/** The thread ids live text carries in any tab of the document. */
+/** The thread ids live text carries in any tab of the document; P3-E: and the block threads whose block a tab holds. */
 export function liveThreadIds(doc: Doc): Set<string> {
   const ids = new Set<string>();
   for (const tab of listTabs(doc)) {
     const body = tabBody(doc, tab.id);
     if (body) for (const id of liveIdsY(body)) ids.add(id);
   }
+  for (const id of liveBlockThreads(doc).keys()) ids.add(id); // P3-E
   return ids;
 }
+
+// P3-E start (E2 M4): where the block threads' blocks are. Nothing is walked when the document has no block thread.
+/** Every block thread's id with its block id (of `only`'s threads alone, when given), read from the threads map. */
+export function blockThreads(doc: Doc, only?: Iterable<string>): Map<string, string> {
+  const out = new Map<string, string>();
+  const entries: Iterable<[unknown, unknown]> = only ? [...only].map((id) => [id, threadNode(doc, id)]) : threadsRoot(doc).attrEntries();
+  for (const [id, node] of entries) {
+    if (!(node instanceof YNode) || !isBlockAnchor(node.getAttr('anchor'))) continue;
+    const blockId: unknown = node.getAttr('blockId');
+    if (typeof blockId === 'string') out.set(String(id), blockId);
+  }
+  return out;
+}
+
+/** Where the blocks carrying `ids` are: each id's first holder, its tab and its top-level block's index in the body. */
+function placeBlocks(doc: Doc, ids: ReadonlySet<string>): Map<string, { tabId: string; index: number }> {
+  const out = new Map<string, { tabId: string; index: number }>();
+  if (ids.size === 0) return out;
+  const walk = (node: Node, tabId: string, index: number): void => {
+    const id: unknown = node.getAttr('id');
+    if (typeof id === 'string' && ids.has(id) && !out.has(id)) out.set(id, { tabId, index });
+    for (const child of node.toArray()) if (child instanceof YNode) walk(child, tabId, index);
+  };
+  for (const tab of listTabs(doc)) {
+    tabBody(doc, tab.id)
+      ?.toArray()
+      .forEach((top, index) => top instanceof YNode && walk(top, tab.id, index));
+  }
+  return out;
+}
+
+/** The block threads (of `only`, when given) whose block some tab holds, with where it is. */
+function liveBlockThreads(doc: Doc, only?: Iterable<string>): Map<string, { blockId: string; tabId: string; index: number }> {
+  const threads = blockThreads(doc, only);
+  const places = placeBlocks(doc, new Set(threads.values()));
+  const out = new Map<string, { blockId: string; tabId: string; index: number }>();
+  for (const [id, blockId] of threads) {
+    const place = places.get(blockId);
+    if (place) out.set(id, { blockId, ...place });
+  }
+  return out;
+}
+// P3-E end
 
 /** The state the UI and the agent see: each thread with `live` and the derived `orphan`. */
 export const threadStates = (doc: Doc, liveIds: ReadonlySet<string>): ThreadState[] =>
@@ -309,11 +369,18 @@ export type Located =
  * (what every replica agrees on), else the block's own gap in the body and the nearest surviving block there.
  */
 export function locate(doc: Doc, thread: Pick<Thread, 'anchor' | 'blockId'>): Located {
-  const start = absolute(doc, thread.anchor?.start);
-  const end = absolute(doc, thread.anchor?.end);
+  // P3-E start (E2 M4): a block thread is where its block is, or nowhere
+  if (isBlockAnchor(thread.anchor)) {
+    const place = thread.blockId === null ? undefined : placeBlocks(doc, new Set([thread.blockId])).get(thread.blockId);
+    return place && thread.blockId !== null ? { how: 'block', blockId: thread.blockId, index: place.index } : { how: 'none', blockId: null };
+  }
+  const anchor = isTextAnchor(thread.anchor) ? thread.anchor : null;
+  // P3-E end
+  const start = absolute(doc, anchor?.start);
+  const end = absolute(doc, anchor?.end);
   const startBlock = start ? blockIdOf(start.type) : null;
   if (start && startBlock && isLive(start.type)) return { how: 'text', blockId: startBlock, index: start.index, endIndex: end && end.type === start.type ? end.index : null };
-  const block = absolute(doc, thread.anchor?.block);
+  const block = absolute(doc, anchor?.block); // P3-E: the text anchor's
   if (block && isLive(block.type)) {
     const kids = block.type.toArray().filter((kid): kid is Node => kid instanceof YNode);
     const here = kids[block.index];
@@ -354,12 +421,20 @@ export function refreshAnchors(doc: Doc, origin?: unknown, scope?: ThreadScope):
       const node = threadNode(doc, id);
       if (!node || seen.has(id)) continue;
       seen.add(id);
-      const stored = (node.getAttr('anchor') as ThreadAnchor | undefined) ?? null;
+      const stored = (node.getAttr('anchor') as ThreadAnchor | BlockAnchor | undefined) ?? null; // P3-E: | BlockAnchor
+      if (isBlockAnchor(stored)) continue; // P3-E: a pasted comment mark of a block thread is not its anchor
       if (stored && node.getAttr('tabId') === tab.id && sameSpot(doc, stored.start, extent.first) && sameSpot(doc, stored.end, extent.last)) continue;
       drifted.push({ node, tabId: tab.id, id, ...anchorOf(body, extent) });
     }
   }
-  if (drifted.length > 0) {
+  // P3-E start (E2 M4): a block thread whose block now sits in another tab follows it there (its block id never drifts)
+  const moved: Array<{ node: Node; tabId: string; id: string }> = [];
+  for (const [id, place] of liveBlockThreads(doc, scope?.threads)) {
+    const node = threadNode(doc, id);
+    if (node && node.getAttr('tabId') !== place.tabId) moved.push({ node, tabId: place.tabId, id });
+  }
+  // P3-E end
+  if (drifted.length > 0 || moved.length > 0 /* P3-E */) {
     transact(
       doc,
       () => {
@@ -368,11 +443,12 @@ export function refreshAnchors(doc: Doc, origin?: unknown, scope?: ThreadScope):
           node.setAttr('blockId', blockId);
           if (node.getAttr('tabId') !== tabId) node.setAttr('tabId', tabId);
         }
+        for (const { node, tabId } of moved) node.setAttr('tabId', tabId); // P3-E
       },
       origin,
     );
   }
-  return drifted.map((entry) => entry.id);
+  return [...drifted.map((entry) => entry.id), ...moved.map((entry) => entry.id)]; // P3-E: and the moved block threads
 }
 
 /**

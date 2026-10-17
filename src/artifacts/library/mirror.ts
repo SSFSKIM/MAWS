@@ -65,6 +65,9 @@ function segment(text: string): string {
     .replace(/^[.-]+|[.-]+$/g, '');
 }
 
+/** P3-E (E2 M5; E's Decision Log 32): the same sanitiser for a writer's own segments (a dashboard's snapshot names). */
+export const mirrorSegment = segment;
+
 // The title made path-safe, suffixed with the id's first 8 characters: what every writer names an artifact's files by.
 export function mirrorSlug(artifact: Pick<Artifact, 'id' | 'title'>): string {
   const title = [...segment(artifact.title)].slice(0, SLUG_MAX).join('').replace(/[.-]+$/, '');

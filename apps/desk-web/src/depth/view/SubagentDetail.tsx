@@ -13,6 +13,7 @@ import { refOf, useTicker } from '../../../../../src/renderer/src/tools/agents/s
 import type { TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
 import { SubagentGlyph } from '../../../../../src/renderer/src/transcript/view/rows/Subagent';
+import { sessionName } from '../../log/projection';
 import type { SessionPlane } from '../../shell/session-plane';
 import type { DeskSession } from '../../shell/sessions';
 import { DeskTranscript } from '../source/desk-transcript';
@@ -63,7 +64,7 @@ export function SubagentDetail({ project, session, plane, agentId, node, actions
               {meta}
             </p>
             <p data-part="dispatched-by" className="m-0 truncate text-ui-sm text-fg-muted">
-              {SUBAGENTS_COPY.dispatchedBy(session.alias)}
+              {SUBAGENTS_COPY.dispatchedBy(sessionName(session))}
             </p>
           </div>
           <span className="shrink-0 text-ui-sm text-fg-muted" data-testid="depth-subagent-status">

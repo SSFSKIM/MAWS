@@ -4,6 +4,8 @@
 // the harness page over an in-memory host (memory-history.ts).
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { TokenOverrides } from '../../meta';
+import type { ContentMap, Doc } from '../../../yjs'; // P3-E
+import type { ExtraChange } from '../../history'; // P3-E
 
 export interface HistoryApi {
   /** Every retained version (`artifacts.versions`), in any order. */
@@ -40,4 +42,10 @@ export interface HistoryApi {
   onVersions?(listener: () => void): () => void;
   /** Where the rail logs a failure it shows (the surface's log). */
   log?(line: string): void;
+  /**
+   * P3-E (E2 M4; E's Decision Log 8 and 28): the changes of a comparison its tab bodies cannot show (a dashboard's
+   * datasets), from its two states and their provenance, merged into the one list the pill, the bar and the paint use.
+   * Absent for documents and decks: their history is unchanged.
+   */
+  extraChanges?(prevDoc: Doc, nextDoc: Doc, attributions: ContentMap): readonly ExtraChange[];
 }
