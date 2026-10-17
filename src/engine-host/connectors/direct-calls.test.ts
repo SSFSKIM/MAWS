@@ -11,8 +11,8 @@ import { HostCommandError } from '@shared/host/runtime';
 import type { DirectOperationOutcome } from '@shared/ipc/schema/connectors';
 import type { McpStatusResponse } from '@shared/wire/control';
 import { openDocuments, type Documents } from '../documents';
-import { SECRET_SERVER_TEXT, ScriptedPool, deferred, tick } from './direct-pool.fixture';
-import { DirectCalls, type DirectCallsOptions, type DirectStartInput } from './direct-calls';
+import { ManualClock, SECRET_SERVER_TEXT, ScriptedPool, deferred, tick } from './direct-pool.fixture';
+import { DIRECT_CALL_DEADLINE_MS, DIRECT_RESOLVE_BOUND_MS, DIRECT_RESULT_TTL_MS, DirectCalls, type DirectCallsOptions, type DirectStartInput } from './direct-calls';
 import { ConnectorStatusCache, connectorLaunchContext, type ConnectorLaunchContext } from './provenance';
 
 const SECRET_ENV = 'omitted-env-literal-9c1e';
@@ -135,10 +135,15 @@ describe('DirectCalls: honest acknowledgments and typed outcomes for every opera
   });
 
   it('bounds a resolution at its 8 s budget even when a lookup never settles', async () => {
+    const clock = new ManualClock();
     const stuck = { resolve: () => new Promise(() => {}), resolveSource: () => new Promise(() => {}), readEntryForWrite: () => new Promise(() => {}) };
-    calls = build({ cache: stuck as never, resolveBoundMs: 20 });
+    calls = build({ cache: stuck as never, clock });
     const operationId = nextId();
     calls.resolve({ operationId, artifactId, directories: [project], server: 'usertoy', tool: 'rows' });
+    clock.advance(DIRECT_RESOLVE_BOUND_MS - 1);
+    await tick();
+    expect(completed).not.toContain(operationId);
+    clock.advance(1);
     expect(await taken(operationId)).toEqual({ kind: 'resolve', answer: { ready: false, why: 'unavailable' } });
   });
 
@@ -187,6 +192,42 @@ describe('DirectCalls: honest acknowledgments and typed outcomes for every opera
     pool.startup.resolve();
     expect(await taken(contradicted)).toEqual({ kind: 'discover', answer: { ok: false, failure: 'unavailable', reason: 'source' } });
     expect(pool.wire).toEqual([]);
+  });
+
+  // Review fix: a discovery checks its source again after the entry's read settles and after its connection is acquired.
+  it('a discovery whose source is contradicted as its entry’s read settles never acquires a connection', async () => {
+    const { source } = await resolved();
+    const readEntryForWrite = cache.readEntryForWrite.bind(cache);
+    calls = build({
+      cache: {
+        resolve: cache.resolve.bind(cache),
+        resolveSource: cache.resolveSource.bind(cache),
+        readEntryForWrite: (verified) => {
+          const read = readEntryForWrite(verified);
+          void read.then(() => observed(launch('app-2', 'L2'), report())); // ahead of the discovery's continuation
+          return read;
+        },
+      },
+    });
+    const operationId = nextId();
+    calls.discover({ operationId, directory: source.directory, sourceId: source.sourceId, generation: source.generation, server: 'usertoy' });
+    expect(await taken(operationId)).toEqual({ kind: 'discover', answer: { ok: false, failure: 'unavailable', reason: 'source' } });
+    expect(pool.acquires).toHaveLength(0);
+  });
+
+  it('a discovery whose source is contradicted as its connection is acquired never lists tools', async () => {
+    const { source } = await resolved();
+    const acquire = pool.acquire.bind(pool);
+    pool.acquire = (spec, signal) => {
+      const acquired = acquire(spec, signal);
+      void acquired.then(() => observed(launch('app-2', 'L2'), report()));
+      return acquired;
+    };
+    const operationId = nextId();
+    calls.discover({ operationId, directory: source.directory, sourceId: source.sourceId, generation: source.generation, server: 'usertoy' });
+    expect(await taken(operationId)).toEqual({ kind: 'discover', answer: { ok: false, failure: 'unavailable', reason: 'source' } });
+    expect(pool.listAttempts).toBe(0);
+    expect(pool.released).toBe(pool.leases);
   });
 
   it('refuses a start past its bound of held operations as a dispatch error, and a known id', async () => {
@@ -256,6 +297,59 @@ describe('DirectCalls: the grant at the actual write', () => {
     pool.atWrite.resolve();
     expect(await callOutcome(input.operationId)).toEqual({ ok: false, failure: 'refused', refusal: 'revoked', reason: 'grant' });
     expect(toolCalls()).toEqual([]);
+  });
+
+  // Review fix: a break that lands after the write's answer settled, before the operation publishes it, is the revoke's
+  // refusal too: as the answer arrives (its promise fulfilled, the awaiting continuation not yet run) and while it is
+  // held after the write.
+  const late: [string, 'read' | 'once', string, () => unknown][] = [
+    ['a revoke of a read grant', 'read', 'rows', () => documents.store.revokeConnectorTool(artifactId, { server: 'usertoy', tool: 'rows' })],
+    ['the deletion of an artifact whose Allow once was consumed', 'once', 'send', () => documents.store.delete(artifactId)],
+  ];
+  for (const [label, mode, tool, change] of late) {
+    it(`${label} as the written call’s answer settles is never published as its result`, async () => {
+      const grant = await granted(mode, tool);
+      pool.onAnswer = () => void change();
+      const input = grant.start();
+      calls.start(input);
+      expect(await callOutcome(input.operationId)).toEqual({ ok: false, failure: 'refused', refusal: 'revoked', reason: 'grant' });
+      expect(toolCalls()).toHaveLength(1); // written: not reversible, its result suppressed
+      expect(fences()).toBe(0);
+    });
+
+    it(`${label} after the write, while its answer is on the way, is never published as its result`, async () => {
+      const grant = await granted(mode, tool);
+      pool.afterWrite = deferred();
+      const input = grant.start();
+      calls.start(input);
+      await vi.waitFor(() => expect(toolCalls()).toHaveLength(1), { interval: 1 });
+      await change();
+      pool.afterWrite.resolve();
+      expect(await callOutcome(input.operationId)).toEqual({ ok: false, failure: 'refused', refusal: 'revoked', reason: 'grant' });
+    });
+  }
+
+  it('a revoke at any microtask between the written call’s answer and its publication is the revoke’s refusal', async () => {
+    const grant = await granted();
+    for (let depth = 0; depth < 12; depth++) {
+      await documents.store.grantConnectorTool(artifactId, { server: 'usertoy', tool: 'rows', fingerprint: grant.fingerprint, mode: 'read' });
+      const later = (left: number, run: () => void): void => queueMicrotask(() => (left === 0 ? run() : later(left - 1, run)));
+      pool.onAnswer = () => later(depth, () => void documents.store.revokeConnectorTool(artifactId, { server: 'usertoy', tool: 'rows' }));
+      const input = grant.start();
+      calls.start(input);
+      expect(await callOutcome(input.operationId), `depth ${depth}`).toEqual({ ok: false, failure: 'refused', refusal: 'revoked', reason: 'grant' });
+    }
+  });
+
+  it('a contradicting report after the write, while its answer is on the way, keeps the answer from being published', async () => {
+    const grant = await granted();
+    pool.afterWrite = deferred();
+    const input = grant.start();
+    calls.start(input);
+    await vi.waitFor(() => expect(toolCalls()).toHaveLength(1), { interval: 1 });
+    observed(launch('app-2', 'L2'), report());
+    pool.afterWrite.resolve();
+    expect(await callOutcome(input.operationId)).toEqual({ ok: false, failure: 'unavailable', reason: 'source' });
   });
 
   it('a grant re-made the same keeps an untaken result: the fence breaks only for a change that refuses it', async () => {
@@ -420,11 +514,17 @@ describe('DirectCalls: lifetimes', () => {
   });
 
   it('times out at its deadline while startup never settles, announced once; the late startup is released, never used', async () => {
-    calls = build({ callDeadlineMs: 30 });
+    const clock = new ManualClock();
+    calls = build({ clock });
     const grant = await granted();
     pool.startup = deferred();
     const input = grant.start();
     calls.start(input);
+    await vi.waitFor(() => expect(pool.acquires).toHaveLength(1), { interval: 1 });
+    clock.advance(DIRECT_CALL_DEADLINE_MS - 1);
+    await tick();
+    expect(completed).not.toContain(input.operationId);
+    clock.advance(1);
     expect(await callOutcome(input.operationId)).toEqual({ ok: false, failure: 'unavailable', reason: 'timeout' });
     pool.startup.resolve();
     await tick();
@@ -434,14 +534,17 @@ describe('DirectCalls: lifetimes', () => {
     expect(fences()).toBe(0);
   });
 
-  it('drops an untaken outcome and its fence after the retention bound', async () => {
-    calls = build({ resultTtlMs: 100 });
+  it('drops an untaken outcome and its fence after the retention bound, not before', async () => {
+    const clock = new ManualClock();
+    calls = build({ clock });
     const grant = await granted();
+    clock.advance(DIRECT_RESULT_TTL_MS * 2); // the resolution's outcome, taken already, leaves nothing behind
     const input = grant.start();
     calls.start(input);
     await vi.waitFor(() => expect(completed).toContain(input.operationId), { interval: 1 });
+    clock.advance(DIRECT_RESULT_TTL_MS - 1);
     expect(fences()).toBe(1);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    clock.advance(1);
     expect(calls.take(input.operationId)).toBeNull();
     expect(fences()).toBe(0);
   });

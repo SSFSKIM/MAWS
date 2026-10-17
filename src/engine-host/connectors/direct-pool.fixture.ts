@@ -20,6 +20,8 @@ export class ScriptedPool {
   startupFailure: DirectFailure | null = null;
   atWrite: Deferred | null = null;
   afterWrite: Deferred | null = null; // holds the answer of a call already written
+  onAnswer: (() => void) | null = null; // runs as a written call's answer settles, before its awaiting caller resumes
+  listAttempts = 0; // tools/list asked for, written or not
   reachedWrite = deferred();
   tools: DirectTool[] = [{ name: 'rows', readOnly: true }, { name: 'send', readOnly: false }];
   result: unknown = { content: [{ type: 'text', text: 'rows 107' }] };
@@ -53,6 +55,7 @@ export class ScriptedPool {
   private lease(spec: DirectConnectionSpec): DirectLease {
     return {
       listTools: async () => {
+        this.listAttempts += 1;
         if (!spec.fence()) return { ok: false, failure: 'unavailable', admitted: false, message: SECRET_SERVER_TEXT };
         this.wire.push({ kind: 'tools/list' });
         return { ok: true, tools: this.tools };
@@ -67,9 +70,36 @@ export class ScriptedPool {
         signal.addEventListener('abort', () => (this.aborts += 1), { once: true });
         if (this.afterWrite) await this.afterWrite.promise;
         if (this.callFailure) return this.callFailure;
+        this.onAnswer?.();
         return { ok: true, result: this.result };
       },
       release: () => void (this.released += 1),
     };
+  }
+}
+
+// A clock the test moves: the table's deadlines and retention fire only at `advance`, in due order, while the store's
+// and the cache's real I/O keep their own timers.
+export class ManualClock {
+  private at = 0;
+  private next = 1;
+  private readonly timers = new Map<number, { due: number; run: () => void }>();
+  now = (): number => this.at;
+  setTimeout = (run: () => void, ms: number): number => {
+    const id = this.next++;
+    this.timers.set(id, { due: this.at + ms, run });
+    return id;
+  };
+  clearTimeout = (handle: unknown): void => void this.timers.delete(handle as number);
+  advance(ms: number): void {
+    const target = this.at + ms;
+    for (;;) {
+      const due = [...this.timers].filter(([, timer]) => timer.due <= target).sort((a, b) => a[1].due - b[1].due || a[0] - b[0])[0];
+      if (!due) break;
+      this.timers.delete(due[0]);
+      this.at = due[1].due;
+      due[1].run();
+    }
+    this.at = target;
   }
 }

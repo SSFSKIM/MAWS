@@ -156,7 +156,8 @@ interface ContextState {
   readonly revisions: Map<string, number>;
 }
 
-type Verified = { source: VerifiedConnectorSource; entry: ConnectorLaunchEntry; visible: VisibleConfig; observation: Positive; positives: Positive[] };
+// `relevant` (P3-HD M2): what of a launch's facts the verified entry's materialization reads, for the write's proof
+type Verified = { source: VerifiedConnectorSource; entry: ConnectorLaunchEntry; visible: VisibleConfig; observation: Positive; positives: Positive[]; relevant: (context: ConnectorLaunchContext) => string };
 const OVERTAKEN = Symbol('overtaken'); // a lookup some change of the cache overtook: start again
 
 const launchKeyOf = (context: ConnectorLaunchContext) => `${context.appSessionId}\0${context.launchId}`;
@@ -246,8 +247,8 @@ export class ConnectorStatusCache {
       if (verified.source.sourceId !== source.sourceId || verified.source.generation !== source.generation) return { ok: false, why: 'changed' };
       // taken in the same synchronous step as the lookup's completion fence, so nothing lands between them (a clear
       // forgets the minted source id, and a later lookup mints another)
-      const standing = this.standing(source.cwd, source.server);
-      const stillValid = () => standing !== null && this.standing(source.cwd, source.server) === standing;
+      const standing = this.standing(source.cwd, source.server, verified.relevant);
+      const stillValid = () => standing !== null && this.standing(source.cwd, source.server, verified.relevant) === standing;
       return { ok: true, source: verified.source, entry: verified.entry, stillValid };
     });
   }
@@ -454,15 +455,16 @@ export class ConnectorStatusCache {
       sourceId: known.sourceId, generation: known.generation, cwd, server, scope, transport: visible.transport, ...(visible.transport === 'http' && { url: visible.url }),
       path: state.configFile, entryPath: located.entryPath, observedAt, entryDigest: entryDigest!,
     };
-    return { source, entry: launch, visible, observation, positives: positives.map((positive) => positive.observation) };
+    return { source, entry: launch, visible, observation, positives: positives.map((positive) => positive.observation), relevant: this.relevance(scope, visible.transport, located.entry) };
   }
 
   // P3-HD M2 start: what a verified answer for `server` at `cwd` rests on in the cache's memory, without the file: null
   // when a fresh lookup would refuse it from memory alone. Every fact verifyOnce reads before its file read is here
   // (saturation, a refused directory, a failed context, a contest, which context holds it positively, that context's
-  // revision of the server, the source id it minted) with the launch facts its materialization ran under (each agreeing
-  // launch's SDK-minimal environment, legacy file and local key), as a set: a launch repeating the same facts adds none.
-  private standing(cwd: string, server: string): string | null {
+  // revision of the server, the source id it minted) with the launch facts the entry's materialization reads (each
+  // agreeing launch's `relevant` projection), as a set: a launch that differs only in facts the entry never reads adds
+  // none, so it neither invalidates a call nor is let through where a fresh lookup would give the entry two meanings.
+  private standing(cwd: string, server: string, relevant: (context: ConnectorLaunchContext) => string): string | null {
     if (this.saturated || this.refused.has(cwd)) return null;
     const states = [...this.contexts.values()].filter((state) => state.cwd === cwd);
     if (states.some((state) => state.failed || state.contested.has(server))) return null;
@@ -474,10 +476,22 @@ export class ConnectorStatusCache {
     const facts = new Set<string>();
     for (const snapshot of state.snapshots.values()) {
       if (snapshot.servers.get(server)?.kind !== 'positive') continue;
-      const { environment, legacyConfigFile, localKey } = snapshot.context;
-      facts.add(this.mac(canonicalJson([environment, legacyConfigFile, localKey])));
+      facts.add(this.mac(relevant(snapshot.context)));
     }
     return canonicalJson([state.key, state.revisions.get(server) ?? 0, known.sourceId, known.generation, [...facts].sort()]);
+  }
+
+  // The launch facts a verified entry's meaning depends on (./source-entry.ts materializeEntry and the lookup above):
+  // the legacy file every launch is checked for; for local scope the captured key; for stdio the SDK-minimal keys its
+  // configured env does not set, as materialization reads them. An HTTP entry reads no launch variable.
+  private relevance(scope: 'user' | 'local', transport: ConnectorTransport, entry: Record<string, unknown>): (context: ConnectorLaunchContext) => string {
+    const stdio = transport === 'stdio';
+    const configured = new Set(stdio && record(entry.env) ? Object.keys(entry.env as Record<string, unknown>) : []);
+    const read = stdio ? SDK_ENVIRONMENT_KEYS.filter((key) => !configured.has(key)) : [];
+    return (context) => {
+      const environment = Object.fromEntries(read.flatMap((key) => { const value = context.environment[key]; return typeof value === 'string' && !value.startsWith('()') ? [[key, value]] : []; }));
+      return canonicalJson([context.legacyConfigFile, scope === 'local' ? context.localKey : null, environment]);
+    };
   }
   // P3-HD M2 end
 

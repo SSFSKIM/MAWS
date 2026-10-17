@@ -64,7 +64,24 @@ export interface DirectCallsOptions {
   resolveBoundMs?: number;
   maxOperations?: number;
   maxResultBytes?: number;
+  clock?: DirectClock; // tests: the deadlines' and retention's time
 }
+
+// The time the table's deadlines and retention keep (the end's announcement is always the next macrotask's).
+export interface DirectClock {
+  now(): number;
+  setTimeout(run: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+const realClock: DirectClock = {
+  now: () => Date.now(),
+  setTimeout: (run, ms) => {
+    const timer = setTimeout(run, ms);
+    timer.unref?.();
+    return timer;
+  },
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
 
 type Kind = DirectOperationOutcome['kind'];
 interface Operation {
@@ -76,8 +93,8 @@ interface Operation {
   outcome?: DirectOperationOutcome;
   stop?: 'timeout'; // why its signal aborted, when it was not withdrawn
   revoked?: boolean; // its fence broke: a revoke, delete or replacing grant asked for while it ran or its outcome waited
-  deadline?: ReturnType<typeof setTimeout>;
-  expiry?: ReturnType<typeof setTimeout>;
+  deadline?: unknown;
+  expiry?: unknown;
   release?: () => void; // lets go of its fence (Decision Log 91: with the operation, not the call)
 }
 
@@ -115,6 +132,7 @@ export class DirectCalls {
   private readonly resolveBoundMs: number;
   private readonly maxOperations: number;
   private readonly maxResultBytes: number;
+  private readonly clock: DirectClock;
 
   constructor(private readonly options: DirectCallsOptions) {
     this.ttlMs = options.resultTtlMs ?? DIRECT_RESULT_TTL_MS;
@@ -122,6 +140,7 @@ export class DirectCalls {
     this.resolveBoundMs = options.resolveBoundMs ?? DIRECT_RESOLVE_BOUND_MS;
     this.maxOperations = options.maxOperations ?? DIRECT_OPERATIONS_MAX;
     this.maxResultBytes = options.maxResultBytes ?? ARTIFACT_MAX_BYTES;
+    this.clock = options.clock ?? realClock;
   }
 
   resolve(input: DirectResolveInput): { operationId: string } {
@@ -202,15 +221,14 @@ export class DirectCalls {
     if (this.operations.has(operationId)) throw new Error(`direct operation ${operationId} is already known`);
     if (this.operations.size >= this.maxOperations) throw new HostCommandError(ipcError('internal', 'the engine host holds as many direct operations as it may'));
     if (credential) this.epochs.set(credential.connectionId, Math.max(this.epochs.get(credential.connectionId) ?? -1, credential.credentialEpoch));
-    const operation: Operation = { id: operationId, kind, controller: new AbortController(), deadlineAt: Date.now() + boundMs, ...(credential && { credential }) };
+    const operation: Operation = { id: operationId, kind, controller: new AbortController(), deadlineAt: this.clock.now() + boundMs, ...(credential && { credential }) };
     this.operations.set(operation.id, operation);
     // its bound ends it with its late answer even while a step it awaits never settles
-    operation.deadline = setTimeout(() => {
+    operation.deadline = this.clock.setTimeout(() => {
       operation.stop = 'timeout';
       operation.controller.abort();
       this.finish(operation, late);
     }, boundMs);
-    (operation.deadline as { unref?: () => void }).unref?.();
     return operation;
   }
 
@@ -223,10 +241,10 @@ export class DirectCalls {
 
   private finish(operation: Operation, answer: unknown): void {
     if (this.operations.get(operation.id) !== operation || operation.outcome) return; // withdrawn, or already ended
-    clearTimeout(operation.deadline);
-    operation.outcome = this.outcomeOf(operation.kind, answer);
-    operation.expiry = setTimeout(() => this.drop(operation), this.ttlMs);
-    (operation.expiry as { unref?: () => void }).unref?.();
+    this.clock.clearTimeout(operation.deadline);
+    // a break between the answer's arrival and here (its callback found no outcome to replace) is the revoke's refusal
+    operation.outcome = operation.revoked && operation.kind === 'call' ? { kind: 'call', outcome: REVOKED } : this.outcomeOf(operation.kind, answer);
+    operation.expiry = this.clock.setTimeout(() => this.drop(operation), this.ttlMs);
     // a macrotask later, so the end never overtakes the start's answer on the wire (route E's rule)
     setTimeout(() => {
       if (this.operations.get(operation.id) === operation) this.options.completed(operation.id);
@@ -251,8 +269,8 @@ export class DirectCalls {
   }
 
   private drop(operation: Operation): void {
-    clearTimeout(operation.deadline);
-    clearTimeout(operation.expiry);
+    this.clock.clearTimeout(operation.deadline);
+    this.clock.clearTimeout(operation.expiry);
     if (this.operations.get(operation.id) === operation) this.operations.delete(operation.id);
     operation.release?.();
     operation.release = undefined;
@@ -371,11 +389,14 @@ export class DirectCalls {
         // the last check, synchronous with the actual stdin write or fetch
         admit: () => (refusedAtWrite = check()) === null,
         signal,
-        timeoutMs: Math.max(1, operation.deadlineAt - Date.now()),
+        timeoutMs: Math.max(1, operation.deadlineAt - this.clock.now()),
       },
     );
     // a refusal at the write is ours (the connection's own fence included); a failure after it says what stopped it
     if (!answer.ok) return refusedAtWrite ?? check() ?? fromTransport(answer, 'transport');
+    // an answer is published only if what admitted its write still holds once it arrives
+    const answered = check();
+    if (answered) return answered;
     const bytes = jsonBytes(answer.result);
     if (bytes === null) return failed('notJson');
     return bytes <= this.maxResultBytes ? { ok: true, result: answer.result as never } : { ok: false, failure: 'tooLarge', reason: 'tooLarge' };
@@ -395,9 +416,13 @@ export class DirectCalls {
     if (!read.ok) return discoverFailure(unavailable('source', read.why));
     const connection = this.connectionCheck(read.stillValid, input.credential, attachment);
     const check = () => (this.registered(operation) ? connection() : this.stopped(operation));
+    const stale = check(); // the source as it stands now, not only as the read's settlement saw it
+    if (stale) return discoverFailure(stale);
     const acquired = await pool.acquire({ source: read.source, entry: read.entry, ...(input.credential && { credential: credentialOf(input.credential) }), fence: () => connection() === null }, signal);
     if (!acquired.ok) return discoverFailure(check() ?? fromTransport(acquired, 'connection'));
     try {
+      const connected = check();
+      if (connected) return discoverFailure(connected);
       const listed = await acquired.lease.listTools(signal);
       const after = check();
       if (after) return discoverFailure(after);

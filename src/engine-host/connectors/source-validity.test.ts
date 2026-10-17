@@ -116,3 +116,68 @@ describe('readEntryForWrite’s stillValid: the cache behind an entry, answered 
     expect(read.stillValid()).toBe(false);
   });
 });
+
+// Review fix: the proof rests only on launch facts the verified entry's materialization reads. An HTTP entry reads no
+// launch variable; a stdio entry reads the SDK-minimal keys its configured env does not set; a user entry no local key.
+describe('readEntryForWrite’s stillValid: only the launch facts the entry’s meaning reads', () => {
+  const http = (): Server => ({ name: 'userhttp', status: 'connected', scope: 'user', source: 'user', config: { type: 'http', url: 'http://127.0.0.1:47831/mcp', headers: { 'X-Probe': 'literal' } }, tools: [{ name: 'rows', annotations: { readOnly: true } }] });
+  const pinned = (): Server => ({ ...toy({ name: 'pinned' }) });
+  function writeFile(): void {
+    const file = {
+      mcpServers: {
+        usertoy: { type: 'stdio', command: 'toy', args: ['toy-server.mjs', 'stdio'] },
+        userhttp: { type: 'http', url: 'http://127.0.0.1:47831/mcp', headers: { 'X-Probe': 'literal' } },
+        pinned: { type: 'stdio', command: 'toy', args: ['toy-server.mjs', 'stdio'], env: { PATH: bin } }, // its own PATH
+      },
+    };
+    writeFileSync(join(config, '.claude.json'), JSON.stringify(file));
+  }
+  async function read(cache: ConnectorStatusCache, server: string) {
+    const resolved = await cache.resolveSource(project, server);
+    if (!resolved.ok) throw new Error(resolved.why);
+    const answer = await cache.readEntryForWrite(resolved.source);
+    if (!answer.ok) throw new Error(answer.why);
+    return answer;
+  }
+  const other = (extra: Record<string, string>, localKey = project) =>
+    connectorLaunchContext({ appSessionId: 'app-2', launchId: 'L2', cwd: project, environment: { HOME: join(dir, 'home'), CLAUDE_CONFIG_DIR: config, PATH: bin, USER: 'u', LOGNAME: 'u', SHELL: '/bin/zsh', TERM: 'dumb', ...extra }, localKey: { kind: 'directory', key: localKey } });
+
+  it('an HTTP entry holds across a launch with another PATH, SHELL and local key, as a fresh lookup admits it', async () => {
+    writeFile();
+    const cache = new ConnectorStatusCache();
+    observed(cache, launch('app-1', 'L1'), report(http()));
+    const answer = await read(cache, 'userhttp');
+    observed(cache, other({ PATH: join(dir, 'bin-2'), SHELL: '/bin/sh' }, dir), report(http()));
+    expect(answer.stillValid()).toBe(true);
+    expect((await cache.readEntryForWrite(answer.source)).ok).toBe(true);
+  });
+
+  it('a stdio entry whose configured env sets PATH holds across a launch with another PATH', async () => {
+    writeFile();
+    const cache = new ConnectorStatusCache();
+    observed(cache, launch('app-1', 'L1'), report(pinned()));
+    const answer = await read(cache, 'pinned');
+    observed(cache, other({ PATH: join(dir, 'bin-2') }), report(pinned()));
+    expect(answer.stillValid()).toBe(true);
+    expect((await cache.readEntryForWrite(answer.source)).ok).toBe(true);
+  });
+
+  it('a user stdio entry holds across a launch that captured another local key', async () => {
+    writeFile();
+    const cache = new ConnectorStatusCache();
+    observed(cache, launch('app-1', 'L1'), report(toy()));
+    const answer = await read(cache, 'usertoy');
+    observed(cache, other({}, dir), report(toy()));
+    expect(answer.stillValid()).toBe(true);
+  });
+
+  it('a stdio entry still fails for a launch fact it reads: an SDK key its configured env does not set', async () => {
+    writeFile();
+    const cache = new ConnectorStatusCache();
+    observed(cache, launch('app-1', 'L1'), report(pinned()));
+    const answer = await read(cache, 'pinned');
+    observed(cache, other({ SHELL: '/bin/sh' }), report(pinned()));
+    expect(answer.stillValid()).toBe(false);
+    expect((await cache.readEntryForWrite(answer.source)).ok).toBe(false); // a fresh lookup contests the two meanings
+  });
+});
