@@ -2,7 +2,7 @@
 // / ended), read from presence while the machine is online and from the last `state` event while it is not.
 import { describe, expect, it } from 'vitest';
 import type { LogEvent } from 'desk-hub/protocol';
-import { groupOf, groupSessions, projectSessions, type ProjectedSession } from './projection';
+import { groupOf, groupSessions, projectSessions, sessionName, type ProjectedSession } from './projection';
 
 const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
 const S2 = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a';
@@ -46,6 +46,27 @@ describe('projectSessions', () => {
     expect(sessions.get(S1)).toMatchObject({ charge: 'newer', member: true, ended: null });
   });
 
+  it('names a session by the latest title its machine published, and by its alias while it has none', () => {
+    const sessions = projectSessions([
+      joined(S1, 'maws-4d', 'macbook'),
+      ev(`macbook/${S1}`, 'titled', { session: S1, title: 'Codex native Computer Use internals' }),
+      ev(`macbook/${S1}`, 'titled', { session: S1, title: 'cua_repl' }),
+      ev(`macbook/${S1}`, 'retired', { session: S1, by: '', reason: 'ended' }),
+      joined(S2, 'maws-45', 'mini'),
+    ]);
+    expect(sessions.get(S1)).toMatchObject({ alias: 'maws-4d', title: 'cua_repl', member: false });
+    expect(sessionName(sessions.get(S1)!)).toBe('cua_repl');
+    expect(sessions.get(S2)?.title).toBeNull();
+    expect(sessionName(sessions.get(S2)!)).toBe('maws-45');
+  });
+
+  it('reads an empty or malformed title as none', () => {
+    const blank = projectSessions([joined(S1, 'maws-4d', 'macbook'), ev(`macbook/${S1}`, 'titled', { session: S1, title: 'x' }), ev(`macbook/${S1}`, 'titled', { session: S1, title: '  ' })]);
+    expect(blank.get(S1)?.title).toBeNull();
+    const shapeless = projectSessions([joined(S1, 'maws-4d', 'macbook'), ev(`macbook/${S1}`, 'titled', { session: S1, title: 42 })]);
+    expect(shapeless.get(S1)?.title).toBeNull();
+  });
+
   it('keeps the last state event with its time, and ignores events that name no session', () => {
     const sessions = projectSessions([
       joined(S1, 'maws-45', 'mini'),
@@ -59,7 +80,7 @@ describe('projectSessions', () => {
 });
 
 describe('groupOf', () => {
-  const base: ProjectedSession = { session: S1, alias: 'a', machine: 'mini', cwd: null, worktree: null, seat: '', member: true, ended: null, charge: null, status: null, state: null, joinedAt: 1 };
+  const base: ProjectedSession = { session: S1, alias: 'a', machine: 'mini', cwd: null, worktree: null, seat: '', title: null, member: true, ended: null, charge: null, status: null, state: null, joinedAt: 1 };
 
   it('puts a retired session under ended, whatever its presence says', () => {
     expect(groupOf({ ...base, member: false, ended: { by: '', reason: 'ended' } }, { presence: { record: { status: 'busy' }, bridge: true }, machineOnline: true, pending: 0 })).toBe('ended');

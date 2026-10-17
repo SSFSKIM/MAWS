@@ -8,7 +8,8 @@
 // widths, links hyperlinks, pictures embedded through the caller's loader, and every thread whose passage is in the
 // file a Word comment on that passage with its messages as replies, resolved threads marked done. What Word has no
 // form for is written as text: math as its LaTeX, a diagram as its mermaid source under a label, a chart and a pending
-// block as their labelled placeholders, chips as what they show. Tracked changes since a version are deferred (H3).
+// block as their labelled placeholders, chips as what they show (P3-E: a chart the kind draws, `renderView`, is its SVG
+// with a PNG fallback or a native table, captioned and labelled, a block thread a Word comment on its caption). Tracked changes since a version are deferred (H3).
 // Pure: `docx` bundles its own zip and needs no Node built-in, so this runs in main or the renderer.
 import {
   AlignmentType,
@@ -46,6 +47,8 @@ import { dsValue, exportDesign, hexOf, houseSystem, officeFace, pageOf, twipsOf,
 import { imageSize } from './image-size';
 import { chipText } from './values';
 import { defaultAuthorName, tabsOf, type ExportOptions, type ExportSource, type ImageLoader } from './source';
+import { isBlockAnchor } from '../threads'; // P3-E
+import type { ExportView, ExportViewTable, ViewRenderer } from './source'; // P3-E
 
 export interface DocxExportOptions<T> extends ExportOptions<T> {
   /** Reads a picture's bytes; a picture it cannot read is written as its alt text. */
@@ -90,10 +93,14 @@ class Writer {
   readonly starts = new Map<number, number[]>();
   readonly ends = new Map<number, number[]>();
 
+  /** P3-E (E2 M5): the Word comments of a block thread, by the block's id, on the block's first paragraph. */
+  readonly blockComments = new Map<string, number[]>();
+
   constructor(
     private readonly design: ExportDesign,
     private readonly images: Map<string, LoadedImage | null>,
     private readonly textWidth: number,
+    private readonly views?: ViewRenderer, // P3-E
   ) {}
 
   private value = (name: DsName) => dsValue(this.design, name);
@@ -322,9 +329,74 @@ class Writer {
     });
   }
 
-  private placeholder(label: string, text: string, place: Place): Paragraph {
-    return this.paragraph([new TextRun({ text: `${label}: `, bold: true }), new TextRun({ text })], { ...place, style: 'Placeholder' });
+  private placeholder(label: string, text: string, place: Place, comments: readonly number[] = []): Paragraph {
+    return this.paragraph(this.commented(comments, [new TextRun({ text: `${label}: `, bold: true }), new TextRun({ text })]), { ...place, style: 'Placeholder' });
   }
+
+  // P3-E start (E2 M5; E's Decision Logs 32 and 35): a chart block's drawn view: its caption (a block thread's Word
+  // comment anchored on it), the figure (the SVG with its PNG fallback, within the column) or a native table of the
+  // preview's cells, then the table's notes, the source label and the warnings, in the system's caption size and muted
+  // colour as direct formatting (no style is added, so a file without views is unchanged).
+  private commented(ids: readonly number[], children: ParagraphChild[]): ParagraphChild[] {
+    if (ids.length === 0) return children;
+    return [...ids.map((id) => new CommentRangeStart(id)), ...children, ...ids.flatMap((id) => [new CommentRangeEnd(id), new TextRun({ children: [new CommentReference(id)] })])];
+  }
+
+  private halfPoints(name: DsName): number | undefined {
+    const twips = twipsOf(this.value(name));
+    return twips ? Math.round(twips / 10) : undefined;
+  }
+
+  private small(text: string, place: Place): Paragraph {
+    return this.paragraph([new TextRun({ text, color: this.color('--ds-color-text-muted'), size: this.halfPoints('--ds-type-caption-size') })], { ...place, style: undefined });
+  }
+
+  private view(view: ExportView, place: Place, comments: readonly number[]): Array<Paragraph | Table> {
+    const caption = this.paragraph(this.commented(comments, [new TextRun({ text: view.caption, bold: true, size: this.halfPoints('--ds-type-h3-size'), color: this.color('--ds-color-text') })]), { ...place, style: undefined }, { keepNext: true });
+    const out: Array<Paragraph | Table> = [caption];
+    if (view.svg !== undefined) {
+      const maxWidth = (this.textWidth - INDENT * place.level) / 15; // px at 96 to the inch
+      const scale = Math.min(1, maxWidth / view.width);
+      const transformation = { width: Math.round(view.width * scale), height: Math.round(view.height * scale) };
+      const altText = { name: view.caption, description: `${view.caption}. ${view.sourceLabel}`, title: view.caption };
+      const figure = view.png
+        ? new ImageRun({ type: 'svg', data: new TextEncoder().encode(view.svg), fallback: { type: 'png', data: view.png }, transformation, altText })
+        : new TextRun({ text: `[Chart: ${view.caption}]`, italics: true });
+      out.push(this.paragraph([figure], { ...place, style: undefined }, { keepNext: true }));
+    } else {
+      out.push(this.viewTable(view.table, place));
+      if (view.table.notes.length > 0) out.push(this.small(view.table.notes.join(' · '), place));
+    }
+    out.push(this.small(view.sourceLabel, place));
+    if (view.warnings?.length) out.push(this.small(view.warnings.join(' · '), place));
+    return out;
+  }
+
+  private viewTable(table: ExportViewTable, place: Place): Table {
+    const available = this.textWidth - INDENT * place.level;
+    const columns = Math.max(1, table.columns.length);
+    const width = Math.floor(available / columns);
+    const raised = this.color('--ds-color-bg-raised') ?? 'auto';
+    const cell = (text: string, numeric: boolean, header: boolean) =>
+      new TableCell({
+        children: [new Paragraph({ children: [new TextRun({ text, bold: header })], ...(numeric ? { alignment: AlignmentType.RIGHT } : {}) })],
+        width: { size: width, type: WidthType.DXA },
+        ...(header ? { shading: { type: ShadingType.CLEAR, fill: raised, color: 'auto' } } : {}),
+      });
+    const rows = [
+      new TableRow({ tableHeader: true, children: table.columns.map((c) => cell(c.name, c.numeric, true)) }),
+      ...table.rows.map((row) => new TableRow({ cantSplit: true, children: row.map((value, k) => cell(value, table.columns[k]?.numeric ?? false, false)) })),
+    ];
+    const border = { style: BorderStyle.SINGLE, size: 4, color: this.color('--ds-color-border') ?? 'auto' };
+    return new Table({
+      rows,
+      columnWidths: Array.from({ length: columns }, () => width),
+      width: { size: width * columns, type: WidthType.DXA },
+      borders: { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border },
+      ...(place.level ? { indent: { size: INDENT * place.level, type: WidthType.DXA } } : {}),
+    });
+  }
+  // P3-E end
 
   block(node: PMNode, place: Place): Array<Paragraph | Table> {
     const a = node.attrs;
@@ -358,8 +430,12 @@ class Writer {
             .split('\n')
             .map((line) => this.paragraph(line ? [new TextRun({ text: line })] : [], { ...place, style: 'Code' })),
         ];
-      case 'chart':
-        return [this.placeholder('Chart', String(a.source ?? ''), place)];
+      case 'chart': {
+        // P3-E (E2 M5): drawn when the kind draws it; a block thread on its first paragraph either way
+        const comments = typeof a.id === 'string' ? (this.blockComments.get(a.id) ?? []) : [];
+        const view = this.views?.(node);
+        return view ? this.view(view, place, comments) : [this.placeholder('Chart', String(a.source ?? ''), place, comments)];
+      }
       case 'pending':
         return [this.placeholder('Pending', String(a.intent ?? ''), place)];
       default:
@@ -425,7 +501,7 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
     tabs.map(({ body }) => body),
     options.loadImage,
   );
-  const writer = new Writer(design, images, width - 2 * margin);
+  const writer = new Writer(design, images, width - 2 * margin, options.renderView); // P3-E: + the kind's views
 
   // each thread's passage: the first and last inline node its mark is on, in the order the writer visits them
   const extents = new Map<string, { first: number; last: number }>();
@@ -443,11 +519,19 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
       index++;
       return false;
     });
+  // P3-E (E2 M5; E's Decision Log 32): the chart blocks in the file, whose block threads (no mark) Word anchors on them
+  const charts = new Set<string>();
+  for (const { body } of tabs)
+    body.descendants((node) => {
+      if (node.type.name === 'chart' && typeof node.attrs.id === 'string') charts.add(node.attrs.id);
+      return !node.isInline;
+    });
   const name = options.authorName ?? defaultAuthorName;
   const comments: ICommentOptions[] = [];
   for (const thread of source.threads) {
     const extent = extents.get(thread.id);
-    if (!extent || thread.messages.length === 0) continue;
+    const block = isBlockAnchor(thread.anchor) && thread.blockId !== null && charts.has(thread.blockId) ? thread.blockId : null; // P3-E
+    if ((!extent && block === null) || thread.messages.length === 0) continue;
     const root = comments.length;
     thread.messages.forEach((message, i) => {
       const id = comments.length;
@@ -463,6 +547,10 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
         // gives each comment's paragraph its `w14:paraId`, which commentsExtended.xml names (and Word's durable id)
         durableId: commentIdToParaId(id),
       });
+      if (!extent) {
+        writer.blockComments.set(block!, [...(writer.blockComments.get(block!) ?? []), id]); // P3-E
+        return;
+      }
       writer.starts.set(extent.first, [...(writer.starts.get(extent.first) ?? []), id]);
       writer.ends.set(extent.last, [...(writer.ends.get(extent.last) ?? []), id]);
     });

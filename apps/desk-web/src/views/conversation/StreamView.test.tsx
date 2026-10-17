@@ -8,6 +8,7 @@ import { VECTOR_PROJECT as PROJECT } from '../../../test/vectors';
 import { memoryLogRecord } from '../../log/record';
 import { ProjectConnection } from '../../project/connection';
 import { deliveryKey } from '../../project/conversation';
+import type { DeskSession } from '../../shell/sessions';
 import { DeskContext } from './desk-context';
 import { StreamView } from './StreamView';
 
@@ -28,6 +29,34 @@ it('opens a link in a message in a new tab, without opener', async () => {
   const link = await waitFor(() => screen.getByRole('link', { name: 'the PR' }));
   fireEvent.click(link);
   expect(open).toHaveBeenCalledWith('https://github.com/SSFSKIM/MAWS/pull/1', '_blank', 'noopener,noreferrer');
+  connection.stop();
+});
+
+it("names a session's message by its title, the alias it went out under muted beside it; by that alias alone without one", () => {
+  const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
+  const [titled, plain] = ['1ea561bc-a60d-4437-a6ac-fa7cd5eda54f', '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b'];
+  const sessions = new Map([
+    [titled, { title: 'cua_repl', alias: 'maws-4d', machine: 'macbook' }],
+    [plain, { title: null, alias: 'maws-45', machine: 'mini' }],
+  ]) as unknown as Map<string, DeskSession>;
+  const message = (seq: number, session: string, from: string) => {
+    const event = { ts: '2026-10-15T08:00:00.000Z', writer: `x/${session}`, seq, kind: 'message', mac: { nonce: `n${seq}`, value: 'v' } } as LogEvent;
+    return { kind: 'message' as const, key: `m${seq}`, offset: seq, event, session, from, text: `said ${seq}` };
+  };
+  render(
+    <DeskContext.Provider value={{ connection, member: 'm', sessions }}>
+      <StreamView items={[message(1, titled, 'maws-4d'), message(2, plain, 'maws-45')]} outbox={[]} />
+    </DeskContext.Provider>,
+  );
+  const who = screen.getAllByTestId('said-who');
+  expect(who.map((e) => e.textContent)).toEqual(['cua_repl', 'maws-45']);
+  expect(screen.getAllByTestId('said-alias').map((e) => e.textContent)).toEqual(['maws-4d']);
+  expect(who[0].parentElement!.textContent).toContain('@macbook');
+  // One line: the title truncates, whole on hover; the alias, the machine and the time never give up their width.
+  expect(who[0].className).toContain('truncate');
+  expect(who[0].title).toBe('cua_repl');
+  expect(who[1].title).toBe('');
+  for (const meta of [...who[0].parentElement!.children].slice(1)) expect(meta.className).toContain('shrink-0');
   connection.stop();
 });
 

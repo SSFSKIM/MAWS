@@ -1,0 +1,65 @@
+// The dashboard's error and status wording (P3-E2; parent §2 "Error and stale states", XE5: the states bind in meaning,
+// their wording is E2's, in this one module the editor, the exporters, the host's answers and E3 reuse). Times are
+// formatted in UTC, explicitly, so neither the machine's locale nor its time zone changes a label or an export.
+import type { ColumnType, DatasetDescriptor } from './datasets';
+
+export const DATASET_STATES = {
+  noDataset: (id: string) => `no dataset "${id}"`,
+  noColumn: (id: string, column: string) => `dataset "${id}" has no column "${column}"`,
+  mismatches: (count: number, rows: number, column: string, type: ColumnType) => `${count} of ${rows} values in ${column} are not ${type}`,
+  unreadable: (id: string) => `the file of "${id}" could not be read`,
+  staleSince: (at: number) => `stale since ${utcTime(at)}`,
+  paused: 'paused: no live session',
+} as const;
+
+// P3-E2 M3: what a view says about the rows it could not draw as asked, drawn in place or noted under the figure.
+export const VIEW_STATES = {
+  missing: (count: number, column: string) => `${count} ${count === 1 ? 'row has' : 'rows have'} no ${column}; not drawn`,
+  needs: (view: string, what: string) => `a ${view} view needs ${what}`,
+  notNumbers: (column: string) => `${column} is not a number column`,
+  empty: 'no rows to draw',
+  tablePreview: (shown: number, total: number) => `first ${shown} of ${total} rows`, // a table view's bound (parent Decision Log 24)
+  // past the small multiples' 24 panels (parent Decision Log 27); the view's rows stay whole in the source sheet
+  tooManySeries: (count: number) => `too many series: ${count}; filter or aggregate`,
+  seriesNamesShortened: 'some series names are shortened; the tips and the source table have them whole',
+  // an aggregate past the largest number (parent Decision Log 27): the note on the view, the word in its cell
+  overflow: (count: number, agg: string, column: string) => `${agg} of ${column} overflows in ${count} ${count === 1 ? 'group' : 'groups'}: too large to represent`,
+  overflowCell: 'overflow',
+  tooLarge: (count: number) => `${count} ${count === 1 ? 'value is' : 'values are'} too large to draw`,
+  // E2 panel: a finite range no scale can span (a subnormal extent, or one not finite once made nice), drawn in place
+  unsupportedDomain: (column: string) => `${column} has a numeric range that cannot be drawn`,
+  // E2 panel: unaggregated bars at one category of one series and measure sit on one another; the remedy is agg
+  repeatedX: (column: string, names: string[], more: number) => `${column} repeats ${names.join(', ')}${more > 0 ? ` and ${more} more` : ''}; bars overlap. Set agg to combine repeated categories.`,
+  noPositive: (column: string) => `no positive ${column} to draw`,
+  slicesDropped: (count: number, column: string) => `${count} ${count === 1 ? 'slice has' : 'slices have'} no positive ${column}; not drawn`,
+  slicesFolded: (count: number) => `${count} slices; the five largest are shown individually and the rest are drawn as one`,
+  labelsShortened: 'some category labels are shortened; the source table has them whole',
+  kept: 'The caption, comments and edits on this block are kept.',
+} as const;
+
+/**
+ * The source label under a view (parent §2 "Views"): the dataset's title, where its snapshot came from, when and by whom
+ * it was last bound, and its state when not `ok`. `by` is the actor's shown name (the human "You", a session its title).
+ */
+export function sourceLabel(descriptor: DatasetDescriptor, by: string): string {
+  const { source, state } = descriptor;
+  const from = source.kind === 'file' ? `from ${source.name}` : `${source.server} · ${source.tool}`;
+  const parts = [descriptor.title, from, `updated ${utcTime(descriptor.updated.at)} by ${by}`];
+  if (state.status === 'stale') parts.push(DATASET_STATES.staleSince(state.at));
+  else if (state.status === 'paused') parts.push(DATASET_STATES.paused);
+  else if (state.status === 'error') parts.push(state.message ?? 'the last refresh failed');
+  return parts.join(' · ');
+}
+
+/** The descriptor's validation notes: "<n> of <rows> values in <column> are not <type>", one per column that has any. */
+export function mismatchNotes(descriptor: DatasetDescriptor): string[] {
+  return descriptor.columns.flatMap((column) => (column.mismatches ? [DATASET_STATES.mismatches(column.mismatches, descriptor.rows, column.name, column.type)] : []));
+}
+
+const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+
+/** `2026-10-16 08:30 UTC`: an epoch time as every label and answer shows it. */
+export function utcTime(at: number): string {
+  const d = new Date(at);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+}

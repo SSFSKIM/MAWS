@@ -21,6 +21,7 @@ import { AppSessionIdSchema } from '../graph/ids'; // P2-E1
 import { ARTIFACT_ID } from './artifact-id';
 import { CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PANE_NAMES, PaneSchema } from './panes';
 import { DOCUMENT_TOOL_NAMES, DOCUMENT_TOOLS } from './document-tools'; // P3-B (M7)
+import { DASHBOARD_TOOL_NAMES, DASHBOARD_TOOLS } from './dashboard-tools'; // P3-E (E2 M2)
 
 export { ARTIFACT_ID } from './artifact-id';
 
@@ -29,6 +30,8 @@ export const MAWS_TOOL_NAMES = [
   'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
   // P3-A (M6)
   'artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export',
+  // P3-E (E2 M2): the dashboard's `artifact_dataset` (`./dashboard-tools`), after A's namespace; B's tools close the list
+  ...DASHBOARD_TOOL_NAMES,
   // P3-B (M7): the document tools (`./document-tools`: their schemas, descriptions, limits and refusals)
   ...DOCUMENT_TOOL_NAMES,
 ] as const;
@@ -182,7 +185,7 @@ export const ArtifactCreateInputSchema = z
     const path = input.path ?? input.html_path;
     if (kind === 'html' && (path === undefined) === (input.content === undefined)) issue('path', 'an html artifact takes path or content, one of them');
     if (kind === 'file' && path === undefined) issue('path', 'a file artifact takes the path of the file');
-    if (kind !== 'html' && kind !== 'document' && input.content !== undefined) issue('content', `a ${kind} artifact takes no content`);
+    if (kind !== 'html' && kind !== 'document' && kind !== 'dashboard' /* P3-E: B's markdown */ && input.content !== undefined) issue('content', `a ${kind} artifact takes no content`);
     if (kind !== 'html' && kind !== 'file' && path !== undefined) issue('path', `a ${kind} artifact takes files, not a path`);
     if ((kind === 'html' || kind === 'file' || kind === 'document') && input.files !== undefined) issue('files', `a ${kind} artifact takes no files`);
   });
@@ -447,7 +450,7 @@ export const MAWS_TOOLS = {
   artifact_create: {
     title: 'Create artifact',
     description:
-      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content; presentation, design, design_system and dashboard start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Returns the artifact's id and revision, and the first time this session creates a kind, that kind's guide and format reference.",
+      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Returns the artifact's id and revision, and the first time this session creates a kind, that kind's guide and format reference.",
     input: ArtifactCreateInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
@@ -509,6 +512,7 @@ export const MAWS_TOOLS = {
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
   // P3-A (M6) end
+  ...DASHBOARD_TOOLS, // P3-E (E2 M2)
   // P3-B (M7)
   ...DOCUMENT_TOOLS,
 } as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean } }>;

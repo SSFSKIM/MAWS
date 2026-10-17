@@ -345,6 +345,18 @@
   background: color-mix(in oklab, var(--warning) 36%, transparent);
   border-bottom-color: var(--warning);
 }
+/* P3-E (E2 M4): a block commented whole (a dashboard's view) is outlined rather than tinted, its content kept legible */
+.ds-doc .doc-atom.comment {
+  background: none;
+  border-bottom: 0;
+  outline: 2px solid color-mix(in oklab, var(--warning) 60%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.ds-doc .doc-atom.comment.comment-active {
+  background: none;
+  outline-color: var(--warning);
+}
 .doc-rail {
   display: flex;
   flex-direction: column;

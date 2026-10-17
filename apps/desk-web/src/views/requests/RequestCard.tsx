@@ -18,6 +18,7 @@ import { QuestionBody } from '../../../../../src/renderer/src/request-card/varia
 import { capabilities } from '../../conversation/capabilities';
 import { cardState, isAsyncQuestion, isQuestion, type CardState } from '../../conversation/card-state';
 import { settledText } from '../../conversation/words';
+import { sessionName } from '../../log/projection';
 import type { RequestRecord, RpcEntry } from '../../project/conversation';
 import { useConnected, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
@@ -67,7 +68,7 @@ export function RequestCard({ request, embedded = false }: { request: string; em
   const capability = session ? capabilities(session, connected)[question ? 'answer' : 'decide'] : { can: false, reason: 'the session is not in this project’s log yet' };
   const rpc = latestRpc(rpcs, request);
   const state = cardState(record, rpc, capability, session?.machineOnline ?? null, connected);
-  const who = session?.alias ?? record.raised.session.slice(0, 8);
+  const who = session ? sessionName(session) : record.raised.session.slice(0, 8);
   const agent = record.raised.agentId ?? null;
   const verb = question ? 'asks' : `wants to ${toolVerb(asPermission(record.raised))}`;
   // A subagent's request names the subagent asking, as the session's.
@@ -81,10 +82,14 @@ export function RequestCard({ request, embedded = false }: { request: string; em
     >
       <header className="flex flex-wrap items-baseline gap-x-1.5 text-ui-sm">
         {!embedded && (
-          <>
-            <span className="font-semibold text-fg">{who}</span>
-            <span className="text-fg-muted">@{record.machine}</span>
-          </>
+          // One line at most: a long title truncates, whole on hover, before its alias and machine wrap away from it.
+          <span className="flex min-w-0 items-baseline gap-x-1.5" data-testid="card-who">
+            <span className="min-w-0 truncate font-semibold text-fg" title={session?.title ? who : undefined}>
+              {who}
+            </span>
+            {session?.title && <span className="shrink-0 text-fg-muted">{session.alias}</span>}
+            <span className="shrink-0 text-fg-muted">@{record.machine}</span>
+          </span>
         )}
         <span className="text-fg-muted">{embedded ? what.charAt(0).toUpperCase() + what.slice(1) : what}</span>
         {isAsyncQuestion(record.raised) && <span className="text-fg-faint">· it keeps working while it waits</span>}
