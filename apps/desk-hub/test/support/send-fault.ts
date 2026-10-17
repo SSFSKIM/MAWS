@@ -36,3 +36,5 @@ export const PROJECT_QUEUES_PATH = '/__test/queues';
 export const PROJECT_SEND_PATH = '/__test/send';
 /** Where the suites' `Project` says how many pages of a `hello`'s backlog it has read. */
 export const PROJECT_BACKLOG_PATH = '/__test/backlog-pages';
+/** Where the suites' `Project` is armed to fail its next `forget`, as a failed RPC from the Registry would. */
+export const PROJECT_FORGET_FAULT_PATH = '/__test/forget-fault';

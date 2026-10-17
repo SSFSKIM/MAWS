@@ -7,7 +7,8 @@
 // (a machine row without a client id) before Cloudflare's API is called; the service token is named
 // `desk-<org>-<machine>`, so a token whose create answer was lost is found by name and deleted before anything else is
 // minted under it. A second redemption while pending rotates the credential. A pending enrollment that expires, and a
-// revoked machine, leave their token's name in `orphans`, swept until the API confirms the deletion. A mint in flight
+// revoked machine, leave their token's name in `orphans`, swept until the API confirms the deletion; a revoked machine
+// leaves its revocation for each project of the org in `revocations`, swept until the project takes it. A mint in flight
 // is the one thing held only in memory (`busy`): an object restart ends the mint with it, and the name makes whatever
 // it left behind findable. Every call to the API under one token name (a sweep's deletion by name, a redemption's
 // deletion and mint) runs in turn on that name's queue, so a deletion by name never lists a token minted after it began.
@@ -58,6 +59,7 @@ CREATE TABLE IF NOT EXISTS enrollments (
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, registered_by TEXT NOT NULL, created TEXT NOT NULL, archive_machine TEXT);
 CREATE TABLE IF NOT EXISTS orphans (token_name TEXT PRIMARY KEY, since TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS revocations (machine TEXT NOT NULL, project TEXT NOT NULL, generation INTEGER NOT NULL, PRIMARY KEY (machine, project));
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT PRIMARY KEY, member TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS summaries (
@@ -73,8 +75,8 @@ type Counts = Omit<ProjectSummary, 'id' | 'name'>;
 const MACHINE_COLUMNS = 'name, client_id, token_name, state, enrollment, created, confirmed';
 const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, ttl_s';
 const PROJECT_COLUMNS = 'id, name, registered_by, created, archive_machine';
-/** How soon a failed orphan deletion is tried again. */
-const ORPHAN_RETRY_MS = 60_000;
+/** How soon a failed orphan deletion, or a revocation a project has not taken, is tried again. */
+const RETRY_MS = 60_000;
 
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 /** 128 random bits as lowercase hex (DX7's member id; also an enrollment's id). */
@@ -238,26 +240,45 @@ export class Registry extends DurableObject<Env> {
     }
   }
 
-  /** Revokes a machine: its record goes at once (the hub refuses it from then), its stream ends, its service token is
-   * deleted (retried until Cloudflare confirms), its name is released, an archive designation of it is cleared, and every
-   * project of the org stops counting it on the grid. */
+  /**
+   * Revokes a machine: its credential is refused and its stream ends at its `Machine` object, then its record goes (the
+   * Worker refuses it from then), its service token is deleted (retried until Cloudflare confirms), its name is released,
+   * an archive designation of it is cleared, and every project of the org stops counting it on the grid (retried until
+   * each project takes it). The `Machine` object goes first because it answers the newest stream generation the machine
+   * opened, which the projects are told: no stream of a refused credential opens after, so the generation recorded with
+   * the record's deletion is final.
+   */
   async revoke(member: MemberRecord, name: string): Promise<Result<{ revoked: string }>> {
     if (member.role !== 'admin') return fail(403, 'not-admin');
     const org = this.ensureOrg();
-    const machine = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name_key = ?`, machineNameKey(name)).toArray()[0];
+    let machine = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name_key = ?`, machineNameKey(name)).toArray()[0];
     if (!machine) return fail(404, 'unknown-machine');
+    const object = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`));
+    let generation = await object.revoke(machine.client_id);
+    // A credential minted for it while its object answered (a pending machine's token redeemed again) is refused there too.
+    for (;;) {
+      const now = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name = ? AND enrollment = ?`, machine.name, machine.enrollment).toArray()[0];
+      if (!now?.client_id || now.client_id === machine.client_id) break;
+      machine = now;
+      generation = Math.max(generation, await object.revoke(machine.client_id));
+    }
+    const revoked = machine;
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec('DELETE FROM machines WHERE name = ?', machine.name);
-      this.sql.exec("UPDATE enrollments SET state = 'expired' WHERE id = ? AND state IN ('open', 'pending')", machine.enrollment);
-      this.sql.exec('UPDATE projects SET archive_machine = NULL WHERE archive_machine = ?', machine.name);
-      this.orphan(machine.token_name);
+      this.sql.exec('DELETE FROM machines WHERE name = ?', revoked.name);
+      this.sql.exec("UPDATE enrollments SET state = 'expired' WHERE id = ? AND state IN ('open', 'pending')", revoked.enrollment);
+      this.sql.exec('UPDATE projects SET archive_machine = NULL WHERE archive_machine = ?', revoked.name);
+      this.orphan(revoked.token_name);
+      // Every project of the org: a project knows its machines, the registry does not.
+      this.sql.exec(
+        'INSERT INTO revocations (machine, project, generation) SELECT ?, id, ? FROM projects WHERE true ON CONFLICT (machine, project) DO UPDATE SET generation = MAX(generation, excluded.generation)',
+        revoked.name,
+        generation,
+      );
     });
-    const generation = await this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`)).revoke(machine.client_id);
-    // Whichever projects it opened: a project knows its machines, the registry does not.
-    await Promise.allSettled(this.projects().map((p) => this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org.id}:${p.id}`)).forget(org.id, p.id, machine.name, generation)));
+    await this.sweepRevocations();
     await this.sweepOrphans();
     await this.scheduleAlarm();
-    return ok({ revoked: machine.name });
+    return ok({ revoked: revoked.name });
   }
 
   machines(): MachineRecord[] {
@@ -442,7 +463,7 @@ export class Registry extends DurableObject<Env> {
     return ok({ project: this.project(id)! });
   }
 
-  /** Expired enrollments and orphaned tokens, swept when their time comes. */
+  /** Expired enrollments, orphaned tokens, and revocations projects have not taken, swept when their time comes. */
   async alarm(): Promise<void> {
     await this.sweep();
   }
@@ -474,8 +495,24 @@ export class Registry extends DurableObject<Env> {
     const now = Date.now();
     const live = this.sql.exec<EnrollmentRow>(`SELECT ${ENROLLMENT_COLUMNS} FROM enrollments WHERE state IN ('open', 'pending')`).toArray();
     for (const enrollment of live) if (lapsed(enrollment, now) && !this.busy.has(enrollment.id)) this.expire(enrollment);
+    await this.sweepRevocations();
     await this.sweepOrphans();
     await this.scheduleAlarm();
+  }
+
+  /** Tells each project a revocation it has not taken (`Project.forget` keeps the newest generation it is told, so a
+   * second telling is harmless). A row goes once its project answered, unless a later revocation of the name raised its
+   * generation meanwhile: that one is still to be told. */
+  private async sweepRevocations(): Promise<void> {
+    const rows = this.sql.exec<{ machine: string; project: string; generation: number }>('SELECT machine, project, generation FROM revocations').toArray();
+    if (rows.length === 0) return;
+    const org = this.ensureOrg().id;
+    await Promise.allSettled(
+      rows.map(async ({ machine, project, generation }) => {
+        await this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${project}`)).forget(org, project, machine, generation);
+        this.sql.exec('DELETE FROM revocations WHERE machine = ? AND project = ? AND generation = ?', machine, project, generation);
+      }),
+    );
   }
 
   /** Deletes orphaned tokens by name, each on its name's queue. A name some machine holds again is that machine's: its
@@ -512,15 +549,15 @@ export class Registry extends DurableObject<Env> {
     return run;
   }
 
-  /** The alarm at the next expiry, or sooner when an orphan waits for a retry; never in the past, so an enrollment kept
-   * open by a mint in flight does not spin it. */
+  /** The alarm at the next expiry, or sooner when an orphan or a revocation waits for a retry; never in the past, so an
+   * enrollment kept open by a mint in flight does not spin it. */
   private async scheduleAlarm(): Promise<void> {
     const now = Date.now();
     const next = this.sql
       .exec<{ expires: string }>("SELECT expires FROM enrollments WHERE state IN ('open', 'pending')")
       .toArray()
       .map((e) => Date.parse(e.expires));
-    if (this.sql.exec('SELECT 1 FROM orphans LIMIT 1').toArray().length > 0) next.push(now + ORPHAN_RETRY_MS);
+    if (this.sql.exec('SELECT 1 FROM orphans UNION ALL SELECT 1 FROM revocations LIMIT 1').toArray().length > 0) next.push(now + RETRY_MS);
     if (next.length === 0) return;
     const at = Math.max(Math.min(...next), now + 250);
     const current = await this.ctx.storage.getAlarm();

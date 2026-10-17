@@ -20,6 +20,7 @@ import {
   PROJECT_ARCHIVE_HOLD_PATH,
   PROJECT_BACKLOG_PATH,
   PROJECT_CALLS_PATH,
+  PROJECT_FORGET_FAULT_PATH,
   PROJECT_HOLD_PATH,
   PROJECT_LEASE_PATH,
   PROJECT_LIFE_PATH,
@@ -250,6 +251,10 @@ export async function startLocalHub() {
     /** Has a project queue a frame for a machine's stream of `generation`, as a reply on a retired stream is queued. */
     async projectSend(project: string, machine: string, generation: number, frame: unknown) {
       await seam('PROJECT', project, PROJECT_SEND_PATH, { machine, generation, frame });
+    },
+    /** Makes a project's next `forget` throw, as a failed RPC from the Registry would (the suites' Worker only). */
+    async failNextForget(project: string) {
+      await seam('PROJECT', project, PROJECT_FORGET_FAULT_PATH);
     },
     /** How many pages of `hello` backlogs a project has read. */
     async backlogPages(project: string): Promise<number> {

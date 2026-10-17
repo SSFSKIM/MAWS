@@ -12,6 +12,7 @@
 //   - a `Project` that counts the calls machines make to it and the frames they carry, and the pages of `hello` backlogs
 //     it has read;
 //   - a `Project` that holds its archive lookups, lists its send queues, and queues a frame for any generation;
+//   - a `Project` armed to fail its next `forget`, as a failed RPC from the Registry would;
 //   - a `Registry` whose org record can be rewritten, as an object still on a deploy's previous version would make it;
 //   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand.
 import { Machine as DeployedMachine, type Timing } from '../../src/objects/machine';
@@ -29,6 +30,7 @@ import {
   PROJECT_ARCHIVE_HOLD_PATH,
   PROJECT_BACKLOG_PATH,
   PROJECT_CALLS_PATH,
+  PROJECT_FORGET_FAULT_PATH,
   PROJECT_HOLD_PATH,
   PROJECT_LEASE_PATH,
   PROJECT_LIFE_PATH,
@@ -153,6 +155,14 @@ export class Project extends DeployedProject {
     return this.ctx.storage.kv.get<number>('visible-window') ?? super.visibleMs();
   }
 
+  forget(org: string, project: string, machine: string, generation: number): void {
+    if (this.ctx.storage.kv.get<boolean>('forget-fault')) {
+      this.ctx.storage.kv.delete('forget-fault');
+      throw new Error('a failure the suite injected into forget');
+    }
+    super.forget(org, project, machine, generation);
+  }
+
   protected async register(project: string, name: string, machine: string): Promise<ProjectRecord> {
     await this.held?.promise;
     return super.register(project, name, machine);
@@ -195,6 +205,10 @@ export class Project extends DeployedProject {
       return new Response('queued');
     }
     if (url.pathname === PROJECT_BACKLOG_PATH) return Response.json(this.backlogPages);
+    if (url.pathname === PROJECT_FORGET_FAULT_PATH) {
+      this.ctx.storage.kv.put('forget-fault', true);
+      return new Response('armed');
+    }
     if (url.pathname === PROJECT_LIFE_PATH) return new Response(this.life);
     if (url.pathname === PROJECT_CALLS_PATH) return Response.json(this.ctx.storage.kv.get('calls') ?? { calls: 0, frames: 0 });
     if (url.pathname === PROJECT_LEASE_PATH) {

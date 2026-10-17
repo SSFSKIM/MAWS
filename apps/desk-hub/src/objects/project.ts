@@ -7,8 +7,8 @@
 //
 // What the session plane keeps survives an eviction while sockets stay open (§2): machines' leases and presence,
 // sessions' presence, the pending set, delivery outcomes, RPC records, and subscription routes (session-store.ts).
-// A machine is online while its lease is fresh; when the lease lapses or its stream closes, the machine's
-// subscriptions end at the browsers and its forwarded RPCs without a result become `uncertain`.
+// A machine is online while its lease is fresh; when the lease lapses, its stream closes, or it is revoked, the
+// machine's subscriptions end at the browsers and its forwarded RPCs without a result become `uncertain`.
 import { DurableObject } from 'cloudflare:workers';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
@@ -255,10 +255,15 @@ export class Project extends DurableObject<Env> {
    * count it, and a frame those streams still carry (a POST the Worker admitted before the revocation) is refused as
    * stale. Its sessions keep their history and read as on a machine that is offline. A machine enrolled again under the
    * name opens a newer stream, and counts again once it opens the project.
+   *
+   * A revoked stream's lease ends here, as that stream's close would end it: the close may never come (a Machine object
+   * that restarted holds no stream to end, and the close is sent unawaited). A newer stream's lease is the name's anew.
    */
   forget(org: string, project: string, machine: string, generation: number): void {
     this.remember(org, project);
     this.plane.revoke(machine, generation);
+    const lease = this.plane.lease(machine);
+    if (lease?.online && lease.generation <= generation) this.lapse({ ...lease, closed: true });
     this.reportSummary();
   }
 
