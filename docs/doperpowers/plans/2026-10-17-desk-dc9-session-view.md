@@ -28,7 +28,7 @@
 - [ ] M1 — The hub's `output`, the widened bodies, and DX8's `output()`
 - [ ] M2 — The fake machine's part: the session-view recording, jobs and status, `output`, pages after the replay
 - [ ] M3 — The per-session owner and the session view
-- [ ] M4 — The channel around the view: tail rows, the request band, the overlay, the end marker, the fallbacks, the retirements
+- [ ] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements
 - [ ] M5 — The column: agents with real status, the jobs view, `output`, MCP names
 - [ ] M6 — The acceptance, the phone's bundle, and the gate
 
@@ -307,9 +307,14 @@ session view beside them; `apps/desk-web/e2e/`.
 **At its end:**
 - **Tail rows.** Each send to the session not yet matched to a user row of
   the transcript — an outbox item, or a `human` event addressed to the
-  session — is a tail row in MAWS's held-prompt shape (`heldRow`), with
-  the desk's delivery line (DX4 `delivery`; an RPC's `uncertain`), passed
-  as `Transcript`'s `tail`. It stays, whatever the delivery state says,
+  session — is a tail row in MAWS's held-prompt shape (`heldRow`), passed
+  as `Transcript`'s `tail`, drawn as the owner chose (1B, Decision Log):
+  the bubble identical to MAWS's `UserRow` but for a foot under a hairline
+  carrying the state (DX4 `delivery`; an RPC's `uncertain`) and, for a
+  send that will not arrive (`recorded`, `refused-read-only`, `failed`), a
+  tint of the whole bubble; the foot is a separate component with a small
+  props surface (state, short words, reason), long reasons in its tooltip,
+  so it can later move into MAWS's `UserRow` (not edited in this round). It stays, whatever the delivery state says,
   until its own user row is observed; matching is one to one and only by
   identity (Decision Log, the second review): the delivery frame's first
   line naming the send's `(writer, seq)` (`[sminos chat <project>
@@ -324,12 +329,18 @@ session view beside them; `apps/desk-web/e2e/`.
   `refused-read-only` or `recorded` keeps its tail row with that state; a
   second outcome for the same key (`failed` after `delivered`) replaces
   the first.
-- **The request band.** The hub's pending requests for the session are a
-  band of DC5's request cards above the composer, answerable in place;
-  the cards leave when settled.
+- **The requests, inline at the tail** (the owner's verdict, 2B,
+  superseding the band). The hub's pending requests for the session are
+  DC5's request cards drawn as the transcript's last rows, after any tail
+  sends, scrolling with it, answerable in place, leaving when settled;
+  never folded inside a closed working record (they sit after the last
+  one). A reader scrolled up gets an "N waiting ↓" pill that jumps to
+  them.
 - **The ask mod's question** draws from its transcript row (S1's classify
   entry, merged in), with the log's `question` and `answered` events
-  overlaid, joined by the event's `src` (the call's tool-use id).
+  overlaid, joined by the event's `src` (the call's tool-use id): while
+  pending the row says "Waiting for your answer · below" (its card is at
+  the tail), and once answered it carries the log's answer.
 - **The end marker.** An ended or retired session's view carries one
   marker row at its tail, with Resume (or who retired it) as the channel's
   header offers today.
@@ -353,7 +364,7 @@ own framed row; a submission delayed then refused keeping its tail row as
 second review's case: an earlier terminal prompt "continue", then a web
 send "continue" acknowledged while the session is busy, whose tail row
 stays until its own framed row arrives; a send whose row never arrives
-because the session ended first, kept ahead of the end marker); browser tests for the band (a permission
+because the session ended first, kept ahead of the end marker); browser tests for the inline requests (a permission
 and a question answered, cards gone), the overlay, the end marker with
 Resume, each fallback, and the phone drawing no transcript; DC5's
 conversation and phone suites pass.
@@ -408,7 +419,7 @@ S2's PRs); the phone's route measured (`e2e/phone-load.spec.ts` or its
 successor) loading no chunk carrying MAWS's transcript, Markdown or shiki;
 DC5's group-chat tests unchanged; the gate green (`static,unit` and
 `e2e:desk-web` on the Linux lane); the taste surfaces polished to the
-owner's verdict on T0. A screenshot set of the session view, the band,
+owner's verdict on T0. A screenshot set of the session view, the inline requests,
 the end marker and the jobs view under the workspace for the composite's
 writer.
 
@@ -534,7 +545,28 @@ in their own worktrees.
   answered. A job's Stop draws disabled with its reason ("Stopping a job
   runs from its terminal"): web Stop is optional in §9.4 and has no DX6
   RPC, so it is residue. M4–M6 polish to the owner's verdict when it comes.
-  Date/Author: 2026-10-17, controller.
+  Date/Author: 2026-10-17, controller. **Superseded in part** by the
+  owner's verdicts below (1B, 2B).
+- Decision: **The owner's verdicts on T0, 2026-10-17** (through the
+  composite's writer; the composite's §9.1 is being amended for 1B and
+  2B): (1) the delivery line is **1B**, inside the bubble — the state in
+  the bubble's foot under a hairline, a send that will not arrive tinting
+  the whole bubble; the bubble stays identical to MAWS's `UserRow` apart
+  from the foot and tint, the foot a separate component with a small props
+  surface (state, short words, reason), long reasons in the tooltip, so it
+  can later move into MAWS's `UserRow` (the owner wants to propose the
+  style to the app; `UserRow` is not edited in this round); (2) requests
+  are **2B**, inline at the transcript's tail — the cards are the
+  transcript's last rows, after any tail sends, scrolling with it, never
+  folded inside a closed record, with an "N waiting ↓" pill for a reader
+  scrolled up; the ask mod's question row reads "Waiting for your answer ·
+  below" while pending and carries the log's answer once answered; (3) job
+  output is **4A**, under its row; (4) web Stop draws disabled with the
+  reason on hover, and becomes a follow-up right after DC8 and DC9 land
+  (DX6 RPC, hub route, machine side) — residue in the report; (5) the end
+  marker as drawn. The mockup page is updated to the chosen alternatives
+  when convenient (not a gate).
+  Date/Author: 2026-10-17, the owner via the composite's writer.
 
 ## Surprises & Discoveries
 
