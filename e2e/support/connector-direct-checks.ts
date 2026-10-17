@@ -6,6 +6,7 @@
 // - `addedListeners` / `loopbackPort`: the callback listener a Connect binds, exactly 127.0.0.1;
 // - `readSealedText` / `plaintextHits`: a sealed OAuth record's format and that no known value is readable in it;
 // - `journalTurns`: launches, and that no model turn ran, from a session's journal rows;
+// - `isBlankResume`: the one failed acquire (a transcript-less resume) the transition scene documents and goes around;
 // - `scrubDiagnostic` / `boundedAcquire` / `boundedMetaRows`: a failed launch's evidence, an acquire's answer and a
 //   journal's meta rows reduced to allowlisted, scrubbed, size-bounded fields (never args, environment or raw frames);
 // - `isRetainedScratch`: which scratch files a scene scans for secrets (never the host token, the raw open log, a
@@ -162,6 +163,21 @@ export function boundedMetaRows(rows: readonly { direction: string; frame: unkno
     return row;
   });
   return { rows: bounded, omitted: Math.max(0, meta.length - META_ROWS_MAX) };
+}
+
+// P3-HD Decision Log 40: the engine's refusal of `--resume` for a session that never wrote a transcript (the owner's
+// no-message Start wrote none), the existing sessions debt the scene documents rather than repairs.
+export const BLANK_RESUME_REFUSAL = 'No conversation found with session ID';
+
+// Whether a `session.acquire` answer is that documented failure, positively: the failed answer's own message and its
+// resources (the session has no transcript) and the launch's init_failed journal row (bounded meta rows) all say it.
+// Anything else, a ready answer included, is not.
+export function isBlankResume(acquire: unknown, metaRows: readonly Record<string, unknown>[]): boolean {
+  if (acquire === null || typeof acquire !== 'object') return false;
+  const { status, message, resources } = acquire as { status?: unknown; message?: unknown; resources?: unknown };
+  const transcript = resources !== null && typeof resources === 'object' ? (resources as { transcript?: unknown }).transcript : undefined;
+  if (status !== 'failed' || transcript !== 'none' || typeof message !== 'string' || !message.includes(BLANK_RESUME_REFUSAL)) return false;
+  return metaRows.some((row) => row.event === 'init_failed' && typeof row.message === 'string' && row.message.includes(BLANK_RESUME_REFUSAL));
 }
 
 // A scratch path (relative to the scene's root, `/`-separated) a scene may read and scan as retainable.

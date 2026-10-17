@@ -42,7 +42,7 @@
 //          admitted call, none for a refused one.
 //   transport host death: a stand-in host starts the same plan and is SIGKILLed; the lifeline alone ends the group.
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'; // P3-HD M4b: rmSync
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'; // P3-HD M4b: rmSync
 import { join } from 'node:path';
 import { test, expect, type TestInfo } from '@playwright/test';
 import type { McpStatusResponse } from '@shared/wire/control';
@@ -65,7 +65,7 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { PAGE_HTML, PAGE_TITLE, pageState, SERVER, TOOL, type ConnectorScene } from './support/connector-scene';
 import { createPageIn, expectQuietJournals, heldServer, referencingServer, Refreshes, serverConnected, serverRow, sessionJournals, sessionMeta } from './support/connector-direct-scene';
-import { boundedAcquire, heldFate, oncePageHtml } from './support/connector-direct-checks';
+import { boundedAcquire, heldFate, isBlankResume, oncePageHtml } from './support/connector-direct-checks';
 import { allow, evidence, grantsOf, printEvidence, revokeInSheet, shot, stopEngine } from './support/connector-direct-acceptance';
 // P3-HD M4b end
 
@@ -748,20 +748,49 @@ test('transition: one grant reads through E, then D with no engine, then E again
     expect(await refreshes.since(), 'and only once').toEqual({ updates: 0, submitted: 0 });
     quiet.unmounted = { silentMs: WATCH_MS + 10_000, shown };
 
-    // D → E: the owner's session resumed (no message), the next refresh reads through its engine again
+    // D → E: back to an engine with no message. The owner's session is resumed; the engine refuses a resume of a session
+    // that never wrote a transcript (the no-message Start wrote none: existing sessions debt, outside P3-HD, Decision Log 40
+    // and docs/doperpowers/plans/2026-09-28-c3-engine-host.md's `--resume` refusals), and then the owner's fresh eligible
+    // session is started. Any other acquire answer is asserted as before: ready, or a failure with its diagnostics.
     expect(scene.launches(engine.appSessionId).spawns, 'no timer acquired an engine through all of D').toBe(1);
     const acquired = appValue(await appInvoke(run.page, 'session.acquire', { appSessionId: engine.appSessionId as LaunchSpec['appSessionId'], reason: 'read', options: { requireEmptyMessage: true } }));
     // Decision Log 39: the answer and the journals' launch rows are kept before the assertion, so a failure can be diagnosed
-    await evidence(info, 'transition-acquire', { acquire: boundedAcquire(acquired, [scene.root, scene.userData]), journals: sessionMeta(scene) });
-    expect(acquired).toMatchObject({ status: 'ready', launched: true });
+    const launchRows = sessionMeta(scene);
+    await evidence(info, 'transition-acquire', { acquire: boundedAcquire(acquired, [scene.root, scene.userData]), journals: launchRows });
+    const blankResume = isBlankResume(acquired, launchRows.find((journal) => journal.appSessionId === engine.appSessionId)?.rows ?? []);
+    let returnedId = engine.appSessionId;
+    let fresh: { appSessionId: string; start: unknown; signals: unknown } | null = null;
+    if (!blankResume) expect(acquired).toMatchObject({ status: 'ready', launched: true });
+    else {
+      // The owner's gesture is not offered while D serves (H hides the sheet's Start), so main's own pair, as the product
+      // runs it for an artifact in a Space linked to an indexed directory: session.create with that directory and its
+      // project, then session.start with no message (requireEmptyMessage), as startArtifactSession does.
+      const linked = realpathSync(scene.project);
+      const project = appValue(await appInvoke(run.page, 'session.projects.list', undefined)).projects.find((entry) => entry.directory === linked);
+      expect(project, 'the Space’s linked directory is an indexed project').toBeDefined();
+      await expect.poll(async () => (await scene.live(run.page)).map((session) => session.appSessionId), { timeout: 15_000, message: 'the refused resume’s engine is gone: no engine is live before the fresh Start' }).toEqual([]);
+      const created = appValue(await appInvoke(run.page, 'session.create', { projectId: project!.id, location: { kind: 'directory', path: scene.project } }));
+      expect(created.appSessionId, 'a fresh session, not the old record').not.toBe(engine.appSessionId);
+      const start = appValue(await appInvoke(run.page, 'session.start', { appSessionId: created.appSessionId, message: null, options: { requireEmptyMessage: true } }));
+      expect(start).toMatchObject({ status: 'starting' });
+      await expect
+        .poll(async () => appValue(await appInvoke(run.page, 'engine.sessions', undefined)).find((entry) => entry.appSessionId === created.appSessionId)?.process, { timeout: 90_000, message: 'the fresh session’s engine is ready' })
+        .toBe('ready');
+      returnedId = created.appSessionId;
+      fresh = { appSessionId: created.appSessionId, start, signals: { engineProcess: 'ready' } };
+    }
     const resumed = await scene.live(run.page);
-    expect(resumed.map((session) => session.appSessionId), 'the owner’s session, alone').toEqual([engine.appSessionId]);
-    await serverConnected(run.page, engine.appSessionId, SERVER);
+    expect(resumed.map((session) => session.appSessionId), blankResume ? 'the fresh session, alone' : 'the owner’s session, alone').toEqual([returnedId]);
+    await serverConnected(run.page, returnedId, SERVER);
+    if (fresh !== null) fresh.signals = { engineProcess: 'ready', mcp: `${SERVER} connected` };
     const back = await refreshes.until('engine', WATCH_MS + 30_000);
     const engineAgain = scene.toolCalls().at(-1)!.pid;
     expect(engineAgain, 'not MAWS’s own instance').not.toBe(directServer);
     expect(await grantsOf(run.page, artifactId), 'still the one grant').toEqual(grants);
-    expect(scene.launches(engine.appSessionId), 'the explicit resume is the only other launch').toEqual({ spawns: 2, exits: 1 });
+    if (blankResume) {
+      expect(scene.launches(engine.appSessionId), 'the old record: its first launch and stop, the refused resume and its exit').toEqual({ spawns: 2, exits: 2 });
+      expect(scene.launches(returnedId), 'the fresh session: one launch, running').toEqual({ spawns: 1, exits: 0 });
+    } else expect(scene.launches(engine.appSessionId), 'the explicit resume is the only other launch').toEqual({ spawns: 2, exits: 1 });
 
     const journals = sessionJournals(scene);
     expectQuietJournals(journals);
@@ -770,6 +799,7 @@ test('transition: one grant reads through E, then D with no engine, then E again
       direct,
       back,
       quiet,
+      eReturn: blankResume ? { route: 'fresh eligible session, not a resume of the old record', debt: 'blank resume: existing sessions debt, P3-HD Decision Log 40', old: engine.appSessionId, fresh } : { route: 'resume of the owner’s session', session: engine.appSessionId },
       pids: { engine: engine.pid, engineServer, directServer, directParent, directParentIsSupervisor: scene.supervisors.has(directParent), resumed: resumed[0]!.pid, engineAgain, engineAgainParentIsEngine: ps(engineAgain, 'ppid') === String(resumed[0]!.pid) },
       journals: journals.map(({ turns, dirMode, fileModes }) => ({ turns, dirMode: dirMode.toString(8), fileModes: fileModes.map((mode) => mode.toString(8)) })),
     });

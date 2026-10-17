@@ -6,7 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  addedListeners, attachIfClean, bearerCrossings, boundedAcquire, boundedMetaRows, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
+  addedListeners, attachIfClean, bearerCrossings, boundedAcquire, boundedMetaRows, isBlankResume, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
   scanScratchTree, scrubDiagnostic, SEALED_FORMAT, type ScratchFs,
 } from '../../e2e/support/connector-direct-checks';
 
@@ -169,6 +169,29 @@ describe('scrubDiagnostic / boundedAcquire / boundedMetaRows: a failed launch’
     const bounded = boundedMetaRows(rows, roots);
     expect(bounded.rows).toHaveLength(64);
     expect(bounded.omitted).toBe(36);
+  });
+});
+
+describe('isBlankResume: the one failed acquire the scene accepts as the documented transcript-less resume (P3-HD Decision Log 40)', () => {
+  const refused = 'No conversation found with session ID: 0a1b';
+  const failed = { status: 'failed', appSessionId: 'a1', message: `engine exited: ${refused}`, resources: { worktree: null, record: 'kept', transcript: 'none' } };
+  const journal = [{ event: 'spawn', argCount: 4 }, { event: 'init_failed', message: refused }, { event: 'exit', code: 1 }];
+
+  it('is positive only when the answer, its resources and the launch’s own init_failed row all say so', () => {
+    expect(isBlankResume(failed, journal)).toBe(true);
+  });
+
+  it('is negative for a ready answer, another failure, a transcript that exists, or a journal that does not agree', () => {
+    expect(isBlankResume({ status: 'ready', appSessionId: 'a1', launched: true, joined: false }, journal)).toBe(false);
+    expect(isBlankResume({ ...failed, message: 'engine exited: EACCES' }, [{ event: 'init_failed', message: 'EACCES' }])).toBe(false);
+    expect(isBlankResume({ ...failed, resources: { ...failed.resources, transcript: 'kept' } }, journal)).toBe(false);
+    expect(isBlankResume(failed, [{ event: 'spawn' }, { event: 'exit' }])).toBe(false);
+    expect(isBlankResume(failed, [{ event: 'init_failed', message: 'timed out' }])).toBe(false);
+    expect(isBlankResume(failed, [{ event: 'spawn', message: refused }])).toBe(false);
+  });
+
+  it('is negative for anything that is not an answer', () => {
+    for (const value of [undefined, null, 'failed', 7, [], { status: 'failed' }, { status: 'failed', message: refused }]) expect(isBlankResume(value, journal)).toBe(false);
   });
 });
 
