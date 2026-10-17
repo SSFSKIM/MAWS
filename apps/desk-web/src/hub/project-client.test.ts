@@ -35,6 +35,7 @@ function client(options: { held?: () => number; frameLimit?: number; resubscribe
   const statuses: ConnectionStatus[] = [];
   const caughtUp: number[] = [];
   const sessions: SessionMessage[] = [];
+  const refusals: string[] = [];
   const held = options.held ?? (() => got.at(-1)?.offset ?? 0);
   const c = new ProjectClient({
     base: double.url.replace(/^http/, 'ws'),
@@ -48,11 +49,12 @@ function client(options: { held?: () => number; frameLimit?: number; resubscribe
       caughtUp: (offset) => caughtUp.push(offset),
       session: (message) => sessions.push(message),
       status: (s) => statuses.push(s),
+      refused: (r) => refusals.push(r.message),
     },
   });
   clients.push(c);
   c.start();
-  return { c, got, statuses, caughtUp, sessions };
+  return { c, got, statuses, caughtUp, sessions, refusals };
 }
 
 describe('the log', () => {
@@ -317,6 +319,41 @@ describe('the session plane', () => {
     subscription.rows('u9', 200);
     await until(() => double.up.filter((u) => u.frame.t === 'rows').length === 4);
     expect(double.up.filter((u) => u.frame.t === 'rows').map((u) => (u.frame as { limit: number }).limit)).toEqual([1000, 1, 2, 200]);
+  });
+
+  it("asks a task's output on a main or an agent subscription within the hub's bounds, and passes the answer through", async () => {
+    const { c, caughtUp, refusals } = client();
+    await until(() => caughtUp.length === 1);
+    const answers: SessionMessage[] = [];
+    const main = c.subscribe({ machine: MACHINE, session: SESSION, agentId: null }, { ...recorder().listener, message: (m) => answers.push(m) });
+    const agent = c.subscribe({ machine: MACHINE, session: SESSION, agentId: 'a1' }, recorder().listener);
+    await until(() => double.subscriptions(PROJECT).length === 2);
+    const { sub } = double.subscriptions(PROJECT).find((s) => s.agentId === null)!;
+    const { sub: agentSub } = double.subscriptions(PROJECT).find((s) => s.agentId === 'a1')!;
+    main.output('b7k2m9q4x', 65536);
+    agent.output('a_B-9', 1);
+    // A task id the engine never spells is not asked for (the hub would refuse it into the audit record); a tail out of
+    // range is brought within 1 to 524288 bytes.
+    main.output('../tasks/b7k2m9q4x', 1024);
+    main.output('b7k2m9q4x', 10_000_000);
+    main.output('b7k2m9q4x', 0);
+    main.output('b7k2m9q4x', 2.5);
+    const asked = () => double.up.filter((u) => u.frame.t === 'output').map((u) => u.frame);
+    await until(() => asked().length === 5);
+    expect(asked()).toEqual([
+      { t: 'output', sub, taskId: 'b7k2m9q4x', tail: 65536 },
+      { t: 'output', sub: agentSub, taskId: 'a_B-9', tail: 1 },
+      { t: 'output', sub, taskId: 'b7k2m9q4x', tail: 524288 },
+      { t: 'output', sub, taskId: 'b7k2m9q4x', tail: 1 },
+      { t: 'output', sub, taskId: 'b7k2m9q4x', tail: 2 },
+    ]);
+
+    double.sendSub(PROJECT, sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: true }, streaming: [], usage: null });
+    const answer = { taskId: 'b7k2m9q4x', result: 'missing', path: null } as const;
+    double.sendSub(PROJECT, sub, 'output', answer);
+    await until(() => answers.length === 2);
+    expect(answers[1]).toMatchObject({ kind: 'output', sub, n: 1, body: answer });
+    expect(refusals).toEqual([]);
   });
 
   it('subscribes again after a gap in n, under a fresh sub', async () => {

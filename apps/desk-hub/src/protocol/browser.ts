@@ -25,9 +25,25 @@ export type ProjectUp =
   /** The session's working-tree diff, answered as DX4 `diff` on that sub; a main-transcript sub's only (`agentId` null).
    * Computed on request, never pushed. */
   | { t: 'diff'; sub: string }
+  /**
+   * The last `tail` bytes of a background task's output file, answered as DX4 `output` on that sub; valid on a main or
+   * an agent sub (a job belongs to the loop whose rows started it). `taskId` as the engine spells a task id and `tail`
+   * 1 to `OUTPUT_TAIL_MAX` (`isTaskId`, `isOutputTail`), else `bad-shape`. Read on request, never pushed; what is absent
+   * or refused comes back as the answer's own variant, never as a hub refusal.
+   */
+  | { t: 'output'; sub: string; taskId: string; tail: number }
   /** Whether this tab shows the project; a visible tab of a member holds back that member's pushes. */
   | { t: 'visibility'; visible: boolean }
   | Part;
+
+/** The most bytes an `output` asks for, so its answer fits one frame. */
+export const OUTPUT_TAIL_MAX = 524_288;
+
+/** A task id as the engine spells one: what an `output` names, and nothing a path could be made of. */
+export const isTaskId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+
+/** A tail an `output` may ask for: a whole number of bytes from 1 to `OUTPUT_TAIL_MAX`. */
+export const isOutputTail = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= OUTPUT_TAIL_MAX;
 
 /** Hub → browser over a project socket. */
 export type ProjectDown =

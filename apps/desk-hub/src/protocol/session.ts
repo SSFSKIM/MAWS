@@ -154,7 +154,18 @@ export type SessionBodies = {
    * agent's; an agent-scope sub's are that agent's own. `usage` is the bridge's last `usage` on a main-scope sub (null
    * without a bridge or before the first one) and absent on an agent-scope sub.
    */
-  snapshot: { rows: JsonObject[]; more: boolean; subagents: SubagentMeta[]; presence: SessionPresence; streaming: Streaming[]; usage?: Usage | null };
+  snapshot: {
+    rows: JsonObject[];
+    more: boolean;
+    subagents: SubagentMeta[];
+    presence: SessionPresence;
+    streaming: Streaming[];
+    usage?: Usage | null;
+    /** The loop's background jobs, as `subagents` carries them; absent from a producer older than DC8. */
+    jobs?: Job[];
+    /** The loop's MCP servers by name, as `subagents` carries them; absent from a producer older than DC8. */
+    mcp?: McpServer[];
+  };
   /** A transcript row verbatim; `agentId` names the subagent whose transcript it is in. */
   row: { row: JsonObject; agentId: string | null };
   /** A `turn.step` chunk object verbatim under `chunk`, nested beside its message's identity and its index in that
@@ -164,11 +175,18 @@ export type SessionBodies = {
   'step-end': StepEnd;
   /** Older rows of the sub's transcript, newest first, answering a browser's `rows` request. */
   rows: { rows: JsonObject[]; before: string; more: boolean };
-  subagents: { subagents: SubagentMeta[] };
+  /**
+   * The subagent tree with each agent's status, the loop's background jobs, and its MCP servers' names: in the snapshot
+   * and again whenever any of it changes. A producer older than DC8 sends `subagents` with each agent's id and meta
+   * alone, and no `jobs` or `mcp`.
+   */
+  subagents: { subagents: SubagentMeta[]; jobs?: Job[]; mcp?: McpServer[] };
   /** Unified diff of the session's working tree against its base branch, answering a browser's `diff` (main-scope subs
    * only; computed on request, never pushed). The daemon answers no `base` when the session's directory is no git
    * working tree, and adds `error` when git failed: a field beyond these, carried as received. */
   diff: { base: string; text: string; error?: string };
+  /** A background task's output tail, answering a browser's `output` (DX3): read on request, never pushed. */
+  output: TaskOutput;
   /** After each main turn, on main-scope subs only: the one source of a session's context use and cost on the web. */
   usage: Usage;
   /**
@@ -197,12 +215,120 @@ export type SessionBodies = {
   delivery: Delivery;
 };
 
-export type SubagentMeta = { agentId: string; meta: JsonObject };
+/**
+ * One agent of the tree: its id and its `subagents/*.meta.json` verbatim, and, from a producer of DC8 or later, its
+ * status with what that rests on. A producer older than DC8 sends the id and the meta alone, and the web shows such an
+ * agent as it did before; one of DC8 or later sends `status` and `evidence` always, the rest where it holds them.
+ */
+export type SubagentMeta = { agentId: string; meta: JsonObject } & (SubagentStatusFacts | { [K in keyof SubagentStatusFacts]?: never });
+
+/**
+ * MAWS's `TaskStatus` words, so the web patches its task graph without a mapping. The machine normalizes every raw word
+ * the engine writes through one table (DX4): `completed`; `failed`, `error` → `failed`; `stopped`, `killed`,
+ * `cancelled`, `interrupted` → `stopped`; `running`, `pending` → `running`; any other word changes nothing. `exited`
+ * is known process death without a terminal word; `unknown` only where no evidence exists.
+ */
+export type SubagentStatus = 'running' | 'completed' | 'failed' | 'stopped' | 'exited' | 'unknown';
+
+/**
+ * What a status rests on: the bridge's account of an agent it holds, a terminal or running word in the rows, the parent
+ * agent's end (`exited`), the session's process gone (`exited`), or nothing (`unknown`).
+ */
+export type StatusEvidence = 'bridge' | 'rows' | 'parent' | 'session' | 'none';
+
+export type SubagentStatusFacts = {
+  status: SubagentStatus;
+  evidence: StatusEvidence;
+  /** The bridge's word, present while the bridge holds the agent: true from its spawn, the seed or a refresh; false
+   * from its stop. */
+  running?: boolean;
+  /** The bridge's spawn record, present when it holds one. */
+  spawn?: SubagentSpawn;
+  /** The terminal or running word the rows carry: the loop's, or a nested agent's in its parent agent's transcript. */
+  outcome?: SubagentOutcome;
+  /** The agent transcript's file facts, read only when its size or mtime changed. */
+  file?: AgentFile;
+};
+
+/**
+ * DX5's `agent` spawn, or, for an agent the module did not see spawn, what the `$.agent.list()` seed gives (no
+ * `background`, `model`, or `toolUseId`).
+ */
+export type SubagentSpawn = {
+  /** The agent that spawned it; null for one the main loop spawned. */
+  parentAgentId: string | null;
+  subagentType: string;
+  description: string;
+  name: string | null;
+  background?: boolean;
+  model?: string;
+  toolUseId?: string | null;
+};
+
+export type SubagentOutcome = {
+  /** `raw` through the normalization table. */
+  status: SubagentStatus;
+  /** The engine's own word, before the table. */
+  raw: string;
+  /** When the row that carries it was written (ISO 8601). */
+  at: string;
+  summary?: string;
+  outputFile?: string;
+};
+
+/** An agent transcript's facts on disk; `firstAt` and `lastAt` are its first and last rows' timestamps, null while it
+ * holds none. */
+export type AgentFile = { size: number; mtimeMs: number; firstAt: string | null; lastAt: string | null };
+
+/** A job's status: running from its start row, so never `unknown`. */
+export type JobStatus = Exclude<SubagentStatus, 'unknown'>;
+
+/**
+ * A background shell or monitor of the loop, read from its rows: a Bash result with `backgroundTaskId`, a Monitor
+ * result's `taskId`, then its notification, `task_status`, or `TaskStop`. It is `exited` once the session's process is
+ * gone without a terminal word.
+ */
+export type Job = {
+  taskId: string;
+  kind: 'shell' | 'monitor';
+  /** The call that started it. */
+  toolUseId: string;
+  startedAt: string;
+  description: string;
+  /** A shell's command. */
+  command?: string;
+  /** The output file as the rows named it; null until a row names one (a monitor's start names none). */
+  outputFile: string | null;
+  status: JobStatus;
+  endedAt?: string;
+  summary?: string;
+};
+
+/** An MCP server the loop's `mcp_instructions_delta` attachments added and did not remove: its name only. */
+export type McpServer = { name: string };
+
+/**
+ * A background task's output, answering an `output` request, by `result`. The machine serves only a task its index
+ * holds, only at the path the session's rows named for it, and only when that path carries `<session>/tasks/<taskId>.output`
+ * and resolves, symlinks followed, to a regular file under the session's tasks directory as the machine derives it.
+ */
+export type TaskOutput =
+  /** `text` is the last `tail` bytes decoded as UTF-8 with replacement, cut forward to the first line break inside the
+   * window when the window does not start the file; `from` the byte offset it starts at; `truncated` whether anything
+   * precedes it. */
+  | { taskId: string; result: 'ok'; path: string; size: number; from: number; text: string; truncated: boolean }
+  /** No file is there: the path passed containment and is gone (the engine writes under the temporary directory); or
+   * `path` null, a known task no row has named a file for yet, which may be asked again once a `subagents` names one. */
+  | { taskId: string; result: 'missing'; path: string | null }
+  /** The path the rows named fails containment; `reason` is a sentence for the human. Not to be asked again. */
+  | { taskId: string; result: 'refused'; path: string; reason: string }
+  /** The machine's index holds no such task: the request may have raced the index's next `subagents`. */
+  | { taskId: string; result: 'unknown-task' };
 
 export type SessionKind = keyof SessionBodies;
 
 /** The kinds that belong to a subscription (`sub` and `n` set); the rest are published to every browser of the project. */
-export const SUBSCRIPTION_KINDS = ['snapshot', 'row', 'chunk', 'block-row', 'step-end', 'rows', 'subagents', 'diff', 'usage', 'end'] as const satisfies readonly SessionKind[];
+export const SUBSCRIPTION_KINDS = ['snapshot', 'row', 'chunk', 'block-row', 'step-end', 'rows', 'subagents', 'diff', 'usage', 'output', 'end'] as const satisfies readonly SessionKind[];
 export type SubscriptionKind = (typeof SUBSCRIPTION_KINDS)[number];
 
 /** The kinds the hub interprets; it relays every other kind without reading its body. */

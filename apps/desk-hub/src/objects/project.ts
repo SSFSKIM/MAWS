@@ -12,7 +12,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
-import type { AuditEntry, PendingRequest, ProjectDown, PushNotice } from '../protocol/browser';
+import { isOutputTail, isTaskId, OUTPUT_TAIL_MAX, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice } from '../protocol/browser';
 import { canonicalize } from '../protocol/canonical';
 import { isMemberId, type ProjectRecord } from '../protocol/identity';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
@@ -155,6 +155,8 @@ export class Project extends DurableObject<Env> {
         return this.rows(socket, frame);
       case 'diff':
         return this.diff(socket, frame.sub);
+      case 'output':
+        return this.output(socket, frame);
       case 'visibility':
         if (typeof frame.visible !== 'boolean') return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'visibility is {visible: boolean}' });
         return this.attach(socket, (a) => ({ ...a, visibleAt: frame.visible ? Date.now() : null }));
@@ -651,6 +653,17 @@ export class Project extends DurableObject<Env> {
     if (!route) return;
     if (route.agentId !== null) return this.refuseBrowser(socket, { reason: 'bad-shape', message: "diff is a main-transcript subscription's (agentId null)" });
     if (this.leaseServes(route)) this.toMachine(route.machine, route.generation, { t: 'diff', project: this.projectId, session: route.session, sub: route.sub });
+  }
+
+  /** A task's output tail, carried to the sub's machine with its route; on a main or an agent sub alike. */
+  private output(socket: WebSocket, frame: Record<string, unknown>): void {
+    const { taskId, tail } = frame;
+    if (!isTaskId(taskId) || !isOutputTail(tail)) {
+      return this.refuseBrowser(socket, { reason: 'bad-shape', message: `output is {sub, taskId: [A-Za-z0-9_-]{1,64}, tail: 1 to ${OUTPUT_TAIL_MAX} bytes}` });
+    }
+    const route = this.ownRoute(socket, frame.sub);
+    if (!route || !this.leaseServes(route)) return;
+    this.toMachine(route.machine, route.generation, { t: 'output', project: this.projectId, session: route.session, agentId: route.agentId, sub: route.sub, taskId, tail });
   }
 
   /** The route of a sub this socket holds; a sub it does not (one that just ended, say) is passed over quietly. */

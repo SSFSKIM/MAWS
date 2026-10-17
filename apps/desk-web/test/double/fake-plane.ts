@@ -15,6 +15,8 @@ export class HeldSubscription {
   readonly asked: Array<{ before: string; limit: number }> = [];
   /** How many times the view asked for the diff. */
   diffs = 0;
+  /** Each task output the view asked for, in order. */
+  readonly outputs: Array<{ taskId: string; tail: number }> = [];
   closed = false;
   n = 0;
 
@@ -55,6 +57,7 @@ export class FakePlane implements SessionPlane {
     return {
       rows: (before, limit) => void held.asked.push({ before, limit }),
       diff: () => void (held.diffs += 1),
+      output: (taskId, tail) => void held.outputs.push({ taskId, tail }),
       close: () => void (held.closed = true),
     };
   }

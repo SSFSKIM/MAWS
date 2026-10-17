@@ -16,6 +16,8 @@ import {
   type LogEvent,
   type Delivery,
   type MachinePresence,
+  isTaskId,
+  OUTPUT_TAIL_MAX,
   SUBSCRIPTION_KINDS,
 } from 'desk-hub/protocol';
 import type { SessionPlane, SessionTarget, Subscription, SubscriptionListener, SubscriptionMessage } from '../shell/session-plane';
@@ -26,6 +28,9 @@ const VISIBLE_REPEAT_MS = 30_000;
 
 /** DX3's `rows` takes a `limit` from 1 to 1000; the hub refuses anything else as `bad-shape`, into the audit record. */
 const rowsLimit = (limit: number) => Math.min(1000, Math.max(1, Math.trunc(limit) || 1));
+
+/** DX3's `output` takes a `tail` from 1 to 524288 bytes, refused `bad-shape` otherwise, as `rows`'s `limit` is. */
+const outputTail = (tail: number) => Math.min(OUTPUT_TAIL_MAX, Math.max(1, Math.trunc(tail) || 1));
 
 export type { ConnectionStatus } from './socket';
 
@@ -195,6 +200,9 @@ export class ProjectClient implements SessionPlane {
       },
       diff: () => {
         if (open.sub && this.subs.has(open) && open.target.agentId === null) this.socket.send({ t: 'diff', sub: open.sub });
+      },
+      output: (taskId, tail) => {
+        if (open.sub && this.subs.has(open) && isTaskId(taskId)) this.socket.send({ t: 'output', sub: open.sub, taskId, tail: outputTail(tail) });
       },
       close: () => {
         if (open.retry) clearTimeout(open.retry);

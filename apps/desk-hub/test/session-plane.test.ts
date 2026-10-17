@@ -4,7 +4,7 @@
 // evict), which drops a `Project`'s memory and keeps its sockets open; a `Machine` holding a stream is an active
 // reference workerd will not evict, so its termination is `ctx.abort()` through a suite seam.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { GridDown, ProjectDown, ProjectSummary } from '../src/protocol/browser';
+import type { GridDown, ProjectDown, ProjectSummary, ProjectUp } from '../src/protocol/browser';
 import { FRAME_LIMIT, PartAssembler } from '../src/protocol/parts';
 import { importOrgKey, newNonce, seal, sealRpc, verify } from '../src/protocol/codes';
 import type { DownFrame } from '../src/protocol/machine';
@@ -322,6 +322,93 @@ describe('subscriptions', () => {
     });
     expect(new Set(gone)).toEqual(new Set([sub, agentSub]));
     other.close();
+    await m.close();
+  });
+
+  it("carry output to the machine on a main and an agent sub, refuse one out of form, and relay the answer to the sub's socket as numbered", async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const other = await browser(project);
+    const sub = newNonce();
+    const agentSub = newNonce();
+    b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub });
+    await m.next((f) => f.t === 'subscribe' && f.sub === sub, 'subscribe');
+    b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: 'a1', sub: agentSub });
+    await m.next((f) => f.t === 'subscribe' && f.sub === agentSub, 'the agent sub');
+
+    // A job belongs to the loop whose rows started it: valid on either scope, carried with the sub's whole route.
+    b.send({ t: 'output', sub, taskId: 'b7k2m9q4x', tail: 65536 });
+    expect(await m.next((f) => f.t === 'output' && f.sub === sub, 'output')).toEqual({ t: 'output', project, session: SESSION, agentId: null, sub, taskId: 'b7k2m9q4x', tail: 65536 });
+    b.send({ t: 'output', sub: agentSub, taskId: 'a_B-9', tail: 524288 });
+    expect(await m.next((f) => f.t === 'output' && f.sub === agentSub, 'the agent output')).toEqual({ t: 'output', project, session: SESSION, agentId: 'a1', sub: agentSub, taskId: 'a_B-9', tail: 524288 });
+
+    // Out of form — a task id the engine never spells, a tail outside 1 to 524288 bytes — refused, never carried.
+    const fromM = m.frames.length;
+    const fromB = b.frames.length;
+    const malformed = [
+      { taskId: '', tail: 1 },
+      { taskId: 'x'.repeat(65), tail: 1 },
+      { taskId: '../b7k2m9q4x', tail: 1 },
+      { taskId: 'b7k2.output', tail: 1 },
+      { taskId: 7, tail: 1 },
+      { tail: 1 },
+      { taskId: 'b7k2m9q4x', tail: 0 },
+      { taskId: 'b7k2m9q4x', tail: 524289 },
+      { taskId: 'b7k2m9q4x', tail: 1.5 },
+      { taskId: 'b7k2m9q4x', tail: '1024' },
+      { taskId: 'b7k2m9q4x' },
+    ];
+    for (const fields of malformed) b.send({ t: 'output', sub, ...fields } as unknown as ProjectUp);
+    const refusals = await waitFor(() => {
+      const got = ofType(b, 'refused', fromB);
+      return got.length >= malformed.length ? got : undefined;
+    });
+    expect(refusals.map((f) => f.refusal.reason)).toEqual(malformed.map(() => 'bad-shape'));
+    // Frames on one socket are taken in order: a well-formed one sent after them is the first the machine sees.
+    b.send({ t: 'output', sub, taskId: 'after', tail: 10 });
+    await m.next((f) => f.t === 'output' && f.taskId === 'after', 'the output after the refusals', fromM);
+    expect(m.frames.slice(fromM).filter((f) => f.t === 'output')).toEqual([{ t: 'output', project, session: SESSION, agentId: null, sub, taskId: 'after', tail: 10 }]);
+
+    // The machine's answers go to the one socket holding each sub, as the machine numbered them, bodies unread.
+    const fromOther = other.frames.length;
+    const snapshot = (s: string) => envelope(m, project, 'snapshot', { rows: [], more: false, subagents: [], presence: presence('busy'), streaming: [] }, SESSION, s, 0);
+    const ok = envelope(m, project, 'output', { taskId: 'b7k2m9q4x', result: 'ok', path: '/private/tmp/claude-501/p/s/tasks/b7k2m9q4x.output', size: 70000, from: 4471, text: 'PASS\n', truncated: true }, SESSION, sub, 1);
+    const missing = envelope(m, project, 'output', { taskId: 'a_B-9', result: 'missing', path: null }, SESSION, agentSub, 1);
+    await m.postOk([{ t: 'session', message: snapshot(sub) }, { t: 'session', message: ok }, { t: 'session', message: snapshot(agentSub) }, { t: 'session', message: missing }]);
+    await b.next((f) => f.t === 'session' && f.message.kind === 'output' && f.message.sub === agentSub, 'the agent answer');
+    expect(sessionKinds(b).filter((x) => x.kind === 'output')).toEqual([ok, missing]);
+    expect(sessionKinds(other, fromOther).filter((x) => x.sub !== null)).toEqual([]);
+    b.close();
+    other.close();
+    await m.close();
+  });
+
+  it('carry no output to a machine whose lease is not fresh', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const sub = newNonce();
+    b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub });
+    await m.next((f) => f.t === 'subscribe', 'subscribe');
+    const fromM = m.frames.length;
+    // The lease runs out within a millisecond; the request reaches the project before anything renews it.
+    await hub.lease(project, { op: 'renew', machine: m.name, generation: m.generation, leaseMs: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const fromB = b.frames.length;
+    b.send({ t: 'output', sub, taskId: 'b7k2m9q4x', tail: 1024 });
+    // A refusal sent after it on the same socket marks that the project has taken it.
+    b.send({ t: 'rows', sub, before: 'r1', limit: 0 });
+    await b.next((f) => f.t === 'refused', 'the marker', fromB);
+    // Renewed, the machine serves a fresh sub, and its output is the first the machine is carried.
+    await hub.lease(project, { op: 'renew', machine: m.name, generation: m.generation, leaseMs: 45_000 });
+    const fresh = newNonce();
+    b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub: fresh });
+    await m.next((f) => f.t === 'subscribe' && f.sub === fresh, 'the fresh sub', fromM);
+    b.send({ t: 'output', sub: fresh, taskId: 'c4d5e6', tail: 1024 });
+    await m.next((f) => f.t === 'output' && f.sub === fresh, "the fresh sub's output", fromM);
+    expect(m.frames.slice(fromM).filter((f) => f.t === 'output')).toEqual([{ t: 'output', project, session: SESSION, agentId: null, sub: fresh, taskId: 'c4d5e6', tail: 1024 }]);
+    b.close();
     await m.close();
   });
 

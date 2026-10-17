@@ -13,8 +13,8 @@
 // is built, the double follows it (DX3 as `interfaces-M3` has it, checked by the local-hub suite): the order of what a
 // socket gets on connect, presence withheld while its machine is offline, the audit record (`refused`, `rejected`,
 // `decided`) replayed after every `caught-up`, the hub's at-once RPC failures sent to the sender and never recorded, an
-// unknown frame refused `bad-shape`, the subscription limits (32 a socket, `rows` 1 to 1000), and a resumed backlog
-// paged, each page but the last ended by `more`.
+// unknown frame refused `bad-shape`, the subscription limits (32 a socket, `rows` 1 to 1000, `output`'s task id and
+// tail), and a resumed backlog paged, each page but the last ended by `more`.
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -23,6 +23,8 @@ import { createGzip } from 'node:zlib';
 import {
   hubWriter,
   importOrgKey,
+  isOutputTail,
+  isTaskId,
   seal,
   toWire,
   PartAssembler,
@@ -545,6 +547,10 @@ export class HubDouble {
         if (!Number.isInteger(frame.limit) || frame.limit < 1 || frame.limit > 1000) this.refuseFrame(project, 'rows is {sub, before: row uuid, limit: 1 to 1000}');
         return;
       case 'visibility':
+        return;
+      case 'output':
+        // Carried to the machine at the hub; here a test answers it with `sendSub`, as a machine would.
+        if (!isTaskId(frame.taskId) || !isOutputTail(frame.tail)) this.refuseFrame(project, 'output is {sub, taskId: [A-Za-z0-9_-]{1,64}, tail: 1 to 524288 bytes}');
         return;
       case 'diff': {
         // Answered as DX4 `diff` on that sub; a main-transcript subscription's only, as DX3 has it.
