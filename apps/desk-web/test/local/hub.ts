@@ -23,10 +23,10 @@ async function free(port: number): Promise<boolean> {
   });
 }
 
-/** A port whose successor is also free (the command takes both). */
+/** A port whose successor is also free (the command takes both), drawn from 20000-32000, below the ephemeral ranges of Linux and macOS, so no outgoing connection is handed the successor before the command binds it. */
 async function freePair(): Promise<number> {
   for (;;) {
-    const port = 20_000 + Math.floor(Math.random() * 20_000);
+    const port = 20_000 + Math.floor(Math.random() * 12_000);
     if ((await free(port)) && (await free(port + 1))) return port;
   }
 }

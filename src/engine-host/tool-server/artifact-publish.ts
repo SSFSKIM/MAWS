@@ -30,6 +30,7 @@ import { isDocKind, type Artifact } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { parseToolArguments, type ArtifactPublishInput, type ArtifactPublishResult } from '@shared/maws/tools';
 import { assetWarnings } from '@artifacts/slides/answer'; // P3-C
+import { boardAssetWarnings } from '@artifacts/design/answer'; // P3-E
 import { stateV2 } from '@artifacts/yjs';
 import { legacyDashboardFiles, legacyDashboardReason } from '@artifacts/dashboard/legacy'; // P3-E
 import type { ArtifactStore } from '../documents/store';
@@ -70,11 +71,16 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
         const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
         throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}, and an html page takes none; nothing was written`);
       }
-      // P3-C (the parent's Decision Log 53 (2)): nothing shows or settles a deck's suggestions in P3
-      if (suggest && artifact.kind === 'presentation') {
-        const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion, and a presentation takes none in this build of MAWS: publish with mode "direct"' : `the user set ${artifact.title} to take agent edits as suggestions, and a presentation takes none in this build of MAWS: ask the user to turn off agent edits as suggestions for it`;
+      // P3-C (the parent's Decision Log 53 (2)): nothing shows or settles a deck's suggestions in P3; P3-E: nor a design's,
+      // whether or not its adapter is registered (the parent's Decision Log 21 (2))
+      if (suggest && (artifact.kind === 'presentation' || artifact.kind === 'design')) {
+        const a = artifact.kind === 'design' ? 'a design' : 'a presentation';
+        const why = input.mode === 'suggest' ? `mode "suggest" asks for a suggestion, and ${a} takes none in this build of MAWS: publish with mode "direct"` : `the user set ${artifact.title} to take agent edits as suggestions, and ${a} takes none in this build of MAWS: ask the user to turn off agent edits as suggestions for it`;
         throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}; nothing was written`);
       }
+      // P3-E (E1's M2; Decision Log 11 (1)): an earlier build's shape is migrated by this session before its replica and
+      // base are looked at, so the publish lands on the kind's model
+      await store.ensureMigrated(artifact.id, actorOf(ctx));
       const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx, suggest) : await placed(store, await publishPage(deps, store, artifact, input, ctx), input, ctx);
       return toolText(result);
     })),
@@ -172,7 +178,8 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
         if (!base) return refusedAfterCommit(store, staleBase(store.revision(artifact.id), NEVER_READ));
         if (input.baseRevision !== base.revision) return refusedAfterCommit(store, staleBase(store.revision(artifact.id), notLastRead(input.baseRevision, base.revision)));
         baseFiles = base.files ?? withDoc(base.state, (doc) => filesOf(store, artifact.kind, doc)); // P3-C: the files the session read, kept on its base
-        const assets = artifact.kind === 'presentation' ? new Set(store.listAssets(artifact.id).map((asset) => asset.ref)) : null; // P3-C: D6's warnings
+        const assets = artifact.kind === 'presentation' || artifact.kind === 'design' ? new Set(store.listAssets(artifact.id).map((asset) => asset.ref)) : null; // P3-C: D6's warnings; P3-E: a design's by board path
+        const pictureWarnings = artifact.kind === 'design' ? boardAssetWarnings : assetWarnings; // P3-E
         const restoredSince = store.listVersions(artifact.id).some((v) => v.kind === 'restore' && v.seq > base.revision);
         const linked = store.link(artifact.id, ctx.appSessionId, 'edited');
         linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
@@ -203,7 +210,7 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
               const kept = [...live].filter((path) => !changed.has(path));
               const changedLive = outcome.result.changed.filter((path) => live.has(path));
               const removed = outcome.result.changed.filter((path) => !live.has(path));
-              const warnings = [...(outcome.result.warnings ?? []), ...(assets ? assetWarnings(doc, assets, changedLive) : [])]; // P3-C
+              const warnings = [...(outcome.result.warnings ?? []), ...(assets ? pictureWarnings(doc, assets, changedLive) : [])]; // P3-C; P3-E
               outcome.result = { ...outcome.result, revision, changed: changedLive, kept, removed, ...(warnings.length > 0 && { warnings }) };
               op.record(outcome.result);
             },

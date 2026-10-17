@@ -46,6 +46,12 @@
     "e2e/support/text-run.ts",
     // P3-C M10: test/support/live-lifecycle.test.ts runs the live runs' end (the stop, the cleanup, the engine's survival, the spend)
     "e2e/support/live-lifecycle.ts",
+    // P3-E1 M6: test/support/design-bundle.test.ts runs the Design final run's bundle checks
+    "e2e/support/design-bundle.ts",
+    "e2e/support/design-final-reporter.ts", // P3-E1 M6: test/support/design-final-reporter.test.ts drives it at its boundary
+    "e2e/support/design-geometry.ts", // P3-E1 M6: test/support/design-geometry.test.ts runs the evidence probe's hidden-node rule
+    // P3-E1 M6: test/support/design-frames.test.ts runs the design scale gate's frame readings
+    "e2e/support/design-frames.ts",
     // P3-H: test/support/final-bundle.test.ts runs the final run's build bundle and its reporter (gate-offload Decision Log 50)
     "e2e/support/final-bundle.ts",
     "e2e/support/final-bundle-reporter.ts",
@@ -83,6 +89,7 @@
     "src/artifacts/slides/canvas/fit.ts", // P3-C
     "src/artifacts/slides/canvas/index.ts", // P3-C
     "src/artifacts/slides/editor/**/*", // P3-C
+    "src/artifacts/design/editor/**/*.tsx", // P3-E1 M3: the workbench's React and DOM (its pure modules beside them stay in)
     "src/artifacts/**/*.dom.test.tsx", // P3-C
     "src/artifacts/dashboard/editor/**/*" // P3-E (E2 M3): the dashboard's node views and source sheet, typechecked by tsconfig.web.json
   ]

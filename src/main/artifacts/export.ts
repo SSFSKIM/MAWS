@@ -40,7 +40,7 @@ import { artifactUrl } from '@shared/artifacts/scheme';
 import { mimeOf } from '@shared/files/mime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
-import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
+import { artifactRefusalOf, type ArtifactRefusal } from '@shared/ipc/schema/artifacts'; // P3-E: artifactRefusalOf
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { artifactExportName, type ArtifactExportFonts /* P3-C */, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
 import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from './capture';
@@ -69,7 +69,13 @@ export interface ExportRequest {
   fonts?: ArtifactExportFonts; // P3-C (H2-4): a presentation's PPTX faces; omitted, named
   width?: number;
   height?: number;
-  exportId?: string; // P3-H (Decision Log 91): a file of its own, its id in `path`'s name
+  // P3-E (E1 M5; X23): a design's PNG board, its PDF's boards, the output's scale
+  board?: string;
+  boards?: string[];
+  scale?: number;
+  // P3-E (E1 M5; Decision Log 33) and P3-H (Decision Log 91): a file of its own (a design's export, or `ownFile`), minted
+  // by the service as it takes the request, its id in `path`'s name
+  exportId?: string;
 }
 
 // What the service gives an exporter (A's side of P3-B's `DocumentExportContext`).
@@ -237,9 +243,11 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
       await rename(temp, path);
       temps.delete(temp);
     }
-    return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }), ...(request.exportId !== undefined && { exportId: request.exportId }) /* P3-H */ };
+    return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }), ...(request.exportId !== undefined && { exportId: request.exportId }) /* P3-E, P3-H */ };
   } catch (error) {
-    return { ok: false, error: messageOf(error) };
+    // P3-E (E1 M5; Decision Log 26): a refusal the exporter named (A's command failure) is kept for the caller
+    const refusal = error instanceof CommandFailure ? artifactRefusalOf(error.error) : null;
+    return { ok: false, error: messageOf(error), ...(refusal && { refusal }) };
   } finally {
     time.end(); // the exporter is done or abandoned: anything it still writes is refused
     for (const temp of temps) await rm(temp, { force: true }).catch(() => {});
@@ -275,7 +283,8 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   // version's, else the live doc's read with its revision), which then names the file. A byte kind's content at the
   // request's revision is immutable, so its request stands as it was asked.
   const snapshot = async (request: ExportRequest, time: ExportBudget): Promise<{ request: ExportRequest; sources: ExportSources }> => {
-    const { artifact } = await time.within(required('artifacts.get', { artifactId: request.artifactId }));
+    // P3-E (Decision Log 22): a retained version's export reads the row alone, never preparing the live document
+    const { artifact } = await time.within(required('artifacts.get', { artifactId: request.artifactId, ...(request.versionId !== undefined && { prepare: false }) }));
     if (!artifact) throw new Error(`no artifact ${request.artifactId}`);
     let state: Uint8Array | null = null;
     let taken = request;
@@ -285,7 +294,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
       } else {
         const live = await time.within(required('artifacts.state', { artifactId: request.artifactId }));
         state = live.bytes;
-        taken = { ...request, revision: live.revision, path: join(dirname(request.path), artifactExportName(live.revision, request.format, request.exportId /* P3-H */)) };
+        taken = { ...request, revision: live.revision, path: join(dirname(request.path), artifactExportName(live.revision, request.format, request.exportId /* P3-E, P3-H */)) };
       }
     }
     return {
@@ -318,8 +327,9 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
     };
   };
   // A request run in its turn within `time`, the budget its receipt started (a kind and format no exporter serves is
-  // answered at once). Never rejects; ends the budget. P3-H (Decision Log 91): `ownFile`, or a design, takes its own
-  // file here, its id minted before anything is read or rendered.
+  // answered at once). Never rejects; ends the budget. P3-E (E1 M5; Decision Log 33) and P3-H (Decision Log 91): a
+  // design, or `ownFile`, takes a file of its own here, its id minted before anything is read or rendered, in the
+  // directory asked, so another export of the same revision and format never replaces it before it is read.
   const queued = async (asked: ExportRequest, time: ExportBudget, ownFile = false): Promise<MawsArtifactExportAnswer> => {
     if (!registry.get(asked.kind, asked.format)) {
       time.end();
@@ -348,11 +358,11 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   });
 
   return {
-    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height, ownFile /* P3-H */ }) {
+    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height, board, boards, scale /* P3-E */, ownFile /* P3-H */ }) {
       const time = new ExportBudget(EXPORT_BUDGET_MS);
       let artifact: CommandOutput<'artifacts.get'>['artifact'];
       try {
-        ({ artifact } = await time.within(required('artifacts.get', { artifactId })));
+        ({ artifact } = await time.within(required('artifacts.get', { artifactId, ...(versionId !== undefined && { prepare: false }) /* P3-E: Decision Log 22 */ })));
       } catch (error) {
         time.end();
         throw error;
@@ -376,10 +386,11 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
         revision = version.seq;
       }
       const path = join(root, artifactId, 'exports', artifactExportName(revision, format));
-      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }) };
-      const result = await queued(request, time, ownFile === true);
+      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }), ...(board !== undefined && { board }), ...(boards !== undefined && { boards }), ...(scale !== undefined && { scale }) /* P3-E */ };
+      const result = await queued(request, time, ownFile === true); // P3-H: ownFile
+      if (!result.ok && result.refusal) throw new CommandFailure(ipcError('invalid_input', result.error, result.refusal)); // P3-E (Decision Log 26): the exporter's refusal, as named
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
-      return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }), ...(result.exportId !== undefined && { exportId: result.exportId }) /* P3-H */ };
+      return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }), ...(result.exportId !== undefined && { exportId: result.exportId }) /* P3-E, P3-H */ };
     },
     stop,
   };

@@ -15,6 +15,8 @@ export interface SlideEntry {
   hidden: boolean;
   held: readonly string[] | null; // the reasons its file does not load
   token: object;
+  /** P3-E (E1 M3, X27 additive): a design board's size (its node's plain `w`/`h` keys); null for a deck's slide. */
+  size?: { w: number; h: number } | null;
 }
 export interface SectionHeader {
   key: string;
@@ -36,7 +38,8 @@ export function readDeckView(doc: Doc): DeckView {
   const order = slideOrder(doc);
   const slides = order.map((id): SlideEntry => {
     const s = Y.slideScalars(doc, id);
-    return { id, hidden: s['attr:hidden'] !== undefined, held: heldOf(doc, id)?.reasons ?? null, token: slideToken(doc, id)! };
+    const size = typeof s.w === 'number' && typeof s.h === 'number' ? { w: s.w, h: s.h } : null; // P3-E
+    return { id, hidden: s['attr:hidden'] !== undefined, held: heldOf(doc, id)?.reasons ?? null, token: slideToken(doc, id)!, size };
   });
   const present = new Set(order);
   const sections: SectionHeader[] = [];
@@ -59,7 +62,7 @@ export function readDeckView(doc: Doc): DeckView {
 
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const sameSlides = (a: readonly SlideEntry[], b: readonly SlideEntry[]) =>
-  a.length === b.length && a.every((s, i) => s.id === b[i]!.id && s.hidden === b[i]!.hidden && s.token === b[i]!.token && sameJson(s.held, b[i]!.held));
+  a.length === b.length && a.every((s, i) => s.id === b[i]!.id && s.hidden === b[i]!.hidden && s.token === b[i]!.token && sameJson(s.held, b[i]!.held) && sameJson(s.size, b[i]!.size)); // P3-E: size
 
 /** `next` with every part equal to `prev`'s replaced by `prev`'s, and `prev` itself when nothing changed. */
 export function keepEqual(prev: DeckView, next: DeckView): DeckView {

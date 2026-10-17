@@ -36,3 +36,12 @@ export const PROJECT_QUEUES_PATH = '/__test/queues';
 export const PROJECT_SEND_PATH = '/__test/send';
 /** Where the suites' `Project` says how many pages of a `hello`'s backlog it has read. */
 export const PROJECT_BACKLOG_PATH = '/__test/backlog-pages';
+/** Where the suites' `Project` is armed to fail its next `forget`, as a failed RPC from the Registry would. */
+export const PROJECT_FORGET_FAULT_PATH = '/__test/forget-fault';
+/** Where the suites' `Machine` is armed (`?mode=hold`) to hold its next revocation's answer until it is released, as a
+ * slow RPC would, or (`?mode=lose`) to lose it once the revocation is stored, as an RPC whose answer never came back. */
+export const REVOKE_FAULT_PATH = '/__test/revoke-fault';
+/** Where the suites' `Machine` says whether a revocation's answer is held: `held` or `none`. */
+export const REVOKE_HELD_PATH = '/__test/revoke-held';
+/** Where the suites' `Machine` releases a held revocation's answer: answers `released`, or `none` while none is held. */
+export const REVOKE_RELEASE_PATH = '/__test/revoke-release';

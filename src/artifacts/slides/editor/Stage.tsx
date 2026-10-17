@@ -62,7 +62,7 @@ export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanv
         {slide ? (
           <div className="deck-stage-center">
             <div ref={setFrame} className="deck-stage-frame" data-stage-slide={slide.id} data-held={slide.held ? '' : undefined}>
-              {scope(<SlideView doc={session.doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} faces={faces} />)}
+              {scope(<SlideView doc={session.doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} faces={faces} size={slide.size ?? null} /* P3-E: a board's size */ />)}
               <div className="deck-stage-overlay">
                 {scope(
                   <Overlay

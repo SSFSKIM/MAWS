@@ -20,6 +20,7 @@ import type { McpToolDefinition } from './server';
 import { showPaneTool } from './show-pane';
 import { documentCreateTool, documentReadTool, documentTools, DocumentToolSession } from './documents'; // P3-B (M7)
 import { presentationThreadTools } from '../presentations/threads'; // P3-C (M7)
+import { designThreadTools } from '../designs/threads'; // P3-E (E1's M2)
 import { dashboardThreadTools } from '../dashboards/threads'; // P3-E (E2 M2)
 import { legacyDashboardTools } from '../dashboards/legacy'; // P3-E (E2 M2 fix wave)
 import { artifactDatasetTool } from './datasets'; // P3-E (E2 M2)
@@ -58,8 +59,8 @@ export function mawsTools(deps: {
       artifactDescribeTypeTool(artifacts), documentReadTool(documents, genericRead), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
       artifactExportTool({ ...artifacts, exporter: deps.exporter }),
       artifactDatasetTool(artifacts), // P3-E (E2 M2)
-      // P3-B (M7); P3-C (M7): B's thread tools answer a deck from its threads; P3-E: and a dashboard from its own
-      ...dashboardThreadTools(documents, presentationThreadTools(documents, documentTools(documents))),
+      // P3-B (M7); P3-C (M7): B's thread tools answer a deck from its threads; P3-E: a design (E1's M2) and a dashboard (E2 M2) from their own
+      ...dashboardThreadTools(documents, designThreadTools(documents, presentationThreadTools(documents, documentTools(documents)))),
     ], genericRead).map(afterImport),
   ];
 }

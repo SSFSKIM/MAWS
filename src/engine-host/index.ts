@@ -41,6 +41,9 @@ import { presentationsScaleSeamRequested, startPresentationsScaleSeam } from './
 // P3-C end
 import { registerDashboards } from './dashboards'; // P3-E (E2 M2)
 import { dashboardE2eSeamRequested, startDashboardE2eSeam } from './dashboards/e2e-seam'; // P3-E (E2 M6): the acceptance seam (e2e only)
+// P3-E start
+import { registerDesigns } from './designs'; // E1's M2
+// P3-E end
 import { registerConnectors } from './connectors/register'; // P3-H H3b
 
 const HOST_VERSION = __MAWS_VERSION__;
@@ -89,6 +92,7 @@ const register: HostRegister = (on, emit, client) => {
   if (documents && presentationsScaleSeamRequested(process.env)) startPresentationsScaleSeam(documents.store, join(userData, 'presentations-scale')); // P3-C M10: the scale gate's seam, MAWS_E2E=1 and MAWS_PRESENTATIONS_SCALE=1 only
   const dashboards = registerDashboards({ documents }); // P3-E (E2 M2): the dashboard kind's adapter and its derived change index
   if (documents && dashboardE2eSeamRequested(process.env)) startDashboardE2eSeam(documents.store, join(userData, 'dashboard-e2e')); // P3-E (E2 M6): the agent's tools for the dashboard e2e groups, MAWS_E2E=1 and MAWS_DASHBOARD_E2E=1 only
+  const designs = registerDesigns({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-E (E1's M2): the design's adapter (its legacy migration among its hooks) and its mirror writer, kept fresh under its governing system
   let connectors: { close(): void } | null = null; // P3-H H3b: below, over the process table
   // C3 start
   ipc = registerEngineIpc(on, emit, {
@@ -99,6 +103,7 @@ const register: HostRegister = (on, emit, client) => {
       designSystems.close(); // P3-D
       presentations.close(); // P3-C
       dashboards.close(); // P3-E
+      designs.close(); // P3-E
       documents?.close(); // P3-A
     },
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,

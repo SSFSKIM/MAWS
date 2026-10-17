@@ -175,7 +175,8 @@ const MEASURE_ARGS: MeasureArgs = { textTags: [...TEXT_TAGS] };
 // moved, by the `translate` property the dialect never writes, to the frame's top-left corner, its ancestors and the
 // slide no longer clipping it, so a wide element no transform keeps in view is taken whole (fix wave 2). Its text is
 // transparent when only its paint is wanted. Answers, after two frames, the rect to capture: the element's box as now
-// drawn (the whole slide for `slide` and `background`), which may be larger than the window.
+// drawn (the whole slide for `slide` and `background`), which may be larger than the window. P3-E (E1 M5; E0's finding
+// (e)): a design board's frame (`data-size`) is the whole slide's box as drawn, at its size and any zoom its draw sets.
 export const STAGE = (slideId: string, elementId: string | null, mode: PictureJob['mode']) => `(() => {
   const slide = ${JSON.stringify(slideId)}, eid = ${JSON.stringify(elementId)}, mode = ${JSON.stringify(mode)};
   document.body.setAttribute('data-shown', '');
@@ -209,7 +210,7 @@ export const STAGE = (slideId: string, elementId: string | null, mode: PictureJo
     return { x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height };
   };
   return frames().then(() => {
-    if (!isolated) return { x: 0, y: 0, w: ${SLIDE_W}, h: ${SLIDE_H} };
+    if (!isolated) { const sized = frame && frame.hasAttribute('data-size') ? frame.getBoundingClientRect() : null; return { x: 0, y: 0, w: sized ? sized.width : ${SLIDE_W}, h: sized ? sized.height : ${SLIDE_H} }; }
     const at = rectOf();
     target.setAttribute('data-maws-moved', '');
     target.style.setProperty('translate', (-at.x) + 'px ' + (-at.y) + 'px', 'important');
@@ -273,8 +274,11 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
   }
 }
 
-/** The measure pass: the page loaded in `measure` mode, fitted and measured. */
-async function measurePass(win: DeckWindow, prepared: Prepared): Promise<MeasuredDeck> {
+/**
+ * The measure pass: the page loaded in `measure` mode, fitted and measured. P3-E (E1 M5; the parent's Decision Log 11
+ * (2)): exported with its narrower parameter for the design's exporter (src/main/design/export.ts); unchanged.
+ */
+export async function measurePass(win: DeckWindow, prepared: Pick<Prepared, 'deck' | 'page'>): Promise<MeasuredDeck> {
   await win.load(deckPage(prepared.deck, { ...prepared.page, mode: 'measure' }));
   return win.measure();
 }

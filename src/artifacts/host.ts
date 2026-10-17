@@ -125,6 +125,12 @@ export interface KindAdapter {
   // P3-C (the parent's Decision Log 58): the paths `readFiles` would answer, in its order, without their text; a publish
   // builds its answer's `kept` and `removed` from them. Without it, the paths of `readFiles` (or the generic file model).
   paths?(doc: Doc): string[];
+  // P3-E (docs/doperpowers/plans/2026-10-16-p3-e-design-dashboard.md Decision Log 11 (1)): brings a document an earlier
+  // build stored in another shape into the kind's current model, in the caller's transaction, answering whether it
+  // wrote; a document already in the model answers false and writes nothing. Input it cannot migrate throws before
+  // anything is written. The store runs it through `ArtifactStore.ensureMigrated` (a scratch test, then one write
+  // credited to the triggering actor) before a live open, read or write; retained versions are never migrated.
+  migrate?(doc: Doc): boolean;
 }
 
 // What an editor shows of an open document (P3-G's header maps it: `unsaved > 0` while live is saving, phase `off` is
@@ -184,7 +190,7 @@ export interface ArtifactHost {
   // P3-D (the P3 spec's Decision Log 59): `revision` names a retained revision (a design-system pin's `versionSeq`), at
   // which the store serves a deleted system's assets while a version pins it (Decision Log 46); omitted, the live one.
   assetUrl(artifactId: string, ref: string, revision?: number): string;
-  export(artifactId: string, format: string, version?: number, options?: { pageSize?: 'letter' | 'a4'; fonts?: 'named' | 'basic' | 'pictures' | 'embedded' /* P3-C (H2-4) */ }): Promise<{ path: string }>; // M7; `pageSize`: Decision Log 42
+  export(artifactId: string, format: string, version?: number, options?: { pageSize?: 'letter' | 'a4'; fonts?: 'named' | 'basic' | 'pictures' | 'embedded' /* P3-C (H2-4) */; board?: string; boards?: string[]; scale?: number /* P3-E (E1 M5; X23): a design's */ }): Promise<{ path: string }>; // M7; `pageSize`: Decision Log 42
   versionState(artifactId: string, version: number | { seq: number }): Promise<Uint8Array>; // V2 bytes (Decision Log 22c)
   attributions(artifactId: string, fromSeq: number, toSeq: number, options?: ArtifactDocOption): Promise<Uint8Array>; // a merged ContentMap (23a)
   // The owner settles proposals of the suggestion doc (Decision Log 45): ranges are the item ids the editor's selection

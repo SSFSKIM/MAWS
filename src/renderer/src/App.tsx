@@ -129,7 +129,8 @@ import { provideDocumentDesignSystem } from './tools/document/design-system';
 // P3-C start
 import { registerPresentationEditor } from './tools/presentation';
 // P3-C end
-// P3-E start
+// P3-E start (E1 M3; E2 M3)
+import { registerDesignEditor } from './tools/design';
 import { registerDashboardEditor } from './tools/dashboard';
 // P3-E end
 
@@ -315,6 +316,9 @@ export function App() {
   // P3-E start: the dashboard editor as the `dashboard` kind's editor in L's registry (B's document body with E's charts,
   // the Datasets action and the source sheet; docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md M3)
   useEffect(() => registerDashboardEditor(), []);
+  // the design workbench as the `design` kind's editor in L's registry (E1 M3; the library's tab and the
+  // panel's Artifacts tool mount it)
+  useEffect(() => registerDesignEditor(), []);
   // P3-E end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.

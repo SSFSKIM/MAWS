@@ -13,6 +13,7 @@ import { complete, completionAt, insertTag, type Completion } from '../../conver
 import { capabilities, turnRunning, type Capability } from '../../conversation/capabilities';
 import { useNarrow } from '../../shell/viewport';
 import type { DeskSession } from '../../shell/sessions';
+import { useProjectModels } from '../../state/models';
 import { useConnected, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
 
@@ -200,8 +201,14 @@ export function SessionComposer({ session }: { session: DeskSession }) {
   );
 }
 
-/** Model and effort for this session's main loop from its next request on (§5); `default` is the session's own. */
+/**
+ * Model and effort for this session's main loop from its next request on (§5); `default` is the session's own. It offers
+ * ids, those this project's sessions were seen answering from (`state/models.ts`): a live session takes an alias only
+ * where its environment maps it, and refuses one it does not, naming the id to use.
+ */
 function ModelForm({ onApply }: { onApply(model: string, effort: string): void }) {
+  const { connection } = useDesk();
+  const models = useProjectModels(connection.project);
   const [model, setModel] = useState('');
   const [effort, setEffort] = useState('');
   return (
@@ -217,7 +224,9 @@ function ModelForm({ onApply }: { onApply(model: string, effort: string): void }
         Model
         <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="a model id, or default" list="desk-models" className="w-[220px] rounded-sm border border-border-strong bg-bg px-2 py-0.5" />
         <datalist id="desk-models">
-          <option value="default" />
+          {['default', ...models].map((m) => (
+            <option key={m} value={m} />
+          ))}
         </datalist>
       </label>
       <label className="flex items-center gap-1.5">

@@ -65,6 +65,11 @@ export function ChannelView(props: {
           {session.machine} is offline: {session.alias}'s presence and depth are unavailable until it reconnects; everything it sent stays here.
         </div>
       )}
+      {session?.machineOnline !== false && session?.machineReadOnly && (
+        <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-warning" role="status" data-testid="machine-read-only">
+          {session.machine} is read-only: it runs nothing sent from outside it, so what you send {session.alias} is recorded and not delivered, and only its terminal can answer or steer it.
+        </div>
+      )}
       {landed.notice && (
         <div className="flex items-center gap-2 border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm" role="status" data-testid="landing" data-landing={landed.notice.kind}>
           <span className={landed.notice.kind === 'unverified' ? 'text-danger' : 'text-fg-muted'}>{landed.notice.text}</span>

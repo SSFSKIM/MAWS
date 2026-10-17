@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { basename, isAbsolute } from 'node:path';
 import type { KindAdapter } from '@artifacts/host';
-import { applyV2, bindingVersion, decodeMap, encodeMap, mergeMaps, type Doc } from '@artifacts/yjs';
+import { applyV2, bindingVersion, decodeMap, encodeMap, mergeMaps, newDoc, type Doc } from '@artifacts/yjs';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
 // P3-H start
 import * as z from 'zod';
@@ -181,6 +181,9 @@ export class ArtifactStore {
   private designSystemChain: DesignSystemChain = { governing: (target) => this.ownGoverning(target) };
   private readonly unsubscribe: (() => void)[] = [];
   private closed = false;
+  // P3-E (ensureMigrated): the artifacts this run found in their kind's current model, and the migrations under way
+  private readonly migrated = new Set<string>();
+  private readonly migrating = new Map<string, Promise<void>>();
 
   constructor(
     readonly service: DocumentService,
@@ -949,6 +952,7 @@ export class ArtifactStore {
   async restore(artifactId: string, versionId: number, actor: Actor, inFrame?: InFrame<{ revision: number; versionId: number }>): Promise<{ revision: number; versionId: number }> {
     const row = this.requireLive(artifactId);
     const version = this.requireVersion(artifactId, versionId);
+    this.migrated.delete(artifactId); // P3-E: a restore may bring back an earlier shape (its kind's `afterRestore` migrates it)
     const result = await restoreArtifact(this, row, version, actor, inFrame);
     this.emit(artifactId, 'updated');
     return result;
@@ -960,6 +964,54 @@ export class ArtifactStore {
     if (this.service.loaded(artifactId) && fromSeq <= 1 && toSeq >= this.service.revision(artifactId)) return encodeMap(this.service.provenance(artifactId));
     return encodeMap(mergeMaps(this.storage.attributions(artifactId, fromSeq, toSeq).map(decodeMap)));
   }
+
+  // P3-E start (docs/doperpowers/plans/2026-10-16-p3-e-design-dashboard.md Decision Log 11 (1); E1's M2): a document an
+  // earlier build stored in another shape is brought into its kind's model (`KindAdapter.migrate`) before a live open,
+  // read or write answers from it. The live state is tested on a scratch copy first, so a document already in the model
+  // costs no write (and, once found so, nothing more this run); one that needs it is migrated in one `writeAs` credited
+  // to `actor`, the actor whose access triggered it, rechecked inside the write, and this resolves once that write
+  // committed; a state found already in the model is remembered only once the batch it was read in has committed.
+  // Concurrent calls share the first one's migration and its actor. Input the kind cannot migrate, and a
+  // read-only store when a migration is needed, refuse `invalid` naming the artifact, with nothing written. Retained
+  // versions are never migrated; a restore forgets what this run found (`restore` above). A kind without the hook, a
+  // byte kind, a deleted or unknown artifact: nothing to do.
+  ensureMigrated(artifactId: string, actor: Actor): Promise<void> {
+    const row = this.entity(artifactId);
+    if (!row || row.deletedAt !== null || !isDocKind(row.kind) || this.migrated.has(artifactId)) return Promise.resolve();
+    const adapter = this.service.adapterFor(row.kind);
+    if (!adapter?.migrate) return Promise.resolve();
+    const running = this.migrating.get(artifactId);
+    if (running) return running;
+    const migration = this.migrate(row, adapter.migrate.bind(adapter), actor).finally(() => this.migrating.delete(artifactId));
+    this.migrating.set(artifactId, migration);
+    return migration;
+  }
+
+  private async migrate(row: EntityRow, migrate: (doc: Doc) => boolean, actor: Actor): Promise<void> {
+    const refused = (why: string, data: Record<string, unknown> = {}) => new ArtifactStoreError('invalid', `the ${row.kind} ${row.id} cannot be opened: ${why}`, { artifactId: row.id, ...data });
+    let needed: boolean;
+    const scratch = newDoc();
+    try {
+      applyV2(scratch, this.service.readState(row.id).state);
+      needed = migrate(scratch);
+    } catch (error) {
+      const coded = error as { data?: unknown };
+      throw refused(`it was stored by an earlier build of MAWS and cannot be brought into the ${row.kind} model (${error instanceof Error ? error.message : String(error)}); its earlier versions still read as they were`, typeof coded.data === 'object' && coded.data !== null ? (coded.data as Record<string, unknown>) : {});
+    } finally {
+      scratch.destroy();
+    }
+    if (!needed) {
+      // certified only once committed: the live state read may hold rows of an open batch (a restore's in-frame migration)
+      // that a failed commit takes back, its rejection then this call's
+      if (this.storage.batchOpen) await this.service.whenCommitted();
+      this.migrated.add(row.id);
+      return;
+    }
+    if (this.storage.readOnly) throw refused(`it was stored by an earlier build of MAWS and must be migrated, and this artifact store is read-only (a newer MAWS wrote it)`);
+    await this.service.writeAs(row.id, actor, (doc) => void migrate(doc));
+    this.migrated.add(row.id);
+  }
+  // P3-E end
 
   // ── turns, idempotency and the test writer ──
 

