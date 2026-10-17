@@ -702,7 +702,15 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
    (the identity provider's redirect leaves the app's scope, so the Access
    cookie must land in the standalone context); Access session lifetime
    against a push tapped hours later. The passphrase path covers missing
-   PRF.
+   PRF. Resolved by the owner's walk against the deployment (2026-10-15/16):
+   a passkey with PRF unlocks the org key in Safari and Chrome on the Mac and
+   in the iOS home-screen app; Access sign-in carries into the standalone app
+   (it opened signed in); the passphrase unlocks in about 3 s on the Mac and
+   the iPhone; a push arrives in about 5 s and its tap lands on the request
+   card, where the answer reaches the machine; tapped 23 hours after the
+   phone's last session, the app was still signed in, landed on the card, and
+   the key was still unlocked. The phone is on iOS 26 or older, without
+   native scroll anchoring (the channel's fallback, Decision Log).
 5. **The path to watch.** The engine's channel servers (an MCP server
    declaring `claude/channel` that pushes messages into a session, which
    replies through a tool) are the engine's own shape for "an outside
@@ -3494,6 +3502,13 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: §8 unknown 4 is resolved and holds as designed: the owner's walk on the deployment proved PRF unlock
+  with an iCloud Keychain passkey on the Mac (Safari, Chrome) and in the iOS home-screen app, Access carried into the
+  standalone app, a passphrase unlock of about 3 s on both devices, a push in about 5 s landing on its request card,
+  and (P2.11) a push tapped 23 hours after the phone's last session opening signed in, on the card, with the key
+  still unlocked. Nothing in §4–§7 changes. Rejected: re-walking P2.11 on the new build (the deploy it waited for
+  changes the web app, not Access's session or the stored key, which are what the step measured).
+  Date/Author: 2026-10-16, owner's walk (DC5's P1–P2).
 - Decision: The channel follows its tail as a `column-reverse` scroller with the browser's own scroll anchoring (DC5).
   The list keeps its chronological DOM, keyboard and accessibility order inside a reversed container, so the bottom
   is the scroll origin: opening at the tail needs no code, and a reader scrolled back keeps their place through
