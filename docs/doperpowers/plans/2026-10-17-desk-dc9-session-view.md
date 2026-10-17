@@ -904,6 +904,20 @@ in their own worktrees.
   origin-less row never consumes a send.
   Date/Author: 2026-10-17, controller (M4 review).
 
+- Decision: The bridge's interrupt row (the marker line followed by its
+  own "Task …" lines) is multi-line, so MAWS's `INTERRUPT_MARKER` misses it
+  and MAWS's backfill reads it as a prompt that opens a turn: a desk
+  Interrupt left the turn "working" and drew a phantom prompt. Fixed on
+  both sides: the bridge writes the marker row as the engine's exact text
+  and the task lines as a separate row (a doperpowers follow-up the
+  composite's writer dispatches; DC8 is merged); and M5's adapter
+  recognizes the bridge's current shape strictly — the marker line
+  followed only by the bridge's own "Task …" lines, on a row with the
+  bridge's origin, never a typed prompt — and normalizes it before MAWS's
+  backfill, so it ends the turn and draws no phantom prompt (history and
+  older plugins keep that shape).
+  Date/Author: 2026-10-17, the composite's writer, folded by the controller.
+
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
   transcript never ended it. The engine writes a `system/turn_duration`
