@@ -4,7 +4,7 @@
 // drawn whole on one line), a direct channel's working record folded (unfolded, DC6's transcript slot), the requests
 // in place, and this tab's sends on their way to the log. The item a tapped notification landed on is marked and
 // scrolled to once it is drawn. On a phone the working record stays folded: the transcript is desktop-only (§4).
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import { writerMachine, type LogEvent, type Recipient } from 'desk-hub/protocol';
 import { TranscriptActionsProvider, type TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
@@ -28,16 +28,20 @@ const time = (ts: string) => {
  * the bottom is the scroll origin. The browser then keeps the tail itself (the scroll position stays 0 at the bottom as
  * rows are added below), a change above a reader who has scrolled back moves nothing they see (it lies at the far end
  * from the origin), and its own scroll anchoring holds them in place when a row below them arrives or grows. Nothing
- * here measures or anchors: it opens at the tail because the origin is the tail, and a landing scrolls its card into
- * view. The scroll position reads 0 at the bottom and negative upward (Chrome, Safari, Firefox).
+ * here measures or anchors, except on an engine without scroll anchoring (`useAnchoringFallback`): it opens at the tail
+ * because the origin is the tail, and a landing scrolls its card into view. The scroll position reads 0 at the bottom
+ * and negative upward (Chrome, Safari, Firefox).
  */
 export function StreamView({ items, outbox, landed = null }: { items: StreamItem[]; outbox: OutboxItem[]; landed?: string | null }) {
   const landedRow = useRef<HTMLLIElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLOListElement>(null);
+  useAnchoringFallback(scroller, list);
   // A landing decides where the reader is: scrolled to its card.
   useEffect(() => landedRow.current?.scrollIntoView({ block: 'center' }), [landed]);
   return (
-    <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto" data-testid="channel-events">
-      <ol className="m-0 list-none px-4 py-3">
+    <div ref={scroller} className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto" data-testid="channel-events">
+      <ol ref={list} className="m-0 list-none px-4 py-3">
         {items.length === 0 && outbox.length === 0 && <li className="text-ui-sm text-fg-muted">Nothing here yet.</li>}
         {items.map((item) => (
           <li
@@ -61,6 +65,39 @@ export function StreamView({ items, outbox, landed = null }: { items: StreamItem
       </ol>
     </div>
   );
+}
+
+/**
+ * Scroll anchoring for an engine that has none: Safari before 27, where `overflow-anchor` does not parse (WebKit gates
+ * the property and the anchoring on one setting, so supporting the one is having the other). In the column-reverse
+ * scroller only a change between a reader scrolled back and the bottom moves what they see, so that is all this holds:
+ * while the reader is off the tail, a change in the list's height leaves the row at the top of their view where it was.
+ * Each row's distance from the list's bottom is kept as last laid out, which no scroll changes; the row at the top of
+ * the view is found among them at the scroll position now (so a scroll not yet reported counts), and the scroll position
+ * moves by as much as that row's distance changed, before the frame is painted. At the tail, the origin follows. A list
+ * that shrank has the browser clamp a reader at its oldest edge before this runs; they are left there, at the edge.
+ */
+function useAnchoringFallback(scroller: RefObject<HTMLDivElement | null>, list: RefObject<HTMLOListElement | null>) {
+  useLayoutEffect(() => {
+    const box = scroller.current;
+    const ol = list.current;
+    if (!box || !ol || CSS.supports('overflow-anchor', 'auto')) return;
+    const fromBottom = (row: Element) => ol.getBoundingClientRect().bottom - row.getBoundingClientRect().bottom;
+    let laidOut: Array<[row: Element, fromBottom: number]> = []; // top row first
+    const observer = new ResizeObserver(() => {
+      const back = -box.scrollTop;
+      if (back >= 1) {
+        const anchor = laidOut.find(([row, was]) => was < back + box.clientHeight && row.isConnected);
+        const moved = anchor ? fromBottom(anchor[0]) - anchor[1] : 0;
+        if (moved > 0 || (moved < 0 && back < box.scrollHeight - box.clientHeight - 1)) box.scrollTop -= moved;
+      }
+      // Read after any correction: a base read before the scroll would leave every distance off by it.
+      const bottom = ol.getBoundingClientRect().bottom;
+      laidOut = [...ol.children].map((row) => [row, bottom - row.getBoundingClientRect().bottom]);
+    });
+    observer.observe(ol);
+    return () => observer.disconnect();
+  }, [scroller, list]);
 }
 
 /**
