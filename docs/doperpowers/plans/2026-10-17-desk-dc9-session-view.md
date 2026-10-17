@@ -4,7 +4,7 @@
 > branch `smns-erb`; on this machine
 > `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/smns-erb/`), child
 > **DC9** (The web — the session view — plan). **Parent pin:** composite
-> MAWS commit `896f04acc` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`; Decision Log). The child's section there is its design; this
+> MAWS commit `bd9c67b14` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`; Decision Log). The child's section there is its design; this
 > document carries only the constraints and the milestones. Before M1 read
 > the composite's §9 whole, §4 as amended (the phone ruling is binding),
 > the DC9 child section, the Cross-Child Contracts DX3, DX4 and DX8 with
@@ -577,6 +577,14 @@ in their own worktrees.
   center's header) names it through `SessionLabel`, title first and alias
   muted, as the title rule says.
   Date/Author: 2026-10-17, the composite's writer, folded by the controller.
+
+- Decision: Parent re-pinned to `bd9c67b14`, which writes the owner's T0
+  verdicts into the composite (§9.1 the tail bubble's foot and tint and
+  the inline requests with the "N waiting ↓" pill; §9.4 output under its
+  row, Stop disabled with its reason and web Stop the first follow-up;
+  DC9.G1 "answered from their cards at the tail"). This document already
+  carries them (the owner's verdicts entry above).
+  Date/Author: 2026-10-17, controller.
 
 ## Surprises & Discoveries
 
