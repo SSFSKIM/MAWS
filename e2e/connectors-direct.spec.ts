@@ -749,7 +749,8 @@ test('transition: one grant reads through E, then D with no engine, then E again
     quiet.unmounted = { silentMs: WATCH_MS + 10_000, shown };
 
     // D → E: back to an engine with no message. The owner's session is resumed; the engine refuses a resume of a session
-    // that never wrote a transcript (the no-message Start wrote none: existing sessions debt, outside P3-HD, Decision Log 40
+    // that never wrote a transcript (the no-message Start wrote none: existing sessions debt, outside P3-HD, Decision Log 40;
+    // the related blank-chat row docs/tech-debt-tracker.md:242 names its side-thread --fork-session manifestation, parent Decision Log 102 this one;
     // and docs/doperpowers/plans/2026-09-28-c3-engine-host.md's `--resume` refusals), and then the owner's fresh eligible
     // session is started. Any other acquire answer is asserted as before: ready, or a failure with its diagnostics.
     expect(scene.launches(engine.appSessionId).spawns, 'no timer acquired an engine through all of D').toBe(1);
@@ -799,7 +800,7 @@ test('transition: one grant reads through E, then D with no engine, then E again
       direct,
       back,
       quiet,
-      eReturn: blankResume ? { route: 'fresh eligible session, not a resume of the old record', debt: 'blank resume: existing sessions debt, P3-HD Decision Log 40', old: engine.appSessionId, fresh } : { route: 'resume of the owner’s session', session: engine.appSessionId },
+      eReturn: blankResume ? { route: 'fresh eligible session, not a resume of the old record', debt: 'blank resume (a pinned engine session id with no transcript): the related blank-chat row at docs/tech-debt-tracker.md:242 (2026-10-17, P3-F; it names the side-thread --resume --fork-session manifestation, not this plain no-message acquire), parent Decision Log 102 and P3-HD Decision Log 40', old: engine.appSessionId, fresh } : { route: 'resume of the owner’s session', session: engine.appSessionId },
       pids: { engine: engine.pid, engineServer, directServer, directParent, directParentIsSupervisor: scene.supervisors.has(directParent), resumed: resumed[0]!.pid, engineAgain, engineAgainParentIsEngine: ps(engineAgain, 'ppid') === String(resumed[0]!.pid) },
       journals: journals.map(({ turns, dirMode, fileModes }) => ({ turns, dirMode: dirMode.toString(8), fileModes: fileModes.map((mode) => mode.toString(8)) })),
     });
