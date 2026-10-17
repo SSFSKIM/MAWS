@@ -12,7 +12,7 @@ A dashboard can keep a granted connector's read-only data current without an age
 - [x] (2026-10-17 14:55Z) Plan grain selected: retention and trusted result publication have different state owners and require reviewed dependency boundaries. Architect confirms opt-in group policy; no CLASS1_E2E edit.
 - [x] (2026-10-17T15:07Z) Adversarial checkpoint review returned; its verified findings and the architect's rulings are folded below (Decision Log 3–4). Not yet done: the architect's ledger entry for the shared names, the A-owned capture-to-hold prerequisite and the schema-3 allocation. No product code is written before it.
 - [x] (2026-10-17 15:12Z) Focused adversarial reread approves 29e34db57 with no material findings. Both retention/capture findings are closed as a checkpoint request, not as runtime proof or implementation authorization.
-- [ ] Checkpoint close — architect ledger entry (names, schema 3, capture-to-hold prerequisite R1b) recorded; then M1 may start.
+- [x] (2026-10-17 15:18Z) Checkpoint accepted: master ca645b4ca records E Decision Log 48 and five exact proposed/as-yet-unbuilt ledger rows. Architect explicitly authorizes E3 to build M1's A capture/retention prerequisite against them. Merged ca645b4ca before execution; implementation may now proceed.
 - [ ] M1 — Snapshot retention and query descriptor boundary.
 - [ ] M2 — Trusted refresh transaction and agent request.
 - [ ] M3 — Visible dashboard watches and owner controls.
@@ -44,7 +44,7 @@ The parent's E3 five items bind unchanged. Their proofs are allocated below rath
 
 ## Checkpoint residue and interfaces
 
-The architect has ruled the retention policy, active/retired distinction, first-snapshot semantics, host-fenced result consumption, the nightly/manual collection points and the agent one-shot rule as stated below (to be recorded in E Decision Log 48). Everything labelled *proposed* is a concrete proposal awaiting the architect's ledger entry, not authorization; exact shared names and schema 3 await that entry before implementation. E2 already exports `QuerySource`, `DatasetState` and `snapshotOf`; its query slot and `stale`/`paused` states exist but have no live behavior. The additions below refine those slots rather than invent a second model.
+The architect has recorded these rulings and exact names in E Decision Log 48 and the five E3 interface-ledger rows on master ca645b4ca, merged here. All names below labelled *proposed* are now **approved for E3 to implement**, with the ledger's proposed state meaning not yet built. M1 explicitly includes the A-owned capture/retention prerequisite; no separate A worker or H/HD agreement is pending. A required name change returns to the architect before use. Route D's runtime clause still waits for P3-HD's landing. E2 already exports `QuerySource`, `DatasetState` and `snapshotOf`; its query slot and `stale`/`paused` states exist but have no live behavior. The additions below refine those slots rather than invent a second model.
 
 ### R1 — Retention, X23 amendment [parent-impact]
 
@@ -58,7 +58,7 @@ Evidence: `store.ts`'s `assetIds` pins every registered row at each version; ref
 - Membership lifecycle. Replacing a query source with another source, or removing the dataset, clears that query's membership rows. Restore resets membership to the single managed ref the restored descriptor holds and reactivates the refs it needs (clearing `retiredAt`) **before** the new version captures assets. Duplicate (live or version) starts membership with the current managed refs only; copied candidates that duplicate does not need are retired after its import pin; no holds or grants are copied. Explicit adoption of a managed asset by a file dataset clears `querySnapshot` and `retiredAt` for that asset and removes its query memberships, so it is ordinary and never collectible. A dedupe hit on an ordinary asset never enrolls it in collection.
 - `lastUsedSeq` is the committed refresh revision; it orders distinct snapshots including reuse. Repeated identical content advances fetch provenance and refreshes that snapshot's `lastUsedSeq` without consuming another distinct slot.
 
-Exact proposed migration DDL (schema slot 3, not yet allocated):
+Exact migration DDL (schema slot 3 allocated by E Decision Log 48):
 
 ```sql
 ALTER TABLE artifact_assets ADD COLUMN querySnapshot INTEGER NOT NULL DEFAULT 0 CHECK (querySnapshot IN (0, 1));
@@ -80,7 +80,7 @@ New managed snapshot names contain a freshly generated UUID (`query-<uuid>.json`
 
 Restore reactivates refs the restored live descriptor needs before its new version captures assets; version duplicate copies the exact pinned rows, live duplicate copies active/current rows; copies carry managed classification but no reader holds or grants. Ref-based file binding and copy must hold or synchronously revalidate their source across asynchronous reads. No current/historical descriptor may refer to collected bytes. New tests cover savepoint rollback, restart collection, thinning, dedup/shared use, same-name reupload, restore during refresh and both duplicate forms.
 
-### R1b — Capture-to-hold atomicity [A-owned prerequisite, returned to the architect; not approved implementation]
+### R1b — Capture-to-hold atomicity [A-owned prerequisite, approved for E3 M1 in Decision Log 48]
 
 The adversarial review verified a capture-to-hold gap: a reader that captures a descriptor and only then asynchronously asks for a hold can lose the bytes in between. Three instances: export state captured before the `SnapshotReader` exists; the source sheet's cloned descriptors before its async holds resolve; and the Download path, which resolves a path and opens a save dialog before it holds anything. N alone does not protect an arbitrarily long open sheet or export, and no timer grace or renderer cache substitutes for a hold. The prerequisite is bounded, A-owned and needs its own architect ledger entry before code.
 
@@ -138,7 +138,7 @@ Use query declarations, not a new server browser: the agent supplies server/tool
 
 H's `e2e/support/connector-mcp-server.mjs` logs calls but currently returns `{server,tool,arguments,n}`, not rows. Add an E3-owned fixture mode/helper using the same unauthenticated stdio protocol, with flat-record arrays and controllable invalid/isError/delayed replies; preserve H's default behavior and tests. E2's dual-guarded dashboard seam invokes real create/dataset handlers. `e2e/dashboard-live-data.spec.ts` and its support create a real query dashboard and use UI grants/Start, with no model message. Script `e2e:dashboard-live-data` is opt-in via the plain build wrapper; ten-minute soak is in this explicit group.
 
-Shared-name inventory (every item is a **proposal** awaiting the architect's ledger entry; none is authorized for code, and E3-private UI names are omitted):
+Shared-name inventory (all recorded and approved for coding by the architect on ca645b4ca; the ledger keeps them **proposed** until built; E3-private UI names are omitted):
 
 - Store schema 3: `artifact_assets.querySnapshot`, `artifact_assets.retiredAt`, `artifact_query_snapshots(artifactId, datasetId, assetId, lastUsedSeq)` with composite FK and cascade (R1).
 - Store API: `ArtifactStore.removeAsset`, `retainQuerySnapshots`, `collectRetiredAssets`, `holdAsset`, `captureWithAssets` (R1, R1b).
@@ -194,6 +194,8 @@ Run the required targeted development groups, then the whole-branch `reviewer-hi
 4. **2026-10-17T15:07Z — architect rulings accepted (to be recorded in E Decision Log 48).** No per-refresh checkpoint; a continuous 30-second schedule yields at most 144 cadence auto versions per day (2-minute human idle, 10-minute continuous), and collection follows both nightly thinning and manual prune. Query `snapshot` is nullable with `updated` absent until first success; a file descriptor is unchanged. Source configuration and `refresh:true` are mutually exclusive modes. The agent one-shot needs no visible lease (owner-initiated live turn, session actor, grant required, route E only for the asking session holding the server, else route D when available, no engine acquisition, timer or watch count); page refresh keeps H visibility. Result bytes stay in the host, the grant fence held through the atomic write, the renderer receiving only the outcome. The `migrations.test.ts` single-file exemption (`V2 = STORE_MIGRATIONS.slice(0, 2)`, E3 marker) is authorized, with schema-3 tests in a separate E3 file. `e2e:dashboard-live-data` stays opt-in with no CLASS1_E2E edit.
 
 5. **2026-10-17 15:12Z — capture command origin correction.** A self-check of `shared/ipc/names/artifacts.ts` found `versionState` is renderer-callable, unlike `state`. The proposed optional hold fields on those commands are replaced by one main-only `artifacts.captureDatasetState`, leaving both existing commands unchanged; a renderer must use the window-owned hold/release path. This preserves registry-enforced origin boundaries rather than introducing per-field authorization. The architect received the corrected name before allocation.
+
+6. **2026-10-17 15:18Z — checkpoint authorized.** Architect accepted plan grain and the bounded A-owned prerequisite for E3 implementation; ca645b4ca records E Decision Log 48, schema 3 and the five shared-name rows. The post-checkpoint capture origin correction and both narrow test exemptions are included. That master is merged; M1 begins against these names. P3-HD is informed by the architect and is not a blocker for route E.
 
 ## Outcomes & Retrospective
 
