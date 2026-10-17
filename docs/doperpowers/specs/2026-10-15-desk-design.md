@@ -3066,8 +3066,9 @@ deployment, so they never switch the production Worker's org, is deferred.
 enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the code pasted at its hidden prompt).
 
 **State** (2026-10-16, evening):
-- **Deployed:** `hub@2ee490bc web@master.2ee490bc` (Worker version `c44f4cd4`): MAWS master after DC3, DC5, DC6
-  and the channel's anchoring fallback (#16) merged, built from a clean checkout of master. The hub's code is
+- **Deployed:** `hub@47fa64ff web@master.47fa64ff` (Worker version `c7f6bf6e`), adding machine removal in the web
+  (#17), over `hub@2ee490bc web@master.2ee490bc` (Worker `c44f4cd4`): MAWS master after DC3, DC5, DC6 and the
+  channel's anchoring fallback (#16) merged, built from a clean checkout of master. The hub's code is
   byte-identical to the previous deploy's (no migration, the same variables, bindings and secrets); the web gained
   DC5's panel fixes and column-reverse channel, DC6's session depth, and #16. Access reconciled with no change; the
   org key and the walk's machine untouched. Before it: `hub@b11ea5f8 web@smns-erb-web.3de8a15e` (Worker `bf5e8232`),
@@ -3075,9 +3076,10 @@ enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the 
 - **Org key:** set up by the owner in the phone walk's Part 2 (fingerprint `8133-6dc8-be8e`), with a passkey and a
   passphrase.
 - **Machines:** `phone-walk`, the fake machine enrolled from an owner-made code for the walk's pushed requests, with
-  its project "phone walk"; the walk has ended and its stand-in is stopped, but the web had no way to remove a machine
-  (the hub's `DELETE /api/machines/<name>` had no caller), so the owner removes it once that lands. No real machine
-  is enrolled yet.
+  its project "phone walk"; the walk has ended and its stand-in is stopped. The web had no way to remove a machine
+  (the hub's `DELETE /api/machines/<name>` had no caller); MAWS #17 adds an admin's Remove to the Machines dialog,
+  with a confirmation step, proven against the double and the real local hub (the stream ends within one heartbeat,
+  the reconnect is refused). The owner removes `phone-walk` with it. No real machine is enrolled yet.
 - **Leftovers:** the proofs' throwaway org `dc3-m5-test` keeps its Durable Objects' storage on the same Worker,
   unreachable from `ssfskim`.
 
@@ -3506,6 +3508,15 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: An admin removes a machine from the web's Machines dialog (MAWS #17). DX7 specified
+  `DELETE /api/machines/<name>` and the hub served it, but no child's web scope named the action, so after the walk
+  the owner had no way to remove its stand-in machine. Removal is a full confirmation step, because what it means
+  needs more than a row holds: the machine is disconnected and its credential deleted, it keeps the org key it was
+  enrolled with, and it needs a new code to return. It asks for no key method, since the hub treats removal as a
+  member's admin action, not a key operation. A non-admin is told an admin does it. Rejected: typing the machine's
+  name to confirm (heavier than an owner-only org needs); inline confirmation on the row (too little room for the
+  consequences).
+  Date/Author: 2026-10-16, design session (the owner found the gap).
 - Decision: §8 unknown 4 is resolved and holds as designed: the owner's walk on the deployment proved PRF unlock
   with an iCloud Keychain passkey on the Mac (Safari, Chrome) and in the iOS home-screen app, Access carried into the
   standalone app, a passphrase unlock of about 3 s on both devices, a push in about 5 s landing on its request card,
