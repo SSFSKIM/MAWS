@@ -165,13 +165,19 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   [[ -n $refused ]] || return 0
   [[ -n $runner ]] && relaunch+=" --runner $runner"
   [[ -n $class1a ]] && relaunch+=" --class1a $class1a"
-  printf '%s\n' "$1" | awk -F'\t' -v refused="$refused" -v relaunch="$relaunch" -v label="$label" '
+  printf '%s\n' "$1" | awk -F'\t' -v refused="$refused" -v relaunch="$relaunch" -v label="$label" -v asked="$gates" '
     BEGIN { n = split(refused, names, " "); for (i = 1; i <= n; i++) isrefused[names[i]] = 1 }
+    # Under GATE_RUNNER=macos the plan runs on the mini too; refused, it ran nothing, so the relaunch is the whole run.
+    $2 == "plan" && $2 in isrefused { plan = 1 }
     $2 == "plan" || $1 == "skipped" { next }
     $2 in isrefused { r = r " " $2; gates = gates "," $2; nr++; next }
     $1 == "success" { g = g " " $2; ng++; next }
     { d = d " " $2 ($1 == "failure" ? "" : " (" $1 ")"); gates = gates "," $2; nd++ }
     END {
+      if (plan) {
+        printf "ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: %s%s --label %s --evidence\n", relaunch, (asked ? " --gates " asked : ""), label
+        exit
+      }
       printf "ci-gate: refused by the mini (%d):%s; green (%d):%s; red (%d):%s; relaunch the refused and the red (less any red baseline, Decision Log 58(c)): %s --gates %s --label %s --evidence\n",
         nr, r, ng, (ng ? g : " none"), nd, (nd ? d : " none"), relaunch, substr(gates, 2), label
     }'
