@@ -6,7 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  addedListeners, attachIfClean, bearerCrossings, blankResumeStartupRejection, boundedAcquire, boundedMetaRows, isBlankResume, journalFrameShapes, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
+  addedListeners, attachIfClean, bearerCrossings, blankResumeStartupRejection, boundedAcquire, boundedMetaRows, forbiddenFrames, isBlankResume, journalFilesOf, journalFrameShapes, readJournalRows, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
   scanScratchTree, scrubDiagnostic, SEALED_FORMAT, type ScratchFs,
 } from '../../e2e/support/connector-direct-checks';
 
@@ -301,6 +301,67 @@ describe('blankResumeStartupRejection / journalFrameShapes: the one inbound erro
   it('marks an absent field absent, and a non-object frame as no keys', () => {
     const [only] = journalFrameShapes([row('in', { type: 'result' }), row('in', 'text')]).results;
     expect(only).toMatchObject({ spawn: 0, subtype: null, isError: '<absent>', numTurns: '<absent>', totalCostUsd: '<absent>', usage: '<absent>', modelUsage: '<absent>', errorMatch: false, keys: ['type'] });
+  });
+});
+
+describe('journalFilesOf / readJournalRows: a session’s journal in launch order, as the host orders it (Decision Log 42)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = realpathSync(mkdtempSync(join(tmpdir(), 'maws-journal-order-')));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const write = (name: string, at: string, frames: { direction: string; frame: unknown }[]) =>
+    writeFileSync(join(dir, name), frames.map((row, index) => `${JSON.stringify({ seq: index, direction: row.direction, at, frame: row.frame })}\n`).join(''));
+  const meta = (event: string) => ({ direction: 'meta', frame: { event } });
+
+  it('orders launches by their first row’s time (not their ids) and a launch’s rotations numerically, and labels the failed resume spawn 2', () => {
+    // the later launch has the lexicographically smaller id, and rotation 10 sorts before rotation 2 as text
+    write('zzz.jsonl', '2026-10-17T10:00:00.000Z', [meta('spawn'), meta('exit')]);
+    write('aaa.jsonl', '2026-10-17T11:00:00.000Z', [meta('spawn'), { direction: 'in', frame: { type: 'result', is_error: true, errors: ['No conversation found with session ID: x'], num_turns: 0, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }]);
+    write('aaa.2.jsonl', '2026-10-17T11:00:01.000Z', [meta('init_failed')]);
+    write('aaa.10.jsonl', '2026-10-17T11:00:02.000Z', [meta('exit')]);
+    expect(journalFilesOf(dir).map((file) => file.slice(dir.length + 1))).toEqual(['zzz.jsonl', 'aaa.jsonl', 'aaa.2.jsonl', 'aaa.10.jsonl']);
+    const rows = readJournalRows(dir);
+    expect(rows.map((row) => (row.frame as { event?: string; type?: string }).event ?? (row.frame as { type?: string }).type)).toEqual(['spawn', 'exit', 'spawn', 'result', 'init_failed', 'exit']);
+    expect(journalFrameShapes(rows).results[0]).toMatchObject({ spawn: 2 });
+    expect(blankResumeStartupRejection(rows).failures).toEqual([]);
+  });
+
+  it('reads complete lines only, and answers nothing for a missing directory', () => {
+    writeFileSync(join(dir, 'a.jsonl'), `${JSON.stringify({ seq: 0, direction: 'meta', at: '2026-10-17T10:00:00.000Z', frame: { event: 'spawn' } })}\n{"seq":1,"direction":"meta","at":"2026-10-17T10:00:01.0`);
+    expect(readJournalRows(dir)).toHaveLength(1);
+    expect(readJournalRows(join(dir, 'missing'))).toEqual([]);
+  });
+});
+
+describe('forbiddenFrames: the assistant, stream and user frames no session of the transition scene may have, either direction (Decision Log 42)', () => {
+  const row = (direction: string, frame: unknown) => ({ direction, frame });
+
+  it('counts each kind in both directions, so an inbound user or an outbound model frame is seen', () => {
+    expect(forbiddenFrames([row('in', { type: 'user' }), row('out', { type: 'assistant' }), row('in', { type: 'assistant' }), row('out', { type: 'stream_event' }), row('in', { type: 'stream_event' }), row('out', { type: 'user' })])).toEqual({ assistant: 2, streamEvent: 2, user: 2 });
+  });
+
+  it('counts neither results, control frames nor meta rows', () => {
+    expect(forbiddenFrames([row('in', { type: 'result' }), row('out', { type: 'control_request' }), row('in', { type: 'system' }), row('meta', { type: 'user', event: 'spawn' }), row('in', 'user')])).toEqual({ assistant: 0, streamEvent: 0, user: 0 });
+  });
+});
+
+describe('journalFrameShapes bounds: a large journal projects a sample and totals, never every frame', () => {
+  const row = (direction: string, frame: unknown) => ({ direction, frame });
+
+  it('keeps the first 8 results with the total, and 24 type buckets with the count of the rest', () => {
+    const results = Array.from({ length: 12 }, () => row('in', { type: 'result', is_error: true }));
+    const shapes = journalFrameShapes(results);
+    expect(shapes.results).toHaveLength(8);
+    expect(shapes.resultsTotal).toBe(12);
+    expect(shapes.counts['in:result']).toBe(12);
+    const typed = Array.from({ length: 40 }, (_, index) => row('in', { type: `t${index}` }));
+    const many = journalFrameShapes([...typed, row('in', { type: 't0' })]);
+    expect(Object.keys(many.counts)).toHaveLength(24);
+    expect(many.counts['in:t0']).toBe(2);
+    expect(many.otherFrames).toBe(16);
   });
 });
 

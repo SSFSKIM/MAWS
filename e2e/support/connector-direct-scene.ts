@@ -9,7 +9,7 @@
 // `${…}` reference (the engine-only scene), the owner's pages in one Space, the page's refreshes counted against the
 // submissions they made, the Servers rows of the sheet, and the scratch sessions' journals (launches, model traffic and
 // the owner-only modes), read only from the scene's own profile.
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type FrameLocator, type Locator, type Page } from '@playwright/test';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
@@ -17,7 +17,7 @@ import type { CommandResult } from '@shared/ipc/schema';
 import { FIXTURE_SERVER } from './connector-engine';
 import { invoke, pageState, TOOL, value, type ConnectorScene } from './connector-scene';
 import { wrapperPids, type WrapperPids } from './connector-direct-transport';
-import { blankResumeStartupRejection, boundedMetaRows, journalTurns, type JournalTurns } from './connector-direct-checks';
+import { blankResumeStartupRejection, boundedMetaRows, forbiddenFrames, journalFilesOf, journalTurns, readJournalRows, type JournalTurns } from './connector-direct-checks';
 
 // The fixture server answers no tools/call while this file exists (support/connector-mcp-server.mjs `--hold`), and
 // answers the held ones once it is removed (P3-HD M4b).
@@ -149,7 +149,7 @@ export async function serverConnected(page: Page, appSessionId: string, server: 
 export interface SessionJournal {
   appSessionId: string;
   turns: JournalTurns;
-  rows: readonly { direction: string; frame: unknown }[]; // in journal order (files sorted by segment)
+  rows: readonly { direction: string; frame: unknown }[]; // in the host's launch order (JournalReader)
   dirMode: number;
   fileModes: number[];
 }
@@ -164,15 +164,11 @@ export function sessionJournals(scene: ConnectorScene): SessionJournal[] {
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
       const dir = join(root, entry.name);
-      const files = journalFiles(dir);
-      const rows = journalRows(files);
+      const files = journalFilesOf(dir);
+      const rows = readJournalRows(dir);
       return { appSessionId: entry.name, turns: journalTurns(rows), rows, dirMode: statSync(dir).mode & 0o777, fileModes: files.map((file) => statSync(file).mode & 0o777) };
     });
 }
-
-const journalFiles = (dir: string): string[] => readdirSync(dir).filter((file) => file.endsWith('.jsonl')).sort().map((file) => join(dir, file));
-const journalRows = (files: readonly string[]) =>
-  files.flatMap((file) => readFileSync(file, 'utf8').split('\n').slice(0, -1).filter(Boolean).map((line) => JSON.parse(line) as { direction: string; frame: unknown }));
 
 // P3-HD Decision Log 39: the scene's session journals' meta rows (spawn, init_failed, reconnect, exit …) as bounded,
 // scrubbed fields, for a failure to be diagnosed from the run's evidence. At most 8 journals; scratch only.
@@ -183,7 +179,13 @@ export function sessionMeta(scene: ConnectorScene): { appSessionId: string; rows
   return readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .slice(0, 8)
-    .map((entry) => ({ appSessionId: entry.name, ...boundedMetaRows(journalRows(journalFiles(join(root, entry.name))), roots) }));
+    .map((entry) => ({ appSessionId: entry.name, ...boundedMetaRows(readJournalRows(join(root, entry.name)), roots) }));
+}
+
+// The transition scene only: no session, the fresh one included, has an assistant, stream or user frame in either
+// direction (the global rule counts outbound user messages and inbound model frames; this adds the other directions).
+export function expectNoForbiddenFrames(journals: readonly SessionJournal[]): void {
+  for (const journal of journals) expect(forbiddenFrames(journal.rows), `${journal.appSessionId}: no assistant, stream or user frame in either direction`).toEqual({ assistant: 0, streamEvent: 0, user: 0 });
 }
 
 // No session ran a model turn or saw a needs-auth report, and every journal is owner-only. `blankResumeOf` (Decision Log

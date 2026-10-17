@@ -64,7 +64,7 @@ import { ps } from './support/processes';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { PAGE_HTML, PAGE_TITLE, pageState, SERVER, TOOL, type ConnectorScene } from './support/connector-scene';
-import { createPageIn, expectQuietJournals, heldServer, referencingServer, Refreshes, serverConnected, serverRow, sessionJournals, sessionMeta } from './support/connector-direct-scene';
+import { createPageIn, expectNoForbiddenFrames, expectQuietJournals, heldServer, referencingServer, Refreshes, serverConnected, serverRow, sessionJournals, sessionMeta } from './support/connector-direct-scene';
 import { blankResumeStartupRejection, boundedAcquire, heldFate, isBlankResume, journalFrameShapes, oncePageHtml } from './support/connector-direct-checks';
 import { allow, evidence, grantsOf, printEvidence, revokeInSheet, shot, stopEngine } from './support/connector-direct-acceptance';
 // P3-HD M4b end
@@ -803,9 +803,11 @@ test('transition: one grant reads through E, then D with no engine, then E again
       eReturn: blankResume ? { route: 'fresh eligible session, not a resume of the old record', debt: 'blank resume (a pinned engine session id with no transcript): the related blank-chat row at docs/tech-debt-tracker.md:242 (2026-10-17, P3-F; it names the side-thread --resume --fork-session manifestation, not this plain no-message acquire), parent Decision Log 102 and P3-HD Decision Log 40', old: engine.appSessionId, fresh } : { route: 'resume of the owner’s session', session: engine.appSessionId },
       pids: { engine: engine.pid, engineServer, directServer, directParent, directParentIsSupervisor: scene.supervisors.has(directParent), resumed: resumed[0]!.pid, engineAgain, engineAgainParentIsEngine: ps(engineAgain, 'ppid') === String(resumed[0]!.pid) },
       journals: journals.map(({ turns, dirMode, fileModes }) => ({ turns, dirMode: dirMode.toString(8), fileModes: fileModes.map((mode) => mode.toString(8)) })),
-      frames: journals.map(({ appSessionId, rows }) => ({ appSessionId, ...journalFrameShapes(rows) })),
+      frames: journals.slice(0, 16).map(({ appSessionId, rows }) => ({ appSessionId, ...journalFrameShapes(rows) })),
+      journalsTotal: journals.length,
       startupRejection: blankResume ? (({ ok, failures }) => ({ appSessionId: engine.appSessionId, ok, failures }))(blankResumeStartupRejection(journals.find((journal) => journal.appSessionId === engine.appSessionId)?.rows ?? [])) : null,
     });
+    expectNoForbiddenFrames(journals);
     expectQuietJournals(journals, blankResume ? engine.appSessionId : undefined);
   });
 });

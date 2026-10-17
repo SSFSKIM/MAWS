@@ -18,9 +18,10 @@
 // - `heldFate`: whether one held call was answered late by its instance, or its instance was torn down first;
 // - `attachIfClean`: a screenshot captured and attached only after the live documents scanned clean;
 // - `scanScratchTree`: every retainable scratch file read whole in bounded chunks, every unreadable one a failure.
-import { closeSync, lstatSync, openSync, readdirSync, readSync } from 'node:fs';
+import { closeSync, lstatSync, openSync, readdirSync, readFileSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { JournalReader } from '../../src/engine-host/journal';
 
 export interface CustodyFacts {
   mockKeychain: boolean; // main's `use-mock-keychain` switch
@@ -218,9 +219,13 @@ export interface ResultProjection {
   keys: string[];
 }
 export interface FrameShapes {
-  counts: Record<string, number>; // `direction:type` for each typed frame row
-  results: ResultProjection[];
+  counts: Record<string, number>; // `direction:type` for each typed frame row: at most 24 buckets, the first seen
+  otherFrames: number; // typed frames beyond those buckets
+  results: ResultProjection[]; // the first 8 results
+  resultsTotal: number;
 }
+const SHAPE_BUCKETS_MAX = 24;
+const SHAPE_RESULTS_MAX = 8;
 interface ProjectedRow {
   spawn: number;
   direction: string;
@@ -242,15 +247,22 @@ const projectRows = (rows: readonly { direction: string; frame: unknown }[]): Pr
 const errorMatches = (frame: Record<string, unknown>): boolean =>
   [frame.result, frame.error, ...(Array.isArray(frame.errors) ? frame.errors : [])].some((text) => typeof text === 'string' && NO_CONVERSATION.test(text));
 
-// What a journal's frames show of themselves, in safe fields only, in the journal's own order (callers sort its files).
+// What a journal's frames show of themselves, in safe fields only, in the journal's own order (read it with
+// readJournalRows), bounded: a sample of the results and a capped set of type buckets, each with its total.
 export function journalFrameShapes(rows: readonly { direction: string; frame: unknown }[]): FrameShapes {
   const counts: Record<string, number> = {};
   const results: ResultProjection[] = [];
+  let otherFrames = 0;
+  let resultsTotal = 0;
   for (const { spawn, direction, frame } of projectRows(rows)) {
     if (direction === 'meta' || typeof frame.type !== 'string') continue;
     const key = `${direction}:${frame.type.slice(0, 40)}`;
-    counts[key] = (counts[key] ?? 0) + 1;
+    if (key in counts) counts[key] = counts[key]! + 1;
+    else if (Object.keys(counts).length < SHAPE_BUCKETS_MAX) counts[key] = 1;
+    else otherFrames += 1;
     if (frame.type !== 'result') continue;
+    resultsTotal += 1;
+    if (results.length >= SHAPE_RESULTS_MAX) continue;
     results.push({
       spawn,
       direction,
@@ -264,7 +276,27 @@ export function journalFrameShapes(rows: readonly { direction: string; frame: un
       keys: Object.keys(frame).slice(0, 24).map((name) => name.slice(0, 40)),
     });
   }
-  return { counts, results };
+  return { counts, otherFrames, results, resultsTotal };
+}
+
+// The assistant, stream and user frames of a journal, either direction: none is allowed in any session of the
+// transition scene (a result alone may be, by blankResumeStartupRejection, in one).
+export function forbiddenFrames(rows: readonly { direction: string; frame: unknown }[]): { assistant: number; streamEvent: number; user: number } {
+  const counts = { assistant: 0, streamEvent: 0, user: 0 };
+  for (const { direction, frame } of projectRows(rows)) {
+    if (direction === 'meta') continue;
+    if (frame.type === 'assistant') counts.assistant += 1;
+    else if (frame.type === 'stream_event') counts.streamEvent += 1;
+    else if (frame.type === 'user') counts.user += 1;
+  }
+  return counts;
+}
+
+// A session directory's journal files in the host's own launch order (JournalReader: launches by their first row's time,
+// a launch's rotations numerically), and their complete rows in that order. Scratch only.
+export const journalFilesOf = (dir: string): string[] => JournalReader.forSession(dir);
+export function readJournalRows(dir: string): { direction: string; frame: unknown }[] {
+  return journalFilesOf(dir).flatMap((file) => readFileSync(file, 'utf8').split('\n').slice(0, -1).filter(Boolean).map((line) => JSON.parse(line) as { direction: string; frame: unknown }));
 }
 
 // The one inbound frame an engine's refused resume may leave without being a model turn (Decision Log 42): exactly one
@@ -276,9 +308,9 @@ export function blankResumeStartupRejection(rows: readonly { direction: string; 
   const failures: string[] = [];
   const projected = projectRows(rows);
   const results = projected.filter(({ frame }) => frame.type === 'result');
-  const count = (types: readonly string[]) => projected.filter(({ direction, frame }) => direction !== 'meta' && types.includes(frame.type as string)).length;
-  if (count(['assistant', 'stream_event']) > 0) failures.push('modelFrames');
-  if (count(['user']) > 0) failures.push('userFrames');
+  const forbidden = forbiddenFrames(rows);
+  if (forbidden.assistant + forbidden.streamEvent > 0) failures.push('modelFrames');
+  if (forbidden.user > 0) failures.push('userFrames');
   if (!projected.some(({ spawn, direction, frame }) => spawn === 2 && direction === 'meta' && frame.event === 'init_failed')) failures.push('initFailed');
   if (results.length !== 1) failures.push('results');
   else {
