@@ -162,6 +162,7 @@ describe("a dropped machine's stream, on the local command, as DC4 and DC5 run i
     const command = spawn(process.execPath, ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', 'local/run.ts', '--port', String(port), '--state', state!], {
       cwd: resolve(import.meta.dirname, '..'),
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     });
     child = command;
     const output: string[] = [];
@@ -170,6 +171,21 @@ describe("a dropped machine's stream, on the local command, as DC4 and DC5 run i
     // The command prints its banner before wrangler dev is ready, so the hub is ready once it answers through the
     // stand-in.
     const deadline = Date.now() + 120_000;
+    try {
+      await ready(command, output, deadline);
+    } catch (error) {
+      // The command may have died with wrangler dev still running (the stand-in lost its bind after wrangler started):
+      // end its whole group before another attempt shares its state directory.
+      try {
+        process.kill(-command.pid!, 'SIGKILL');
+      } catch {
+        // the group is already gone
+      }
+      throw error;
+    }
+  }
+
+  async function ready(command: ChildProcess, output: string[], deadline: number): Promise<void> {
     for (;;) {
       if (command.exitCode !== null) {
         const message = `the local command exited (${command.exitCode}):\n${output.join('')}`;
