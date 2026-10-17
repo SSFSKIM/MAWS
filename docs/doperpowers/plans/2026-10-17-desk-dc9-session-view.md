@@ -757,7 +757,39 @@ in their own worktrees.
   engine's `origin.kind` (two-subagents' own rows carry it).
   Date/Author: 2026-10-17, M2 executor, folded by the controller.
 
+- Decision (M3, as built at `57320abdb` on `desk-dc9-m3`): the streaming
+  bridge is the desk's layer — its tail rows carry the turn, and a marked
+  live text is handed to MAWS's projection as settled text of the same
+  words (`live: false`, its open marks closed by DC6's `liveMarkdown`),
+  unmarked text staying live; lost, giving the store's turn the live
+  buffer (writing reducer state outside the reducer, or provisional events
+  the reducer cannot drop, which DC6's settling decision rejected). Cost
+  accepted: a marked streaming text draws without streamdown's
+  incomplete-Markdown mode. "The turn of the latest prompt row" is read as
+  the latest derived row's turn, since a turn a notification or a
+  hand-back opens has no prompt. DC6's liveness and retry rules move
+  unchanged into a `TranscriptKeeper` the owner runs once; an owner's
+  release is deferred one microtask so a same-commit hand-off keeps the
+  subscription. The session view draws on a desktop while `machineOnline
+  !== false` (null counts as online, as DC6's `reachable`). The status
+  word sits in the header's actions group (DC5's two-child header rule).
+  The view's chunk loads through one hook in `ChannelView`, not two lazy
+  boundaries. The Report · Transcript choice is kept per transcript key
+  for the page's life and re-applied when MAWS's store starts the key
+  over; a reload opens on Report. The open-agent request runs owner →
+  column → Subagents, opening a closed column. Paging's browser proof runs
+  on DC6's `DepthPlayer` until M6 proves it on `session-view`. DC6's
+  browser suites moved to the center; the fold suite is deleted; six DC5
+  conversation tests are `fixme` for M4, which brings the log's items into
+  the session view.
+  Date/Author: 2026-10-17, M3 executor, folded by the controller.
+
 ## Surprises & Discoveries
+- 2026-10-17 (M3): MAWS's report counts question rows as persistent, not
+  as tool calls ("Working record · 1 tool call" for a turn with Bash and
+  two questions). MAWS's "Jump to latest" animates working dots whenever
+  its store holds an open turn (`state.current !== null`), whatever the
+  desk's presence says — after a replay ends, too.
 - 2026-10-17 (M2): engine 2.1.300 also writes a `<task-notification>` as a
   plain user row when it opens a turn on one, besides the `queued_command`
   attachment DX4 and the fixture read: `two-subagents`' own notifications
