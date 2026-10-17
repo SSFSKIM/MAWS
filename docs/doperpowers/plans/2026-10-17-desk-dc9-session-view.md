@@ -4,7 +4,7 @@
 > branch `smns-erb`; on this machine
 > `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/smns-erb/`), child
 > **DC9** (The web — the session view — plan). **Parent pin:** composite
-> MAWS commit `21ba47570` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`, `bd9c67b14`; Decision Log). The child's section there is its design; this
+> MAWS commit `34defe9f6` (re-pinned 2026-10-17 from `77e82d832` via `f60dd668b`, `896f04acc`, `bd9c67b14`, `21ba47570`; Decision Log). The child's section there is its design; this
 > document carries only the constraints and the milestones. Before M1 read
 > the composite's §9 whole, §4 as amended (the phone ruling is binding),
 > the DC9 child section, the Cross-Child Contracts DX3, DX4 and DX8 with
@@ -320,8 +320,9 @@ session view beside them; `apps/desk-web/e2e/`.
   line naming the send's `(writer, seq)` (`[sminos chat <project>
   <writer_short>:<seq> from human → @you…]`, with `hub/<member>:<seq>` for
   a web send; `compose_chat_frame`, `event_ref`, `writer_short` in
-  doperpowers' `sminos.py` give the exact grammar), or an exact row uuid
-  (the bridge's optional `delivered.uuid`). There is no text-containment
+  doperpowers' `sminos.py` give the exact grammar); an exact row uuid
+  would also do, but `delivered.uuid` is not carried to the web (Decision
+  Log, `34defe9f6`), so a uuid path is kept only if it costs nothing. There is no text-containment
   fallback: a row without a frame (a prompt typed at the terminal) never
   matches a web send. A send whose row never arrives because the session
   ends first stays as a delivered entry at the tail, ahead of the end
@@ -713,6 +714,17 @@ in their own worktrees.
   60/60 checks (the table, 14 body cases by `subagents`/`jobs`/`mcp`, 17
   output cases).
   Date/Author: 2026-10-17, M2 executor, folded by the controller.
+
+- Decision: Parent re-pinned to `34defe9f6` (via `99d3ec713`): DX4 names
+  both notification forms (the `queued_command` attachment and a plain
+  user row whose text is the notification), DC8's plane reads both and the
+  shared fixture gains a plain-row case (its commit to be relayed; the fake
+  keeps reading both). The bridge's `delivered.uuid` stays on the bridge's
+  stream and is not carried to the web (deferred), so M4's matcher goes by
+  the frame's `(writer, seq)` in practice and keeps a uuid path only if it
+  costs nothing. The DX5 seed carries `name?` when the engine's list has
+  one, which the optional `spawn.name` fits.
+  Date/Author: 2026-10-17, controller (the composite's writer's notice).
 
 ## Surprises & Discoveries
 - 2026-10-17 (M2): engine 2.1.300 also writes a `<task-notification>` as a
