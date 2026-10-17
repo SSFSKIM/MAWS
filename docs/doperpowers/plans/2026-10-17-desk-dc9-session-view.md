@@ -254,7 +254,7 @@ row; `two-subagents`' existing tests unchanged.
 
 ### M3 — The per-session owner and the session view
 
-Starts after the titles PR is merged into this branch.
+Starts after the titles PR (MAWS #25, master `6a677a8d`) is merged into this branch.
 
 **At its end:**
 - **One owner per (machine, session).** The session's main `DeskTranscript`
@@ -567,6 +567,16 @@ in their own worktrees.
   marker as drawn. The mockup page is updated to the chosen alternatives
   when convenient (not a gate).
   Date/Author: 2026-10-17, the owner via the composite's writer.
+
+- Decision: The titles PR (MAWS #25, master `6a677a8d`) has merged:
+  Sidebar, ChannelView, StreamView, DepthColumn, SubagentDetail,
+  RequestCard, Composer, completion, the projection and a new
+  `shell/SessionLabel.tsx` changed. `desk-dc9` merges `origin/master` at
+  or after `6a677a8d` before M3 dispatches. Every new surface that names a
+  session (the tail bubbles, the inline request cards, the end marker, the
+  center's header) names it through `SessionLabel`, title first and alias
+  muted, as the title rule says.
+  Date/Author: 2026-10-17, the composite's writer, folded by the controller.
 
 ## Surprises & Discoveries
 
