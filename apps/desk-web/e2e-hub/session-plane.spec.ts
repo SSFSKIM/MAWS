@@ -4,7 +4,8 @@
 // from the audit record's `decided`); RPC states, `uncertain` among them, and its retry under the same nonce; each
 // recipient's delivery outcome surviving a reload; a machine gone offline leaving the conversation with its presence
 // and depth unavailable; an event and a request whose code fails not drawn; and §5's controls by the session's kind as
-// the machine's real presence says it.
+// the machine's real presence says it. And a connected machine removed from the Machines dialog: off the list, its
+// stream ended, and its credential refused.
 //
 // The fake machine replays the committed recording (a haiku session with two subagents, a Bash permission prompt, a
 // question, a `<message>`, an interrupted turn). Where its API does not reach, a DX2 test client (test/local/machine.ts)
@@ -17,7 +18,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type BrowserContext, type Page, type WebSocket } from '@playwright/test';
 import { FakeMachine, loadRecording, TWO_SUBAGENTS, type FakeMachineOptions, type Recording, type Step } from 'desk-hub/fake-machine';
-import { base64urlEncode, encodeEnrollmentCode, seal, type EnrollmentIssued, type LogEvent, type ProjectUp, type Raised, type Rpc } from 'desk-hub/protocol';
+import { base64urlEncode, encodeEnrollmentCode, seal, type EnrollmentIssued, type LogEvent, type MachineRecord, type ProjectUp, type Raised, type Rpc } from 'desk-hub/protocol';
 import { LocalHub } from '../test/local/hub';
 import { TestMachine } from '../test/local/machine';
 import { revokeMachines } from '../test/local/revoke';
@@ -444,4 +445,30 @@ test('G2: a session that ended without being retired keeps its channel and offer
   await expect(header).toContainText('Resumed; it rejoins in a moment', { timeout: 15_000 });
   expect(fm.rpcs).toMatchObject([{ rpc: 'resume', executed: true, outcome: { state: 'done' } }]);
   await expect(nav(page).locator(`[data-group="idle"] [data-session="${rec.session}"]`)).toBeVisible({ timeout: 15_000 });
+});
+
+test('an admin removes a connected machine from the Machines dialog: it leaves the list, its stream ends at once, and its credential is refused', async () => {
+  test.setTimeout(60_000);
+  const fm = await fakeMachine({ recordings: [] });
+  expect(fm.isConnected).toBe(true);
+  await page.goto(hub.localhost);
+  await page.getByRole('button', { name: 'Machines', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Machines' });
+  const row = dialog.locator(`[data-machine="${fm.name}"]`);
+  await expect(row).toContainText('enrolled');
+
+  await row.getByRole('button', { name: `Remove ${fm.name}` }).click();
+  const confirm = dialog.getByTestId('remove-confirm');
+  await expect(confirm.getByTestId('remove-meaning')).toContainText('disconnects it at once and deletes its credential');
+  await confirm.getByRole('button', { name: `Remove ${fm.name}` }).click();
+  await expect(dialog.getByTestId('machines-notice')).toHaveText(`Removed ${fm.name}. To use it with the desk again, enroll it again.`);
+  await expect(row).toHaveCount(0);
+  const listed = (await (await fetch(`${hub.url}/api/machines`)).json()) as { machines: MachineRecord[] };
+  expect(listed.machines.map((m) => m.name)).not.toContain(fm.name);
+  enrolledNames.splice(enrolledNames.indexOf(fm.name), 1); // revoked here: the teardown has nothing left to revoke for it
+
+  // The hub ended its stream with the revocation, not at a lapsed lease: well within one heartbeat.
+  await expect.poll(() => fm.isConnected, { timeout: hub.heartbeatMs }).toBe(false);
+  // Reconnecting with the credential it holds, as its daemon would, is refused.
+  await expect(fm.connect()).rejects.toMatchObject({ status: 403 });
 });

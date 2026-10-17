@@ -4,7 +4,9 @@ import { useEffect, type ReactNode } from 'react';
 
 export const buttonPrimary = 'rounded-md bg-primary px-3 py-1.5 text-ui font-medium text-primary-foreground hover:opacity-90 disabled:cursor-default disabled:opacity-50';
 export const buttonSecondary = 'rounded-md border border-border-strong bg-bg-raised px-3 py-1.5 text-ui text-fg hover:bg-bg-hover disabled:cursor-default disabled:opacity-50';
-export const buttonQuiet = 'rounded-sm px-1 text-ui-sm text-fg-muted underline-offset-2 hover:text-fg hover:underline';
+/** The button that carries out a destructive step the owner confirmed. */
+export const buttonDanger = 'rounded-md border border-danger bg-bg-raised px-3 py-1.5 text-ui font-medium text-danger hover:bg-bg-hover disabled:cursor-default disabled:opacity-50';
+export const buttonQuiet ='rounded-sm px-1 text-ui-sm text-fg-muted underline-offset-2 hover:text-fg hover:underline';
 export const textInput = 'w-full rounded-md border border-border-strong bg-bg px-2.5 py-1.5 text-ui text-fg outline-none focus:border-accent';
 
 export function Dialog(props: { title: string; onClose: () => void; children: ReactNode }) {
