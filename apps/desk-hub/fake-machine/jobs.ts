@@ -23,6 +23,15 @@ export const TABLE: Readonly<Record<string, { status: Exclude<SubagentStatus, 'e
 const EXPIRY = /^(\[Monitor expired after |\[Monitor timed out)/;
 const LAUNCHED = 'async_launched';
 
+/**
+ * The engine's launch texts for an agent that runs in the background, matched exactly: `Async agent launched
+ * successfully.`, optionally a space and a parenthesis closed on that line, then a line `agentId: …` (2.1.2xx–2.1.300,
+ * some written without a toolUseResult); or a fork's `Fork started — processing in background`.
+ */
+const LAUNCH = /^Async agent launched successfully\.(?: \([^\n]*\))?\nagentId: /;
+const FORK_LAUNCH = 'Fork started — processing in background';
+const isLaunchText = (text: string) => text === FORK_LAUNCH || LAUNCH.test(text);
+
 /** One row's word about a task or an agent, before the table: what the fold reads. */
 type Word = { raw: string | null; at: string; summary?: string; outputFile?: string; event?: string };
 
@@ -87,6 +96,8 @@ export class LoopIndex {
   /** Background shells and monitors, in the order of their start rows. */
   readonly started: Started[] = [];
   readonly monitors = new Set<string>();
+  /** Agent calls the engine ran in the background by their own input (`run_in_background` true, or the string "true"). */
+  readonly backgroundCalls = new Set<string>();
   /** The latest output path a row named for each task id. */
   readonly paths = new Map<string, string>();
   /** Task ids some row names as a job, a notification, or a `task_status`: what `output` serves. */
@@ -116,8 +127,12 @@ export class LoopIndex {
     const result = obj(toolUseResult);
     if (call.name === 'Agent' || call.name === 'Task') {
       const status = str(result?.status);
-      const raw = status === LAUNCHED ? LAUNCHED : isError ? 'error' : (status ?? 'completed');
+      const launch = status === LAUNCHED || (!isError && isLaunchText(textOf(block.content)));
+      const raw = launch ? LAUNCHED : isError ? 'error' : (status ?? 'completed');
+      // A launch written without a toolUseResult names no output file.
       const outputFile = status === LAUNCHED ? str(result?.outputFile) : null;
+      const background = call.input.run_in_background === true || call.input.run_in_background === 'true';
+      if (background) this.backgroundCalls.add(id);
       this.mentions.push({ from: 'result', taskId: null, toolUseId: id, raw, at, ...(outputFile !== null && { outputFile }) });
     } else if (call.name === 'Bash' && typeof result?.backgroundTaskId === 'string') {
       const taskId = result.backgroundTaskId;
@@ -263,7 +278,8 @@ export function derive(d: Derivation): Body {
     // A nested agent's call, result and notification are in its parent agent's transcript.
     const loop = parent === null ? d.main : (d.agents[parent]?.index ?? null);
     const toolUseId = str(meta?.toolUseId) ?? spawn?.toolUseId ?? null;
-    const background = meta?.requestShape === 'background' || spawn?.background === true;
+    // Known background four ways: the meta, the bridge's spawn, the call's own input, or a launch among its rows.
+    const background = meta?.requestShape === 'background' || spawn?.background === true || (toolUseId !== null && loop?.backgroundCalls.has(toolUseId) === true);
     const mentions = (loop?.mentions ?? []).filter((m) => {
       if (m.from === 'result') return m.toolUseId !== null && m.toolUseId === toolUseId && (!background || m.raw === LAUNCHED);
       if (m.from === 'notification') return m.taskId === agentId || (toolUseId !== null && m.toolUseId === toolUseId);
