@@ -196,14 +196,39 @@ function shapeOf(value: unknown, depth = 0): unknown {
   return Object.fromEntries(Object.entries(value).slice(0, 16).map(([key, inner]) => [key.slice(0, 40), shapeOf(inner, depth + 1)]));
 }
 
-// Every number in the tree is 0 (null allowed): no string, boolean, array or nonzero number anywhere.
-function zeroTree(value: unknown): boolean {
-  if (value === null || value === 0) return true;
-  if (typeof value !== 'object' || Array.isArray(value)) return false;
-  return Object.values(value).every(zeroTree);
+// The `usage` of the refused resume's result as run 39077555852 observed it (Decision Log 43): nothing else is admitted.
+// Four API token counters, required and exactly 0; optional nested counters, each key known and exactly 0; the
+// descriptive root strings `service_tier`, `inference_geo` and `speed`; an empty `iterations` list; a null
+// `fallback_credit`. A null counter, an unknown key (root or nested), a string where a number belongs, a nonempty list or
+// a positive number anywhere fails.
+const USAGE_CORE = ['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'] as const;
+const USAGE_NESTED: Record<string, readonly string[]> = {
+  output_tokens_details: ['thinking_tokens'],
+  server_tool_use: ['web_search_requests', 'web_fetch_requests'],
+  cache_creation: ['ephemeral_1h_input_tokens', 'ephemeral_5m_input_tokens'],
+};
+const USAGE_STRINGS = ['service_tier', 'inference_geo', 'speed'] as const;
+const isPlainObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function observedZeroUsage(usage: unknown): boolean {
+  if (!isPlainObject(usage)) return false;
+  for (const key of Object.keys(usage)) {
+    const value = usage[key];
+    if ((USAGE_CORE as readonly string[]).includes(key)) {
+      if (value !== 0) return false;
+    } else if (key in USAGE_NESTED) {
+      if (!isPlainObject(value) || Object.keys(value).some((inner) => !USAGE_NESTED[key]!.includes(inner) || value[inner] !== 0)) return false;
+    } else if ((USAGE_STRINGS as readonly string[]).includes(key)) {
+      if (typeof value !== 'string') return false;
+    } else if (key === 'iterations') {
+      if (!Array.isArray(value) || value.length !== 0) return false;
+    } else if (key === 'fallback_credit') {
+      if (value !== null) return false;
+    } else return false;
+  }
+  return USAGE_CORE.every((counter) => usage[counter] === 0);
 }
 
-const API_TOKEN_COUNTERS = ['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'] as const; // each explicitly 0 (null or absent fails)
 const NO_CONVERSATION = /no\s+conversation\s+found/i; // the engine’s refusal text, as it is written
 
 export interface ResultProjection {
@@ -299,11 +324,11 @@ export function readJournalRows(dir: string): { direction: string; frame: unknow
   return journalFilesOf(dir).flatMap((file) => readFileSync(file, 'utf8').split('\n').slice(0, -1).filter(Boolean).map((line) => JSON.parse(line) as { direction: string; frame: unknown }));
 }
 
-// The one inbound frame an engine's refused resume may leave without being a model turn (Decision Log 42): exactly one
-// `result` in the journal, inbound, in the second launch, an error whose result/error text is the engine’s missing-conversation refusal, with explicit zero
-// turns, cost and API-token usage (usage with the four API token counters present and 0, every number in it and in a present
-// modelUsage zero), the same launch's init_failed row, and no assistant, stream or user frame anywhere. `failures` names
-// each unmet condition by a closed word.
+// The one inbound frame an engine's refused resume may leave without being a model turn (Decision Logs 42 and 43):
+// exactly one `result` in the journal, inbound, in the second launch, an error whose result/error text is the engine's
+// missing-conversation refusal, with explicit zero turns and cost, the observed all-zero `usage` (observedZeroUsage),
+// an empty `modelUsage`, the same launch's init_failed row, and no assistant, stream or user frame anywhere. `failures`
+// names each unmet condition by a closed word.
 export function blankResumeStartupRejection(rows: readonly { direction: string; frame: unknown }[]): { ok: boolean; failures: string[]; result: ResultProjection | null } {
   const failures: string[] = [];
   const projected = projectRows(rows);
@@ -322,9 +347,8 @@ export function blankResumeStartupRejection(rows: readonly { direction: string; 
     if (!errorMatches(frame)) failures.push('errorMatch');
     if (frame.num_turns !== 0) failures.push('numTurns');
     if (frame.total_cost_usd !== 0) failures.push('totalCostUsd');
-    if (usage === null || typeof usage !== 'object' || Array.isArray(usage) || API_TOKEN_COUNTERS.some((counter) => (usage as Record<string, unknown>)[counter] !== 0) || !zeroTree(usage)) failures.push('usage');
-    const modelUsage = frame.modelUsage;
-    if (modelUsage !== undefined && (modelUsage === null || typeof modelUsage !== 'object' || Array.isArray(modelUsage) || !zeroTree(modelUsage))) failures.push('modelUsage');
+    if (!observedZeroUsage(usage)) failures.push('usage');
+    if (!isPlainObject(frame.modelUsage) || Object.keys(frame.modelUsage).length !== 0) failures.push('modelUsage'); // present and empty: no model ran
   }
   return { ok: failures.length === 0, failures, result: journalFrameShapes(rows).results[0] ?? null };
 }

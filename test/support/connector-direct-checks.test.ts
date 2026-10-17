@@ -201,7 +201,21 @@ describe('blankResumeStartupRejection / journalFrameShapes: the one inbound erro
   const spawn = row('meta', { event: 'spawn', args: ['--resume', 'x'] });
   const initFailed = row('meta', { event: 'init_failed', message: 'No conversation found with session ID: x' });
   const exit = row('meta', { event: 'exit', code: 1 });
-  const usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: { web_search_requests: 0 }, service_tier: null };
+  // the shape run 39077555852 observed for the refused resume's result (zero everywhere; descriptive strings, an empty iterations list)
+  const usage = {
+    output_tokens_details: { thinking_tokens: 0 },
+    input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    output_tokens: 0,
+    server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+    service_tier: 'standard',
+    cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
+    inference_geo: 'not_available',
+    iterations: [] as unknown[],
+    speed: 'standard',
+    fallback_credit: null,
+  };
   const result = { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['No conversation found with session ID: x'], num_turns: 0, total_cost_usd: 0, usage, modelUsage: {} };
   const good = () => [spawn, row('in', { type: 'system', subtype: 'init' }), exit, spawn, row('in', result), initFailed, exit];
   const withResult = (patch: Record<string, unknown>) => [spawn, exit, spawn, row('in', { ...result, ...patch }), initFailed, exit];
@@ -258,10 +272,27 @@ describe('blankResumeStartupRejection / journalFrameShapes: the one inbound erro
     expect(failures(withResult({ usage: { ...usage, input_tokens: 1 } }))).toContain('usage');
     expect(failures(withResult({ usage: { ...usage, cache_read_input_tokens: 5 } }))).toContain('usage');
     expect(failures(withResult({ usage: { ...usage, server_tool_use: { web_search_requests: 2 } } }))).toContain('usage');
-    expect(failures(withResult({ usage: { ...usage, service_tier: 'standard' } }))).toContain('usage');
+    // the observed metadata: descriptive strings at the root, an empty iterations list, a null fallback credit — and nothing else
+    for (const patch of [{ service_tier: 1 }, { service_tier: null }, { inference_geo: 0 }, { speed: false }, { iterations: undefined, extra: 0 }, { iterations: [{ input_tokens: 0 }] }, { iterations: {} }, { iterations: null }, { fallback_credit: 0 }, { fallback_credit: 'x' }, { fallback_credit: {} }]) {
+      expect(failures(withResult({ usage: { ...usage, ...patch } })), JSON.stringify(patch)).toContain('usage');
+    }
+    expect(failures(withResult({ usage: { ...usage, unknown_counter: 0 } })), 'unknown root field').toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, unknown_text: 'x' } })), 'unknown root string').toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, server_tool_use: { web_search_requests: 0, web_fetch_requests: 0, other: 0 } } })), 'unknown nested field').toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0, ephemeral_9h_input_tokens: 0 } } })), 'unknown nested field').toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, output_tokens_details: { thinking_tokens: 0, reasoning: 0 } } })), 'unknown nested field').toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, output_tokens_details: { thinking_tokens: 1 } } })), 'thinking tokens').toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, output_tokens_details: { thinking_tokens: null } } })), 'nested null counter').toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, output_tokens_details: [] } })), 'nested array').toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, server_tool_use: { web_search_requests: 0, web_fetch_requests: 1 } } })), 'server tool use').toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 4 } } })), 'ephemeral cache').toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, cache_creation: { ephemeral_1h_input_tokens: '0', ephemeral_5m_input_tokens: 0 } } })), 'ephemeral cache string').toContain('usage');
     expect(failures(withResult({ usage: { ...usage, input_tokens: '0' } }))).toContain('usage');
     expect(failures(withResult({ modelUsage: { 'claude-x': { inputTokens: 3, costUSD: 0.01 } } }))).toContain('modelUsage');
     expect(failures(withResult({ modelUsage: [] }))).toContain('modelUsage');
+    expect(failures(withResult({ modelUsage: { 'claude-x': { inputTokens: 0, costUSD: 0 } } })), 'a model entry, even all zero').toContain('modelUsage');
+    expect(failures(withResult({ modelUsage: undefined })), 'absent').toContain('modelUsage');
+    expect(failures(withResult({ modelUsage: null }))).toContain('modelUsage');
   });
 
   it('rejects an assistant, stream or user frame anywhere, either direction', () => {
@@ -290,7 +321,20 @@ describe('blankResumeStartupRejection / journalFrameShapes: the one inbound erro
         isError: true,
         numTurns: 0,
         totalCostUsd: 0,
-        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: { web_search_requests: 0 }, service_tier: '<string>' },
+        usage: {
+          output_tokens_details: { thinking_tokens: 0 },
+          input_tokens: 0,
+          cache_creation_input_tokens: 0,
+          cache_read_input_tokens: 0,
+          output_tokens: 0,
+          server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+          service_tier: '<string>',
+          cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
+          inference_geo: '<string>',
+          iterations: '<array:0>',
+          speed: '<string>',
+          fallback_credit: null,
+        },
         modelUsage: {},
         errorMatch: true,
         keys: ['type', 'subtype', 'is_error', 'errors', 'num_turns', 'total_cost_usd', 'usage', 'modelUsage', 'result', 'env'],
@@ -319,7 +363,7 @@ describe('journalFilesOf / readJournalRows: a session’s journal in launch orde
   it('orders launches by their first row’s time (not their ids) and a launch’s rotations numerically, and labels the failed resume spawn 2', () => {
     // the later launch has the lexicographically smaller id, and rotation 10 sorts before rotation 2 as text
     write('zzz.jsonl', '2026-10-17T10:00:00.000Z', [meta('spawn'), meta('exit')]);
-    write('aaa.jsonl', '2026-10-17T11:00:00.000Z', [meta('spawn'), { direction: 'in', frame: { type: 'result', is_error: true, errors: ['No conversation found with session ID: x'], num_turns: 0, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }]);
+    write('aaa.jsonl', '2026-10-17T11:00:00.000Z', [meta('spawn'), { direction: 'in', frame: { type: 'result', is_error: true, errors: ['No conversation found with session ID: x'], num_turns: 0, total_cost_usd: 0, modelUsage: {}, usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } }]);
     write('aaa.2.jsonl', '2026-10-17T11:00:01.000Z', [meta('init_failed')]);
     write('aaa.10.jsonl', '2026-10-17T11:00:02.000Z', [meta('exit')]);
     expect(journalFilesOf(dir).map((file) => file.slice(dir.length + 1))).toEqual(['zzz.jsonl', 'aaa.jsonl', 'aaa.2.jsonl', 'aaa.10.jsonl']);
