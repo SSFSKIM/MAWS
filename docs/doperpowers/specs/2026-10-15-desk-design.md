@@ -2663,8 +2663,10 @@ machine answers `output` on the sub. **Containment** (the review, 2026-10-17): t
 `CLAUDE_CODE_TMPDIR` or `/tmp` as the engine resolves it (SPEC ch. 20, "the shared per-uid temp root"; `/private/tmp`
 on macOS), `<uid>` the daemon's own, `<session id>` the subscription's, and `<slug>` each of: the name of the
 transcript's project directory (`~/.claude/projects/<slug>/<session id>.jsonl`), the engine's slug (SPEC §35.2.1) of
-the working directory the session joined the log with, and the engine's slug of its session record's `cwd`; a
-machine whose engine settings name `adoptShellOutputRoot` adds `<that root>/<session id>/tasks/`. A set, not one
+the working directory the session joined the log with, and the engine's slug of its session record's `cwd`. A shell
+a `--bg` takeover adopted from another session writes under that session's root, which nothing on the machine names
+(`adoptShellOutputRoot` is the engine's in-process takeover state in 2.1.300, not a setting; DC8, 2026-10-17): its
+output is refused, a known refusal, never a root read from a row. A set, not one
 root (DC8, 2026-10-17): the engine's temp directory takes the slug of the session's original working directory,
 so a session that moved into a worktree writes its outputs under one slug while its transcript lives under another
 (a family coordinator session's rows named 387 output paths under the first and 137 under the second); one root
@@ -4467,7 +4469,7 @@ a hub that connects into machines (§2).
   2026-10-17, DC8's two gaps in DX4, recorded from its Decision Log: the
   `output` containment root is a set — the slugs of the transcript's
   project directory, of the working directory the session joined with and
-  of its session record's `cwd`, plus `adoptShellOutputRoot` — because the
+  of its session record's `cwd` — because the
   engine's temp directory follows the session's original working
   directory and a session that moved into a worktree splits its outputs
   from its transcript (387 and 137 paths in one family session); one root
@@ -4523,6 +4525,14 @@ a hub that connects into machines (§2).
   parked for a MAWS-app follow-up that owns the whole feature, offered to
   its architect. Rejected: landing the backfill without a consumer, a
   half-feature on master that contradicts C8b's documented line.
+  2026-10-17, DC8's M4: `adoptShellOutputRoot` is struck from the
+  containment roots. In 2.1.300 it is the engine's in-process `--bg`
+  takeover state, not a setting, and nothing on the machine names it.
+  A shell adopted from another session therefore has its output refused,
+  as a known refusal. The three slug roots stay. How many adopted
+  shells fall under the original-cwd slug anyway is unmeasured.
+  Rejected: taking that root from the adopting session's rows, which
+  would undo containment.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
