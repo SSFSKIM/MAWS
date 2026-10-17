@@ -20,7 +20,7 @@ import { parseSpec, type ValueFormat, type ViewSpec } from '../spec';
 import { DATASET_STATES, VIEW_STATES } from '../states';
 import * as geo from './geometry';
 import { SHAPES, type Point, type Ticks } from './geometry';
-import { decimalsFor, esc, formatInstant, formatNumber, px, unitOf, type Theme } from './svg';
+import { decimalsFor, esc, formatClock, formatInstant, formatNumber, px, unitOf, type Theme } from './svg';
 import { textWidth, wrap } from './text';
 import { columnFormat, instantOf, overflowKey, shownColumns, transform, typedKey, type ViewColumn, type ViewData, type ViewTable } from './transform';
 
@@ -189,7 +189,11 @@ function formatCell(value: Cell, column: ViewColumn | undefined, format?: ValueF
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (column?.type === 'date' && format !== 'text') {
     const ms = instantOf(value);
-    if (ms !== null) return value.length === 10 ? formatInstant(ms, 'day') : `${formatInstant(ms, 'day')} ${formatInstant(ms, 'minute').slice(6)} UTC`;
+    if (ms === null) return value;
+    if (value.length === 10) return formatInstant(ms, 'day');
+    // a date-time to the minute, finer when the value is (E2 panel): seconds, then milliseconds
+    const grain = unitOf([ms]);
+    return `${formatInstant(ms, 'day')} ${formatClock(ms, grain === 'second' || grain === 'millisecond' ? grain : 'minute')} UTC`;
   }
   return value;
 }

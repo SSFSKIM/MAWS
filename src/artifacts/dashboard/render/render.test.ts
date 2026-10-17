@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { HOUSE_TOKENS } from '../../document/export/design-system';
 import { parseDataset, DatasetError } from '../parse';
 import { GDP_CSV, PENGUINS_CSV } from '../fixtures/datasets';
-import { renderFailure, renderView, themeFrom, TABLE_VIEW_MAX_ROWS, viewRows, type Rendered, type ViewTable } from './index';
+import { renderFailure, renderView, themeFrom, TABLE_VIEW_MAX_ROWS, viewPreview, viewRows, type Rendered, type ViewTable } from './index';
 import { textWidth } from './text';
 
 const table = (csv: string): ViewTable => {
@@ -297,7 +297,24 @@ describe('renderView', () => {
     const t: ViewTable = { columns: [{ name: 'at', type: 'date' }, { name: 'v', type: 'number' }], rows: [['2026-10-16T09:00:00+09:00', 1], ['2026-10-16T00:30:00.123456789Z', 2], ['2026-10-16', 3], ['2026-10-16', 4]] };
     const { svg = '' } = renderView({ view: 'scatter', x: 'at', y: 'v' }, t, theme, 't');
     const list = /data-tips="([^"]*)"/.exec(svg)![1].split('&#10;');
-    expect(list).toEqual(['2026-10-16 00:00 UTC · v: 1', '2026-10-16 00:30 UTC · v: 2', '2026-10-16 · v: 3', '2026-10-16 · v: 4']);
+    expect(list).toEqual(['2026-10-16 00:00 UTC · v: 1', '2026-10-16 00:30:00.123 UTC · v: 2', '2026-10-16 · v: 3', '2026-10-16 · v: 4']);
+  });
+
+  it('keeps accepted sub-minute distinctions apart on the axis, in the tips, the table and the export preview (E2 panel)', () => {
+    const t: ViewTable = { columns: [{ name: 'at', type: 'date' }, { name: 'v', type: 'number' }], rows: [['2026-10-16T00:00:01Z', 1], ['2026-10-16T00:00:02Z', 2], ['2026-10-16T00:00:02.500Z', 3], ['2026-10-16T00:01Z', 4]] };
+    const { svg = '' } = renderView({ view: 'scatter', x: 'at', y: 'v' }, t, theme, 't');
+    expect(layer(svg).map((p) => p.tip)).toEqual(['2026-10-16 00:00:01 UTC · v: 1', '2026-10-16 00:00:02 UTC · v: 2', '2026-10-16 00:00:02.500 UTC · v: 3', '2026-10-16 00:01 UTC · v: 4']);
+    const seconds = renderView({ view: 'line', x: 'at', y: 'v' }, { columns: t.columns, rows: t.rows.slice(0, 2) }, theme, 't').svg!;
+    const ticks = grade(seconds).texts.filter((text) => text.startsWith('10-16'));
+    expect(ticks.length).toBeGreaterThan(1);
+    expect(new Set(ticks).size).toBe(ticks.length);
+    for (const tick of ticks) expect(tick).toMatch(/^10-16 00:00:0\d(?:\.\d{3})?$/);
+    const cells = ['2026-10-16 00:00:01 UTC', '2026-10-16 00:00:02 UTC', '2026-10-16 00:00:02.500 UTC', '2026-10-16 00:01 UTC'];
+    expect(renderView({ view: 'table' }, t, theme, 't').table!.rows.map((row) => row[0])).toEqual(cells);
+    const preview = viewPreview({ view: 'line', x: 'at', y: 'v' }, t, 't');
+    expect(preview.ok && preview.table.rows.map((row) => row[0])).toEqual(cells);
+    // a calendar date stays a date; a date-time on the minute keeps its minutes
+    expect(renderView({ view: 'table' }, { columns: t.columns, rows: [['0099-01-01', 1], ['2026-10-16T09:00+09:00', 2]] }, theme, 't').table!.rows.map((row) => row[0])).toEqual(['0099-01-01', '2026-10-16 00:00 UTC']);
   });
 
   it('draws the named error and empty states in place, keeping the caption', () => {

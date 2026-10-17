@@ -38,27 +38,47 @@ export function decimalsFor(ticks: number[]): number {
   return 6;
 }
 
-export type TimeUnit = 'year' | 'month' | 'day' | 'hour' | 'minute';
-const pad = (n: number) => String(n).padStart(2, '0');
+export type TimeUnit = 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second' | 'millisecond';
+const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+/** A UTC year in at least four digits (`0099`), as the ISO dates it is read from write it. */
+const yearOf = (d: Date) => (d.getUTCFullYear() < 0 ? '-' : '') + pad(Math.abs(d.getUTCFullYear()), 4);
 
-/** An instant written in UTC at the unit's grain: `1990`, `1990-03`, `1990-03-15`, `03-15 14:00`. */
+/**
+ * An instant written in UTC at the unit's grain: `1990`, `1990-03`, `1990-03-15`, `03-15 14:00` (an hour or a minute),
+ * `03-15 14:00:05`, `03-15 14:00:05.250` (E2 panel: a second or a millisecond, so instants apart by less than a minute
+ * never read alike).
+ */
 export function formatInstant(ms: number, unit: TimeUnit): string {
   const d = new Date(ms);
-  const date = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-  if (unit === 'year') return String(d.getUTCFullYear());
-  if (unit === 'month') return date.slice(0, 7);
-  if (unit === 'day') return date;
-  return `${date.slice(5)} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  const day = `${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  if (unit === 'year') return yearOf(d);
+  if (unit === 'month') return `${yearOf(d)}-${pad(d.getUTCMonth() + 1)}`;
+  if (unit === 'day') return `${yearOf(d)}-${day}`;
+  return `${day} ${formatClock(ms, unit)}`;
 }
 
-/** The grain of a tick list: the coarsest unit every tick sits on. */
+/** An instant's UTC clock: `14:00` for an hour or a minute, `14:00:05` for a second, `14:00:05.250` for a millisecond. */
+export function formatClock(ms: number, unit: 'hour' | 'minute' | 'second' | 'millisecond'): string {
+  const d = new Date(ms);
+  const minute = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+  if (unit === 'hour' || unit === 'minute') return minute;
+  const second = `${minute}:${pad(d.getUTCSeconds())}`;
+  return unit === 'second' ? second : `${second}.${pad(d.getUTCMilliseconds(), 3)}`;
+}
+
+/** The grain of a tick list (or of one instant): the coarsest unit every tick sits on. */
 export function unitOf(ticks: number[]): TimeUnit {
   const on = (test: (d: Date) => boolean) => ticks.every((t) => test(new Date(t)));
-  const midnight = (d: Date) => d.getUTCHours() === 0 && d.getUTCMinutes() === 0;
+  const second = (d: Date) => d.getUTCMilliseconds() === 0;
+  const minute = (d: Date) => second(d) && d.getUTCSeconds() === 0;
+  const hour = (d: Date) => minute(d) && d.getUTCMinutes() === 0;
+  const midnight = (d: Date) => hour(d) && d.getUTCHours() === 0;
   if (on((d) => midnight(d) && d.getUTCDate() === 1 && d.getUTCMonth() === 0)) return 'year';
   if (on((d) => midnight(d) && d.getUTCDate() === 1)) return 'month';
   if (on(midnight)) return 'day';
-  return on((d) => d.getUTCMinutes() === 0) ? 'hour' : 'minute';
+  if (on(hour)) return 'hour';
+  if (on(minute)) return 'minute';
+  return on(second) ? 'second' : 'millisecond';
 }
 
 export interface Theme {
