@@ -536,7 +536,13 @@ test('beside the agentâ€™s views the owner comments on the chart and writes; Bâ€
   const chartBlock = record.locator('.doc-chart').first();
 
   let threadId = '';
-  await test.step('the owner comments on the chart block, replies in the rail and writes beside it', async () => {
+  await test.step('the owner writes beside the chart, comments on the chart block and replies in the rail', async () => {
+    // the prose first, while the column is the panel's whole width (the rail open narrows it: the tracker's P3-F row)
+    const prose = record.locator('.ds-doc .ProseMirror p', { hasText: 'Revenue by region this quarter.' });
+    await prose.click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' Owner: compare with last year.');
+    await expect(prose).toHaveText('Revenue by region this quarter. Owner: compare with last year.');
     const watched = await watchSelection(record);
     await selectChart(record);
     await commentSelectedChart(record, watched);
@@ -552,11 +558,6 @@ test('beside the agentâ€™s views the owner comments on the chart and writes; Bâ€
     await rail.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
     await reply(rail, threadId, 'Is Jeju this low every quarter?');
     await expect(rail.locator(`article[data-thread="${threadId}"]`).getByRole('listitem')).toHaveText(['YouIs Jeju this low every quarter?']);
-    const prose = record.locator('.ds-doc .ProseMirror p', { hasText: 'Revenue by region this quarter.' });
-    await prose.click();
-    await page.keyboard.press('End');
-    await page.keyboard.type(' Owner: compare with last year.');
-    await expect(prose).toHaveText('Revenue by region this quarter. Owner: compare with last year.');
     await durable(record);
   });
 

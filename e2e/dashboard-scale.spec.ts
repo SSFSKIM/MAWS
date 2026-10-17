@@ -41,9 +41,9 @@ const TITLE = '판매 원장 대시보드';
 const AGENT = 'A';
 const TRIALS = 3;
 const LOAD_BELOW = 10;
-const FIRST_SETTLE_MS = 6 * 60_000; // after the build's CPU burst, which the 1-minute load trails
+const FIRST_SETTLE_MS = 5 * 60_000; // after the build's CPU burst, which the 1-minute load trails
 const TRIAL_SETTLE_MS = 90_000;
-const SETTLE_BUDGET_MS = 8 * 60_000; // every settle after the first, together
+const SETTLE_BUDGET_MS = 6 * 60_000; // every settle after the first, together
 const VIEWS = BENCH_VIEWS.length;
 const SCATTER = String(BENCH_VIEWS.find((spec) => spec.view === 'scatter')!.title);
 const RAW_TABLE = BENCH_VIEWS.findIndex((spec) => spec.view === 'table' && spec.columns === undefined && spec.agg === undefined);
