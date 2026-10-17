@@ -2626,8 +2626,13 @@ notices are no evidence, so a monitor that expired never stays `running` until i
 
 **Precedence** (the review's round 2, 2026-10-17), highest first — better evidence is never overridden by worse:
 (1) an explicit terminal outcome in a row — `completed`, `failed` or `stopped` after the table, the newest in row
-order (`evidence: rows`; for a background agent, by `meta.requestShape` or `spawn.background`, the result row is its
-start and does not count); (2) known process death, `exited`: the session's process is gone (`session`), the parent
+order (`evidence: rows`; for a background agent, the result row is its start and does not count). An agent is known as
+background by `meta.requestShape`, `spawn.background`, the persisted call's `input.run_in_background` (`true` or
+`"true"`; `false` proves nothing, since calls flagged false were launched async), or its result's exact launch text
+(`Async agent launched successfully.` followed by a line `agentId: …`, or a fork's `Fork started — processing in
+background`). Either text is `async_launched` running evidence at (3), and a launch without a `toolUseResult` names no
+`outputFile` (the panel, DC8, 2026-10-17: older launches and all forks carry no `toolUseResult`, so without these a
+cold open read them `completed` while the live view read `exited`). (2) known process death, `exited`: the session's process is gone (`session`), the parent
 agent (`meta.parentAgentId` or `spawn.parentAgentId`) has ended — a terminal status or `exited` of its own
 (`parent`) — or the bridge reports the agent stopped without a terminal word (`bridge`); (3) `running` or `pending`
 evidence, `running`: the bridge's word on an agent it holds (true from spawn, the seed or a refresh; `bridge`) or a
@@ -3024,7 +3029,7 @@ and M2 left them. Changed rows are marked **[M3]**; rows fix wave 1 changed are 
 | `settled` | M3 **[M3]** (was reserved), **[fw1]** | `request, winner, outcome, by`. `outcome` ∈ `allow \| deny \| answered \| withdrawn`. `winner` ∈ `terminal \| other \| web`. `by` is `terminal` when the terminal's answer was used, `cli` when the CLI's was (winner `other`), the member id when the web's was (winner `web`), and `bridge` for `withdrawn` (winner `other`). A passed deadline settles nothing: the request stays pending, answerable only in the terminal, until the terminal's answer settles it as `terminal` with its real outcome. Exactly one per `raised`. **[fw1] Evidence, all tied to the call's own id:** (1) the engine's `tool_decision` record for the call, which arrives at decision time: source `hook` with the bridge's handed-out decision of the same behavior means the decider; `user_temporary`, `user_permanent` or `user_reject` means the terminal, with the record's real outcome (accept is `allow`/`answered`, reject is `deny`); anything else (`user_abort`, `config`, a hook's decision the bridge did not hand out) means `withdrawn` by `bridge`. A request the bridge's interrupt aborted is `withdrawn` whatever the record says. (2) With no record within 1 s of a real call's result row, the call's transcript (its subagent's own for a subagent) once the result row is in it: a `hook_permission_decision` mark carrying the call's `toolUseID` means the hook's answer was used (then as (1) with source `hook`); none means the terminal's, with the outcome the result shows. (3) Neither available (the ask mod's dialog keeps no rows; the transcript unreadable or the result never written within about 2 s): `withdrawn` by `bridge`. A turn's end and the session's end withdraw as before. An async question answered through a dialog a press opened settles with that dialog's request: `answered` by its `by` (or `withdrawn` when the dialog's was) |
 | `block-row` | M3 **[M3]** | `uuid, turnId, agentId, step, index`: the transcript row `uuid` holds block `index` of that message. Posted from `session.append` for each response row, paired by the row's block type and the order of the step's block starts (a tool row by its call id), never by position. The child removes the block from `streaming` under the lock; later chunks of that block are ignored. A row whose block never streamed (a server tool) names none |
 | `chunk` | M1, **[M3]** | Unchanged on the wire. The child now folds each chunk into its **block** (`chunk.index`) |
-| `resync` | M1 fw1, M2, **[M3]**, **[fw1]** | `turns, streaming` (per block, as the snapshot's, **[fw1]** each entry also carrying `settled: [<index>…]`, the blocks a `block-row` settled), `agents, override, delivered`, **`pending`** (each `raised`'s fields with `t`), **`settled`** (recent settlements). The child replaces its pending set with `pending` (keeping a request's decided/closed state) and merges `settled` with its own. **[fw1]** The child keeps an entry's `settled` blocks out of the message and ignores their late chunks, and a block it saw settled itself stays settled across the resync, even when the copy does not name it (the snapshot's `streaming` entry shape is unchanged: `settled` is never shown) |
+| `resync` | M1 fw1, M2, **[M3]**, **[fw1]** | `turns, streaming` (per block, as the snapshot's, **[fw1]** each entry also carrying `settled: [<index>…]`, the blocks a `block-row` settled), `agents, override, delivered`, **`pending`** (each `raised`'s fields with `t`), **`settled`** (recent settlements). The child replaces its pending set with `pending` (keeping a request's decided/closed state) and merges `settled` with its own. **[fw1]** The child keeps an entry's `settled` blocks out of the message and ignores their late chunks, and a block it saw settled itself stays settled across the resync, even when the copy does not name it (the snapshot's `streaming` entry shape is unchanged: `settled` is never shown). **[DC8]** **`refused`**: `[{key, reason}]`, each delivery refusal the mod holds until the child has answered a post that carried it; the child records each key once, as it would the `delivered {outcome: "refused"}` event, so a refusal whose post failed still becomes the `failed` outcome (the panel, 2026-10-17). A `/clear` forgets them as it forgets `delivered` |
 
 **The mod's evidence [fw1].** The mod hooks `telemetry.log` (`{to: "collector"}`) and
 reads the engine's `tool_decision` records: `attributes.tool_use_id`, `source`, `decision`.
@@ -4556,6 +4561,20 @@ a hub that connects into machines (§2).
   killed mid-turn, a cut replay) still reads "working", and is logged
   as debt. Rejected earlier: ending a turn on idle presence, which
   corrupted turn history.
+  2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
+  desk-dc8 370662a2, c81b77fc, 578b11b8):
+  - DX5's `resync` gains `refused`, so a refusal whose post failed is not
+    lost. Before, the desk kept "delivered" on a prompt the engine had
+    dropped.
+  - DX4 knows a background agent from three more sources: the persisted
+    call's flag, and the two exact launch texts. The shared fixture is
+    at c81b77fc. Without them, a cold open read older launches and every
+    fork `completed`, while the live view read `exited`.
+  - The bridge's clear-time retry no longer sets aside an agent that the
+    new conversation's own hooks name, and restores one already set
+    aside. Rejected: tech debt for the third, because hiding a live
+    agent for the rest of a session is worse than the accepted seed
+    residual.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
