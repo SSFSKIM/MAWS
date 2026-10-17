@@ -431,7 +431,10 @@ writer.
 G2's proof pages across a compaction boundary: rows before a
 `compact_boundary` in the same transcript file load and draw above MAWS's
 "Compacted earlier" divider, never stopping there (the owner's ask is the
-full history).
+full history), on a committed synthetic recording — never one derived
+from the owner's transcripts. The acceptance also asserts that a session
+whose last turn has its `system/turn_duration` row reads as finished (no
+"working" divider or dots), pinning the narrowed debt row.
 
 **Touches:** `apps/desk-web/e2e/` and whatever the acceptance finds.
 
@@ -829,6 +832,16 @@ in their own worktrees.
   Date/Author: 2026-10-17, M3 executor, folded by the controller.
 
 ## Surprises & Discoveries
+- 2026-10-17: an idle session's last turn reads "working" only when the
+  transcript never ended it. The engine writes a `system/turn_duration`
+  row (with a uuid) at every turn's end — 749, 2,570 and 183 in the
+  latest MAWS-project transcripts — which MAWS's backfill maps to
+  `turn.ended` (`backfill.ts:415`) and the desk's adapter replays; the
+  recordings' last turn is an interrupted one (`isAbortedMidStream`, no
+  `turn_duration`). So the desk-only debt row covers an interrupt with no
+  end row, a process killed mid-turn, and a cut replay; ordinary idle
+  sessions read finished. The local copy of the owner's transcript used
+  for the retake and the compaction probe is deleted.
 - 2026-10-17 (a probe on a real session, local only): paging crosses a
   compaction cleanly — MAWS's backfill turns `compact_boundary` into one
   historical `boundary.compaction` row and hides only rewind branches, the
