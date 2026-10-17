@@ -9,6 +9,7 @@ import { Normalizer } from '../normalizer'; // E7
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
 import { createBackfillContext, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 import { mapSystemFrame } from '../normalizer-system';
+import { applyTaskEvents, emptyGraph, monitors, shells } from '../../renderer/src/tools/agents/model/task-graph'; // DC9
 
 const SESSION = 'S' as SessionId;
 const SIDECAR_DIR = join(FIXTURE_DIR, 'subagent-sidecars');
@@ -685,3 +686,123 @@ describe('peer messages from disk (E7)', () => {
   });
 });
 // E7 end
+
+// DC9 start (the desk's DC9, its shared MAWS edit S2; the desk's composite §9.4-9.5 and DX4's "Jobs and agent status"):
+// a disk transcript's background shells and monitors, as the live stream's task frames give them. Row shapes are
+// engine 2.1.300's, taken from real transcripts and scrubbed; the parity case is E1's recorded session.
+describe('background shells and monitors from disk (DC9)', () => {
+  const BASE = ['id', 'sessionId', 'at', 'seq', 'agentId', 'parentToolUseId'];
+  const payload = (event: SessionEvent | undefined) => event && Object.fromEntries(Object.entries(event).filter(([key]) => !BASE.includes(key)));
+  const live = (name: string) => {
+    const n = new Normalizer({ appSessionId: 'app' as never, launchId: 'L', sessionId: null });
+    return loadJournal('pass3', name).flatMap((row) => n.push(row));
+  };
+  const OUT = (task: string) => `/private/tmp/claude-501/-p/S/tasks/${task}.output`;
+
+  const prompt = rec({ type: 'user', uuid: 'u0', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'go' } });
+  const call = (uuid: string, id: string, name: string, input: Record<string, unknown>, n: number) =>
+    rec({ type: 'assistant', uuid, parentUuid: null, timestamp: at(n), message: { id: `m-${uuid}`, model: 'x', content: [{ type: 'tool_use', id, name, input }] } });
+  const result = (uuid: string, id: string, content: string, toolUseResult: Record<string, unknown>, n: number, isError = false) =>
+    rec({ type: 'user', uuid, parentUuid: null, timestamp: at(n), toolUseResult, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content, is_error: isError }] } });
+  const bashStart = (task: string, input: Record<string, unknown>, n: number, extra: Record<string, unknown> = {}) => [
+    call(`a-${task}`, `toolu_${task}`, 'Bash', input, n),
+    result(`r-${task}`, `toolu_${task}`, `Command running in background with ID: ${task}. Output is being written to: ${OUT(task)}. You will be notified when it completes.`,
+      { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: task, ...extra }, n + 1),
+  ];
+  const monitorStart = (task: string, input: Record<string, unknown>, n: number) => [
+    call(`a-${task}`, `toolu_${task}`, 'Monitor', input, n),
+    result(`r-${task}`, `toolu_${task}`, `Monitor started (task ${task}, timeout 300000ms). You will be notified on each event.`, { taskId: task, timeoutMs: 300000, persistent: false }, n + 1),
+  ];
+  const notification = (uuid: string, body: string, n: number) =>
+    rec({ type: 'attachment', uuid, parentUuid: null, timestamp: at(n), attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: `<task-notification>\n${body}\n</task-notification>`, source_uuid: `s-${uuid}` } });
+  const taskStatus = (uuid: string, task: string, status: string, n: number, taskType = 'local_bash') =>
+    rec({ type: 'attachment', uuid, parentUuid: null, timestamp: at(n), attachment: {
+      type: 'task_status', taskId: task, taskType, description: 'd', status, deltaSummary: null, outputFilePath: OUT(task),
+      ...(taskType === 'local_bash' && { shell: { command: 'c', kind: 'bash', toolUseId: `toolu_${task}` } }),
+    } });
+  const graphOf = (events: SessionEvent[]) => applyTaskEvents(emptyGraph(), events);
+
+  it('starts a background Bash as the live task_started does, before its result, and the graph reads it as the live shell', () => {
+    const disk = mapAll(loadTranscriptFixture('p1-maws-ask-async'));
+    const liveEvents = live('p1-maws-ask-async');
+    const started = (events: SessionEvent[]) => events.find((e) => e.kind === 'task.started' && e.taskId === 'bufnxcjfn');
+    expect(started(disk)).toMatchObject({ taskType: 'local_bash', toolUseId: 'toolu_01KWovG21LNv4wASDsfaYkEF', description: 'sleep 15; echo WAITED', isBackground: true });
+    expect(payload(started(disk))).toEqual(payload(started(liveEvents)));
+    expect(disk[disk.indexOf(started(disk)!) + 1]).toMatchObject({ kind: 'tool.result', toolUseId: 'toolu_01KWovG21LNv4wASDsfaYkEF' });
+    // The live shell up to its result: the recording later kills it at the session's stop, which the disk does not record.
+    const liveResult = liveEvents.findIndex((e) => e.kind === 'tool.result' && e.toolUseId === 'toolu_01KWovG21LNv4wASDsfaYkEF');
+    const node = (events: SessionEvent[]) => {
+      const [shell] = shells(graphOf(events));
+      return shell && { ...shell, startedAt: null, provenance: null };
+    };
+    expect(node(disk)).toMatchObject({ kind: 'shell', status: 'running', outputFile: '/private/tmp/claude-501/-private-tmp-maws-e1-repo-zQsycy/ccd2c390-f412-47ce-a480-87c2524d643e/tasks/bufnxcjfn.output' });
+    expect(node(disk)).toEqual(node(liveEvents.slice(0, liveResult + 1)));
+  });
+
+  it("names a shell by its call's description, else its command, and starts one moved to the background by its timeout", () => {
+    const events = mapAll([
+      prompt,
+      ...bashStart('b1', { command: 'npm run dev', description: 'Dev server', run_in_background: true }, 1),
+      ...bashStart('b2', { command: 'sleep 999' }, 3, { timedOutAfterMs: 330000 }),
+      call('a-fg', 'toolu_fg', 'Bash', { command: 'ls' }, 5),
+      result('r-fg', 'toolu_fg', 'a\nb', { stdout: 'a\nb', stderr: '', interrupted: false, isImage: false, noOutputExpected: false }, 6),
+    ]);
+    expect(only(events, 'task.started').map(payload)).toEqual([
+      { kind: 'task.started', taskId: 'b1', toolUseId: 'toolu_b1', taskType: 'local_bash', description: 'Dev server', isBackground: true, workflowName: null },
+      { kind: 'task.started', taskId: 'b2', toolUseId: 'toolu_b2', taskType: 'local_bash', description: 'sleep 999', isBackground: true, workflowName: null },
+    ]);
+    expect(shells(graphOf(events)).map((n) => [n.taskId, n.status, n.outputFile])).toEqual([['b1', 'running', OUT('b1')], ['b2', 'running', OUT('b2')]]);
+  });
+
+  it('starts a monitor from its result, a WebSocket one as monitor_ws, which a monitor event leaves running and its end notification ends', () => {
+    const events = mapAll([
+      prompt,
+      ...monitorStart('m1', { description: 'errors in deploy.log', command: 'tail -f deploy.log | grep ERROR', timeout_ms: 300000 }, 1),
+      ...monitorStart('m2', { description: 'socket', ws: { url: 'wss://example.invalid/feed' } }, 3),
+      notification('e1', '<task-id>m1</task-id>\n<summary>Monitor event: "errors in deploy.log"</summary>\n<event>ERROR x</event>', 5),
+      notification('e2', `<task-id>m2</task-id>\n<tool-use-id>toolu_m2</tool-use-id>\n<output-file>${OUT('m2')}</output-file>\n<status>killed</status>\n<summary>Monitor "socket" stopped</summary>`, 6),
+    ]);
+    expect(only(events, 'task.started').map(payload)).toEqual([
+      { kind: 'task.started', taskId: 'm1', toolUseId: 'toolu_m1', taskType: 'monitor', description: 'errors in deploy.log', isBackground: true, workflowName: null },
+      { kind: 'task.started', taskId: 'm2', toolUseId: 'toolu_m2', taskType: 'monitor_ws', description: 'socket', isBackground: true, workflowName: null },
+    ]);
+    const graph = graphOf(events);
+    expect(shells(graph)).toEqual([]);
+    expect(monitors(graph).map((n) => [n.taskId, n.status, n.outputFile])).toEqual([['m1', 'running', null], ['m2', 'stopped', OUT('m2')]]);
+  });
+
+  it("patches a task's status from a task_status attachment through the notification's table, and passes over a word it does not know", () => {
+    const words = ['running', 'pending', 'completed', 'failed', 'error', 'stopped', 'killed', 'cancelled', 'interrupted', 'something-new'];
+    const events = mapAll([prompt, ...words.map((word, i) => taskStatus(`t${i}`, 'b1', word, i + 1))]);
+    expect(kinds(events)).toEqual(['session.started', 'turn.started', 'user.message', ...words.slice(0, -1).map(() => 'task.updated')]);
+    expect(only(events, 'task.updated').map((e) => e.patch)).toEqual(
+      ['running', 'running', 'completed', 'failed', 'failed', 'stopped', 'stopped', 'stopped', 'stopped'].map((status) => ({ status })),
+    );
+    expect(only(events, 'task.updated')[0]).toMatchObject({ id: 't0', taskId: 'b1' });
+    // An agent's restatement after a compaction patches the agent the same way.
+    expect(only(mapAll([taskStatus('t', 'a1', 'completed', 1, 'local_agent')]), 'task.updated').map(payload)).toEqual([{ kind: 'task.updated', taskId: 'a1', patch: { status: 'completed' } }]);
+  });
+
+  it('ends a shell whose stop the engine writes no notification for: a TaskStop that succeeded, as the live stopped notification', () => {
+    const stop = (uuid: string, task: string, n: number, isError = false) => [
+      call(`a-${uuid}`, `toolu_${uuid}`, 'TaskStop', { task_id: task }, n),
+      result(`r-${uuid}`, `toolu_${uuid}`, isError ? 'No task found' : `Successfully stopped task: ${task} (npm run dev)`,
+        isError ? {} : { message: `Successfully stopped task: ${task} (npm run dev)`, task_id: task, task_type: 'local_bash', command: 'npm run dev' }, n + 1, isError),
+    ];
+    const events = mapAll([
+      prompt,
+      ...bashStart('b1', { command: 'npm run dev', description: 'Dev server', run_in_background: true }, 1),
+      ...bashStart('b2', { command: 'make' }, 3),
+      ...stop('s1', 'b1', 5),
+      ...stop('s2', 'b2', 7, true),
+      notification('n3', `<task-id>b2</task-id>\n<tool-use-id>toolu_b2</tool-use-id>\n<output-file>${OUT('b2')}</output-file>\n<status>completed</status>\n<summary>Background command "make" completed (exit code 0)</summary>`, 9),
+      ...stop('s3', 'b2', 10), // after its completion: live sends no stopped notification for a task already over
+      ...stop('s4', 'not-a-job', 12),
+    ]);
+    const stopped = only(events, 'task.notification').filter((e) => e.status === 'stopped');
+    expect(stopped.map(payload)).toEqual([{ kind: 'task.notification', taskId: 'b1', toolUseId: 'toolu_b1', status: 'stopped', summary: 'Dev server', outputFile: null, reason: null }]);
+    expect(events[events.indexOf(stopped[0]) + 1]).toMatchObject({ kind: 'tool.result', toolUseId: 'toolu_s1' });
+    expect(shells(graphOf(events)).map((n) => [n.taskId, n.status])).toEqual([['b2', 'completed'], ['b1', 'stopped']]);
+  });
+});
+// DC9 end

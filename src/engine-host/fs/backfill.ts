@@ -44,7 +44,14 @@ export interface BackfillContext {
   // steer (blockedPrompt, below) from a blocked prompt of its own.
   inToolLoop: boolean;
   lastAssistantWasApiError: boolean;
+  // DC9: the calls whose result starts or stops a background job, by tool use, until that result; and each shell or
+  // monitor started here, with the tool use that started it, its description and whether it has ended.
+  readonly jobCalls: Map<string, JobCall>;
+  readonly jobs: Map<string, Job>;
 }
+
+interface JobCall { name: string; input: Record<string, unknown> } // DC9
+interface Job { toolUseId: ToolUseId; description: string; ended: boolean } // DC9
 
 export function createBackfillContext(init: {
   sessionId: SessionId;
@@ -65,6 +72,8 @@ export function createBackfillContext(init: {
     lastTurnUserUuid: null,
     inToolLoop: false,
     lastAssistantWasApiError: false,
+    jobCalls: new Map(), // DC9
+    jobs: new Map(), // DC9
   };
 }
 
@@ -110,6 +119,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
       break;
     case 'attachment': // context injections: on the chain, nothing to show, except a relay's receipt in a child and a prompt taken mid-turn (W1)
       if (taskNotificationAttachment(record, uuid, ctx, base, events)) break;
+      if (taskStatusAttachment(record, ctx, base, events)) break; // DC9
       if (peerQueuedMessage(record, uuid, base, events)) break; // E7
       if (ctx.agentId === null) steeredPrompt(record, base, events);
       else coordinatorMessage(record, uuid, ctx, base, events);
@@ -279,6 +289,8 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
         });
       } else if (notification.taskId !== null) {
         // Like the live normaliser, an outcome without a known task type is a task.notification.
+        const job = ctx.jobs.get(notification.taskId); // DC9
+        if (job !== undefined) job.ended = true;
         events.push({ ...base(), kind: 'task.notification', taskId: notification.taskId as TaskId, toolUseId: notification.toolUseId as ToolUseId, status: notification.status, summary: notification.result ?? notification.summary ?? '', outputFile: notification.outputFile, reason: null });
       }
     }
@@ -306,6 +318,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     const text = typeof content === 'string' ? content : content.map((b) => (typeof b.text === 'string' ? b.text : '')).join('\n');
     const isError = block.is_error === true;
     startPendingSubagent(ctx, toolUseId, base, events);
+    jobEvents(ctx, toolUseId, structured, isError, base, events); // DC9
     events.push({
       ...base(),
       kind: 'tool.result',
@@ -362,6 +375,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
     const toolUseId = block.id as ToolUseId;
     const toolName = typeof block.name === 'string' ? block.name : '';
     events.push({ ...base(), kind: 'tool.use', toolUseId, toolName, input: block.input, apiMessageId, messageUuid: uuid });
+    if (JOB_TOOLS.has(toolName)) ctx.jobCalls.set(toolUseId, { name: toolName, input: isRecord(block.input) ? block.input : {} }); // DC9
     if (toolName !== 'Agent') return;
     if (startSubagent(ctx, toolUseId, base, events) === null) ctx.pendingAgents.add(toolUseId);
   });
@@ -395,6 +409,62 @@ function startPendingSubagent(ctx: BackfillContext, toolUseId: string, base: Bas
   ctx.pendingAgents.delete(toolUseId);
   return taskId;
 }
+
+// DC9 start (the desk's DC9, its shared MAWS edit S2; the desk's composite §9.4-9.5, DX4's "Jobs and agent status"): a
+// background shell or monitor from disk, as the live stream's task frames give it (normalizer-system.ts), so the task
+// graph reads a reloaded session's jobs as a live one's. Engine 2.1.300's rows: a result whose `toolUseResult` names
+// `backgroundTaskId` (Bash run in the background, or moved there by its timeout or the user) is the shell's start, live's
+// `task_started` of a `local_bash` with the call's description, else its command (the engine's `description || command`),
+// written just before that result; its output file is the result's own "Output is being written to:", which the graph
+// reads from the `tool.result` after it. A Monitor's result (`{taskId, timeoutMs, persistent}`) starts a monitor:
+// `monitor_ws` for a WebSocket source as live has it, and `monitor` for a command, which live sends as `local_bash`
+// (the engine runs it as a shell of kind `monitor`), so the graph would list it as a shell; the engine's own task list
+// calls it a monitor. A model's TaskStop of a top-level shell writes no notification, only the live stream's `stopped`
+// one (2.1.300 `YTe` step 8, `va(id, "stopped", { toolUseId, summary: description })`), made here from the TaskStop's
+// result that is not an error, for a job not already over; an agent's stop keeps its own path.
+const JOB_TOOLS = new Set(['Bash', 'PowerShell', 'Monitor', 'TaskStop', 'KillShell', 'KillBash']); // TaskStop's aliases too
+const STOP_TOOLS = new Set(['TaskStop', 'KillShell', 'KillBash']);
+
+function jobEvents(ctx: BackfillContext, toolUseId: string, structured: unknown, isError: boolean, base: Base, events: SessionEvent[]): void {
+  const call = ctx.jobCalls.get(toolUseId);
+  ctx.jobCalls.delete(toolUseId);
+  if (isError || !isRecord(structured)) return;
+  const input = call?.input ?? {};
+  const start = (taskId: string, taskType: string, description: string): void => {
+    ctx.jobs.set(taskId, { toolUseId: toolUseId as ToolUseId, description, ended: false });
+    events.push({ ...base(), kind: 'task.started', taskId: taskId as TaskId, toolUseId: toolUseId as ToolUseId, taskType, description, isBackground: true, workflowName: null });
+  };
+  if (typeof structured.backgroundTaskId === 'string' && structured.backgroundTaskId.length > 0) {
+    start(structured.backgroundTaskId, 'local_bash', stringOf(input.description) || stringOf(input.command));
+  } else if (call?.name === 'Monitor' && typeof structured.taskId === 'string' && structured.taskId.length > 0) {
+    start(structured.taskId, input.ws !== undefined ? 'monitor_ws' : 'monitor', stringOf(input.description));
+  } else if (call !== undefined && STOP_TOOLS.has(call.name)) {
+    const taskId = typeof structured.task_id === 'string' ? structured.task_id : stringOf(input.task_id) || stringOf(input.shell_id);
+    const job = ctx.jobs.get(taskId);
+    if (job === undefined || job.ended) return;
+    job.ended = true;
+    events.push({ ...base(), kind: 'task.notification', taskId: taskId as TaskId, toolUseId: job.toolUseId, status: 'stopped', summary: job.description, outputFile: null, reason: null });
+  }
+}
+
+// The engine's `task_status` attachment (SPEC 20.10.10): a task's state restated after a compaction, `{taskId,
+// taskType, description, status, deltaSummary, outputFilePath}` (and `shell` for a running shell). Its status word goes
+// through the notification's table as the patch live's `task_updated` carries; a word the table does not know changes
+// nothing. The attachment is the model's context otherwise, so it shows nothing.
+function taskStatusAttachment(record: TranscriptRecord, ctx: BackfillContext, base: Base, events: SessionEvent[]): boolean {
+  const attachment = record.attachment as { type?: unknown; taskId?: unknown; status?: unknown } | undefined;
+  if (attachment?.type !== 'task_status') return false;
+  const status = typeof attachment.status === 'string' ? taskStatusOf(attachment.status) : null;
+  if (typeof attachment.taskId !== 'string' || attachment.taskId.length === 0 || status === null) return true;
+  const job = ctx.jobs.get(attachment.taskId);
+  if (job !== undefined) job.ended = status !== 'running';
+  events.push({ ...base(), kind: 'task.updated', taskId: attachment.taskId as TaskId, patch: { status } });
+  return true;
+}
+
+const stringOf = (value: unknown): string => (typeof value === 'string' ? value : '');
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+// DC9 end
 
 function systemEvents(record: TranscriptRecord, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const subtype = typeof record.subtype === 'string' ? record.subtype : null;
@@ -668,6 +738,28 @@ export function isTaskNotification(record: TranscriptRecord): boolean {
   return record.type === 'user' && typeof content === 'string' && parseTaskNotification(content) !== null;
 }
 
+// The engine's raw task status words, one table for a notification's `<status>` and a `task_status`'s `status` (DC9;
+// the desk's DX4 normalization table is this one): null for a word it does not know.
+function taskStatusOf(raw: string): 'completed' | 'failed' | 'stopped' | 'running' | null {
+  switch (raw) {
+    case 'completed':
+      return 'completed';
+    case 'failed':
+    case 'error':
+      return 'failed';
+    case 'stopped':
+    case 'killed':
+    case 'cancelled':
+    case 'interrupted':
+      return 'stopped';
+    case 'running':
+    case 'pending':
+      return 'running';
+    default:
+      return null;
+  }
+}
+
 // The engine's `<task-notification>` block (SPEC 20.9): the outcome of a background task, delivered as a user record.
 function parseTaskNotification(content: string): TaskNotification | null {
   if (!content.trimStart().startsWith('<task-notification>')) return null;
@@ -675,11 +767,8 @@ function parseTaskNotification(content: string): TaskNotification | null {
     const match = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(content);
     return match === null ? null : match[1].trim();
   };
-  const status = element('status');
-  const outcome: TaskNotification['status'] =
-    status === 'failed' || status === 'error' ? 'failed'
-    : status === 'stopped' || status === 'killed' || status === 'cancelled' || status === 'interrupted' ? 'stopped'
-    : 'completed';
+  const status = taskStatusOf(element('status') ?? '');
+  const outcome: TaskNotification['status'] = status === 'failed' || status === 'stopped' ? status : 'completed'; // a notification ends its task
   return {
     taskId: element('task-id'),
     toolUseId: element('tool-use-id'),

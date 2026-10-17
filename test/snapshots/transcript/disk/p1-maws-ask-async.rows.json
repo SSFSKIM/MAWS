@@ -175,7 +175,7 @@
       "subagentLifecycle": null
     },
     "detail": {
-      "backgroundTaskId": null,
+      "backgroundTaskId": "bufnxcjfn",
       "command": "sleep 15; echo WAITED",
       "cwd": null,
       "description": null,
