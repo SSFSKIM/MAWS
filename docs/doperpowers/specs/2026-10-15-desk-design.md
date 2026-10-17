@@ -3079,7 +3079,8 @@ enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the 
   its project "phone walk"; the walk has ended and its stand-in is stopped. The web had no way to remove a machine
   (the hub's `DELETE /api/machines/<name>` had no caller); MAWS #17 adds an admin's Remove to the Machines dialog,
   with a confirmation step, proven against the double and the real local hub (the stream ends within one heartbeat,
-  the reconnect is refused). The owner removes `phone-walk` with it. No real machine is enrolled yet.
+  the reconnect is refused). The owner removed `phone-walk` with it on the deployment (2026-10-16), and read the
+  org key's fingerprint unchanged, `8133-6dc8-be8e`, after both deploys. No machine is enrolled now.
 - **Leftovers:** the proofs' throwaway org `dc3-m5-test` keeps its Durable Objects' storage on the same Worker,
   unreachable from `ssfskim`.
 
