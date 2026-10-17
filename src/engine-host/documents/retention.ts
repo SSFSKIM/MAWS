@@ -115,6 +115,11 @@ export class SnapshotRetention {
     return this.db.prepare('SELECT 1 FROM artifact_assets WHERE artifactId = ? AND assetId = ? AND querySnapshot = 1').get(artifactId, assetId) !== undefined;
   }
 
+  /** Of `refs`, the managed query snapshots the artifact still holds: the only assets a collection could take. */
+  collectible(artifactId: string, refs: readonly string[]): string[] {
+    return refs.filter((ref) => this.row(artifactId, ref)?.querySnapshot === 1);
+  }
+
   /** A duplicate's assets (the M1 review's ruling): of `assetIds`, every ordinary asset and only the query snapshots the
    * copied `state` names, so its first version pins its state alone and no irrelevant retired snapshot travels. */
   copiedAssets(artifactId: string, assetIds: string[], state: Uint8Array): string[] {

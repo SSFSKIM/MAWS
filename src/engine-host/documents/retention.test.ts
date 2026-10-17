@@ -428,6 +428,22 @@ describe('versions, restore and duplicate', () => {
     expect(rowOf(id, a)).toBeDefined(); // current now
   });
 
+  it('a restore holds query snapshots alone: a file dataset naming an asset the store does not hold restores as before', async () => {
+    const id = await dashboard();
+    const at = Date.now();
+    await store().service.writeAs(id, human, (doc) => setDataset(doc, 'sales', { title: 'Sales', source: { kind: 'file', ref: 'assets/sales.csv', name: 'sales.csv', format: 'csv', sha256: 'c'.repeat(64), size: 9 }, columns: [{ name: 'v', type: 'number' }], rows: 1, updated: { at, by: human }, state: { status: 'ok', at } }));
+    const a = await refresh(id, 'live', 'A');
+    const v1 = (await store().createVersion(id, { kind: 'named', actor: human, label: 'v1' }))!;
+    await store().service.writeAs(id, human, (doc) => removeDataset(doc, 'sales'));
+    await refresh(id, 'live', 'B');
+    await refresh(id, 'live', 'C');
+    await store().restore(id, v1, human); // no hold asked for the file's placeholder ref
+    const live = store().service.live(id);
+    expect(readDataset(live, 'sales')?.source).toMatchObject({ kind: 'file', ref: 'assets/sales.csv' });
+    expect(readDataset(live, 'live')?.source).toMatchObject({ snapshot: { ref: a } });
+    expect(rowOf(id, a)).toMatchObject({ retiredAt: null });
+  });
+
   it('a restore refused after its hold lets the hold go', async () => {
     const id = await dashboard();
     const a = await refresh(id, 'live', 'A');
