@@ -947,6 +947,26 @@ in their own worktrees.
   fixed. The six DC5 `fixme` tests are moved and pass.
   Date/Author: 2026-10-17, M4 executor, folded by the controller.
 
+- Decision (M5 review; the composite's writer's ruling): a steer and the
+  bridge's interrupt row are both doperpowers plugin meta appends, so
+  provenance is made distinguishable at the source — doperpowers #225
+  writes the interrupt as two meta plugin rows (the engine-exact marker
+  `[Request interrupted by user]`, then a note row "The interrupt came
+  from the desk." / "… from outside the terminal." with one "Task …" line
+  per background task) and its steer refuses a text that is exactly an
+  engine marker or begins with the old bridge form. The desk ends the turn
+  on the engine-exact marker on an origin-less row (Esc) or a doperpowers
+  plugin row, keeps the legacy one-row shape strictly, and draws the note
+  row as neither prompt nor bubble. Accepted residual (debt): a human
+  steering exactly the marker text through an older plugin. Also from the
+  review: when the `subagents` body carries DX4 `status` (a DC8 producer)
+  it is authoritative over statuses the held rows' backfill events imply
+  (MAWS's backfill marks legacy launches and forks `completed`, which DX4
+  corrected; a sidecar's `stoppedByUser` is a hint, not evidence); held
+  events fill status only for an older producer. A job's `summary` stays
+  visible beside MAWS's row when its output is missing.
+  Date/Author: 2026-10-17, controller and the composite's writer.
+
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
   transcript never ended it. The engine writes a `system/turn_duration`
