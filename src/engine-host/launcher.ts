@@ -10,7 +10,7 @@
 // binary and the tested version as its engine's.
 import { appReplayHandshake } from './replay-handshake';
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
@@ -19,7 +19,7 @@ import type { SessionStateStore } from '@shared/engine/session-state-store';
 import type { LaunchResult } from '@shared/ipc/schema/session';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import type { BinaryCheck } from './binary-info';
-import { JOURNAL_MAX_BYTES, JournalWriter } from './journal';
+import { JOURNAL_MAX_BYTES, JournalWriter, ownerOnlyJournalDirectory } from './journal'; // P3-HD: ownerOnlyJournalDirectory
 import { TESTED_ENGINE_VERSION } from './engine-compat';
 import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './launch';
 import type { ProcessTable } from './process-table';
@@ -104,7 +104,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     const outcome = deps.table.reserve(spec.appSessionId, () => {
       const session = new EngineSession({
         spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),
-        journal: new JournalWriter(journalDir(deps.userData, spec.appSessionId), plan.launchId, { maxBytes: JOURNAL_MAX_BYTES }),
+        journal: openSessionJournal(deps.userData, spec.appSessionId, plan.launchId), // P3-HD
         // C12 start: the budget policy's stateful servers (keepAlive), and `process_exit` for the first launch after a release
         statefulMcpServers: () => deps.table.statefulMcpServers,
         reconnectTrigger: deps.table.takeReleased(spec.appSessionId) ? 'process_exit' : 'user',
@@ -147,3 +147,12 @@ export function journalDir(userData: string, appSessionId: AppSessionId): string
   assertSafeAppSessionId(appSessionId);
   return join(userData, 'engine-host', 'journal', appSessionId);
 }
+
+// P3-HD start (P3 co-work Decision Logs 97 and 98): a launch's journal, with the journal root owner-only as well as the
+// session directory and files the writer keeps so.
+export function openSessionJournal(userData: string, appSessionId: AppSessionId, launchId: string): JournalWriter {
+  const dir = journalDir(userData, appSessionId);
+  ownerOnlyJournalDirectory(dirname(dir));
+  return new JournalWriter(dir, launchId, { maxBytes: JOURNAL_MAX_BYTES });
+}
+// P3-HD end
