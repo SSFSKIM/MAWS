@@ -144,15 +144,34 @@ describe("a send at the session view's tail", () => {
       expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toHaveLength(1);
   });
 
-  it('takes a frame from a row with no provenance (an engine that marks none), or from a peer-queued command', () => {
+  it('is never taken by a frame on a row that marks no delivery provenance, in either form', () => {
     const send = human(1, 'x');
-    const rows = [userRow(framed(1, 'x'), undefined, null), { type: 'attachment', uuid: 'q-peer', timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt: framed(1, 'x'), commandMode: 'prompt', origin: { kind: 'peer', from: 'unknown' } } } as JsonObject];
-    for (const row of rows) expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
+    const machineHuman = { offset: ++offset, event: { ts: '2026-10-15T09:00:00.000Z', writer: 'mini/human', seq: 1, kind: 'human', from: 'human', to: [{ session: S, alias: 'maws-45' }], text: 'r', msg_id: '5e551e17', mac: { nonce: 'h3', value: 'v' } } as LogEvent };
+    const queued = (prompt: string, origin?: unknown) => ({ type: 'attachment', uuid: `q${++uuid}`, timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', ...(origin !== undefined && { origin }) } }) as JsonObject;
+    const unmarked = (frame: string) => [
+      userRow(frame, undefined, null), // no origin: an ordinary prompt to MAWS
+      { ...userRow(frame), origin: 'plugin' } as JsonObject, // an origin that is not an object
+      userRow(frame, undefined, { kind: 'plugin', name: 'doperpowers' }), // a plugin's prompt not submitted as the user
+      queued(frame), // a queued command with no origin
+      queued(frame, null),
+    ];
+    for (const row of unmarked(framed(1, 'x'))) expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } })), JSON.stringify(row)).toHaveLength(1);
+    for (const row of unmarked('[sminos message from human id=5e551e17]\nr'))
+      expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), row], complete: false } })), JSON.stringify(row)).toHaveLength(1);
+  });
+
+  it('takes a frame from the bridge as the user, or from a command a peer or a plugin queued, in either form', () => {
+    const send = human(1, 'x');
+    const machineHuman = { offset: ++offset, event: { ts: '2026-10-15T09:00:00.000Z', writer: 'mini/human', seq: 1, kind: 'human', from: 'human', to: [{ session: S, alias: 'maws-45' }], text: 'r', msg_id: '5e551e17', mac: { nonce: 'h4', value: 'v' } } as LogEvent };
+    const queued = (prompt: string, kind: string) => ({ type: 'attachment', uuid: `q${++uuid}`, timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind } } }) as JsonObject;
+    const delivered = (frame: string) => [userRow(frame), queued(frame, 'peer'), queued(frame, 'plugin')];
+    for (const row of delivered(framed(1, 'x'))) expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
+    for (const row of delivered('[sminos message from human id=5e551e17]\nr')) expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
   });
 
   it("matches a frame however the engine carries the prompt: the row's text, a text block, a queued command", () => {
     const send = human(1, 'x');
-    const forms = [userRow([{ type: 'text', text: framed(1, 'x') }]), { type: 'attachment', uuid: 'q1', timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt: framed(1, 'x'), commandMode: 'prompt' } } as JsonObject];
+    const forms = [userRow([{ type: 'text', text: framed(1, 'x') }]), { type: 'attachment', uuid: 'q1', timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt: framed(1, 'x'), commandMode: 'prompt', origin: { kind: 'peer' } } } as JsonObject];
     for (const row of forms) expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
     // A tool's result quoting the frame (a log read back) is not a prompt.
     const quoted = userRow([{ type: 'tool_result', tool_use_id: 't', content: framed(1, 'x') }]);

@@ -8,9 +8,9 @@
 // line must be the frame sminos writes for that event: `[sminos chat <project> <writer_short>:<seq> from <from> →
 // <@you | @all>[ | unread N]]` (`frame_of`, `compose_chat_frame`, `event_ref`, `writer_short` in doperpowers'
 // `sminos.py`; a web send's writer, `hub/<member>`, has no session part and stands whole), or `[sminos message from
-// <via or from> id=<msg_id>]` for an event that carries a `msg_id` (`compose_frame`). Where the row marks its
-// provenance it must mark a delivery's (the bridge's plugin prompt, a peer's queued command), never a prompt typed at
-// the terminal. A steer's result names the row it appended. Nothing is matched by text: a typed prompt is never a web
+// <via or from> id=<msg_id>]` for an event that carries a `msg_id` (`compose_frame`). The row must mark a delivery's
+// provenance (the bridge's plugin prompt as the user, a peer's queued command), never a prompt typed at the terminal
+// nor one that marks none. A steer's result names the row it appended. Nothing is matched by text: a typed prompt is never a web
 // send's row, however equal its words, and a send whose row never comes (the session ended first) stays, its state
 // saying so.
 //
@@ -83,16 +83,17 @@ const object = (value: unknown): JsonObject | null => (typeof value === 'object'
 
 /**
  * The first lines of the prompts a row carries that may be a delivery: a user row's text or text blocks (never a
- * tool's result), a queued command's prompt. A row that marks its provenance must mark a delivery's: the bridge submits
- * as a plugin (`$.prompt.submit({asUser: true})` writes a user row whose `origin` is `{kind: "plugin", asUser: true}`),
- * and the other last hops queue the prompt as a peer's (`origin.kind` `peer`); a prompt typed at the terminal says
- * `human` and is never one.
+ * tool's result), a queued command's prompt. The row must mark a delivery's provenance: the bridge submits as a plugin
+ * (`$.prompt.submit({asUser: true})` writes a user row whose `origin` is `{kind: "plugin", asUser: true}`), and the
+ * other last hops queue the prompt as a peer's (`origin.kind` `peer`). A prompt typed at the terminal (`human`), or a
+ * row that marks no origin — which MAWS reads as an ordinary prompt — is never one; the web's sends exist only on
+ * engines with the bridge, which mark it.
  */
 function deliveredLines(row: JsonObject): string[] {
   const firstLine = (text: string) => text.split('\n', 1)[0];
   if (row.type === 'user') {
     const origin = object(row.origin);
-    if (origin !== null && origin.kind !== 'plugin') return [];
+    if (origin?.kind !== 'plugin' || origin.asUser !== true) return [];
     const content = object(row.message)?.content;
     if (typeof content === 'string') return [firstLine(content)];
     if (Array.isArray(content)) return content.flatMap((block) => (object(block)?.type === 'text' && typeof object(block)!.text === 'string' ? [firstLine(object(block)!.text as string)] : []));
@@ -101,7 +102,7 @@ function deliveredLines(row: JsonObject): string[] {
   const attachment = object(row.attachment);
   if (row.type !== 'attachment' || attachment?.type !== 'queued_command' || typeof attachment.prompt !== 'string') return [];
   const origin = object(attachment.origin);
-  return origin !== null && origin.kind !== 'peer' && origin.kind !== 'plugin' ? [] : [firstLine(attachment.prompt)];
+  return origin?.kind === 'peer' || origin?.kind === 'plugin' ? [firstLine(attachment.prompt)] : [];
 }
 
 /** What the held rows say of the sends: the first lines that may be deliveries, the uuids, the oldest row's time. */
