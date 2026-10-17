@@ -24,18 +24,34 @@ import { PaneBridge } from './panes';
 import type { McpToolContext, McpToolDefinition, McpToolResult } from './server';
 import { mawsTools } from './tools';
 
-// A gate on the bind's file read: armed, `readFile` of the named path waits until it is released.
+// A gate on the bind's file read: armed, the first read from a descriptor opened on the named path waits until it is
+// released (the tool reads the validated file through one descriptor, E2 M6: `open`, its fstat, then `read`).
 const gate = vi.hoisted(() => ({ path: null as string | null, reached: null as (() => void) | null, release: null as Promise<void> | null }));
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>();
-  const readFile = (async (...args: Parameters<typeof actual.readFile>) => {
-    if (gate.path !== null && String(args[0]) === gate.path) {
-      gate.reached?.();
-      await gate.release;
-    }
-    return actual.readFile(...args);
-  }) as typeof actual.readFile;
-  return { ...actual, default: { ...actual, readFile }, readFile };
+  const open = (async (...args: Parameters<typeof actual.open>) => {
+    const handle = await actual.open(...args);
+    if (gate.path === null || String(args[0]) !== gate.path) return handle;
+    gate.path = null;
+    let first = true;
+    return new Proxy(handle, {
+      get(target, key) {
+        if (key === 'read') {
+          return async (...a: Parameters<typeof target.read>) => {
+            if (first) {
+              first = false;
+              gate.reached?.();
+              await gate.release;
+            }
+            return target.read(...a);
+          };
+        }
+        const value: unknown = Reflect.get(target, key);
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+  }) as typeof actual.open;
+  return { ...actual, default: { ...actual, open }, open };
 });
 
 const SELF = 'app-legacy' as AppSessionId;
@@ -120,7 +136,7 @@ describe('a held legacy dashboard’s writes', () => {
     let release!: () => void;
     gate.release = new Promise<void>((resolve) => (release = resolve));
     const reached = new Promise<void>((resolve) => (gate.reached = resolve));
-    gate.path = realpathSync(path); // the bind reads the file where its symlinks lead
+    gate.path = realpathSync(path); // the bind opens the file where its symlinks lead
     const binding = call('artifact_dataset', { artifact: 'board', baseRevision: base, id: 'sales', path: 'sales.csv' }, 'toolu_race');
     await reached; // the bind is reading its file
     await world.store.restore(board.id, before!, human);
