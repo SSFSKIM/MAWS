@@ -15,10 +15,12 @@ import { useThreadStatus } from '@artifacts/document/editor/comments/use-threads
 import { anchorField, type Anchor } from '@shared/anchor/anchor';
 import type { ArtifactKind } from '@shared/artifacts/entity'; // P3-C
 import type { AppSessionId } from '@shared/graph/ids';
+import type { ArtifactSessionContext } from '../../artifacts/session-context'; // P3-F1
 import { QUIET } from '../../sessions/ui';
 import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
 import { closeCard, useCommentCard, type CardHostMode, type OpenCard } from '../../side/card/store';
 import { openCommentComposer } from '../code/anchor/anchor';
+import { cancelPendingComment, PendingCommentNotice, pendingThreadOf, startCommentSession, subscribePending, usePendingComment } from './comment-session'; // P3-F1
 
 const LABEL_MAX = 200; // X10's label cap
 const QUOTE_MAX = 300; // the passage as the lead line and the card's title read it; the thread keeps it whole
@@ -31,7 +33,13 @@ export function artifactCommentAnchor({ artifactId, title, threadId, tabTitle, q
 interface Options {
   artifactId: string;
   /** The session a comment goes to (its Side thread's parent, or the main conversation it steers). */
-  appSessionId: AppSessionId;
+  appSessionId?: AppSessionId; // P3-F1: optional, `context` answering without it
+  /**
+   * P3-F1 (fix 2; the P3 interface ledger's X23 row): without `appSessionId`, the artifact's own context (H's policy): its
+   * session opens the card at once, a directory starts one on the owner's Comment (./comment-session.tsx), and none (or
+   * no context given) shows the card's notice saying why.
+   */
+  context?: ArtifactSessionContext;
   /** The document's title, as the anchor names it. */
   title: string;
   /** The surface the editor is in, for a re-docked card (a panel tool or a main tab). */
@@ -53,6 +61,7 @@ interface Binding {
   mode: CardHostMode;
   visible: boolean;
   holdReplica: (() => () => void) | undefined;
+  namesParent: boolean; // P3-F1: no chat beside it, so the card names its session
 }
 
 // A card host's drafts: the new threads it opened that nothing was said in yet, each with the sends in it still on their
@@ -124,7 +133,7 @@ function draftsOf(hostId: string): Drafts {
 }
 
 /** The surface DocumentEditor takes (`comments`), stable while the artifact and the session stay. */
-export function useDocumentComments({ artifactId, appSessionId, title, mode = 'panel', visible = true, holdReplica, artifactKind }: Options): DocumentComments {
+export function useDocumentComments({ artifactId, appSessionId, context, title, mode = 'panel', visible = true, holdReplica, artifactKind }: Options): DocumentComments { // P3-F1: context
   const hostId = `document:${useId()}`;
   const titleRef = useRef(title);
   useLayoutEffect(() => {
@@ -132,21 +141,34 @@ export function useDocumentComments({ artifactId, appSessionId, title, mode = 'p
   });
   const opened = useCallback(
     (passage: CommentedPassage) => {
+      const anchor = artifactCommentAnchor({ artifactId, title: titleRef.current, ...passage, ...(artifactKind !== undefined && { artifactKind }) /* P3-C */ });
+      const placement = { kind: 'card', host: 'artifact', hostId } as const;
+      // P3-F1 start: the explicit session, else the artifact's own; with neither, a start or the notice (the draft
+      // registered after, so the window's card closing for the notice keeps it)
+      const session = appSessionId ?? (context?.kind === 'session' ? context.appSessionId : undefined);
+      if (session === undefined) {
+        startCommentSession({ hostId, artifactId, threadId: passage.threadId, label: anchor.label, context: context ?? { kind: 'none' }, open: (started) => openCommentComposer(anchor, { appSessionId: started, placement, destination: 'main' }) });
+        draftsOf(hostId).opened(passage.threadId);
+        return;
+      }
+      // P3-F1 end
       draftsOf(hostId).opened(passage.threadId);
-      openCommentComposer(artifactCommentAnchor({ artifactId, title: titleRef.current, ...passage, ...(artifactKind !== undefined && { artifactKind }) /* P3-C */ }), { appSessionId, placement: { kind: 'card', host: 'artifact', hostId } });
+      openCommentComposer(anchor, { appSessionId: session /* P3-F1 */, placement });
     },
-    [artifactId, appSessionId, hostId, artifactKind],
+    [artifactId, appSessionId, context /* P3-F1 */, hostId, artifactKind],
   );
+  const namesParent = appSessionId === undefined; // P3-F1
   return useMemo(() => {
-    const binding: Binding = { artifactId, hostId, mode, visible, holdReplica };
+    const binding: Binding = { artifactId, hostId, mode, visible, holdReplica, namesParent /* P3-F1 */ };
     return { opened, overlay: (props: CommentOverlayProps): ReactNode => <DocumentCardHost {...props} binding={binding} /> };
-  }, [opened, artifactId, hostId, mode, visible, holdReplica]);
+  }, [opened, artifactId, hostId, mode, visible, holdReplica, namesParent /* P3-F1 */]);
 }
 
 const threadOf = (card: OpenCard | null): string | null => (card?.target?.kind === 'artifact' ? card.target.threadId : null);
 
 function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { binding: Binding }) {
-  const { artifactId, hostId, mode, visible, holdReplica } = binding;
+  const { artifactId, hostId, mode, visible, holdReplica, namesParent } = binding; // P3-F1: namesParent
+  const pending = usePendingComment(hostId); // P3-F1
   const { doc, locate, layoutKey, setActive, resolve, reopen, record, discard, focus } = editor;
 
   // The card on screen draws its thread as active; a draft whose card went with nothing on its way is withdrawn. The
@@ -159,8 +181,9 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
     let shown: string | null = null;
     const follow = (open: OpenCard | null) => {
       const mine = open?.hostId === hostId ? open : null;
-      const threadId = threadOf(mine);
-      draftsOf(hostId).follow(mine?.phase.kind === 'composing' ? threadId : null, discard);
+      const waiting = pendingThreadOf(hostId); // P3-F1: a comment waiting on its session is this host's draft too
+      const threadId = threadOf(mine) ?? waiting; // P3-F1: ?? waiting
+      draftsOf(hostId).follow(mine?.phase.kind === 'composing' ? threadOf(mine) : waiting, discard); // P3-F1: threadOf(mine), waiting
       if (threadId !== shown) {
         shown = threadId;
         setActive(threadId);
@@ -168,12 +191,17 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
     };
     follow(useCommentCard.getState().open);
     const stop = useCommentCard.subscribe((state) => follow(state.open));
+    const stopPending = subscribePending(() => follow(useCommentCard.getState().open)); // P3-F1
     return () => {
       stop();
+      stopPending(); // P3-F1
       mountedOverlays.delete(hostId);
       queueMicrotask(() => {
         try {
-          if (!mountedOverlays.has(hostId)) draftsOf(hostId).follow(null, discard);
+          if (!mountedOverlays.has(hostId)) {
+            cancelPendingComment(hostId); // P3-F1: the editor went, and the comment waiting on its session with it
+            draftsOf(hostId).follow(null, discard);
+          }
         } finally {
           release?.();
         }
@@ -221,21 +249,36 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
           }
         };
       },
+      ...(namesParent && { namesParent: true as const }), // P3-F1
     }),
-    [layoutKey, hostId, locate, doc, resolve, reopen, record, discard, focus, holdReplica],
+    [layoutKey, hostId, locate, doc, resolve, reopen, record, discard, focus, holdReplica, namesParent /* P3-F1 */],
   );
 
   return (
-    <CommentCardHost
-      hostId={hostId}
-      host="artifact"
-      mode={mode}
-      layout="anchored"
-      accepts={(card) => card.target?.kind === 'artifact' && card.target.artifactId === artifactId}
-      frame={frame}
-      visible={visible}
-      restoreFocus={focus}
-    />
+    <>
+      {/* P3-F1: the comment waiting on its session, where its card will be */}
+      {pending && (
+        <PendingCommentNotice
+          pending={pending}
+          locate={locate}
+          layoutKey={layoutKey}
+          onClose={() => {
+            cancelPendingComment(hostId);
+            focus();
+          }}
+        />
+      )}
+      <CommentCardHost
+        hostId={hostId}
+        host="artifact"
+        mode={mode}
+        layout="anchored"
+        accepts={(card) => card.target?.kind === 'artifact' && card.target.artifactId === artifactId}
+        frame={frame}
+        visible={visible}
+        restoreFocus={focus}
+      />
+    </>
   );
 }
 

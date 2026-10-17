@@ -147,6 +147,9 @@ export default defineConfig({
             // P3-H (the P3 spec's Decision Log 92): the library's components as built, where the first Export of a kind
             // never showed (its formats read from the module's cache in render, memoized on the kind)
             'src/renderer/src/library/**/*.test.tsx',
+            // P3-F1 (fix 2): the standalone tab's comment target and its pending notice, whose renders select the library,
+            // layout and pending stores through hooks
+            'src/renderer/src/tools/document/comment-session.test.tsx',
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

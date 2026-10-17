@@ -1,17 +1,16 @@
 // The document editor in the panel's Artifacts tool (M8 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D13),
 // and the body it shares with the `artifact` main tab (DocumentMain): `DocumentEditor` over the tab's replica (the
 // state L's registry made for this tab), the X32 header registered under the scope the surface gives, the page
-// registered as a Mark-up surface, comments going to the session the main area shows, the history rail on A's IPC,
-// the page in the governing design system's scope when D's is provided, `onShown` once the document is on screen.
+// registered as a Mark-up surface, comments going to the session the main area shows (P3-F1: with none shown, the
+// artifact's own context), the history rail on A's IPC, the page in the governing design system's scope when D's is
+// provided, `onShown` once the document is on screen.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DocumentEditor, type DocumentRail } from '@artifacts/document/editor/DocumentEditor';
 import type { Editor } from '@tiptap/core';
-import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
-import { shownSession } from '../../panel/host';
-import { useLayout } from '../../stores/layout';
+import { useArtifactCommentTarget } from './comment-session'; // P3-F1
 import { useDocumentComments } from './comments';
 import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useSystemFor } from './design-system'; // P3-D: useSystemFor
 import { documentHeader, type DocumentHeaderCommands } from './header';
@@ -23,7 +22,7 @@ export function DocumentPanel(props: DocumentEditorProps) {
   return <DocumentBody {...props} surface="panel" />;
 }
 
-const NO_SESSION = '' as AppSessionId;
+const NO_TARGET = { context: { kind: 'none' } } as const; // P3-F1: unused while the target is unread (no comments offered)
 
 export function DocumentBody({ artifactId, state, scope, visible, onShown, surface }: DocumentEditorProps & { surface: 'panel' | 'main' }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
@@ -47,9 +46,11 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     ),
   );
 
-  // Comments go to the session the main area shows (its Side thread, or its conversation); none shown, none offered.
-  const appSessionId = useLayout((s) => shownSession(s.main));
-  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_SESSION, title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold });
+  // Comments go to the session the main area shows (its Side thread, or its conversation). P3-F1: with none shown, to
+  // the artifact's own context (its session, a session its directory starts on Comment, or a card saying why not);
+  // not offered only while that is unread.
+  const target = useArtifactCommentTarget(artifactId);
+  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold });
 
   // The page is the tab's Mark-up surface while it is on screen.
   const page = useRef<HTMLElement | null>(null);
@@ -84,7 +85,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         artifactId={artifactId}
         handle={snapshot.handle}
         host={state.host}
-        comments={appSessionId === null ? undefined : comments}
+        comments={target === null ? undefined : comments /* P3-F1 */}
         history={state.history}
         suggestions={state.host}
         rail={snapshot.rail}
