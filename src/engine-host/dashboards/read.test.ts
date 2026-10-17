@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DATASET_READ_MAX_BYTES, DATASET_READ_MAX_ROWS } from '@artifacts/dashboard/datasets';
 import { BENCH_ROWS, benchCsv } from '@artifacts/dashboard/fixtures/bench';
+import { parseDataset, type ParsedDataset } from '@artifacts/dashboard/parse';
 import type { Actor } from '@shared/artifacts/actor';
 import { ArtifactStoreError } from '../documents/errors';
 import { DocumentService } from '../documents/service';
@@ -200,6 +201,37 @@ describe('DatasetReader', () => {
     const reader = new DatasetReader(world.store);
     for (const { ref } of refs) expect(reader.read(id, ref, { format: 'json', limit: 1 }).total).toBe(16_000);
     expect(reader.cached()).toHaveLength(1);
+  });
+
+  // E2 M6 (the retained review's residual, E's Decision Log 41): the charge covers the whole entry, its columns (names,
+  // types) and warnings as well as its rows, each string as the rows' strings are (two bytes a character at least)
+  const textOf = (parsed: ParsedDataset) => [...parsed.columns.flatMap((column) => [column.name, column.type]), ...parsed.warnings].reduce((n, text) => n + 2 * text.length, 0);
+  const retained = async (text: string, maxBytes: number) => {
+    const id = await board();
+    const { ref } = await upload(id, text, 'wide.csv');
+    const reader = new DatasetReader(world.store, { maxBytes });
+    reader.read(id, ref, { format: 'csv', limit: 1 });
+    return reader.cached().length === 1;
+  };
+
+  it('charges a header-heavy table its column names and types, not only its rows: 256 long names and no row', async () => {
+    const names = Array.from({ length: 256 }, (_, k) => `${'n'.repeat(250)}${k}`);
+    const text = `${names.join(',')}\n`;
+    const parsed = parseDataset(bytes(text), 'csv') as ParsedDataset;
+    expect(parsed.rows).toHaveLength(0);
+    const floor = bytes(text).length + textOf(parsed);
+    expect(await retained(text, floor - 1)).toBe(false);
+    expect(await retained(text, floor * 4)).toBe(true);
+  });
+
+  it('charges a warning-heavy table its warnings: a mismatch in each of 256 long-named columns', async () => {
+    const names = Array.from({ length: 256 }, (_, k) => `${'w'.repeat(200)}${k}`);
+    const text = [names.join(','), names.map(() => '1').join(','), names.map(() => '2').join(','), names.map(() => 'x').join(',')].join('\n');
+    const parsed = parseDataset(bytes(text), 'csv') as ParsedDataset;
+    expect(parsed.warnings).toHaveLength(256);
+    const floor = bytes(text).length + textOf(parsed);
+    expect(await retained(text, floor - 1)).toBe(false);
+    expect(await retained(text, floor * 4)).toBe(true);
   });
 
   it('keeps the scale bench\'s ledger and its replacement together under the default cap, each parsed once for every page', async () => {

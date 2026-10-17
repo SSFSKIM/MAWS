@@ -26,25 +26,35 @@ export interface DatasetReadOptions {
 const CACHE_ENTRIES = 8;
 const CACHE_HELD_BYTES = 64 * 1024 * 1024;
 
-// E2 M6 (panel P2 scalpel-4#2, E's Decision Log 40): what a parsed table holds, estimated from its shape, not its
-// source: a sparse JSON file of 600 KB expands to 200,000 x 256 cells. Calibrated on V8 without pointer compression
-// (heap deltas of parsed tables after GC, from 1x for sparse cells to about 1.7x for one-byte text, never below): a row
-// array's headers and an 8-byte slot per cell, a 16-byte box per number that is not a small integer, a string's header
-// and two bytes per character (two-byte text is the larger form), and the source's length besides, the decoded text a
-// field sliced from it may keep alive. Counting stops once past `cap`: such a table is not kept.
+// E2 M6 (panel P2 scalpel-4#2, E's Decision Logs 40 and 41): what a cache entry holds, charged from its whole shape,
+// never its source's size alone (a sparse JSON file of 600 KB expands to 200,000 x 256 cells). A policy, complete and
+// monotonic (every part of the entry is charged, and more rows, cells, columns, warnings or characters never charge
+// less), not an exact heap measure: the entry and its key, the table's containers, a row array's headers and an 8-byte
+// slot per cell, a 16-byte box per number that is not a small integer, each column's object with its name and type,
+// each warning, each string at its header and two bytes per character (the larger of V8's two forms), and the source's
+// length besides, the decoded text a field sliced from it may keep alive. A scratch heap probe on V8 without pointer
+// compression put these charges at or above the measured heap of the tables it tried; that is a diagnostic, not a
+// bound for every table. Counting stops once past `cap`: such a table is not kept.
+const ENTRY_BYTES = 256; // the cache entry, its Map slot, the parsed table and its three arrays' headers
 const ROW_BYTES = 80;
 const SLOT_BYTES = 8;
 const BOXED_NUMBER_BYTES = 16;
 const STRING_BYTES = 32;
+const COLUMN_BYTES = 64; // a column object; its name and type are charged as strings
 const SMALL_INTEGER = 2 ** 30;
 
-function heldBytes(parsed: ParsedDataset, sourceBytes: number, cap: number): number {
+const stringBytes = (text: string) => STRING_BYTES + 2 * text.length;
+
+function heldBytes(key: string, parsed: ParsedDataset, sourceBytes: number, cap: number): number {
   const width = parsed.columns.length;
-  let held = sourceBytes + parsed.rows.length * (ROW_BYTES + width * SLOT_BYTES);
+  let held = ENTRY_BYTES + stringBytes(key) + sourceBytes;
+  for (const column of parsed.columns) held += SLOT_BYTES + COLUMN_BYTES + stringBytes(column.name) + stringBytes(column.type) + (column.mismatches === undefined ? 0 : BOXED_NUMBER_BYTES);
+  for (const warning of parsed.warnings) held += SLOT_BYTES + stringBytes(warning);
+  held += parsed.rows.length * (SLOT_BYTES + ROW_BYTES + width * SLOT_BYTES);
   for (const row of parsed.rows) {
     if (held > cap) return held;
     for (const cell of row) {
-      if (typeof cell === 'string') held += STRING_BYTES + 2 * cell.length;
+      if (typeof cell === 'string') held += stringBytes(cell);
       else if (typeof cell === 'number' && !(Number.isInteger(cell) && Math.abs(cell) < SMALL_INTEGER)) held += BOXED_NUMBER_BYTES;
     }
   }
@@ -107,7 +117,7 @@ export class DatasetReader {
     }
     const parsed = parseDataset(this.store.files.readAsset(artifactId, sha256), format);
     if (parsed instanceof DatasetError) throw new ArtifactStoreError(parsed.kind, `the snapshot does not read as ${format}: ${parsed.reason}`, parsed.line === undefined ? {} : { line: parsed.line });
-    const size = heldBytes(parsed, sourceBytes, this.maxBytes);
+    const size = heldBytes(key, parsed, sourceBytes, this.maxBytes);
     if (size > this.maxBytes) return parsed; // larger than the whole cache: answered, never kept
     this.cache.set(key, { parsed, size });
     let held = [...this.cache.values()].reduce((sum, entry) => sum + entry.size, 0);
