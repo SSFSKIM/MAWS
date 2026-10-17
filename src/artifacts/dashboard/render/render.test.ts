@@ -446,6 +446,37 @@ describe('renderView', () => {
   });
 });
 
+describe('numeric ranges no scale can draw (E2 panel)', () => {
+  const subnormal: ViewTable = { columns: [{ name: 'x', type: 'number' }, { name: 'y', type: 'number' }], rows: [[1, 1e-320], [2, 2e-320]] };
+
+  it('draws a subnormal y range as the named state in place, the caption kept, never throwing', () => {
+    for (const view of ['line', 'area', 'scatter', 'bar']) {
+      let rendered: Rendered | undefined;
+      expect(() => (rendered = renderView({ view, x: 'x', y: 'y', title: 'Tiny' }, subnormal, theme, 't')), view).not.toThrow();
+      const svg = rendered!.svg!;
+      expect(svg, view).toContain('y has a numeric range that cannot be drawn');
+      expect(svg, view).toContain('aria-label="Tiny"');
+      expect(svg, view).not.toMatch(/NaN|Infinity/);
+      expect(grade(svg).problems, view).toEqual([]);
+      expect(rendered!.warnings, view).toContain('y has a numeric range that cannot be drawn');
+    }
+  });
+
+  it('names the x column when its numeric range cannot be drawn', () => {
+    const t: ViewTable = { columns: [{ name: 'tiny', type: 'number' }, { name: 'v', type: 'number' }], rows: [[1e-320, 1], [2e-320, 2]] };
+    for (const view of ['line', 'scatter']) {
+      const { svg = '' } = renderView({ view, x: 'tiny', y: 'v' }, t, theme, 't');
+      expect(svg, view).toContain('tiny has a numeric range that cannot be drawn');
+    }
+  });
+
+  it('still draws a range just above the floor and a subnormal value beside ordinary ones', () => {
+    const fine: ViewTable = { columns: subnormal.columns, rows: [[1, 0], [2, 1e-299]] };
+    expect(renderView({ view: 'line', x: 'x', y: 'y' }, fine, theme, 't').svg).toContain('stroke-width="2"');
+    expect(draw('edge-extreme').svg).not.toContain('cannot be drawn');
+  });
+});
+
 describe('many series: labelled small multiples (parent Decision Log 27)', () => {
   const scatter = (t: ViewTable, over: Record<string, unknown> = {}) => renderView({ view: 'scatter', x: 'x', y: 'y', series: 's', ...over }, t, theme, 't');
   const textsOf = (body: string) => grade(`<svg xmlns="http://www.w3.org/2000/svg">${body}</svg>`).texts;

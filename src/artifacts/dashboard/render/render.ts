@@ -426,10 +426,18 @@ function cartesian(v: View): Rendered {
     return notice(theme, why, v.caption, warnings.filter((w) => w !== why));
   }
   // One y domain for every panel (a scale's ticks depend on its domain alone), its labels in the measures' common
-  // format, else raw numbers.
+  // format, else raw numbers. A range no scale can span (geo.linear's floor, E2 panel) is the named state in place,
+  // decided before any tick is asked for; so is an x range of numbers.
   const yDomain = domainOf(yValues, spec.view === 'bar' || spec.view === 'area');
-  const yScaleOver = (bottom: number, top: number) => geo.linear(yDomain, [bottom, top], 5, true);
-  const yLabels = tickLabels(yScaleOver(1, 0).ticks, 'linear', commonFormat(all.map((s) => s.format)));
+  const yScale0 = geo.linear(yDomain, [1, 0], 5, true);
+  if (yScale0 === null) return notice(theme, VIEW_STATES.unsupportedDomain(ys.map((_, k) => yName(k)).join(', ')), v.caption, warnings);
+  const xs: number[] = [];
+  if (xKind !== 'band') for (const s of all) for (const m of s.marks) xs.push(xValue(m.x)!);
+  const xDomain = domainOf(xs, false);
+  if (xKind === 'linear' && geo.linear(xDomain, [0, 1], 6, spec.view === 'scatter') === null) return notice(theme, VIEW_STATES.unsupportedDomain(xCol.name), v.caption, warnings);
+  // admitted above by its domain alone, so a scale over any range exists
+  const yScaleOver = (bottom: number, top: number) => geo.linear(yDomain, [bottom, top], 5, true)!;
+  const yLabels = tickLabels(yScale0.ticks, 'linear', commonFormat(all.map((s) => s.format)));
   const left = Math.ceil(largest(yLabels.map((l) => textWidth(l, theme.caption)), 0)) + 10;
   const lineH = theme.caption * 1.4;
 
@@ -463,9 +471,7 @@ function cartesian(v: View): Rendered {
         band: { ...band, keys },
       };
     }
-    const xs: number[] = [];
-    for (const s of all) for (const m of s.marks) xs.push(xValue(m.x)!);
-    const scale = xKind === 'time' ? geo.time(domainOf(xs, false), [0, width], 6) : geo.linear(domainOf(xs, false), [0, width], 6, spec.view === 'scatter');
+    const scale = xKind === 'time' ? geo.time(xDomain, [0, width], 6) : geo.linear(xDomain, [0, width], 6, spec.view === 'scatter')!;
     const labels = tickLabels(scale.ticks, xKind, xFormat);
     const every = thinning(
       labels.map((l) => textWidth(l, theme.caption)),

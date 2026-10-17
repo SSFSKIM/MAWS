@@ -35,11 +35,22 @@ export function extent(values: number[]): [number, number] | null {
   return lo === undefined || hi === undefined ? null : [lo, hi];
 }
 
-/** A linear scale over `domain` onto `range` with about `count` ticks; `nice` extends the domain to round values. */
-export function linear(domain: [number, number], range: [number, number], count: number, nice: boolean): Ticks {
+/** The least extent a linear domain may span (E2 panel): below it (a subnormal span) d3's tick step is past what a
+ * number can hold, and its tick list an invalid array length. */
+export const MIN_EXTENT = 1e-300;
+const spans = ([lo, hi]: readonly number[]): boolean => Number.isFinite(hi - lo) && hi - lo >= MIN_EXTENT;
+
+/**
+ * A linear scale over `domain` onto `range` with about `count` ticks; `nice` extends the domain to round values. Null
+ * for a domain no scale can draw: its extent, as given or once made nice, not a finite number of at least
+ * `MIN_EXTENT`, decided before d3 is asked for a tick. Depends on the domain alone, never the range.
+ */
+export function linear(domain: [number, number], range: [number, number], count: number, nice: boolean): Ticks | null {
+  if (!spans(domain)) return null;
   const scale = scaleLinear().domain(domain).range(range);
   if (nice) scale.nice(count);
   const [lo, hi] = scale.domain();
+  if (!spans([lo, hi])) return null;
   return { domain: [lo, hi], ticks: scale.ticks(count), map: (v) => scale(v) };
 }
 

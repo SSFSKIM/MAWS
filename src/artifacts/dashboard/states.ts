@@ -26,6 +26,10 @@ export const VIEW_STATES = {
   overflow: (count: number, agg: string, column: string) => `${agg} of ${column} overflows in ${count} ${count === 1 ? 'group' : 'groups'}: too large to represent`,
   overflowCell: 'overflow',
   tooLarge: (count: number) => `${count} ${count === 1 ? 'value is' : 'values are'} too large to draw`,
+  // E2 panel: a finite range no scale can span (a subnormal extent, or one not finite once made nice), drawn in place
+  unsupportedDomain: (column: string) => `${column} has a numeric range that cannot be drawn`,
+  // E2 panel: unaggregated bars at one category of one series and measure sit on one another; the remedy is agg
+  repeatedX: (column: string, names: string[], more: number) => `${column} repeats ${names.join(', ')}${more > 0 ? ` and ${more} more` : ''}; bars overlap. Set agg to combine repeated categories.`,
   noPositive: (column: string) => `no positive ${column} to draw`,
   slicesDropped: (count: number, column: string) => `${count} ${count === 1 ? 'slice has' : 'slices have'} no positive ${column}; not drawn`,
   slicesFolded: (count: number) => `${count} slices; the smallest after the first five are drawn as one`,
