@@ -3,7 +3,7 @@
 // frame), not the frame's length; idle frames are kept but the bound reads the active ones; the compositor's drops are
 // reported only when the trace carries its reporter; the rAF proxy counts skipped frames against a calibrated interval.
 import { describe, expect, it } from 'vitest';
-import { distribution, frameWork, inside, rafDrops, type TraceEvent } from '../../e2e/support/design-frames';
+import { distribution, frameWork, inside, rafDrops, relayoutCallback, type TraceEvent } from '../../e2e/support/design-frames';
 
 const PID = 7;
 const MAIN = 1;
@@ -108,5 +108,71 @@ describe('the publications inside a measured window', () => {
     ];
     expect(inside(pubs, { startedAt: 1_000, endedAt: 3_150 })).toEqual({ indexes: [1, 2, 3], count: 3, intervalsMs: [700, 700] });
     expect(inside(pubs, { startedAt: 3_300, endedAt: 4_000 })).toEqual({ indexes: [], count: 0, intervalsMs: [] });
+  });
+});
+
+// DL39: the re-layout row reads the one animation-frame callback that ran every board's fresh layout pass after the
+// requested scope stood, its whole wall time (the measure and write phases before the first board's listener included)
+describe('the re-layout callback', () => {
+  const BOARDS = ['b1', 'b2', 'b3'];
+  const M = 'design-relayout-1';
+  const um = (name: string, ts: number, tid = MAIN): TraceEvent => ({ name, cat: 'blink.user_timing', ph: 'I', ts, pid: PID, tid });
+  const fire = (ts: number, dur: number, tdur?: number): TraceEvent => ({ name: 'FireAnimationFrame', cat: 'devtools.timeline', ph: 'X', ts, dur, pid: PID, tid: MAIN, ...(tdur !== undefined && { tdur }), args: { data: { id: ts } } });
+  const layout = (board: string, ts: number, n = 1, mark = M) => um(`${mark}:layout:${board}:${n}`, ts);
+  /** Enter at 1 ms, the scope standing at 2 ms, the pass's callback 16–40 ms holding the three boards' layouts at 30–39 ms, its frame's style and paint after it. */
+  function relayTrace(extra: TraceEvent[] = [], without: (e: TraceEvent) => boolean = () => false): TraceEvent[] {
+    return [
+      um(`${M}:enter`, 1_000),
+      um(`${M}:scope`, 2_000),
+      layout('b1', 1_500, 1), // a layout before the scope stood: not the measured pass
+      fire(1_200, 600), // the callback that ran it
+      begin(16_000),
+      fire(16_000, 24_000, 20_000),
+      layout('b1', 30_000, 2),
+      layout('b2', 35_000),
+      layout('b3', 39_000),
+      slice('UpdateLayoutTree', 40_500, 1_000),
+      slice('Paint', 42_000, 2_000),
+      begin(48_000),
+      slice('Paint', 49_000, 5_000), // the next frame's: not this pass's
+      ...extra,
+    ].filter((e) => !without(e));
+  }
+
+  it('measures the whole callback holding every board’s first layout after the scope stood, with its CPU time and the frame’s work after it', () => {
+    const r = relayoutCallback(relayTrace(), M, BOARDS);
+    expect(r).toMatchObject({ wallMs: 24, cpuMs: 20, beforeFirstMarkMs: 14, marksSpanMs: 9, enterToScopeMs: 1, scopeToCallbackMs: 14, followingMs: 3 });
+  });
+
+  it('answers no CPU time when the trace has none', () => {
+    const events = relayTrace().map((e) => (e.name === 'FireAnimationFrame' ? { ...e, tdur: undefined } : e));
+    expect(relayoutCallback(events, M, BOARDS).cpuMs).toBeNull();
+  });
+
+  it('ignores another run’s marks', () => {
+    expect(relayoutCallback(relayTrace([layout('b2', 31_000, 1, 'design-relayout-2'), um('design-relayout-2:scope', 25_000)]), M, BOARDS).wallMs).toBe(24);
+  });
+
+  it('refuses a missing board, a missing or repeated scope or enter mark, rather than answer a shorter slice', () => {
+    expect(() => relayoutCallback(relayTrace([], (e) => e.name === `${M}:layout:b3:1`), M, BOARDS)).toThrow(/no layout after the scope stood: b3/);
+    expect(() => relayoutCallback(relayTrace([], (e) => e.name === `${M}:scope`), M, BOARDS)).toThrow(/0 scope marks/);
+    expect(() => relayoutCallback(relayTrace([um(`${M}:scope`, 3_000)]), M, BOARDS)).toThrow(/2 scope marks/);
+    expect(() => relayoutCallback(relayTrace([], (e) => e.name === `${M}:enter`), M, BOARDS)).toThrow(/0 enter marks/);
+    expect(() => relayoutCallback([um(`${M}:enter`, 5_000), ...relayTrace([], (e) => e.name === `${M}:enter`)], M, BOARDS)).toThrow(/the scope stood before the Enter/);
+  });
+
+  it('refuses layouts spread over two callbacks, or held by two', () => {
+    const split = relayTrace([fire(36_000, 5_000)], (e) => e.name === 'FireAnimationFrame' && e.ts === 16_000);
+    expect(() => relayoutCallback([...split, fire(16_000, 19_000)], M, BOARDS)).toThrow(/the layouts lie in 2 callbacks/);
+    expect(() => relayoutCallback(relayTrace([fire(15_000, 26_000)]), M, BOARDS)).toThrow(/2 callbacks hold every layout/);
+  });
+
+  it('refuses a callback whose duration is not finite and positive, and a layout mark not at a finite time', () => {
+    for (const dur of [Number.NaN, 0, -5]) {
+      const events = relayTrace().map((e) => (e.name === 'FireAnimationFrame' && e.ts === 16_000 ? { ...e, dur } : e));
+      expect(() => relayoutCallback(events, M, BOARDS), String(dur)).toThrow(/no callback holds every layout/);
+    }
+    const events = relayTrace().map((e) => (e.name === `${M}:layout:b2:1` ? { ...e, ts: Number.NaN } : e));
+    expect(() => relayoutCallback(events, M, BOARDS)).toThrow(/not a finite time/);
   });
 });

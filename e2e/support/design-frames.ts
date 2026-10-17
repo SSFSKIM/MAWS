@@ -161,3 +161,79 @@ export function inside<T extends Timed>(all: readonly T[], span: Span): { indexe
   const intervalsMs = indexes.slice(1).map((k, j) => all[k]!.requestedAt - all[indexes[j]!]!.requestedAt);
   return { indexes, count: indexes.length, intervalsMs };
 }
+
+export interface RelayoutCallback {
+  /** The callback's wall time on the main thread (`dur`): synchronous, so no scheduling wait; preemption would count. */
+  wallMs: number;
+  /** Its thread time (`tdur`, CPU), when the trace has it: recorded, not judged. */
+  cpuMs: number | null;
+  /** From the callback's start to the first board's listener: the measure and write phases ahead of any fit. */
+  beforeFirstMarkMs: number;
+  /** From the first board's listener to the last's. */
+  marksSpanMs: number;
+  enterToScopeMs: number;
+  scopeToCallbackMs: number;
+  /** The frame's own style, layout, pre-paint, paint, layerize and commit after the callback (to the renderer's next BeginFrame); null when no next frame is traced. */
+  followingMs: number | null;
+  /** The callback's id (`args.data.id`), for the trace's reader. */
+  callback: unknown;
+}
+
+/**
+ * DL39's re-layout pass, read from the trace (see the header's frame rules for the thread): the page marks `<run>:enter`
+ * at the Enter, `<run>:scope` when the requested token stood in the design's scope style, and `<run>:layout:<board>:<n>`
+ * at each canvas's `onLayout`. Each board's first layout after the scope stood must lie in one and the same
+ * `FireAnimationFrame` callback of finite, positive duration on that thread; that callback's whole duration is the pass
+ * (C's flushLayout measures every canvas, writes every canvas, then fits each, its listeners firing at each fit's end, so
+ * the first listener comes after the measure and write phases). Anything else is refused by name: a missing or repeated
+ * enter or scope mark, the scope before the Enter, a board with no layout after it, a mark at no finite time, layouts
+ * spread over several callbacks, several callbacks holding them all, or none.
+ */
+export function relayoutCallback(events: TraceEvent[], run: string, boards: readonly string[]): RelayoutCallback {
+  const marks = events.filter((e) => (e.cat ?? '').includes('blink.user_timing') && (e.name === `${run}:enter` || e.name === `${run}:scope` || e.name.startsWith(`${run}:layout:`)));
+  const one = (what: 'enter' | 'scope') => {
+    const found = marks.filter((e) => e.name === `${run}:${what}`);
+    if (found.length !== 1) throw new Error(`the trace holds ${found.length} ${what} marks of ${run}, not 1`);
+    return found[0]!;
+  };
+  const [enter, scope] = [one('enter'), one('scope')];
+  const unread = marks.filter((e) => !Number.isFinite(e.ts));
+  if (unread.length > 0) throw new Error(`a mark at not a finite time: ${unread.map((e) => e.name).join(', ')}`);
+  if (scope.ts < enter.ts) throw new Error('the scope stood before the Enter: not this change’s');
+  const { pid, tid } = scope;
+  const firsts = new Map<string, number>();
+  for (const e of marks) {
+    const board = e.name.startsWith(`${run}:layout:`) ? e.name.slice(`${run}:layout:`.length).replace(/:\d+$/, '') : null;
+    if (board === null || e.pid !== pid || e.tid !== tid || e.ts < scope.ts) continue;
+    if (!firsts.has(board) || e.ts < firsts.get(board)!) firsts.set(board, e.ts);
+  }
+  const missing = boards.filter((b) => !firsts.has(b));
+  if (missing.length > 0) throw new Error(`no layout after the scope stood: ${missing.join(', ')}`);
+  const at = boards.map((b) => firsts.get(b)!);
+  const [first, last] = [Math.min(...at), Math.max(...at)];
+  const callbacks = events.filter((e) => e.name === 'FireAnimationFrame' && e.ph === 'X' && e.pid === pid && e.tid === tid && Number.isFinite(e.ts) && Number.isFinite(e.dur) && e.dur! > 0);
+  const holds = (c: TraceEvent, t: number) => c.ts <= t && t <= c.ts + c.dur!;
+  const holders = callbacks.filter((c) => holds(c, first) && holds(c, last));
+  if (holders.length > 1) throw new Error(`${holders.length} callbacks hold every layout: ambiguous`);
+  if (holders.length === 0) {
+    const touched = callbacks.filter((c) => at.some((t) => holds(c, t)));
+    throw new Error(touched.length > 1 ? `the layouts lie in ${touched.length} callbacks, not one pass` : 'no callback holds every layout');
+  }
+  const c = holders[0]!;
+  const end = c.ts + c.dur!;
+  const next = events.filter((e) => e.pid === pid && e.name === 'BeginFrame' && e.ts >= end).map((e) => e.ts).sort((a, b) => a - b)[0];
+  const following =
+    next === undefined
+      ? null
+      : union(events.filter((e) => e.pid === pid && e.tid === tid && e.ph === 'X' && PRODUCES.has(e.name) && Number.isFinite(e.dur) && e.ts >= end && e.ts < next).map((e) => [e.ts, e.ts + e.dur!])).reduce((s, [a, b]) => s + (b - a), 0) / 1000;
+  return {
+    wallMs: c.dur! / 1000,
+    cpuMs: Number.isFinite((c as { tdur?: number }).tdur) ? (c as { tdur?: number }).tdur! / 1000 : null,
+    beforeFirstMarkMs: (first - c.ts) / 1000,
+    marksSpanMs: (last - first) / 1000,
+    enterToScopeMs: (scope.ts - enter.ts) / 1000,
+    scopeToCallbackMs: (c.ts - scope.ts) / 1000,
+    followingMs: following,
+    callback: (c.args?.data as { id?: unknown } | undefined)?.id ?? null,
+  };
+}

@@ -78,7 +78,7 @@ interface Seam {
     threads(artifactId: string): Promise<SeamThread[]>; // M4
     derivedId(artifactId: string, from: string, to: string, elementId: string): Promise<string>; // M4
     frameProbe: { arm(artifactId: string, surface: string, model: FrameProbeModel, dom: FrameProbeDom[]): string; result(probe: string): FrameProbeResult | null; disarm(probe: string): void }; // M6
-    layoutProbe: { arm(artifactId: string, surface: string): string; result(probe: string): { armedAt: number; layouts: Record<string, number[]> }; disarm(probe: string): void }; // M6
+    layoutProbe: { arm(artifactId: string, surface: string, options?: LayoutProbeOptions): string; result(probe: string): { armedAt: number; scopeAt: number | null; layouts: Record<string, number[]> }; disarm(probe: string): void }; // M6; DL39's options
   };
 }
 
@@ -110,7 +110,12 @@ export async function frameProbeResult(page: Page, probe: string, timeout = 10_0
   }
   return result!;
 }
-export const armLayoutProbe = (page: Page, id: string, surface: 'main' | 'panel') => page.evaluate(([a, s]) => (window as unknown as Seam).__maws_design.layoutProbe.arm(a, s), [id, surface] as const);
+/** DL39: a mark per layout (`<mark>:layout:<board>:<n>`) and one when `scope`'s token stands (`<mark>:scope`), for a trace's reader. */
+export interface LayoutProbeOptions {
+  mark?: string;
+  scope?: { token: string; value: string };
+}
+export const armLayoutProbe = (page: Page, id: string, surface: 'main' | 'panel', options: LayoutProbeOptions = {}) => page.evaluate(([a, s, o]) => (window as unknown as Seam).__maws_design.layoutProbe.arm(a, s, o), [id, surface, options] as const);
 export const layoutProbeResult = (page: Page, probe: string) => page.evaluate((p) => (window as unknown as Seam).__maws_design.layoutProbe.result(p), probe);
 export const disarmLayoutProbe = (page: Page, probe: string) => page.evaluate((p) => (window as unknown as Seam).__maws_design.layoutProbe.disarm(p), probe);
 export const seamInstalled = (page: Page) => page.evaluate(() => typeof (window as unknown as Partial<Seam>).__maws_design);

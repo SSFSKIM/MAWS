@@ -10,7 +10,7 @@ import { boardFrame, writeBoardEntry, writeCanvasKeys } from '@artifacts/design/
 import { setBoardFrame } from '@artifacts/design/writers';
 import { importSlide } from '@artifacts/slides/model';
 import { loadSlide } from '@artifacts/slides/parse';
-import { frameProbe, type FrameProbeDom, type FrameProbeModel } from './e2e-seam';
+import { frameProbe, lastDeclaration, type FrameProbeDom, type FrameProbeModel } from './e2e-seam';
 
 function designDoc(): Doc {
   const doc = newDoc();
@@ -102,5 +102,18 @@ describe('the within-a-frame probe', () => {
     box.remove();
     setBoardFrame(s.local, 'tablet', { x: 600 });
     expect(() => frameProbe(window, s.local, s.root, 'panel', MODEL, DOM)).toThrow(/already holds/);
+  });
+});
+
+// DL39: the layout probe knows the requested override stands from the scope's stylesheet text alone (no style forced):
+// the token's last declaration, the override block the system's tokens are followed by
+describe('a scope stylesheet’s last declaration of a token', () => {
+  const css = '[data-ds-scope="ds-1"] {\n  --ds-color-bg: #fbfbf8;\n  --ds-color-bg-subtle: #eeeeee;\n  --ds-color-text: var(--ds-color-bg);\n}\n\n[data-ds-scope="ds-1"] {\n  --ds-color-bg: #123456;\n}\n';
+  it('reads the override that comes last, not a longer name or a var() use', () => {
+    expect(lastDeclaration(css, '--ds-color-bg')).toBe('#123456');
+    expect(lastDeclaration(css, '--ds-color-bg-subtle')).toBe('#eeeeee');
+    expect(lastDeclaration(css.replace('  --ds-color-bg: #123456;\n', ''), '--ds-color-bg')).toBe('#fbfbf8');
+    expect(lastDeclaration(css, '--ds-color-accent')).toBeNull();
+    expect(lastDeclaration('', '--ds-color-bg')).toBeNull();
   });
 });

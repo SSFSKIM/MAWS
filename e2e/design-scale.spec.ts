@@ -4,7 +4,8 @@
 // session driven through the host's scale seam (C's DeckScaleSeam under MAWS_DESIGN_PERF: A's real `artifact_read` and
 // `artifact_publish` as the session, a design's publish through its adapter, the host loop sampled around each call).
 // Every row is measured on the product's own routes, at the trials' 1-minute load, and judged on its WORST trial; no
-// best-of-trials and no high-load waiver: a trial at a load of 10 or more is not acceptance, and the run fails then.
+// best-of-trials and no high-load waiver: a trial at a load of 10 or more is not acceptance, and the run fails then (the one
+// median-judged row is DL39's one-board publish over the bench).
 //   1 open      artifact-cold (the host's copy unloaded, seed and earlier replicas closed, nothing holding the design) in
 //               a ready app: the library row's press (its pointerdown's timestamp) to every board's canvas laid out (the
 //               tab's drawnAt, which waits each canvas's first layout pass); the tab constructor to drawn beside it; every
@@ -20,14 +21,17 @@
 //               3 publications asked and answered inside the window or the trial is unreadable; the cadence and changed
 //               paths recorded; the dragged frame and the agent's fill both stand after it
 //   3 relayout  a Theme background change through the Theme rail (the design's overrides: the scope moves, every canvas
-//               invalidated in one batch): its Enter's timestamp to the last of 24 fresh onLayout observations, an
-//               upper-bound latency (first, last and spread noted; the spread never stands for the pass)      ≤ 50 ms
+//               invalidated in one batch), the world's scope verified to hold the requested token: the wall time of the
+//               one FireAnimationFrame callback that holds all 24 canvases' first layout after the scope stood (DL39;
+//               its thread time, the frame's following style/layout/paint, the Enter→last latency and the listeners'
+//               spread recorded beside it, none of them judged)                                            ≤ 50 ms
 //   4 memory    the renderer's working set (its window's own PID in Electron's metrics, KiB → MiB), ordinary and after a
 //               forced collection, with every export window closed (a missing, non-finite or non-positive reading is
 //               unreadable): ordinary ≤ 500 MB (500 × 10⁶ bytes)
-//   5 publish   the host loop's busy time over one agent publish (one board, the 4,096×8,192 and the heaviest among the
-//               seven; the whole design's 24 boards with the manifest sent unchanged); its longest gap and wall time
-//               beside it                                                                       ≤ 50 ms; ≤ 300 ms
+//   5 publish   the host loop's busy time over one agent publish (DL39): each bench board alone once, the median of the 24
+//               ≤ 50 ms; every heaviest board (182 elements: the posters, the 4,096² and the 4,096×8,192) alone three
+//               times, the worst ≤ 100 ms; the whole design's 24 boards with the manifest unchanged, the worst ≤ 300 ms;
+//               the longest gap and wall time beside each
 //   6 pdf       every board as one PDF through main's export service: the request to the committed file, its 24 pages
 //               checked against each board's native size                                                    < 55 s
 // Raw trials, frame lists, publish cadences, the machine and its loads go to test-results/design-scale.json, each trial's
@@ -39,7 +43,7 @@ import { cpus, loadavg, release, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BENCH_CARD, BENCH_CARD_FILLS, benchBoards, benchDesignFiles, type BenchBoard } from '../src/artifacts/design/fixtures/bench';
-import { frameWork, inside, rafDrops, type FrameWork, type RafDrops, type Span, type TraceEvent } from './support/design-frames';
+import { frameWork, inside, rafDrops, relayoutCallback, type FrameWork, type RafDrops, type Span, type TraceEvent } from './support/design-frames';
 import { armLayoutProbe, boardOf, boardsOf, disarmLayoutProbe, findIn, frameOf, headerAction, layoutProbeResult, ok, seamInstalled, seed, tabsOf, type TabView } from './support/design';
 import { PerfSeam, type LoopStats } from './support/document-scale';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -63,7 +67,12 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const load1 = (): number => +loadavg()[0]!.toFixed(2);
 const boardPath = (id: string) => `project/boards/${id}.html`;
 const rgbOf = (hex: string) => `rgb(${[1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join(', ')})`;
-const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
+/** The median: the middle value, or the mean of the middle two of an even count. */
+const median = (xs: number[]) => {
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+};
 
 /** Waits (bounded) for a 1-minute load under the limit; answers the load the trial starts at. */
 async function quiet(): Promise<number> {
@@ -90,7 +99,8 @@ interface Row {
   limit: number | null;
   /** Strictly below the limit (the PDF's "< 55 s"), else at most. */
   strict?: boolean;
-  value: number | null; // the worst trial's
+  judgedBy: 'worst' | 'median';
+  value: number | null; // the worst trial's, or the trials' median (judgedBy)
   verdict: Verdict;
   loads: number[];
   trials: Trial[];
@@ -101,9 +111,10 @@ class Rows {
   private readonly extra: Record<string, unknown> = {};
   constructor(private readonly meta: Record<string, unknown>) {}
 
-  add(row: string, measure: string, unit: string, limit: number | null, bound: string, trials: Trial[], strict = false): Row {
+  /** A row judged on its worst trial, or (DL39's one-board publish row alone) on the median of its trials. */
+  add(row: string, measure: string, unit: string, limit: number | null, bound: string, trials: Trial[], strict = false, judgedBy: 'worst' | 'median' = 'worst'): Row {
     const read = trials.filter((t) => t.value !== null).map((t) => t.value!);
-    const worst = read.length > 0 ? Math.max(...read) : null;
+    const worst = read.length === 0 ? null : judgedBy === 'median' ? median(read) : Math.max(...read);
     const loads = trials.map((t) => t.load);
     const verdict: Verdict =
       trials.length === 0 || trials.some((t) => t.value === null) ? 'unreadable'
@@ -111,17 +122,17 @@ class Rows {
       : loads.some((l) => l >= LOAD_LIMIT) ? 'not acceptance (load ≥ 10)'
       : (strict ? worst! < limit : worst! <= limit) ? 'met'
       : 'missed';
-    const entry: Row = { row, measure, unit, bound, limit, ...(strict && { strict }), value: worst === null ? null : +worst.toFixed(3), verdict, loads, trials: trials.map((t) => ({ ...t, value: t.value === null ? null : +t.value.toFixed(3) })) };
+    const entry: Row = { row, measure, unit, bound, limit, ...(strict && { strict }), judgedBy, value: worst === null ? null : +worst.toFixed(3), verdict, loads, trials: trials.map((t) => ({ ...t, value: t.value === null ? null : +t.value.toFixed(3) })) };
     this.rows.push(entry);
     this.write();
-    console.log(`[design scale] ${row}: ${entry.value ?? '—'} ${unit} (worst of ${trials.length}; ${verdict}; bound ${bound}; trials ${trials.map((t) => `${t.value === null ? `unreadable (${t.error})` : t.value.toFixed(2)} at load ${t.load}`).join(', ')})`);
+    console.log(`[design scale] ${row}: ${entry.value ?? '—'} ${unit} (${judgedBy} of ${trials.length}; ${verdict}; bound ${bound}; trials ${trials.map((t) => `${t.value === null ? `unreadable (${t.error})` : t.value.toFixed(2)} at load ${t.load}`).join(', ')})`);
     return entry;
   }
 
   write(extra: Record<string, unknown> = {}): void {
     Object.assign(this.extra, extra);
     mkdirSync(join(RESULTS, '..'), { recursive: true });
-    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: { rule: 'each row on its worst trial; a trial at a 1-minute load of 10 or more is not acceptance; an unreadable trial is never replaced by a number', loadLimit: LOAD_LIMIT }, rows: this.rows }, null, 2)}\n`);
+    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: { rule: 'each row on its worst trial (DL39: the one-board publish row on the median of all 24 boards, its heaviest boards on their worst); a trial at a 1-minute load of 10 or more is not acceptance; an unreadable trial is never replaced by a number', loadLimit: LOAD_LIMIT }, rows: this.rows }, null, 2)}\n`);
   }
 }
 
@@ -477,20 +488,22 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
   expect(Object.keys(agent.files).filter((p) => p.startsWith('project/boards/'))).toHaveLength(24);
   rows.write({ agentFirstRead: { wallMs: first.wallMs, loopMaxMs: first.loop.max, busyMs: first.busyMs, load: load1() } });
 
-  await test.step('5: the agent’s publishes through A’s real publish, the design open: one board, seven times; all 24 boards, five times', async () => {
+  await test.step('5: the agent’s publishes through A’s real publish, the design open: every board once, the heaviest three times each, the whole design five times', async () => {
     await agent.publish([BOARDS[0]!.id]); // warm-up: the session's base becomes its own publish
-    // seven single boards: the 4,096×8,192 board and the heaviest by elements among them, the rest spread over the mix
-    const tall = BOARDS.find((b) => b.size === 'tall')!;
-    const heaviest = [...BOARDS].sort((a, b) => b.elements - a.elements)[0]!;
-    const singles = [...new Set([tall.id, heaviest.id, ...BOARDS.map((b) => b.id).filter((_, i) => i % 4 === 1)])].slice(0, 7);
-    const one: Trial[] = [];
-    for (const boardId of singles) {
+    const publishOne = async (board: BenchBoard): Promise<Trial> => {
       const load = await quiet();
-      const answer = await agent.publish([boardId]);
-      const board = BOARDS.find((b) => b.id === boardId)!;
-      one.push({ value: answer.busyMs, load: Math.max(load, load1()), note: `${boardId} (${board.w}×${board.h}, ${board.elements} elements); longest loop gap ${answer.loop.max.toFixed(1)} ms; wall ${answer.wallMs.toFixed(1)} ms; changed ${answer.result!.changed.join(', ')}` });
+      const answer = await agent.publish([board.id]);
       await sleep(300);
-    }
+      return { value: answer.busyMs, load: Math.max(load, load1()), note: `${board.id} (${board.size}, ${board.w}×${board.h}, ${board.elements} elements); longest loop gap ${answer.loop.max.toFixed(1)} ms; wall ${answer.wallMs.toFixed(1)} ms; changed ${answer.result!.changed.join(', ')}` };
+    };
+    // DL39: every bench board once, in the bench's order, judged on their median; the heaviest boards (every board tied
+    // at the most elements: the 4,096×8,192 and whichever others reach it), three trials each, judged on their worst
+    const sweep: Trial[] = [];
+    for (const board of BOARDS) sweep.push(await publishOne(board));
+    const most = Math.max(...BOARDS.map((b) => b.elements));
+    const heaviest = BOARDS.filter((b) => b.elements === most);
+    const heavy: Trial[] = [];
+    for (const board of heaviest) for (let k = 0; k < TRIALS; k++) heavy.push(await publishOne(board));
     const whole: Trial[] = [];
     for (let k = 0; k < 5; k++) {
       const load = await quiet();
@@ -498,7 +511,8 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
       whole.push({ value: answer.busyMs, load: Math.max(load, load1()), note: `longest loop gap ${answer.loop.max.toFixed(1)} ms; wall ${answer.wallMs.toFixed(1)} ms; ${answer.sent} files sent (the manifest unchanged among them), ${answer.result!.changed.length} changed` });
       await sleep(1_000);
     }
-    rows.add('5 publish one board', 'one board’s publish (the 4,096×8,192 board and the heaviest among the seven) by the agent’s session through A’s real artifact_publish: the host loop’s busy time over the call (the 1 ms sampler’s gaps past its tick)', 'ms', 50, '≤ 50 ms', one);
+    rows.add('5 publish one board (median of the bench)', 'each of the 24 bench boards published alone by the agent’s session through A’s real artifact_publish, once, in the bench’s order: the host loop’s busy time over the call (the 1 ms sampler’s gaps past its tick), the median of the 24; every board’s figure kept', 'ms', 50, '≤ 50 ms, median of the bench boards (DL39)', sweep, false, 'median');
+    rows.add('5 publish one board (heaviest)', `the heaviest bench boards (${heaviest.map((b) => `${b.id} ${b.w}×${b.h}`).join(', ')}, ${most} elements) each published alone ${TRIALS} times: the host loop’s busy time over the call, the worst`, 'ms', 100, '≤ 100 ms, the heaviest board (DL39)', heavy);
     rows.add('5 publish whole design', 'the whole design in one publish: all 24 boards, each changed, and the manifest sent unchanged: the host loop’s busy time over the call', 'ms', 300, '≤ 300 ms', whole);
   });
 
@@ -677,41 +691,80 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
     }
   });
 
-  await test.step('3: re-layout every board after a Theme background change, three times: the Enter to the last fresh onLayout', async () => {
+  await test.step('3: re-layout every board after a Theme background change, three times: the one callback that lays all 24 out once the scope holds the new value', async () => {
     await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
     await headerAction(page, 'Theme');
     const theme = tab.locator('[data-deck-rail="theme"]');
     await expect(theme).toBeVisible();
     const background = theme.getByRole('textbox', { name: 'Background', exact: true });
+    const scopeOf = tab.locator('[data-design-world] .deck-ds-scope[data-ds-scope]').first();
     const trials: Trial[] = [];
+    const latencies: Trial[] = [];
     for (let k = 0; k < TRIALS; k++) {
       const colour = ['#123456', '#654321', '#2b7a78'][k]!;
+      const mark = `design-relayout-${k + 1}`;
       await background.fill(colour);
       const load = await quiet();
-      const probe = await armLayoutProbe(page, id, 'main');
+      // the probe marks each canvas's layout and the moment the requested override stands in the world's scope style
+      const probe = await armLayoutProbe(page, id, 'main', { mark, scope: { token: '--ds-color-bg', value: colour } });
+      let traceEvents: TraceEvent[];
+      let enterAt: number | null = null;
+      let result: Awaited<ReturnType<typeof layoutProbeResult>> | null = null;
       try {
-        await page.evaluate(() => {
-          const w = window as unknown as { __designEnter?: number | null };
-          w.__designEnter = null;
-          window.addEventListener('keydown', (e) => (w.__designEnter ??= e.key === 'Enter' ? e.timeStamp : null), { capture: true, once: true });
-        });
-        await background.press('Enter');
-        const enter = async () => page.evaluate(() => (window as unknown as { __designEnter?: number | null }).__designEnter ?? null);
-        await expect.poll(async () => {
-          const at = await enter();
-          const result = await layoutProbeResult(page, probe);
-          return at !== null && BOARDS.every((b) => (result.layouts[b.id] ?? []).some((t) => t >= at));
-        }, { timeout: 15_000, message: 'every board laid out again after the change' }).toBe(true);
-        const at = (await enter())!;
-        const { layouts } = await layoutProbeResult(page, probe);
-        const firsts = BOARDS.map((b) => layouts[b.id]!.find((t) => t >= at)!);
-        trials.push({ value: Math.max(...firsts) - at, load: Math.max(load, load1()), note: `${Object.keys(layouts).length} canvases observed; first layout ${(Math.min(...firsts) - at).toFixed(2)} ms after the Enter, last ${(Math.max(...firsts) - at).toFixed(2)} ms (spread ${(Math.max(...firsts) - Math.min(...firsts)).toFixed(2)} ms)` });
+        try {
+          ({ events: traceEvents } = await traced(page, async () => {
+          await page.evaluate((m) => {
+            const w = window as unknown as { __designEnter?: number | null };
+            w.__designEnter = null;
+            window.addEventListener(
+              'keydown',
+              (e) => {
+                if (e.key !== 'Enter') return;
+                w.__designEnter ??= e.timeStamp;
+                performance.mark(`${m}:enter`);
+              },
+              { capture: true, once: true },
+            );
+          }, mark);
+          await background.press('Enter');
+          await expect.poll(async () => {
+            const now = await layoutProbeResult(page, probe);
+            return now.scopeAt !== null && BOARDS.every((b) => (now.layouts[b.id] ?? []).some((t) => t >= now.scopeAt!));
+          }, { timeout: 15_000, message: 'the scope took the new value and every board laid out again after it' }).toBe(true);
+          await sleep(100); // the pass's frame, traced whole
+          enterAt = await page.evaluate(() => (window as unknown as { __designEnter?: number | null }).__designEnter ?? null);
+          result = await layoutProbeResult(page, probe);
+          }));
+        } catch (error) {
+          if (!(error instanceof TraceUnavailable)) throw error;
+          trials.push({ value: null, load: Math.max(load, load1()), error: `trace unavailable: ${error.message}` });
+          continue;
+        }
       } finally {
         await disarmLayoutProbe(page, probe);
       }
-      await expect.poll(() => tab.locator(`[data-board-id="${BOARDS[0]!.id}"] .maws-slide`).evaluate((n) => getComputedStyle(n).backgroundColor)).not.toBe('');
+      mkdirSync(TRACES, { recursive: true });
+      writeFileSync(join(TRACES, `relayout-${k + 1}.trace.json`), JSON.stringify({ traceEvents }));
+      // the change itself, read after the measure (forcing style is harmless now): the scope the boards draw in holds it
+      const drawnToken = (await scopeOf.evaluate((n) => getComputedStyle(n).getPropertyValue('--ds-color-bg'))).trim().toLowerCase();
+      const r = result as Awaited<ReturnType<typeof layoutProbeResult>> | null;
+      const at = r?.scopeAt ?? null;
+      const firsts = r && at !== null ? BOARDS.map((b) => r.layouts[b.id]!.find((t) => t >= at)!) : [];
+      const latencyNote = r && at !== null && enterAt !== null ? `Enter → scope ${(at - enterAt).toFixed(2)} ms; Enter → first fresh layout ${(Math.min(...firsts) - enterAt).toFixed(2)} ms, last ${(Math.max(...firsts) - enterAt).toFixed(2)} ms (listener spread ${(Math.max(...firsts) - Math.min(...firsts)).toFixed(2)} ms)` : 'no latency read';
+      if (r && at !== null && enterAt !== null) latencies.push({ value: Math.max(...firsts) - enterAt, load: Math.max(load, load1()), note: latencyNote });
+      if (drawnToken !== colour) {
+        trials.push({ value: null, load: Math.max(load, load1()), error: `the world's scope reads --ds-color-bg ${drawnToken || '(none)'}, not the requested ${colour}` });
+        continue;
+      }
+      try {
+        const pass = relayoutCallback(traceEvents, mark, BOARDS.map((b) => b.id));
+        trials.push({ value: pass.wallMs, load: Math.max(load, load1()), note: `callback ${String(pass.callback)}: wall ${pass.wallMs.toFixed(2)} ms, thread (CPU) ${pass.cpuMs === null ? 'not traced' : `${pass.cpuMs.toFixed(2)} ms`}; ${pass.beforeFirstMarkMs.toFixed(2)} ms before the first board’s listener (the measure and write phases), listeners over ${pass.marksSpanMs.toFixed(2)} ms; scope → callback ${pass.scopeToCallbackMs.toFixed(2)} ms; the frame’s style, layout and paint after it ${pass.followingMs === null ? 'not traced' : `${pass.followingMs.toFixed(2)} ms`}; ${latencyNote}` });
+      } catch (error) {
+        trials.push({ value: null, load: Math.max(load, load1()), error: `${error instanceof Error ? error.message : String(error)}; ${latencyNote}` });
+      }
     }
-    rows.add('3 relayout', 'a Theme background change (the design’s overrides, the scope moved): its Enter’s timestamp to the last of 24 fresh onLayout observations, one per canvas; an upper-bound latency (the input, the scope’s restyle, the wait for the layout frame and the batched pass), not E0’s CPU cost; the observations’ first, last and spread noted beside it, the spread never standing for the pass', 'ms', 50, '≤ 50 ms (E0 13.5 ms)', trials);
+    rows.add('3 relayout', 'a Theme background change (the design’s overrides; the world’s scope verified to hold the requested --ds-color-bg): the wall time of the one animation-frame callback that ran all 24 canvases’ first layout pass after the scope stood (DevTools trace; its measure and write phases included; a synchronous callback, so no scheduling wait; its thread time noted, not judged)', 'ms', 50, '≤ 50 ms (E0 13.5 ms, a stand-in)', trials);
+    rows.add('3 relayout (latency)', 'the same changes: the Enter to the last of 24 fresh layouts after the scope stood (an upper bound including the frame wait), recorded beside row 3', 'ms', null, 'recorded beside row 3', latencies);
   });
 
   await test.step('6: every board as one PDF through main’s export service, three times: the request to the committed file, its 24 pages checked', async () => {

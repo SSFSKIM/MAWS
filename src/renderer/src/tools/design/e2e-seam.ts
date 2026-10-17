@@ -81,8 +81,20 @@ export interface FrameProbeResult {
 }
 export interface LayoutProbeResult {
   armedAt: number;
+  /** DL39: when the requested token first stood in the world's scope style (performance.now()); null until it does, or without one asked. */
+  scopeAt: number | null;
   /** Each board's layout passes since arming (performance.now()), by board. */
   layouts: Record<string, number[]>;
+}
+/**
+ * DL39: what the layout probe adds for a trace's reader: with `mark`, a `performance.mark` at each canvas's layout
+ * (`<mark>:layout:<board>:<n>`) and, with `scope`, one when the token's value first stands in the world's scope style
+ * (`<mark>:scope`): the last declaration of `token` in the `<style>` of the scope the world's boards draw in, read as
+ * text, so no style or layout is forced while the pass is pending.
+ */
+export interface LayoutProbeOptions {
+  mark?: string;
+  scope?: { token: string; value: string };
 }
 
 export interface DesignTabView {
@@ -120,7 +132,7 @@ export interface DesignSeam {
   };
   /** M6: fresh layout observations on every canvas of the tab on `surface`. */
   layoutProbe: {
-    arm(artifactId: string, surface: string): string;
+    arm(artifactId: string, surface: string, options?: LayoutProbeOptions): string;
     result(probe: string): LayoutProbeResult;
     disarm(probe: string): void;
   };
@@ -211,16 +223,56 @@ export function frameProbe(win: Window, doc: Doc, root: HTMLElement, surface: st
 }
 
 /** M6: fresh `onLayout` observations on every canvas the tab's live world draws. */
-function armLayoutProbe(win: Window, artifactId: string, surface: string): { result(): LayoutProbeResult; disarm(): void } {
+/** DL39: the value a stylesheet's last declaration of the custom property `token` gives it (an override block comes last), else null. */
+export function lastDeclaration(css: string, token: string): string | null {
+  const escaped = token.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const found = [...css.matchAll(new RegExp(`(?:^|[;{\\s])${escaped}\\s*:\\s*([^;}]+)`, 'g'))].at(-1);
+  return found ? found[1]!.trim() : null;
+}
+
+function armLayoutProbe(win: Window, artifactId: string, surface: string, options: LayoutProbeOptions = {}): { result(): LayoutProbeResult; disarm(): void } {
   const tab = tabOn(artifactId, surface);
   if (tab.canvases.size === 0) throw new Error(`the ${surface} tab of ${artifactId} draws no canvas`);
+  const { mark, scope } = options;
   const armedAt = win.performance.now();
   const layouts: Record<string, number[]> = {};
   const offs = [...tab.canvases].map(([boardId, canvas]) => {
     layouts[boardId] = [];
-    return canvas.onLayout(() => layouts[boardId]!.push(win.performance.now()));
+    return canvas.onLayout(() => {
+      layouts[boardId]!.push(win.performance.now());
+      if (mark) win.performance.mark(`${mark}:layout:${boardId}:${layouts[boardId]!.length}`);
+    });
   });
-  return { result: () => ({ armedAt, layouts: Object.fromEntries(Object.entries(layouts).map(([b, at]) => [b, [...at]])) }), disarm: () => offs.forEach((off) => off()) };
+  let scopeAt: number | null = null;
+  let observer: MutationObserver | null = null;
+  if (scope) {
+    const root = win.document.querySelector<HTMLElement>(`[data-design-artifact="${artifactId}"][data-design-surface="${surface}"]`);
+    if (!root) throw new Error(`no ${surface} body shows ${artifactId}`);
+    const stands = () => {
+      const id = root.querySelector<HTMLElement>('[data-design-world] .deck-ds-scope[data-ds-scope]')?.dataset.dsScope;
+      const style = id ? [...win.document.head.querySelectorAll<HTMLStyleElement>('style[data-ds-scope-style]')].find((el) => el.dataset.dsScopeStyle === id) : undefined;
+      const declared = lastDeclaration(style?.textContent ?? '', scope.token);
+      return declared !== null && declared.toLowerCase() === scope.value.toLowerCase();
+    };
+    if (stands()) {
+      offs.forEach((off) => off());
+      throw new Error(`the ${surface} scope already declares ${scope.token}: ${scope.value}`);
+    }
+    observer = new (win as Window & typeof globalThis).MutationObserver(() => {
+      if (scopeAt !== null || !stands()) return;
+      scopeAt = win.performance.now();
+      if (mark) win.performance.mark(`${mark}:scope`);
+    });
+    observer.observe(win.document.head, { childList: true, subtree: true, characterData: true });
+    observer.observe(root, { attributes: true, attributeFilter: ['data-ds-scope'], subtree: true });
+  }
+  return {
+    result: () => ({ armedAt, scopeAt, layouts: Object.fromEntries(Object.entries(layouts).map(([b, at]) => [b, [...at]])) }),
+    disarm: () => {
+      observer?.disconnect();
+      offs.forEach((off) => off());
+    },
+  };
 }
 
 export function installDesignSeam(win: Window, host: () => ArtifactHost): void {
@@ -315,7 +367,7 @@ export function installDesignSeam(win: Window, host: () => ArtifactHost): void {
       disarm: drop,
     },
     layoutProbe: {
-      arm: (artifactId, surface) => keep(armLayoutProbe(win, artifactId, surface)),
+      arm: (artifactId, surface, options) => keep(armLayoutProbe(win, artifactId, surface, options)),
       result: (id) => probe(id).result() as LayoutProbeResult,
       disarm: drop,
     },
