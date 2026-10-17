@@ -147,7 +147,7 @@ test('@layout a channel opens at its tail and follows it; a reader scrolled back
   expect(Math.abs(moved)).toBeLessThanOrEqual(1);
 });
 
-test('@layout on an engine without scroll anchoring (Safari before 27), a reader scrolled back keeps their row as a message arrives below, a row below grows, and a row above grows; at the tail the channel follows', async ({ browserName, page, hub }) => {
+test('@layout on an engine without scroll anchoring (Safari before 27), a reader scrolled back keeps their row as a message arrives below and as a row below or above them grows or shrinks; at the tail the channel follows', async ({ browserName, page, hub }) => {
   // The engine's own anchoring is turned off in the channel and `overflow-anchor` reported unsupported, so the channel
   // takes its fallback and nothing else can hold the reader: the owner's phone on iOS 26 or older.
   await page.addInitScript(() => {
@@ -184,26 +184,35 @@ test('@layout on an engine without scroll anchoring (Safari before 27), a reader
   await page.waitForTimeout(300);
   await expect(line(28)).toBeInViewport();
   const runs = center(page).getByTestId('agent-run');
-  const unfold = async (run: Locator) => {
-    await run.getByRole('button').evaluate((b) => (b as HTMLButtonElement).click()); // no scroll to it, as a row changing on its own
-    await expect(run.getByTestId('agent-run-messages')).toBeAttached();
+  /** Unfolds or folds a run without scrolling to it, as a row changing on its own. */
+  const toggle = async (run: Locator, open: boolean) => {
+    await run.getByRole('button').evaluate((b) => (b as HTMLButtonElement).click());
+    await expect(run.getByTestId('agent-run-messages')).toHaveCount(open ? 1 : 0);
   };
   const moves: string[] = [];
-  /** How far the reader's row (line 28) moved through `change`; under 1 px is whole-pixel rounding. */
-  const holds = async (what: string, change: () => Promise<unknown>) => {
-    const before = (await line(28).boundingBox())!.y;
+  /** How far the reader's row moved through `change`; under 1 px is whole-pixel rounding. */
+  const holds = async (what: string, row: Locator, change: () => Promise<unknown>) => {
+    const before = (await row.boundingBox())!.y;
     await change();
     await page.waitForTimeout(300);
-    const moved = (await line(28).boundingBox())!.y - before;
+    const moved = (await row.boundingBox())!.y - before;
     moves.push(`${what}: ${moved.toFixed(2)}`);
     expect.soft(Math.abs(moved), `${what}, moved ${moved.toFixed(2)} px`).toBeLessThanOrEqual(1);
   };
-  await holds('a message arriving below', async () => {
+  await holds('a message arriving below', line(28), async () => {
     await message(33);
     await expect(line(33)).toBeAttached();
   });
-  await holds('a row below growing', () => unfold(runs.nth(1)));
-  await holds('a row above growing', () => unfold(runs.first()));
+  await holds('a row below growing', line(28), () => toggle(runs.nth(1), true));
+  await holds('a row above growing', line(28), () => toggle(runs.first(), true));
+  await holds('a row below shrinking', line(28), () => toggle(runs.nth(1), false));
+  // At the oldest edge a list that shrinks has the browser clamp the reader, and the edge is their place.
+  await toggle(runs.nth(1), true);
+  await events.evaluate((el) => el.scrollBy(0, -1e7));
+  await page.waitForTimeout(300);
+  const oldest = center(page).getByText('the migration is merged', { exact: true });
+  await expect(oldest).toBeInViewport();
+  await holds('a row below shrinking, at the oldest edge', oldest, () => toggle(runs.nth(1), false));
   test.info().annotations.push({ type: `row moved (px), ${browserName}, no anchoring (native: ${native})`, description: moves.join('; ') });
   console.log(`row moved in ${browserName} without anchoring (native: ${native}): ${moves.join('; ')}`);
 });

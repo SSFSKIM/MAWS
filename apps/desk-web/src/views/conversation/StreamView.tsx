@@ -74,25 +74,26 @@ export function StreamView({ items, outbox, landed = null }: { items: StreamItem
  * while the reader is off the tail, a change in the list's height leaves the row at the top of their view where it was.
  * Each row's distance from the list's bottom is kept as last laid out, which no scroll changes; the row at the top of
  * the view is found among them at the scroll position now (so a scroll not yet reported counts), and the scroll position
- * moves by as much as that row's distance changed, before the frame is painted. At the tail, the origin follows.
+ * moves by as much as that row's distance changed, before the frame is painted. At the tail, the origin follows. A list
+ * that shrank has the browser clamp a reader at its oldest edge before this runs; they are left there, at the edge.
  */
 function useAnchoringFallback(scroller: RefObject<HTMLDivElement | null>, list: RefObject<HTMLOListElement | null>) {
   useLayoutEffect(() => {
     const box = scroller.current;
     const ol = list.current;
     if (!box || !ol || CSS.supports('overflow-anchor', 'auto')) return;
+    const fromBottom = (row: Element) => ol.getBoundingClientRect().bottom - row.getBoundingClientRect().bottom;
     let laidOut: Array<[row: Element, fromBottom: number]> = []; // top row first
     const observer = new ResizeObserver(() => {
-      const bottom = ol.getBoundingClientRect().bottom;
-      const fromBottom = (row: Element) => bottom - row.getBoundingClientRect().bottom;
       const back = -box.scrollTop;
       if (back >= 1) {
-        const viewTop = back + box.clientHeight;
-        const anchor = laidOut.find(([row, was]) => was < viewTop && row.isConnected);
+        const anchor = laidOut.find(([row, was]) => was < back + box.clientHeight && row.isConnected);
         const moved = anchor ? fromBottom(anchor[0]) - anchor[1] : 0;
-        if (moved) box.scrollTop -= moved;
+        if (moved > 0 || (moved < 0 && back < box.scrollHeight - box.clientHeight - 1)) box.scrollTop -= moved;
       }
-      laidOut = [...ol.children].map((row) => [row, fromBottom(row)]);
+      // Read after any correction: a base read before the scroll would leave every distance off by it.
+      const bottom = ol.getBoundingClientRect().bottom;
+      laidOut = [...ol.children].map((row) => [row, bottom - row.getBoundingClientRect().bottom]);
     });
     observer.observe(ol);
     return () => observer.disconnect();
