@@ -12,8 +12,8 @@ The observable path is the existing HTML artifact and its Connectors sheet: decl
 
 - [x] (2026-10-17 03:16Z) Isolated worktree confirmed at e6b5912f9; binding parent decisions, H implementation/handoff, spike and gate rules read. Full interface-ledger orientation delegated and returned; E2's cited standalone document is absent from this pin, reported to architect.
 - [x] (2026-10-17 03:19Z) One frozen/prefer-offline worktree install through the shared slot completed, exit 0.
-- [x] (2026-10-17 03:29Z) Execution document independently reviewed; six actionable contract gaps folded at 2086d3772. Parent Decision 98 records initial residue rulings/names. Follow-up discovery/credential-epoch and native-custody verification rulings remain open.
-- [ ] M1a journal subtask executing test-first (includes tightening existing wider paths under Decision 98); provenance implementation not yet dispatched.
+- [x] (2026-10-17 03:29Z) Execution document independently reviewed; six actionable contract gaps folded at 2086d3772. Parent Decision 98 and its follow-up settle all residue/names. Full document at 742506b76 approved on re-review with no material findings; SDK runtime proofs remain implementation work. Architect's docs-only master b8def6d2f merged as adbe33d88.
+- [ ] M1a journal implementation returned at 24a5ab478; task review pending. Executor reports RED6/GREEN41 tests in four named files, mutation check, full typecheck and changed-file eslint clean; controller verified commit scope, not rerun checks. Provenance implementation follows as M1b.
 - [ ] M1 — Attested source observations, conservative lookup and journal creation permissions.
 - [ ] M2 — Host-local direct operations and bounded SDK stdio/HTTP connections.
 - [ ] M3 — Main-owned OAuth custody, loopback flow and owner connection controls.
