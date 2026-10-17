@@ -1,0 +1,9 @@
+{
+  "project": "ebb30c31-6f6e-414d-9a40-c7be37616d06",
+  "name": "MAWS",
+  "remote": "",
+  "hub": {
+    "url": "https://desk-hub.opencognita-platform.workers.dev",
+    "org": "ssfskim"
+  }
+}
