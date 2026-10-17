@@ -26,7 +26,7 @@ import { ArtifactStoreError, StoreTooNewError } from './errors'; // P3-H: StoreT
 import { Maintenance } from './maintenance';
 import { OpLedger, type OpScope } from './ops';
 import { restoreArtifact } from './restore';
-import { SnapshotRetention, type AssetHold } from './retention'; // E3
+import { datasetRefsOf, SnapshotRetention, type AssetHold } from './retention'; // E3
 import type { Committed, DocumentService, WriteOptions } from './service';
 import type { SqliteDocumentStorage } from './storage';
 import { actorFromKey, VersionStore, type DesignSystemRef, type VersionKind } from './versions';
@@ -1026,10 +1026,17 @@ export class ArtifactStore {
   async restore(artifactId: string, versionId: number, actor: Actor, inFrame?: InFrame<{ revision: number; versionId: number }>): Promise<{ revision: number; versionId: number }> {
     const row = this.requireLive(artifactId);
     const version = this.requireVersion(artifactId, versionId);
-    this.migrated.delete(artifactId); // P3-E: a restore may bring back an earlier shape (its kind's `afterRestore` migrates it)
-    const result = await restoreArtifact(this, row, version, actor, inFrame);
-    this.emit(artifactId, 'updated');
-    return result;
+    // E3 (the M1 review): the snapshots the version's state names are held from here, before the first await, until the
+    // restore has published or refused, so a prune or a thinning dropping the version meanwhile never takes their bytes
+    const hold = isDocKind(row.kind) && version.enc ? this.retention.hold(artifactId, datasetRefsOf(this.versions.state(artifactId, version.id))) : null;
+    try {
+      this.migrated.delete(artifactId); // P3-E: a restore may bring back an earlier shape (its kind's `afterRestore` migrates it)
+      const result = await restoreArtifact(this, row, version, actor, inFrame);
+      this.emit(artifactId, 'updated');
+      return result;
+    } finally {
+      hold?.release();
+    }
   }
 
   // The merged attribution (encoded ContentMap) of every row overlapping [fromSeq, toSeq] (Decision Log 23a); the

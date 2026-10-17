@@ -387,6 +387,47 @@ describe('versions, restore and duplicate', () => {
     expect(members(id, 'live')).toEqual([a, d]);
   });
 
+  it('a restore holds the snapshots its version names from its first step: a prune dropping that version while the restore waits never takes them', async () => {
+    const id = await dashboard();
+    const a = await refresh(id, 'live', 'A');
+    const v1 = (await store().createVersion(id, { kind: 'named', actor: human, label: 'With A' }))!;
+    await refresh(id, 'live', 'B');
+    await refresh(id, 'live', 'C');
+    expect(retired(id, a)).toBe(true); // pinned by v1 alone
+    const { sha256 } = rowOf(id, a)!;
+    // the restore's first await (its pre-restore auto version) is held open while the owner prunes every version
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    const autoVersion = store().autoVersion.bind(store());
+    vi.spyOn(store(), 'autoVersion').mockImplementationOnce(async (artifactId) => {
+      await gate;
+      return autoVersion(artifactId);
+    });
+    const restoring = store().restore(id, v1, human);
+    await store().pruneVersions(id, Date.now() + 1);
+    expect(store().versions.version(id, v1)).toBeUndefined();
+    expect(rowOf(id, a)).toBeDefined(); // the restore's hold kept it through the prune's collection
+    open();
+    await restoring;
+    expect(readDataset(store().service.live(id), 'live')?.source).toMatchObject({ snapshot: { ref: a } });
+    expect(rowOf(id, a)).toMatchObject({ retiredAt: null });
+    expect(existsSync(fileOf(id, sha256))).toBe(true);
+    store().collectRetiredAssets(id);
+    expect(rowOf(id, a)).toBeDefined(); // current now
+  });
+
+  it('a restore refused after its hold lets the hold go', async () => {
+    const id = await dashboard();
+    const a = await refresh(id, 'live', 'A');
+    const v1 = (await store().createVersion(id, { kind: 'named', actor: human, label: 'With A' }))!;
+    await refresh(id, 'live', 'B');
+    await refresh(id, 'live', 'C');
+    vi.spyOn(store(), 'autoVersion').mockRejectedValueOnce(new Error('the pre-restore version failed'));
+    await expect(store().restore(id, v1, human)).rejects.toThrow('the pre-restore version failed');
+    await store().pruneVersions(id, Date.now() + 1);
+    expect(rowOf(id, a)).toBeUndefined(); // nothing held it any more
+  });
+
   it('a live duplicate copies the snapshots its state names and the ordinary assets, never the query snapshots it cannot name; its import version pins its state alone', async () => {
     const id = await dashboard();
     const a = await refresh(id, 'live', 'A');

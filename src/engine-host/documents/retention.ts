@@ -275,6 +275,7 @@ export class SnapshotRetention {
    * holds `notFound` (the snapshot is unavailable), with nothing held. Synchronous, so a capture and its hold share a turn. */
   hold(artifactId: string, refs: readonly string[]): AssetHold {
     const wanted = [...new Set(refs)];
+    if (wanted.length === 0) return { release: () => {} }; // nothing to protect: no hold counted
     const entry = this.holds.get(artifactId) ?? { groups: new Set<object>(), refs: new Map<string, number>() };
     const limit = (which: keyof typeof ASSET_HOLD_LIMITS, what: string) => new ArtifactStoreError('tooLarge', `${what} (at most ${ASSET_HOLD_LIMITS[which]}); nothing was held`, { hold: which, limit: ASSET_HOLD_LIMITS[which] });
     if (wanted.length > ASSET_HOLD_LIMITS.groupRefs) throw limit('groupRefs', `one hold names ${wanted.length} snapshots`);
