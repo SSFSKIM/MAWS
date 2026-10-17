@@ -12,8 +12,8 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
 
-/** Rows keyed by their turn (which a rebuild can rename) or drawn by the stream (which a row replaces). */
-const VOLATILE = /^(time|divider|desk-stream):/;
+/** Rows keyed by their turn (which a rebuild can rename: the report's working record too) or drawn by the stream (which a row replaces). */
+const VOLATILE = /^(time|divider|owner-record|desk-stream):/;
 /** What only a reader does to the scroller (the list's own scrolling raises none of it): their move ends a correction. */
 const INTENT = ['wheel', 'touchstart', 'pointerdown'] as const;
 const NAVIGATION_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
