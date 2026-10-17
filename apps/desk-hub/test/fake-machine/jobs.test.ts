@@ -47,6 +47,31 @@ describe('a raw word', () => {
   });
 });
 
+describe('a launch', () => {
+  const agent = 'a0000000000000002';
+  const LAUNCH_TEXT = `Async agent launched successfully.\nagentId: ${agent} (internal ID)\nThe agent is working in the background.`;
+  const derived = (resultRow: Partial<JsonObject>) => {
+    const main: JsonObject[] = [
+      { type: 'assistant', uuid: 'call', timestamp: at(1), message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_B', name: 'Agent', input: { description: 'Echo' } }] } },
+      { type: 'user', uuid: 'result', timestamp: at(2), message: { role: 'user', content: [{ tool_use_id: 'toolu_B', type: 'tool_result', content: [{ type: 'text', text: LAUNCH_TEXT }] }] }, ...resultRow },
+    ];
+    const metas = [{ agentId: agent, meta: { agentType: 'general-purpose', toolUseId: 'toolu_B' } }];
+    return deriveFromRows({ session: { id: SESSION, running: false }, main, metas, agentFiles: {}, bridge: null }).subagents[0];
+  };
+
+  it('is decided by a toolUseResult where there is one: a foreground answer that begins with the launch text stays completed', () => {
+    expect(derived({ toolUseResult: { status: 'completed', agentId: agent, content: [{ type: 'text', text: LAUNCH_TEXT }] } })).toMatchObject({
+      status: 'completed',
+      evidence: 'rows',
+      outcome: { status: 'completed', raw: 'completed', at: at(2) },
+    });
+  });
+
+  it('is read by its text only on a row written without a toolUseResult', () => {
+    expect(derived({})).toMatchObject({ status: 'exited', evidence: 'session', outcome: { status: 'running', raw: 'async_launched' } });
+  });
+});
+
 describe('output under a dangling symlink', () => {
   let dir = '';
   afterEach(() => rmSync(dir, { recursive: true, force: true }));

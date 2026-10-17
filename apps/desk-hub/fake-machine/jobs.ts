@@ -127,7 +127,10 @@ export class LoopIndex {
     const result = obj(toolUseResult);
     if (call.name === 'Agent' || call.name === 'Task') {
       const status = str(result?.status);
-      const launch = status === LAUNCHED || (!isError && isLaunchText(textOf(block.content)));
+      // Where the engine wrote a toolUseResult, its status alone says whether this is a launch: a foreground agent's
+      // answer may begin with the launch text. Only a row written without one is read by its text.
+      const written = toolUseResult !== undefined && toolUseResult !== null;
+      const launch = written ? status === LAUNCHED : !isError && isLaunchText(textOf(block.content));
       const raw = launch ? LAUNCHED : isError ? 'error' : (status ?? 'completed');
       // A launch written without a toolUseResult names no output file.
       const outputFile = status === LAUNCHED ? str(result?.outputFile) : null;
