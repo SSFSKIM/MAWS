@@ -6,6 +6,8 @@
 // - `addedListeners` / `loopbackPort`: the callback listener a Connect binds, exactly 127.0.0.1;
 // - `readSealedText` / `plaintextHits`: a sealed OAuth record's format and that no known value is readable in it;
 // - `journalTurns`: launches, and that no model turn ran, from a session's journal rows;
+// - `journalFrameShapes` / `blankResumeStartupRejection`: the frames of a journal as safe shapes, and the one inbound
+//   error result (no turn, cost or usage) the transition scene lets the old session's refused resume have (Decision Log 42);
 // - `isBlankResume`: the one failed acquire (a transcript-less resume) the transition scene documents and goes around;
 // - `scrubDiagnostic` / `boundedAcquire` / `boundedMetaRows`: a failed launch's evidence, an acquire's answer and a
 //   journal's meta rows reduced to allowlisted, scrubbed, size-bounded fields (never args, environment or raw frames);
@@ -178,6 +180,120 @@ export function isBlankResume(acquire: unknown, metaRows: readonly Record<string
   const transcript = resources !== null && typeof resources === 'object' ? (resources as { transcript?: unknown }).transcript : undefined;
   if (status !== 'failed' || transcript !== 'none' || typeof message !== 'string' || !message.includes(BLANK_RESUME_REFUSAL)) return false;
   return metaRows.some((row) => row.event === 'init_failed' && typeof row.message === 'string' && row.message.includes(BLANK_RESUME_REFUSAL));
+}
+
+// P3-HD Decision Log 42. The fields of a frame reduced to a shape: numbers, booleans and null as they are, a string as
+// '<string>', an array as '<array:n>', an object as its first 16 keys' shapes to depth 3; an absent field as '<absent>'.
+// Nothing a frame carries as text, arguments, environment or credentials survives.
+function shapeOf(value: unknown, depth = 0): unknown {
+  if (value === undefined) return '<absent>';
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return '<string>';
+  if (Array.isArray(value)) return `<array:${value.length}>`;
+  if (typeof value !== 'object') return `<${typeof value}>`;
+  if (depth >= 3) return '<object>';
+  return Object.fromEntries(Object.entries(value).slice(0, 16).map(([key, inner]) => [key.slice(0, 40), shapeOf(inner, depth + 1)]));
+}
+
+// Every number in the tree is 0 (null allowed): no string, boolean, array or nonzero number anywhere.
+function zeroTree(value: unknown): boolean {
+  if (value === null || value === 0) return true;
+  if (typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value).every(zeroTree);
+}
+
+const NO_CONVERSATION = /no[ _-]?conversation[ _-]?found/i;
+
+export interface ResultProjection {
+  spawn: number; // the launch (1-based, by spawn rows before it) the frame arrived in; 0 before any
+  direction: string;
+  subtype: string | null;
+  isError: unknown;
+  numTurns: unknown;
+  totalCostUsd: unknown;
+  usage: unknown;
+  modelUsage: unknown;
+  errorMatch: boolean; // whether the engine's text names a missing conversation (the text itself is never kept)
+  keys: string[];
+}
+export interface FrameShapes {
+  counts: Record<string, number>; // `direction:type` for each typed frame row
+  results: ResultProjection[];
+}
+interface ProjectedRow {
+  spawn: number;
+  direction: string;
+  frame: Record<string, unknown>;
+}
+
+const projectRows = (rows: readonly { direction: string; frame: unknown }[]): ProjectedRow[] => {
+  let spawn = 0;
+  const projected: ProjectedRow[] = [];
+  for (const { direction, frame } of rows) {
+    if (frame === null || typeof frame !== 'object' || Array.isArray(frame)) continue;
+    const record = frame as Record<string, unknown>;
+    if (direction === 'meta' && record.event === 'spawn') spawn += 1;
+    projected.push({ spawn, direction, frame: record });
+  }
+  return projected;
+};
+
+const errorMatches = (frame: Record<string, unknown>): boolean =>
+  [frame.result, frame.subtype, frame.error, ...(Array.isArray(frame.errors) ? frame.errors : [])].some((text) => typeof text === 'string' && NO_CONVERSATION.test(text));
+
+// What a journal's frames show of themselves, in safe fields only, in the journal's own order (callers sort its files).
+export function journalFrameShapes(rows: readonly { direction: string; frame: unknown }[]): FrameShapes {
+  const counts: Record<string, number> = {};
+  const results: ResultProjection[] = [];
+  for (const { spawn, direction, frame } of projectRows(rows)) {
+    if (direction === 'meta' || typeof frame.type !== 'string') continue;
+    const key = `${direction}:${frame.type.slice(0, 40)}`;
+    counts[key] = (counts[key] ?? 0) + 1;
+    if (frame.type !== 'result') continue;
+    results.push({
+      spawn,
+      direction,
+      subtype: typeof frame.subtype === 'string' ? frame.subtype.slice(0, 60) : null,
+      isError: shapeOf(frame.is_error),
+      numTurns: shapeOf(frame.num_turns),
+      totalCostUsd: shapeOf(frame.total_cost_usd),
+      usage: shapeOf(frame.usage),
+      modelUsage: shapeOf(frame.modelUsage),
+      errorMatch: errorMatches(frame),
+      keys: Object.keys(frame).slice(0, 24).map((name) => name.slice(0, 40)),
+    });
+  }
+  return { counts, results };
+}
+
+// The one inbound frame an engine's refused resume may leave without being a model turn (Decision Log 42): exactly one
+// `result` in the journal, inbound, in the second launch, an error naming the missing conversation, with explicit zero
+// turns, cost and API-token usage (usage with input and output tokens present, every number in it and in a present
+// modelUsage zero), the same launch's init_failed row, and no assistant, stream or user frame anywhere. `failures` names
+// each unmet condition by a closed word.
+export function blankResumeStartupRejection(rows: readonly { direction: string; frame: unknown }[]): { ok: boolean; failures: string[]; result: ResultProjection | null } {
+  const failures: string[] = [];
+  const projected = projectRows(rows);
+  const results = projected.filter(({ frame }) => frame.type === 'result');
+  const count = (types: readonly string[]) => projected.filter(({ direction, frame }) => direction !== 'meta' && types.includes(frame.type as string)).length;
+  if (count(['assistant', 'stream_event']) > 0) failures.push('modelFrames');
+  if (count(['user']) > 0) failures.push('userFrames');
+  if (!projected.some(({ spawn, direction, frame }) => spawn === 2 && direction === 'meta' && frame.event === 'init_failed')) failures.push('initFailed');
+  if (results.length !== 1) failures.push('results');
+  else {
+    const { spawn, direction, frame } = results[0]!;
+    const usage = frame.usage;
+    if (spawn !== 2) failures.push('spawn');
+    if (direction !== 'in') failures.push('direction');
+    if (frame.is_error !== true) failures.push('isError');
+    if (!errorMatches(frame)) failures.push('errorMatch');
+    if (frame.num_turns !== 0) failures.push('numTurns');
+    if (frame.total_cost_usd !== 0) failures.push('totalCostUsd');
+    if (usage === null || typeof usage !== 'object' || Array.isArray(usage) || (usage as Record<string, unknown>).input_tokens !== 0 || (usage as Record<string, unknown>).output_tokens !== 0 || !zeroTree(usage)) failures.push('usage');
+    const modelUsage = frame.modelUsage;
+    if (modelUsage !== undefined && (modelUsage === null || typeof modelUsage !== 'object' || Array.isArray(modelUsage) || !zeroTree(modelUsage))) failures.push('modelUsage');
+  }
+  return { ok: failures.length === 0, failures, result: journalFrameShapes(rows).results[0] ?? null };
 }
 
 // A scratch path (relative to the scene's root, `/`-separated) a scene may read and scan as retainable.

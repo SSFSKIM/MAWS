@@ -17,7 +17,7 @@ import type { CommandResult } from '@shared/ipc/schema';
 import { FIXTURE_SERVER } from './connector-engine';
 import { invoke, pageState, TOOL, value, type ConnectorScene } from './connector-scene';
 import { wrapperPids, type WrapperPids } from './connector-direct-transport';
-import { boundedMetaRows, journalTurns, type JournalTurns } from './connector-direct-checks';
+import { blankResumeStartupRejection, boundedMetaRows, journalTurns, type JournalTurns } from './connector-direct-checks';
 
 // The fixture server answers no tools/call while this file exists (support/connector-mcp-server.mjs `--hold`), and
 // answers the held ones once it is removed (P3-HD M4b).
@@ -149,6 +149,7 @@ export async function serverConnected(page: Page, appSessionId: string, server: 
 export interface SessionJournal {
   appSessionId: string;
   turns: JournalTurns;
+  rows: readonly { direction: string; frame: unknown }[]; // in journal order (files sorted by segment)
   dirMode: number;
   fileModes: number[];
 }
@@ -164,11 +165,12 @@ export function sessionJournals(scene: ConnectorScene): SessionJournal[] {
     .map((entry) => {
       const dir = join(root, entry.name);
       const files = journalFiles(dir);
-      return { appSessionId: entry.name, turns: journalTurns(journalRows(files)), dirMode: statSync(dir).mode & 0o777, fileModes: files.map((file) => statSync(file).mode & 0o777) };
+      const rows = journalRows(files);
+      return { appSessionId: entry.name, turns: journalTurns(rows), rows, dirMode: statSync(dir).mode & 0o777, fileModes: files.map((file) => statSync(file).mode & 0o777) };
     });
 }
 
-const journalFiles = (dir: string): string[] => readdirSync(dir).filter((file) => file.endsWith('.jsonl')).map((file) => join(dir, file));
+const journalFiles = (dir: string): string[] => readdirSync(dir).filter((file) => file.endsWith('.jsonl')).sort().map((file) => join(dir, file));
 const journalRows = (files: readonly string[]) =>
   files.flatMap((file) => readFileSync(file, 'utf8').split('\n').slice(0, -1).filter(Boolean).map((line) => JSON.parse(line) as { direction: string; frame: unknown }));
 
@@ -184,11 +186,17 @@ export function sessionMeta(scene: ConnectorScene): { appSessionId: string; rows
     .map((entry) => ({ appSessionId: entry.name, ...boundedMetaRows(journalRows(journalFiles(join(root, entry.name))), roots) }));
 }
 
-// No session ran a model turn or saw a needs-auth report, and every journal is owner-only.
-export function expectQuietJournals(journals: readonly SessionJournal[]): void {
+// No session ran a model turn or saw a needs-auth report, and every journal is owner-only. `blankResumeOf` (Decision Log
+// 42, one scene only): the one session whose refused resume may have left a single inbound error result, accepted only
+// when blankResumeStartupRejection classifies it; every other journal keeps the rule above.
+export function expectQuietJournals(journals: readonly SessionJournal[], blankResumeOf?: string): void {
   expect(journals.length, 'the scene’s sessions kept journals').toBeGreaterThan(0);
   for (const journal of journals) {
-    expect(journal.turns, `${journal.appSessionId}: no user message and no model frame`).toMatchObject({ userFrames: 0, modelFrames: 0, needsAuth: 0 });
+    if (journal.appSessionId === blankResumeOf) {
+      const verdict = blankResumeStartupRejection(journal.rows);
+      expect(verdict.failures, `${journal.appSessionId}: the refused resume’s only inbound frame is a zero-turn, zero-cost, zero-usage error result in its second launch`).toEqual([]);
+      expect(journal.turns, `${journal.appSessionId}: no user message, that one result alone as a model frame`).toMatchObject({ userFrames: 0, modelFrames: 1, needsAuth: 0 });
+    } else expect(journal.turns, `${journal.appSessionId}: no user message and no model frame`).toMatchObject({ userFrames: 0, modelFrames: 0, needsAuth: 0 });
     expect(journal.dirMode, `${journal.appSessionId}: its journal directory is 0700`).toBe(0o700);
     for (const mode of journal.fileModes) expect(mode, `${journal.appSessionId}: its journal files are 0600`).toBe(0o600);
   }

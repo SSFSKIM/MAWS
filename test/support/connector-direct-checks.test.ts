@@ -6,7 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  addedListeners, attachIfClean, bearerCrossings, boundedAcquire, boundedMetaRows, isBlankResume, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
+  addedListeners, attachIfClean, bearerCrossings, blankResumeStartupRejection, boundedAcquire, boundedMetaRows, isBlankResume, journalFrameShapes, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
   scanScratchTree, scrubDiagnostic, SEALED_FORMAT, type ScratchFs,
 } from '../../e2e/support/connector-direct-checks';
 
@@ -192,6 +192,99 @@ describe('isBlankResume: the one failed acquire the scene accepts as the documen
 
   it('is negative for anything that is not an answer', () => {
     for (const value of [undefined, null, 'failed', 7, [], { status: 'failed' }, { status: 'failed', message: refused }]) expect(isBlankResume(value, journal)).toBe(false);
+  });
+});
+
+describe('blankResumeStartupRejection / journalFrameShapes: the one inbound error result the transition scene accepts on the old session (P3-HD Decision Log 42)', () => {
+  // The failed wire shape is not yet observed: these fixtures are proposed classifier cases, not the engine's real frame.
+  const row = (direction: string, frame: unknown) => ({ direction, frame });
+  const spawn = row('meta', { event: 'spawn', args: ['--resume', 'x'] });
+  const initFailed = row('meta', { event: 'init_failed', message: 'No conversation found with session ID: x' });
+  const exit = row('meta', { event: 'exit', code: 1 });
+  const usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: { web_search_requests: 0 }, service_tier: null };
+  const result = { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['No conversation found with session ID: x'], num_turns: 0, total_cost_usd: 0, usage, modelUsage: {} };
+  const good = () => [spawn, row('in', { type: 'system', subtype: 'init' }), exit, spawn, row('in', result), initFailed, exit];
+  const withResult = (patch: Record<string, unknown>) => [spawn, exit, spawn, row('in', { ...result, ...patch }), initFailed, exit];
+  const failures = (rows: ReturnType<typeof good>) => blankResumeStartupRejection(rows).failures;
+
+  it('accepts exactly one explicit zero-turn, zero-cost, zero-usage error result in the second spawn, with the init_failed row', () => {
+    expect(blankResumeStartupRejection(good())).toMatchObject({ ok: true, failures: [] });
+  });
+
+  it('rejects an absent, a repeated, a misplaced or an outbound result', () => {
+    expect(failures([spawn, exit, spawn, initFailed, exit])).toContain('results');
+    expect(failures([...good(), row('in', result)])).toContain('results');
+    expect(failures([spawn, row('in', result), exit, spawn, initFailed, exit])).toContain('spawn');
+    expect(failures([spawn, exit, spawn, exit, spawn, row('in', result), initFailed])).toContain('spawn');
+    expect(failures([result].map(() => row('in', result)))).toContain('spawn');
+    expect(failures([spawn, exit, spawn, row('out', result), initFailed, exit])).toContain('direction');
+  });
+
+  it('rejects a result that is not an error or does not name the missing conversation', () => {
+    expect(failures(withResult({ is_error: false }))).toContain('isError');
+    expect(failures(withResult({ is_error: undefined }))).toContain('isError');
+    expect(failures(withResult({ errors: ['EACCES'] }))).toContain('errorMatch');
+    expect(failures(withResult({ errors: undefined }))).toContain('errorMatch');
+    expect(blankResumeStartupRejection(withResult({ errors: undefined, result: 'No conversation found with session ID: x' })).ok).toBe(true);
+  });
+
+  it('rejects unknown, missing, nonzero or non-numeric turns, cost and usage', () => {
+    expect(failures(withResult({ num_turns: undefined }))).toContain('numTurns');
+    expect(failures(withResult({ num_turns: 1 }))).toContain('numTurns');
+    expect(failures(withResult({ num_turns: '0' }))).toContain('numTurns');
+    expect(failures(withResult({ total_cost_usd: undefined }))).toContain('totalCostUsd');
+    expect(failures(withResult({ total_cost_usd: 0.0001 }))).toContain('totalCostUsd');
+    expect(failures(withResult({ usage: undefined }))).toContain('usage');
+    expect(failures(withResult({ usage: null }))).toContain('usage');
+    expect(failures(withResult({ usage: [] }))).toContain('usage');
+    expect(failures(withResult({ usage: {} }))).toContain('usage');
+    expect(failures(withResult({ usage: { output_tokens: 0 } }))).toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, input_tokens: 1 } }))).toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, cache_read_input_tokens: 5 } }))).toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, server_tool_use: { web_search_requests: 2 } } }))).toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, service_tier: 'standard' } }))).toContain('usage');
+    expect(failures(withResult({ usage: { ...usage, input_tokens: '0' } }))).toContain('usage');
+    expect(failures(withResult({ modelUsage: { 'claude-x': { inputTokens: 3, costUSD: 0.01 } } }))).toContain('modelUsage');
+    expect(failures(withResult({ modelUsage: [] }))).toContain('modelUsage');
+  });
+
+  it('rejects an assistant, stream or user frame anywhere, either direction', () => {
+    expect(failures([...good(), row('in', { type: 'assistant', message: {} })])).toContain('modelFrames');
+    expect(failures([row('in', { type: 'stream_event', event: {} }), ...good()])).toContain('modelFrames');
+    expect(failures([...good(), row('out', { type: 'user', message: {} })])).toContain('userFrames');
+    expect(failures([...good(), row('in', { type: 'user', message: {} })])).toContain('userFrames');
+  });
+
+  it('rejects a second spawn that did not write init_failed', () => {
+    expect(failures([spawn, initFailed, exit, spawn, row('in', result), exit])).toContain('initFailed');
+    expect(failures([spawn, exit, spawn, row('in', result), exit])).toContain('initFailed');
+  });
+
+  it('projects the frame in safe fields only: shapes and booleans, never content, arguments, environment or tokens', () => {
+    const secret = 'sk-ant-AbCdEf0123456789AbCdEf0123456789AbCdEf0123456789';
+    const rows = [row('meta', { event: 'spawn', args: [`--token=${secret}`] }), row('in', { ...result, result: secret, errors: [secret, 'No conversation found'], env: { SECRET: secret }, usage: { ...usage, service_tier: secret } }), row('in', { type: 'assistant', message: { content: secret } })];
+    const shapes = journalFrameShapes(rows);
+    expect(JSON.stringify(shapes)).not.toContain(secret);
+    expect(shapes.counts).toEqual({ 'in:result': 1, 'in:assistant': 1 });
+    expect(shapes.results).toEqual([
+      {
+        spawn: 1,
+        direction: 'in',
+        subtype: 'error_during_execution',
+        isError: true,
+        numTurns: 0,
+        totalCostUsd: 0,
+        usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, server_tool_use: { web_search_requests: 0 }, service_tier: '<string>' },
+        modelUsage: {},
+        errorMatch: true,
+        keys: ['type', 'subtype', 'is_error', 'errors', 'num_turns', 'total_cost_usd', 'usage', 'modelUsage', 'result', 'env'],
+      },
+    ]);
+  });
+
+  it('marks an absent field absent, and a non-object frame as no keys', () => {
+    const [only] = journalFrameShapes([row('in', { type: 'result' }), row('in', 'text')]).results;
+    expect(only).toMatchObject({ spawn: 0, subtype: null, isError: '<absent>', numTurns: '<absent>', totalCostUsd: '<absent>', usage: '<absent>', modelUsage: '<absent>', errorMatch: false, keys: ['type'] });
   });
 });
 

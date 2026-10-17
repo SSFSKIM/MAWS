@@ -65,7 +65,7 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { PAGE_HTML, PAGE_TITLE, pageState, SERVER, TOOL, type ConnectorScene } from './support/connector-scene';
 import { createPageIn, expectQuietJournals, heldServer, referencingServer, Refreshes, serverConnected, serverRow, sessionJournals, sessionMeta } from './support/connector-direct-scene';
-import { boundedAcquire, heldFate, isBlankResume, oncePageHtml } from './support/connector-direct-checks';
+import { blankResumeStartupRejection, boundedAcquire, heldFate, isBlankResume, journalFrameShapes, oncePageHtml } from './support/connector-direct-checks';
 import { allow, evidence, grantsOf, printEvidence, revokeInSheet, shot, stopEngine } from './support/connector-direct-acceptance';
 // P3-HD M4b end
 
@@ -793,8 +793,8 @@ test('transition: one grant reads through E, then D with no engine, then E again
       expect(scene.launches(returnedId), 'the fresh session: one launch, running').toEqual({ spawns: 1, exits: 0 });
     } else expect(scene.launches(engine.appSessionId), 'the explicit resume is the only other launch').toEqual({ spawns: 2, exits: 1 });
 
+    // Decision Log 42: the E-return proof and every journal’s frame shapes are kept before the quiet guard, so a red run keeps them
     const journals = sessionJournals(scene);
-    expectQuietJournals(journals);
     await evidence(info, 'transition', {
       refreshes: refreshes.seen,
       direct,
@@ -803,7 +803,10 @@ test('transition: one grant reads through E, then D with no engine, then E again
       eReturn: blankResume ? { route: 'fresh eligible session, not a resume of the old record', debt: 'blank resume (a pinned engine session id with no transcript): the related blank-chat row at docs/tech-debt-tracker.md:242 (2026-10-17, P3-F; it names the side-thread --resume --fork-session manifestation, not this plain no-message acquire), parent Decision Log 102 and P3-HD Decision Log 40', old: engine.appSessionId, fresh } : { route: 'resume of the owner’s session', session: engine.appSessionId },
       pids: { engine: engine.pid, engineServer, directServer, directParent, directParentIsSupervisor: scene.supervisors.has(directParent), resumed: resumed[0]!.pid, engineAgain, engineAgainParentIsEngine: ps(engineAgain, 'ppid') === String(resumed[0]!.pid) },
       journals: journals.map(({ turns, dirMode, fileModes }) => ({ turns, dirMode: dirMode.toString(8), fileModes: fileModes.map((mode) => mode.toString(8)) })),
+      frames: journals.map(({ appSessionId, rows }) => ({ appSessionId, ...journalFrameShapes(rows) })),
+      startupRejection: blankResume ? (({ ok, failures }) => ({ appSessionId: engine.appSessionId, ok, failures }))(blankResumeStartupRejection(journals.find((journal) => journal.appSessionId === engine.appSessionId)?.rows ?? [])) : null,
     });
+    expectQuietJournals(journals, blankResume ? engine.appSessionId : undefined);
   });
 });
 
