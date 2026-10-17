@@ -771,6 +771,35 @@ describe('background shells and monitors from disk (DC9)', () => {
     expect(monitors(graph).map((n) => [n.taskId, n.status, n.outputFile])).toEqual([['m1', 'running', null], ['m2', 'stopped', OUT('m2')]]);
   });
 
+  // DX4's expiry rule, as DC8's shared fixture pins it ("monitors that expire", doperpowers tests/sminos/dx4-jobs.json).
+  it('ends a monitor on its expiry notice, either form, as completed with the line as summary; an event notice or a shell named by one runs on', () => {
+    const notice = (uuid: string, task: string, event: string, n: number) => notification(uuid, `<task-id>${task}</task-id>\n<summary>Monitor event: "d"</summary>\n<event>${event}</event>`, n);
+    const expired = '[Monitor expired after 30m with 2 events delivered. Re-arm it if you still need the watch.]';
+    const timedOut = '[Monitor timed out — re-arm if needed.]';
+    const events = mapAll([
+      prompt,
+      ...monitorStart('bexpire01', { description: 'ticket state changes', command: 'tail -F fold.log', timeout_ms: 1800000 }, 1),
+      ...monitorStart('btimeout2', { description: 'the log', command: 'tail -F hub.log', timeout_ms: 1800000 }, 3),
+      ...monitorStart('bevent003', { description: 'failures', command: 'tail -F run.log', timeout_ms: 1800000 }, 5),
+      ...bashStart('bshell004', { command: 'python3 -m http.server', description: 'Serve', run_in_background: true }, 7),
+      notice('e1', 'bexpire01', '02:57:14 tick 1 ready', 9),
+      notice('e2', 'bexpire01', expired, 10),
+      notice('e3', 'btimeout2', timedOut, 11),
+      notice('e4', 'bevent003', 'FAIL test_plane', 12),
+      notice('e5', 'bshell004', '[Monitor expired after 30m with no events delivered.]', 13),
+      notice('e6', 'unknown01', expired, 14),
+    ]);
+    expect(only(events, 'task.notification').map(payload)).toEqual([
+      { kind: 'task.notification', taskId: 'bexpire01', toolUseId: 'toolu_bexpire01', status: 'completed', summary: expired, outputFile: null, reason: null },
+      { kind: 'task.notification', taskId: 'btimeout2', toolUseId: 'toolu_btimeout2', status: 'completed', summary: timedOut, outputFile: null, reason: null },
+    ]);
+    const graph = graphOf(events);
+    expect(monitors(graph).map((n) => [n.taskId, n.status, n.endedAt, n.summary])).toEqual([
+      ['bevent003', 'running', null, null], ['btimeout2', 'completed', at(11), timedOut], ['bexpire01', 'completed', at(10), expired],
+    ]);
+    expect(shells(graph).map((n) => [n.taskId, n.status])).toEqual([['bshell004', 'running']]);
+  });
+
   it("patches a task's status from a task_status attachment through the notification's table, and passes over a word it does not know", () => {
     const words = ['running', 'pending', 'completed', 'failed', 'error', 'stopped', 'killed', 'cancelled', 'interrupted', 'something-new'];
     const events = mapAll([prompt, ...words.map((word, i) => taskStatus(`t${i}`, 'b1', word, i + 1))]);

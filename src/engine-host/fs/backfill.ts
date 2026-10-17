@@ -44,14 +44,18 @@ export interface BackfillContext {
   // steer (blockedPrompt, below) from a blocked prompt of its own.
   inToolLoop: boolean;
   lastAssistantWasApiError: boolean;
-  // DC9: the calls whose result starts or stops a background job, by tool use, until that result; and each shell or
-  // monitor started here, with the tool use that started it, its description and whether it has ended.
+  // DC9: what a result that starts or stops a background job needs of its call, by tool use, kept for the session (a
+  // result the chain follower delivers again on a rejoin reads its call again, while the call itself is not re-read);
+  // and each shell or monitor started here, with the tool use that started it and the record whose event ended it.
   readonly jobCalls: Map<string, JobCall>;
   readonly jobs: Map<string, Job>;
 }
 
-interface JobCall { name: string; input: Record<string, unknown> } // DC9
-interface Job { toolUseId: ToolUseId; description: string; ended: boolean } // DC9
+// DC9: `stopTaskId` the TaskStop's `task_id` (or its older `shell_id`); `ws` a Monitor on a WebSocket source.
+interface JobCall { name: string; description: string; command: string; ws: boolean; stopTaskId: string }
+// DC9: `endedBy` the uuid of the record whose event ended the job (null while it runs), so that record, delivered
+// again, ends it the same way and any other one does not end it twice.
+interface Job { toolUseId: ToolUseId; kind: 'shell' | 'monitor'; description: string; endedBy: string | null }
 
 export function createBackfillContext(init: {
   sessionId: SessionId;
@@ -289,11 +293,10 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
         });
       } else if (notification.taskId !== null) {
         // Like the live normaliser, an outcome without a known task type is a task.notification.
-        const job = ctx.jobs.get(notification.taskId); // DC9
-        if (job !== undefined) job.ended = true;
+        endJob(ctx, notification.taskId, uuid); // DC9
         events.push({ ...base(), kind: 'task.notification', taskId: notification.taskId as TaskId, toolUseId: notification.toolUseId as ToolUseId, status: notification.status, summary: notification.result ?? notification.summary ?? '', outputFile: notification.outputFile, reason: null });
       }
-    }
+    } else if (notification !== null) monitorExpiry(ctx, notification, uuid, base, events); // DC9
     return;
   }
   if (!Array.isArray(content)) return;
@@ -318,7 +321,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     const text = typeof content === 'string' ? content : content.map((b) => (typeof b.text === 'string' ? b.text : '')).join('\n');
     const isError = block.is_error === true;
     startPendingSubagent(ctx, toolUseId, base, events);
-    jobEvents(ctx, toolUseId, structured, isError, base, events); // DC9
+    jobEvents(ctx, toolUseId, uuid, structured, isError, base, events); // DC9
     events.push({
       ...base(),
       kind: 'tool.result',
@@ -375,7 +378,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
     const toolUseId = block.id as ToolUseId;
     const toolName = typeof block.name === 'string' ? block.name : '';
     events.push({ ...base(), kind: 'tool.use', toolUseId, toolName, input: block.input, apiMessageId, messageUuid: uuid });
-    if (JOB_TOOLS.has(toolName)) ctx.jobCalls.set(toolUseId, { name: toolName, input: isRecord(block.input) ? block.input : {} }); // DC9
+    if (JOB_TOOLS.has(toolName)) ctx.jobCalls.set(toolUseId, jobCallOf(toolName, block.input)); // DC9
     if (toolName !== 'Agent') return;
     if (startSubagent(ctx, toolUseId, base, events) === null) ctx.pendingAgents.add(toolUseId);
   });
@@ -425,26 +428,52 @@ function startPendingSubagent(ctx: BackfillContext, toolUseId: string, base: Bas
 const JOB_TOOLS = new Set(['Bash', 'PowerShell', 'Monitor', 'TaskStop', 'KillShell', 'KillBash']); // TaskStop's aliases too
 const STOP_TOOLS = new Set(['TaskStop', 'KillShell', 'KillBash']);
 
-function jobEvents(ctx: BackfillContext, toolUseId: string, structured: unknown, isError: boolean, base: Base, events: SessionEvent[]): void {
-  const call = ctx.jobCalls.get(toolUseId);
-  ctx.jobCalls.delete(toolUseId);
+function jobCallOf(name: string, input: unknown): JobCall {
+  const field = (key: string): string => (isRecord(input) && typeof input[key] === 'string' ? input[key] : '');
+  return { name, description: field('description'), command: field('command'), ws: isRecord(input) && input.ws !== undefined, stopTaskId: field('task_id') || field('shell_id') };
+}
+
+// The events a job's tool result stands for, emitted before that result; `messageUuid` the record it is in.
+function jobEvents(ctx: BackfillContext, toolUseId: string, messageUuid: MessageUuid, structured: unknown, isError: boolean, base: Base, events: SessionEvent[]): void {
   if (isError || !isRecord(structured)) return;
-  const input = call?.input ?? {};
-  const start = (taskId: string, taskType: string, description: string): void => {
-    ctx.jobs.set(taskId, { toolUseId: toolUseId as ToolUseId, description, ended: false });
+  const call = ctx.jobCalls.get(toolUseId);
+  const start = (taskId: string, kind: Job['kind'], taskType: string, description: string): void => {
+    // A result delivered again keeps what the records after it said of its job.
+    if (ctx.jobs.get(taskId)?.toolUseId !== toolUseId) ctx.jobs.set(taskId, { toolUseId: toolUseId as ToolUseId, kind, description, endedBy: null });
     events.push({ ...base(), kind: 'task.started', taskId: taskId as TaskId, toolUseId: toolUseId as ToolUseId, taskType, description, isBackground: true, workflowName: null });
   };
   if (typeof structured.backgroundTaskId === 'string' && structured.backgroundTaskId.length > 0) {
-    start(structured.backgroundTaskId, 'local_bash', stringOf(input.description) || stringOf(input.command));
+    start(structured.backgroundTaskId, 'shell', 'local_bash', call === undefined ? '' : call.description || call.command);
   } else if (call?.name === 'Monitor' && typeof structured.taskId === 'string' && structured.taskId.length > 0) {
-    start(structured.taskId, input.ws !== undefined ? 'monitor_ws' : 'monitor', stringOf(input.description));
+    start(structured.taskId, 'monitor', call.ws ? 'monitor_ws' : 'monitor', call.description);
   } else if (call !== undefined && STOP_TOOLS.has(call.name)) {
-    const taskId = typeof structured.task_id === 'string' ? structured.task_id : stringOf(input.task_id) || stringOf(input.shell_id);
+    const taskId = typeof structured.task_id === 'string' ? structured.task_id : call.stopTaskId;
     const job = ctx.jobs.get(taskId);
-    if (job === undefined || job.ended) return;
-    job.ended = true;
+    if (job === undefined || !endJob(ctx, taskId, messageUuid)) return;
     events.push({ ...base(), kind: 'task.notification', taskId: taskId as TaskId, toolUseId: job.toolUseId, status: 'stopped', summary: job.description, outputFile: null, reason: null });
   }
+}
+
+// Marks a job ended by this record; false when another record already ended it (a task that is over stops no more).
+function endJob(ctx: BackfillContext, taskId: string, by: string): boolean {
+  const job = ctx.jobs.get(taskId);
+  if (job === undefined || (job.endedBy !== null && job.endedBy !== by)) return false;
+  job.endedBy = by;
+  return true;
+}
+
+// A monitor's expiry (DX4's expiry rule; DC8's shared fixture, "monitors that expire"): the engine ends a monitor whose
+// deadline passed with a notification carrying no <status> and no <tool-use-id>, its <event> the engine's expiry line
+// (`[Monitor expired after …]`, or `[Monitor timed out — re-arm if needed.]`). For a task started here as a monitor it is
+// the monitor's end, `completed` with the line as its summary, at the notification's time. A monitor's ordinary event
+// notification, statusless too, changes nothing, and nor does an expiry line naming a task that is no monitor.
+const MONITOR_EXPIRY = /^\[Monitor (?:expired after |timed out)/;
+function monitorExpiry(ctx: BackfillContext, notification: TaskNotification, uuid: MessageUuid, base: Base, events: SessionEvent[]): void {
+  const { taskId, event } = notification;
+  if (notification.statusWord !== null || taskId === null || event === null || !MONITOR_EXPIRY.test(event)) return;
+  const job = ctx.jobs.get(taskId);
+  if (job?.kind !== 'monitor' || !endJob(ctx, taskId, uuid)) return;
+  events.push({ ...base(), kind: 'task.notification', taskId: taskId as TaskId, toolUseId: job.toolUseId, status: 'completed', summary: event, outputFile: null, reason: null });
 }
 
 // The engine's `task_status` attachment (SPEC 20.10.10): a task's state restated after a compaction, `{taskId,
@@ -456,13 +485,11 @@ function taskStatusAttachment(record: TranscriptRecord, ctx: BackfillContext, ba
   if (attachment?.type !== 'task_status') return false;
   const status = typeof attachment.status === 'string' ? taskStatusOf(attachment.status) : null;
   if (typeof attachment.taskId !== 'string' || attachment.taskId.length === 0 || status === null) return true;
-  const job = ctx.jobs.get(attachment.taskId);
-  if (job !== undefined) job.ended = status !== 'running';
+  if (status !== 'running') endJob(ctx, attachment.taskId, record.uuid as string);
   events.push({ ...base(), kind: 'task.updated', taskId: attachment.taskId as TaskId, patch: { status } });
   return true;
 }
 
-const stringOf = (value: unknown): string => (typeof value === 'string' ? value : '');
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 // DC9 end
 
@@ -730,6 +757,8 @@ interface TaskNotification {
   summary: string | null;
   result: string | null;
   outputFile: string | null;
+  statusWord: string | null; // DC9: the raw <status>, absent from a monitor's event and expiry notices
+  event: string | null; // DC9: a monitor notice's <event>
 }
 
 // The same disk shape used by the follower's response-delivery classification.
@@ -767,7 +796,8 @@ function parseTaskNotification(content: string): TaskNotification | null {
     const match = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(content);
     return match === null ? null : match[1].trim();
   };
-  const status = taskStatusOf(element('status') ?? '');
+  const statusWord = element('status');
+  const status = taskStatusOf(statusWord ?? '');
   const outcome: TaskNotification['status'] = status === 'failed' || status === 'stopped' ? status : 'completed'; // a notification ends its task
   return {
     taskId: element('task-id'),
@@ -776,5 +806,7 @@ function parseTaskNotification(content: string): TaskNotification | null {
     summary: element('summary'),
     result: element('result'),
     outputFile: element('output-file'),
+    statusWord,
+    event: element('event'),
   };
 }

@@ -1326,3 +1326,49 @@ describe('a transcript a terminal and MAWS both write (W7)', () => {
     expect(out.events().length).toBe(settled);
   });
 });
+
+// DC9 (the desk's DC9, its shared MAWS edit S2): a job's start or stop is its result's, so a result the follower retracts
+// and rejoins (its issuing assistant staying on the shared prefix, never read again) maps to the same events again.
+describe('a background job result delivered again on a rejoin (DC9)', () => {
+  const assistant = (uuid: string, parentUuid: string, n: number, name: string, input: object) =>
+    line({ type: 'assistant', uuid, parentUuid, timestamp: at(n), message: { id: `m-${uuid}`, model: 'x', role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${uuid}`, name, input }] } });
+  const result = (uuid: string, parentUuid: string, n: number, content: string, toolUseResult: object) =>
+    line({ type: 'user', uuid, parentUuid, sourceToolAssistantUUID: parentUuid, timestamp: at(n), toolUseResult, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_${parentUuid}`, content }] } });
+  const prompt = line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'go' } });
+  const ofSource = (out: Collector, uuid: string) => out.events().filter((e) => e.id === uuid || e.id.startsWith(`${uuid}#`) || e.id.startsWith(`${uuid}@`)).map((e) => [e.id, e.kind]);
+
+  // The result `r` is cut by a second writer's record on its assistant `a`, then rejoins under a record that follows it.
+  async function cutAndRejoin(lines: string[], a: string, r: string): Promise<Collector> {
+    const { reader, follower, out } = await started(joined(lines));
+    reader.append(joined([line({ type: 'user', uuid: 'foreign', parentUuid: a, timestamp: at(30), message: { role: 'user', content: 'Another writer' } })]));
+    await follower.poke();
+    expect(out.of('boundary.retraction').map((e) => e.retractedMessageUuids)).toEqual([[r]]);
+    reader.append(joined([line({ type: 'user', uuid: 'next', parentUuid: r, timestamp: at(31), message: { role: 'user', content: 'Continue' } })]));
+    await follower.poke();
+    expect(follower.snapshot().chain).toContain(r);
+    expectWellFormed(out.events());
+    return out;
+  }
+
+  it("a Monitor's result starts its monitor again", async () => {
+    const out = await cutAndRejoin([
+      prompt,
+      assistant('a1', 'u1', 1, 'Monitor', { description: 'errors', command: 'tail -F x.log', timeout_ms: 300000 }),
+      result('r1', 'a1', 2, 'Monitor started (task m1, timeout 300000ms).', { taskId: 'm1', timeoutMs: 300000, persistent: false }),
+    ], 'a1', 'r1');
+    expect(ofSource(out, 'r1')).toEqual([['r1', 'task.started'], ['r1#1', 'tool.result'], ['r1@2', 'task.started'], ['r1@2#1', 'tool.result']]);
+    expect(out.of('task.started').map((e) => [e.taskId, e.taskType, e.description])).toEqual([['m1', 'monitor', 'errors'], ['m1', 'monitor', 'errors']]);
+  });
+
+  it("a TaskStop's result stops its shell again", async () => {
+    const out = await cutAndRejoin([
+      prompt,
+      assistant('a1', 'u1', 1, 'Bash', { command: 'npm run dev', description: 'Dev server', run_in_background: true }),
+      result('r1', 'a1', 2, 'Command running in background with ID: b1. Output is being written to: /tmp/claude-501/-p/S/tasks/b1.output.', { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: 'b1' }),
+      assistant('a2', 'r1', 3, 'TaskStop', { task_id: 'b1' }),
+      result('r2', 'a2', 4, 'Successfully stopped task: b1 (npm run dev)', { message: 'Successfully stopped task: b1 (npm run dev)', task_id: 'b1', task_type: 'local_bash', command: 'npm run dev' }),
+    ], 'a2', 'r2');
+    expect(ofSource(out, 'r2')).toEqual([['r2', 'task.notification'], ['r2#1', 'tool.result'], ['r2@2', 'task.notification'], ['r2@2#1', 'tool.result']]);
+    expect(out.of('task.notification').map((e) => [e.taskId, e.status, e.toolUseId])).toEqual([['b1', 'stopped', 'toolu_a1'], ['b1', 'stopped', 'toolu_a1']]);
+  });
+});
