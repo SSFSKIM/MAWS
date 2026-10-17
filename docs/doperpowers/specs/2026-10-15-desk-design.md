@@ -1034,9 +1034,9 @@ slug>/<session id>/tasks/<task id>.output` (engine SPEC ch. 20, "the
 shared per-uid temp root"; `/private/tmp/claude-501/…` as the
 `task_status`, the notification and the Bash result each name it here) —
 only for a task the loop's index holds, only at the path the session's own
-rows named for it, and only when the resolved path of what is opened lies
-under one of the resolved canonical roots the machine derives for that
-session from its own state (the engine's temp rule, the uid, the slugs of
+rows named for it, and only when the resolved path of what is opened is
+exactly `<taskId>.output` under one of the resolved canonical roots the
+machine derives for that session from its own state (the engine's temp rule, the uid, the slugs of
 the transcript's project directory and of the session's working
 directories, the session id; DX4), besides carrying the
 `<session id>/tasks/<taskId>.output` suffix. A symlink that keeps the
@@ -1449,8 +1449,10 @@ predates the module has no evidence while it runs.
     row names its path answers `ok` or `missing` with that path, never
     `refused`), `unknown-task` for a task the index does not hold, and
     `refused` with its reason for any path other than the one the
-    session's rows named, for a path whose resolved target lies outside
-    the resolved canonical root the machine derives (DX4), including a
+    session's rows named, for a path whose resolved target is not exactly
+    `<taskId>.output` under one of the resolved canonical roots the
+    machine derives (DX4), including a symlink to another task's file
+    under the same root, a
     symlink whose target keeps all three suffix components (`…/<same
     session>/tasks/<same task>.output` elsewhere) and an ordinary symlink
     to a file of another name; MCP names from the rows; the machine side
@@ -2503,7 +2505,7 @@ and `streaming` are that agent's own.
 | `block-row` | yes | `{uuid, turnId, agentId, step, index}`: the engine wrote the row `uuid` for content block `index` of that step; sent before the row itself arrives |
 | `step-end` | yes | `{turnId, agentId, step}`: that model request ended — finished, aborted, or cut off by its turn's end — from DX5's `step end` or `turn complete`; sent after every `block-row` of the step, so a block of it still without one never gets one, and the browser drops its partial text |
 | `rows` | yes | `{rows, before, more}`: older rows of the sub's transcript, newest first, answering a `rows` request |
-| `subagents` | yes | `{subagents: [{agentId, meta, status, evidence, running?, spawn?, outcome?, file?}], jobs: [Job], mcp: [{name}]}` **[2026-10-17]**: each `meta` a `subagents/*.meta.json` verbatim (a main-scope sub's the session's tree, an agent-scope sub's that agent's own, as before); `status` one of `running \| completed \| failed \| stopped \| exited \| unknown` (MAWS's `TaskStatus` words, so the web patches without a mapping) and `evidence` what it rests on, `bridge \| rows \| parent \| session \| none` (below); `running` the bridge's, present while the bridge holds the agent; `spawn` the bridge's spawn record, `{parentAgentId, subagentType, description, name, background, model, toolUseId}` (DX5 `agent` spawn, or the `$.agent.list()` seed's `{parentAgentId, subagentType, description, name}` for an agent the module did not see spawn), present when it holds one; `outcome` from the rows — the loop's, or for a nested agent its parent agent's transcript — `{status, raw, at, summary?, outputFile?}`, `raw` the engine's own word before the normalization table below; `file` the agent transcript's `{size, mtimeMs, firstAt, lastAt}`, read only when size or mtime changed. `jobs`: the loop's background shells and monitors, `{taskId, kind: "shell" \| "monitor", toolUseId, startedAt, description, command?, outputFile: string \| null, status, endedAt?, summary?}`, `status` as above less `unknown`, `outputFile` null until a row names one (a Monitor's result names none; a notification or a `task_status` may). `mcp`: the server names the loop's `mcp_instructions_delta` attachments added and did not remove, in order; names only. Sent in the snapshot and whenever any of it changes (the metas today, every `METAS_EVERY`; now also a status, a job, a name). A consumer older than DC9 reads `subagents[*].agentId` and `meta` and ignores the rest; a producer older than DC8 sends the two fields alone, and the web then shows an agent as it does today |
+| `subagents` | yes | `{subagents: [{agentId, meta, status, evidence, running?, spawn?, outcome?, file?}], jobs: [Job], mcp: [{name}]}` **[2026-10-17]**: each `meta` a `subagents/*.meta.json` verbatim (a main-scope sub's the session's tree, an agent-scope sub's that agent's own, as before); `status` one of `running \| completed \| failed \| stopped \| exited \| unknown` (MAWS's `TaskStatus` words, so the web patches without a mapping) and `evidence` what it rests on, `bridge \| rows \| parent \| session \| none` (below); `running` the bridge's, present while the bridge holds the agent; `spawn` the bridge's spawn record, `{parentAgentId, subagentType, description, name, background, model, toolUseId}` (DX5 `agent` spawn, or the `$.agent.list()` seed's `{parentAgentId, subagentType, description}` for an agent the module did not see spawn — the engine's list has no `name` (DC8, 2026-10-17)), present when it holds one; `outcome` from the rows — the loop's, or for a nested agent its parent agent's transcript — `{status, raw, at, summary?, outputFile?}`, `raw` the engine's own word before the normalization table below; `file` the agent transcript's `{size, mtimeMs, firstAt, lastAt}`, read only when size or mtime changed. `jobs`: the loop's background shells and monitors, `{taskId, kind: "shell" \| "monitor", toolUseId, startedAt, description, command?, outputFile: string \| null, status, endedAt?, summary?}`, `status` as above less `unknown`, `outputFile` null until a row names one (a Monitor's result names none; a notification or a `task_status` may). `mcp`: the server names the loop's `mcp_instructions_delta` attachments added and did not remove, in order; names only. Sent in the snapshot and whenever any of it changes (the metas today, every `METAS_EVERY`; now also a status, a job, a name). A consumer older than DC9 reads `subagents[*].agentId` and `meta` and ignores the rest; a producer older than DC8 sends the two fields alone, and the web then shows an agent as it does today |
 | `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
 | `output` | yes | **[2026-10-17]** `{taskId, result, …}`, answering an `output` request, one of four variants by `result`: **`ok`** `{taskId, result: "ok", path, size, from, text, truncated}` — `path` the output file as the session's rows named it, `size` the file's bytes, `text` its last `tail` bytes decoded UTF-8 with replacement, cut forward to the first line break inside the window when the window does not start the file, `from` the byte offset `text` starts at, `truncated` whether anything precedes it; **`missing`** `{taskId, result: "missing", path: string \| null}` — the task is known and there is nothing to read: `path` a string when the rows named a file, it passed containment, and no file is there (the engine writes them under the temporary directory), or null when no row has named a file for the task yet (a monitor just started; `Job.outputFile` null) — never `refused`, which is the containment refusal alone (the review's round 2); **`refused`** `{taskId, result: "refused", path, reason}` — the path the rows named fails containment (below), `reason` a sentence for the human; **`unknown-task`** `{taskId, result: "unknown-task"}` — the loop's index holds no such task. No variant carries a field another variant's rule leaves out. The consumer: `ok` draws the tail, with how many bytes precede it when `truncated`; `missing` says the file is gone, or that the task has no output file yet when `path` is null, leaves the row's own summary standing, and stays retry-eligible — when a later `subagents` supplies or changes the task's `outputFile`, the web may ask again; `refused` draws as a warning with `reason` and offers no retry; `unknown-task` waits for the next `subagents` to carry the task (the request raced the index) and otherwise says the task is unknown to the machine. Read on the thread that reads pages |
 | `usage` | yes | `{context: {tokens?, window, percent?}, cost: {usd} \| null}`: the bridge's `usage` event (DX5) verbatim (`tokens` and `percent` absent until a response has reported the window's fill; `cost` null where the engine keeps no ledger), after each main turn, on main-transcript subscriptions only. It is the one source of a session's context use and cost on the web: the transcript's rows do not carry them (the engine's `cost-state` records have no `uuid` and are not rows here), so a session without a bridge shows both as unavailable |
@@ -2612,7 +2614,10 @@ after its notification shows `completed` until its next notification, since a ro
 bridge's `running`. A job is `running` from its start row, ends on its notification, `task_status` or `TaskStop`
 through the same table, and is `exited` once the session's process is gone. The web patches these onto MAWS's task
 graph on the desk side (`task-feed.ts`), never in MAWS's `mergeSidecars`. One fixture of rows and the body they yield
-pins the plane's and the fake machine's derivations, as DX1's vectors pin its two code implementations; it holds the
+pins the plane's and the fake machine's derivations, as DX1's vectors pin its two code implementations (doperpowers
+`tests/sminos/dx4-jobs.json`, run by `jobs_parity.py`; its `about` field is normative where this prose is silent —
+unrecognized words, an Agent result's raw word, ties within a level, a job's times and summary, MCP removals before
+additions, an output window without a line break); it holds the
 module-reload case, a nested agent whose parent still runs, a cold open of an ended session holding an agent with a
 `running` status and no completion notification (`exited`), a nested agent under an ended parent (`exited`), each raw
 word of the table, a background agent of a bridgeless running session with only its `async_launched` result
@@ -2636,7 +2641,8 @@ taken from the transcript directory would refuse most of its shells. It then ser
 holds (`unknown-task` otherwise), only at the path the session's own rows named for it — a `task_status`'s
 `outputFilePath`, a notification's `<output-file>`, a Bash result's "Output is being written to:" — and only when
 **both** hold: the path carries the suffix `<session id>/tasks/<taskId>.output`, and the realpath of the target as
-opened (symlinks resolved) has one root's realpath as a prefix in whole path components and is a regular file. So a symlink under the root whose target keeps all three suffix
+opened (symlinks resolved) equals `<realpath of one root>/<taskId>.output` exactly and is a regular file — exact, not a
+component prefix, which would accept a symlink to another task's file under the same root (DC8, 2026-10-17). So a symlink under the root whose target keeps all three suffix
 components elsewhere (`…/<same session>/tasks/<same task>.output` under another root) is refused, an ordinary
 symlink to a file of another name is refused, and an agent task's `.output` — a symlink the engine makes into the
 agent's transcript under `~/.claude/projects/` (SPEC ch. 20) — is refused, the agent being read through its own
@@ -4435,6 +4441,13 @@ a hub that connects into machines (§2).
   the first follow-up after DC8 and DC9; the end marker as drawn. The ask
   mod's question shows as its card at the tail while pending and as its
   transcript row, which points to the card, then carries the answer (§9.1).
+  2026-10-17, DC8's shared fixture (doperpowers `tests/sminos/dx4-jobs.json`)
+  binds both producers, its `about` normative where DX4's prose is silent;
+  `output` containment is exact — the opened target's realpath equals
+  `<realpath of one root>/<taskId>.output` — since a component prefix
+  would accept a symlink to another task's file in the same root; the
+  `$.agent.list()` seed carries no `name`, which the engine's list lacks
+  (DX5 as amended).
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
