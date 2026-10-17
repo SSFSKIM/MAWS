@@ -89,7 +89,7 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
         )}
         {tab === 'jobs' && (
           <div role="tabpanel" aria-label="Jobs" className="absolute inset-0 flex flex-col">
-            <JobsPane controller={main} state={state} machine={session.machine} />
+            <JobsPane controller={main} state={state} machine={session.machine} ended={session.presence?.record === null} />
           </div>
         )}
         {tab === 'diff' && (

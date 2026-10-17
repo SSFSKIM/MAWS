@@ -2,7 +2,9 @@
 // a turn open past `[Request interrupted by user]` (its live path ends it from the SDK result, which the desk never
 // receives), so the desk's mapping ends it there, with an id derived from the marker row, so a reset, a rebuild and an
 // older page replay it alike. Only the row the engine (or the bridge's interrupt) writes ends a turn: a typed prompt or
-// a steer carrying the same words never does. A `turn_duration` after the marker ends nothing twice.
+// a steer carrying the same words never does. A `turn_duration` after the marker ends nothing twice. The bridge's record
+// of an interrupt that stopped backgrounded Bash calls carries its "Task …" lines after the marker; it is read as the
+// marker alone, so it ends the turn and draws no prompt.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
@@ -26,6 +28,13 @@ function answer(text: string, second: number): JsonObject[] {
 const marker = (text: string, second: number, extra: Record<string, unknown> = {}): JsonObject => ({
   ...envelope(second), type: 'user', entrypoint: 'cli', promptId: 'p1', interruptedMessageId: 'msg_011interrupted', message: { role: 'user', content: [{ type: 'text', text }] }, ...extra,
 });
+/** A row the bridge appends (`$.session.append`) as the engine stores it (2.1.300 `cli.pretty.js:1462`): a user-role meta
+ * row of text blocks, its origin the plugin's. The bridge's interrupt record and its steers both have this shape. */
+const appended = (text: string, second: number, extra: Record<string, unknown> = {}): JsonObject => ({
+  ...envelope(second), type: 'user', isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' }, message: { role: 'user', content: [{ type: 'text', text }] }, ...extra,
+});
+const STOPPED = (task: string) => `Task ${task}, the Bash command the interrupt moved to the background, was then stopped: it is not running, and no notification will come for it.`;
+const RUNNING = (task: string) => `Task ${task}, the Bash command the interrupt moved to the background, could not be stopped: it may still be running.`;
 const turnDuration = (second: number): JsonObject => ({ ...envelope(second), type: 'system', subtype: 'turn_duration', durationMs: 5000, isMeta: false });
 
 async function rowsOf(rows: JsonObject[]): Promise<{ rows: Row[]; turns: { state: string; ended: unknown }[] }> {
@@ -53,9 +62,18 @@ describe('an interrupted turn', () => {
 
   it('ends at the bridge’s interrupt row, from the desk or from outside the terminal', async () => {
     for (const text of ['[Request interrupted by user from the desk]', '[Request interrupted by user from outside the terminal]']) {
-      const { rows } = await rowsOf([prompt('Write a long essay'), ...answer('Once upon', 2), marker(text, 5, { interruptedMessageId: undefined, entrypoint: undefined })]);
+      const { rows } = await rowsOf([prompt('Write a long essay'), ...answer('Once upon', 2), appended(text, 5)]);
       expect(dividers(rows), text).toEqual(['stopped']);
     }
+  });
+
+  it('ends at the bridge’s interrupt row that names the Bash calls it stopped, and draws no prompt for it', async () => {
+    const text = ['[Request interrupted by user from the desk]', STOPPED('bk3x9a1'), RUNNING('b_7-q')].join('\n');
+    const { rows, turns } = await rowsOf([prompt('Write a long essay'), ...answer('Once upon', 2), appended(text, 5)]);
+    expect(dividers(rows)).toEqual(['stopped']);
+    expect(turns).toHaveLength(1);
+    expect(rows.filter((row) => row.kind === 'user')).toHaveLength(1); // the essay's prompt alone
+    expect((turns[0].ended as { id: string }).id).toMatch(/#interrupt-end$/);
   });
 
   it('is ended once: a turn_duration after the marker neither ends it again nor ends another turn', async () => {
@@ -78,8 +96,15 @@ describe('an interrupted turn', () => {
   });
 
   it('is never ended by a typed prompt or a steer carrying the marker’s words', async () => {
-    const steer = (text: string, second: number): JsonObject => ({ ...envelope(second), type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
+    const steer = appended; // the bridge's steer row: its interrupt record's shape, the human's words as its text
+    const bridgeLines = ['[Request interrupted by user from the desk]', STOPPED('bk3x9a1')].join('\n');
     for (const row of [
+      prompt(bridgeLines, 5), // a typed prompt carrying the bridge's lines
+      marker(bridgeLines, 5), // the bridge's lines on a row without its origin
+      appended(`${bridgeLines}\nand then carry on`, 5), // the bridge's lines and one that is not its
+      appended(['[Request interrupted by user from the desk]', 'Task bk3x9a1, the Bash command was stopped.'].join('\n'), 5), // a task line not the bridge's
+      appended(bridgeLines, 5, { origin: { kind: 'plugin', name: 'another' } }), // another plugin's row
+      steer('[Request interrupted by user]', 5), // the engine's words, appended by the bridge (a steer)
       prompt('[Request interrupted by user] please continue', 5), // a typed prompt with the prefix
       { ...prompt('[Request interrupted by user]', 5) }, // typed whole: a person's prompt, whatever its words
       steer('[Request interrupted by user] then carry on', 5), // a steer row with the prefix

@@ -169,10 +169,11 @@ test('the jobs view: shells and the monitor with MAWS’s rows, Stop disabled wi
   await expect(outputOf(jobs, WATCH).getByRole('alert')).toContainText(`${MACHINE} would not read it:`);
   await expect(outputOf(jobs, WATCH).getByRole('button', { name: 'Refresh' })).toHaveCount(0);
 
-  // missing with no path (a task no row has named a file for), and an unknown task the next subagents does not carry.
+  // missing with no path for a job that has ended, in a session that has: no file will be named, and none is promised.
   fm.answerOutput = (taskId) => (taskId === SUITE ? { taskId, result: 'missing', path: null } : null);
   await outputOf(jobs, SUITE).getByRole('button', { name: 'Refresh' }).click();
-  await expect(outputOf(jobs, SUITE)).toContainText('No output file yet. Output asks again when the session names one.');
+  await expect(outputOf(jobs, SUITE)).toContainText('No output file was named for this job.');
+  await expect(outputOf(jobs, SUITE)).not.toContainText('asks again');
   fm.answerOutput = null;
 
   await expect(jobs.locator('[data-section="mcp"]')).toContainText('MCP servers · 2');

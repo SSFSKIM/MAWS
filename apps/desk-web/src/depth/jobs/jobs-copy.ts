@@ -24,6 +24,14 @@ export function jobsTabLabel(jobs: readonly Job[] | null): string {
   return `Jobs · ${running > 0 ? `${running} running` : jobs.length}`;
 }
 
+/**
+ * What a `missing` answer with no path says: while the job runs in a live session a file may still be named, and Output
+ * asks again when one is; once the job or the session has ended, none will be.
+ */
+export function noFileNote(final: boolean): { main: string; why?: string } {
+  return final ? { main: JOBS_COPY.noFileFinal } : { main: JOBS_COPY.noFile, why: JOBS_COPY.noFileWhy };
+}
+
 export const JOBS_COPY = {
   mcp: (n: number) => `MCP servers · ${n}`,
   mcpNote: "Names from the session's rows. Whether each is connected is not known to the web.",
@@ -37,6 +45,7 @@ export const JOBS_COPY = {
   goneWhy: "The engine keeps it under the machine's temporary directory.",
   noFile: 'No output file yet.',
   noFileWhy: 'Output asks again when the session names one.',
+  noFileFinal: 'No output file was named for this job.',
   refused: (machine: string, reason: string) => `${machine} would not read it: ${reason}`,
   checking: (machine: string) => `Checking with ${machine}…`,
   unknown: (machine: string) => `${machine} does not know this task.`,

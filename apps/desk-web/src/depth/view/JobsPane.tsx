@@ -17,14 +17,15 @@ import { MonitorRow, ShellRow } from '../../../../../src/renderer/src/tools/agen
 import type { TaskNode } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import { useTicker } from '../../../../../src/renderer/src/tools/agents/subagents/shared';
 import { jobLists } from '../jobs/job-nodes';
-import { JOBS_COPY, shortPath, STOP_UNAVAILABLE } from '../jobs/jobs-copy';
+import { JOBS_COPY, noFileNote, shortPath, STOP_UNAVAILABLE } from '../jobs/jobs-copy';
 import type { OutputView } from '../jobs/output-requests';
 import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
 
 type Section = 'shells' | 'monitors' | 'mcp';
 const noop = () => {};
 
-export function JobsPane({ controller, state, machine }: { controller: DeskTranscript; state: DepthTranscriptState; machine: string }) {
+/** `ended`: the session's process is gone (its presence says no process), so no job of it will name a file now. */
+export function JobsPane({ controller, state, machine, ended }: { controller: DeskTranscript; state: DepthTranscriptState; machine: string; ended: boolean }) {
   const outputs = useStore(controller.outputs.state, (s) => s.open);
   const [collapsed, setCollapsed] = useState<ReadonlySet<Section>>(new Set());
   const { jobs, mcp } = state;
@@ -57,7 +58,7 @@ export function JobsPane({ controller, state, machine }: { controller: DeskTrans
             return (
               <JobRow key={node.taskId} open={view !== undefined}>
                 <ShellRow node={node} now={now} selected={false} stopError={null} onStop={noop} onOutput={() => (view ? controller.outputs.close(node.taskId) : controller.outputs.open(node.taskId))} />
-                {view && <OutputPanel taskId={node.taskId} path={node.outputFile} view={view} machine={machine} controller={controller} />}
+                {view && <OutputPanel taskId={node.taskId} path={node.outputFile} view={view} machine={machine} final={ended || node.status !== 'running'} controller={controller} />}
               </JobRow>
             );
           }),
@@ -115,7 +116,7 @@ function McpList({ servers }: { servers: McpServer[] }) {
 const ACTION = 'rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
 
 /** A shell's output under its row: its path, Refresh and Close, then the machine's answer by its variant. */
-function OutputPanel({ taskId, path, view, machine, controller }: { taskId: string; path: string | null; view: OutputView; machine: string; controller: DeskTranscript }) {
+function OutputPanel({ taskId, path, view, machine, final, controller }: { taskId: string; path: string | null; view: OutputView; machine: string; final: boolean; controller: DeskTranscript }) {
   const shown = view.phase === 'ok' ? view.answer : view.phase === 'asking' ? view.last : null;
   const named = shown?.path ?? (view.phase === 'refused' ? view.path : view.phase === 'missing' ? view.path : null) ?? path;
   const pre = useRef<HTMLPreElement>(null);
@@ -149,13 +150,14 @@ function OutputPanel({ taskId, path, view, machine, controller }: { taskId: stri
           )}
         </>
       ) : (
-        <OutputNote view={view} machine={machine} />
+        <OutputNote view={view} machine={machine} final={final} />
       )}
     </div>
   );
 }
 
-function OutputNote({ view, machine }: { view: OutputView; machine: string }) {
+/** `final`: the job has ended or its session has, so a file not named yet never will be. */
+function OutputNote({ view, machine, final }: { view: OutputView; machine: string; final: boolean }) {
   const note = (main: string, why?: string, tone = 'text-fg') => (
     <p className={`m-0 px-2 py-1.5 text-ui-sm ${tone}`}>
       {main}
@@ -165,8 +167,11 @@ function OutputNote({ view, machine }: { view: OutputView; machine: string }) {
   switch (view.phase) {
     case 'asking':
       return note(JOBS_COPY.asking(machine), undefined, 'text-fg-muted');
-    case 'missing':
-      return view.path === null ? note(JOBS_COPY.noFile, JOBS_COPY.noFileWhy) : note(JOBS_COPY.gone(machine), JOBS_COPY.goneWhy);
+    case 'missing': {
+      if (view.path !== null) return note(JOBS_COPY.gone(machine), JOBS_COPY.goneWhy);
+      const { main, why } = noFileNote(final);
+      return note(main, why);
+    }
     case 'refused':
       return (
         <p role="alert" className="m-0 bg-warning/10 px-2 py-1.5 text-ui-sm text-warning">

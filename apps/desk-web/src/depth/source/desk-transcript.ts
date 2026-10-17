@@ -59,7 +59,7 @@ import { noteModel } from '../../state/models';
 import { taskGraphOf, withEvents, withMetas, withStatuses } from '../agents/task-feed';
 import { OutputRequests } from '../jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
-import { withInterruptEnd } from './interrupt';
+import { normalizeInterruptRow, withInterruptEnd } from './interrupt';
 import { rowsInRange, type BoundState, type Range } from './range';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
@@ -137,12 +137,13 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
  * message from the session's own subagent opens (its hand-back, an `<agent-message>` of the peer origin, which MAWS's
  * backfill reads as a `subagent.message`) is the session woken by its subagent, not a peer session's: it takes the
  * engine's origin, whose divider MAWS reads as "Continued for …", as it reads a task notification's turn. An interrupt
- * marker ends the turn it interrupted (`interrupt.ts`).
+ * marker ends the turn it interrupted, the bridge's record of one read as its marker line alone (`interrupt.ts`).
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
-  const record = TranscriptRecordSchema.safeParse(row);
+  const mapped = normalizeInterruptRow(row);
+  const record = TranscriptRecordSchema.safeParse(mapped);
   if (!record.success) return [];
-  const events = withInterruptEnd(row, recordToEvents(record.data, ctx), ctx);
+  const events = withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx);
   if (!events.some((event) => event.kind === 'subagent.message')) return events;
   return events.map((event) => (event.kind === 'turn.started' && event.origin === 'peer' ? { ...event, origin: 'task-notification' } : event));
 }

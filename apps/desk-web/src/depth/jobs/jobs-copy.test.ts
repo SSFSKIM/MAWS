@@ -1,7 +1,7 @@
 // DC9's M5: the jobs view's words — the tab's label, a tail's "before" note, an output path by its last parts.
 import type { Job } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
-import { formatBytes, JOBS_COPY, jobsTabLabel, shortPath } from './jobs-copy';
+import { formatBytes, JOBS_COPY, jobsTabLabel, noFileNote, shortPath } from './jobs-copy';
 
 const job = (status: Job['status']): Job => ({ taskId: `t-${status}`, kind: 'shell', toolUseId: 'toolu_x', startedAt: '2026-10-17T10:00:00.000Z', description: 'x', outputFile: null, status });
 
@@ -19,6 +19,11 @@ describe('the jobs view’s words', () => {
     expect(formatBytes(4096)).toBe('4.0 KB');
     expect(formatBytes(1_150_000)).toBe('1.1 MB');
     expect(JOBS_COPY.before(1_150_000)).toBe('1.1 MB before this, not shown');
+  });
+
+  it('says no file is named yet, and that Output asks again, only while the job runs in a live session', () => {
+    expect(noFileNote(false)).toEqual({ main: 'No output file yet.', why: 'Output asks again when the session names one.' });
+    expect(noFileNote(true)).toEqual({ main: 'No output file was named for this job.' });
   });
 
   it('names an output file by its last two parts', () => {
