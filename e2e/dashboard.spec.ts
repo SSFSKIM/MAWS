@@ -504,8 +504,9 @@ test('the agent creates a dashboard from markdown and binds a CSV, a TSV and a J
     expect((await agent.ok<BoardRead>('A', 'artifact_read', { artifact: id })).markdown).toContain('Revenue by region in Q4.');
   });
 
+  let main: Locator | null = null;
   await test.step('the owner opens it in a main tab: both views draw the bound data under the session-credited source label', async () => {
-    const main = await openInMain(page, id);
+    main = await openInMain(page, id);
     await expect(figures(main)).toHaveCount(2, { timeout: 15_000 });
     const bar = figures(main).nth(0);
     await expect(bar.locator('.dash-figure > svg')).toBeVisible({ timeout: 15_000 });
@@ -513,6 +514,23 @@ test('the agent creates a dashboard from markdown and binds a CSV, a TSV and a J
     await expect(figures(main).nth(1).locator('.dash-figure > table tbody')).toContainText('제주');
     await expect(bar.locator('button.dash-source-label')).toHaveText(/^Sales · from sales\.csv · updated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC by Harness A$/);
     await main.screenshot({ path: `${PROOF}/agent-board.png` });
+  });
+
+  await test.step('the agent’s suggested chart draws the data in the suggested document, the live one untouched; accepted, the live one draws it (the suggestion as the displayed document)', async () => {
+    const tab = main!;
+    const base = (await agent.ok<BoardRead>('A', 'artifact_read', { artifact: id })).revision;
+    const fence = chartFence('sales', { view: 'bar', x: 'region', y: 'total', sort: { by: 'total', dir: 'asc' }, title: 'Lowest first' }, 'c3').join('\n');
+    await agent.ok('A', 'artifact_edit', { artifact: id, baseRevision: base, mode: 'suggest', ops: [{ op: 'insert', after: 'c2', markdown: fence }] });
+    const proposed = tab.getByLabel('Suggested document').locator('figure.dash-view', { hasText: 'Lowest first' });
+    await expect(proposed.locator('.dash-figure > svg')).toBeVisible({ timeout: 15_000 });
+    await expect.poll(() => tipsOf(proposed), { timeout: 15_000 }).toEqual(['제주 · total: 40', '부산 · total: 98', '서울 · total: 120']);
+    await expect(proposed.locator('button.dash-source-label')).toHaveText(/^Sales · from sales\.csv · /);
+    await expect(tab.locator('[data-editor="live"] figure.dash-view')).toHaveCount(2);
+    await tab.screenshot({ path: `${PROOF}/agent-suggested.png` });
+    await tab.getByRole('button', { name: 'Accept suggestion 1', exact: true }).click();
+    const accepted = tab.locator('[data-editor="live"] figure.dash-view', { hasText: 'Lowest first' });
+    await expect(accepted.locator('.dash-figure > svg')).toBeVisible({ timeout: 15_000 });
+    await expect.poll(() => tipsOf(accepted), { timeout: 15_000 }).toEqual(['제주 · total: 40', '부산 · total: 98', '서울 · total: 120']);
   });
   await agent.release('A');
   await agent.release('B');
