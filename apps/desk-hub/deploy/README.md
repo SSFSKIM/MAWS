@@ -6,7 +6,7 @@ The hub runs on the owner's Cloudflare account as the Worker `desk-hub`, at
 host, the owner, and the org. Everything here goes through one command, run
 from the MAWS worktree root:
 
-    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure> [options]
+    pnpm --filter desk-hub deployment <deploy|probe|fake-check|redeploy-check|measure|frame-cost|counts> [options]
 
 ## Credentials
 
@@ -73,6 +73,31 @@ means enrolling every machine again.
 1. Open the hub in a browser and sign in ("Sign in with Cloudflare"; the team allows account members, and the policy the owner's email).
 2. Set up the org key first (the web app's first unlock method, DX7). An org whose key someone else set up first cannot be unlocked by the owner.
 3. Enroll machines from the web app's "Enroll a machine" (`sminos hub enroll` on each, the code pasted at its hidden prompt).
+
+## `counts` (read-only; the owner's org)
+
+The composite's Parent-Level Acceptance 10 compares, writer by writer, each
+machine's log files with the hub's log. `counts` reads the hub's half through a
+project socket as the person whose `DESK_ACCESS_TOKEN` it is given: it resumes
+the log from offset 0 to `caught-up` and sends nothing else (no visibility, no
+`human`, no RPC, no subscription), so it runs against `config.json`'s org.
+`machine-counts.py` reads a machine's half from its log files
+(`$SMINOS_HOME/projects/<id>/log/`), standard library only, so a machine with no
+MAWS checkout runs it over ssh:
+
+    python3 apps/desk-hub/deploy/machine-counts.py --dir <checkout> > /tmp/sk.json
+    ssh mini python3 - --dir <checkout on the mini> < apps/desk-hub/deploy/machine-counts.py > /tmp/mini.json
+    printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=https://desk-hub.opencognita-platform.workers.dev)" \
+      | pnpm --filter desk-hub deployment counts --project <id> --machine /tmp/sk.json --machine /tmp/mini.json [--audit]
+
+Per writer it prints the count and last seq on each side and a verdict:
+`agrees`; `explained`, for a position that machine refused (the audit's
+`rejected`, or its own `spent` list in the project's `uplink.json`) or a writer
+under a name other than the machine's enrolled one, which stays local; or
+`differs`. It exits 1 when any writer differs. The audit
+is the hub's replay after `caught-up`, its latest 100 rows. `--audit` also prints
+those rows (`decided` carries who settled each request); `--json` prints the
+hub's half alone.
 
 ## The checks (DC3.G2, G4, G6)
 
