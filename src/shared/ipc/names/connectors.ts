@@ -4,9 +4,10 @@
 export const commands = [
   'connectors.open', 'connectors.declare', 'connectors.call', 'connectors.watch', 'connectors.unwatch', 'connectors.refresh',
   'connectors.visibility', 'connectors.close',
+  'connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', // P3-HD M3c2: the owner's, from the sheet
 ] as const;
 
-export const events = ['connectors.watchUpdate', 'connectors.operation', 'connectors.grantChanged', 'connectors.directOperation' /* P3-HD */] as const;
+export const events = ['connectors.watchUpdate', 'connectors.operation', 'connectors.grantChanged', 'connectors.directOperation' /* P3-HD */, 'connectors.serversChanged' /* P3-HD M3c2: main's, targeted */] as const;
 
 // The grant store and route E's engine leg: main's alone, never bridged to a window (a window grants and revokes through
 // main's `artifacts.*` grant commands, which take the route's fingerprint and stop work in flight first).

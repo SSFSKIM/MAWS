@@ -97,4 +97,10 @@ describe('the application root’s connector composition', () => {
     expect(typeof state.connectorDeps!.windowOf).toBe('function');
     expect(state.connectorDeps!.index).toBeDefined();
   });
+
+  // P3-HD M3c2: the production OAuth provider's factory beside route D, the real one; no test toggle selects it
+  it('supplies MAWS’s own OAuth provider’s production factory beside route D', async () => {
+    const { productionConnectorOAuth } = await import('./oauth-root');
+    expect(state.connectorDeps!.oauth).toBe(productionConnectorOAuth);
+  });
 });

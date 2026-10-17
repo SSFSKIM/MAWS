@@ -43,6 +43,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
 import type { LibraryContent, LibraryRow } from '@shared/ipc/schema/library';
 import { artifactHost } from '../../../artifacts';
+import { connectorsOwner } from '../../../artifacts/connector-owner'; // P3-HD M3c2
 import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { ArtifactEditor, ArtifactEditorProps, ArtifactEditorTarget } from '../../../artifacts/registry';
 import { startArtifactSession } from '../../../artifacts/session-context';
@@ -448,9 +449,10 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
 
 // ---- registration ------------------------------------------------------------------------------------------------------
 
-// P3-H H4: an HTML page's tab keeps its connectors, ended with the tab
+// P3-H H4: an HTML page's tab keeps its connectors, ended with the tab. P3-HD M3c2: with the owner's server rows (main's
+// trusted commands, apart from the page's ArtifactHost)
 const connectorsFor = (artifactId: string): ConnectorsTab =>
-  new ConnectorsTab(artifactId, { host: artifactHost(), startSession: (context, previous) => startArtifactSession(context, previous), log: (line) => console.warn(`[connectors] ${line}`) });
+  new ConnectorsTab(artifactId, { host: artifactHost(), startSession: (context, previous) => startArtifactSession(context, previous), log: (line) => console.warn(`[connectors] ${line}`), owner: connectorsOwner() });
 
 const createState = (kind: ByteKind, target: ArtifactEditorTarget): ByteViewerState => ({
   view: createStore<ViewState>()(() => ({ selected: 'latest', reloads: 0, pickingIn: null })),
