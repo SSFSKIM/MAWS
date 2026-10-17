@@ -319,13 +319,22 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
             await table.evaluate((scroller) => {
               scroller.scrollTop = 0;
               const rows = scroller.querySelector('.dash-sheet-rows')!;
-              const record = { scrolls: [] as number[], commits: [] as number[], frames: [] as number[], longTasks: [] as number[], done: false };
+              const record = { frames: [] as number[], longTasks: [] as number[], done: false, stop: () => {} };
               (window as unknown as Win).__dashScroll = record;
               performance.clearMarks('dash:scroll');
               performance.clearMarks('dash:commit');
-              scroller.addEventListener('scroll', (event) => void performance.mark('dash:scroll', { startTime: event.timeStamp }), { passive: true });
-              new MutationObserver(() => void performance.mark('dash:commit')).observe(rows, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'aria-rowindex'] });
-              new PerformanceObserver((list) => list.getEntries().forEach((entry) => record.longTasks.push(entry.duration))).observe({ type: 'longtask' });
+              // one listener and two observers per trial, each removed when the trial ends
+              const onScroll = (event: Event) => void performance.mark('dash:scroll', { startTime: event.timeStamp });
+              scroller.addEventListener('scroll', onScroll, { passive: true });
+              const commits = new MutationObserver(() => void performance.mark('dash:commit'));
+              commits.observe(rows, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'aria-rowindex'] });
+              const longTasks = new PerformanceObserver((list) => list.getEntries().forEach((entry) => record.longTasks.push(entry.duration)));
+              longTasks.observe({ type: 'longtask' });
+              record.stop = () => {
+                scroller.removeEventListener('scroll', onScroll);
+                commits.disconnect();
+                longTasks.disconnect();
+              };
               const frame = (at: number) => {
                 record.frames.push(at);
                 if (!record.done) requestAnimationFrame(frame);
@@ -345,8 +354,9 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
               }, i / 20);
             await page.waitForTimeout(300);
             const seen = await table.evaluate(() => {
-              const record = (window as unknown as { __dashScroll: { frames: number[]; longTasks: number[]; done: boolean } }).__dashScroll;
+              const record = (window as unknown as { __dashScroll: { frames: number[]; longTasks: number[]; done: boolean; stop(): void } }).__dashScroll;
               record.done = true;
+              record.stop();
               const scrolls = performance.getEntriesByName('dash:scroll').map((m) => m.startTime);
               const commits = performance.getEntriesByName('dash:commit').map((m) => m.startTime);
               performance.clearMarks('dash:scroll');
