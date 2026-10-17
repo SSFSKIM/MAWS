@@ -133,6 +133,28 @@ describe('transform', () => {
     expect(rows({ filter: [{ column: 'sales', op: 'gt', value: '5' }] })).toHaveLength(0);
   });
 
+  it('orders booleans in a filter as it sorts them: the operand normalized like the cells, false before true (E2 panel)', () => {
+    const flags: ViewTable = { columns: [{ name: 'name', type: 'string' }, { name: 'active', type: 'boolean' }], rows: [['a', false], ['b', true], ['c', null]] };
+    expect(rows({ filter: [{ column: 'active', op: 'gt', value: false }] }, flags)).toEqual([['b', true]]);
+    expect(rows({ filter: [{ column: 'active', op: 'lt', value: true }] }, flags)).toEqual([['a', false]]);
+    expect(rows({ filter: [{ column: 'active', op: 'gt', value: true }] }, flags)).toEqual([]);
+    // a text operand stays text: never coerced into a boolean's order
+    expect(rows({ filter: [{ column: 'active', op: 'gt', value: 'false' }] }, flags)).toEqual([]);
+  });
+
+  it('keeps an invalid calendar value out of an ordered date filter, never as the instant Date.UTC would roll it to (E2 panel)', () => {
+    const days: ViewTable = { columns: [{ name: 'day', type: 'date' }], rows: [['2026-02-27'], ['2026-02-28'], ['2026-02-30']] };
+    expect(rows({ filter: [{ column: 'day', op: 'gt', value: '2026-03-01' }] }, days)).toEqual([]);
+    expect(rows({ filter: [{ column: 'day', op: 'lt', value: '2026-03-01' }] }, days)).toEqual([['2026-02-27'], ['2026-02-28']]);
+  });
+
+  it('makes the implicit measure for count alone: another aggregate without y is the missing-y state (E2 panel)', () => {
+    expect(run({ view: 'bar', x: 'region', agg: 'mean' })).toEqual({ ok: false, error: 'a bar view needs a y column' });
+    expect(run({ view: 'pie', x: 'region', agg: 'sum' })).toEqual({ ok: false, error: 'a pie view needs a y column (the sizes)' });
+    expect(run({ view: 'table', x: 'region', agg: 'max' })).toEqual({ ok: false, error: 'a table view needs a y column' });
+    expect(rows({ x: 'region', agg: 'count' })).toEqual([['north', 3], ['south', 2], ['east', 1]]);
+  });
+
   it('takes series identity from the whole snapshot, before the filter, by typed keys', () => {
     expect(data({ series: 'rep', filter: [{ column: 'rep', op: 'eq', value: 'Cy' }] }).seriesKeys).toEqual(['Ana', 'Ben', 'Cy', 'Dee'].map(typedKey));
     const mixed: ViewTable = { columns: [{ name: 'x', type: 'number' }, { name: 'y', type: 'number' }, { name: 's', type: 'string' }], rows: [[1, 2, 1], [2, 3, '1'], [3, 4, null], [4, 5, '(none)']] };
@@ -154,5 +176,31 @@ describe('instantOf', () => {
     expect(instantOf('2026-10-16T00:00:00')).toBeNull(); // the host refuses a date-time without a zone
     expect(instantOf('16/10/2026')).toBeNull();
     expect(instantOf(20261016)).toBeNull();
+  });
+
+  it('validates the calendar as the host does: an impossible day or time is no instant (E2 panel)', () => {
+    expect(instantOf('2026-02-30')).toBeNull();
+    expect(instantOf('2026-02-29')).toBeNull();
+    expect(instantOf('2024-02-29')).toBe(Date.UTC(2024, 1, 29));
+    expect(instantOf('2026-13-01')).toBeNull();
+    expect(instantOf('2026-04-31T10:00Z')).toBeNull();
+    expect(instantOf('2026-10-16T24:00Z')).toBeNull();
+    expect(instantOf('2026-10-16T10:60Z')).toBeNull();
+    expect(instantOf('2026-10-16T10:00:60Z')).toBeNull();
+    expect(instantOf('2026-10-16T10:00+24:00')).toBeNull();
+  });
+
+  it('keeps a year from 0000 to 0099 its own, never Date.UTC’s 1900s (E2 panel)', () => {
+    const at = (year: number, month: number, day: number, ms = 0) => {
+      const d = new Date(0);
+      d.setUTCFullYear(year, month, day);
+      return d.getTime() + ms;
+    };
+    expect(instantOf('0099-01-01')).toBe(at(99, 0, 1));
+    expect(new Date(instantOf('0099-01-01')!).getUTCFullYear()).toBe(99);
+    expect(instantOf('0000-02-29')).toBe(at(0, 1, 29)); // year 0 is a leap year in the proleptic calendar
+    expect(new Date(instantOf('0000-02-29')!).toISOString()).toBe('0000-02-29T00:00:00.000Z');
+    expect(instantOf('0050-06-15T12:30:15.250+02:00')).toBe(at(50, 5, 15, (10 * 3600 + 30 * 60 + 15) * 1000 + 250));
+    expect(instantOf('0100-01-01')).toBe(at(100, 0, 1));
   });
 });

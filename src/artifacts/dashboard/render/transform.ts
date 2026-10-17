@@ -13,6 +13,7 @@
 // held as null and marked (`overflow`), with a note naming the measure (parent Decision Log 27), which every consumer
 // shows. Nothing here reads the locale, the clock or a DOM; nothing spreads a data-sized array into a call.
 import type { Cell } from '../datasets';
+import { isIsoDate } from '../parse';
 import { DATASET_STATES, VIEW_STATES } from '../states';
 import { SPEC_LIMITS, yColumns, type ValueFormat, type ViewFilter, type ViewSpec } from '../spec';
 
@@ -60,16 +61,23 @@ export const typedKey = (value: Cell): string => JSON.stringify(value);
 // The host's date grammar (parse.ts): an ISO calendar date, or a zoned ISO date-time with up to nine fraction digits.
 const DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|([+-])(\d{2}):(\d{2})))?$/;
 
-/** A date cell's instant in UTC milliseconds (a calendar date at its UTC midnight), or null; never local time. */
+/**
+ * A date cell's instant in UTC milliseconds (a calendar date at its UTC midnight), or null; never local time. Only a
+ * value the host's own grammar admits (`isIsoDate`: a real calendar day and clock time) has one, so a retained mismatch
+ * such as 2026-02-30 is never rolled into March; the year is set whole (`setUTCFullYear`), so 0000 to 0099 keep their
+ * own years rather than `Date.UTC`'s 1900s (E2 panel).
+ */
 export function instantOf(value: Cell): number | null {
-  if (typeof value !== 'string') return null;
+  if (typeof value !== 'string' || !isIsoDate(value)) return null;
   const m = DATE.exec(value);
   if (!m) return null;
   const [, y, mo, d, h = '0', mi = '0', s = '0', fraction = '', zone, sign, zh = '0', zm = '0'] = m;
   const offset = zone === undefined || zone === 'Z' ? 0 : (sign === '-' ? -1 : 1) * (Number(zh) * 60 + Number(zm));
-  const ms = Number(fraction.padEnd(3, '0').slice(0, 3));
-  const at = Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s), ms) - offset * 60_000;
-  return Number.isFinite(at) ? at : null;
+  const at = new Date(0);
+  at.setUTCFullYear(Number(y), Number(mo) - 1, Number(d));
+  at.setUTCHours(Number(h), Number(mi), Number(s), Number(fraction.padEnd(3, '0').slice(0, 3)));
+  const ms = at.getTime() - offset * 60_000;
+  return Number.isFinite(ms) ? ms : null;
 }
 
 export function transform(table: ViewTable, spec: ViewSpec, datasetId: string): Transformed {
@@ -81,6 +89,9 @@ export function transform(table: ViewTable, spec: ViewSpec, datasetId: string): 
   const named = [spec.x, ...ys, spec.series, ...(spec.filter ?? []).map((f) => f.column)].filter((name): name is string => name !== undefined);
   const absent = named.find((name) => !index.has(name));
   if (absent !== undefined) return { ok: false, error: DATASET_STATES.noColumn(datasetId, absent) };
+  // only `count` measures without a y (the rows it counts); any other aggregate of nothing is the missing y, never a
+  // count passed off as its answer (E2 panel)
+  if (spec.agg !== undefined && spec.agg !== 'count' && ys.length === 0) return { ok: false, error: VIEW_STATES.needs(spec.view, spec.view === 'pie' ? 'a y column (the sizes)' : 'a y column') };
 
   const seriesKeys: string[] = [];
   if (spec.series !== undefined) {
@@ -100,7 +111,7 @@ export function transform(table: ViewTable, spec: ViewSpec, datasetId: string): 
   const overflowing = new Map<readonly Cell[], number[]>(); // an aggregated row's overflowed columns, until the rows settle
   if (spec.agg !== undefined) {
     const keys = [...new Set([spec.x, spec.series].filter((name): name is string => name !== undefined))];
-    const sources = ys.length > 0 ? ys : [null]; // null: the implicit count of rows
+    const sources = ys.length > 0 ? ys : [null]; // null: the implicit count of rows (agg `count` alone, above)
     const taken = new Set(keys);
     const measures = sources.map((y) => {
       let name = y ?? 'count';
@@ -219,6 +230,7 @@ function aggregate(agg: NonNullable<ViewSpec['agg']>, values: Cell[]): number | 
 }
 const SUM_SCALE = 2 ** 970;
 
+/** A value as sorting and an ordered filter compare it: a date column's instant (else its text), a boolean as 0 or 1. */
 const comparable = (value: Cell, column: ViewColumn): number | string | null => {
   if (value === null) return null;
   if (column.type === 'date') return instantOf(value) ?? (typeof value === 'string' ? value : null);
@@ -240,8 +252,9 @@ function matches(value: Cell, filter: ViewFilter, column: ViewColumn): boolean {
   if (filter.op === 'in') return (wanted as Cell[]).some((item) => item === value);
   if (filter.op === 'eq') return value === wanted;
   if (filter.op === 'ne') return value !== wanted;
+  // the operand through the cells' own normalization (a boolean as 0 or 1, E2 panel); a date column's only as an instant
   const left = comparable(value, column);
-  const right = column.type === 'date' ? instantOf(wanted as Cell) : (wanted as Cell);
+  const right = column.type === 'date' ? instantOf(wanted as Cell) : comparable(wanted as Cell, column);
   if (left === null || right === null || typeof left !== typeof right) return false;
   return filter.op === 'lt' ? left < right : left > right;
 }
