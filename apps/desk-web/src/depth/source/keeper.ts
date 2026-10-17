@@ -18,12 +18,6 @@ import type { DeskTranscript, DepthTranscriptState, TranscriptStoreApi } from '.
 /** A transcript is live while its session has a live process and its machine's lease holds (DX8). */
 export const reachable = (session: DeskSession) => session.presence?.record != null && session.machineOnline !== false;
 
-/**
- * The session is at rest, as its machine reports it: its process idle (the engine's `status` in its session record),
- * or gone. Not while presence is unknown (none yet, or the machine offline): nothing is said then.
- */
-export const atRest = (session: DeskSession) => session.machineOnline !== false && session.presence != null && (session.presence.record === null || session.presence.record.status === 'idle');
-
 /** The first retry after an end while the session stays reachable, doubling up to the cap. */
 const RETRY_FIRST_MS = 1000;
 const RETRY_MAX_MS = 60_000;

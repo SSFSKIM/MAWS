@@ -6,6 +6,12 @@
 // at the top until the first, and an ended session stays pageable while the view is open, its liveness read from its
 // presence. An `Agent` row opens its agent in the column. Loaded as a chunk of its own, so the phone, which never draws
 // it, loads none of MAWS's transcript.
+//
+// Two decorations of MAWS's view are the desk's own (`styles/app.css`, under `data-session-view`): a gutter that keeps
+// every row, breakouts included, clear of MAWS's floating "Jump to latest"; and, while the session is at rest, that
+// control's arrow in place of its working dots. MAWS reads a turn as working until a row ends it, and DX4's rows carry
+// no SDK result, so an idle session's last turn stays open in the store; the transcript is left as the rows say it, and
+// only the control's drawing follows the session's presence.
 import { useMemo, useRef } from 'react';
 import type { SubagentRef } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
@@ -20,6 +26,9 @@ import type { DeskSession } from '../../shell/sessions';
 import { ReportToggle } from './ReportToggle';
 
 type Props = { project: string; session: DeskSession; plane: SessionPlane };
+
+/** The session is at rest as its machine reports it: idle, or no process. Not while its presence is unknown. */
+const atRest = (session: DeskSession) => session.machineOnline !== false && session.presence != null && (session.presence.record === null || session.presence.record.status === 'idle');
 
 export default function SessionView({ project, session, plane }: Props) {
   const owner = useSessionOwner(project, session, plane);
@@ -37,7 +46,7 @@ export default function SessionView({ project, session, plane }: Props) {
     [owner],
   );
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="session-view" data-session-view="" data-session={session.session} aria-label={`${sessionName(session)}'s session`}>
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="session-view" data-session-view="" data-at-rest={atRest(session) ? '' : undefined} data-session={session.session} aria-label={`${sessionName(session)}'s session`}>
       <ReportToggle storeKey={owner.main.key} />
       <TranscriptPane controller={owner.main} state={state} variant="session" ownerLane actions={actions} list={list} />
     </section>

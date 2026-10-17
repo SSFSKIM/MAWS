@@ -406,31 +406,4 @@ describe('the main transcript through the session plane', () => {
     controller.close();
     expect(plane.current.closed).toBe(true);
   });
-
-  it("a session at rest closes the turn its rows left open, as MAWS's app ends a transcript nobody is writing — drawing nothing, through a rebuild and a reset", async () => {
-    const script = scriptOf(recording.session, null);
-    const entry = () => store.getState().entries[controller.key];
-    plane.snapshot(script, script.length);
-    await settle();
-    expect(entry().working).toBe(true); // the recording's last turn has no end on disk
-    const drawn = entry().rows.map((row) => row.id);
-
-    controller.setResting(true); // presence: idle, or no process
-    await settle();
-    expect(entry().working).toBe(false);
-    expect(entry().rows.map((row) => row.id)).toEqual(drawn); // no row of its own
-
-    plane.current.listener.reset(); // a reset while at rest: the fresh snapshot ends the same way
-    await settle();
-    plane.snapshot(script, script.length);
-    await settle();
-    expect(entry().working).toBe(false);
-
-    controller.setResting(false); // busy again: a fresh snapshot no longer ends it
-    plane.current.listener.reset();
-    await settle();
-    plane.snapshot(script, script.length);
-    await settle();
-    expect(entry().working).toBe(true);
-  });
 });

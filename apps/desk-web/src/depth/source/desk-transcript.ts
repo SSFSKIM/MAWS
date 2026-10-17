@@ -43,7 +43,7 @@ import type { AgentId, EventId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, TranscriptRecordSchema } from '@shared/wire/transcript';
 import type { JsonObject, SessionBodies, SubagentMeta, Usage } from 'desk-hub/protocol';
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import { createBackfillContext, eventBase, recordToEvents, type BackfillContext, type SubagentLookup } from '../../../../../src/engine-host/fs/backfill';
+import { createBackfillContext, recordToEvents, type BackfillContext, type SubagentLookup } from '../../../../../src/engine-host/fs/backfill';
 import type { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import { emptyGraph, type TaskGraph } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import type { TranscriptSource } from '../../../../../src/renderer/src/transcript/source/types';
@@ -155,17 +155,6 @@ const deferred = (): Deferred => {
   return { promise, resolve };
 };
 
-/**
- * The end of a turn the rows left open, once the session is at rest (presence idle, or no process): what MAWS's own
- * disk follower writes for a transcript nobody is writing whose last turn never ended (`chain-follower.ts`
- * `unendedTurnExit`), `process.exited` of reason `unknown` with no `seq`, which closes the open turn and draws nothing
- * (`derive.ts`). DX4's rows carry no SDK result, so without it the last turn reads as working for good. Placed after
- * the row that was last when the session came to rest, so a rebuild orders it as it was applied.
- */
-function restOf(ctx: BackfillContext, after: string | null): SessionEvent {
-  return { ...eventBase(ctx, `desk-rest:${after ?? ''}`), kind: 'process.exited', code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null } as SessionEvent;
-}
-
 /** One generation of the transcript as MAWS's store attaches it: the held rows mapped under one context, then live. */
 class RowsSource implements TranscriptSource {
   readonly key: string;
@@ -189,24 +178,9 @@ class RowsSource implements TranscriptSource {
   async snapshot(): Promise<SessionEvent[]> {
     await this.owner.whenSnapshotted();
     const ctx = this.owner.newContext();
-    const rest = this.owner.restingAfter();
-    const events: SessionEvent[] = [];
-    let ended = false;
-    for (const row of this.owner.heldRows()) {
-      events.push(...this.owner.mapRow(row, ctx));
-      if (rest !== undefined && !ended && row.uuid === rest) {
-        events.push(restOf(ctx, rest));
-        ended = true;
-      }
-    }
-    if (rest !== undefined && !ended) events.push(restOf(ctx, rest));
+    const events = this.owner.heldRows().flatMap((row) => this.owner.mapRow(row, ctx));
     this.ctx = ctx;
     return events;
-  }
-
-  /** The session came to rest after the snapshot: its open turn ends now; before it, the snapshot will end it. */
-  rest(after: string | null): void {
-    if (this.ctx !== null) this.listener?.([restOf(this.ctx, after)]);
   }
 
   /**
@@ -271,8 +245,6 @@ export class DeskTranscript {
   /** The rows the source draws: the held ones, or with a range those inside it (bounding rows cut). */
   private shown: Row[] = [];
   private readonly shownUuids = new Set<string>();
-  /** At rest, the row after which the open turn ended (`setResting`); undefined while the session is not at rest. */
-  private rest: string | null | undefined = undefined;
 
   constructor(options: DeskTranscriptOptions) {
     this.plane = options.plane;
@@ -341,22 +313,6 @@ export class DeskTranscript {
     if (this.target.agentId !== null) return;
     this.state.setState((s) => ({ diff: { pending: true, answer: s.diff?.answer ?? null } }));
     if (this.served) this.subscription?.diff();
-  }
-
-  /**
-   * The session is at rest — idle, or its process gone — as its presence says (the view tells it): a turn its rows
-   * left open is ended, as MAWS's app ends one nobody is writing (`restOf`), so it no longer reads as working. Busy
-   * again, the next rows open their own turn; a rebuild then no longer ends the old one.
-   */
-  setResting(resting: boolean): void {
-    if (resting === (this.rest !== undefined)) return;
-    this.rest = resting ? (this.rows.at(-1)?.uuid ?? null) : undefined;
-    if (this.rest !== undefined) this.source.rest(this.rest);
-  }
-
-  /** While at rest, the row after which its open turn ended (null: before every held row); undefined while not. */
-  restingAfter(): string | null | undefined {
-    return this.rest;
   }
 
   /** One agent's blocks still streaming on this subscription (the main one carries every agent's). */

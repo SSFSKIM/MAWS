@@ -102,14 +102,12 @@ describe('the per-session owner', () => {
     expect(plane.subs).toHaveLength(1);
     const key = center.result.current.main.key;
     expect(useTranscriptStore.getState().live[key]).toBe(true);
-    expect(center.result.current.main.restingAfter()).toBeUndefined(); // busy: not at rest
 
     // The session ends: its liveness is read from presence, and the subscription stays (an ended session pages).
     center.rerender({ s: session({ presence: { record: null, bridge: false }, group: 'ended' }) });
     column.rerender({ s: session({ presence: { record: null, bridge: false }, group: 'ended' }) });
     expect(useTranscriptStore.getState().live[key]).toBe(false);
     expect(plane.current.closed).toBe(false);
-    expect(center.result.current.main.restingAfter()).not.toBeUndefined(); // at rest: a turn left open ends
 
     center.unmount();
     await act(settle);

@@ -8,11 +8,13 @@
 // one snapshot). The column and the center share one subscription.
 import type { Locator, Page } from '@playwright/test';
 import type { Step } from 'desk-hub/fake-machine';
+import type { JsonObject } from 'desk-hub/protocol';
 import { DepthPlayer } from './depth-player';
 import { FakeMachineReplay } from './fake-machine';
 import { expect, seedKey, test } from './fixtures';
 import { PROJECT, S, stageProject } from './scene';
 import type { HubDouble } from '../test/double/hub-double';
+import { readRecording } from '../test/double/session-stream';
 
 const MACHINE = 'fake';
 const ANSWER = 'You chose blue';
@@ -133,38 +135,84 @@ test('a session view whose chunk fails to load says so, with a Retry and a reloa
   await expect(failed).toHaveCount(0);
 });
 
-for (const width of [1280, 1440]) {
-  test(`at ${width} px the jump to the latest row sits in a gutter beside the rows, and an idle session's is its arrow, not working dots`, async ({ page, hub }) => {
-    await page.setViewportSize({ width, height: 800 });
-    const { fm, view } = await openSession(page, hub);
-    fm.playThrough();
-    fm.depth.presence = { status: 'idle', waitingFor: null, needs: null }; // the replayed session at rest
-    fm.sendPresence();
-    await expect(view).toContainText('three hundred');
-    const scroller = view.locator('[data-transcript-scroller]');
-    const jump = view.getByRole('button', { name: 'Jump to latest' });
-    await expect
-      .poll(async () => {
-        await scroller.evaluate((el) => el.scrollBy({ top: -160 }));
-        return jump.isVisible();
-      })
-      .toBe(true);
-    await expect(jump.locator('svg')).toBeVisible(); // the arrow: the turn the rows left open ended with the session at rest
-    await expect(jump.locator('.transcript-working-dots')).toHaveCount(0);
+// Rows ahead of the recorded ones holding what breaks out of the reading column (MAWS's W2): a wide table and a code
+// block with one long line, each as wide as MAWS lets it be.
+const WIDE_COLUMNS = Array.from({ length: 14 }, (_, i) => `column ${i + 1} heading`);
+const WIDE = [
+  'A table and a code block wider than the text:',
+  '',
+  `| ${WIDE_COLUMNS.join(' | ')} |`,
+  `| ${WIDE_COLUMNS.map(() => '---').join(' | ')} |`,
+  `| ${WIDE_COLUMNS.map((_, i) => `value ${i + 1} of a row`).join(' | ')} |`,
+  '',
+  '```ts',
+  `const line = '${'a long line of code that does not wrap '.repeat(8)}';`,
+  '```',
+].join('\n');
+const wideRows: JsonObject[] = [
+  { type: 'user', uuid: 'wide-prompt', parentUuid: null, isSidechain: false, timestamp: '2026-10-15T11:39:00.000Z', sessionId: S.asks, message: { role: 'user', content: 'Show me something wide.' } },
+  {
+    type: 'assistant',
+    uuid: 'wide-answer',
+    parentUuid: 'wide-prompt',
+    isSidechain: false,
+    timestamp: '2026-10-15T11:39:01.000Z',
+    sessionId: S.asks,
+    apiBlockIndex: 0,
+    message: { id: 'msg_wide', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: WIDE }], stop_reason: 'end_turn' },
+  },
+];
 
-    // Every row beside the control ends before it: the rows' column keeps its gutter.
+/** The right edge of everything the rows draw: each row's reading column (less its padding) and each breakout block. */
+const drawnEnds = (view: Locator) =>
+  view.evaluate((el) => [
+    ...[...el.querySelectorAll<HTMLElement>('.transcript-row')].map((row) => ({ what: row.closest('[data-row-id]')?.getAttribute('data-row-id') ?? 'row', end: row.getBoundingClientRect().right - parseFloat(getComputedStyle(row).paddingRight) })),
+    ...[...el.querySelectorAll<HTMLElement>('[data-streamdown="table-wrapper"], [data-streamdown="code-block"]')].map((block) => ({ what: block.getAttribute('data-streamdown')!, end: block.getBoundingClientRect().right })),
+  ]);
+const presence = (hub: HubDouble, record: JsonObject | null) =>
+  hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session: S.asks, kind: 'presence', sub: null, n: null, body: { record, bridge: record !== null } });
+
+for (const width of [1280, 1440, 1920]) {
+  test(`at ${width} px the jump to the latest row sits in a gutter clear of every row, wide tables and code included; an idle session's draws its arrow, not working dots`, async ({ page, hub }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await stageProject(hub);
+    const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: wideRows }));
+    played.skip(played.script.length); // the recording's last turn has no end on disk: MAWS reads it as working
+    await seedKey(page, hub);
+    await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+    const view = page.getByTestId('session-view');
+    await expect(view).toContainText('Both subagents reported back.');
+    const jump = view.getByRole('button', { name: 'Jump to latest' });
+    await view.locator('[data-transcript-scroller]').evaluate((el) => el.scrollTo({ top: 0 }));
+    await expect(view.locator('[data-streamdown="table-wrapper"]')).toBeVisible();
+    await expect(view.locator('[data-streamdown="code-block"]')).toBeVisible();
+    await expect(jump).toBeVisible();
+
+    // Busy, the control draws MAWS's working dots.
+    presence(hub, { status: 'busy' });
+    await expect(view).not.toHaveAttribute('data-at-rest');
+    await expect(jump.locator('.transcript-working-dots')).toBeVisible();
+
+    // Every drawn row, and each wide block, ends 12 px or more before the control.
     const box = (await jump.boundingBox())!;
-    const beside = await view.locator('.transcript-row').evaluateAll(
-      (els, b) =>
-        els.flatMap((el) => {
-          const rect = el.getBoundingClientRect();
-          if (rect.bottom <= b.y || rect.top >= b.y + b.height) return [];
-          return [{ end: rect.right - parseFloat(getComputedStyle(el).paddingRight), id: el.closest('[data-row-id]')?.getAttribute('data-row-id') }];
-        }),
-      box,
-    );
-    expect(beside.length).toBeGreaterThan(0);
-    for (const row of beside) expect(row.end, `row ${row.id}`).toBeLessThanOrEqual(box.x - 12);
+    const ends = await drawnEnds(view);
+    expect(ends.filter((e) => e.what === 'table-wrapper' || e.what === 'code-block')).toHaveLength(2);
+    for (const { what, end } of ends) expect(end, what).toBeLessThanOrEqual(box.x - 12);
+    // The wide blocks still break out to their width (the gutter bounds them; it does not cancel them).
+    const text = await view.locator('.transcript-row:has([data-streamdown="table-wrapper"])').evaluate((row) => row.getBoundingClientRect().width - parseFloat(getComputedStyle(row).paddingLeft) - parseFloat(getComputedStyle(row).paddingRight));
+    expect((await view.locator('[data-streamdown="table-wrapper"]').boundingBox())!.width).toBeGreaterThanOrEqual(text);
+
+    // At rest (idle), the control draws its arrow and no dots, and the transcript is as it was.
+    const before = await rowIds(view);
+    presence(hub, { status: 'idle' });
+    await expect(view).toHaveAttribute('data-at-rest', '');
+    await expect(jump.locator('.transcript-working-dots')).toBeHidden();
+    expect(await jump.evaluate((el) => getComputedStyle(el, '::after').content)).not.toBe('none');
+    expect(await rowIds(view)).toEqual(before);
+    // With no process at all, the same.
+    presence(hub, null);
+    await expect(view).toHaveAttribute('data-at-rest', '');
+    await expect(jump.locator('.transcript-working-dots')).toBeHidden();
   });
 }
 
@@ -244,3 +292,71 @@ test('a session that ended while its view was open keeps its subscription and pa
   expect(await pageToFirstRow(hub, view)).toBeGreaterThanOrEqual(1);
   await expect(view.getByTestId('depth-unavailable')).toHaveCount(0);
 });
+
+// A long history ahead of the recorded rows, paged in 100 rows at a time: the recorded session's own rows (prompts,
+// thinking, Agent calls and their results, hand-backs, notifications, answers) copied a dozen times under ids of their
+// own, a day apart. A page's edge then falls inside a turn (whose top rows the page renames, which MAWS's list cannot
+// anchor on) and the rows a page brings are drawn at the list's guesses before they are measured.
+const recorded = readRecording().session;
+const ids = new Set(recorded.flatMap((row) => [String(row.uuid), ...JSON.stringify(row).match(/(toolu|msg)_[A-Za-z0-9]+/g) ?? []]));
+const longHistory: JsonObject[] = Array.from({ length: 12 }, (_, copy) =>
+  recorded.map((row) => {
+    let text = JSON.stringify(row);
+    for (const id of ids) text = text.split(id).join(`${id}-h${copy}`);
+    const copied = JSON.parse(text) as JsonObject;
+    if (typeof copied.timestamp === 'string') copied.timestamp = new Date(Date.parse(copied.timestamp) - (12 - copy) * 86_400_000).toISOString();
+    return copied;
+  }),
+).flat();
+
+/** The first row in the scroller's viewport whose id outlives a rebuild, and its offset from the viewport's top. */
+const readerRow = (view: Locator) =>
+  view.locator('[data-transcript-scroller]').evaluate((el) => {
+    const top = el.getBoundingClientRect().top;
+    const rows = [...el.querySelectorAll('[data-row-id]')]
+      .map((row) => ({ id: row.getAttribute('data-row-id')!, y: row.getBoundingClientRect().top - top, bottom: row.getBoundingClientRect().bottom - top }))
+      .filter((row) => row.bottom > 0 && !/^(time|divider|owner-record|desk-stream):/.test(row.id))
+      .sort((a, b) => a.y - b.y);
+    return rows[0] ?? null;
+  });
+const rowY = (view: Locator, id: string) =>
+  view.locator('[data-transcript-scroller]').evaluate((el, id) => {
+    const row = el.querySelector(`[data-row-id="${CSS.escape(id)}"]`);
+    return row ? row.getBoundingClientRect().top - el.getBoundingClientRect().top : null;
+  }, id);
+
+for (const delay of [0, 300, 1500]) {
+  test(`a page of older rows answered ${delay === 0 ? 'at once' : `${delay} ms late`} leaves the reader's row where it was, page after page`, async ({ page, hub }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await stageProject(hub);
+    const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: longHistory, limit: 40 }));
+    played.skip(played.script.length);
+    played.holdRows = true;
+    await seedKey(page, hub);
+    await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+    const view = page.getByTestId('session-view');
+    await expect(view).toContainText('Both subagents reported back.');
+    const scroller = view.locator('[data-transcript-scroller]');
+    const asked = () => hub.up.filter((u) => u.frame.t === 'rows').length;
+    for (let pageNo = 1; pageNo <= 3; pageNo++) {
+      // The reader scrolls to the top, which asks for the page; what they look at then is their place.
+      const before = asked();
+      await expect
+        .poll(async () => {
+          await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+          return asked();
+        })
+        .toBeGreaterThan(before);
+      await page.waitForTimeout(150); // the list has drawn the top
+      const reader = (await readerRow(view))!;
+      expect(reader, `page ${pageNo}: a row in view`).not.toBeNull();
+      await page.waitForTimeout(delay);
+      expect(played.releaseRows(), `page ${pageNo}`).toBe(1);
+      await expect(page.getByTestId('session-status')).toHaveText(''); // the page is in
+      await page.waitForTimeout(600); // the page drawn and measured
+      const y = await rowY(view, reader.id);
+      expect(y, `page ${pageNo}: ${reader.id} drawn`).not.toBeNull();
+      expect(Math.abs(y! - reader.y), `page ${pageNo}: ${reader.id} from ${reader.y} to ${y}`).toBeLessThan(4);
+    }
+  });
+}

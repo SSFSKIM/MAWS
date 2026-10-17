@@ -37,12 +37,30 @@
   }
 }
 
-/* DC9: the session view's gutter for MAWS's "Jump to latest" (transcript.css `.transcript-jump`, a 32 px control 12 px
-   in from the pane's edge where the pane has no room beside the reading column, as the center rarely has): each row's
-   column ends at least 56 px from the pane's edge — the control and 12 px either side — so the control never covers a
-   row. `100cqi` is the scroller's width (it is the rows' query container). */
-[data-session-view] .thread-column {
-  padding-inline-end: max(var(--measure-pad), calc(56px - max(0px, (100cqi - var(--measure)) / 2)));
+/* DC9: the session view's gutter for MAWS's "Jump to latest" (transcript.css `.transcript-jump`, a floating 32 px
+   control). The gutter is the scroller's own end padding, so everything the rows draw stays inside it: the reading
+   column and the tables and code blocks that break out of it, which MAWS bounds by the scroller's width (`100cqi`, the
+   scroller being the rows' query container). The control sits in the gutter, 12 px from the pane's edge at every width
+   (MAWS moves it into a wide pane's margin, where a breakout up to --measure-wide still reaches), 12 px clear of the
+   rows. */
+[data-session-view] [data-transcript-scroller] {
+  padding-inline-end: 56px;
+}
+[data-session-view] .transcript-jump {
+  right: 12px;
+}
+/* While the session is at rest (presence idle, or no process), the control draws its arrow, not its working dots: the
+   transcript keeps the turn its rows left open (DX4's rows carry no SDK result to end it), and only this drawing
+   follows the session's presence. The arrow is MAWS's own path, drawn by mask. */
+[data-session-view][data-at-rest] .transcript-jump .transcript-working-dots {
+  display: none;
+}
+[data-session-view][data-at-rest] .transcript-jump:has(.transcript-working-dots)::after {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3v10M3.5 8.5 8 13l4.5-4.5'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 
 @theme inline {
