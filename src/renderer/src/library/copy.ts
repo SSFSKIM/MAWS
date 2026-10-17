@@ -163,3 +163,24 @@ export const SPACE_COPY = {
   unlink: 'Unlink folder',
   delete: 'Delete Space…',
 };
+
+// P3-H "Send to" a connector (Decision Log 87): the Export submenu's items and their confirmation sheet.
+export const SEND_TO_COPY = {
+  item: (service: string) => `Send to ${service}…`,
+  title: (service: string) => `Send to ${service}`,
+  format: 'Format',
+  body: (title: string, service: string) => `Claude exports “${title}” and sends the file to ${service} with your connector.`,
+  approval: 'You approve the connector in the session, as for any tool.',
+  fromLive: (session: string) => `Claude sends it from “${session}”.`,
+  resumes: (session: string) => `Resumes “${session}” to send it.`,
+  startsIn: (directory: string) => `Starts a new session in ${directory} to send it.`,
+  ownSession: 'its session',
+  send: 'Send',
+  resumeAndSend: 'Resume session and send',
+  startAndSend: 'Start session and send',
+  tryAgain: 'Try again',
+  openSession: 'Open session',
+  exporting: (format: string) => `Exporting as ${format}…`,
+  starting: 'Starting the session…',
+  sending: 'Sending…',
+};

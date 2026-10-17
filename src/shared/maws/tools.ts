@@ -264,8 +264,9 @@ export type ArtifactExportInput = z.infer<typeof ArtifactExportInputSchema>;
 export const EXPORT_ANSWER_MS = 60_000;
 const EXPORT_EXTENSIONS: Record<ArtifactExportFormat, string> = { pdf: 'pdf', png: 'png', docx: 'docx', pptx: 'pptx', md: 'md', html: 'html', claude: 'zip' /* P3-D */ };
 // An export's file name under `<userData>/artifacts/<id>/exports/` (the tool's and the library's alike). P3-E (E1 M5;
-// Decision Log 33): a design's export names its own opaque `exportId` (a UUID main mints), so two exports of one revision
-// and format never share a file; absent, every other kind keeps its name.
+// E's Decision Log 33) and P3-H (P3 Decision Log 91): an export that is a file of its own (a design's, or one asked as
+// `ownFile`) names the opaque `exportId` main minted for it, so no later export of the same revision and format
+// replaces it; absent, the revision-and-format cache name.
 export const artifactExportName = (revision: number, format: ArtifactExportFormat, exportId?: string): string => `${revision}-${format}${exportId !== undefined ? `-${exportId}` : ''}.${EXPORT_EXTENSIONS[format]}`;
 // P3-A (M6) end
 

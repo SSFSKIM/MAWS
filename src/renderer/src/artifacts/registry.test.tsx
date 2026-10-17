@@ -1,14 +1,14 @@
 // The editor mount registry (the P3-L execution document, Decision Log 7; the P3 interface ledger §7): a kind's editor
 // registered, replaced and unregistered, `Main` defaulting to `Panel`, and the state an editor keeps per tab, made once
 // by `createState` and disposed when the tab goes or the surface shows something else.
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EditorHostScope } from '../panel/editor-host';
 import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
 import {
   artifactEditorFor, holdArtifactEditorState, registerArtifactEditor, releaseArtifactEditorState, resetArtifactEditors, useArtifactEditor,
-  type ArtifactEditorProps,
+  useHeldArtifactEditorState, type ArtifactEditorHold, type ArtifactEditorProps,
 } from './registry';
 
 const A = '0b6f7d52-1c1f-4c4e-9a37-5d0e7a0d1a01';
@@ -127,5 +127,35 @@ describe('the state an editor keeps per tab', () => {
     act(() => useLayout.getState().closeTab(scope.tabId));
     expect(e.dispose).toHaveBeenCalledWith(held.state);
     expect(e.createState).toHaveBeenCalledTimes(1);
+  });
+
+  // P3-H (the P3 spec's Decision Log 93): a render reads the scope's hold through the hook, which every hold and release
+  // publishes to (made, re-targeted, released by the surface, ended with its main tab), so a compiled render never keeps
+  // one it read before.
+  it('the scope’s hold, read through useHeldArtifactEditorState, follows every hold and release of that scope', async () => {
+    const e = editor();
+    registerArtifactEditor('document', e);
+    const docEditor = artifactEditorFor('document')!;
+    const seen = renderHook(() => useHeldArtifactEditorState(panel));
+    expect(seen.result.current).toBeNull();
+    let a!: ArtifactEditorHold;
+    await act(async () => void (a = holdArtifactEditorState(panel, A, 'document', docEditor)));
+    expect(seen.result.current).toBe(a);
+    await act(async () => void holdArtifactEditorState({ surface: 'panel', tabId: 'p2' }, A, 'document', docEditor));
+    expect(seen.result.current, 'another scope’s hold is its own').toBe(a);
+    let b!: ArtifactEditorHold;
+    await act(async () => void (b = holdArtifactEditorState(panel, B, 'document', docEditor))); // a re-target
+    expect(seen.result.current).toBe(b);
+    await act(async () => releaseArtifactEditorState(panel));
+    expect(seen.result.current).toBeNull();
+
+    act(() => useLayout.getState().openTab({ kind: 'artifact', artifactId: A }));
+    const scope: EditorHostScope = { surface: 'main', tabId: `artifact:${A}` };
+    const main = renderHook(() => useHeldArtifactEditorState(scope));
+    let held!: ArtifactEditorHold;
+    await act(async () => void (held = holdArtifactEditorState(scope, A, 'document', docEditor)));
+    expect(main.result.current).toBe(held);
+    await act(async () => useLayout.getState().closeTab(scope.tabId)); // ended with its tab
+    expect(main.result.current).toBeNull();
   });
 });

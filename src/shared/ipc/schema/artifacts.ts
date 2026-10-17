@@ -14,7 +14,9 @@ import { ArtifactVersionSchema } from '../../artifacts/version';
 import { AppSessionIdSchema } from '../../graph/ids';
 import { ARTIFACT_EXPORT_FONTS /* P3-C */, ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
-import type { CommandSpec } from './common';
+import { JsonValueSchema, type CommandSpec } from './common';
+import { ConnectorGrantGestureSchema, ConnectorGrantSchema, ConnectorToolRefSchema } from '../../artifacts/connectors'; // P3-H H3b
+import { ConnectorGrantOutcomeSchema } from './connectors'; // P3-H H3b
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
@@ -47,25 +49,9 @@ export const ArtifactContentInputSchema = z.union([
 // (P3-A M5): what JSON.stringify would drop or rewrite (`undefined`, a function, NaN, Infinity) is refused at any depth,
 // since the detached JSON line would carry something else than was sent. The public type is one level deep and the rest
 // `unknown`, since a recursive JSON type makes Playwright's typed `page.evaluate` over CommandInput infinitely deep
-// (TS2589); the recursion is the runtime check below.
-function isJsonValue(value: unknown, ancestors: Set<object> = new Set()): boolean {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (typeof value !== 'object' || ancestors.has(value)) return false; // undefined, function, bigint, symbol, a cycle
-  const isArray = Array.isArray(value);
-  const prototype = Object.getPrototypeOf(value);
-  if (!isArray && prototype !== Object.prototype && prototype !== null) return false; // a Date, Map, typed array, class instance
-  ancestors.add(value);
-  const keys = Object.keys(value);
-  const ok = (!isArray || keys.length === (value as unknown[]).length) && keys.every((key) => isJsonValue((value as Record<string, unknown>)[key], ancestors));
-  ancestors.delete(value);
-  return ok;
-}
-const TestValueSchema = z
-  .union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.unknown()), z.record(z.string(), z.unknown())])
-  .refine((value) => isJsonValue(value), 'expected a JSON value');
+// (TS2589); the recursion is the runtime check (`JsonValueSchema`, common.ts).
 export const ArtifactTestOpSchema = z.discriminatedUnion('op', [
-  z.strictObject({ op: z.literal('setAttr'), key: z.string().min(1), value: TestValueSchema, root: z.string().min(1).optional() }),
+  z.strictObject({ op: z.literal('setAttr'), key: z.string().min(1), value: JsonValueSchema, root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('insertText'), index: Seq, text: z.string(), root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('deleteText'), index: Seq, length: z.number().int().positive(), root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('page'), text: z.string().max(ARTIFACT_MAX_BYTES) }), // M7 fix wave 1: an html page's new content
@@ -229,6 +215,10 @@ export const commands = {
   // page's whole height when omitted). A kind and format no exporter serves is refused `exportUnavailable {kind, format}`.
   // P3-E (E1 M5; X23, the parent's Decision Log 26): a design's `board` (its PNG's one board), `boards` (its PDF's pages)
   // and `scale` (0.1 to 4); a PNG over the picture cap is refused `exportTooLarge {board, w, h, maxScale}`.
+  // P3-H (P3 Decision Log 91, the X31 `ownFile` row): `ownFile`, or a design's export (E's Decision Log 33), is a file
+  // of its own: main mints `exportId` before it renders, names the file `<revision>-<format>-<exportId>.<ext>` and
+  // answers the id beside its path, so no later export of the same revision and format replaces it. It lives under the
+  // artifact's export storage as the cache files do. Send to is the caller that sets it.
   'artifacts.export': main(
     z.strictObject({
       artifactId: Id,
@@ -241,12 +231,21 @@ export const commands = {
       board: z.string().min(1).max(64).optional(), // P3-E
       boards: z.array(z.string().min(1).max(64)).max(200).optional(), // P3-E
       scale: z.number().min(0.1).max(4).optional(), // P3-E
+      ownFile: z.literal(true).optional(), // P3-H (Decision Log 91)
     }),
     // the snapshot exported (a document that moved since names a later revision); `blockedRequests`: remote requests the
-    // PDF printer refused
-    // P3-E (E1 M5; Decision Log 33): a design export's own id, the one `library.saveAs` names it by
+    // PDF printer refused; `exportId`: the id of an export of its own file, the one `library.saveAs` names it by (P3-E,
+    // E's Decision Log 33; P3-H, Decision Log 91)
     z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional(), exportId: z.uuid().optional() }),
   ),
+  // P3-H H3b start: the owner's connector grants from the editor header (the P3 interface ledger's X23 grant rows), main's:
+  // a grant is taken under the fingerprint the route reports now (the gesture carries none), refused when no route has
+  // the tool or a read grant is asked for a tool the route does not mark read-only; a revoke stops the tool's work in
+  // flight before the store is asked (src/main/connectors/broker.ts).
+  'artifacts.connectorGrants': main(z.strictObject({ artifactId: Id }), z.strictObject({ grants: z.array(ConnectorGrantSchema) })),
+  'artifacts.grantConnectorTool': main(z.strictObject({ artifactId: Id, tool: ConnectorGrantGestureSchema }), ConnectorGrantOutcomeSchema),
+  'artifacts.revokeConnectorTool': main(z.strictObject({ artifactId: Id, ...ConnectorToolRefSchema.shape }), z.strictObject({ revoked: z.boolean() })),
+  // P3-H H3b end
 } as const satisfies Record<`artifacts.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

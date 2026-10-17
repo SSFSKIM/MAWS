@@ -5,7 +5,7 @@
 // written under the store's directory) and then saved where the owner chooses (`library.saveAs` of that export, the
 // native dialog at Downloads); a File artifact's "Save a copy…" saves its stored file the same way. The outcome is a
 // toast; a cancelled dialog says nothing.
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactExportFormat } from '@shared/maws/tools';
@@ -14,35 +14,41 @@ import { toast } from '../stores/notices';
 import { VIEWERS_COPY } from '../tools/artifacts/viewers/copy';
 import { toastFailure } from './dialogs';
 
+// P3-H (the P3 spec's Decision Log 92): the window's answers per kind and the asks in flight, shared by every menu,
+// header and sheet; a render reads an answer only through `useSyncExternalStore`, so the one asking re-renders with it.
+// (Read in render directly, the React Compiler memoized it on the kind: the first consumer of a kind never showed it.)
 const NONE: readonly ArtifactExportFormat[] = [];
 const formats = new Map<ArtifactKind, readonly ArtifactExportFormat[]>();
-const asking = new Map<ArtifactKind, Promise<readonly ArtifactExportFormat[]>>();
+const asking = new Set<ArtifactKind>();
+const listeners = new Set<() => void>();
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => void listeners.delete(listener);
+};
+
+// Asks main once for a kind while no answer is known or awaited; a refusal (or a failed ask) leaves it unknown, asked
+// again by the next viewer or menu.
+function ask(kind: ArtifactKind, client: MawsBridge): void {
+  if (formats.has(kind) || asking.has(kind)) return;
+  asking.add(kind);
+  client.invoke('library.exportFormats', { kind }).then(
+    (result) => {
+      asking.delete(kind);
+      if (!result.ok) return;
+      formats.set(kind, result.value.formats);
+      listeners.forEach((listener) => listener());
+    },
+    () => void asking.delete(kind),
+  );
+}
 
 // The kind's formats, asked of main the first time (none while it has not answered, or when it could not).
 export function useExportFormats(kind: ArtifactKind | null, client: MawsBridge = ipc): readonly ArtifactExportFormat[] {
-  const known = kind === null ? NONE : formats.get(kind);
-  const [, answered] = useState(0);
+  const known = useSyncExternalStore(subscribe, () => (kind === null ? NONE : (formats.get(kind) ?? NONE)));
   useEffect(() => {
-    if (kind === null || formats.has(kind)) return;
-    let live = true;
-    let pending = asking.get(kind);
-    if (!pending) {
-      pending = client.invoke('library.exportFormats', { kind }).then((result) => {
-        asking.delete(kind);
-        if (!result.ok) return NONE; // asked again by the next viewer or menu
-        formats.set(kind, result.value.formats);
-        return result.value.formats;
-      });
-      asking.set(kind, pending);
-    }
-    void pending.then(() => {
-      if (live) answered((n) => n + 1);
-    });
-    return () => {
-      live = false;
-    };
+    if (kind !== null) ask(kind, client);
   }, [kind, client]);
-  return known ?? NONE;
+  return known;
 }
 
 // Tests: nothing known.

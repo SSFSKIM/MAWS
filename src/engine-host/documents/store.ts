@@ -13,12 +13,16 @@ import { basename, isAbsolute } from 'node:path';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, bindingVersion, decodeMap, encodeMap, mergeMaps, newDoc, type Doc } from '@artifacts/yjs';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
+// P3-H start
+import * as z from 'zod';
+import { ConnectorCallRefSchema, ConnectorGrantRequestSchema, ConnectorToolRefSchema, type ConnectorAuthorization, type ConnectorCallRef, type ConnectorGrant, type ConnectorGrantChange, type ConnectorGrantMode, type ConnectorGrantRequest, type ConnectorToolRef, connectorToolKey } from '@shared/artifacts/connectors';
+// P3-H end
 import { isDocKind, type Artifact, type ArtifactKind, type ArtifactSessionLink, type Space } from '@shared/artifacts/entity';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ARTIFACT_ID, ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 import { ArtifactFiles, safeName, type ContentRef } from './bytes';
-import { ArtifactStoreError } from './errors';
+import { ArtifactStoreError, StoreTooNewError } from './errors'; // P3-H: StoreTooNewError
 import { Maintenance } from './maintenance';
 import { OpLedger, type OpScope } from './ops';
 import { restoreArtifact } from './restore';
@@ -164,6 +168,8 @@ export class ArtifactStore {
   private readonly changeListeners = new Set<(change: ArtifactChanged) => void>();
   private readonly spaceListeners = new Set<(change: SpaceChanged) => void>();
   private readonly defaultsListeners = new Set<() => void>(); // P3-C (Decision Log 29)
+  private readonly grantListeners = new Set<(change: ConnectorGrantChange) => void>(); // P3-H
+  private readonly fences = new Map<string, Set<ConnectorFence>>(); // P3-H H3b: per artifact, the dispatch fences held now
   private readonly coalescing = new Map<string, { timer: ReturnType<typeof setTimeout>; pending: number | null }>();
   private readonly creating = new Set<string>(); // artifacts whose first content is committing: `created` announces them
   private readonly schedule = new Map<string, { idle?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setTimeout> }>();
@@ -405,7 +411,8 @@ export class ArtifactStore {
     return this.get(artifactId)!;
   }
 
-  // A soft delete (`deletedAt`); a design system still governing a live artifact is refused (Decision Log 22a).
+  // A soft delete (`deletedAt`); a design system still governing a live artifact is refused (Decision Log 22a). P3-H:
+  // its connector grants go in the same savepoint (a soft delete fires no cascade), each announced as revoked.
   async delete(artifactId: string, inFrame?: InFrame<void>): Promise<void> {
     const row = this.requireLive(artifactId);
     if (row.kind === 'design_system') {
@@ -413,11 +420,16 @@ export class ArtifactStore {
       if (users.length > 0) throw new ArtifactStoreError('designSystemInUse', `the design system governs ${users.length} artifact(s)`, { artifactIds: users });
     }
     const at = this.now();
-    await this.service.inBatch(() => {
+    this.breakFences(artifactId, null); // P3-H H3b: no connector call fenced before the delete writes
+    const revoked = await this.service.inBatch(() => {
       this.storage.db.prepare('UPDATE artifacts SET deletedAt = ?, updatedAt = ? WHERE id = ?').run(at, at, artifactId);
+      const grants = this.grantRows(artifactId); // P3-H
+      this.storage.db.prepare('DELETE FROM artifact_connector_grants WHERE artifactId = ?').run(artifactId); // P3-H
       inFrame?.();
+      return grants;
     });
     this.versions.forget(artifactId); // a deleted artifact writes no more versions
+    for (const grant of revoked) this.emitGrant(artifactId, grant, 'revoked'); // P3-H
     this.emit(artifactId, 'deleted');
   }
 
@@ -1050,6 +1062,165 @@ export class ArtifactStore {
     return context;
   }
 
+  // ── P3-H start: connector grants (docs/doperpowers/plans/2026-10-12-p3-co-work.md, P3-H and Decision Log 24 and 80;
+  // @shared/artifacts/connectors) ──
+  // The owner's per-artifact, per-tool permission, the only gate on a connector call: main checks it before routing a
+  // call (`checkConnectorCall`) and the host again just before writing mcp_call (`authorizeConnectorCall`, which takes
+  // an Allow once's one use). Grants live beside the artifact, never in its content: no revision, version, change-feed
+  // entry or `updatedAt` moves with one, and no copy, restore, import or export carries one. Each operation answers,
+  // and announces through `onConnectorGrantChange`, only once its rows have committed (Decision Log 33's barrier), so a
+  // listener stopping watches acts on durable state.
+
+  onConnectorGrantChange(listener: (change: ConnectorGrantChange) => void): () => void {
+    this.grantListeners.add(listener);
+    return () => this.grantListeners.delete(listener);
+  }
+
+  // The artifact's grants, committed, ordered by server and tool.
+  connectorGrants(artifactId: string): Promise<ConnectorGrant[]> {
+    return this.readCommitted(() => {
+      this.requireLive(artifactId);
+      return this.grantRows(artifactId);
+    });
+  }
+
+  // The owner's grant of one tool to one artifact; a grant already held for the tool is replaced whole (a re-grant under
+  // a changed fingerprint, or Allow once again). H3b: asked for, it breaks every fence of the tool taken for another
+  // fingerprint or mode, as a revoke would (the authority that call was admitted under is withdrawn, its row present or
+  // already consumed); one taken for this very fingerprint and mode stays held, so a second Allow once does not stop
+  // the call the first admitted.
+  grantConnectorTool(artifactId: string, request: ConnectorGrantRequest): Promise<ConnectorGrant> {
+    return this.writeCommitted(async () => {
+      const { server, tool, fingerprint, mode } = connectorInput(GRANT_INPUT, request, 'grant');
+      this.requireLive(artifactId);
+      this.breakFences(artifactId, { server, tool }, (fence) => fence.fingerprint === fingerprint && fence.mode === mode);
+      const grant: ConnectorGrant = { server, tool, fingerprint, mode, grantedAt: this.now() };
+      await this.service.inBatch(() =>
+        this.storage.db
+          .prepare(
+            'INSERT INTO artifact_connector_grants (artifactId, server, tool, fingerprint, mode, grantedAt) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (artifactId, server, tool) DO UPDATE SET fingerprint = excluded.fingerprint, mode = excluded.mode, grantedAt = excluded.grantedAt',
+          )
+          .run(artifactId, server, tool, fingerprint, mode, grant.grantedAt),
+      );
+      this.emitGrant(artifactId, grant, 'granted');
+      return grant;
+    });
+  }
+
+  // Answers whether a grant was there to revoke; once it resolves, no call under it is authorized.
+  revokeConnectorTool(artifactId: string, ref: ConnectorToolRef): Promise<boolean> {
+    return this.writeCommitted(async () => {
+      const tool = connectorInput(TOOL_INPUT, ref, 'tool');
+      this.requireLive(artifactId);
+      this.breakFences(artifactId, tool); // H3b: asked for, so no call fenced before it writes
+      const removed = await this.service.inBatch(() => Number(this.storage.db.prepare('DELETE FROM artifact_connector_grants WHERE artifactId = ? AND server = ? AND tool = ?').run(artifactId, tool.server, tool.tool).changes) > 0);
+      if (removed) this.emitGrant(artifactId, tool, 'revoked');
+      return removed;
+    });
+  }
+
+  // Whether `call` may run, consuming nothing: main's check before it routes a call. Answers behind the read barrier.
+  checkConnectorCall(artifactId: string, call: ConnectorCallRef): Promise<ConnectorAuthorization> {
+    return this.readCommitted(() => this.connectorDecision(artifactId, call));
+  }
+
+  // Whether `call` may run now, the use taken: the host's check immediately before it writes mcp_call. A `read` grant
+  // answers behind the read barrier. A `once` grant is consumed in the same synchronous step that found it and answered
+  // only after that consumption commits, so of any number of concurrent calls one is granted, and a lost batch grants
+  // none and leaves the grant for the next; a call that then fails has still used it (at most once, never twice).
+  // H3b: `expected`, the mode the caller's own check admitted, is compared before anything is consumed: a read grant
+  // swapped for an Allow once since (or the reverse) answers `wrongMode` and takes nothing. The answer is a snapshot
+  // across the commit barrier, so the write still waits on `connectorFenceHolds`.
+  authorizeConnectorCall(artifactId: string, call: ConnectorCallRef, expected?: ConnectorGrantMode): Promise<ConnectorAuthorization> {
+    return this.writeCommitted(async () => {
+      const found = this.connectorDecision(artifactId, call);
+      const decision: ConnectorAuthorization = found.granted && expected !== undefined && found.mode !== expected ? { granted: false, refusal: 'wrongMode' } : found;
+      if (!decision.granted || decision.mode === 'read') return this.readCommitted(() => decision);
+      const { server, tool } = connectorInput(CALL_INPUT, call, 'call');
+      await this.service.inBatch(() => this.storage.db.prepare('DELETE FROM artifact_connector_grants WHERE artifactId = ? AND server = ? AND tool = ?').run(artifactId, server, tool));
+      this.emitGrant(artifactId, { server, tool }, 'consumed');
+      return decision;
+    });
+  }
+
+  // H3b: the dispatch fence. Taken for a call's fingerprint and expected mode before the authorization and held until
+  // the call it guards has ended: a revoke of the tool, a grant replacing it under another fingerprint or mode
+  // (`grantConnectorTool`) or a delete of the artifact asked for meanwhile — committed, still in its batch, or later
+  // rolled back — breaks it at once, synchronously, and calls its `onBreak` (the holder aborts its operation there, so a
+  // write still queued behind the engine's stdin is dropped by the transport before it starts). A read call also needs its grant
+  // still there as authorized (the same fingerprint, still `read`); an Allow once's own consumption is the use it
+  // authorized, so its fence needs no row. The holder releases it when its work ends (P3 Decision Log 91: the host's
+  // connector calls when the call's outcome is taken, cancelled or expired), so nothing is retained past that bound.
+  connectorFence(artifactId: string, call: ConnectorCallRef, mode: ConnectorGrantMode, onBreak?: () => void): ConnectorFence {
+    const fence: ConnectorFence = { artifactId, key: connectorToolKey(call), fingerprint: call.fingerprint, mode, broken: false, onBreak };
+    let held = this.fences.get(artifactId);
+    if (!held) this.fences.set(artifactId, (held = new Set()));
+    held.add(fence);
+    return fence;
+  }
+
+  releaseConnectorFence(fence: ConnectorFence): void {
+    const held = this.fences.get(fence.artifactId);
+    if (!held?.delete(fence)) return;
+    if (held.size === 0) this.fences.delete(fence.artifactId);
+  }
+
+  connectorFenceHolds(fence: ConnectorFence, call: ConnectorCallRef, mode: ConnectorGrantMode): 'held' | 'revoked' | 'fingerprintChanged' | 'wrongMode' {
+    const { artifactId } = fence;
+    if (fence.broken || fence.key !== connectorToolKey(call) || !this.fences.get(artifactId)?.has(fence)) return 'revoked';
+    const row = this.closed || this.storage.readOnly ? undefined : this.entity(artifactId);
+    if (!row || row.deletedAt !== null) return 'revoked';
+    if (mode === 'once') return 'held';
+    const grant = this.grantRows(artifactId).find((row) => row.server === call.server && row.tool === call.tool);
+    if (!grant) return 'revoked';
+    if (grant.fingerprint !== call.fingerprint) return 'fingerprintChanged';
+    return grant.mode === 'read' ? 'held' : 'wrongMode';
+  }
+
+  // A revoke of `tool` (null: a delete of the artifact), or a grant replacing it, asked for: every fence held of it
+  // breaks now, but those the replacing grant still `admits`.
+  private breakFences(artifactId: string, tool: ConnectorToolRef | null, admits?: (fence: ConnectorFence) => boolean): void {
+    const key = tool && connectorToolKey(tool);
+    for (const fence of [...(this.fences.get(artifactId) ?? [])]) {
+      if ((key !== null && fence.key !== key) || admits?.(fence)) continue;
+      fence.broken = true;
+      this.releaseConnectorFence(fence);
+      try {
+        fence.onBreak?.();
+      } catch (error) {
+        this.log(`a connector fence's onBreak threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  // What the artifact's grant says of `call`, read now. A store a newer MAWS wrote authorizes nothing: its grant rows
+  // may mean more than this app reads.
+  private connectorDecision(artifactId: string, call: ConnectorCallRef): ConnectorAuthorization {
+    const ref = connectorInput(CALL_INPUT, call, 'call');
+    if (this.storage.readOnly) throw new StoreTooNewError(this.storage.statusReason ?? 'a newer app wrote this store');
+    this.requireLive(artifactId);
+    const grant = this.grantRows(artifactId).find((row) => row.server === ref.server && row.tool === ref.tool);
+    if (!grant) return { granted: false, refusal: 'notGranted' };
+    if (grant.fingerprint !== ref.fingerprint) return { granted: false, refusal: 'fingerprintChanged' };
+    return { granted: true, mode: grant.mode };
+  }
+
+  private grantRows(artifactId: string): ConnectorGrant[] {
+    return this.storage.db.prepare('SELECT server, tool, fingerprint, mode, grantedAt FROM artifact_connector_grants WHERE artifactId = ? ORDER BY server, tool').all(artifactId) as unknown as ConnectorGrant[];
+  }
+
+  private emitGrant(artifactId: string, { server, tool }: ConnectorToolRef, change: ConnectorGrantChange['change']): void {
+    if (this.closed) return;
+    for (const listener of this.grantListeners) {
+      try {
+        listener({ artifactId, server, tool, change });
+      } catch (error) {
+        this.log(`an onConnectorGrantChange listener threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+  // ── P3-H end ──
+
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -1257,6 +1428,30 @@ function toArtifact(row: EntityRow): Artifact {
 function toSpace(row: { id: string; name: string; linkedDir: string | null; createdAt: number }): Space {
   return { id: row.id, name: row.name, ...(row.linkedDir === null ? {} : { linkedDir: row.linkedDir }), createdAt: row.createdAt };
 }
+
+// P3-H start: a grant operation's input, its known fields taken and checked (an extra field, a grant's `mode` passed
+// to a revoke, is dropped), else refused as `invalid`.
+const GRANT_INPUT = z.object(ConnectorGrantRequestSchema.shape);
+const TOOL_INPUT = z.object(ConnectorToolRefSchema.shape);
+const CALL_INPUT = z.object(ConnectorCallRefSchema.shape);
+
+// H3b: a connector call's dispatch fence (`connectorFence`): its tool and authority, and whether a revoke, a replacing
+// grant or a delete broke it.
+export interface ConnectorFence {
+  readonly artifactId: string;
+  readonly key: string;
+  readonly fingerprint: string; // the authority it was taken for: the call's fingerprint and the mode its check admitted
+  readonly mode: ConnectorGrantMode;
+  broken: boolean;
+  readonly onBreak?: () => void;
+}
+
+function connectorInput<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new ArtifactStoreError('invalid', `not a connector ${what}: ${z.prettifyError(parsed.error)}`);
+  return parsed.data;
+}
+// P3-H end
 
 function uniqueName(name: string, taken: Set<string>): string {
   if (!taken.has(name)) return name;

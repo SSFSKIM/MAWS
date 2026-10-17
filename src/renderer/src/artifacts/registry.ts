@@ -14,7 +14,7 @@
 // unasked). The mounting surface asks for it through
 // `holdArtifactEditorState` and gives it back through `releaseArtifactEditorState`; a main tab's is given back here
 // when the tab leaves the main area by any path, as the editor host clears the tab's header registration.
-import type { ComponentType } from 'react';
+import { useSyncExternalStore, type ComponentType } from 'react';
 import { create } from 'zustand';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { EditorHostScope } from '../panel/editor-host';
@@ -85,10 +85,31 @@ export interface ArtifactEditorHold<S = unknown> {
 const holds = new Map<string, ArtifactEditorHold>();
 const keyOf = (scope: EditorHostScope): string => `${scope.surface}:${scope.tabId}`;
 
+// P3-H (the P3 spec's Decision Log 93): every write to `holds` (a hold made, ended or cleared) is published to the
+// renders reading a scope's hold through `useHeldArtifactEditorState`, so the React Compiler cannot keep one read before.
+// The listeners hear it in a microtask, coalesced: a hold is made while a surface renders (`holdArtifactEditorState` is
+// safe to call in render), where updating another component would be a render-phase update; a render reading meanwhile
+// gets the map's current hold all the same.
+const holdListeners = new Set<() => void>();
+let publishing = false;
+function published(): void {
+  if (publishing) return;
+  publishing = true;
+  queueMicrotask(() => {
+    publishing = false;
+    holdListeners.forEach((listener) => listener());
+  });
+}
+const subscribeHolds = (listener: () => void) => {
+  holdListeners.add(listener);
+  return () => void holdListeners.delete(listener);
+};
+
 function end(key: string): void {
   const hold = holds.get(key);
   if (!hold) return;
   holds.delete(key);
+  published();
   try {
     hold.editor.dispose?.(hold.state);
   } catch (error) {
@@ -106,12 +127,17 @@ export function holdArtifactEditorState<S>(scope: EditorHostScope, artifactId: s
   end(key);
   const hold: ArtifactEditorHold<S> = { artifactId, kind, editor, state: editor.createState?.({ artifactId, kind, surface: scope.surface }) as S };
   holds.set(key, hold as ArtifactEditorHold);
+  published();
   return hold;
 }
 
 // What the scope holds now, if anything: a surface that cannot confirm the artifact for a moment (its host unreachable)
 // keeps showing the editor it was showing from this.
 export const heldArtifactEditorState = (scope: EditorHostScope): ArtifactEditorHold | null => holds.get(keyOf(scope)) ?? null;
+
+// The same, for a render: re-rendered at every hold and release (P3-H, Decision Log 93).
+export const useHeldArtifactEditorState = (scope: EditorHostScope): ArtifactEditorHold | null =>
+  useSyncExternalStore(subscribeHolds, () => heldArtifactEditorState(scope));
 
 // The surface stopped showing an artifact in this scope (the panel went Back or its tab went, a main tab shows a notice).
 export function releaseArtifactEditorState(scope: EditorHostScope): void {
@@ -132,5 +158,6 @@ useLayout.subscribe((state, before) => {
 // Tests: no editors and no held state (nothing disposed).
 export function resetArtifactEditors(): void {
   holds.clear();
+  published();
   useEditors.setState({ editors: {} });
 }

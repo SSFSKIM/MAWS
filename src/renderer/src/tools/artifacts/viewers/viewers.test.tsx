@@ -35,6 +35,7 @@ let versions: ArtifactVersion[];
 let names: Record<number, string>; // the stored file's name by revision
 let main: ReturnType<typeof installFakeMain>;
 let versionsAnswer: (() => Promise<ReturnType<typeof ok>>) | null; // fix wave 1: a read answered when the case says
+let connectorMain: ((name: string, input: Record<string, unknown>) => ReturnType<typeof ok> | null) | null = null; // P3-H H4
 const offs: (() => void)[] = [];
 
 function rowOf(kind: ArtifactKind, over: Partial<LibraryRow> = {}): LibraryRow {
@@ -73,6 +74,8 @@ beforeEach(() => {
   names = { 4: 'index.html', 9: 'index.html' };
   versionsAnswer = null;
   main = installFakeMain((name, input) => {
+    const connectorAnswer = connectorMain?.(name, input); // P3-H H4: a connectors case's own answers
+    if (connectorAnswer) return connectorAnswer;
     if (name === 'library.get') return ok({ row });
     if (name === 'artifacts.versions') return versionsAnswer ? versionsAnswer() : ok({ versions });
     if (name === 'library.content') {
@@ -486,5 +489,83 @@ describe('the File viewer', () => {
     expect(header().exports?.map((e) => e.label)).toEqual(['Save a copy…']);
     act(() => header().exports![0]!.onSelect());
     await waitFor(() => expect(main.callsOf('library.saveAs')).toEqual([{ artifactId: ID, source: { content: { revision: 9 } } }]));
+  });
+});
+
+// P3-H H4: an HTML page's connectors. Each load of the page gets its own lease on the viewer's artifact, hidden until the
+// body is on screen and the window's document visible, closed at the next load; the header's Connectors action appears
+// once the page declares a tool, and opens the owner's sheet, whose Allow grants through main.
+describe('an HTML page’s connectors', () => {
+  const LEASES = ['c0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000002'];
+  const TOOL = { server: 'fixture', tool: 'read_series' };
+  let opens: number;
+  beforeEach(() => {
+    opens = 0;
+    connectorMain = (name, input) => {
+      if (name === 'connectors.open') {
+        const leaseId = LEASES[opens];
+        opens += 1;
+        return ok({ leaseId });
+      }
+      if (name === 'connectors.visibility') return ok({ ok: true });
+      if (name === 'connectors.close') return ok({ closed: true });
+      if (name === 'connectors.declare') return ok({ ok: true, declared: input.tools });
+      if (name === 'artifacts.connectorGrants') return ok({ grants: [] });
+      if (name === 'artifacts.grantConnectorTool') return ok({ ok: true, grant: { ...TOOL, fingerprint: 'f1', mode: 'read', grantedAt: 1 } });
+      return null;
+    };
+  });
+  afterEach(() => {
+    connectorMain = null;
+    Reflect.deleteProperty(document, 'visibilityState');
+  });
+
+  // the page's end of each load's port, as the frame hands it over
+  function pagePorts(el: HTMLIFrameElement) {
+    const ports: MessagePort[] = [];
+    el.contentWindow!.postMessage = ((data: unknown, _origin: string, transfer: MessagePort[] = []) => {
+      if ((data as { type?: string }).type === 'maws:connectors') ports.push(transfer[0]!);
+    }) as typeof window.postMessage;
+    return ports;
+  }
+  const visibilities = (leaseId: string) => main.callsOf('connectors.visibility').filter((call) => call.leaseId === leaseId).map((call) => call.visible);
+
+  it('gives each load its own lease on the artifact, shown only while the body and the window are, the last load’s closed', async () => {
+    const { show } = mount('html');
+    await waitFor(() => expect(frame('html')).not.toBeNull());
+    pagePorts(frame('html')!);
+    load(frame('html')!);
+    await waitFor(() => expect(visibilities(LEASES[0]!)).toEqual([true]));
+    expect(main.callsOf('connectors.open')).toEqual([{ artifactId: ID }]);
+    show(false);
+    await waitFor(() => expect(visibilities(LEASES[0]!)).toEqual([true, false]));
+    show(true);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    act(() => void document.dispatchEvent(new Event('visibilitychange')));
+    await waitFor(() => expect(visibilities(LEASES[0]!)).toEqual([true, false, true, false]));
+    load(frame('html')!); // the page reloaded itself
+    await waitFor(() => expect(main.callsOf('connectors.close')).toEqual([{ leaseId: LEASES[0] }]));
+    await waitFor(() => expect(main.callsOf('connectors.open')).toHaveLength(2));
+    expect(visibilities(LEASES[1]!)).toEqual([]); // the window is hidden: the new lease stays hidden
+  });
+
+  it('offers Connectors once the page declares a tool, never opening it by itself, and grants on the owner’s Allow', async () => {
+    mount('html');
+    await waitFor(() => expect(frame('html')).not.toBeNull());
+    const ports = pagePorts(frame('html')!);
+    load(frame('html')!);
+    await waitFor(() => expect(actionLabels()).toEqual(['Comment', 'Reload', 'Open externally', 'Reveal in Finder']));
+    const answers: unknown[] = [];
+    ports[0]!.onmessage = (event) => void answers.push(event.data);
+    ports[0]!.postMessage({ id: 1, op: 'declare', tools: [TOOL] });
+    await waitFor(() => expect(answers).toEqual([{ id: 1, answer: { ok: true, declared: [TOOL] } }]));
+    await waitFor(() => expect(actionLabels()).toEqual(['Comment', 'Connectors', 'Reload', 'Open externally', 'Reveal in Finder']));
+    expect(document.querySelector('[data-connectors-sheet]')).toBeNull();
+    act(() => action('Connectors').onSelect());
+    const sheet = await waitFor(() => document.querySelector<HTMLElement>('[data-connectors-sheet]')!);
+    expect(within(sheet).getByText('Not allowed')).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Allow fixture · read_series to read' }));
+    await waitFor(() => expect(main.callsOf('artifacts.grantConnectorTool')).toEqual([{ artifactId: ID, tool: { ...TOOL, mode: 'read' } }]));
+    ports[0]!.close();
   });
 });

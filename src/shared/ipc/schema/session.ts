@@ -413,6 +413,10 @@ export const StartOptionsSchema = z.strictObject({
   trust: TrustDecisionSchema.optional(),
   model: z.string().nullable().optional(),
   effort: EffortSchema.nullable().optional(),
+  // P3-H (P3 Decision Log 88): a start that must run no model turn (a connector's owner Start). Main refuses it, changing
+  // nothing, while a first message is in the request or retained for the session (an intent's, or a resume's behind a
+  // card); absent, a start keeps and sends a retained message as it always has.
+  requireEmptyMessage: z.literal(true).optional(),
 });
 export type StartOptions = z.infer<typeof StartOptionsSchema>;
 
