@@ -108,11 +108,13 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
     source.setAttribute('data-atom-controls', ''); // its button's clicks and keys are its own, not the editor's (B's atom view)
     view.append(title, frame, source);
     into.append(view);
-    // E2 M6 (the tracker's last-block row, run 38992236787's selection log): a press on the view is the editor's alone. The
-    // browser's default would focus the editor with its own caret at the document's start, and that caret's late
-    // selectionchange, read by ProseMirror as the pointer's, replaced the block selection the click had just made; the
-    // editor focuses itself and selects the block on the click. The default is refused once the press has bubbled past
-    // the editor (ProseMirror ignores a press already refused), and the source label's controls keep their own.
+    // E2 M6 (the tracker's last-block row; provisional, its cause not established): a press on the view is left to the
+    // editor. Run 38992236787's selection log observed the click's block selection, the editor's focus, then a late
+    // selectionchange at the document's first paragraph that ProseMirror read as the pointer's, replacing the block
+    // selection; the hypothesis is the browser's own focus caret from the press's default, and that run fell in a window
+    // of unstable window activation on the Mac runner. The default is refused once the press has bubbled past the editor
+    // (ProseMirror ignores a press already refused), so the editor focuses itself and selects the block on the click;
+    // the source label's controls keep their own presses.
     const pressed = (event: MouseEvent) => {
       if (event.button === 0 && view.contains(event.target as Node) && !source.contains(event.target as Node)) event.preventDefault();
     };
