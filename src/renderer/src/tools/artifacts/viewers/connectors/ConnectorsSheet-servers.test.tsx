@@ -124,3 +124,21 @@ describe('the Connectors sheet’s Servers section', () => {
     expect(screen.getByRole('button', { name: 'Allow notes · search to read' })).toBeTruthy();
   });
 });
+
+// P3-HD M3c2 correction: the owned sheet's body scrolls within the viewport, so every control and Done stay reachable
+describe('the owned sheet at a narrow height', () => {
+  it('bounds its body by the viewport with its own scroller, Done outside it', async () => {
+    const { tab } = setup({ servers: Array.from({ length: 40 }, (_, i) => ({ kind: 'unreadable', connectionId: `55555555-5555-4555-8555-${String(i).padStart(12, '0')}` }) as ConnectorServerRow) });
+    tab.openSheet();
+    render(<ConnectorsSheet tab={tab} context={{ kind: 'none' }} />);
+    await flush();
+    const body = document.querySelector<HTMLElement>('[data-connectors-body]')!;
+    expect(body).not.toBeNull();
+    expect(body.className).toMatch(/\bmax-h-\[[^\]]*vh[^\]]*\]/);
+    expect(body.className).toContain('overflow-y-auto');
+    expect(body.querySelector('[data-connectors-servers]')).not.toBeNull();
+    expect(body.querySelector('[data-connector-tool]')).not.toBeNull();
+    const done = screen.getByRole('button', { name: 'Done' });
+    expect(body.contains(done)).toBe(false);
+  });
+});

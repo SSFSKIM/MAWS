@@ -32,9 +32,8 @@ export function ArtifactConnectorsSheet({ tab, artifact }: { tab: ConnectorsTab;
 export function ConnectorsSheet({ tab, context }: { tab: ConnectorsTab; context: ArtifactSessionContext }) {
   const view = useStore(tab.view);
   const tools = sheetTools(view);
-  return (
-    <Sheet title={C.title} width="w-[min(520px,90vw)]" onClose={() => tab.closeSheet()} data-connectors-sheet="">
-      <p className="m-0 mb-3 text-ui-sm text-fg-muted">{tab.owned ? S.intro : C.intro}</p>
+  const body = (
+    <>
       {tools.length === 0 ? (
         <p className="m-0 text-ui text-fg-muted">{C.none}</p>
       ) : (
@@ -46,6 +45,20 @@ export function ConnectorsSheet({ tab, context }: { tab: ConnectorsTab; context:
       )}
       {tab.owned && tools.length > 0 && <ServersSection tab={tab} />}
       {view.needsSession && <StartRow tab={tab} context={context} />}
+    </>
+  );
+  return (
+    <Sheet title={C.title} width="w-[min(520px,90vw)]" onClose={() => tab.closeSheet()} data-connectors-sheet="">
+      <p className="m-0 mb-3 text-ui-sm text-fg-muted">{tab.owned ? S.intro : C.intro}</p>
+      {tab.owned ? (
+        // P3-HD M3c2 correction: the tools and servers can outgrow the sheet (it sits 18% from the top); its body scrolls
+        // within the viewport so every control and Done stay reachable, focus rings inside the padding
+        <div data-connectors-body="" className="-mx-1 max-h-[calc(82vh-11rem)] overflow-y-auto px-1 py-0.5">
+          {body}
+        </div>
+      ) : (
+        body
+      )}
       <div className="mt-4 flex justify-end">
         <button type="button" onClick={() => tab.closeSheet()} className={SECONDARY}>
           {C.done}

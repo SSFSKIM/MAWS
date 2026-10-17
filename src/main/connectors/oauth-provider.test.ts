@@ -958,3 +958,96 @@ describe('lifetime', () => {
     expect(read).not.toHaveBeenCalled();
   });
 });
+
+// P3-HD M3c2 correction: the owner's seam, main-only. A notice carries nothing; the owner reads the state again. The
+// provider's authority and fences are unchanged: these only announce what an owner's row would show differently.
+describe('owner notifications and the unattributed snapshot', () => {
+  it('announces an owner flow’s creation and its end, with no payload', async () => {
+    const heard: unknown[][] = [];
+    provider.onChange((...args: unknown[]) => void heard.push(args));
+    const connecting = provider.connect(source());
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+    expect(heard.length).toBeGreaterThan(0); // the flow (and its connection id) exists now
+    expect(await provider.state(IDENTITY)).toEqual({ state: 'connecting', connectionId: FRESH });
+    const before = heard.length;
+    flow.connects[0]!.answer.resolve(grant());
+    expect(await connecting).toEqual({ ok: true, connectionId: FRESH, reused: false });
+    expect(heard.length).toBeGreaterThan(before);
+    expect(heard.every((args) => args.length === 0)).toBe(true);
+  });
+
+  it('announces a cold 401’s parking and a demand’s rejected refresh', async () => {
+    const heard = vi.fn();
+    provider.onChange(heard);
+    provider.unauthorized({ source: source(), purpose: 'call', credential: null });
+    expect(heard).toHaveBeenCalled();
+    expect(await provider.state(IDENTITY)).toEqual({ state: 'needsConnect' });
+    provider.stop();
+    provider = makeProvider();
+    await seed(tokens(1, { expiresAt: NOW + 30_000 }));
+    const later = vi.fn();
+    provider.onChange(later);
+    const demand = prepare();
+    await vi.waitFor(() => expect(flow.refreshes).toHaveLength(1));
+    later.mockClear();
+    flow.refreshes[0]!.answer.reject(new ConnectorOAuthError('rejected'));
+    expect(await demand).toEqual({ ok: false });
+    expect(later).toHaveBeenCalled();
+    expect(await provider.state(IDENTITY)).toEqual({ state: 'needsReconnect', connectionId: SAVED });
+  });
+
+  it('announces a retirement while it is pending, unconfirmed and cleared', async () => {
+    await seed();
+    await prepare();
+    const heard = vi.fn();
+    provider.onChange(heard);
+    closeAnswers = [];
+    const disconnecting = provider.disconnect(SAVED);
+    expect(heard).toHaveBeenCalled();
+    await vi.waitFor(() => expect(closeAnswers).toHaveLength(1));
+    heard.mockClear();
+    closeAnswers[0]!.resolve(false);
+    await disconnecting;
+    expect(provider.disconnecting(SAVED)).toBe('unconfirmed');
+    expect(heard).toHaveBeenCalled();
+    heard.mockClear();
+    provider.hostLost();
+    expect(heard).toHaveBeenCalled();
+  });
+
+  it('says when a forgotten connection’s identity was never learned, even a readable record whose read timed out', async () => {
+    await seed();
+    expect(provider.withdrawnUnattributed()).toBe(false);
+    sealer.openHangs = true;
+    const heard = vi.fn();
+    provider.onChange(heard);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const disconnecting = provider.disconnect(SAVED);
+      await vi.advanceTimersByTimeAsync(OAUTH_FORGET_READ_TIMEOUT_MS);
+      await disconnecting;
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(provider.withdrawnUnattributed()).toBe(true);
+    expect(heard).toHaveBeenCalled();
+  });
+
+  it('a forget whose record was read is attributed: the snapshot stays false', async () => {
+    await seed();
+    await provider.disconnect(SAVED);
+    expect(provider.withdrawnUnattributed()).toBe(false);
+  });
+
+  it('stops announcing once unsubscribed, and a listener that throws harms nothing', async () => {
+    const heard = vi.fn();
+    const off = provider.onChange(heard);
+    provider.onChange(() => {
+      throw new Error('a listener failed');
+    });
+    off();
+    provider.unauthorized({ source: source(), purpose: 'call', credential: null });
+    expect(heard).not.toHaveBeenCalled();
+    expect(await provider.state(IDENTITY)).toEqual({ state: 'needsConnect' });
+  });
+});

@@ -59,6 +59,8 @@ let grants: ConnectorGrant[];
 let states: Map<string, ConnectorOAuthState>;
 let saved: ConnectorOAuthSaved[] | null;
 let disconnecting: Map<string, 'pending' | 'unconfirmed'>;
+let changeListeners: Set<() => void>; // P3-HD M3c2 correction: the provider's change subscription
+let unattributed: boolean; // P3-HD M3c2 correction: the provider's own flag
 let provider: ConnectorOAuthProvider & { [K in 'connect' | 'reconnect' | 'disconnect' | 'state']: ReturnType<typeof vi.fn> };
 let owner: ConnectorOwner;
 let viewer: Viewer;
@@ -79,6 +81,8 @@ beforeEach(() => {
   states = new Map();
   saved = [];
   disconnecting = new Map();
+  changeListeners = new Set();
+  unattributed = false;
   viewer = new Viewer(1);
   provider = {
     state: vi.fn(async (identity: { requestUrl: string; server: string }) => states.get(identity.server) ?? { state: 'disconnected' }),
@@ -87,6 +91,11 @@ beforeEach(() => {
     reconnect: vi.fn(async () => ({ ok: true, connectionId: CONN, reused: false })),
     disconnect: vi.fn(async () => ({ local: 'forgotten', host: 'confirmed', revocation: 'revoked' })),
     disconnecting: (connectionId: string) => disconnecting.get(connectionId) ?? null,
+    onChange: vi.fn((listener: () => void) => {
+      changeListeners.add(listener);
+      return () => void changeListeners.delete(listener);
+    }),
+    withdrawnUnattributed: () => unattributed,
     prepare: vi.fn(),
     unauthorized: vi.fn(),
     hostLost: vi.fn(),
@@ -379,14 +388,20 @@ describe('the owner’s Disconnect', () => {
     expect((await rows()).servers).toHaveLength(1); // confirmed: the retirement row goes
   });
 
-  it('forgetting an unreadable saved connection needs no source, and its withdrawal is explained until relaunch (Decision Log 33)', async () => {
+  it('forgetting an unreadable saved connection needs no source; the withdrawal is the provider’s own flag, never a guess (Decision Log 33)', async () => {
     saved = [{ state: 'unreadable', connectionId: CONN_BAD }];
     expect((await rows(ART, [{ server: 'notes', tool: 'search' }])).servers).toContainEqual({ kind: 'unreadable', connectionId: CONN_BAD });
     owner.disconnect(CONN_BAD);
     await settle();
     expect(provider.disconnect).toHaveBeenCalledWith(CONN_BAD);
     saved = [];
-    expect((await rows()).withdrawnUnattributed).toBe(true);
+    expect((await rows()).withdrawnUnattributed).toBe(false); // the provider learned whose it was: no withdrawal
+    unattributed = true; // e.g. a readable record whose cold read timed out while it was forgotten
+    selections.set(key('web', 'fetch'), ok(http(SRC_B, '/repo', { server: 'web', resourceUrl: 'https://open.example/mcp' })));
+    states.set('web', { state: 'withdrawn' });
+    const answer = await rows(ART, [{ server: 'web', tool: 'fetch' }]);
+    expect(answer.withdrawnUnattributed).toBe(true);
+    expect(answer.servers[0]).toMatchObject({ server: 'web', connection: { state: 'withdrawn' } });
   });
 
   it('invalidates only the windows that read rows, every artifact they read, and forgets a closed window', async () => {
@@ -406,5 +421,115 @@ describe('the owner’s Disconnect', () => {
     owner.disconnect(CONN_OLD);
     await settle();
     expect(other.sent).toEqual([]);
+  });
+});
+
+// P3-HD M3c2 correction wave (the review's five findings)
+describe('the owner’s Disconnect against older actions', () => {
+  it('a newer Disconnect from another window cancels an older Connect still resolving its sources: no flow, no discovery', async () => {
+    const resolving = deferred<Resolved>();
+    selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
+    states.set('notes', { state: 'connected', connectionId: CONN, refreshable: true });
+    const handle = handleOf(await rows(), 'notes');
+    selections.set(key('notes', 'search'), () => resolving.promise); // the action's revalidation pauses here
+    states.set('notes', { state: 'needsConnect' });
+    expect(owner.connect(ART, handle)).toEqual({ accepted: true });
+    await settle();
+    expect(owner.disconnect(CONN)).toEqual({ accepted: true }); // another window's
+    resolving.resolve(ok(http(SRC_A, '/repo')));
+    await settle();
+    expect(provider.connect).not.toHaveBeenCalled();
+    expect(discovered).toEqual([]);
+    expect((await rows()).servers[0]).toMatchObject({ last: { action: 'connect', ok: false, why: 'cancelled' } });
+  });
+
+  it('a Disconnect of an id no row names cancels every HTTP action that could be its, sparing stdio', async () => {
+    const resolving = deferred<Resolved>();
+    const stdioResolving = deferred<Resolved>();
+    selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
+    selections.set(key('files', 'read'), ok(stdio(SRC_S, '/repo'), known));
+    const answer = await rows(ART, [{ server: 'notes', tool: 'search' }, { server: 'files', tool: 'read' }]);
+    selections.set(key('notes', 'search'), () => resolving.promise);
+    selections.set(key('files', 'read'), () => stdioResolving.promise);
+    states.set('notes', { state: 'needsConnect' });
+    owner.connect(ART, handleOf(answer, 'notes'));
+    owner.connect(ART, handleOf(answer, 'files'));
+    await settle();
+    owner.disconnect(CONN_OLD); // never listed: whose it is is unknown
+    resolving.resolve(ok(http(SRC_A, '/repo')));
+    stdioResolving.resolve(ok(stdio(SRC_S, '/repo'), known));
+    await settle();
+    expect(provider.connect).not.toHaveBeenCalled();
+    expect(discovered).toEqual([{ sourceId: SRC_S, directory: '/repo' }]); // the stdio action went on
+  });
+
+  it('a Disconnect of a known connection leaves another identity’s action alone', async () => {
+    selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
+    selections.set(key('web', 'fetch'), ok(http(SRC_B, '/repo', { server: 'web', resourceUrl: 'https://web.example/mcp' })));
+    states.set('notes', { state: 'connected', connectionId: CONN, refreshable: true });
+    states.set('web', { state: 'needsConnect' });
+    const answer = await rows(ART, [{ server: 'notes', tool: 'search' }, { server: 'web', tool: 'fetch' }]);
+    const signals: AbortSignal[] = [];
+    provider.connect.mockImplementation((_source: DirectSource, given: AbortSignal) => {
+      signals.push(given);
+      return new Promise(() => {});
+    });
+    owner.connect(ART, handleOf(answer, 'web'));
+    await settle();
+    owner.disconnect(CONN);
+    expect(signals[0]!.aborted).toBe(false);
+  });
+});
+
+describe('the owner’s saved rows, by the ids actually shown', () => {
+  const record = (connectionId: string): ConnectorOAuthSaved => ({ state: 'sealed', connectionId, identity: { requestUrl: URL_SECRET, server: 'notes', scope: 'user', configPath: '/Users/me/.claude.json', entryPath: ['mcpServers', 'notes'] }, issuer: 'https://as.example', resource: URL_SECRET, savedAt: 1, refreshable: true });
+
+  it('two saved records of the source’s exact identity both stay reachable for Disconnect', async () => {
+    selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
+    states.set('notes', { state: 'unavailable', why: 'duplicate' });
+    saved = [record(CONN), record(CONN_OLD)];
+    const answer = await rows();
+    expect(answer.servers).toEqual([
+      expect.objectContaining({ kind: 'source', connection: { state: 'unavailable', why: 'duplicate' } }),
+      { kind: 'saved', connectionId: CONN, server: 'notes', scope: 'user', path: '/Users/me/.claude.json' },
+      { kind: 'saved', connectionId: CONN_OLD, server: 'notes', scope: 'user', path: '/Users/me/.claude.json' },
+    ]);
+  });
+
+  it('a record whose local delete failed stays reachable after the retirement confirms, and Disconnect retries it', async () => {
+    selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
+    states.set('notes', { state: 'connected', connectionId: CONN, refreshable: true });
+    saved = [record(CONN)];
+    expect((await rows()).servers).toHaveLength(1); // the source row names it
+    provider.disconnect.mockImplementation(async () => ({ local: 'failed', host: 'confirmed', revocation: 'revoked' }));
+    owner.disconnect(CONN);
+    await settle();
+    states.set('notes', { state: 'withdrawn' }); // the provider withdrew the identity; the file is still there
+    const answer = await rows();
+    expect(answer.servers[1]).toEqual({ kind: 'saved', connectionId: CONN, server: 'notes', scope: 'user', path: '/Users/me/.claude.json', last: { action: 'disconnect', local: 'failed', host: 'confirmed', revocation: 'revoked' } });
+    expect(owner.disconnect(CONN)).toEqual({ accepted: true });
+  });
+});
+
+describe('the provider’s changes reach the windows', () => {
+  it('a flow the provider opens after the rows were read invalidates them, revealing its Cancel id; coalesced, no payload', async () => {
+    selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
+    await rows();
+    viewer.sent.length = 0;
+    states.set('notes', { state: 'connecting', connectionId: CONN });
+    for (const listener of changeListeners) listener();
+    for (const listener of changeListeners) listener();
+    expect(viewer.sent).toEqual([]); // coalesced, after the provider's own step
+    await settle();
+    expect(viewer.sent).toEqual([{ artifactId: ART }]);
+    expect((await rows()).servers[0]).toMatchObject({ connection: { state: 'connecting', connectionId: CONN } });
+  });
+
+  it('reading the rows never notifies, and stop unsubscribes', async () => {
+    await rows();
+    expect(viewer.sent).toEqual([]);
+    expect(changeListeners.size).toBe(1);
+    owner.stop();
+    expect(changeListeners.size).toBe(0);
   });
 });

@@ -22,6 +22,11 @@
 //   confirmed stays visible as its own row, retryable, after the provider has forgotten the record (`disconnecting` is the
 //   provider's, separate from `saved`). Forgetting an unreadable record withdraws, for this main's lifetime, every HTTP
 //   source without its own MAWS sign-in from automatic use (the provider's rule, Decision Log 33); the answer says so.
+// - P3-HD M3c2 correction: a Disconnect synchronously cancels every older owner action it could concern (the exact
+//   HTTP row a listing tied the id to; every HTTP action when no listing did), before anything awaits, so an older
+//   Connect or Reconnect never reaches the provider after a newer Disconnect. A saved record is hidden only behind a
+//   row that shows its id. The provider's own changes (`onChange`, no payload) become the same targeted invalidation,
+//   coalesced; the unattributed withdrawal is the provider's own flag.
 import { randomUUID } from 'node:crypto';
 import type { ConnectorGrant, ConnectorToolRef } from '@shared/artifacts/connectors';
 import { eventChannel } from '@shared/ipc/schema';
@@ -57,7 +62,7 @@ export interface ConnectorOwnerViewer {
 
 export interface ConnectorOwnerDeps {
   direct: Pick<DirectRoute, 'resolveSource' | 'discover'>;
-  oauth: Pick<ConnectorOAuthProvider, 'state' | 'saved' | 'connect' | 'reconnect' | 'disconnect' | 'disconnecting'> | null; // null: no OAuth of MAWS's own
+  oauth: Pick<ConnectorOAuthProvider, 'state' | 'saved' | 'connect' | 'reconnect' | 'disconnect' | 'disconnecting' | 'onChange' | 'withdrawnUnattributed'> | null; // null: no OAuth of MAWS's own
   grants(artifactId: string): Promise<ConnectorGrant[]>; // the artifact's durable grants
   log?: (line: string) => void;
 }
@@ -160,7 +165,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
   const disconnects = new Set<string>(); // in flight
   const viewers = new Map<number, { viewer: ConnectorOwnerViewer; artifacts: Set<string> }>();
   const queries = new Set<AbortController>();
-  let withdrawnUnattributed = false;
+  const connectionRows = new Map<string, string>(); // P3-HD M3c2 correction: connection id → the HTTP row key a listing tied it to
   let stopped = false;
 
   // ── invalidation, to the windows that read rows ──
@@ -290,6 +295,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
         connection = connectionOf(await within(oauth.state(identity), signal, { state: 'unavailable', why: 'store' } as ConnectorOAuthState));
         if (connection.connectionId !== undefined) {
           labels.set(connection.connectionId, origin);
+          remember(connectionRows, connection.connectionId, group.key); // P3-HD M3c2 correction
           shown.add(connection.connectionId);
           const leaving = oauth.disconnecting(connection.connectionId);
           if (leaving) connection = { ...connection, disconnecting: leaving };
@@ -310,7 +316,6 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
       const listed = await within<ConnectorOAuthSaved[] | null>(oauth.saved(), signal, null);
       if (listed === null) saved = 'unavailable';
       const named = new Set([...tools.values()].map((tool) => tool.server));
-      const used = new Set([...groups.keys()]);
       for (const entry of listed ?? []) {
         if (shown.has(entry.connectionId)) continue;
         const disconnecting = oauth.disconnecting(entry.connectionId);
@@ -319,9 +324,12 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
         if (entry.state === 'unreadable') {
           labels.set(entry.connectionId, 'unreadable');
           rows.push({ kind: 'unreadable', connectionId: entry.connectionId, ...extra });
-        } else if (named.has(entry.identity.server) && !used.has(`http\0${identityKey(entry.identity)}`)) {
+        } else if (named.has(entry.identity.server)) {
+          // P3-HD M3c2 correction: hidden only behind a row that shows this id (`shown`), never because a row resolves
+          // the same identity: a duplicate, or a record whose deletion failed, stays reachable for Disconnect
           const origin: Origin = { server: entry.identity.server, scope: entry.identity.scope, path: entry.identity.configPath };
           labels.set(entry.connectionId, origin);
+          remember(connectionRows, entry.connectionId, `http\0${identityKey(entry.identity)}`);
           rows.push({ kind: 'saved', connectionId: entry.connectionId, ...origin, ...extra });
         } else {
           continue;
@@ -340,7 +348,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
         rows.push({ kind: 'retiring', connectionId, ...(origin ?? {}), disconnecting, ...(last && { last }) });
       }
     }
-    return { servers: rows.slice(0, 1_024), saved, withdrawnUnattributed };
+    return { servers: rows.slice(0, 1_024), saved, withdrawnUnattributed: oauth?.withdrawnUnattributed() ?? false }; // P3-HD M3c2 correction: the provider's flag
   }
 
   // ── actions ──
@@ -411,6 +419,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     const identity = oauthIdentityOf(first);
     if (!identity || !oauth) return (await discoverAll(kind, sources, signal, 'none')).last;
     if (kind === 'reconnect') {
+      if (signal.aborted) return fail('cancelled'); // P3-HD M3c2 correction: a newer Disconnect wins
       const replaced = await oauth.reconnect(first, signal);
       if (!replaced.ok) return fail(failure(replaced.why));
       return (await discoverAll(kind, sources, signal, 'maws')).last;
@@ -435,6 +444,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
       default: // needsConnect, withdrawn: the owner's explicit Connect
         break;
     }
+    if (signal.aborted) return fail('cancelled'); // P3-HD M3c2 correction: a newer Disconnect wins
     const connected = await oauth.connect(first, signal);
     if (!connected.ok) return fail(failure(connected.why));
     return (await discoverAll(kind, sources, signal, 'maws')).last;
@@ -447,7 +457,12 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     if (!oauth) return { accepted: false, why: 'stale' };
     if (disconnects.has(connectionId)) return { accepted: false, why: 'busy' };
     const label = labels.get(connectionId);
-    if (label === 'unreadable') withdrawnUnattributed = true; // whose it was is unknown: the provider withdraws (Decision Log 33)
+    // P3-HD M3c2 correction: before anything awaits, the older actions it could concern end (the provider's generation
+    // cannot stop one not yet admitted to it): the exact HTTP row a listing tied the id to, else every HTTP action
+    const row = connectionRows.get(connectionId);
+    for (const [key, action] of [...actions]) {
+      if (row !== undefined ? key === row : key.startsWith('http\0')) action.controller.abort();
+    }
     remember(retiring, connectionId, label === undefined || label === 'unreadable' ? null : label);
     disconnects.add(connectionId);
     changed();
@@ -462,6 +477,18 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     return { accepted: true };
   }
 
+  // P3-HD M3c2 correction: the provider's changes, coalesced into one invalidation after its own step
+  let scheduled = false;
+  const unsubscribe =
+    oauth?.onChange(() => {
+      if (scheduled || stopped) return;
+      scheduled = true;
+      queueMicrotask(() => {
+        scheduled = false;
+        if (!stopped) changed();
+      });
+    }) ?? null;
+
   return {
     servers,
     connect: (artifactId, sourceHandle) => start('connect', artifactId, sourceHandle),
@@ -474,6 +501,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     stop() {
       if (stopped) return;
       stopped = true;
+      unsubscribe?.(); // P3-HD M3c2 correction
       for (const action of actions.values()) action.controller.abort();
       for (const query of queries) query.abort();
       viewers.clear();

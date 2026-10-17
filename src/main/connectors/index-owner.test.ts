@@ -89,6 +89,7 @@ let me: FakeSender;
 let closeHost: ((target: { connectionId: string; credentialEpoch?: number }) => Promise<boolean>) | null;
 let routeDeps: DirectRouteDeps | null;
 let provider: ConnectorOAuthProvider;
+let changeListeners: Set<() => void>;
 
 function start(over: Partial<ConnectorsDeps> = {}) {
   service = startConnectors({
@@ -117,6 +118,7 @@ beforeEach(() => {
   me = new FakeSender(7);
   closeHost = null;
   routeDeps = null;
+  changeListeners = new Set();
   provider = {
     prepare: vi.fn(async () => ({ ok: true, credential: null })),
     unauthorized: vi.fn(),
@@ -126,6 +128,11 @@ beforeEach(() => {
     reconnect: vi.fn(),
     disconnect: vi.fn(async () => ({ local: 'forgotten', host: 'confirmed', revocation: 'revoked' })),
     disconnecting: vi.fn(() => null),
+    onChange: vi.fn((listener: () => void) => {
+      changeListeners.add(listener);
+      return () => void changeListeners.delete(listener);
+    }), // P3-HD M3c2 correction
+    withdrawnUnattributed: vi.fn(() => false),
     hostLost: vi.fn(),
     stop: vi.fn(),
   } as never;
@@ -171,6 +178,18 @@ describe('MAWS’s own OAuth beside route D', () => {
     expect(await invoke('connectors.disconnect', { connectionId: CONN })).toEqual({ accepted: true });
     expect(provider.disconnect).toHaveBeenCalledWith(CONN);
     expect(me.sent).toContainEqual([eventChannel('connectors.serversChanged'), { artifactId: ART }]);
+  });
+
+  // P3-HD M3c2 correction: a provider change (a flow opened, a refresh rejected) reaches the window that read rows
+  it('turns the provider’s change notice into the targeted invalidation, and unsubscribes at stop', async () => {
+    start();
+    await invoke('connectors.servers', { artifactId: ART, tools: [{ server: 'notes', tool: 'search' }] });
+    me.sent.length = 0;
+    for (const listener of changeListeners) listener();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(me.sent).toEqual([[eventChannel('connectors.serversChanged'), { artifactId: ART }]]);
+    service.stop();
+    expect(changeListeners.size).toBe(0);
   });
 
   it('without route D (H’s engine-only service) neither OAuth nor the owner’s server commands exist', () => {

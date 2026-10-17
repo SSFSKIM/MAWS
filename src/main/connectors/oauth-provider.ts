@@ -45,6 +45,8 @@
 //   serves another's requests) ends every waiting demand and owner flow and drops pending closes, whose epochs end with
 //   that attachment; a refresh in flight still persists its rotation under its claim, for the next attachment's
 //   demand. `stop` (main stopping) ends everything and refuses later work.
+// - P3-HD M3c2 correction: the owner's rows hear `onChange` (no payload) when something they show may differ, and read
+//   `withdrawnUnattributed` as this provider's own flag. Neither grants, fences or delivers anything.
 import { randomUUID } from 'node:crypto';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
 import type { DirectCredentialPreparation, DirectCredentialPrepared } from './direct-route';
@@ -107,6 +109,12 @@ export interface ConnectorOAuthProvider extends DirectCredentialPreparation {
   // A withdrawn connection's retirement still unanswered (`pending`) or answered without confirmation (`unconfirmed`):
   // until it clears, its identity is delivered nothing.
   disconnecting(connectionId: string): 'pending' | 'unconfirmed' | null;
+  // P3-HD M3c2 correction (the owner's seam, main-only): `listener` hears, with nothing in the notice, that something an
+  // owner's row shows may differ (a flow begun or ended, a source parked, withdrawn or reconnect-bound, a retirement's
+  // state, a forgotten record, the unattributed withdrawal). The owner reads the state again; nothing here is authority.
+  onChange(listener: () => void): () => void;
+  // Whether a connection was forgotten without its identity learned in this main's lifetime (Decision Log 33).
+  withdrawnUnattributed(): boolean;
   hostLost(): void;
   stop(): void;
 }
@@ -181,6 +189,17 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
   let stopped = false;
   let attachment = new AbortController(); // the engine host's attachment; aborted when it ends, and at stop
   const lifetime = new AbortController(); // main's: aborted at stop
+  // P3-HD M3c2 correction: the owner's change listeners, told synchronously and never trusted to succeed
+  const listeners = new Set<() => void>();
+  const notify = () => {
+    for (const listener of [...listeners]) {
+      try {
+        listener();
+      } catch {
+        log('connectors: an OAuth change listener failed');
+      }
+    }
+  };
 
   const expiring = (tokens: { expiresAt?: number }) => tokens.expiresAt !== undefined && tokens.expiresAt - now() <= OAUTH_REFRESH_MARGIN_MS;
   const expired = (tokens: { expiresAt?: number }) => tokens.expiresAt !== undefined && tokens.expiresAt <= now();
@@ -224,6 +243,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
 
   // Ends the slot's saved state at once (Disconnect, a Reconnect's withdrawal): no later step of earlier work lands.
   function withdraw(slot: Slot): void {
+    const visible = slot.blocked !== 'withdrawn' || slot.held !== null || slot.flow !== null || slot.closing.length > 0; // P3-HD M3c2 correction
     slot.generation += 1;
     slot.blocked = 'withdrawn';
     slot.refresh?.abort();
@@ -232,6 +252,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     slot.held = null;
     slot.issued = null;
     slot.closing = [];
+    if (visible) notify(); // P3-HD M3c2 correction
   }
 
   // The identity's saved grant into `slot.held`, or why there is none to use.
@@ -312,7 +333,10 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     if (issued.unusable || expiring(issued)) {
       const refreshToken = held.record.tokens.refreshToken;
       if (refreshToken === undefined) {
-        if (issued.unusable || expired(issued)) slot.blocked = 'needsReconnect';
+        if (issued.unusable || expired(issued)) {
+          slot.blocked = 'needsReconnect';
+          notify(); // P3-HD M3c2 correction
+        }
         return; // a still-valid token is used until it expires
       }
       const controller = new AbortController();
@@ -321,7 +345,10 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       try {
         rotated = await flow.refresh(grantOf(held.record), controller.signal);
       } catch (error) {
-        if (current() && error instanceof ConnectorOAuthError && error.code === 'rejected') slot.blocked = 'needsReconnect';
+        if (current() && error instanceof ConnectorOAuthError && error.code === 'rejected') {
+          slot.blocked = 'needsReconnect';
+          notify(); // P3-HD M3c2 correction
+        }
         return;
       } finally {
         if (slot.refresh === controller) slot.refresh = null;
@@ -396,11 +423,13 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     const issued = issuedHigh.get(connectionId);
     const entry: Retirement = { key: issued?.key ?? null, floor: issued?.epoch ?? 0, state: 'pending' };
     retirements.set(connectionId, entry);
+    notify(); // P3-HD M3c2 correction
     const host = attachment.signal;
     return closeBounded({ connectionId, credentialEpoch: entry.floor }).then((confirmed) => {
       if (retirements.get(connectionId) === entry) {
         if (confirmed || host.aborted) retirements.delete(connectionId);
         else entry.state = 'unconfirmed';
+        notify(); // P3-HD M3c2 correction
       }
       return confirmed;
     });
@@ -416,7 +445,10 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         const read = await readBounded(connectionId);
         record = typeof read === 'string' ? null : read;
         // whose grant it was is unknown: no source without its own owned grant is served for this main's lifetime
-        if (read === 'unknown') unattributed = true;
+        if (read === 'unknown') {
+          unattributed = true;
+          notify(); // P3-HD M3c2 correction
+        }
         const slot = record && enter(record.identity);
         if (slot) {
           // the identity is withdrawn too, unless main holds another connection for it
@@ -429,6 +461,8 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       } catch {
         forgotten.delete(connectionId); // still on disk: listed again, for another attempt
         return { local: 'failed', record };
+      } finally {
+        notify(); // P3-HD M3c2 correction: the saved list changed (or did not, after all)
       }
     })();
     const revocation = local.then(({ record }) => (record ? revokeBounded(grantOf(record)) : ('none' as const)));
@@ -447,6 +481,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     const controller = new AbortController();
     const me = { connectionId, controller };
     slot.flow = me;
+    notify(); // P3-HD M3c2 correction: the flow and its connection id exist
     const onOwner = () => controller.abort();
     signal?.addEventListener('abort', onOwner, { once: true });
     if (signal?.aborted) controller.abort();
@@ -498,6 +533,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       signal?.removeEventListener('abort', onOwner);
       controller.signal.removeEventListener('abort', discard);
       if (slot.flow === me) slot.flow = null; // a failed replacement leaves `withdraw`'s block: nothing is revived
+      notify(); // P3-HD M3c2 correction
     }
   }
 
@@ -582,7 +618,10 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       if (credential === null) {
         slot.users -= 1;
         // sent with none, refused: the server needs authorization; parked until the owner connects
-        if (!slot.held && !slot.flow && slot.blocked === null) slot.blocked = 'needsConnect';
+        if (!slot.held && !slot.flow && slot.blocked === null) {
+          slot.blocked = 'needsConnect';
+          notify(); // P3-HD M3c2 correction
+        }
         return;
       }
       const { issued } = slot;
@@ -632,7 +671,10 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         const held = slot.held;
         if (held) {
           if (needsReconnect(slot, held)) return { ok: false, why: 'needsReconnect' };
-          slot.blocked = null; // an explicit Connect over a saved grant: no browser, no registration
+          if (slot.blocked !== null) {
+            slot.blocked = null; // an explicit Connect over a saved grant: no browser, no registration
+            notify(); // P3-HD M3c2 correction
+          }
           return { ok: true, connectionId: held.record.connectionId, reused: true };
         }
         return runFlow(slot, null, signal);
@@ -672,6 +714,14 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       return retirements.get(connectionId)?.state ?? null;
     },
 
+    // P3-HD M3c2 correction start: the owner's seam
+    onChange(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    withdrawnUnattributed: () => unattributed,
+    // P3-HD M3c2 correction end
+
     hostLost() {
       attachment.abort();
       attachment = new AbortController();
@@ -680,6 +730,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         slot.closing = [];
         slot.flow?.controller.abort();
       }
+      notify(); // P3-HD M3c2 correction
     },
 
     stop() {
@@ -692,6 +743,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         slot.refresh?.abort();
         slot.flow?.controller.abort();
       }
+      listeners.clear(); // P3-HD M3c2 correction
     },
   };
 }
