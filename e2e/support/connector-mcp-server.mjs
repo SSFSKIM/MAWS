@@ -64,7 +64,7 @@ function releaseLater() {
     clearInterval(releasing);
     releasing = null;
     for (const message of held.splice(0)) {
-      record({ method: null, event: 'released', tool: message.params?.name });
+      record({ method: null, event: 'released', tool: message.params?.name, rpcId: message.id });
       reply(message);
     }
   }, 100);
@@ -75,7 +75,8 @@ if (hold !== null) process.stdout.on('error', () => {}); // P3-HD M4b: a late an
 for await (const line of createInterface({ input: process.stdin })) {
   if (line.trim() === '') continue;
   const message = JSON.parse(line);
-  record({ method: message.method ?? null, ...(message.method === 'tools/call' ? { tool: message.params?.name, arguments: message.params?.arguments ?? {} } : {}) });
+  // P3-HD M4b: with a hold file, a tools/call is logged with its JSON-RPC id, so a scene can tell which held call was released
+  record({ method: message.method ?? null, ...(message.method === 'tools/call' ? { tool: message.params?.name, arguments: message.params?.arguments ?? {}, ...(hold !== null && { rpcId: message.id }) } : {}) });
   if (hold !== null && message.method === 'tools/call' && existsSync(hold)) {
     // P3-HD M4: submitted and held; M4b: answered when the hold file is removed
     if (message.id !== undefined) held.push(message);

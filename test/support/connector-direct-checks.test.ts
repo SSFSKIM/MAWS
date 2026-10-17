@@ -1,9 +1,13 @@
-// P3-HD M4b: the pure checks route D's integrated scenes (e2e/connectors-direct.spec.ts) rest their custody, listener,
+// P3-HD M4b: the pure checks route D's integrated scenes (e2e/connectors-direct.spec.ts, e2e/connectors-oauth.spec.ts) rest their custody, listener,
 // sealed-record, journal, bearer and page claims on (e2e/support/connector-direct-checks.ts). No app, engine, socket or
 // fixture process: each check is driven with the values a scene would read.
-import { describe, expect, it } from 'vitest';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  addedListeners, bearerCrossings, custodyProblems, isRetainedScratch, journalTurns, loopbackPort, oncePageHtml, pageVariant, plaintextHits, readSealedText, SEALED_FORMAT,
+  addedListeners, attachIfClean, bearerCrossings, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
+  scanScratchTree, SEALED_FORMAT, type ScratchFs,
 } from '../../e2e/support/connector-direct-checks';
 
 describe('custodyProblems: the scratch profile and mock keychain a launch must show before any owner action', () => {
@@ -165,5 +169,128 @@ const tool = { server: "fixture", tool: "read_series" };
     expect(html).toContain('<button id="call" type="button">');
     expect(html).not.toContain('mawsConnectors.watch');
     expect(oncePageHtml({ server: 'a"b', tool: '</script>', title: 'T' })).toContain('const tool = { server: "a\\"b", tool: "<\\/script>" };');
+  });
+});
+
+describe('heldFate: what became of one held call once its hold was lifted', () => {
+  const held = { pid: 41, rpcId: 7 };
+  const entries = [
+    { pid: 41, method: 'tools/call', rpcId: 7 },
+    { pid: 41, method: null, event: 'released', rpcId: 6 }, // another call's release
+    { pid: 42, method: null, event: 'released', rpcId: 7 }, // another instance's
+  ];
+
+  it('is released only by that instance’s release of that call', () => {
+    expect(heldFate([...entries, { pid: 41, method: null, event: 'released', rpcId: 7 }], held, true)).toBe('released');
+    expect(heldFate([...entries, { pid: 41, method: null, event: 'released', rpcId: 7 }], held, false)).toBe('released');
+  });
+
+  it('is torn down when its instance is gone without releasing it', () => {
+    expect(heldFate(entries, held, false)).toBe('teardown');
+  });
+
+  it('is still pending while its instance lives and has not released it: a broken release cannot pass', () => {
+    expect(heldFate(entries, held, true)).toBe('pending');
+    expect(heldFate([], held, true)).toBe('pending');
+  });
+});
+
+describe('attachIfClean: a screenshot attached only once the live documents scanned clean', () => {
+  const deps = (over: Partial<Parameters<typeof attachIfClean>[0]> = {}) => {
+    const capture = vi.fn(async () => Buffer.from('png'));
+    const attach = vi.fn<(body: Buffer) => Promise<void>>(async () => {});
+    return { capture, attach, all: { read: async () => ['<html>sheet</html>', '<html>page</html>'], scan: () => ({}), capture, attach, ...over } };
+  };
+
+  it('captures and attaches when every document is clean', async () => {
+    const { capture, attach, all } = deps();
+    await expect(attachIfClean(all)).resolves.toEqual({ documents: 2 });
+    expect(capture).toHaveBeenCalledOnce();
+    expect(attach).toHaveBeenCalledWith(Buffer.from('png'));
+  });
+
+  it('never captures or attaches when a document carries a secret, reporting kinds and counts only', async () => {
+    const secret = 'synthetic-access-token-value';
+    const { capture, attach, all } = deps({ read: async () => [`<p>${secret}</p>`], scan: (texts) => (texts.some((text) => text.includes(secret)) ? { accessToken: 1 } : {}) });
+    const failure = await attachIfClean(all).catch((error: Error) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain('accessToken: 1');
+    expect((failure as Error).message).not.toContain(secret);
+    expect(capture).not.toHaveBeenCalled();
+    expect(attach).not.toHaveBeenCalled();
+  });
+
+  it('never certifies a read that failed, read nothing, or read an empty document', async () => {
+    for (const read of [async () => Promise.reject(new Error('frame detached')), async () => [], async () => ['<html>sheet</html>', '']]) {
+      const { capture, attach, all } = deps({ read });
+      await expect(attachIfClean(all)).rejects.toThrow();
+      expect(capture).not.toHaveBeenCalled();
+      expect(attach).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe('scanScratchTree: every retainable scratch file read in bounded chunks, every gap a failure', () => {
+  let root: string;
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-scratch-scan-')));
+  });
+  afterEach(() => {
+    chmodSync(root, 0o700);
+    rmSync(root, { recursive: true, force: true });
+  });
+  const SECRET = 'synthetic-refresh-token-0123456789';
+  const clean = (text: string) => !text.includes(SECRET);
+
+  it('reads every retainable file, skipping only the excluded ones, and finds a value across a chunk boundary', () => {
+    mkdirSync(join(root, 'ud', 'supervisor'), { recursive: true });
+    writeFileSync(join(root, 'ud', 'supervisor', 'host.log'), 'quiet');
+    writeFileSync(join(root, 'ud', 'supervisor', 'host.token'), SECRET); // excluded, never read
+    writeFileSync(join(root, 'open.log'), SECRET); // excluded
+    writeFileSync(join(root, 'big.log'), `${'x'.repeat(1_000)}${SECRET}${'y'.repeat(1_000)}`);
+    const scan = scanScratchTree(root, clean, { chunkBytes: 1_010, overlapBytes: 64 });
+    expect(scan).toEqual({ files: 2, bytes: 5 + 2_000 + SECRET.length, gone: [], failures: [], dirty: ['big.log'] });
+  });
+
+  it('reads a file larger than any one chunk whole, in bounded reads', () => {
+    writeFileSync(join(root, 'large.bin'), Buffer.alloc(10_000, 0x61));
+    const reads: number[] = [];
+    const fs: ScratchFs = { ...nodeScratchFs, read: (path, position, length) => (reads.push(length), nodeScratchFs.read(path, position, length)) };
+    expect(scanScratchTree(root, clean, { fs, chunkBytes: 4_096, overlapBytes: 64 })).toMatchObject({ files: 1, bytes: 10_000, failures: [], dirty: [] });
+    expect(Math.max(...reads)).toBeLessThanOrEqual(4_096);
+  });
+
+  it('fails a file or directory it cannot read', () => {
+    writeFileSync(join(root, 'locked.log'), 'x');
+    chmodSync(join(root, 'locked.log'), 0o000);
+    mkdirSync(join(root, 'shut'));
+    chmodSync(join(root, 'shut'), 0o000);
+    try {
+      const scan = scanScratchTree(root, clean);
+      expect(scan.failures.map((failure) => failure.path).sort()).toEqual(['locked.log', 'shut']);
+      expect(scan.failures.every((failure) => failure.code === 'EACCES')).toBe(true);
+    } finally {
+      chmodSync(join(root, 'locked.log'), 0o600);
+      chmodSync(join(root, 'shut'), 0o700);
+    }
+  });
+
+  it('counts a file gone between listing and reading as gone, not as read or failed; any other error fails', () => {
+    writeFileSync(join(root, 'a.log'), 'x');
+    writeFileSync(join(root, 'b.log'), 'x');
+    const error = (code: string) => Object.assign(new Error(code), { code });
+    const fs: ScratchFs = {
+      ...nodeScratchFs,
+      read: (path, position, length) => {
+        if (path.endsWith('a.log')) throw error('ENOENT');
+        if (path.endsWith('b.log')) throw error('EIO');
+        return nodeScratchFs.read(path, position, length);
+      },
+    };
+    expect(scanScratchTree(root, clean, { fs })).toEqual({ files: 0, bytes: 0, gone: ['a.log'], failures: [{ path: 'b.log', code: 'EIO' }], dirty: [] });
+  });
+
+  it('fails a root it cannot list', () => {
+    expect(scanScratchTree(join(root, 'missing'), clean).failures).toEqual([{ path: '.', code: 'ENOENT' }]);
   });
 });

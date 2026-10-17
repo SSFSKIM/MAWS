@@ -1,4 +1,4 @@
-// P3-HD M4b: the OAuth scenes' app-side support (e2e/connectors-direct.spec.ts, "oauth …"), over the toy fixture of
+// P3-HD M4b: the OAuth scenes' app-side support (e2e/connectors-oauth.spec.ts), over the toy fixture of
 // ./connector-oauth.ts and its fake browser (./connector-oauth-browser.ts). docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md,
 // acceptance 4 and 6, Decision Log 23, 25 and 28:
 // - `expectScratchCustody` reads, on each launch and before any owner action, that main runs on the mock keychain with
@@ -10,17 +10,18 @@
 //   and the listener closed after its one answer. The raw open log carries the authorization URL's state and PKCE
 //   challenge: only the reviewed helpers read it, in memory; nothing here prints, attaches or asserts on its text;
 // - `sealedRecords` reads `<userData>/connectors/oauth/` (modes, the format line, the ciphertext), never decrypting;
-// - `scanScratch` reads the scene's retainable scratch files (./connector-direct-checks.ts `isRetainedScratch`).
+// - `cleanShot` attaches a screenshot only after the live documents scanned clean (the whole-scratch scan is
+//   ./connector-direct-checks.ts `scanScratchTree`).
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, sep } from 'node:path';
-import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
+import { join } from 'node:path';
+import { expect, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
 import type { ConnectorServerRow } from '@shared/ipc/schema/connectors';
 import { SERVERS_COPY as S } from '../../src/renderer/src/tools/artifacts/viewers/connectors/copy';
-import { addedListeners, custodyProblems, isRetainedScratch, loopbackPort, readSealedText } from './connector-direct-checks';
+import { addedListeners, attachIfClean, custodyProblems, loopbackPort, readSealedText } from './connector-direct-checks';
 import { followAuthorization, openExternalUrls, type FollowedAuthorization } from './connector-oauth-browser';
-import { readOAuthLog, type OAuthFixturePaths } from './connector-oauth';
+import { readOAuthLog, scanForSecrets, type OAuthFixturePaths } from './connector-oauth';
 import { onLaunched } from './launch';
 import { tcpListeners } from './processes';
 import type { ConnectorScene, Run } from './connector-scene';
@@ -137,50 +138,26 @@ export function sealedRecords(scene: ConnectorScene): SealedStore {
   return { dirMode: mode(dir), parentMode: mode(parent), records };
 }
 
-// Every retainable regular file under the scene's root, read as Latin-1 (any byte sequence a secret could be in), each
-// passed to `clean`: how many were read, how many were too large to read, and the relative paths that were not clean.
-export function scanScratch(scene: ConnectorScene, clean: (text: string) => boolean, maxBytes = 64 * 1024 * 1024): { files: number; tooLarge: number; dirty: string[] } {
-  const found = { files: 0, tooLarge: 0, dirty: [] as string[] };
-  const walk = (dir: string) => {
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return; // gone meanwhile
-    }
-    for (const name of entries) {
-      const path = join(dir, name);
-      const rel = relative(scene.root, path).split(sep).join('/');
-      let info;
-      try {
-        info = lstatSync(path);
-      } catch {
-        continue;
-      }
-      if (info.isDirectory()) walk(path);
-      else if (info.isFile() && isRetainedScratch(rel)) {
-        if (info.size > maxBytes) {
-          found.tooLarge += 1;
-          continue;
-        }
-        let text;
-        try {
-          text = readFileSync(path).toString('latin1');
-        } catch {
-          continue;
-        }
-        found.files += 1;
-        if (!clean(text)) found.dirty.push(rel);
-      }
-    }
-  };
-  walk(scene.root);
-  return found;
+// Every frame's document of the app's window, for the secret scans: a frame that cannot be read fails the scan.
+export async function documentTexts(page: Page): Promise<string[]> {
+  return Promise.all(page.frames().map((frame) => frame.content()));
 }
 
-// Every frame's document of the app's window, for the secret scan.
-export async function domTexts(page: Page): Promise<string[]> {
-  return Promise.all(page.frames().map((frame) => frame.content().catch(() => '')));
+// A screenshot of the live sheet or page, attached only after every document of the app's window, read as it is shown,
+// scanned clean against each fixture that has minted secrets (./connector-direct-checks.ts attachIfClean).
+export async function cleanShot(info: TestInfo, name: string, target: Locator, page: Page, fixtures: readonly OAuthFixturePaths[]): Promise<void> {
+  const minted = fixtures.filter((fixture) => existsSync(fixture.secrets));
+  const { documents } = await attachIfClean({
+    read: () => documentTexts(page),
+    scan: (texts) => {
+      const found: Record<string, number> = {};
+      for (const fixture of minted) for (const [kind, count] of Object.entries(scanForSecrets(fixture, texts).found)) found[kind] = (found[kind] ?? 0) + (count ?? 0);
+      return found;
+    },
+    capture: () => target.screenshot(),
+    attach: (body) => info.attach(name, { body, contentType: 'image/png' }),
+  });
+  info.annotations.push({ type: 'clean-shot', description: JSON.stringify({ name, documents, fixturesScanned: minted.length }) });
 }
 
 // The fixture's MCP requests since `from` (ms).

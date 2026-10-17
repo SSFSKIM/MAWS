@@ -1,4 +1,4 @@
-// P3-HD M4b: the pure checks route D's integrated scenes (e2e/connectors-direct.spec.ts) rest on, free of Playwright
+// P3-HD M4b: the pure checks route D's integrated scenes (e2e/connectors-direct.spec.ts, e2e/connectors-oauth.spec.ts) rest on, free of Playwright
 // so test/support/connector-direct-checks.test.ts runs them under vitest. docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md,
 // acceptance 1-6 and Decision Log 23, 25 and 28:
 // - `custodyProblems`: the launch's mock keychain and canonical scratch profile, checked before any owner action (the
@@ -9,7 +9,12 @@
 // - `isRetainedScratch`: which scratch files a scene scans for secrets (never the host token, the raw open log, a
 //   fixture's secrets inventory or a sealed record, which is scanned apart);
 // - `bearerCrossings`: a bearer presented to a server that did not issue it;
-// - `pageVariant` / `oncePageHtml`: H's page re-pointed at another server, and a page that calls once per click.
+// - `pageVariant` / `oncePageHtml`: H's page re-pointed at another server, and a page that calls once per click;
+// - `heldFate`: whether one held call was answered late by its instance, or its instance was torn down first;
+// - `attachIfClean`: a screenshot captured and attached only after the live documents scanned clean;
+// - `scanScratchTree`: every retainable scratch file read whole in bounded chunks, every unreadable one a failure.
+import { closeSync, lstatSync, openSync, readdirSync, readSync } from 'node:fs';
+import { join } from 'node:path';
 
 export interface CustodyFacts {
   mockKeychain: boolean; // main's `use-mock-keychain` switch
@@ -157,4 +162,118 @@ document.getElementById('call').addEventListener('click', async () => show(await
 </script>
 </body></html>
 `;
+}
+
+// What became of one held tools/call (its instance's pid, its JSON-RPC id) once its hold was lifted: `released` when that
+// instance logged releasing that call (support/connector-mcp-server.mjs `--hold`, just before it writes the answer),
+// `teardown` when the instance is gone without having done so, `pending` while it lives and has not: a release that
+// never comes from a live instance is never taken for either.
+export function heldFate(entries: readonly { pid: number; event?: unknown; rpcId?: unknown }[], held: { pid: number; rpcId: unknown }, alive: boolean): 'released' | 'teardown' | 'pending' {
+  if (entries.some((entry) => entry.event === 'released' && entry.pid === held.pid && entry.rpcId === held.rpcId)) return 'released';
+  return alive ? 'pending' : 'teardown';
+}
+
+// A screenshot taken and attached only after every live document was read and none carries a secret. A failed read,
+// no documents or an empty one certifies nothing; a finding is reported by kind and count, never by value.
+export async function attachIfClean(deps: {
+  read(): Promise<readonly string[]>;
+  scan(texts: readonly string[]): Partial<Record<string, number>>;
+  capture(): Promise<Buffer>;
+  attach(body: Buffer): Promise<void>;
+}): Promise<{ documents: number }> {
+  const texts = await deps.read();
+  if (texts.length === 0 || texts.some((text) => text.length === 0)) throw new Error('attachIfClean: a live document read empty, so the screenshot cannot be certified');
+  const found = Object.entries(deps.scan(texts)).filter(([, count]) => (count ?? 0) > 0);
+  if (found.length > 0) throw new Error(`attachIfClean: the live documents carry fixture secrets (${found.map(([kind, count]) => `${kind}: ${count}`).join(', ')}); no screenshot taken`);
+  await deps.attach(await deps.capture());
+  return { documents: texts.length };
+}
+
+export interface ScratchFs {
+  readdir(dir: string): string[];
+  lstat(path: string): { kind: 'dir' | 'file' | 'other' };
+  read(path: string, position: number, length: number): Buffer; // up to `length` bytes at `position`; empty at the end
+}
+export const nodeScratchFs: ScratchFs = {
+  readdir: (dir) => readdirSync(dir),
+  lstat(path) {
+    const info = lstatSync(path);
+    return { kind: info.isDirectory() ? 'dir' : info.isFile() ? 'file' : 'other' };
+  },
+  read(path, position, length) {
+    const fd = openSync(path, 'r');
+    try {
+      const buffer = Buffer.alloc(length);
+      return buffer.subarray(0, readSync(fd, buffer, 0, length, position));
+    } finally {
+      closeSync(fd);
+    }
+  },
+};
+
+export interface ScratchScan {
+  files: number; // read whole
+  bytes: number;
+  gone: string[]; // removed between listing and reading (ENOENT): not read, not a failure
+  failures: { path: string; code: string }[]; // anything else that kept a retainable path from being read: a coverage gap
+  dirty: string[]; // read, and not clean
+}
+
+// Every regular file under `root` that `include` admits (relative, `/`-separated), read as Latin-1 in chunks of at most
+// `chunkBytes`, each checked with the previous `overlapBytes` before it so a value across a boundary is still seen.
+// Symlinks and other non-regular entries are not followed. Paths and error codes only, never contents.
+export function scanScratchTree(
+  root: string,
+  clean: (text: string) => boolean,
+  options: { fs?: ScratchFs; chunkBytes?: number; overlapBytes?: number; include?: (relative: string) => boolean } = {},
+): ScratchScan {
+  const fs = options.fs ?? nodeScratchFs;
+  const chunkBytes = options.chunkBytes ?? 8 * 1024 * 1024;
+  const overlapBytes = options.overlapBytes ?? 64 * 1024;
+  const include = options.include ?? isRetainedScratch;
+  const scan: ScratchScan = { files: 0, bytes: 0, gone: [], failures: [], dirty: [] };
+  const missed = (relative: string, error: unknown, isRoot = false) => {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code ?? 'error';
+    if (code === 'ENOENT' && !isRoot) scan.gone.push(relative);
+    else scan.failures.push({ path: relative, code });
+  };
+  const readWhole = (path: string, relative: string) => {
+    let carry = Buffer.alloc(0);
+    let bytes = 0;
+    let dirty = false;
+    for (let position = 0; ; ) {
+      const chunk = fs.read(path, position, chunkBytes);
+      if (chunk.length === 0) break;
+      position += chunk.length;
+      bytes += chunk.length;
+      const window = Buffer.concat([carry, chunk]);
+      if (!dirty && !clean(window.toString('latin1'))) dirty = true;
+      carry = window.subarray(Math.max(0, window.length - overlapBytes));
+    }
+    scan.files += 1;
+    scan.bytes += bytes;
+    if (dirty) scan.dirty.push(relative);
+  };
+  const walk = (dir: string, relative: string) => {
+    let names: string[];
+    try {
+      names = fs.readdir(dir);
+    } catch (error) {
+      missed(relative === '' ? '.' : relative, error, relative === '');
+      return;
+    }
+    for (const name of names.sort()) {
+      const path = join(dir, name);
+      const rel = relative === '' ? name : `${relative}/${name}`;
+      try {
+        const { kind } = fs.lstat(path);
+        if (kind === 'dir') walk(path, rel);
+        else if (kind === 'file' && include(rel)) readWhole(path, rel);
+      } catch (error) {
+        missed(rel, error);
+      }
+    }
+  };
+  walk(root, '');
+  return scan;
 }
