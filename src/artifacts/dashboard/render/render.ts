@@ -718,10 +718,18 @@ function pieView(v: View): Rendered {
   if (dropped > 0) warnings.push(VIEW_STATES.slicesDropped(dropped, yName));
   let kept = slices.flatMap((s) => (positive(s.value) && s.value <= DRAWABLE ? [{ label: s.label, value: s.value }] : []));
   if (kept.length > 6) {
-    const rest = kept.slice(5);
+    // the five largest keep their names, in the view's order (equal sizes by it too); the smaller rest fold into one (E2 panel)
+    const largestFive = new Set(
+      kept
+        .map((s, i) => ({ value: s.value, i }))
+        .sort((a, b) => b.value - a.value || a.i - b.i)
+        .slice(0, 5)
+        .map(({ i }) => i),
+    );
+    const rest = kept.filter((_, i) => !largestFive.has(i));
     let other = 0;
     for (const s of rest) other += s.value;
-    kept = [...kept.slice(0, 5), { label: `other (${rest.length})`, value: other }];
+    kept = [...kept.filter((_, i) => largestFive.has(i)), { label: `other (${rest.length})`, value: other }];
     warnings.push(VIEW_STATES.slicesFolded(rest.length + 5));
   }
   let total = 0;

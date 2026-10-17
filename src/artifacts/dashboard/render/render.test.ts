@@ -243,6 +243,18 @@ describe('renderView', () => {
     expect(texts.filter((t) => ['1', '2', '3'].includes(t))).toEqual(['1', '2', '3', '1', '2', '3']);
   });
 
+  it('folds the smallest pie slices: the five largest keep their names in the view\'s order, ties by that order (E2 panel)', () => {
+    const t: ViewTable = { columns: [{ name: 'k', type: 'string' }, { name: 'v', type: 'number' }], rows: [['a', 1], ['b', 2], ['c', 3], ['d', 4], ['e', 5], ['f', 100], ['g', 200]] };
+    const { svg = '', warnings } = renderView({ view: 'pie', x: 'k', y: 'v' }, t, theme, 't');
+    expect(tips(svg)).toEqual(['c: 3 (1%)', 'd: 4 (1.3%)', 'e: 5 (1.6%)', 'f: 100 (31.7%)', 'g: 200 (63.5%)', 'other (2): 3 (1%)']);
+    expect(warnings).toContain('7 slices; the smallest after the first five are drawn as one');
+    // unsorted, and ties: equal sizes keep the earlier rows
+    const tied: ViewTable = { columns: t.columns, rows: [['a', 5], ['b', 9], ['c', 5], ['d', 1], ['e', 5], ['f', 5], ['g', 5], ['h', 9]] };
+    expect(tips(renderView({ view: 'pie', x: 'k', y: 'v' }, tied, theme, 't').svg!).map((tip) => tip.split(':')[0])).toEqual(['a', 'b', 'c', 'e', 'h', 'other (3)']);
+    // six slices or fewer: every one named, in the view's order
+    expect(tips(renderView({ view: 'pie', x: 'k', y: 'v' }, { columns: t.columns, rows: t.rows.slice(1) }, theme, 't').svg!).map((tip) => tip.split(':')[0])).toEqual(['b', 'c', 'd', 'e', 'f', 'g']);
+  });
+
   it('keeps series identity from the unfiltered snapshot: a filter never changes a surviving series\' form', () => {
     const spec = { view: 'scatter', x: 'flipper_length_mm', y: 'body_mass_g', series: 'species_ko' };
     const three = renderView(spec, penguins, theme, 'penguins').svg!;
