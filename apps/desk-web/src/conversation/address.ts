@@ -5,8 +5,11 @@
 // The text is sent as typed, tags and all, as sminos records it.
 import type { Recipient } from 'desk-hub/protocol';
 
-/** A session as addressing sees it: its membership (latest `joined`/`retired`) and whether it is live now. */
-export type Addressable = { session: string; alias: string; member: boolean; live: boolean };
+/**
+ * A session as addressing sees it: its membership (latest `joined`/`retired`) and whether it is live now; and its title,
+ * which `@` completion matches and shows (a tag always names the alias).
+ */
+export type Addressable = { session: string; alias: string; member: boolean; live: boolean; title?: string | null };
 
 export type Tag = { raw: string; project: string; name: string; short: string };
 

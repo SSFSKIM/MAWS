@@ -1,8 +1,9 @@
-// The project's sessions as its log says them (smns §3's lifecycle kinds), and the sidebar's grouping (§4). The log
-// is read in offset order, which keeps each writer's seq order: a session's lifecycle is one writer's, so its latest
-// `joined` / `retired` decides membership. The in-charge and status lines can be set from two machines, and the later
-// `ts` wins, as smns §3 has it. Presence (DX4) is live and not in the log: a session's group reads it while its machine
-// is online, and the last `state` event while the machine is offline or its presence is not known yet.
+// The project's sessions as its log says them (smns §3's lifecycle kinds, `titled` among them), and the sidebar's
+// grouping (§4). The log is read in offset order, which keeps each writer's seq order: a session's lifecycle is one
+// writer's, so its latest `joined` / `retired` decides membership, and its latest `titled` its title. The in-charge and
+// status lines can be set from two machines, and the later `ts` wins, as smns §3 has it. Presence (DX4) is live and not
+// in the log: a session's group reads it while its machine is online, and the last `state` event while the machine is
+// offline or its presence is not known yet.
 import type { LogEvent, SessionPresence } from 'desk-hub/protocol';
 import { writerMachine } from 'desk-hub/protocol';
 
@@ -17,6 +18,11 @@ export type ProjectedSession = {
   worktree: string | null;
   /** The seat its latest `joined` names (a `--bg` job sminos spawned); `''` for a session it did not spawn. */
   seat: string;
+  /**
+   * Its title, as its human knows it (the harness's "Session name": the name `/rename` gave it, else the generated one),
+   * from the latest `titled` its machine published; null for none, and the session is named by its alias.
+   */
+  title: string | null;
   /** Whether the latest membership event is `joined`. */
   member: boolean;
   /** The latest `retired`, while it stands. */
@@ -28,6 +34,15 @@ export type ProjectedSession = {
   /** The offset of the latest `joined`: the sidebar lists the newest member first. */
   joinedAt: number;
 };
+
+/**
+ * What the desk names a session by: its title, the name its human knows it by (the owner, 2026-10-17: "maws-4d
+ * @macbook" did not say which session it was), else its alias. The alias stays how a session is addressed with @, so a
+ * view that names a session by its title shows the alias beside it.
+ */
+export function sessionName(session: { title?: string | null; alias: string }): string {
+  return session.title || session.alias;
+}
 
 type Draft = ProjectedSession & { chargeTs: string; statusTs: string };
 
@@ -47,6 +62,7 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
         cwd: null,
         worktree: null,
         seat: '',
+        title: null,
         member: false,
         ended: null,
         charge: null,
@@ -81,6 +97,9 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
       case 'renamed':
         draft().alias = str(event.alias) ?? draft().alias;
         break;
+      case 'titled':
+        draft().title = str(event.title)?.trim() || null;
+        break;
       case 'in-charge': {
         const d = draft();
         if (event.ts >= d.chargeTs) {
@@ -108,8 +127,8 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
   }
   const sessions = new Map<string, ProjectedSession>();
   for (const [id, d] of drafts) {
-    const { session, alias, machine, cwd, worktree, seat, member, ended, charge, status, state, joinedAt } = d;
-    sessions.set(id, { session, alias, machine, cwd, worktree, seat, member, ended, charge, status, state, joinedAt });
+    const { session, alias, machine, cwd, worktree, seat, title, member, ended, charge, status, state, joinedAt } = d;
+    sessions.set(id, { session, alias, machine, cwd, worktree, seat, title, member, ended, charge, status, state, joinedAt });
   }
   return sessions;
 }

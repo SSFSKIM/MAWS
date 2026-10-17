@@ -24,6 +24,7 @@ const session = (id: string, alias: string): DeskSession => ({
   cwd: '/w',
   worktree: null,
   seat: '',
+  title: null,
   member: true,
   ended: null,
   charge: null,
@@ -71,6 +72,25 @@ it("keeps each session's draft of a question raised under the same id as another
   fireEvent.click(within(cardA).getByRole('radio', { name: /user_id/ }));
   expect(picked(cardA)).toBe('true');
   expect(picked(cardB)).toBe('false');
+});
+
+it('names a titled session on one line: the title truncating, whole on hover, its alias and machine beside it', () => {
+  const long = 'Codex native Computer Use internals, its approval prompts, and the native helper';
+  const r = record(A);
+  connection.conversation.store.setState({ requests: { [r.key]: r } });
+  render(
+    <DeskContext.Provider value={{ connection, member: MEMBER, sessions: new Map([[A, { ...session(A, 'maws-45'), title: long }]]) }}>
+      <RequestCard request={r.key} />
+    </DeskContext.Provider>,
+  );
+  const [name, ...meta] = [...screen.getByTestId('card-who').children] as HTMLElement[];
+  expect(name.textContent).toBe(long);
+  expect(name.className).toContain('truncate');
+  expect(name.title).toBe(long);
+  expect(meta.map((e) => [e.textContent, e.className.includes('shrink-0')])).toEqual([
+    ['maws-45', true],
+    ['@mini', true],
+  ]);
 });
 
 describe('Skip', () => {

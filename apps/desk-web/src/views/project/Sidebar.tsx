@@ -1,10 +1,13 @@
 // The project's left column (§4): `# <project>`, then its sessions as direct channels grouped waiting on you /
-// working / idle / ended, each with its machine and its in-charge line; "+ Session" below them. On a phone it is the
-// project's first screen (mockups/desk/05-phone.html, 3A): full width, rows sized for a thumb, the group chat named as
-// such, and no "+ Session" (starting a session stays off the phone in phase 1).
+// working / idle / ended, each named by its title (truncated to fit) with its machine and whether that is online, the
+// alias it is addressed by muted under it (`SessionLabel`) — by its alias and machine on one line when it has no title —
+// and its in-charge line under; "+ Session" below them. On a phone it is the project's first screen
+// (mockups/desk/05-phone.html, 3A): full width, rows sized for a thumb, the group chat named as such, and no "+ Session"
+// (starting a session stays off the phone in phase 1).
 import type { Channel } from '../../shell/layout';
 import type { DeskSession } from '../../shell/sessions';
 import { GROUPS, type SessionGroup } from '../../log/projection';
+import { SessionLabel } from '../../shell/SessionLabel';
 
 const HEADINGS: Record<SessionGroup, string> = { waiting: 'Waiting on you', working: 'Working', idle: 'Idle', ended: 'Ended' };
 
@@ -72,11 +75,7 @@ function SessionRow({ session, selected, phone, onSelect }: { session: DeskSessi
       className={['block w-full rounded-sm px-2.5 text-left', phone ? 'py-2.5' : 'py-1.5', selected ? 'bg-bg-active' : 'hover:bg-bg-hover', offline || session.group === 'ended' ? 'text-fg-muted' : 'text-fg'].join(' ')}
     >
       <span className="flex min-w-0 items-baseline gap-1.5 text-ui-sm">
-        <span className="truncate">{session.alias}</span>
-        <span className="shrink-0 text-fg-muted" data-testid="machine">
-          @{session.machine}
-        </span>
-        {offline && <span className="shrink-0 text-fg-faint">offline</span>}
+        <SessionLabel session={session} offline />
       </span>
       {session.charge && (
         <span className="mt-0.5 block truncate text-ui-sm text-fg-muted" data-testid="charge">

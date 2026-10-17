@@ -5,10 +5,12 @@
 // RPC and delivers nothing sent from outside it, whatever the kind. `note` says how an action that can be taken will
 // land.
 import type { SessionPresence } from 'desk-hub/protocol';
-import type { SessionGroup } from '../log/projection';
+import { sessionName, type SessionGroup } from '../log/projection';
 
 export type CapabilityInput = {
   alias: string;
+  /** Its title, which the reasons name it by when it has one (`sessionName`). */
+  title?: string | null;
   machine: string;
   member: boolean;
   group: SessionGroup;
@@ -78,7 +80,8 @@ function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
     return { send: yes(`recorded, not delivered: ${s.machine} is read-only`), steer: ro, interrupt: ro, answer: ro, decide: ro, model: ro, compact: ro, retire: ro, resume: ro };
   }
   const running = turnRunning(s);
-  const retire = s.member ? yes(s.seat ? undefined : 'records it retired; the process stays yours to close') : no(`${s.alias} is retired`);
+  const name = sessionName(s);
+  const retire = s.member ? yes(s.seat ? undefined : 'records it retired; the process stays yours to close') : no(`${name} is retired`);
   switch (kind) {
     case 'offline': {
       const off = no(`${s.machine} is offline`);
@@ -86,7 +89,7 @@ function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
       return { send: yes(`kept in the log; delivered when ${s.machine} reconnects`), steer: off, interrupt: off, answer: shown, decide: shown, model: off, compact: off, retire: off, resume: off };
     }
     case 'not-running': {
-      const stopped = no(`${s.alias} is not running`);
+      const stopped = no(`${name} is not running`);
       if (retiredBy(s) !== null) {
         return { send: yes(), steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no('retired: a retired session is not resumed') };
       }
@@ -94,50 +97,50 @@ function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
       return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: yes() };
     }
     case 'unknown': {
-      const waiting = no(`waiting for ${s.alias}'s presence`);
+      const waiting = no(`waiting for ${name}'s presence`);
       return { send: yes(), steer: waiting, interrupt: waiting, answer: waiting, decide: waiting, model: waiting, compact: waiting, retire, resume: waiting };
     }
     case 'bridged':
       return {
-        send: yes(running ? `queued until ${s.alias} is idle` : 'starts a turn'),
-        steer: running ? yes('read at its next model request') : no(`${s.alias} is idle: Send starts a turn`),
-        interrupt: running ? yes() : no(`nothing to interrupt: ${s.alias} is idle`),
+        send: yes(running ? `queued until ${name} is idle` : 'starts a turn'),
+        steer: running ? yes('read at its next model request') : no(`${name} is idle: Send starts a turn`),
+        interrupt: running ? yes() : no(`nothing to interrupt: ${name} is idle`),
         answer: yes(),
         decide: yes(),
         model: yes(),
         compact: yes(running ? 'at the end of this turn' : undefined),
         retire,
-        resume: no(`${s.alias} is running`),
+        resume: no(`${name} is running`),
       };
     case 'seat': {
-      const terminal = no(`terminal only: ${s.alias} runs without the bridge`);
-      const bridge = no(`${s.alias} runs without the bridge`);
+      const terminal = no(`terminal only: ${name} runs without the bridge`);
+      const bridge = no(`${name} runs without the bridge`);
       return {
         send: yes(running ? 'read at its next step' : 'starts a turn'),
-        steer: running ? yes('read at its next step') : no(`${s.alias} is idle: Send starts a turn`),
-        interrupt: no(`${s.alias} runs without the bridge: interrupt it in its terminal`),
+        steer: running ? yes('read at its next step') : no(`${name} is idle: Send starts a turn`),
+        interrupt: no(`${name} runs without the bridge: interrupt it in its terminal`),
         answer: terminal,
         decide: terminal,
         model: bridge,
         compact: bridge,
         retire,
-        resume: no(`${s.alias} is running`),
+        resume: no(`${name} is running`),
       };
     }
     case 'terminal': {
-      const terminal = no(`terminal only: ${s.alias} runs without the bridge`);
-      const bridge = no(`${s.alias} runs without the bridge`);
+      const terminal = no(`terminal only: ${name} runs without the bridge`);
+      const bridge = no(`${name} runs without the bridge`);
       return {
         send: yes('read at its next tool round'),
         // §5: a terminal session without the bridge takes a steer as a send, which it reads at its next tool round.
-        steer: running ? { can: true, reason: null, note: 'sent as a message: it arrives at its next tool round', path: 'send' } : no(`${s.alias} is idle: Send starts a turn`),
-        interrupt: no(`${s.alias} runs without the bridge: interrupt it in its terminal`),
+        steer: running ? { can: true, reason: null, note: 'sent as a message: it arrives at its next tool round', path: 'send' } : no(`${name} is idle: Send starts a turn`),
+        interrupt: no(`${name} runs without the bridge: interrupt it in its terminal`),
         answer: terminal,
         decide: terminal,
         model: bridge,
         compact: bridge,
         retire,
-        resume: no(`${s.alias} is running`),
+        resume: no(`${name} is running`),
       };
     }
   }

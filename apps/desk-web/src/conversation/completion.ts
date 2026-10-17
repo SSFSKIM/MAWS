@@ -2,10 +2,11 @@
 // glass, so typing an @ among the tags that open a post lists the project's live members matching what follows, and a
 // pick inserts the exact tag `sminos say` resolves — `@alias`, `@alias#short` where it would reach another member too
 // (an ended session that has not retired is still one), `@"alias"` for one with spaces — or `@all`. An @ later in the
-// text is only text (address.ts), so nothing is offered there.
+// text is only text (address.ts), so nothing is offered there. A member is found by its title too, the name its human
+// knows it by, and listed with it; the tag still names its alias, which is what `sminos say` resolves.
 import { address, leadingTags, type Addressable } from './address';
 
-export type Completion = { tag: string; alias: string; session: string | null };
+export type Completion = { tag: string; alias: string; session: string | null; title: string | null };
 
 /** The tag being typed at `caret`, when it is one of the tags that open the text: where it starts and what follows @. */
 export function completionAt(text: string, caret: number): { start: number; query: string } | null {
@@ -23,15 +24,19 @@ export function completionAt(text: string, caret: number): { start: number; quer
 
 const short = (session: string) => session.slice(0, 8);
 
-/** The live members (and `@all`) whose alias starts with `query`, each with the tag that addresses exactly it. */
+/**
+ * The live members (and `@all`) whose alias starts with `query`, or whose title or a word of it does, each with the tag
+ * that addresses exactly it.
+ */
 export function complete(query: string, sessions: readonly Addressable[]): Completion[] {
   const live = sessions.filter((s) => s.member && s.live);
   const q = query.toLowerCase();
+  const titled = (title: string) => title.startsWith(q) || title.split(/[^\p{L}\p{N}]+/u).some((word) => word.startsWith(q));
   const found: Completion[] = live
-    .filter((s) => s.alias.toLowerCase().startsWith(q))
-    .map((s) => ({ tag: tagFor(s, sessions), alias: s.alias, session: s.session }))
+    .filter((s) => s.alias.toLowerCase().startsWith(q) || (s.title ? titled(s.title.toLowerCase()) : false))
+    .map((s) => ({ tag: tagFor(s, sessions), alias: s.alias, session: s.session, title: s.title || null }))
     .sort((a, b) => a.tag.localeCompare(b.tag));
-  if ('all'.startsWith(q)) found.push({ tag: '@all', alias: 'all', session: null });
+  if ('all'.startsWith(q)) found.push({ tag: '@all', alias: 'all', session: null, title: null });
   return found;
 }
 
