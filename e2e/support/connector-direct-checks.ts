@@ -6,6 +6,8 @@
 // - `addedListeners` / `loopbackPort`: the callback listener a Connect binds, exactly 127.0.0.1;
 // - `readSealedText` / `plaintextHits`: a sealed OAuth record's format and that no known value is readable in it;
 // - `journalTurns`: launches, and that no model turn ran, from a session's journal rows;
+// - `scrubDiagnostic` / `boundedAcquire` / `boundedMetaRows`: a failed launch's evidence, an acquire's answer and a
+//   journal's meta rows reduced to allowlisted, scrubbed, size-bounded fields (never args, environment or raw frames);
 // - `isRetainedScratch`: which scratch files a scene scans for secrets (never the host token, the raw open log, a
 //   fixture's secrets inventory or a sealed record, which is scanned apart);
 // - `bearerCrossings`: a bearer presented to a server that did not issue it;
@@ -14,6 +16,7 @@
 // - `attachIfClean`: a screenshot captured and attached only after the live documents scanned clean;
 // - `scanScratchTree`: every retainable scratch file read whole in bounded chunks, every unreadable one a failure.
 import { closeSync, lstatSync, openSync, readdirSync, readSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export interface CustodyFacts {
@@ -96,6 +99,69 @@ export function journalTurns(rows: readonly { direction: string; frame: unknown 
     }
   }
   return turns;
+}
+
+// A diagnostic string safe to print: the scene's paths and the owner's home named by role, any other user's home
+// anonymized, token-like runs removed, and at most `max` characters.
+export function scrubDiagnostic(text: string, roots: readonly string[], max: number): string {
+  let out = text;
+  for (const root of [...roots].filter((path) => path.length > 3).sort((a, b) => b.length - a.length)) out = out.split(root).join('<scratch>');
+  const home = homedir();
+  if (home.length > 3) out = out.split(home).join('<home>');
+  out = out.replace(/\/Users\/[^/\s]+/g, '/Users/<user>').replace(/[A-Za-z0-9_-]{40,}/g, '<redacted>');
+  return out.length > max ? `${out.slice(0, max)}…` : out;
+}
+
+const text = (value: unknown, roots: readonly string[], max: number): string | undefined => (typeof value === 'string' ? scrubDiagnostic(value, roots, max) : undefined);
+
+// What a `session.acquire` answer shows of itself: its status, flags, scrubbed message and the three resource states.
+// Any other key is named, never copied.
+export function boundedAcquire(outcome: unknown, roots: readonly string[]): Record<string, unknown> {
+  if (outcome === null || typeof outcome !== 'object') return { notAnObject: outcome === null ? 'null' : typeof outcome };
+  const answer = outcome as Record<string, unknown>;
+  const known = new Set(['status', 'appSessionId', 'launched', 'joined', 'message', 'resources']);
+  const bounded: Record<string, unknown> = {};
+  const status = text(answer.status, roots, 40);
+  if (status !== undefined) bounded.status = status;
+  const id = text(answer.appSessionId, roots, 80);
+  if (id !== undefined) bounded.appSessionId = id;
+  for (const flag of ['launched', 'joined'] as const) if (typeof answer[flag] === 'boolean') bounded[flag] = answer[flag];
+  const message = text(answer.message, roots, 1000);
+  if (message !== undefined) bounded.message = message;
+  if (answer.resources !== null && typeof answer.resources === 'object') {
+    const resources = answer.resources as Record<string, unknown>;
+    const worktree = resources.worktree !== null && typeof resources.worktree === 'object' ? (resources.worktree as Record<string, unknown>) : null;
+    bounded.resources = { worktree: worktree === null ? null : { state: text(worktree.state, roots, 40) ?? null }, record: text(resources.record, roots, 40) ?? null, transcript: text(resources.transcript, roots, 40) ?? null };
+  }
+  const other = Object.keys(answer).filter((key) => !known.has(key)).slice(0, 12).map((key) => scrubDiagnostic(key, roots, 40));
+  if (other.length > 0) bounded.otherKeys = other;
+  return bounded;
+}
+
+const META_ROWS_MAX = 64;
+const META_STRINGS = { event: 80, phase: 40, reason: 200, trigger: 40, message: 1000 } as const;
+const META_SCALARS = ['code', 'signal', 'attempt', 'maxAttempts', 'pid'] as const;
+
+// A journal's meta rows (spawn, init_failed, reconnect, exit …) as allowlisted scalar fields: the first 64 in order, the
+// rest counted. A spawn's argument list is its length alone; no environment, frame or other row direction is read.
+export function boundedMetaRows(rows: readonly { direction: string; frame: unknown }[], roots: readonly string[]): { rows: Record<string, unknown>[]; omitted: number } {
+  const meta = rows.filter((row) => row.direction === 'meta' && row.frame !== null && typeof row.frame === 'object');
+  const bounded = meta.slice(0, META_ROWS_MAX).map(({ frame }) => {
+    const source = frame as Record<string, unknown>;
+    const row: Record<string, unknown> = {};
+    for (const key of Object.keys(source)) {
+      const value = source[key];
+      if (key in META_STRINGS) {
+        const scrubbed = text(value, roots, META_STRINGS[key as keyof typeof META_STRINGS]);
+        if (scrubbed !== undefined) row[key] = scrubbed;
+      } else if ((META_SCALARS as readonly string[]).includes(key)) {
+        if (value === null || typeof value === 'number' || typeof value === 'boolean') row[key] = value;
+        else if (typeof value === 'string') row[key] = scrubDiagnostic(value, roots, 80);
+      } else if (key === 'args' && Array.isArray(value)) row.argCount = value.length;
+    }
+    return row;
+  });
+  return { rows: bounded, omitted: Math.max(0, meta.length - META_ROWS_MAX) };
 }
 
 // A scratch path (relative to the scene's root, `/`-separated) a scene may read and scan as retainable.

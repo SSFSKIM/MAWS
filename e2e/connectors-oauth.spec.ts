@@ -14,7 +14,7 @@
 //          forgets, the revocation endpoint up or down, and leaves D blocked; a Connect's listener pending at shutdown is
 //          closed with the app.
 import { existsSync } from 'node:fs';
-import { test, expect, type TestInfo } from '@playwright/test';
+import { test, expect, type Locator, type TestInfo } from '@playwright/test';
 import { CONNECTORS_COPY as C, SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { PAGE_HTML, PAGE_TITLE, SERVER, TOOL, TOOL_NAME, wait, WATCH_MS, withScene, type ConnectorScene } from './support/connector-scene';
 import { createPageIn, expectQuietJournals, Refreshes, serverConnected, serverRow, sessionJournals } from './support/connector-direct-scene';
@@ -50,6 +50,17 @@ const phasesOf = (fixture: OAuthFixturePaths) =>
   summaryOf(fixture).windows.map(({ seq, phase, requests, advertised, unauthorized, authRoutes, authorizationHeaders, toolCallAttempts: attempts, toolCalls, registrations, authorizations, codeExchanges, refreshes, revocations, revocationsUnavailable, refusals }) => ({
     seq, phase, requests, advertised, unauthorized, authRoutes, authorizationHeaders, toolCallAttempts: attempts, toolCalls, registrations, authorizations, codeExchanges, refreshes, revocations, revocationsUnavailable, refusals,
   }));
+
+// Disconnect's observable result on a source row: withdrawn, and the retirement finished. The reviewed owner source row
+// carries `last` only for Connect/Reconnect (a Disconnect's result lives on the saved/retiring rows, which are gone once
+// retirement completes), and a previous Connect's `last` may remain, so `last` is not asserted either way. Nothing in the
+// list is still being disconnected or unconfirmed (one connection exists in this scene), and no retiring row remains.
+async function expectDisconnected(sheet: Locator, row: Locator): Promise<void> {
+  await expect(row.locator('[data-connector-server-state]')).toContainText(connectionWords('withdrawn'), { timeout: 20_000 });
+  const servers = sheet.locator('[data-connectors-servers]');
+  await expect(servers.locator('[data-connector-server][data-kind="retiring"]'), 'no retirement row remains').toHaveCount(0, { timeout: 20_000 });
+  for (const text of [S.disconnecting, S.unconfirmed]) await expect(servers.locator('[data-connector-server-state]').filter({ hasText: text }), `no row is still “${text}”`).toHaveCount(0, { timeout: 20_000 });
+}
 
 // The sealed store holds `count` records: ciphertext, 0600 in a 0700 directory, nothing of the identity or tokens readable.
 function expectSealed(scene: ConnectorScene, fixture: OAuthFixture, count: number): unknown {
@@ -297,8 +308,7 @@ test('oauth relaunch: after a quit nothing reaches the server until an open-phas
         sheet = await scene.openSheet(run.page);
         row = serverRow(sheet, SERVER, 'source');
         await row.getByRole('button', { name: S.disconnectLabel(SERVER) }).click();
-        await expect(row.locator('[data-connector-server-last]')).toHaveText(` · ${S.last({ action: 'disconnect', local: 'forgotten', host: 'confirmed', revocation: 'revoked' })}`, { timeout: 20_000 });
-        await expect(row.locator('[data-connector-server-state]')).toContainText(connectionWords('withdrawn'));
+        await expectDisconnected(sheet, row);
         await scene.closeSheet(run.page);
         let disconnectedAt = Date.now();
         expect(summaryOf(series).oauth.revocations, 'the grant was revoked').toBeGreaterThan(0);
@@ -323,7 +333,7 @@ test('oauth relaunch: after a quit nothing reaches the server until an open-phas
         sheet = await scene.openSheet(run.page);
         row = serverRow(sheet, SERVER, 'source');
         await row.getByRole('button', { name: S.disconnectLabel(SERVER) }).click();
-        await expect(row.locator('[data-connector-server-last]')).toHaveText(` · ${S.last({ action: 'disconnect', local: 'forgotten', host: 'confirmed', revocation: 'failed' })}`, { timeout: 20_000 });
+        await expectDisconnected(sheet, row);
         await scene.closeSheet(run.page);
         disconnectedAt = Date.now();
         expect(summaryOf(series).oauth.revocationsUnavailable, 'the revocation was attempted').toBeGreaterThan(0);

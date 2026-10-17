@@ -2,12 +2,12 @@
 // sealed-record, journal, bearer and page claims on (e2e/support/connector-direct-checks.ts). No app, engine, socket or
 // fixture process: each check is driven with the values a scene would read.
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  addedListeners, attachIfClean, bearerCrossings, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
-  scanScratchTree, SEALED_FORMAT, type ScratchFs,
+  addedListeners, attachIfClean, bearerCrossings, boundedAcquire, boundedMetaRows, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
+  scanScratchTree, scrubDiagnostic, SEALED_FORMAT, type ScratchFs,
 } from '../../e2e/support/connector-direct-checks';
 
 describe('custodyProblems: the scratch profile and mock keychain a launch must show before any owner action', () => {
@@ -107,6 +107,68 @@ describe('journalTurns: launches and model traffic in a session’s journal rows
       row('in', { type: 'user' }), // a tool result echoed in is not one sent
     ];
     expect(journalTurns(rows)).toEqual({ spawns: 0, exits: 0, userFrames: 1, modelFrames: 3, needsAuth: 1 });
+  });
+});
+
+describe('scrubDiagnostic / boundedAcquire / boundedMetaRows: a failed launch’s evidence, bounded and scrubbed', () => {
+  const roots = ['/private/var/folders/x/T/maws-connectors-a'];
+  const secret = 'AbCdEf0123456789AbCdEf0123456789AbCdEf0123456789';
+
+  it('replaces the scene’s paths, the home directory and any other user’s home, and token-like runs; truncates', () => {
+    const text = `ENOENT /private/var/folders/x/T/maws-connectors-a/ud/x and ${homedir()}/y and /Users/someone/z token=${secret}`;
+    const scrubbed = scrubDiagnostic(text, roots, 400);
+    expect(scrubbed).toContain('<scratch>/ud/x');
+    expect(scrubbed).toContain('<home>/y');
+    expect(scrubbed).toContain('/Users/<user>/z');
+    expect(scrubbed).toContain('token=<redacted>');
+    expect(scrubbed).not.toContain(secret);
+    expect(scrubbed).not.toContain('maws-connectors-a');
+    expect(scrubDiagnostic('x'.repeat(50) + ' y'.repeat(300), roots, 100).length).toBeLessThanOrEqual(101);
+  });
+
+  it('keeps a failed acquire’s status, message and resource states, scrubbed, and names (never copies) any other key', () => {
+    const bounded = boundedAcquire(
+      { status: 'failed', appSessionId: 'a1', message: `No conversation found with session ID: x (${roots[0]}/ud)`, resources: { worktree: null, record: 'kept', transcript: 'none' }, extra: { secret }, token: secret },
+      roots,
+    );
+    expect(bounded).toEqual({
+      status: 'failed',
+      appSessionId: 'a1',
+      message: 'No conversation found with session ID: x (<scratch>/ud)',
+      resources: { worktree: null, record: 'kept', transcript: 'none' },
+      otherKeys: ['extra', 'token'],
+    });
+    expect(JSON.stringify(bounded)).not.toContain(secret);
+  });
+
+  it('keeps a ready acquire’s flags and answers a non-object as its type', () => {
+    expect(boundedAcquire({ status: 'ready', appSessionId: 'a1', launched: true, joined: false }, roots)).toEqual({ status: 'ready', appSessionId: 'a1', launched: true, joined: false });
+    expect(boundedAcquire(undefined, roots)).toEqual({ notAnObject: 'undefined' });
+  });
+
+  it('keeps only the allowlisted scalar fields of meta rows, in order; spawn args are a count, never copied', () => {
+    const rows = [
+      { direction: 'meta', frame: { event: 'spawn', args: ['--resume', 'id', `--mcp-config=${secret}`], pid: 7 } },
+      { direction: 'out', frame: { type: 'control_request' } },
+      { direction: 'meta', frame: { event: 'init_failed', message: `No conversation found (${roots[0]}/ud)`, code: 'x', env: { SECRET: secret } } },
+      { direction: 'stderr', frame: { text: 'ignored' } },
+      { direction: 'meta', frame: { event: 'exit', code: 1, signal: null, reason: 'crash' } },
+    ];
+    expect(boundedMetaRows(rows, roots)).toEqual({
+      rows: [
+        { event: 'spawn', argCount: 3, pid: 7 },
+        { event: 'init_failed', message: 'No conversation found (<scratch>/ud)', code: 'x' },
+        { event: 'exit', code: 1, signal: null, reason: 'crash' },
+      ],
+      omitted: 0,
+    });
+  });
+
+  it('bounds the number of rows and counts the omitted', () => {
+    const rows = Array.from({ length: 100 }, () => ({ direction: 'meta', frame: { event: 'reconnect', phase: 'attempting' } }));
+    const bounded = boundedMetaRows(rows, roots);
+    expect(bounded.rows).toHaveLength(64);
+    expect(bounded.omitted).toBe(36);
   });
 });
 

@@ -64,8 +64,8 @@ import { ps } from './support/processes';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { PAGE_HTML, PAGE_TITLE, pageState, SERVER, TOOL, type ConnectorScene } from './support/connector-scene';
-import { createPageIn, expectQuietJournals, heldServer, referencingServer, Refreshes, serverConnected, serverRow, sessionJournals } from './support/connector-direct-scene';
-import { heldFate, oncePageHtml } from './support/connector-direct-checks';
+import { createPageIn, expectQuietJournals, heldServer, referencingServer, Refreshes, serverConnected, serverRow, sessionJournals, sessionMeta } from './support/connector-direct-scene';
+import { boundedAcquire, heldFate, oncePageHtml } from './support/connector-direct-checks';
 import { allow, evidence, grantsOf, printEvidence, revokeInSheet, shot, stopEngine } from './support/connector-direct-acceptance';
 // P3-HD M4b end
 
@@ -751,6 +751,8 @@ test('transition: one grant reads through E, then D with no engine, then E again
     // D → E: the owner's session resumed (no message), the next refresh reads through its engine again
     expect(scene.launches(engine.appSessionId).spawns, 'no timer acquired an engine through all of D').toBe(1);
     const acquired = appValue(await appInvoke(run.page, 'session.acquire', { appSessionId: engine.appSessionId as LaunchSpec['appSessionId'], reason: 'read', options: { requireEmptyMessage: true } }));
+    // Decision Log 39: the answer and the journals' launch rows are kept before the assertion, so a failure can be diagnosed
+    await evidence(info, 'transition-acquire', { acquire: boundedAcquire(acquired, [scene.root, scene.userData]), journals: sessionMeta(scene) });
     expect(acquired).toMatchObject({ status: 'ready', launched: true });
     const resumed = await scene.live(run.page);
     expect(resumed.map((session) => session.appSessionId), 'the owner’s session, alone').toEqual([engine.appSessionId]);

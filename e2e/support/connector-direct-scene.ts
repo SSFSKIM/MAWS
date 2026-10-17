@@ -17,7 +17,7 @@ import type { CommandResult } from '@shared/ipc/schema';
 import { FIXTURE_SERVER } from './connector-engine';
 import { invoke, pageState, TOOL, value, type ConnectorScene } from './connector-scene';
 import { wrapperPids, type WrapperPids } from './connector-direct-transport';
-import { journalTurns, type JournalTurns } from './connector-direct-checks';
+import { boundedMetaRows, journalTurns, type JournalTurns } from './connector-direct-checks';
 
 // The fixture server answers no tools/call while this file exists (support/connector-mcp-server.mjs `--hold`), and
 // answers the held ones once it is removed (P3-HD M4b).
@@ -163,10 +163,25 @@ export function sessionJournals(scene: ConnectorScene): SessionJournal[] {
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
       const dir = join(root, entry.name);
-      const files = readdirSync(dir).filter((file) => file.endsWith('.jsonl')).map((file) => join(dir, file));
-      const rows = files.flatMap((file) => readFileSync(file, 'utf8').split('\n').slice(0, -1).filter(Boolean).map((line) => JSON.parse(line) as { direction: string; frame: unknown }));
-      return { appSessionId: entry.name, turns: journalTurns(rows), dirMode: statSync(dir).mode & 0o777, fileModes: files.map((file) => statSync(file).mode & 0o777) };
+      const files = journalFiles(dir);
+      return { appSessionId: entry.name, turns: journalTurns(journalRows(files)), dirMode: statSync(dir).mode & 0o777, fileModes: files.map((file) => statSync(file).mode & 0o777) };
     });
+}
+
+const journalFiles = (dir: string): string[] => readdirSync(dir).filter((file) => file.endsWith('.jsonl')).map((file) => join(dir, file));
+const journalRows = (files: readonly string[]) =>
+  files.flatMap((file) => readFileSync(file, 'utf8').split('\n').slice(0, -1).filter(Boolean).map((line) => JSON.parse(line) as { direction: string; frame: unknown }));
+
+// P3-HD Decision Log 39: the scene's session journals' meta rows (spawn, init_failed, reconnect, exit …) as bounded,
+// scrubbed fields, for a failure to be diagnosed from the run's evidence. At most 8 journals; scratch only.
+export function sessionMeta(scene: ConnectorScene): { appSessionId: string; rows: Record<string, unknown>[]; omitted: number }[] {
+  const root = join(scene.userData, 'engine-host', 'journal');
+  if (!existsSync(root)) return [];
+  const roots = [scene.root, scene.userData];
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .slice(0, 8)
+    .map((entry) => ({ appSessionId: entry.name, ...boundedMetaRows(journalRows(journalFiles(join(root, entry.name))), roots) }));
 }
 
 // No session ran a model turn or saw a needs-auth report, and every journal is owner-only.
