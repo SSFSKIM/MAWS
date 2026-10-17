@@ -27,14 +27,23 @@
 # trailers. The pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green
 # there (§3.1); the plan refuses the rest. The pool takes class 1a alone; the plan job, hosted, makes its box. Every gh
 # call names the repository, so the script runs from any directory.
+#
+# Before the push, a run that puts jobs on a Mac (resolved from the flags and the repository variables as the plan does)
+# reads ci-kit's open alerts (SSFSKIM/ci-kit-sandbox, label ci-kit-alert: a system dialog holds a Mac's front) and MAWS's
+# runners. When no online ci-kit-mac-<machine> runner is free of an alert, it pushes nothing, prints each alert and exits
+# 2, since the runner's job-started check would refuse those jobs; when one is, it names the blocked and goes ahead. A
+# failed read warns and goes ahead (scripts/ci-gate-alerts.mjs).
+#
+#   MAWS_GATE_IGNORE_ALERTS=1  skip that check, for an alert left open by mistake
 set -uo pipefail
 
 REPO=SSFSKIM/MAWS
 usage() {
-  sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//' >&2
+  awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0" >&2
   exit 2
 }
 
+args=("$@")
 target=''
 gates=''
 runner=${MAWS_GATE_RUNNER:-}
@@ -69,6 +78,22 @@ else
   sha=$(git -C "$git_dir" rev-parse --verify --quiet "$target^{commit}") || { echo "ci-gate: no commit $target" >&2; exit 2; }
   branch=''
 fi
+
+# ci-kit's alert watcher: while no online Mac runner is free of an open alert, a run with Mac jobs is not pushed, its jobs
+# would only be refused. Exit 2, as for the script's other refusals; anything else from the check goes ahead.
+if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
+  alert_check='ci-gate: MAWS_GATE_IGNORE_ALERTS=1, the ci-kit alert check skipped'
+else
+  alert_check=$(node "$(dirname "$0")/ci-gate-alerts.mjs" --gates "$gates" --runner "$runner" --class1a "$class1a")
+  case $? in
+    0) ;;
+    2)
+      printf '%s\n' "$alert_check" >&2
+      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh ${args[*]}" >&2
+      exit 2 ;;
+    *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
+  esac
+fi
 short=${sha:0:8}
 label=${label:-${branch:-gate}}
 label=${label//[^A-Za-z0-9._-]/-}
@@ -77,6 +102,7 @@ out=/tmp/maws-review/gates
 mkdir -p "$out"
 log=$out/ci-$short.log
 exec > >(tee "$log") 2>&1
+[[ -z $alert_check ]] || printf '%s\n' "$alert_check"
 
 # One paragraph of trailers: the nonce makes every pushed sha unique, so pushing the same sha again still triggers a run.
 trailers="Nonce: $(date +%s)-$$"
