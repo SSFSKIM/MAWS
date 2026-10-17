@@ -6,7 +6,8 @@
 // remounting, React's strict effects) keeps the subscription it has.
 //
 // What the views share rides on it besides the transcript: the session's liveness, told once for every view
-// (`keeper.ts`: the store's `setLive`, the subscription taken up again after an end), and the open-agent request — an
+// (`keeper.ts`: the store's `setLive`, the subscription taken up again after an end), whether it is at rest
+// (`DeskTranscript.setResting`), and the open-agent request — an
 // `Agent` row in the center names its agent, and the column, which takes the request, opens its Subagents tab on it.
 import { useEffect, useState } from 'react';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -15,7 +16,7 @@ import type { SubagentRef } from '../../../../../src/renderer/src/transcript/mod
 import type { SessionPlane } from '../../shell/session-plane';
 import type { DeskSession } from '../../shell/sessions';
 import { DeskTranscript, type TranscriptStoreApi } from '../source/desk-transcript';
-import { reachable, TranscriptKeeper } from '../source/keeper';
+import { atRest, reachable, TranscriptKeeper } from '../source/keeper';
 
 /** The agent an `Agent` row asked the column to open: null when the tree does not name it yet (the tree is shown). */
 export type AgentRequest = { agentId: string | null };
@@ -100,11 +101,16 @@ function letGo(key: string, held: Held): void {
   held.owner.keeper.stop();
 }
 
-/** A view's hold on its session's owner while it is mounted, with the session's liveness told to it. */
+/**
+ * A view's hold on its session's owner while it is mounted, with the session's liveness told to it, and whether it is
+ * at rest (a turn the transcript left open then ends, so an idle session never reads as working).
+ */
 export function useSessionOwner(project: string, session: DeskSession, plane: SessionPlane): SessionOwner {
   const [owner] = useState(() => sessionOwner({ project, machine: session.machine, session: session.session, plane }));
   const live = reachable(session);
+  const resting = atRest(session);
   useEffect(() => holdOwner(owner), [owner]);
   useEffect(() => owner.keeper.reachable(live), [owner, live]);
+  useEffect(() => owner.main.setResting(resting), [owner, resting]);
   return owner;
 }

@@ -37,6 +37,14 @@
   }
 }
 
+/* DC9: the session view's gutter for MAWS's "Jump to latest" (transcript.css `.transcript-jump`, a 32 px control 12 px
+   in from the pane's edge where the pane has no room beside the reading column, as the center rarely has): each row's
+   column ends at least 56 px from the pane's edge — the control and 12 px either side — so the control never covers a
+   row. `100cqi` is the scroller's width (it is the rows' query container). */
+[data-session-view] .thread-column {
+  padding-inline-end: max(var(--measure-pad), calc(56px - max(0px, (100cqi - var(--measure)) / 2)));
+}
+
 @theme inline {
   --text-numeral: var(--text-numeral);
   --text-label: var(--text-label);

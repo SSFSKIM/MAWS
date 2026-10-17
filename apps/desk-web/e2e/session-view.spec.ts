@@ -117,6 +117,57 @@ test("the report: the marks and questions, one working record per marked turn, a
   await expect.poll(() => allRowIds(view), { timeout: 15_000 }).toEqual(report);
 });
 
+test('a session view whose chunk fails to load says so, with a Retry and a reload; the reload draws it', async ({ page, hub }) => {
+  const chunk = /\/assets\/SessionView-[^/]*\.js$/;
+  await page.route(chunk, (route) => route.abort());
+  const failed = page.getByTestId('session-view-failed');
+  await stageProject(hub);
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+  await expect(failed).toContainText('The session view could not be loaded');
+  await expect(page.getByTestId('composer')).toBeVisible(); // the channel around it stands
+  await page.unroute(chunk);
+  await expect(failed.getByRole('button', { name: 'Retry' })).toBeVisible(); // asks again in place (Chrome refuses it: its module map keeps the failure)
+  await failed.getByRole('button', { name: 'Reload the page' }).click();
+  await expect(page.getByTestId('session-view')).toHaveAttribute('data-session', S.asks);
+  await expect(failed).toHaveCount(0);
+});
+
+for (const width of [1280, 1440]) {
+  test(`at ${width} px the jump to the latest row sits in a gutter beside the rows, and an idle session's is its arrow, not working dots`, async ({ page, hub }) => {
+    await page.setViewportSize({ width, height: 800 });
+    const { fm, view } = await openSession(page, hub);
+    fm.playThrough();
+    fm.depth.presence = { status: 'idle', waitingFor: null, needs: null }; // the replayed session at rest
+    fm.sendPresence();
+    await expect(view).toContainText('three hundred');
+    const scroller = view.locator('[data-transcript-scroller]');
+    const jump = view.getByRole('button', { name: 'Jump to latest' });
+    await expect
+      .poll(async () => {
+        await scroller.evaluate((el) => el.scrollBy({ top: -160 }));
+        return jump.isVisible();
+      })
+      .toBe(true);
+    await expect(jump.locator('svg')).toBeVisible(); // the arrow: the turn the rows left open ended with the session at rest
+    await expect(jump.locator('.transcript-working-dots')).toHaveCount(0);
+
+    // Every row beside the control ends before it: the rows' column keeps its gutter.
+    const box = (await jump.boundingBox())!;
+    const beside = await view.locator('.transcript-row').evaluateAll(
+      (els, b) =>
+        els.flatMap((el) => {
+          const rect = el.getBoundingClientRect();
+          if (rect.bottom <= b.y || rect.top >= b.y + b.height) return [];
+          return [{ end: rect.right - parseFloat(getComputedStyle(el).paddingRight), id: el.closest('[data-row-id]')?.getAttribute('data-row-id') }];
+        }),
+      box,
+    );
+    expect(beside.length).toBeGreaterThan(0);
+    for (const row of beside) expect(row.end, `row ${row.id}`).toBeLessThanOrEqual(box.x - 12);
+  });
+}
+
 test('a marked response folds its turn and shows its mark while it streams, before its row is written; settling leaves no double', async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
   const uuid = answerRow(fm);

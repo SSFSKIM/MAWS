@@ -105,7 +105,15 @@ test('the tree matches the recording’s metas, grows as the agents start, and f
   await expect(tree).toContainText('Done · 1');
   player.advance(player.script.length);
   await expect(tree).toContainText('Done · 2');
-  await tree.locator('[data-section="done"] h3 button').click();
+  // Done starts closed, as MAWS's does, and says so: its heading's chevron points right until it is opened.
+  const done = tree.locator('[data-section="done"] h3 button');
+  await expect(done).toHaveAttribute('aria-expanded', 'false');
+  await expect(done.locator('.transcript-chevron')).toBeVisible();
+  const turned = () => done.locator('.transcript-chevron').evaluate((el) => getComputedStyle(el).transform);
+  expect(await turned()).toBe('none');
+  await done.click();
+  await expect(done).toHaveAttribute('aria-expanded', 'true');
+  await expect.poll(turned).not.toBe('none');
 
   const drawn = await tree.locator('[data-agent-row]').evaluateAll((els) =>
     els.map((el) => ({ agentId: el.getAttribute('data-agent-row'), status: el.getAttribute('data-status'), title: el.querySelector('[data-part="title"]')?.textContent })),

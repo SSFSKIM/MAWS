@@ -31,27 +31,11 @@ import { useConnected, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
 import { StreamView } from '../conversation/StreamView';
 import { SessionLabel } from '../../shell/SessionLabel';
+import { moduleLoader, useLoadedModule } from './module-loader';
 
 // The session view and its status word: one chunk, loaded the first time a desktop draws a session view, both drawn
-// as soon as it is in. Not two lazy components: React draws a Suspense boundary that follows a suspended one only on
-// a later pre-render pass, which held the view back seconds behind the header's word (seen under happy-dom).
-type SessionViewModule = typeof import('./SessionView');
-let sessionViewModule: SessionViewModule | null = null;
-let loadingSessionView: Promise<SessionViewModule> | null = null;
-
-function useSessionViewModule(wanted: boolean): SessionViewModule | null {
-  const [module, setModule] = useState(sessionViewModule);
-  useEffect(() => {
-    if (!wanted || module !== null) return;
-    let current = true;
-    loadingSessionView ??= import('./SessionView').then((loaded) => (sessionViewModule = loaded));
-    void loadingSessionView.then((loaded) => current && setModule(loaded));
-    return () => {
-      current = false;
-    };
-  }, [wanted, module]);
-  return module;
-}
+// from that one load (`module-loader.ts`).
+const sessionViews = moduleLoader(() => import('./SessionView'));
 
 /** Whether a direct channel's center is its session view: on a desktop, while the session's machine is online. */
 const drawsSessionView = (session: DeskSession | null, phone: boolean): session is DeskSession => session !== null && !phone && session.machineOnline !== false;
@@ -76,7 +60,7 @@ export function ChannelView(props: {
   const outbox = Object.values(outboxAll).filter((o) => channel.kind === 'group' || (o.to !== '*' && o.to.some((r) => r.session === channel.session)));
   const landed = useLanded(channel, items);
   const sessionView = channel.kind === 'session' && drawsSessionView(session, phone) ? session : null;
-  const views = useSessionViewModule(sessionView !== null);
+  const { module: views, failed: viewFailed, retry: retryView } = useLoadedModule(sessionViews, sessionView !== null);
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg" aria-label="Channel">
       <header className={['flex shrink-0 items-center gap-2 border-b border-border', phone ? 'min-h-[44px] flex-wrap px-3 py-1.5' : 'h-[44px] px-4'].join(' ')} data-testid="channel-header">
@@ -128,7 +112,22 @@ export function ChannelView(props: {
         </div>
       )}
       {sessionView ? (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{views && <views.default key={sessionView.session} project={connection.project} session={sessionView} plane={connection.client} />}</div>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {views && <views.default key={sessionView.session} project={connection.project} session={sessionView} plane={connection.client} />}
+          {viewFailed !== null && (
+            <div className="m-4 flex items-center gap-2 text-ui-sm text-danger" role="alert" data-testid="session-view-failed">
+              <span className="min-w-0">The session view could not be loaded ({viewFailed}).</span>
+              <button type="button" className="shrink-0 rounded-sm border border-border-strong px-2 py-0.5 text-fg hover:bg-bg-hover" onClick={retryView}>
+                Retry
+              </button>
+              {/* A browser may keep a module it failed to fetch (Chrome's module map does) and refuse it again without a
+                  fetch: a reload fetches it anew, and the desk comes back where it was (the URL, the browser's log). */}
+              <button type="button" className="shrink-0 rounded-sm border border-border-strong px-2 py-0.5 text-fg hover:bg-bg-hover" onClick={() => location.reload()}>
+                Reload the page
+              </button>
+            </div>
+          )}
+        </div>
       ) : (
         // Keyed by channel, so each opens at its own tail (the composer beside it is keyed by the session alone).
         <StreamView key={channel.kind === 'group' ? 'stream:group' : `stream:${channel.session}`} items={items} outbox={outbox} landed={landed.item} />

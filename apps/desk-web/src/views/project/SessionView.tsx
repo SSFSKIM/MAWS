@@ -37,7 +37,7 @@ export default function SessionView({ project, session, plane }: Props) {
     [owner],
   );
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="session-view" data-session={session.session} aria-label={`${sessionName(session)}'s session`}>
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="session-view" data-session-view="" data-session={session.session} aria-label={`${sessionName(session)}'s session`}>
       <ReportToggle storeKey={owner.main.key} />
       <TranscriptPane controller={owner.main} state={state} variant="session" ownerLane actions={actions} list={list} />
     </section>
