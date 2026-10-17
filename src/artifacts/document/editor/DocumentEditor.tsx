@@ -95,6 +95,15 @@ export type DocumentRail = 'comments' | 'history' | null;
 type Rail = DocumentRail;
 const NO_CARRIES: ReadonlyMap<string, Carry['kind']> = new Map();
 
+// P3-F1: the input types the owner types text into (an unknown type reads as 'text')
+const TEXT_ENTRY_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
+// P3-F1: a text-entry control (a text field, a text area, an editable region) with text in it
+function holdsTypedText(element: Element): boolean {
+  if (element instanceof HTMLTextAreaElement) return element.value !== '';
+  if (element instanceof HTMLInputElement) return TEXT_ENTRY_TYPES.has(element.type) && element.value !== '';
+  return element instanceof HTMLElement && element.isContentEditable && (element.textContent ?? '') !== '';
+}
+
 /** A request to show a thread's passage: a new serial for each ask, so asking twice shows twice. */
 interface Showing {
   threadId: string;
@@ -155,11 +164,12 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const railLayout = useRailLayout(body, railShown);
   const drawer = railShown && railLayout.mode === 'drawer';
   // Escape inside the drawer closes it, and the keyboard goes back to the page; one the rail's own control took is its
-  // own, and one in a field holding text (a reply being written) is the field's, so the draft is not lost.
+  // own, and one in a text field holding text (a reply or a version name being written) is the field's, so the draft is
+  // not lost. A checkbox, a radio or a button holds no draft, whatever its value.
   const onBodyKeyDown = (event: KeyboardEvent) => {
     const { target } = event;
     if (!drawer || event.key !== 'Escape' || event.defaultPrevented || !(target instanceof Element) || !target.closest('.doc-rail')) return;
-    if ((target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) && target.value !== '') return;
+    if (holdsTypedText(target)) return;
     event.preventDefault();
     event.stopPropagation();
     const pages = body.current?.querySelectorAll<HTMLElement>('.doc-page-frame .ProseMirror') ?? [];

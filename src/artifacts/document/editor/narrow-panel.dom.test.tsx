@@ -12,6 +12,7 @@ import { commentSelection } from './comments/plugins';
 import { DocumentEditor } from './DocumentEditor';
 import type { DocumentHandle } from './host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
+import { MemoryHistory } from './history/memory-history';
 import { TAB, World, doc, para, until } from './test-world';
 
 const owner = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
@@ -57,6 +58,7 @@ function rect(this: Element): DOMRect {
 }
 
 let world: World | null = null;
+let history: MemoryHistory | null = null;
 let handles: DocumentHandle[] = [];
 beforeEach(() => {
   width = 1200;
@@ -67,6 +69,8 @@ afterEach(() => {
   cleanup();
   for (const handle of handles) handle.close();
   handles = [];
+  history?.destroy();
+  history = null;
   world?.destroy();
   world = null;
   observers.clear();
@@ -75,13 +79,14 @@ afterEach(() => {
 });
 
 let editor: Editor | null = null;
-async function mount(): Promise<HTMLElement> {
+async function mount({ withHistory = false }: { withHistory?: boolean } = {}): Promise<HTMLElement> {
   world = new World(doc(para('p1', 'The owner reviews the launch plan today.')));
   const handle = openMemoryHandle(world.host, { log: () => {} });
   handles.push(handle);
   await whenSynced(handle);
   editor = null;
-  const { container } = render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} onEditor={(e) => (editor = e)} />);
+  history = withHistory ? new MemoryHistory(world.host) : null;
+  const { container } = render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} {...(history && { history })} onEditor={(e) => (editor = e)} />);
   await until(() => editor !== null && editor.getText().length > 0, 'the editor to bind');
   // a thread on "launch plan", so the rail has a reply field
   act(() => {
@@ -175,6 +180,32 @@ describe('the rail in the body’s width', () => {
     act(() => fireEvent.change(field(), { target: { value: '' } }));
     act(() => fireEvent.keyDown(field(), { key: 'Escape' }));
     expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
+  });
+
+  // The panel's follow-up: only a text-entry control holding text keeps the Escape; a checkbox's value is 'on' whatever
+  // its state, and there is no draft in it to lose.
+  it('as a drawer closes on Escape from History’s Named only checkbox; a version name being written keeps it', async () => {
+    width = 600;
+    const container = await mount({ withHistory: true });
+    const rail = () => screen.queryByRole('complementary', { name: 'Version history' });
+    const openHistory = async () => {
+      press('Version history');
+      await until(() => rail() !== null, 'the history rail');
+    };
+    await openHistory();
+    expect(layout(container)).toBe('drawer');
+    const named = within(rail()!).getByRole('checkbox', { name: 'Named only' }) as HTMLInputElement;
+    expect(named.value).toBe('on');
+    act(() => fireEvent.keyDown(named, { key: 'Escape' }));
+    expect(rail(), 'Escape on the checkbox closes the drawer').toBeNull();
+
+    await openHistory();
+    act(() => fireEvent.click(within(rail()!).getByRole('button', { name: 'Save version' })));
+    const name = within(rail()!).getByRole('textbox', { name: 'Version name' });
+    act(() => fireEvent.change(name, { target: { value: 'Draft to legal' } }));
+    act(() => fireEvent.keyDown(name, { key: 'Escape' }));
+    expect(rail(), 'the name being written is not lost').not.toBeNull();
+    expect((within(rail()!).getByRole('textbox', { name: 'Version name' }) as HTMLInputElement).value).toBe('Draft to legal');
   });
 
   it('does not take an Escape the page handles itself (find closes, the drawer stays)', async () => {
