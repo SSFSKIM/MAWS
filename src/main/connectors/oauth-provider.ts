@@ -39,7 +39,8 @@
 //   idempotent and begins blocking, the retirement and the local removal at once; revocation is best effort.
 // - A connection being forgotten is not proof of absence: a listing that still shows it withdraws its identity, and
 //   one forgotten without its identity learned (unreadable, or its read past its bound) leaves every source without an
-//   owned grant refused (`unavailable`, `unknown`) for this main's lifetime, never switched to its own configuration.
+//   owned grant withdrawn for automatic use in this main's lifetime, never switched to its own configuration; an
+//   explicit Connect may still establish a new grant, unless a record that may be its own is still saved unreadable.
 // - Lifetime: `hostLost` (main's attachment to the engine host ended; the host runs that attachment's cleanup before it
 //   serves another's requests) ends every waiting demand and owner flow and drops pending closes, whose epochs end with
 //   that attachment; a refresh in flight still persists its rotation under its claim, for the next attachment's
@@ -136,7 +137,9 @@ interface Slot {
   blocked: 'withdrawn' | 'needsConnect' | 'needsReconnect' | null;
   users: number;
 }
-type Found = 'held' | 'none' | 'stale' | 'store' | 'unknown' | 'duplicate';
+// `unattributed`: no owned grant, but a connection was forgotten without its identity learned (a gate for automatic use
+// only: an explicit Connect may establish a new grant); `unknown`: a record still saved may be this identity's.
+type Found = 'held' | 'none' | 'unattributed' | 'stale' | 'store' | 'unknown' | 'duplicate';
 // A withdrawn connection's host close: `floor` covers every epoch main issued for it; `key` the identity it blocks
 // (null: none was ever issued, so none can be in the host).
 interface Retirement {
@@ -249,7 +252,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     }
     if (matches.some((entry) => discarding.has(entry.connectionId))) return 'stale'; // an ended flow's, still on disk
     if (matches.length > 1) return 'duplicate';
-    if (matches.length === 0) return unattributed || listed.some((entry) => entry.state === 'unreadable') ? 'unknown' : 'none';
+    if (matches.length === 0) return listed.some((entry) => entry.state === 'unreadable') ? 'unknown' : unattributed ? 'unattributed' : 'none';
     const { connectionId } = matches[0]!;
     const claim = store.claim(connectionId);
     let record: ConnectorOAuthRecord | null;
@@ -298,6 +301,11 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     const held = slot.held;
     const current = () => !stopped && slot.generation === generation && slot.held === held;
     if (!held || slot.blocked) return;
+    for (const [connectionId, entry] of [...retirements]) {
+      if (entry.key !== slot.key) continue;
+      await retire(connectionId);
+      if (!current() || retirements.has(connectionId)) return;
+    }
     if (held.unsaved && !(await persist(slot, held, generation))) return;
     slot.issued ??= epochOf(slot, held.record);
     const issued = slot.issued;
@@ -324,11 +332,6 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       slot.issued = epochOf(slot, held.record);
       if (issued.deliveredTo && !issued.deliveredTo.aborted) slot.closing.push({ connectionId: issued.connectionId, credentialEpoch: issued.credentialEpoch });
       if (!(await persist(slot, held, generation))) return;
-    }
-    for (const [connectionId, entry] of [...retirements]) {
-      if (entry.key !== slot.key) continue;
-      await retire(connectionId);
-      if (!current() || retirements.has(connectionId)) return;
     }
     while (slot.closing.length > 0) {
       const target = slot.closing[0]!;
@@ -504,21 +507,30 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     return held.record.tokens.refreshToken === undefined && (unusable || expired(held.record.tokens));
   }
 
-  // An owner action's lookup of the identity's saved grant: why it cannot go on, or null (`slot.held` then says). The
-  // action's lifetime (its signal, the identity's generation, the host attachment) is taken first: an action whose
-  // lifetime ended meanwhile ends, rather than reading what changed as a new state to act on.
-  async function lookUp(slot: Slot, signal: AbortSignal | undefined): Promise<Extract<ConnectorOAuthConnectResult, { ok: false }> | null> {
+  // An owner action's lifetime (its signal, the identity's generation, the host attachment), captured before its
+  // first await. The caller proves it synchronously at the side effect itself (reuse or `runFlow`), so an action whose
+  // lifetime ended at any point meanwhile ends, rather than reading what changed as a new state to act on.
+  function actionLifetime(slot: Slot, signal: AbortSignal | undefined): () => boolean {
     const generation = slot.generation;
     const host = attachment.signal;
-    const ended = () => host.aborted || signal?.aborted === true || slot.generation !== generation;
+    return () => !stopped && !host.aborted && signal?.aborted !== true && slot.generation === generation;
+  }
+
+  // An owner action's lookup of the identity's saved grant: why it cannot go on, or null (`slot.held` then says).
+  async function lookUp(slot: Slot): Promise<Extract<ConnectorOAuthConnectResult, { ok: false }> | null> {
     if (slot.flow) return { ok: false, why: 'busy' };
-    let found: Found = 'held';
-    if (!slot.held) found = await adopt(slot);
-    else await Promise.resolve(); // the same turn boundary either way: what happened meanwhile is checked below
-    if (stopped) return { ok: false, why: 'stopped' };
-    if (found === 'stale' || ended()) return { ok: false, why: 'cancelled' };
-    if (slot.flow) return { ok: false, why: 'busy' };
+    if (slot.held) return null;
+    const found = await adopt(slot);
+    if (found === 'stale') return { ok: false, why: 'cancelled' };
     if (!slot.held && unavailableOf(found)) return { ok: false, why: 'unavailable' };
+    return null;
+  }
+
+  // The final proof, synchronous with the action's side effect: why it must not happen, or null.
+  function admission(slot: Slot, alive: () => boolean): Extract<ConnectorOAuthConnectResult, { ok: false }> | null {
+    if (stopped) return { ok: false, why: 'stopped' };
+    if (!alive()) return { ok: false, why: 'cancelled' };
+    if (slot.flow) return { ok: false, why: 'busy' };
     return null;
   }
 
@@ -581,7 +593,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       return withSlot<ConnectorOAuthState>(identity, { state: 'unavailable', why: 'store' }, async (slot) => {
         if (!slot.held && !slot.flow && slot.blocked !== 'withdrawn' && slot.blocked !== 'needsConnect') {
           const found = await adopt(slot);
-          if (!slot.held && !slot.flow && !slot.blocked) return unavailableOf(found) ?? { state: 'disconnected' };
+          if (!slot.held && !slot.flow && !slot.blocked) return unavailableOf(found) ?? { state: found === 'unattributed' ? 'withdrawn' : 'disconnected' };
         }
         if (slot.flow) return { state: 'connecting', connectionId: slot.flow.connectionId };
         if (slot.blocked === 'withdrawn' || slot.blocked === 'needsConnect') return { state: slot.blocked };
@@ -612,8 +624,11 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       if (!identity) return { ok: false, why: 'notHttp' };
       if (stopped) return { ok: false, why: 'stopped' };
       return withSlot<ConnectorOAuthConnectResult>(identity, { ok: false, why: 'capacity' }, async (slot) => {
-        const refused = await lookUp(slot, signal);
+        const alive = actionLifetime(slot, signal);
+        const refused = await lookUp(slot);
         if (refused) return refused;
+        const ended = admission(slot, alive); // no await between this and the reuse or the flow below
+        if (ended) return ended;
         const held = slot.held;
         if (held) {
           if (needsReconnect(slot, held)) return { ok: false, why: 'needsReconnect' };
@@ -629,8 +644,11 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       if (!identity) return { ok: false, why: 'notHttp' };
       if (stopped) return { ok: false, why: 'stopped' };
       return withSlot<ConnectorOAuthConnectResult>(identity, { ok: false, why: 'capacity' }, async (slot) => {
-        const refused = await lookUp(slot, signal);
+        const alive = actionLifetime(slot, signal);
+        const refused = await lookUp(slot);
         if (refused) return refused;
+        const ended = admission(slot, alive); // no await between this and the flow
+        if (ended) return ended;
         return runFlow(slot, slot.held?.record ?? null, signal);
       });
     },

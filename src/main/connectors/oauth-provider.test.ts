@@ -94,6 +94,7 @@ class FakeFlow implements ConnectorOAuthFlow {
   readonly revokes: ConnectorOAuthGrant[] = [];
   revokeAnswer: 'revoked' | 'unsupported' | 'failed' = 'revoked';
   connect: ConnectorOAuthFlow['connect'] = ({ requestUrl, signal }) => {
+    events.push('consent');
     const answer = deferred<ConnectorOAuthGrant>();
     this.connects.push({ requestUrl, signal, answer });
     return answer.promise;
@@ -595,6 +596,41 @@ describe('Disconnect', () => {
     expect(await provider.disconnect(SAVED)).toEqual({ local: 'forgotten', host: 'confirmed', revocation: 'none' });
     // whose grant it was is unknown: no source switches to its own configuration or none in this main's lifetime
     expect(await prepare()).toEqual({ ok: false });
+    expect(await provider.state(IDENTITY)).toEqual({ state: 'withdrawn' });
+  });
+
+  it('after an unattributed forget, an explicit Connect recovers a source through its own new flow; automatic use stays refused', async () => {
+    await seed();
+    sealer.failOpen = true;
+    provider.stop();
+    provider = makeProvider();
+    await provider.disconnect(SAVED);
+    sealer.failOpen = false;
+    const unrelated = source({ server: 'second', entryPath: ['mcpServers', 'second'] });
+    expect(await prepare(undefined, unrelated)).toEqual({ ok: false });
+    const connecting = provider.connect(source());
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+    flow.connects[0]!.answer.resolve(grant(tokens(6)));
+    expect(await connecting).toEqual({ ok: true, connectionId: FRESH, reused: false });
+    expect(credentialOf(await prepare())).toMatchObject({ connectionId: FRESH, accessToken: 'at-6' });
+    expect(await prepare(undefined, unrelated)).toEqual({ ok: false }); // its own Connect is its way back
+    const second = provider.reconnect(unrelated);
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(2));
+    flow.connects[1]!.answer.resolve(grant(tokens(7)));
+    expect(await second).toEqual({ ok: true, connectionId: FRESH2, reused: false });
+    expect(credentialOf(await prepare(undefined, unrelated))).toMatchObject({ connectionId: FRESH2, accessToken: 'at-7' });
+  });
+
+  it('after an unattributed forget, explicit consent still does not bypass a record that remains unreadable', async () => {
+    await seed(tokens(1), IDENTITY, SAVED);
+    await seed(tokens(2), { ...IDENTITY, server: 'other' }, OTHER);
+    sealer.failOpen = true;
+    provider.stop();
+    provider = makeProvider();
+    await provider.disconnect(SAVED);
+    expect(await provider.connect(source())).toEqual({ ok: false, why: 'unavailable' });
+    expect(await provider.reconnect(source())).toEqual({ ok: false, why: 'unavailable' });
+    expect(flow.connects).toEqual([]);
     expect(await provider.state(IDENTITY)).toEqual({ state: 'unavailable', why: 'unknown' });
   });
 
@@ -726,7 +762,81 @@ describe('a flow ended just after its save committed', () => {
   }
 });
 
+describe('an owner action’s final lifetime proof, at its side effect', () => {
+  // consent after the end is allowed only for an action admitted before it (its withdrawal of the old grant came first)
+  const admittedBeforeEnd = () => {
+    const end = events.indexOf('end');
+    const consent = events.indexOf('consent');
+    return consent === -1 || consent < end || events.slice(0, end).some((event) => event.startsWith('close:saved'));
+  };
+  for (const action of ['connect', 'reconnect'] as const) {
+    for (const end of ['disconnect', 'hostLost'] as const) {
+      for (const depth of [0, 1, 2, 3]) {
+        it(`${action}: a ${end} queued ${depth} microtask(s) after the call starts no consent for an ended action`, async () => {
+          await seed();
+          await prepare(); // main holds the grant: the lookup answers without the store
+          const pending = provider[action](source());
+          let hop = () => {
+            events.push('end');
+            if (end === 'disconnect') void provider.disconnect(SAVED);
+            else provider.hostLost();
+          };
+          for (let i = 0; i < depth; i += 1) { const inner = hop; hop = () => queueMicrotask(inner); }
+          queueMicrotask(hop);
+          await Promise.race([pending, new Promise((resolve) => setTimeout(resolve, 50))]);
+          expect(events).toContain('end');
+          expect(admittedBeforeEnd()).toBe(true);
+          if (action === 'connect') expect(flow.connects).toEqual([]); // a held grant is reused, never consented again
+        });
+      }
+    }
+  }
+});
+
 describe('a withdrawn connection’s retirement', () => {
+  for (const first of ['false', 'timeout'] as const) {
+    it(`an old close first ${first === 'false' ? 'unconfirmed' : 'timed out'}, a responsive host then clears it for a short-lived access-only replacement`, async () => {
+      await seed();
+      await prepare();
+      closeAnswers = [];
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        const replacing = provider.reconnect(source());
+        await vi.waitFor(() => expect(closeAnswers).toHaveLength(1));
+        if (first === 'false') closeAnswers[0]!.resolve(false);
+        else await vi.advanceTimersByTimeAsync(OAUTH_HOST_CLOSE_TIMEOUT_MS);
+        await vi.waitFor(() => expect(provider.disconnecting(SAVED)).toBe('unconfirmed'));
+        await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+        flow.connects[0]!.answer.resolve(grant(tokens(9, { expiresAt: clock + 30_000, refreshToken: undefined })));
+        expect(await replacing).toMatchObject({ ok: true, connectionId: FRESH });
+      } finally {
+        vi.useRealTimers();
+      }
+      closeAnswers = null; // the host answers again
+      expect(credentialOf(await prepare())).toMatchObject({ connectionId: FRESH, accessToken: 'at-9' });
+      expect(flow.refreshes).toEqual([]);
+      expect(flow.connects).toHaveLength(1);
+      expect(provider.disconnecting(SAVED)).toBeNull();
+    });
+  }
+
+  it('a transient refresh failure does not hold back the retirement: a still-valid replacement is delivered once the close confirms', async () => {
+    await seed();
+    await prepare();
+    closeAnswers = [];
+    const replacing = provider.reconnect(source());
+    await vi.waitFor(() => expect(closeAnswers).toHaveLength(1));
+    closeAnswers[0]!.resolve(false);
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+    flow.connects[0]!.answer.resolve(grant(tokens(9, { expiresAt: clock + 30_000 })));
+    expect(await replacing).toMatchObject({ ok: true });
+    closeAnswers = null;
+    const pending = prepare();
+    await vi.waitFor(() => expect(flow.refreshes).toHaveLength(1));
+    flow.refreshes[0]!.answer.reject(new ConnectorOAuthError('transient'));
+    expect(credentialOf(await pending)).toMatchObject({ connectionId: FRESH, accessToken: 'at-9' });
+  });
+
   it('Reconnect: the replacement is not delivered until the old connection’s close is confirmed', async () => {
     await seed();
     const old = credentialOf(await prepare()) as { credentialEpoch: number };
