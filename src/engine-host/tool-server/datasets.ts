@@ -22,6 +22,8 @@ import { DATASET_STATES } from '@artifacts/dashboard/states';
 import { legacyDashboardFiles, legacyDashboardReason } from '@artifacts/dashboard/legacy';
 import type { ArtifactDatasetResult } from '@shared/maws/dashboard-tools';
 import { mimeOf } from '@shared/files/mime';
+import type { MawsDatasetRefreshOutcome } from '@shared/ipc/schema/maws'; // E3
+import type { DatasetRefreshRequests } from '../connectors/dataset-requests'; // E3
 import { parseToolArguments, TOOL_ERRORS } from '@shared/maws/tools';
 import { dashboardAdapterOf } from '../dashboards';
 import { actorOf, answering, lineageOf, opIdOf, pathUnderCwd, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
@@ -104,7 +106,32 @@ async function readValidated(file: ValidatedFile): Promise<Uint8Array> {
   }
 }
 
-export function artifactDatasetTool(deps: ArtifactToolDeps): McpToolDefinition {
+// E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): what a refresh answers when nothing was
+// published, by main's closed outcome (never its words) or by how the request ended.
+const NOT_PUBLISHED: Record<string, (tool: string, server: string) => string> = {
+  'revoked:notGranted': (tool) => `the owner has not granted ${tool} to this dashboard; ask them to allow it from the dashboard's datasets, then refresh`,
+  'revoked:fingerprintChanged': (tool) => `${tool} changed since the owner granted it; ask them to grant it again, then refresh`,
+  'revoked:wrongMode': (tool) => `${tool} is granted only once, and a refresh needs the owner's read-only grant`,
+  'revoked:revoked': (tool) => `the owner revoked ${tool} while it ran`,
+  'paused:noRoute': (_tool, server) => `this live session does not have ${server} connected, and no direct route reaches it; nothing was fetched`,
+  'paused:unavailable': (_tool, server) => `${server} became unavailable during the call`,
+  'paused:hidden': (tool) => `the call of ${tool} was stopped`,
+  'paused:closed': (tool) => `the call of ${tool} was stopped`,
+  'invalid:notReadOnly': (tool) => `${tool} is not marked read-only, so it cannot feed a dataset`,
+  ok: () => 'MAWS reported the call done, but the host recorded no publication',
+};
+const notPublished = (outcome: MawsDatasetRefreshOutcome, tool: string, server: string): string => {
+  const key = outcome.ok ? 'ok' : `${outcome.state}:${outcome.reason}`;
+  return (NOT_PUBLISHED[key] ?? (() => `the refresh of ${tool} failed (${key}); nothing was published`))(tool, server);
+};
+const ENDED: Record<'timeout' | 'withdrawn' | 'noClient', string> = {
+  timeout: 'MAWS did not answer in time; nothing was published',
+  withdrawn: 'the request was withdrawn',
+  noClient: 'MAWS is not open; the dataset cannot be refreshed',
+};
+// E3 end
+
+export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<DatasetRefreshRequests, 'ask'> /* E3 */ }): McpToolDefinition {
   return defineMawsTool(TOOL, (args, ctx) =>
     deps.session.joined(opIdOf(ctx), () =>
       answering(TOOL, async () => {
@@ -121,6 +148,37 @@ export function artifactDatasetTool(deps: ArtifactToolDeps): McpToolDefinition {
         if (!artifact) throw new ToolRefusal(TOOL_ERRORS.noArtifact(TOOL, input.artifact));
         if (artifact.kind !== 'dashboard') throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind }, `${input.artifact} is a ${artifact.kind} artifact; ${TOOL} binds data to dashboards`);
 
+        // E3 (R3): one refresh of the configured query, asked of main and answered by the host's durable record
+        if (input.refresh) {
+          const query = await store.readCommitted(() => {
+            const doc = store.service.live(artifactId);
+            const held = legacyDashboardFiles(doc);
+            if (held) throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard', held }, `${input.artifact}: ${legacyDashboardReason(held)}; nothing was fetched`);
+            const live = store.revision(artifactId);
+            if (input.baseRevision > live) throw refuse(TOOL, { reason: 'invalid', liveRevision: live }, `baseRevision ${input.baseRevision} is newer than the live revision ${live}`);
+            const existing = readDataset(doc, input.id);
+            if (adapter.lastChange(artifactId, input.id) > input.baseRevision) {
+              const detail = existing ? 'replaced since your read' : 'removed since your read';
+              throw refuse(TOOL, { reason: 'conflict', dataset: input.id, detail, liveRevision: live }, `dataset "${input.id}" was ${detail.replace(' since your read', '')} since your read (revision ${input.baseRevision}); read the dashboard again`);
+            }
+            if (!existing) throw refuse(TOOL, { reason: 'notFound', dataset: input.id }, `${DATASET_STATES.noDataset(input.id)} to refresh`);
+            if (existing.source.kind !== 'query') throw refuse(TOOL, { reason: 'invalid', dataset: input.id }, `dataset "${input.id}" is bound to a file; only a query source refreshes`);
+            return existing.source;
+          });
+          if (!deps.refreshes) throw refuse(TOOL, { reason: 'unavailable' }, 'this run of MAWS cannot refresh a dataset');
+          const named = `${query.server} · ${query.tool}`;
+          const settled = await deps.refreshes.ask({ artifactId, datasetId: input.id, baseRevision: input.baseRevision, appSessionId: ctx.appSessionId, opId: opIdOf(ctx), server: query.server, tool: query.tool, args: query.args }, ctx.signal);
+          switch (settled.kind) {
+            case 'published':
+              return toolText(settled.answer);
+            case 'refused':
+              if (settled.refusal !== null) throw refuse(TOOL, { reason: 'invalid', dataset: input.id }, `${settled.refusal}; nothing was published`);
+              throw refuse(TOOL, { reason: 'unavailable', dataset: input.id }, notPublished(settled.outcome, named, query.server));
+            default:
+              throw refuse(TOOL, { reason: 'unavailable', dataset: input.id }, ENDED[settled.kind]);
+          }
+        }
+
         // what the write stands on, read and validated first
         let source: { bytes: Uint8Array; name: string; format: DatasetFormat; ref?: string } | null = null;
         let table: ParsedDataset | null = null;
@@ -129,7 +187,7 @@ export function artifactDatasetTool(deps: ArtifactToolDeps): McpToolDefinition {
         // then adopts it)
         let held: { release(): void } | null = null;
         try {
-          if (!input.remove) {
+          if (!input.remove && !input.source /* E3: a query reads nothing */) {
             if (input.path !== undefined) {
               const validated = await realFileUnder(ctx.cwd, input.path);
               const name = basename(input.path);
@@ -192,8 +250,22 @@ export function artifactDatasetTool(deps: ArtifactToolDeps): McpToolDefinition {
                   actor,
                   assets,
                   (doc, refs) => {
-                    if (!source || !table) return removeDataset(doc, input.id);
                     const prior = existing as DatasetDescriptor | null;
+                    // E3 (R2): a query configured, never fetched: no snapshot, rows, columns or provenance
+                    if (input.source) {
+                      const { kind, server, tool, args, schedule, staleAfter } = input.source;
+                      const description = input.description ?? prior?.description;
+                      return setDataset(doc, input.id, {
+                        title: input.title ?? prior?.title ?? input.id,
+                        ...(description !== undefined && { description }),
+                        ...(input.rowKey !== undefined && { rowKey: input.rowKey }),
+                        source: { kind, server, tool, args, ...(schedule !== undefined && { schedule }), ...(staleAfter !== undefined && { staleAfter }), snapshot: null },
+                        columns: [],
+                        rows: 0,
+                        state: { status: 'ok', at },
+                      });
+                    }
+                    if (!source || !table) return removeDataset(doc, input.id);
                     const title = input.title ?? prior?.title ?? input.id;
                     const description = input.description ?? prior?.description;
                     setDataset(doc, input.id, {
@@ -210,7 +282,9 @@ export function artifactDatasetTool(deps: ArtifactToolDeps): McpToolDefinition {
                   {
                     prepare,
                     inFrame: (revision) => {
-                      recorded = table
+                      recorded = input.source
+                        ? { status: 'dataset', artifactId, id: input.id, revision, columns: [], rows: 0, notFetched: true } // E3
+                        : table
                         ? { status: 'dataset', artifactId, id: input.id, revision, columns: table.columns, rows: table.rows.length, ...(table.warnings.length > 0 && { warnings: table.warnings }) }
                         : { status: 'dataset', artifactId, id: input.id, revision };
                       op.record(recorded);

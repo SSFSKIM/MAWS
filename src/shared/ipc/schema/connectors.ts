@@ -18,6 +18,7 @@ import {
   CONNECTOR_GRANT_MODES,
   CONNECTOR_REFUSAL_REASONS,
   ConnectorCallRefSchema,
+  ConnectorDatasetSinkSchema, // E3
   ConnectorGrantRequestSchema,
   ConnectorGrantSchema,
   ConnectorToolRefSchema,
@@ -67,12 +68,16 @@ export type ConnectorResolveAnswer = z.infer<typeof ConnectorResolveAnswerSchema
 
 // One tool run as main's check admitted it: the grant's `fingerprint` and `mode`, which the host compares with the
 // grant again (before an Allow once is consumed) and with the session's mcp_status at the write.
+// E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): `dataset`, the trusted sink main forwards from the
+// owner's surface (or an agent's refresh request, `requestId`, which the host issued): the host keeps the result, checks
+// it against the dataset's query and publishes it as the dataset's snapshot instead of answering it.
 export const ConnectorStartSchema = ConnectorSessionToolSchema.extend({
   operationId: OperationId,
   artifactId: ArtifactId,
   arguments: z.record(z.string(), z.unknown()),
   fingerprint: ConnectorGrantRequestSchema.shape.fingerprint,
   mode: z.enum(CONNECTOR_GRANT_MODES),
+  dataset: ConnectorDatasetSinkSchema.extend({ requestId: z.uuid().optional() }).optional(), // E3
 });
 
 // How an operation ended, for main alone. `refused`: the host's own last check found no grant to admit it (named as the
@@ -104,9 +109,11 @@ export const commands = {
   // `tools`: the page's `{server, tool}` pairs, as it sent them.
   'connectors.declare': main(z.strictObject({ leaseId: LeaseId, tools: z.unknown() }), ConnectorDeclareOutcomeSchema),
   // `request`: the page's `{server, tool, args?}`. Answers once the tool has (no fixed bound: a tool may take minutes).
-  'connectors.call': main(z.strictObject({ leaseId: LeaseId, request: z.unknown() }), ConnectorCallOutcomeSchema),
+  // E3: `dataset`, the trusted owner's sink beside the request (never the page's): the result becomes the dataset's
+  // snapshot in the host, and the outcome's `result` is the publication's metadata.
+  'connectors.call': main(z.strictObject({ leaseId: LeaseId, request: z.unknown(), dataset: ConnectorDatasetSinkSchema.optional() /* E3 */ }), ConnectorCallOutcomeSchema),
   // `request`: the page's `{server, tool, args?, intervalMs}`; its refreshes arrive as `connectors.watchUpdate`.
-  'connectors.watch': main(z.strictObject({ leaseId: LeaseId, request: z.unknown() }), ConnectorWatchStartSchema),
+  'connectors.watch': main(z.strictObject({ leaseId: LeaseId, request: z.unknown(), dataset: ConnectorDatasetSinkSchema.optional() /* E3 */ }), ConnectorWatchStartSchema),
   'connectors.unwatch': main(LeaseWatch, z.strictObject({ stopped: z.boolean() })),
   // The owner's Refresh (after its Start, say): one now, when the watch is visible, granted and idle.
   'connectors.refresh': main(LeaseWatch, z.strictObject({ refreshing: z.boolean() })),

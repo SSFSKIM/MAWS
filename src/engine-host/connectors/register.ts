@@ -16,6 +16,8 @@ import type { ArtifactStore } from '../documents/store';
 import type { DeadlineShape } from '../ipc';
 import type { EngineSession } from '../session';
 import { ConnectorCalls } from './calls';
+import type { DatasetRefreshRequests } from './dataset-requests'; // E3
+import { connectorDatasetSink } from './dataset-sink'; // E3
 
 type HostConnectorCommand = { [N in keyof typeof ConnectorCommands]: (typeof ConnectorCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof ConnectorCommands];
 
@@ -28,6 +30,7 @@ export interface ConnectorsSurfaceDeps {
   sessions: { get(appSessionId: AppSessionId): Pick<EngineSession, 'lifecycle' | 'control' | 'status'> | undefined }; // the process table
   store: ArtifactStore | null; // null: the store failed to open this run
   calls?: ConnectorCalls; // tests
+  datasetRefresh?: DatasetRefreshRequests; // E3: the agents' refresh requests a dataset start may name (absent: none)
 }
 
 function refused(reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}, code: 'invalid_input' | 'internal' = 'invalid_input'): HostCommandError {
@@ -42,6 +45,7 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
       session: (id) => deps.sessions.get(id as AppSessionId),
       store: () => store,
       completed: (operationId) => void emit('connectors.operation', { operationId }),
+      datasets: connectorDatasetSink({ store: () => store, requests: deps.datasetRefresh ?? null }), // E3
     });
   const storeOf = (): ArtifactStore => {
     if (!store) throw refused('unavailable', 'the artifact store could not be opened this run', {}, 'internal');

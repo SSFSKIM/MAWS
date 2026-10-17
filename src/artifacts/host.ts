@@ -5,6 +5,7 @@
 import type { Awareness } from '@y/protocols/awareness';
 import type { Actor } from '@shared/artifacts/actor';
 import type {
+  ConnectorCallOptions, // E3
   ConnectorCallOutcome,
   ConnectorCallRequest,
   ConnectorDeclareOutcome,
@@ -171,12 +172,16 @@ export interface ArtifactDocOption {
 export interface ConnectorSurface {
   // Adds `server · tool` pairs the page may call; answers everything the surface has declared.
   declareTools(tools: readonly ConnectorToolRef[]): Promise<ConnectorDeclareOutcome>;
-  // Runs a declared tool once, answering when it has (a tool may take minutes).
-  callTool(request: ConnectorCallRequest): Promise<ConnectorCallOutcome>;
+  // Runs a declared tool once, answering when it has (a tool may take minutes). E3
+  // (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): `options`, the trusted owner's alone (an artifact
+  // page's relay never passes it): the result becomes the dataset's snapshot in the host, and the outcome's `result` is
+  // the publication's metadata, never the rows.
+  callTool(request: ConnectorCallRequest, options?: ConnectorCallOptions): Promise<ConnectorCallOutcome>;
   // Refreshes a declared read-only tool every `intervalMs` (clamped to 30 s .. 24 h, at most 64 watches in the app) while
   // the surface is visible, each refresh's outcome to `listener`; one due while hidden runs once when shown. The listener
   // may hear a first refresh before the start's promise settles.
-  watchTool(request: ConnectorWatchRequest, listener: (update: ConnectorCallOutcome) => void): Promise<ConnectorWatchStart>;
+  // E3: `options`, the owner's dataset sink as for `callTool`, naming no `baseRevision` (each refresh takes the host's).
+  watchTool(request: ConnectorWatchRequest, listener: (update: ConnectorCallOutcome) => void, options?: ConnectorCallOptions): Promise<ConnectorWatchStart>;
   unwatchTool(watchId: string): Promise<boolean>;
   // A refresh now, when the watch is visible, granted and idle (after the owner started a session, say).
   refreshWatch(watchId: string): Promise<boolean>;

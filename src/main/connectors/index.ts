@@ -22,11 +22,17 @@
 //   afresh. Its events reach main only once its connection streams, so route E starts operations only then, and each
 //   time a connection starts streaming main reconciles what an event dropped before it: the pending operations'
 //   outcomes are taken, and every watch waiting for a grant has its grant re-read from the store.
+// - E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): a window's call or watch may carry the owner's
+//   dataset sink beside its request, handed to the broker as it came. An agent's dataset refresh is announced by the host
+//   by its id alone (`maws.artifact.datasetRefresh`); main reads it (`artifacts.datasetRefreshRequest`), runs it through
+//   the broker with no lease (the asking session's own engine), and answers how its call went
+//   (`maws.artifact.datasetRefreshed`), both main-only; the host's own record of the publication is the tool's answer.
 import { realpathSync } from 'node:fs';
 import type { BrowserWindow, WebContents } from 'electron';
 import type { ConnectorCallOutcome } from '@shared/artifacts/connectors';
 import { eventChannel, type CommandInput, type CommandName, type CommandOutput, type CommandResult, type HostState } from '@shared/ipc/schema';
 import type { ConnectorWatchUpdate } from '@shared/ipc/schema/connectors';
+import type { MawsDatasetRefreshOutcome } from '@shared/ipc/schema/maws'; // E3
 import { validateEventPayload } from '@shared/ipc/validate';
 import type { HostSupervisor } from '../hosts/supervisor';
 import type { registerMainHandler } from '../ipc/router';
@@ -75,7 +81,7 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
   };
   const engine = createEngineRoute({ call, sessions: index.sessions, projects: index.projects, realpath, streaming: () => hosts.streaming('engine-host'), log });
   const routes: ConnectorRoute[] = [engine]; // route D joins after it (P3-H's brief: E first)
-  const broker = new ConnectorBroker({ routes, grants, log, recheckWindow: (owner) => followed.get(owner)?.read() });
+  const broker = new ConnectorBroker({ routes, grants, log, recheckWindow: (owner) => followed.get(owner)?.read(), sessionRoute: (appSessionId, artifactId, tool, signal) => engine.resolveSession(appSessionId, artifactId, tool, signal) /* E3 */ });
 
   // ── the owner windows ──
   interface Followed {
@@ -138,13 +144,13 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
   // ── a page's lease, through its owner window ──
   register('connectors.open', ({ artifactId }, { sender }) => ({ leaseId: broker.open(ownerOf(sender), artifactId) }));
   register('connectors.declare', ({ leaseId, tools }, { sender }) => broker.declareTools(ownerOf(sender), leaseId, tools));
-  register('connectors.call', ({ leaseId, request }, { sender }) => broker.callTool(ownerOf(sender), leaseId, request));
-  register('connectors.watch', ({ leaseId, request }, { sender }) => {
+  register('connectors.call', ({ leaseId, request, dataset }, { sender }) => broker.callTool(ownerOf(sender), leaseId, request, dataset && { dataset } /* E3 */));
+  register('connectors.watch', ({ leaseId, request, dataset }, { sender }) => {
     let watchId: string | null = null; // the first refresh runs a timer turn after the start answers
     const listener = (update: ConnectorCallOutcome) => {
       if (watchId !== null) sendUpdate(sender, { leaseId, watchId, update });
     };
-    const start = broker.watchTool(ownerOf(sender), leaseId, request, listener);
+    const start = broker.watchTool(ownerOf(sender), leaseId, request, listener, dataset && { dataset } /* E3 */);
     if (start.ok) watchId = start.watchId;
     return start;
   });
@@ -158,6 +164,23 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
   register('artifacts.revokeConnectorTool', async ({ artifactId, server, tool }) => ({ revoked: await broker.revokeTool(artifactId, { server, tool }) }));
 
   const stopEnded = hosts.onEvent('connectors.operation', ({ operationId }) => engine.operationEnded(operationId));
+  // E3: an agent's dataset refresh, read, run and answered; a request read as gone (answered, ended) is left alone
+  const refresh = async (requestId: string): Promise<void> => {
+    let outcome: MawsDatasetRefreshOutcome;
+    try {
+      const { request } = await host('artifacts.datasetRefreshRequest', { requestId });
+      if (request === null) return;
+      const { appSessionId, artifactId, datasetId, baseRevision, server, tool, args } = request;
+      const answer = await broker.refreshForSession({ appSessionId, artifactId, server, tool, args, dataset: { id: datasetId, baseRevision, requestId } });
+      outcome = answer.ok ? { ok: true } : answer;
+    } catch (error) {
+      log(`connectors: the dataset refresh ${requestId} could not be run: ${error instanceof Error ? error.message : String(error)}`);
+      outcome = { ok: false, state: 'failed', reason: 'routeFailed' };
+    }
+    const answered = await call('maws.artifact.datasetRefreshed', { requestId, outcome }).catch((error: unknown) => ({ ok: false as const, error }));
+    if (!answered.ok) log(`connectors: the dataset refresh ${requestId}'s answer did not reach the host`);
+  };
+  const stopRefreshes = hosts.onEvent('maws.artifact.datasetRefresh', ({ requestId }) => void refresh(requestId));
   const stopGrants = hosts.onEvent('connectors.grantChanged', (change) => broker.onGrantChange(change));
   const stopDeletes = hosts.onEvent('artifacts.changed', (change) => {
     if (change.change === 'deleted') broker.onArtifactDeleted(change.artifactId);
@@ -172,6 +195,7 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
   return {
     stop: () => {
       stopEnded();
+      stopRefreshes(); // E3
       stopGrants();
       stopDeletes();
       stopState();

@@ -42,6 +42,14 @@ export interface ConnectorRouteCallContext {
   signal: AbortSignal;
   fingerprint: string;
   mode: ConnectorGrantMode;
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): the trusted dataset sink. The route's backend
+  // keeps the result and publishes it as the dataset's snapshot, answering the publication's metadata as `result`;
+  // `requestId` names an agent's refresh request (the host issued it), never a page's. `publishable` is main's
+  // synchronous recheck that the work may still publish (the native window read now for a page, the request not ended
+  // for an agent): the route asks it in the same turn as each step that would let the backend publish, and withdraws the
+  // work when it answers false.
+  dataset?: { id: string; baseRevision?: number; requestId?: string };
+  publishable?: () => boolean;
 }
 
 // `unavailable`: the route no longer has the server (not connected, the engine gone, needs authentication); `failed`:

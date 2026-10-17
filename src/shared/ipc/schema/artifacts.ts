@@ -15,7 +15,7 @@ import { AppSessionIdSchema } from '../../graph/ids';
 import { ARTIFACT_EXPORT_FONTS /* P3-C */, ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
 import { JsonValueSchema, type CommandSpec } from './common';
-import { ConnectorGrantGestureSchema, ConnectorGrantSchema, ConnectorToolRefSchema } from '../../artifacts/connectors'; // P3-H H3b
+import { ConnectorDatasetSinkSchema /* E3 */, ConnectorGrantGestureSchema, ConnectorGrantSchema, ConnectorToolRefSchema } from '../../artifacts/connectors'; // P3-H H3b
 import { ConnectorGrantOutcomeSchema } from './connectors'; // P3-H H3b
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
@@ -287,6 +287,17 @@ export const commands = {
   // crashing releases it too. Main's.
   'artifacts.holdDatasets': main(z.strictObject({ artifactId: Id, refs: HoldRefs }), z.strictObject({ holdId: z.uuid() })),
   'artifacts.releaseDatasets': main(z.strictObject({ holdId: z.uuid() }), z.strictObject({ released: z.boolean() })),
+  // An agent's pending `artifact_dataset` refresh (R3), read by main once `maws.artifact.datasetRefresh` named it: the
+  // dashboard, the dataset and the base the session read it at, the asking session, and the query its descriptor names
+  // (the tool and its arguments). Null once the request ended or for an id the host never issued. Main-only.
+  'artifacts.datasetRefreshRequest': host(
+    z.strictObject({ requestId: z.uuid() }),
+    z.strictObject({
+      request: z
+        .strictObject({ artifactId: Id, datasetId: ConnectorDatasetSinkSchema.shape.id, baseRevision: Seq, appSessionId: AppSessionIdSchema, ...ConnectorToolRefSchema.shape, args: z.record(z.string(), z.unknown()) })
+        .nullable(),
+    }),
+  ),
   // E3 end
 } as const satisfies Record<`artifacts.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

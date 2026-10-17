@@ -30,6 +30,7 @@ import type { Documents } from '.';
 import type { ArtifactStore, ByteContent } from './store';
 import { datasetReaderOf } from '../dashboards/read'; // P3-E
 import { ConnectionHolds } from '../dashboards/holds'; // E3
+import type { DatasetRefreshRequests } from '../connectors/dataset-requests'; // E3
 
 type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.open' | 'artifacts.export' | 'artifacts.downloadAsset' /* P3-E: main's */ | 'artifacts.connectorGrants' | 'artifacts.grantConnectorTool' | 'artifacts.revokeConnectorTool' /* P3-H H3b: main's */ | 'artifacts.holdDatasets' | 'artifacts.releaseDatasets' /* E3: main's */> | keyof typeof SpaceCommands;
 
@@ -39,13 +40,17 @@ export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShap
   'artifacts.saveVersion': 'immediate', 'artifacts.nameVersion': 'immediate', 'artifacts.restore': 'immediate', 'artifacts.markViewed': 'immediate', 'artifacts.pruneVersions': 'immediate',
   'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.copyAsset': 'immediate' /* P3-C */, 'artifacts.readDataset': 'immediate' /* P3-E */, 'artifacts.testLoopDelay': 'immediate',
   'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.assets': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
-  'artifacts.captureDatasetState': 'immediate', 'artifacts.holdAssets': 'immediate', 'artifacts.releaseAssets': 'immediate', // E3
+  'artifacts.captureDatasetState': 'immediate', 'artifacts.holdAssets': 'immediate', 'artifacts.releaseAssets': 'immediate', 'artifacts.datasetRefreshRequest': 'immediate', // E3
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
 };
 
 export interface ArtifactsSurfaceDeps {
   documents: Documents | null; // null: the store failed to open this run (`openDocuments` logged why)
   env: Record<string, string | undefined>; // MAWS_E2E=1 opens the test writer and the loop delay
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): the host's registry of agents' dataset refreshes,
+  // which main reads a pending request from. Absent only where the host runs no sessions' tools (a test of this surface
+  // alone): every request then reads null.
+  datasetRefresh?: Pick<DatasetRefreshRequests, 'read'>;
 }
 
 const HUMAN: Actor = { kind: 'human' };
@@ -62,7 +67,7 @@ function typed(error: unknown): unknown {
 }
 
 // E3: `onClientGone` releases the holds main's connection took (its absence: a test's surface, holds released at close)
-export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onDocPort'> & Partial<Pick<HostClientHooks, 'onClientGone'>>, { documents, env }: ArtifactsSurfaceDeps): { close(): void } {
+export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onDocPort'> & Partial<Pick<HostClientHooks, 'onClientGone'>>, { documents, env, datasetRefresh }: ArtifactsSurfaceDeps): { close(): void } {
   const e2e = env.MAWS_E2E === '1';
   const loopDelay: ReturnType<typeof monitorEventLoopDelay> | null = e2e ? monitorEventLoopDelay({ resolution: 10 }) : null;
   loopDelay?.enable();
@@ -266,6 +271,8 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   });
   serve('artifacts.holdAssets', async ({ artifactId, refs }) => ({ assetHoldId: await holds.hold(storeOf(), artifactId, refs) }));
   serve('artifacts.releaseAssets', ({ assetHoldId }) => ({ released: holds.release(assetHoldId) }));
+  // E3: an agent's pending dataset refresh, as main reads it once its id was announced (main-only)
+  serve('artifacts.datasetRefreshRequest', ({ requestId }) => ({ request: datasetRefresh?.read(requestId) ?? null }));
   // E3 end
   serve('artifacts.status', () => {
     if (!documents) return { status: 'unavailable' as const, reason: 'the artifact store could not be opened this run (the host log says why)' };

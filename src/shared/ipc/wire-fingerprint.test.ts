@@ -33,6 +33,7 @@ describe('HOST_EVENTS', () => {
         'maws.pane.show',
         'maws.artifact.capture',
         'maws.artifact.export', // P3-A M7
+        'maws.artifact.datasetRefresh', // E3: an agent's refresh request, its id alone
         'host.supervisorStatus', // E10 M2
         'artifacts.changed', // P3-A M4
         'spaces.changed', // P3-A M4

@@ -915,11 +915,11 @@ describe('ipc schema validates both directions', () => {
   // E5 end
   // E1 start: the maws tool server's commands and its pane request (P1 ledger §5)
   describe('E1 entries', () => {
-    it('adds the maws namespace: three engine-host commands and the pane request, all bridged', () => {
-      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */, 'maws.artifact.exported' /* P3-A M7 */]);
+    it('adds the maws namespace: three engine-host commands and the pane request, all bridged but E3’s main-only datasetRefreshed', () => {
+      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */, 'maws.artifact.exported' /* P3-A M7 */, 'maws.artifact.datasetRefreshed' /* E3 */]);
       for (const spec of Object.values(maws.commands)) expect(spec.owner).toBe('engine-host');
-      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */, 'maws.artifact.export' /* P3-A M7 */]);
-      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
+      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */, 'maws.artifact.export' /* P3-A M7 */, 'maws.artifact.datasetRefresh' /* E3 */]);
+      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands).filter((name) => !MAIN_ONLY_COMMANDS.includes(name as never))); // E3
     });
 
     it('validates the asks, an answer, a pane request and its answer', () => {
@@ -1499,7 +1499,7 @@ describe('ipc schema validates both directions', () => {
     it('the browser tools\' bridge left with the tools', () => {
       expect(Object.keys(commands).filter((name) => name.startsWith('maws.browser.'))).toEqual([]);
       expect(Object.keys(events).filter((name) => name.startsWith('maws.browser.'))).toEqual([]);
-      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
+      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands).filter((name) => !MAIN_ONLY_COMMANDS.includes(name as never))); // E3
       expect([...NAMES.maws.events]).toEqual(Object.keys(maws.events));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });

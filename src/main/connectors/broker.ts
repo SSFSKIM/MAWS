@@ -32,19 +32,29 @@
 //   it ran is obsolete: the watch asks again rather than wait); one of a tool that is not read-only ends.
 // - What a page reads of a failure is a state and a reason from a closed list (P3 Decision Log 84); the words of an
 //   error, the route's or main's own, go to main's log only.
+// - E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): the owner's surface may put a dataset sink beside
+//   a page's call or watch (`options.dataset`, never the page's request), which the route's backend publishes the
+//   result to; it needs a read grant of a read-only tool, and the route asks its `publishable` (the window re-read now,
+//   the work not aborted, the lease visible) before each step that would let the backend publish. An agent's one
+//   refresh (`refreshForSession`) needs no lease: the asking session's own engine (`sessionRoute`) or a direct route
+//   serves it, never another session's, under the same read grant; the owner's revoke, the store's revoke or delete and
+//   main's stop end it as they end a page's work.
 import { randomUUID } from 'node:crypto';
 import * as z from 'zod';
 import {
   CONNECTOR_ARGS_MAX_BYTES,
   CONNECTOR_DECLARE_LIMIT,
   CONNECTOR_WATCH_LIMIT,
+  ConnectorCallOptionsSchema, // E3
   ConnectorCallRequestSchema,
   ConnectorGrantGestureSchema,
   ConnectorToolRefSchema,
   ConnectorWatchRequestSchema,
   clampWatchInterval,
   connectorToolKey,
+  type ConnectorCallOptions, // E3
   type ConnectorCallOutcome,
+  type ConnectorDatasetSink, // E3
   type ConnectorDeclareOutcome,
   type ConnectorGrant,
   type ConnectorGrantChange,
@@ -68,6 +78,16 @@ export interface ConnectorBrokerOptions {
   log?: (line: string) => void;
   // P3-H H4: main re-reads `owner`'s window, reporting any change through `setWindowShown` before it returns.
   recheckWindow?: (owner: string) => void;
+  // E3: route E's target in the asking session alone (an agent's refresh); absent, only the other routes serve one.
+  sessionRoute?: (appSessionId: string, artifactId: string, tool: ConnectorToolRef, signal: AbortSignal) => Promise<ConnectorRouteTarget | null>;
+}
+
+// E3: an agent's one refresh, as main read it from the host's request.
+export interface ConnectorAgentRefresh extends ConnectorToolRef {
+  appSessionId: string;
+  artifactId: string;
+  args: Record<string, unknown>;
+  dataset: { id: string; baseRevision: number; requestId: string };
 }
 
 export type ConnectorWatchListener = (update: ConnectorCallOutcome) => void;
@@ -98,6 +118,7 @@ interface Watch {
   readonly args: Record<string, unknown>;
   readonly intervalMs: number;
   readonly listener: ConnectorWatchListener;
+  readonly dataset?: ConnectorDatasetSink; // E3: the owner's sink, without a base (each refresh takes the host's)
   waitingForGrant: boolean; // no grant admits it: no timer until the owner grants
   waitingSince: number; // the tool's grant generation when it began to wait: a grant since makes the wait obsolete
   rechecking?: boolean; // P3-H H3b: its grant being re-read from the store
@@ -157,6 +178,8 @@ export class ConnectorBroker {
   private readonly revoking = new Map<string, number>(); // keys whose owner's revoke the store has not answered yet
   private readonly grantGenerations = new Map<string, number>(); // per key, the grants announced so far
   private readonly revocations = new Map<string, number>(); // P3-H H3b: per key, the revokes heard so far
+  private readonly agentWork = new Map<Work, string>(); // E3: agents' refreshes in flight, by their artifact
+  private readonly sessionRoute: ConnectorBrokerOptions['sessionRoute']; // E3
   private stopped = false;
 
   constructor(options: ConnectorBrokerOptions) {
@@ -164,6 +187,7 @@ export class ConnectorBroker {
     this.authority = options.grants;
     this.log = options.log ?? ((line) => console.error(line));
     this.recheckWindow = options.recheckWindow ?? (() => {});
+    this.sessionRoute = options.sessionRoute;
   }
 
   // ── the page's lease (relayed by the owner) ──
@@ -190,17 +214,20 @@ export class ConnectorBroker {
     return { ok: true, declared: [...lease.declared.values()] };
   }
 
-  async callTool(owner: string, leaseId: string, request: unknown): Promise<ConnectorCallOutcome> {
+  // E3: `options`, the owner's dataset sink beside the page's request.
+  async callTool(owner: string, leaseId: string, request: unknown, options?: ConnectorCallOptions): Promise<ConnectorCallOutcome> {
     const lease = this.leaseOf(owner, leaseId);
     if (!lease) return invalid('lease');
     const parsed = ConnectorCallRequestSchema.safeParse(request);
     const args = parsed.success ? argsOf(parsed.data.args) : null;
     if (!parsed.success || args === null) return invalid('request');
+    const sink = sinkOf(options);
+    if (sink === false) return invalid('request'); // E3
     const tool = { server: parsed.data.server, tool: parsed.data.tool };
     if (!lease.declared.has(connectorToolKey(tool))) return invalid('undeclared');
     const work = this.work(lease, tool);
     try {
-      const outcome = await this.run(lease, tool, args, 'call', work);
+      const outcome = await this.run(lease, tool, args, 'call', work, sink ?? undefined);
       this.recheckWindow(lease.owner); // P3-H H4: at publication, a hide no event announced aborts it still
       return work.controller.signal.aborted ? (work.controller.signal.reason as ConnectorRefusal) : outcome;
     } finally {
@@ -209,16 +236,19 @@ export class ConnectorBroker {
   }
 
   // Starts a watch whose refreshes reach `listener` (never one dropped by a hide, close or revoke).
-  watchTool(owner: string, leaseId: string, request: unknown, listener: ConnectorWatchListener): ConnectorWatchStart {
+  // E3: `options`, the owner's dataset sink, which names no base (each refresh takes the host's at its start).
+  watchTool(owner: string, leaseId: string, request: unknown, listener: ConnectorWatchListener, options?: ConnectorCallOptions): ConnectorWatchStart {
     const lease = this.leaseOf(owner, leaseId);
     if (!lease) return invalid('lease');
     const parsed = ConnectorWatchRequestSchema.safeParse(request);
     const args = parsed.success ? argsOf(parsed.data.args) : null;
     if (!parsed.success || args === null || typeof listener !== 'function') return invalid('request');
+    const sink = sinkOf(options);
+    if (sink === false || sink?.baseRevision !== undefined) return invalid('request'); // E3
     const tool = { server: parsed.data.server, tool: parsed.data.tool };
     if (!lease.declared.has(connectorToolKey(tool))) return invalid('undeclared');
     if (this.watches.size >= CONNECTOR_WATCH_LIMIT) return invalid('watchLimit');
-    const watch: Watch = { id: randomUUID(), lease, tool, key: workKey(lease.artifactId, tool), args, intervalMs: clampWatchInterval(parsed.data.intervalMs), listener, waitingForGrant: false, waitingSince: 0 };
+    const watch: Watch = { id: randomUUID(), lease, tool, key: workKey(lease.artifactId, tool), args, intervalMs: clampWatchInterval(parsed.data.intervalMs), listener, ...(sink && { dataset: sink }) /* E3 */, waitingForGrant: false, waitingSince: 0 };
     this.watches.set(watch.id, watch);
     lease.watches.add(watch);
     this.schedule(watch);
@@ -293,7 +323,30 @@ export class ConnectorBroker {
   stop(): void {
     this.stopped = true;
     for (const lease of [...this.leases.values()]) this.dispose(lease);
+    this.abort(this.agentWork.keys(), refusal('paused', 'closed')); // E3
     this.windowShown.clear();
+  }
+
+  // E3: an agent's one refresh of a dataset's query: no lease, no watch and no timer; the asking session's own engine
+  // or a direct route, the owner's read grant of a read-only tool, the host's sink publishing the result.
+  async refreshForSession(request: ConnectorAgentRefresh): Promise<ConnectorCallOutcome> {
+    if (this.stopped) return refusal('paused', 'closed');
+    const tool = { server: request.server, tool: request.tool };
+    const args = argsOf(request.args);
+    if (args === null) return invalid('request');
+    const work: Work = { key: workKey(request.artifactId, tool), controller: new AbortController() };
+    if (this.revoking.has(work.key)) return refusal('revoked', 'revoked');
+    this.agentWork.set(work, request.artifactId);
+    const { signal } = work.controller;
+    try {
+      const found = await this.agentTarget(request, tool, signal);
+      if ('ok' in found) return signal.aborted ? (signal.reason as ConnectorRefusal) : found;
+      const publishable = () => !signal.aborted && this.agentWork.has(work);
+      const outcome = await this.callTarget(request.artifactId, found.route, found.target, tool, args, 'call', signal, null, { sink: request.dataset, publishable });
+      return signal.aborted ? (signal.reason as ConnectorRefusal) : outcome;
+    } finally {
+      this.agentWork.delete(work);
+    }
   }
 
   grants(artifactId: string): Promise<ConnectorGrant[]> {
@@ -356,6 +409,7 @@ export class ConnectorBroker {
     const tools = new Map<string, ConnectorToolRef>();
     for (const lease of this.leases.values()) if (lease.artifactId === artifactId) for (const [key, tool] of lease.declared) tools.set(key, tool);
     for (const tool of tools.values()) this.revoked(artifactId, tool);
+    this.abort([...this.agentWork].filter(([, of]) => of === artifactId).map(([work]) => work), refusal('revoked', 'revoked')); // E3
   }
 
   // ── the work ──
@@ -367,22 +421,50 @@ export class ConnectorBroker {
   }
 
   // One run of `work`; when it was aborted, the abort's reason (a refusal) is the outcome.
-  private async run(lease: Lease, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, work: Work): Promise<ConnectorCallOutcome> {
+  private async run(lease: Lease, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, work: Work, sink?: ConnectorDatasetSink): Promise<ConnectorCallOutcome> {
     this.recheckWindow(lease.owner); // P3-H H4: a hide no event announced is heard now, before anything is asked
     if (!this.visible(lease)) return refusal('paused', 'hidden');
     if (this.revoking.has(work.key)) return refusal('revoked', 'revoked');
     lease.work.add(work);
-    const outcome = await this.attempt(lease, tool, args, use, work.controller.signal);
+    const outcome = await this.attempt(lease, tool, args, use, work.controller.signal, sink);
     return work.controller.signal.aborted ? (work.controller.signal.reason as ConnectorRefusal) : outcome;
   }
 
-  private async attempt(lease: Lease, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, signal: AbortSignal): Promise<ConnectorCallOutcome> {
-    const { artifactId } = lease;
-    const named = `${artifactId}'s ${tool.server} · ${tool.tool}`;
-    const found = await this.target(artifactId, tool, signal);
+  private async attempt(lease: Lease, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, signal: AbortSignal, sink?: ConnectorDatasetSink): Promise<ConnectorCallOutcome> {
+    const found = await this.target(lease.artifactId, tool, signal);
     if ('ok' in found) return found;
-    const { route, target } = found;
-    if (use === 'watch' && !target.readOnly) return invalid('notReadOnly');
+    // E3: a page's sink publishes only while the work runs and the lease is visible, its window re-read now
+    const publishable = () => {
+      this.recheckWindow(lease.owner);
+      return !signal.aborted && this.visible(lease);
+    };
+    return this.callTarget(lease.artifactId, found.route, found.target, tool, args, use, signal, lease.owner, sink && { sink, publishable });
+  }
+
+  // E3: the asking session's own engine first, then a route other than the engine (route D), never another session's.
+  private async agentTarget(request: ConnectorAgentRefresh, tool: ConnectorToolRef, signal: AbortSignal): Promise<{ route: ConnectorRouteName; target: ConnectorRouteTarget } | ConnectorRefusal> {
+    if (this.sessionRoute) {
+      let value;
+      try {
+        value = await unlessAborted(this.sessionRoute(request.appSessionId, request.artifactId, { ...tool }, signal), signal);
+      } catch (error) {
+        return this.failed('routeFailed', `the engine route could not be asked for ${request.appSessionId}'s refresh of ${request.artifactId}'s ${tool.server} · ${tool.tool}: ${boundedMessage(error)}`);
+      }
+      if (value === ABORTED || signal.aborted) return signal.reason as ConnectorRefusal;
+      if (value !== null) {
+        const target = readTarget(value);
+        return target ? { route: 'engine', target } : this.failed('malformed', `the engine route answered a malformed target for ${request.artifactId}'s ${tool.server} · ${tool.tool}`);
+      }
+    }
+    return this.target(request.artifactId, tool, signal, this.routes.filter((route) => route.route !== 'engine'));
+  }
+
+  // The target's grant checked and its call made, the outcome read. `owner`: the page's window, re-read at the
+  // backend's door (null for an agent's refresh). E3: `dataset`, the sink and its recheck, which only a read grant of a
+  // read-only tool feeds.
+  private async callTarget(artifactId: string, route: ConnectorRouteName, target: ConnectorRouteTarget, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, signal: AbortSignal, owner: string | null, dataset?: { sink: ConnectorDatasetSink & { requestId?: string }; publishable: () => boolean }): Promise<ConnectorCallOutcome> {
+    const named = `${artifactId}'s ${tool.server} · ${tool.tool}`;
+    if ((use === 'watch' || dataset) && !target.readOnly) return invalid('notReadOnly');
     let authorization;
     try {
       authorization = await unlessAborted(this.authority.check(artifactId, { ...tool, fingerprint: target.fingerprint }), signal);
@@ -391,7 +473,7 @@ export class ConnectorBroker {
     }
     if (authorization === ABORTED || signal.aborted) return signal.reason as ConnectorRefusal;
     if (!authorization.granted) return refusal('revoked', authorization.refusal);
-    if (!admits(authorization.mode, target.readOnly, use)) return refusal('revoked', 'wrongMode');
+    if (!admits(authorization.mode, target.readOnly, dataset ? 'watch' : use)) return refusal('revoked', 'wrongMode'); // E3: a dataset, as a watch
     let answer;
     try {
       // The backend's door (P3-H H4): the window re-read in the same turn as the call, so a hide no event announced while
@@ -399,8 +481,8 @@ export class ConnectorBroker {
       const admitted = authorization;
       answer = await unlessAborted(
         Promise.resolve().then<ConnectorRouteAnswer | typeof ABORTED>(() => {
-          this.recheckWindow(lease.owner);
-          return signal.aborted ? ABORTED : target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode });
+          if (owner !== null) this.recheckWindow(owner);
+          return signal.aborted ? ABORTED : target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode, ...(dataset && { dataset: dataset.sink, publishable: dataset.publishable }) /* E3 */ });
         }),
         signal,
       );
@@ -421,9 +503,9 @@ export class ConnectorBroker {
 
   // The first route's already-live target for `tool`, or the refusal: `noRoute` when none has it, `routeFailed` when
   // none has it and one of them failed to say, `malformed` when the route answered a malformed target.
-  private async target(artifactId: string, tool: ConnectorToolRef, signal: AbortSignal): Promise<{ route: ConnectorRouteName; target: ConnectorRouteTarget } | ConnectorRefusal> {
+  private async target(artifactId: string, tool: ConnectorToolRef, signal: AbortSignal, routes: readonly ConnectorRoute[] = this.routes /* E3 */): Promise<{ route: ConnectorRouteName; target: ConnectorRouteTarget } | ConnectorRefusal> {
     let broke: unknown = null;
-    for (const route of this.routes) {
+    for (const route of routes) {
       let value;
       try {
         value = await unlessAborted(Promise.resolve().then(() => route.resolve(artifactId, { ...tool }, signal)), signal);
@@ -451,6 +533,7 @@ export class ConnectorBroker {
     const key = workKey(artifactId, tool);
     this.revocations.set(key, (this.revocations.get(key) ?? 0) + 1); // P3-H H3b
     const stop = refusal('revoked', 'revoked');
+    this.abort([...this.agentWork.keys()].filter((work) => work.key === key), stop); // E3: an agent's refresh of it
     for (const lease of this.leases.values()) {
       if (lease.artifactId !== artifactId) continue;
       this.abort([...lease.work].filter((work) => work.key === key), stop);
@@ -527,7 +610,7 @@ export class ConnectorBroker {
     const work = this.work(lease, watch.tool);
     const generation = this.generation(watch.key);
     watch.running = work;
-    const outcome = await this.run(lease, watch.tool, watch.args, 'watch', work);
+    const outcome = await this.run(lease, watch.tool, watch.args, 'watch', work, watch.dataset);
     delete watch.running;
     this.recheckWindow(lease.owner); // P3-H H4: at publication, a hide no event announced aborts it still
     // The publication fence, checked now rather than when the run ended: a hide, close, unwatch or revoke since then
@@ -617,6 +700,13 @@ export class ConnectorBroker {
     const watch = typeof watchId === 'string' ? this.watches.get(watchId) : undefined;
     return lease !== undefined && watch?.lease === lease ? watch : undefined;
   }
+}
+
+// E3: the owner's sink from a call's options: none, the sink, or false for options that are not one.
+function sinkOf(options: unknown): ConnectorDatasetSink | null | false {
+  if (options === undefined) return null;
+  const parsed = ConnectorCallOptionsSchema.safeParse(options);
+  return parsed.success ? parsed.data.dataset : false;
 }
 
 // Whether a grant in `mode` admits this use of a tool: a watch only a read grant of a read-only tool; a call of a
