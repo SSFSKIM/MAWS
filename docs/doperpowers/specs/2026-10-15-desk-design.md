@@ -3065,15 +3065,19 @@ deployment, so they never switch the production Worker's org, is deferred.
 **The owner's first steps** (DX7's ordering): sign in, set up the org key first (the first unlock method), then
 enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the code pasted at its hidden prompt).
 
-**State** (2026-10-15, night):
-- **Deployed:** `hub@b11ea5f8 web@smns-erb-web.3de8a15e` (Worker version `bf5e8232`): DC3's whole branch after its
-  panel wave (the hub's code at `36d6bae3`) and DC5's web after its Task 6, so DX3's paged `resume` runs on both
-  sides. The deploy reconciled Access with no change and left the walk's machine, project, push subscription, and
-  org key as they were. Before it: `hub@85e83830 web@smns-erb-web.fdb7b406`.
+**State** (2026-10-16, evening):
+- **Deployed:** `hub@2ee490bc web@master.2ee490bc` (Worker version `c44f4cd4`): MAWS master after DC3, DC5, DC6
+  and the channel's anchoring fallback (#16) merged, built from a clean checkout of master. The hub's code is
+  byte-identical to the previous deploy's (no migration, the same variables, bindings and secrets); the web gained
+  DC5's panel fixes and column-reverse channel, DC6's session depth, and #16. Access reconciled with no change; the
+  org key and the walk's machine untouched. Before it: `hub@b11ea5f8 web@smns-erb-web.3de8a15e` (Worker `bf5e8232`),
+  held through the owner's P2.11 so the step measured an unchanged build.
 - **Org key:** set up by the owner in the phone walk's Part 2 (fingerprint `8133-6dc8-be8e`), with a passkey and a
   passphrase.
 - **Machines:** `phone-walk`, the fake machine enrolled from an owner-made code for the walk's pushed requests, with
-  its project "phone walk"; removed when the walk ends. No real machine is enrolled yet.
+  its project "phone walk"; the walk has ended and its stand-in is stopped, but the web had no way to remove a machine
+  (the hub's `DELETE /api/machines/<name>` had no caller), so the owner removes it once that lands. No real machine
+  is enrolled yet.
 - **Leftovers:** the proofs' throwaway org `dc3-m5-test` keeps its Durable Objects' storage on the same Worker,
   unreachable from `ssfskim`.
 
