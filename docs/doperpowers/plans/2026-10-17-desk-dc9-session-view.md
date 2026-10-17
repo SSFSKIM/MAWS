@@ -29,7 +29,7 @@
 - [x] M2 — The fake machine's part: the session-view recording, jobs and status, `output`, pages after the replay (2026-10-17, reviewed clean: 36131d48..6bb8bb4f, fixes 45c4d172..62c4fbd3 and 62c4fbd3..c4a17632)
 - [x] M3 — The per-session owner and the session view (2026-10-17, reviewed clean: 36131d48..57320abd on `desk-dc9-m3`, fixes ..6b2ddded, ..2388b1f3, ..55c6e118; merged at 582aecfd)
 - [x] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements (2026-10-17, reviewed clean: ec8021c6..7e2bbe64, fixes b05deb29..1b05db7a and 1b05db7a..38791976)
-- [ ] M5 — The column: agents with real status, the jobs view, `output`, MCP names (building on `desk-dc9-m5` in `/tmp/desk-dc9-m5`; to be reviewed, then merged)
+- [x] M5 — The column: agents with real status, the jobs view, `output`, MCP names (2026-10-17, reviewed clean: 34d32461..488b7329 on `desk-dc9-m5`, merge b0b1e3ff, fix ..4cca48d8; merged at ec0e9013)
 - [ ] M6 — The acceptance, the phone's bundle, and the gate
 
 ## Constraints that bind every milestone
@@ -966,6 +966,27 @@ in their own worktrees.
   events fill status only for an older producer. A job's `summary` stays
   visible beside MAWS's row when its output is missing.
   Date/Author: 2026-10-17, controller and the composite's writer.
+
+- Decision (M5, as built): DX4's status is patched onto MAWS's task graph
+  on the desk side (`withStatuses` over the graph the held rows build, each
+  time anew), authoritative when the body carries it; agents DX4 leaves
+  `unknown` sit under "Status unavailable · N" for a DC8 producer (it knows
+  every recorded agent); a job's summary is a plain line under MAWS's
+  unchanged `ShellRow`/`MonitorRow`; Stop is disabled with its reason by a
+  layout effect on the desk's wrapper (MAWS's rows imported unedited); 4A's
+  open output draws inside the row's border, asks 4096 bytes, shows the
+  path's last two parts, and an `unknown-task` waits 10 s for the next
+  `subagents`; monitors get no Output (MAWS's `MonitorRow` has none); the
+  terminal-job copy applies once a job is terminal or the session has no
+  process (an offline machine is not ended). The interrupted turn ends at
+  its marker by a desk check stricter than MAWS's `INTERRUPT_MARKER`, the
+  bridge's legacy row normalized on a mapped copy only. Agent names in
+  `agent_message` rows: no desk seam without rewriting the call's input,
+  so a maws-fe debt row. The column's tabs are Subagents, Jobs, Diff,
+  Info. Deferred minor (debt): when DX4's status equals the held one, the
+  held end time stays (a legacy launch then a completion keeps the
+  launch's time).
+  Date/Author: 2026-10-17, M5 executor, folded by the controller.
 
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
