@@ -3066,7 +3066,7 @@ deployment, so they never switch the production Worker's org, is deferred.
 enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the code pasted at its hidden prompt).
 
 **State** (2026-10-16, evening):
-- **Deployed:** `hub@47fa64ff web@master.47fa64ff` (Worker version `c7f6bf6e`), adding machine removal in the web
+- **Deployed:** `hub@47fa64ff web@master.47fa64ff` (Worker version `09cc96e0`), adding machine removal in the web
   (#17), over `hub@2ee490bc web@master.2ee490bc` (Worker `c44f4cd4`): MAWS master after DC3, DC5, DC6 and the
   channel's anchoring fallback (#16) merged, built from a clean checkout of master. The hub's code is
   byte-identical to the previous deploy's (no migration, the same variables, bindings and secrets); the web gained
