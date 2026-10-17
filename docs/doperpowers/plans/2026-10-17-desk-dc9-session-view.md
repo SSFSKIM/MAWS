@@ -885,6 +885,25 @@ in their own worktrees.
   `completed`.
   Date/Author: 2026-10-17, M2 executor, folded by the controller.
 
+- Decision (M4, a gap §9.1 did not foresee): a send stays at the tail
+  until its own row is observed, but with history only partly held a
+  `queued`, `delivered` or `uncertain` send older than the oldest held row
+  is left off the tail until the history is complete (`more` false), and
+  shows again then if its row never came; a send that ended `failed`,
+  `refused-read-only` or `recorded` never gets a row and always stays.
+  Reason: §9.1's rule was written for a live send; applied to a reopened
+  session it would pile every past web send whose row sits in unpaged
+  history at the tail, each wrongly. Rejected: positive reconciliation of
+  every logged send against rows not yet loaded (it needs the whole
+  transcript on the web, or a new DX4 lookup). Accepted residual: a
+  delivered send whose row never came before the session ended, opened
+  later with newer history held, shows only once the history is paged to
+  its start. Also: the matcher requires affirmative delivery provenance
+  (a user row with origin `plugin`/`asUser`, a queued command with `peer`
+  or `plugin`) besides the frame's whole first line, so a typed or
+  origin-less row never consumes a send.
+  Date/Author: 2026-10-17, controller (M4 review).
+
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
   transcript never ended it. The engine writes a `system/turn_duration`
