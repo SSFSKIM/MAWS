@@ -43,9 +43,9 @@
 //   transport host death: a stand-in host starts the same plan and is SIGKILLed; the lifeline alone ends the group.
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'; // P3-HD M4b: existsSync, rmSync
 import { join } from 'node:path';
-import { test, expect, type TestInfo } from '@playwright/test';
+import { test, expect, type Locator, type Page, type TestInfo } from '@playwright/test'; // P3-HD M4b: Locator, Page
 import type { McpStatusResponse } from '@shared/wire/control';
 import { ConnectorStatusCache } from '../src/engine-host/connectors/provenance';
 import { connectorToolState } from '../src/engine-host/connectors/status';
@@ -61,6 +61,15 @@ import { invoke as appInvoke, value as appValue, TOOL_NAME, wait, WATCH_MS, with
 import { holdFileOf, newMembers, wrappedServer } from './support/connector-direct-scene';
 import { ps } from './support/processes';
 // P3-HD M4 end
+// P3-HD M4b start
+import type { LaunchSpec } from '@shared/engine/launch-spec';
+import { CONNECTORS_COPY as C, SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
+import { PAGE_HTML, PAGE_TITLE, pageState, SERVER, TOOL, type ConnectorScene, type LiveEngine, type Run } from './support/connector-scene';
+import { createPageIn, expectQuietJournals, heldServer, referencingServer, Refreshes, serverConnected, serverRow, sessionJournals } from './support/connector-direct-scene';
+import { bearerCrossings, oncePageHtml, pageVariant, plaintextHits } from './support/connector-direct-checks';
+import { browserOpens, connectionWords, connectThroughBrowser, domTexts, expectScratchCustody, httpEntry, listenersOnPort, MainOutput, mcpRequestsSince, openLogOf, scanScratch, sealedRecords, toolCallAttempts } from './support/connector-direct-oauth';
+import { assertOpenPhase, enterOAuthPhase, enterOpenPhase, readOAuthLog, scanForSecrets, startOAuthFixture, summarizeOAuthLog, updateOAuthControl, type OAuthFixture, type OAuthFixturePaths } from './support/connector-oauth';
+// P3-HD M4b end
 
 test.skip(process.env.MAWS_CONNECTORS_DIRECT_E2E !== '1', 'the direct-route e2e runs under pnpm e2e:connectors-direct (MAWS_CONNECTORS_DIRECT_E2E=1)');
 test.describe.configure({ timeout: 180_000 });
@@ -649,3 +658,654 @@ test('disconnect: the page reads through MAWS’s own instance after the engine 
   );
 });
 // P3-HD M4 end
+// P3-HD M4b start: the integrated acceptance on the built app (support/connector-scene.ts, H's page and Connectors sheet,
+// the owner's Start, no message, no model turn), docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md acceptance 1-6:
+//   transition: one read grant reads through the engine, then, the engine stopped, through MAWS's own instance (route D,
+//          the same grant, no engine acquired), then through the engine again once the owner's session is resumed; each
+//          refresh submits exactly one call. Under D, the window hidden, minimized, or the page's surface unmounted, it
+//          calls nothing past its interval and catches up once. The sheet names the verified file and scope.
+//   lifecycle: under D, a call held by the fixture (submitted, unanswered) when the owner revokes, or when the artifact
+//          is deleted, never reaches the page when the fixture answers it late, an Allow once already consumed by its
+//          held call included; a duplicate holds no grant and restoring a version saved while the grant stood restores
+//          none.
+//   engine only: an entry with a `${…}` reference is the session's alone: the sheet says why, and with the engine gone
+//          the page reads paused and MAWS starts no instance of its own.
+//   oauth connect / oauth relaunch: the toy OAuth fixture (support/connector-oauth.ts) is observed by an engine only in
+//          its open phase; that engine stopped and confirmed dead, the same URL demands OAuth of MAWS alone (Decision
+//          Log 23). A refusal with no MAWS grant parks D without a tool call or a browser; the owner's Connect binds
+//          127.0.0.1, completes DCR/PKCE/state/resource through the fake browser and closes its listener; each later
+//          refresh reads through D on a rotated token (saved before the next refresh) over a new connection, with no
+//          other browser or registration; the record is ciphertext, 0600 in a 0700 directory; an open HTTP server beside
+//          it is read through D with no bearer, and neither server is ever presented the other's. After an ordinary quit
+//          and relaunch nothing reaches the fixture until an open-phase engine has observed it again; then D reads on the
+//          sealed grant (mock keychain) with no browser. Disconnect revokes and forgets, the revocation endpoint up or
+//          down, and leaves D blocked; a Connect's listener pending at shutdown is closed with the app.
+const toolRowOf = (sheet: Locator, name = TOOL_NAME) => sheet.locator(`[data-connector-tool="${name}"]`);
+const grantsOf = async (page: Page, artifactId: string) => appValue(await appInvoke(page, 'artifacts.connectorGrants', { artifactId })).grants;
+
+async function allow(scene: ConnectorScene, page: Page, name: string, mode: 'read' | 'once' = 'read'): Promise<void> {
+  const sheet = await scene.openSheet(page);
+  await toolRowOf(sheet, name).getByRole('button', { name: mode === 'read' ? C.allowLabel(name) : C.allowOnceLabel(name) }).click();
+  await expect(toolRowOf(sheet, name).locator('[data-connector-state]')).toContainText(mode === 'read' ? C.allowedRead : C.allowedOnce);
+  await scene.closeSheet(page);
+}
+
+async function revokeInSheet(scene: ConnectorScene, page: Page, name = TOOL_NAME): Promise<void> {
+  const sheet = await scene.openSheet(page);
+  await toolRowOf(sheet, name).getByRole('button', { name: C.revokeLabel(name) }).click();
+  await expect(toolRowOf(sheet, name).locator('[data-connector-state]')).toContainText(C.notAllowed);
+  await scene.closeSheet(page);
+}
+
+// The owner's session stopped, its process gone and no engine live.
+async function stopEngine(scene: ConnectorScene, run: Run, engine: LiveEngine): Promise<void> {
+  appValue(await appInvoke(run.page, 'session.stop', { appSessionId: engine.appSessionId, reason: 'stop' }));
+  await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: 'the engine stopped' }).toBe(false);
+  expect(await scene.live(run.page), 'no engine is live').toEqual([]);
+}
+
+// The fixture's late answers to held calls (support/connector-mcp-server.mjs `--hold`), by the instance that held them.
+const releasedBy = (scene: ConnectorScene, pid: number) => scene.calls().filter((entry) => (entry as { event?: string }).event === 'released' && entry.pid === pid).length;
+
+async function shot(info: TestInfo, name: string, target: Locator): Promise<void> {
+  await info.attach(name, { body: await target.screenshot(), contentType: 'image/png' });
+}
+
+test('transition: one grant reads through E, then D with no engine, then E again, one submission each; hidden, minimized or unmounted it calls nothing and catches up once', async () => {
+  test.setTimeout(600_000);
+  const info = test.info();
+  await withScene('transition', info, async (scene) => {
+    const run = await scene.launch();
+    const artifactId = await scene.createPage(run.page);
+    let { frame } = await scene.openPage(run.page, artifactId);
+    await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+    const engine = await scene.ownerStart(run.page);
+    await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+    await allow(scene, run.page, TOOL_NAME);
+    await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: 20_000 });
+    const grants = await grantsOf(run.page, artifactId);
+    expect(grants).toMatchObject([{ server: SERVER, tool: TOOL, mode: 'read' }]);
+    const engineServer = scene.toolCalls()[0]!.pid;
+    const calls = () => scene.toolCalls().length;
+    const refreshes = new Refreshes(frame, calls);
+    await refreshes.mark();
+
+    // E → D: the engine stopped, the same page's next refresh reads through MAWS's own instance, no engine started
+    await stopEngine(scene, run, engine);
+    const direct = await refreshes.until('direct', WATCH_MS + 30_000);
+    const directServer = scene.toolCalls().at(-1)!.pid;
+    const directParent = Number(ps(directServer, 'ppid'));
+    expect(directServer, 'a server other than the engine’s').not.toBe(engineServer);
+    expect(directParent, 'not the engine’s child').not.toBe(engine.pid);
+    expect(await grantsOf(run.page, artifactId), 'the same grant, fingerprint and mode: no new one').toEqual(grants);
+    expect(await scene.live(run.page), 'route D started no engine').toEqual([]);
+    expect(scene.launches(engine.appSessionId), 'the owner’s one launch, exited').toEqual({ spawns: 1, exits: 1 });
+
+    // the trusted sheet names the verified file and scope of the source D reads
+    const sheet = await scene.openSheet(run.page);
+    const row = serverRow(sheet, SERVER, 'source');
+    await expect(row).toContainText(S.origin('user', join(scene.userData, 'claude-config', '.claude.json')));
+    await expect(row).toContainText(S.transport('stdio'));
+    await expect(row.locator('[data-connector-server-state]')).toHaveText('MAWS can reach it directly'); // copy.ts SERVERS_COPY.connection, a stdio source
+    await shot(info, 'transition-servers.png', sheet);
+    await scene.closeSheet(run.page);
+
+    // hidden, then minimized: nothing past the interval, then exactly one catch-up through D
+    const quiet: Record<string, unknown> = {};
+    const away: [string, () => Promise<void>, () => Promise<void>][] = [
+      ['hidden', () => scene.hideWindow(run), () => scene.showWindow(run)],
+      ['minimized', () => scene.minimizeWindow(run), () => scene.restoreWindow(run)],
+    ];
+    for (const [label, leave, come] of away) {
+      await leave();
+      const from = Date.now();
+      await wait(WATCH_MS + 10_000);
+      expect(scene.toolCallsBetween(from, Date.now()), `no call while ${label}`).toEqual([]);
+      expect(await refreshes.since(), `nothing arrived while ${label}`).toEqual({ updates: 0, submitted: 0 });
+      await come();
+      const caught = await refreshes.next(15_000);
+      expect(caught.last, `${label}: the catch-up reads through D`).toMatch(/^ok n=\d+ via=direct$/);
+      expect(caught.submitted, `${label}: one catch-up call`).toBe(1);
+      await wait(5_000);
+      expect(await refreshes.since(), `${label}: and only one`).toEqual({ updates: 0, submitted: 0 });
+      quiet[label] = { silentMs: WATCH_MS + 10_000, caught };
+    }
+
+    // the page's surface gone (the library over its tab unmounts it), then back: a new load reads once
+    const tab = run.page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`);
+    await run.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+    await expect(tab.locator('[data-artifact-frame="html"]'), 'the page’s surface is gone').toHaveCount(0);
+    const unmounted = Date.now();
+    await wait(WATCH_MS + 10_000);
+    expect(scene.toolCallsBetween(unmounted, Date.now()), 'no call while its surface is gone').toEqual([]);
+    const before = calls();
+    ({ frame } = await scene.openPage(run.page, artifactId));
+    refreshes.remounted(frame, before);
+    const shown = await refreshes.next(15_000);
+    expect(shown.last).toMatch(/^ok n=\d+ via=direct$/);
+    expect(shown.submitted, 'the new load read once').toBe(1);
+    await wait(5_000);
+    expect(await refreshes.since(), 'and only once').toEqual({ updates: 0, submitted: 0 });
+    quiet.unmounted = { silentMs: WATCH_MS + 10_000, shown };
+
+    // D → E: the owner's session resumed (no message), the next refresh reads through its engine again
+    expect(scene.launches(engine.appSessionId).spawns, 'no timer acquired an engine through all of D').toBe(1);
+    const acquired = appValue(await appInvoke(run.page, 'session.acquire', { appSessionId: engine.appSessionId as LaunchSpec['appSessionId'], reason: 'read', options: { requireEmptyMessage: true } }));
+    expect(acquired).toMatchObject({ status: 'ready', launched: true });
+    const resumed = await scene.live(run.page);
+    expect(resumed.map((session) => session.appSessionId), 'the owner’s session, alone').toEqual([engine.appSessionId]);
+    await serverConnected(run.page, engine.appSessionId, SERVER);
+    const back = await refreshes.until('engine', WATCH_MS + 30_000);
+    const engineAgain = scene.toolCalls().at(-1)!.pid;
+    expect(engineAgain, 'not MAWS’s own instance').not.toBe(directServer);
+    expect(await grantsOf(run.page, artifactId), 'still the one grant').toEqual(grants);
+    expect(scene.launches(engine.appSessionId), 'the explicit resume is the only other launch').toEqual({ spawns: 2, exits: 1 });
+
+    const journals = sessionJournals(scene);
+    expectQuietJournals(journals);
+    await evidence(info, 'transition', {
+      refreshes: refreshes.seen,
+      direct,
+      back,
+      quiet,
+      pids: { engine: engine.pid, engineServer, directServer, directParent, directParentIsSupervisor: scene.supervisors.has(directParent), resumed: resumed[0]!.pid, engineAgain, engineAgainParentIsEngine: ps(engineAgain, 'ppid') === String(resumed[0]!.pid) },
+      journals: journals.map(({ turns, dirMode, fileModes }) => ({ turns, dirMode: dirMode.toString(8), fileModes: fileModes.map((mode) => mode.toString(8)) })),
+    });
+  });
+});
+
+const ONCE_TITLE = 'Signups, once';
+
+test('lifecycle: under D a revoke or delete suppresses a held call’s late answer, a consumed Allow once included; a duplicate or a restored version gains no grant', async () => {
+  test.setTimeout(600_000);
+  const info = test.info();
+  await withScene(
+    'lifecycle',
+    info,
+    async (scene) => {
+      const hold = holdFileOf(scene);
+      const run = await scene.launch();
+      const live = await createPageIn(run.page, scene, { html: PAGE_HTML, title: PAGE_TITLE });
+      const artifactId = live.artifactId;
+      let { frame } = await scene.openPage(run.page, artifactId);
+      await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+      const engine = await scene.ownerStart(run.page);
+      await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+      await allow(scene, run.page, TOOL_NAME);
+      await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: 20_000 });
+      const enginePids = new Set(scene.calls().map((entry) => entry.pid));
+      const calls = () => scene.toolCalls().length;
+      const refreshes = new Refreshes(frame, calls);
+      await refreshes.mark();
+      await stopEngine(scene, run, engine);
+      await refreshes.until('direct', WATCH_MS + 30_000);
+      const steps: Record<string, unknown> = {};
+
+      // a read held by the fixture, then revoked from the sheet; the fixture then answers it late
+      writeFileSync(hold, '');
+      const submitted = calls();
+      await expect.poll(calls, { timeout: WATCH_MS + 30_000, message: 'the next refresh submitted its call' }).toBe(submitted + 1);
+      const held = scene.toolCalls().at(-1)!;
+      expect(enginePids.has(held.pid), 'held on MAWS’s own instance').toBe(false);
+      await wait(1_000);
+      expect(await refreshes.since(), 'its answer is held').toEqual({ updates: 0, submitted: 1 });
+      await revokeInSheet(scene, run.page);
+      await expect(frame.locator('#last')).toHaveText('revoked:revoked');
+      rmSync(hold);
+      await wait(3_000); // the fixture answers within 100 ms of the hold's removal, if its instance is still up
+      const revokedAt = Date.now();
+      await wait(WATCH_MS + 5_000);
+      const afterRevoke = await pageState(frame);
+      expect(afterRevoke.last, 'the late answer never reached the page').not.toMatch(/^ok/);
+      expect(scene.toolCallsBetween(revokedAt, Date.now()), 'no call after the revoke').toEqual([]);
+      expect(await grantsOf(run.page, artifactId)).toEqual([]);
+      steps.revoke = { held: held.pid, lateAnswers: releasedBy(scene, held.pid), page: afterRevoke };
+
+      // an Allow once, consumed by its call held on MAWS's instance, then revoked (the sheet offers no Revoke for a used
+      // Allow once, so the owner's own command); the fixture then answers late
+      const once = await createPageIn(run.page, scene, { html: oncePageHtml({ server: SERVER, tool: TOOL, title: ONCE_TITLE }), title: ONCE_TITLE, spaceId: live.spaceId });
+      const { frame: onceFrame } = await scene.openPage(run.page, once.artifactId, ONCE_TITLE);
+      await expect(onceFrame.locator('#declared')).toHaveText('declared');
+      await allow(scene, run.page, TOOL_NAME, 'once');
+      writeFileSync(hold, '');
+      const onceBefore = calls();
+      await onceFrame.locator('#call').click();
+      await expect.poll(calls, { timeout: 30_000, message: 'the Allow once call was submitted' }).toBe(onceBefore + 1);
+      const onceHeld = scene.toolCalls().at(-1)!;
+      expect(enginePids.has(onceHeld.pid), 'through MAWS’s own instance').toBe(false);
+      await expect.poll(() => grantsOf(run.page, once.artifactId), { timeout: 10_000, message: 'the Allow once was consumed' }).toEqual([]);
+      expect((await pageState(onceFrame)).updates, 'its answer is held').toBe(0);
+      appValue(await appInvoke(run.page, 'artifacts.revokeConnectorTool', { artifactId: once.artifactId, server: SERVER, tool: TOOL }));
+      await expect(onceFrame.locator('#updates')).toHaveText('1', { timeout: 15_000 });
+      const onceOutcome = await pageState(onceFrame);
+      expect(onceOutcome.last, 'the consumed call’s result is suppressed').not.toMatch(/^ok/);
+      rmSync(hold);
+      const onceRevokedAt = Date.now();
+      await wait(5_000);
+      expect(await pageState(onceFrame), 'the late answer never arrived').toEqual(onceOutcome);
+      expect(scene.toolCallsBetween(onceRevokedAt, Date.now())).toEqual([]);
+      steps.once = { held: onceHeld.pid, lateAnswers: releasedBy(scene, onceHeld.pid), page: onceOutcome };
+
+      // allowed again: a duplicate holds no grant; a version saved under the grant, restored after its revoke, restores none
+      let before = calls();
+      ({ frame } = await scene.openPage(run.page, artifactId));
+      refreshes.remounted(frame, before);
+      await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: 20_000 });
+      await allow(scene, run.page, TOOL_NAME);
+      await expect(frame.locator('#last')).toHaveText(/^ok n=\d+ via=direct$/, { timeout: 20_000 });
+      const copy = appValue(await appInvoke(run.page, 'artifacts.duplicate', { artifactId })).artifact.id;
+      expect(await grantsOf(run.page, copy), 'a duplicate holds no grant').toEqual([]);
+      expect(await grantsOf(run.page, artifactId)).toMatchObject([{ server: SERVER, tool: TOOL, mode: 'read' }]);
+      const { versionId } = appValue(await appInvoke(run.page, 'artifacts.saveVersion', { artifactId, label: 'while allowed' }));
+      appValue(await appInvoke(run.page, 'artifacts.testWrite', { artifactId, opId: 'hd-m4b-edit', ops: [{ op: 'page', text: PAGE_HTML.replace('<p id="updates">0</p>', '<p id="updates">0</p>\n<p id="edited">edited</p>') }] }));
+      await expect(frame.locator('#edited'), 'the edited page loaded').toHaveText('edited', { timeout: 20_000 });
+      await expect(frame.locator('#last')).toHaveText(/^ok n=\d+ via=direct$/, { timeout: 20_000 });
+      await revokeInSheet(scene, run.page);
+      const restoreRevokedAt = Date.now();
+      appValue(await appInvoke(run.page, 'artifacts.restore', { artifactId, versionId }));
+      await expect(frame.locator('#edited'), 'the saved version is back').toHaveCount(0, { timeout: 20_000 });
+      await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: 20_000 });
+      expect(await grantsOf(run.page, artifactId), 'the restored version restores no grant').toEqual([]);
+      await wait(WATCH_MS + 5_000);
+      expect(scene.toolCallsBetween(restoreRevokedAt, Date.now()), 'nothing called since the revoke').toEqual([]);
+      steps.restore = { versionId, duplicateGrants: 0, restoredGrants: 0 };
+
+      // a call held when the artifact is deleted; the fixture then answers late
+      await allow(scene, run.page, TOOL_NAME);
+      await expect(frame.locator('#last')).toHaveText(/^ok n=\d+ via=direct$/, { timeout: 20_000 });
+      writeFileSync(hold, '');
+      before = calls();
+      await expect.poll(calls, { timeout: WATCH_MS + 30_000, message: 'the next refresh submitted its call' }).toBe(before + 1);
+      const deletedHeld = scene.toolCalls().at(-1)!;
+      appValue(await appInvoke(run.page, 'artifacts.delete', { artifactId }));
+      rmSync(hold);
+      const deletedAt = Date.now();
+      await wait(WATCH_MS + 5_000);
+      expect(scene.toolCallsBetween(deletedAt, Date.now()), 'nothing is called for a deleted artifact').toEqual([]);
+      const after = await appInvoke(run.page, 'artifacts.connectorGrants', { artifactId });
+      expect(after.ok ? after.value.grants : [], 'a deleted artifact holds no grant').toEqual([]);
+      expect(await grantsOf(run.page, copy), 'nor does its duplicate').toEqual([]);
+      steps.delete = { held: deletedHeld.pid, lateAnswers: releasedBy(scene, deletedHeld.pid) };
+
+      expect(await scene.live(run.page), 'no engine was acquired').toEqual([]);
+      expect(scene.launches(engine.appSessionId).spawns, 'the owner’s one launch').toBe(1);
+      const journals = sessionJournals(scene);
+      expectQuietJournals(journals);
+      await evidence(info, 'lifecycle', { steps, refreshes: refreshes.seen, journals: journals.map(({ turns }) => turns) });
+    },
+    { server: heldServer },
+  );
+});
+
+test('engine only: an entry with a reference is the session’s alone; with its engine gone the page reads paused and MAWS starts nothing', async () => {
+  test.setTimeout(300_000);
+  const info = test.info();
+  await withScene(
+    'engineonly',
+    info,
+    async (scene) => {
+      const run = await scene.launch();
+      const artifactId = await scene.createPage(run.page);
+      const { frame } = await scene.openPage(run.page, artifactId);
+      await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+      const engine = await scene.ownerStart(run.page);
+      await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+      const sheet = await scene.openSheet(run.page);
+      await expect(serverRow(sheet, SERVER, 'engineOnly'), 'the sheet says the server is the session’s alone, and why').toContainText(S.engineOnly('unattested'));
+      await expect(serverRow(sheet, SERVER, 'source'), 'no direct source for it').toHaveCount(0);
+      await shot(info, 'engine-only-servers.png', sheet);
+      await scene.closeSheet(run.page);
+      await allow(scene, run.page, TOOL_NAME);
+      await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: 20_000 });
+      const enginePids = new Set(scene.calls().map((entry) => entry.pid));
+
+      await stopEngine(scene, run, engine);
+      await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: WATCH_MS + 30_000 });
+      await wait(WATCH_MS + 5_000);
+      const own = scene.calls().filter((entry) => !enginePids.has(entry.pid));
+      expect(own, 'MAWS started no instance of its own: no request reached a server the engine did not start').toEqual([]);
+      expect(scene.toolCalls(), 'the one call, the engine’s').toHaveLength(1);
+      expect(await scene.live(run.page)).toEqual([]);
+      expect(scene.launches(engine.appSessionId).spawns).toBe(1);
+      const journals = sessionJournals(scene);
+      expectQuietJournals(journals);
+      await evidence(info, 'engine-only', { last: (await pageState(frame)).last, serverPids: enginePids.size, toolCalls: scene.toolCalls().length, journals: journals.map(({ turns }) => turns) });
+    },
+    { server: referencingServer },
+  );
+});
+
+const OTHER = 'other';
+const OTHER_TITLE = 'Signups, other';
+const OTHER_TOOL_NAME = C.toolName(OTHER, TOOL);
+const OAUTH_TTL_SECONDS = 30; // within main's 60 s refresh margin (oauth-provider.ts): every delivery refreshes, so every read rotates
+
+// A body retained only after it scanned clean against each fixture that minted secrets.
+async function retain(info: TestInfo, label: string, value: unknown, fixtures: readonly OAuthFixturePaths[]): Promise<string> {
+  const body = `${JSON.stringify(value, null, 2)}\n`;
+  for (const fixture of fixtures) if (existsSync(fixture.secrets)) expect(scanForSecrets(fixture, [body]), `${label} carries no ${fixture.id} secret`).toEqual({ clean: true, found: {} });
+  await evidence(info, label, value);
+  return body;
+}
+
+// What a fixture's log says, all windows, in safe counts.
+const summaryOf = (fixture: OAuthFixturePaths) => summarizeOAuthLog(readOAuthLog(fixture));
+const issuedAccess = (fixture: OAuthFixturePaths) => summaryOf(fixture).windows.flatMap((window) => window.issued.map((issued) => issued.access));
+const presented = (fixture: OAuthFixturePaths) => [...new Set(summaryOf(fixture).windows.flatMap((window) => window.presentedBearers))];
+// The token family and generation of each tools/call answered in the OAuth phase (MAWS's alone), in order.
+const answeredTokens = (fixture: OAuthFixturePaths) =>
+  readOAuthLog(fixture).filter((entry) => entry.phase === 'oauth' && entry.route === 'mcp' && entry.method === 'tools/call' && entry.status === 200).map((entry) => (entry.token ? `${entry.token.family}.${entry.token.generation}` : 'none'));
+const phasesOf = (fixture: OAuthFixturePaths) =>
+  summaryOf(fixture).windows.map(({ seq, phase, requests, advertised, unauthorized, authRoutes, authorizationHeaders, toolCallAttempts: attempts, toolCalls, registrations, authorizations, codeExchanges, refreshes, revocations, revocationsUnavailable, refusals }) => ({
+    seq, phase, requests, advertised, unauthorized, authRoutes, authorizationHeaders, toolCallAttempts: attempts, toolCalls, registrations, authorizations, codeExchanges, refreshes, revocations, revocationsUnavailable, refusals,
+  }));
+
+// The sealed store holds `count` records: ciphertext, 0600 in a 0700 directory, nothing of the identity or tokens readable.
+function expectSealed(scene: ConnectorScene, fixture: OAuthFixture, count: number): unknown {
+  const store = sealedRecords(scene);
+  expect(store.records, `${count} sealed record(s)`).toHaveLength(count);
+  if (count === 0) return { records: 0 };
+  expect(store.dirMode, 'connectors/oauth is 0700').toBe(0o700);
+  expect((store.parentMode ?? 0o777) & 0o077, 'connectors is owner-only').toBe(0);
+  const needles = [fixture.resourceUrl, fixture.origin, new URL(fixture.origin).host, '"accessToken"', '"refreshToken"', '"tokens"', 'series:read', 'Bearer', 'client_id'];
+  for (const record of store.records) {
+    expect(record.mode, 'a sealed record is 0600').toBe(0o600);
+    expect(record.ciphertext, 'the sealed format line and one base64 body').not.toBeNull();
+    expect(plaintextHits(record.ciphertext!, needles), 'nothing of the identity or tokens is readable in the ciphertext').toEqual([]);
+    expect(scanForSecrets(fixture, [record.text, record.ciphertext!.toString('latin1')]), 'no fixture secret in the sealed file').toEqual({ clean: true, found: {} });
+  }
+  return { records: store.records.length, dirMode: store.dirMode?.toString(8), parentMode: store.parentMode?.toString(8), modes: store.records.map((record) => record.mode.toString(8)), ciphertextBytes: store.records.map((record) => record.ciphertext!.length) };
+}
+
+// The secret scan over everything retainable: the scratch files, main's output, the app's documents and the evidence.
+async function expectNothingRetained(info: TestInfo, label: string, scene: ConnectorScene, fixtures: readonly OAuthFixturePaths[], texts: readonly string[]): Promise<void> {
+  const minted = fixtures.filter((fixture) => existsSync(fixture.secrets));
+  expect(minted.length, 'the scan has secrets to look for').toBeGreaterThan(0);
+  const clean = (text: string) => minted.every((fixture) => scanForSecrets(fixture, [text]).clean);
+  const scratch = scanScratch(scene, clean);
+  const dirtyTexts = texts.filter((text) => !clean(text)).length;
+  await evidence(info, `${label}-secret-scan`, { scratchFiles: scratch.files, tooLarge: scratch.tooLarge, dirty: scratch.dirty, texts: texts.length, dirtyTexts });
+  expect(scratch.files, 'the scan read the scratch').toBeGreaterThan(0);
+  expect(scratch.dirty, 'no scratch file holds a fixture secret').toEqual([]);
+  expect(dirtyTexts, 'neither main’s output, the app’s documents nor the evidence holds one').toBe(0);
+}
+
+test('oauth connect: a refusal parks D, the owner’s Connect signs MAWS in on 127.0.0.1, every read rotates on a new connection; an open server beside it never sees a bearer', async () => {
+  test.setTimeout(900_000);
+  const info = test.info();
+  let series: OAuthFixture | undefined;
+  let other: OAuthFixture | undefined;
+  await withScene(
+    'oauth',
+    info,
+    async (scene) => {
+      const retained: string[] = [];
+      try {
+        series = await startOAuthFixture({ root: scene.root, id: 'series' });
+        other = await startOAuthFixture({ root: scene.root, id: OTHER });
+        const fixtures = [series, other];
+        const openLog = openLogOf(scene);
+        const output = new MainOutput();
+        const run = await output.launch(scene);
+        await expectScratchCustody(run, scene);
+        const page1 = await createPageIn(run.page, scene, { html: PAGE_HTML, title: PAGE_TITLE });
+        const page2 = await createPageIn(run.page, scene, { html: pageVariant(PAGE_HTML, { server: OTHER, title: OTHER_TITLE }), title: OTHER_TITLE, spaceId: page1.spaceId });
+
+        // the engine observes both URLs in their open phase and reads each once
+        let { frame } = await scene.openPage(run.page, page1.artifactId);
+        await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+        for (const fixture of fixtures) assertOpenPhase(fixture);
+        const engine = await scene.ownerStart(run.page);
+        await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+        await allow(scene, run.page, TOOL_NAME);
+        await expect(frame.locator('#last')).toHaveText(/^ok n=\d+ via=engine$/, { timeout: 20_000 });
+        await serverConnected(run.page, engine.appSessionId, OTHER);
+        let frame2 = (await scene.openPage(run.page, page2.artifactId, OTHER_TITLE)).frame;
+        await expect(frame2.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+        await allow(scene, run.page, OTHER_TOOL_NAME);
+        await expect(frame2.locator('#last')).toHaveText(/^ok n=\d+ via=engine$/, { timeout: 20_000 });
+
+        // the engine stopped and confirmed dead; only then does series demand OAuth, of MAWS alone
+        await stopEngine(scene, run, engine);
+        const stoppedAt = Date.now();
+        enterOAuthPhase(series, { enginePids: [engine.pid] }, { accessTtlSeconds: OAUTH_TTL_SECONDS });
+
+        // open HTTP through D: the other page reads with no bearer
+        const otherRefreshes = new Refreshes(frame2, () => toolCallAttempts(other!));
+        await otherRefreshes.mark();
+        const otherDirect = await otherRefreshes.until('direct', WATCH_MS + 30_000);
+        const otherSince = mcpRequestsSince(other, stoppedAt);
+        expect(otherSince.map((entry) => entry.httpMethod), 'MAWS’s HTTP connection posts only').toEqual(otherSince.map(() => 'POST'));
+        expect(otherSince.filter((entry) => entry.bearer !== 'none'), 'and presents no bearer').toEqual([]);
+
+        // series with no MAWS grant: the refusal parks D: no tool call, nothing asked of the authorization server, no browser
+        let before = toolCallAttempts(series);
+        ({ frame } = await scene.openPage(run.page, page1.artifactId));
+        const refreshes = new Refreshes(frame, () => toolCallAttempts(series!));
+        refreshes.remounted(frame, before);
+        const parked = await refreshes.next(20_000);
+        expect(parked.last, 'not read').not.toMatch(/^ok/);
+        expect(parked.submitted, 'no tools/call was sent').toBe(0);
+        const refused = summaryOf(series).oauth;
+        expect(refused, 'refused, and nothing asked of the authorization server').toMatchObject({ toolCallAttempts: 0, authRoutes: 0, registrations: 0 });
+        expect(refused.unauthorized, 'the resource refused MAWS without a grant').toBeGreaterThan(0);
+        expect(browserOpens(openLog), 'no browser opened by a refresh').toBe(0);
+        let sheet = await scene.openSheet(run.page);
+        let row = serverRow(sheet, SERVER, 'source');
+        await expect(row.locator('[data-connector-server-state]')).toContainText(connectionWords('needsConnect'));
+        await expect(row).toContainText(S.transport('http'));
+        await shot(info, 'oauth-needs-connect.png', sheet.locator('[data-connectors-servers]'));
+
+        // the owner's Connect: 127.0.0.1, DCR/PKCE/state/resource through the fake browser, the listener closed after
+        const bound = await connectThroughBrowser({ run, row, server: SERVER, openLog, origin: series.origin });
+        await expect(row.locator('[data-connector-server-state]')).toContainText(connectionWords('connected'), { timeout: 20_000 });
+        await expect(row.locator('[data-connector-server-last]')).toHaveText(` · ${S.last({ action: 'connect', ok: true, tools: 1, credential: 'maws' })}`);
+        await shot(info, 'oauth-connected.png', sheet.locator('[data-connectors-servers]'));
+        await scene.closeSheet(run.page);
+        expect(summaryOf(series).oauth, 'one registration, one consent, one code exchange').toMatchObject({ registrations: 1, authorizations: 1, codeExchanges: 1 });
+
+        // two reads through D, each on a new connection and a rotated token, no browser or registration again
+        const reads = [await refreshes.until('direct', WATCH_MS + 30_000), await refreshes.until('direct', WATCH_MS + 30_000)];
+        const rotated = summaryOf(series).oauth;
+        const tokens = answeredTokens(series);
+        expect(tokens, 'each read presented a live token of the one grant').toHaveLength(2);
+        expect(tokens.every((token) => token.startsWith('1.')), 'family 1').toBe(true);
+        expect(new Set(tokens).size, 'a rotated token each time').toBe(2);
+        expect(rotated.refreshes, 'a refresh per read').toBeGreaterThanOrEqual(2);
+        expect(rotated.refusals, 'no rotated refresh token was ever replayed, no code reused').toEqual({});
+        expect(rotated, 'still one registration, consent and code exchange').toMatchObject({ registrations: 1, authorizations: 1, codeExchanges: 1, toolCallAttempts: 2, toolCalls: 2 });
+        expect(rotated.mcp.initialize ?? 0, 'the discovery and each read on a connection of its own').toBeGreaterThanOrEqual(3);
+        expect(browserOpens(openLog), 'one browser open in all').toBe(1);
+        const sealed = expectSealed(scene, series, 1);
+
+        // the open server read again through D while MAWS holds series's grant: neither was presented the other's bearer
+        before = toolCallAttempts(other);
+        frame2 = (await scene.openPage(run.page, page2.artifactId, OTHER_TITLE)).frame;
+        otherRefreshes.remounted(frame2, before);
+        const otherAgain = await otherRefreshes.until('direct', 20_000);
+        const crossings = bearerCrossings([
+          { name: 'series', issued: issuedAccess(series), presented: presented(series) },
+          { name: OTHER, issued: issuedAccess(other), presented: presented(other) },
+        ]);
+        expect(crossings, 'every bearer reached only the server that issued it').toEqual([]);
+        expect(presented(series).length, 'series was presented its own bearers').toBeGreaterThan(0);
+        expect(presented(other), 'the open server was never presented a bearer').toEqual([]);
+        expect(existsSync(other.secrets), 'the open server minted nothing').toBe(false);
+
+        // the window at its narrowest: the row's controls stay reachable
+        ({ frame } = await scene.openPage(run.page, page1.artifactId));
+        await run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(960, 900));
+        sheet = await scene.openSheet(run.page);
+        row = serverRow(sheet, SERVER, 'source');
+        for (const name of [S.reconnectLabel(SERVER), S.disconnectLabel(SERVER)]) await expect(row.getByRole('button', { name }), `${name} is reachable`).toBeInViewport();
+        await shot(info, 'oauth-connected-narrow.png', sheet);
+        await scene.closeSheet(run.page);
+        await run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1440, 900));
+
+        const documents = await domTexts(run.page);
+        retained.push(
+          await retain(info, 'oauth-connect', {
+            series: phasesOf(series), other: phasesOf(other), otherDirect, otherAgain, parked,
+            bind: { exact: bound.address === `127.0.0.1:${bound.port}`, followed: bound.followed }, reads, tokens, sealed, crossings, opens: browserOpens(openLog), refreshes: refreshes.seen,
+          }, fixtures),
+        );
+        await scene.quit(run);
+        expect(listenersOnPort(bound.port), 'nothing listens on the callback port').toEqual([]);
+        const journals = sessionJournals(scene);
+        expectQuietJournals(journals);
+        await expectNothingRetained(info, 'oauth-connect', scene, fixtures, [output.text(), ...documents, ...retained]);
+      } finally {
+        await series?.close();
+        await other?.close();
+      }
+    },
+    { server: () => httpEntry(series!.resourceUrl), servers: () => ({ [OTHER]: httpEntry(other!.resourceUrl) }), env: (scene) => ({ MAWS_E2E_OPEN_LOG: openLogOf(scene) }) },
+  );
+});
+
+test('oauth relaunch: after a quit nothing reaches the server until an open-phase engine observes it again, then D reads on the sealed grant; Disconnect forgets, revoked or not; a pending listener closes with the app', async () => {
+  test.setTimeout(900_000);
+  const info = test.info();
+  let series: OAuthFixture | undefined;
+  await withScene(
+    'oauthrelaunch',
+    info,
+    async (scene) => {
+      const retained: string[] = [];
+      try {
+        series = await startOAuthFixture({ root: scene.root, id: 'series' });
+        const fixtures = [series];
+        const openLog = openLogOf(scene);
+        const output = new MainOutput();
+        let run = await output.launch(scene);
+        await expectScratchCustody(run, scene);
+        const { artifactId } = await createPageIn(run.page, scene, { html: PAGE_HTML, title: PAGE_TITLE });
+        let { frame } = await scene.openPage(run.page, artifactId);
+        await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+        assertOpenPhase(series);
+        const first = await scene.ownerStart(run.page);
+        await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+        await allow(scene, run.page, TOOL_NAME);
+        await expect(frame.locator('#last')).toHaveText(/^ok n=\d+ via=engine$/, { timeout: 20_000 });
+        const refreshes = new Refreshes(frame, () => toolCallAttempts(series!));
+        await refreshes.mark();
+        await stopEngine(scene, run, first);
+        enterOAuthPhase(series, { enginePids: [first.pid] }, { accessTtlSeconds: OAUTH_TTL_SECONDS });
+
+        // signed in, one read through D
+        let sheet = await scene.openSheet(run.page);
+        let row = serverRow(sheet, SERVER, 'source');
+        const firstBind = await connectThroughBrowser({ run, row, server: SERVER, openLog, origin: series.origin });
+        await expect(row.locator('[data-connector-server-state]')).toContainText(connectionWords('connected'), { timeout: 20_000 });
+        await scene.closeSheet(run.page);
+        await refreshes.until('direct', WATCH_MS + 30_000);
+        const beforeQuit = answeredTokens(series).filter((token) => token.startsWith('1.'));
+        expect(beforeQuit.length, 'read on the grant before the quit').toBeGreaterThan(0);
+        const sealedBefore = expectSealed(scene, series, 1);
+
+        // an ordinary quit and a relaunch: nothing reaches the server; the saved grant is listed but is no source. The
+        // fixture is open again before the relaunch, so no engine could ever observe its OAuth phase
+        const supervisor = await scene.supervisor(run.page);
+        await scene.quit(run);
+        const quitAt = Date.now();
+        enterOpenPhase(series);
+        run = await output.launch(scene);
+        await expectScratchCustody(run, scene);
+        const relaunchedSupervisor = await scene.supervisor(run.page);
+        ({ frame } = await scene.openPage(run.page, artifactId));
+        refreshes.remounted(frame, toolCallAttempts(series));
+        await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+        expect(answeredTokens(series), 'the relaunched page read nothing').toEqual(beforeQuit);
+        sheet = await scene.openSheet(run.page);
+        await expect(serverRow(sheet, SERVER, 'saved'), 'the saved connection is listed, not usable').toContainText(S.savedRow);
+        await expect(serverRow(sheet, SERVER, 'source'), 'and is no verified source').toHaveCount(0);
+        await shot(info, 'oauth-relaunched-saved.png', sheet.locator('[data-connectors-servers]'));
+        await scene.closeSheet(run.page);
+        await wait(WATCH_MS + 5_000);
+        expect(mcpRequestsSince(series, quitAt), 'nothing reached the server before a fresh observation').toEqual([]);
+        await refreshes.mark(); // the relaunched page's own refreshes so far (it may have been restored, not reopened)
+
+        // a fresh observation in the open phase by an engine that then stops; then D reads on the sealed grant
+        assertOpenPhase(series);
+        const second = await scene.ownerStart(run.page);
+        await refreshes.until('engine', WATCH_MS + 30_000);
+        await stopEngine(scene, run, second);
+        enterOAuthPhase(series, { enginePids: [first.pid, second.pid] }, { accessTtlSeconds: OAUTH_TTL_SECONDS });
+        const reused = await refreshes.until('direct', WATCH_MS + 30_000);
+        const afterRelaunch = answeredTokens(series).filter((token) => token !== 'none');
+        const last = afterRelaunch.at(-1)!.split('.').map(Number);
+        expect(last[0], 'the same grant').toBe(1);
+        expect(last[1], 'on a token rotated past every one used before the quit').toBeGreaterThan(Math.max(...beforeQuit.map((token) => Number(token.split('.')[1]))));
+        const relaunched = summaryOf(series).oauth;
+        expect(relaunched.refusals, 'the saved refresh token was the rotated one: no replay').toEqual({});
+        expect(relaunched, 'no other registration, consent or code exchange').toMatchObject({ registrations: 1, authorizations: 1, codeExchanges: 1 });
+        expect(browserOpens(openLog), 'no browser after the relaunch').toBe(1);
+
+        // Disconnect with revocation available: revoked, forgotten, and D blocked without a request
+        sheet = await scene.openSheet(run.page);
+        row = serverRow(sheet, SERVER, 'source');
+        await row.getByRole('button', { name: S.disconnectLabel(SERVER) }).click();
+        await expect(row.locator('[data-connector-server-last]')).toHaveText(` · ${S.last({ action: 'disconnect', local: 'forgotten', host: 'confirmed', revocation: 'revoked' })}`, { timeout: 20_000 });
+        await expect(row.locator('[data-connector-server-state]')).toContainText(connectionWords('withdrawn'));
+        await scene.closeSheet(run.page);
+        let disconnectedAt = Date.now();
+        expect(summaryOf(series).oauth.revocations, 'the grant was revoked').toBeGreaterThan(0);
+        expectSealed(scene, series, 0);
+        const blocked = await refreshes.next(WATCH_MS + 30_000);
+        expect(blocked.last).not.toMatch(/^ok/);
+        expect(mcpRequestsSince(series, disconnectedAt), 'D sent nothing after the Disconnect').toEqual([]);
+        expect(browserOpens(openLog), 'and opened no browser').toBe(1);
+
+        // Connect again: a new registration and grant, read through D
+        sheet = await scene.openSheet(run.page);
+        row = serverRow(sheet, SERVER, 'source');
+        await connectThroughBrowser({ run, row, server: SERVER, openLog, origin: series.origin });
+        await expect(row.locator('[data-connector-server-state]')).toContainText(connectionWords('connected'), { timeout: 20_000 });
+        await scene.closeSheet(run.page);
+        expect(summaryOf(series).oauth, 'a second registration and code exchange').toMatchObject({ registrations: 2, codeExchanges: 2 });
+        await refreshes.until('direct', WATCH_MS + 30_000);
+        expect(answeredTokens(series).at(-1)!.startsWith('2.'), 'read on the new grant').toBe(true);
+
+        // Disconnect with the revocation endpoint down: forgotten all the same, D blocked
+        updateOAuthControl(series, { revocation: 'unavailable' });
+        sheet = await scene.openSheet(run.page);
+        row = serverRow(sheet, SERVER, 'source');
+        await row.getByRole('button', { name: S.disconnectLabel(SERVER) }).click();
+        await expect(row.locator('[data-connector-server-last]')).toHaveText(` · ${S.last({ action: 'disconnect', local: 'forgotten', host: 'confirmed', revocation: 'failed' })}`, { timeout: 20_000 });
+        await scene.closeSheet(run.page);
+        disconnectedAt = Date.now();
+        expect(summaryOf(series).oauth.revocationsUnavailable, 'the revocation was attempted').toBeGreaterThan(0);
+        expectSealed(scene, series, 0);
+        const blockedAgain = await refreshes.next(WATCH_MS + 30_000);
+        expect(blockedAgain.last).not.toMatch(/^ok/);
+        expect(mcpRequestsSince(series, disconnectedAt), 'D sent nothing after the Disconnect').toEqual([]);
+
+        // a Connect waiting in the browser when the app quits: its listener closes with the app, nothing is saved
+        sheet = await scene.openSheet(run.page);
+        row = serverRow(sheet, SERVER, 'source');
+        const pending = await connectThroughBrowser({ run, row, server: SERVER, openLog, origin: series.origin, follow: false });
+        const exchanges = summaryOf(series).oauth.codeExchanges;
+        const documents = await domTexts(run.page);
+        await scene.quit(run);
+        expect(listenersOnPort(pending.port), 'the pending listener closed with the app').toEqual([]);
+        expect(summaryOf(series).oauth.codeExchanges, 'no code was exchanged for it').toBe(exchanges);
+        expectSealed(scene, series, 0);
+
+        retained.push(
+          await retain(info, 'oauth-relaunch', {
+            series: phasesOf(series),
+            binds: [firstBind, pending].map((bound) => ({ exact: bound.address === `127.0.0.1:${bound.port}`, followed: bound.followed ?? null })),
+            beforeQuit, afterRelaunch, reused, blocked, blockedAgain, sealedBefore, hostRestarted: relaunchedSupervisor !== supervisor, opens: browserOpens(openLog), refreshes: refreshes.seen,
+          }, fixtures),
+        );
+        const journals = sessionJournals(scene);
+        expectQuietJournals(journals);
+        await expectNothingRetained(info, 'oauth-relaunch', scene, fixtures, [output.text(), ...documents, ...retained]);
+      } finally {
+        await series?.close();
+      }
+    },
+    { server: () => httpEntry(series!.resourceUrl), env: (scene) => ({ MAWS_E2E_OPEN_LOG: openLogOf(scene) }) },
+  );
+});
+// P3-HD M4b end

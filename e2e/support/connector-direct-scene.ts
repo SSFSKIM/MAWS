@@ -4,13 +4,23 @@
 // recording its pid, so the scene can tell the members of MAWS's instance from the engine's and prove none outlives
 // main. The grandchild's command line names the scene's root, so a leak is caught and cleaned by the scene's own
 // survivor check. Every value is a scratch fake; nothing of the owner's is read.
-import { chmodSync, mkdirSync, writeFileSync } from 'node:fs';
+//
+// P3-HD M4b: the integrated scenes' stdio support beside it: the plain entry with a hold file (the lifecycle scene) or a
+// `${…}` reference (the engine-only scene), the owner's pages in one Space, the page's refreshes counted against the
+// submissions they made, the Servers rows of the sheet, and the scratch sessions' journals (launches, model traffic and
+// the owner-only modes), read only from the scene's own profile.
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { expect, type FrameLocator, type Locator, type Page } from '@playwright/test';
+import type { LaunchSpec } from '@shared/engine/launch-spec';
+import type { CommandResult } from '@shared/ipc/schema';
 import { FIXTURE_SERVER } from './connector-engine';
-import { TOOL, type ConnectorScene } from './connector-scene';
+import { invoke, pageState, TOOL, value, type ConnectorScene } from './connector-scene';
 import { wrapperPids, type WrapperPids } from './connector-direct-transport';
+import { journalTurns, type JournalTurns } from './connector-direct-checks';
 
-// The fixture server answers no tools/call while this file exists (support/connector-mcp-server.mjs `--hold`).
+// The fixture server answers no tools/call while this file exists (support/connector-mcp-server.mjs `--hold`), and
+// answers the held ones once it is removed (P3-HD M4b).
 export function holdFileOf(scene: ConnectorScene): string {
   return join(scene.root, 'hold');
 }
@@ -42,3 +52,130 @@ export function newMembers(scene: ConnectorScene, before: WrapperPids): WrapperP
   const now = wrapperPids(wrapperLogOf(scene));
   return { wrappers: now.wrappers.filter((pid) => !before.wrappers.includes(pid)), sleepers: now.sleepers.filter((pid) => !before.sleepers.includes(pid)) };
 }
+
+// P3-HD M4b start
+// H's plain fixture entry (support/connector-scene.ts), with more arguments.
+export function plainServer(scene: ConnectorScene, extra: readonly string[] = []): Record<string, unknown> {
+  return { type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', 'series', '--log', scene.log, '--tools', JSON.stringify([TOOL]), ...extra] };
+}
+export const heldServer = (scene: ConnectorScene) => plainServer(scene, ['--hold', holdFileOf(scene)]);
+// A `${…}` reference (with a default, so the engine runs it): route D's literal-only policy keeps the entry the session's.
+export const referencingServer = (scene: ConnectorScene) => plainServer(scene, ['--note', '${MAWS_SCENE_NOTE:-literal}']);
+
+// The owner's HTML page in a Space linked to the project (a new one unless `spaceId` names it), as H's createPage makes it.
+export async function createPageIn(page: Page, scene: ConnectorScene, options: { html: string; title: string; spaceId?: string }): Promise<{ artifactId: string; spaceId: string }> {
+  const spaceId = options.spaceId ?? value(await invoke(page, 'spaces.create', { name: 'Live data', linkedDir: scene.project })).space.id;
+  const created = await page.evaluate(
+    ([html, title, space]) => window.maws.invoke('artifacts.create', { kind: 'html', title, spaceId: space, content: { bytes: new TextEncoder().encode(html), name: 'index.html' } }),
+    [options.html, options.title, spaceId] as const,
+  );
+  const artifactId = value<'artifacts.create'>(created as CommandResult<'artifacts.create'>).artifact.id;
+  scene.note('artifact', { id: artifactId, title: options.title });
+  return { artifactId, spaceId };
+}
+
+export interface Refresh {
+  last: string; // the page's `#last`
+  updates: number; // its `#updates`
+  submitted: number; // tools/call submissions the fixture saw since the previous refresh
+}
+
+// A page's refreshes, each with the submissions it made: the fixture's count read when the page's `#updates` moves.
+// The page writes its outcome after the call's answer, so a refresh's submission is in the count by then, and the next
+// is an interval away.
+export class Refreshes {
+  readonly seen: Refresh[] = [];
+  private updates = 0;
+  private calls = 0;
+
+  constructor(private frame: FrameLocator, private readonly submissions: () => number) {}
+
+  // From the page as it is now.
+  async mark(): Promise<void> {
+    this.updates = (await pageState(this.frame)).updates;
+    this.calls = this.submissions();
+  }
+  // A new load of the page (its count starts again), `callsBefore` read before it was opened.
+  remounted(frame: FrameLocator, callsBefore: number): void {
+    this.frame = frame;
+    this.updates = 0;
+    this.calls = callsBefore;
+  }
+
+  async next(timeout: number): Promise<Refresh> {
+    await expect.poll(async () => (await pageState(this.frame)).updates, { timeout, intervals: [100], message: 'the page’s next refresh arrived' }).toBeGreaterThan(this.updates);
+    const state = await pageState(this.frame);
+    const calls = this.submissions();
+    expect(state.updates, 'one refresh arrived, not two').toBe(this.updates + 1);
+    const refresh = { last: state.last, updates: state.updates, submitted: calls - this.calls };
+    this.updates = state.updates;
+    this.calls = calls;
+    this.seen.push(refresh);
+    return refresh;
+  }
+
+  // Refreshes until one reads through `route` (at most `most`), each submitting at most one call and a read exactly one.
+  async until(route: 'engine' | 'direct', timeout: number, most = 3): Promise<Refresh> {
+    for (let i = 0; i < most; i += 1) {
+      const refresh = await this.next(timeout);
+      expect(refresh.submitted, `refresh ${refresh.updates} (${refresh.last}) submitted at most one call`).toBeLessThanOrEqual(1);
+      if (refresh.last.startsWith('ok ')) expect(refresh.submitted, `read ${refresh.updates} submitted exactly one call`).toBe(1);
+      if (refresh.last.endsWith(` via=${route}`) && refresh.last.startsWith('ok ')) return refresh;
+    }
+    throw new Error(`no refresh read through route ${route}: ${JSON.stringify(this.seen.slice(-most))}`);
+  }
+
+  // What arrived and was submitted since the last refresh (nothing, for a silent page).
+  async since(): Promise<{ updates: number; submitted: number }> {
+    return { updates: (await pageState(this.frame)).updates - this.updates, submitted: this.submissions() - this.calls };
+  }
+}
+
+// The connectors sheet's row for one of MAWS's servers (P3-HD M3c2), optionally of one kind.
+export function serverRow(sheet: Locator, name: string, kind?: 'source' | 'engineOnly' | 'saved' | 'unreadable' | 'retiring'): Locator {
+  return sheet.locator(`[data-connector-server="${name}"]${kind === undefined ? '' : `[data-kind="${kind}"]`}`);
+}
+
+// Until the engine host reports the session's fixture server connected.
+export async function serverConnected(page: Page, appSessionId: string, server: string): Promise<void> {
+  await expect
+    .poll(async () => {
+      const status = await invoke(page, 'session.mcpStatus', { appSessionId: appSessionId as LaunchSpec['appSessionId'] });
+      return status.ok ? status.value.mcpServers.find((entry) => entry.name === server)?.status : 'unanswered';
+    }, { timeout: 60_000, message: `${server} is connected` })
+    .toBe('connected');
+}
+
+export interface SessionJournal {
+  appSessionId: string;
+  turns: JournalTurns;
+  dirMode: number;
+  fileModes: number[];
+}
+
+// Every session journal of the scene's profile (<userData>/engine-host/journal/<session>/*.jsonl): launches, model
+// traffic, and the owner-only modes of its directory and files. Complete lines only: a live engine's row being appended
+// is left for a later read.
+export function sessionJournals(scene: ConnectorScene): SessionJournal[] {
+  const root = join(scene.userData, 'engine-host', 'journal');
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const dir = join(root, entry.name);
+      const files = readdirSync(dir).filter((file) => file.endsWith('.jsonl')).map((file) => join(dir, file));
+      const rows = files.flatMap((file) => readFileSync(file, 'utf8').split('\n').slice(0, -1).filter(Boolean).map((line) => JSON.parse(line) as { direction: string; frame: unknown }));
+      return { appSessionId: entry.name, turns: journalTurns(rows), dirMode: statSync(dir).mode & 0o777, fileModes: files.map((file) => statSync(file).mode & 0o777) };
+    });
+}
+
+// No session ran a model turn or saw a needs-auth report, and every journal is owner-only.
+export function expectQuietJournals(journals: readonly SessionJournal[]): void {
+  expect(journals.length, 'the scene’s sessions kept journals').toBeGreaterThan(0);
+  for (const journal of journals) {
+    expect(journal.turns, `${journal.appSessionId}: no user message and no model frame`).toMatchObject({ userFrames: 0, modelFrames: 0, needsAuth: 0 });
+    expect(journal.dirMode, `${journal.appSessionId}: its journal directory is 0700`).toBe(0o700);
+    for (const mode of journal.fileModes) expect(mode, `${journal.appSessionId}: its journal files are 0600`).toBe(0o600);
+  }
+}
+// P3-HD M4b end
