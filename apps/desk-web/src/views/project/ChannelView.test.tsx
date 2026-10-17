@@ -99,3 +99,21 @@ it("draws each item of a session's stream once as it changes (the stream and the
   expect(screen.getAllByText('maws-45 joined on mini')).toHaveLength(1);
   expect(document.querySelectorAll('[data-request="toolu_1"]')).toHaveLength(1);
 });
+
+it('says when the machine is read-only, before anything is sent: a send is recorded and not delivered, and every RPC is drawn disabled saying why', () => {
+  const sessions = new Map([[A, { ...session(A, 'maws-45'), machineReadOnly: true }]]);
+  render(
+    <DeskContext.Provider value={{ connection, member: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', sessions }}>
+      <ChannelView name="MAWS" channel={{ kind: 'session', session: A }} session={sessions.get(A)!} events={[]} />
+    </DeskContext.Provider>,
+  );
+  expect(screen.getByTestId('machine-read-only').textContent).toBe("mini is read-only: it runs nothing sent from outside it, so what you send maws-45 is recorded and not delivered, and only its terminal can answer or steer it.");
+  for (const name of ['Retire…', 'Steer', 'Interrupt', 'Model', 'Compact']) {
+    const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+    expect(button.disabled, name).toBe(true);
+    expect(button.title, name).toBe('mini is read-only: it runs nothing sent from outside it');
+  }
+  expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false);
+  // While a turn runs the note says why Steer is off too.
+  expect(screen.getByTestId('composer-note').textContent).toBe('recorded, not delivered: mini is read-only · mini is read-only: it runs nothing sent from outside it');
+});

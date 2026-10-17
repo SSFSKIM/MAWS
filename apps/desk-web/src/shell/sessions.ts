@@ -15,6 +15,8 @@ export type DeskSession = ProjectedSession & {
   presence: SessionPresence | null;
   /** The machine's lease as the hub reports it; null until it does. */
   machineOnline: boolean | null;
+  /** The machine's owner set it read-only (its DX4 `machine` presence's policy): it runs nothing sent from outside it. */
+  machineReadOnly?: boolean;
 };
 
 function livenessOf(live: LiveState, session: ProjectedSession): Liveness {
@@ -29,7 +31,8 @@ function livenessOf(live: LiveState, session: ProjectedSession): Liveness {
 function view(project: string, live: LiveState, session: ProjectedSession): DeskSession {
   const liveness = livenessOf(live, session);
   const machineOnline = liveness.machineOnline ?? null;
-  return { ...session, project, group: groupOf(session, liveness), presence: machineOnline === false ? null : (liveness.presence ?? null), machineOnline };
+  const machineReadOnly = live.machines[session.machine]?.policy?.read_only === true;
+  return { ...session, project, group: groupOf(session, liveness), presence: machineOnline === false ? null : (liveness.presence ?? null), machineOnline, machineReadOnly };
 }
 
 /** Every session the project's log names, grouped for the sidebar (each group newest member first). */

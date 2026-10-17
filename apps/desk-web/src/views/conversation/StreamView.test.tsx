@@ -3,10 +3,11 @@
 // around MAWS's Markdown — never MAWS's IPC defaults, which the desk does not load.
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { LogEvent } from 'desk-hub/protocol';
+import type { Delivery, LogEvent } from 'desk-hub/protocol';
 import { VECTOR_PROJECT as PROJECT } from '../../../test/vectors';
 import { memoryLogRecord } from '../../log/record';
 import { ProjectConnection } from '../../project/connection';
+import { deliveryKey } from '../../project/conversation';
 import { DeskContext } from './desk-context';
 import { StreamView } from './StreamView';
 
@@ -46,5 +47,39 @@ it('names who posted each human message: you, another member by id, or a human a
   const who = screen.getAllByTestId('said-who');
   expect(who.map((e) => e.textContent)).toEqual(['You', 'Another member (a1b2c3d4)', 'A human']);
   expect(who[2].parentElement!.textContent).toContain('@mini');
+  connection.stop();
+});
+
+it("draws each recipient's delivery outcome with the machine's reason when it was not delivered", () => {
+  const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
+  const [live, seat, rests] = ['67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a', '0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59'];
+  const to = [
+    { session: live, alias: 'walk-b' },
+    { session: seat, alias: 'web-1a2b3c' },
+    { session: rests, alias: 'maws-45' },
+  ];
+  const event = { ts: '2026-10-15T08:00:00.000Z', writer: 'hub/4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', seq: 4, kind: 'human', from: 'human', to, text: 'ping', mac: { nonce: 'n4', value: 'v' } } as LogEvent;
+  const delivery = (session: string, outcome: Delivery['outcome'], reason: string): Delivery => ({ event: { writer: event.writer, seq: event.seq }, session, outcome, reason, mac: { nonce: `d-${session}`, value: 'v' } });
+  const readOnly = 'this machine is read-only: nothing written outside it is delivered';
+  connection.conversation.store.setState({
+    deliveries: {
+      [deliveryKey(event)]: {
+        [live]: delivery(live, 'refused-read-only', readOnly),
+        [seat]: delivery(seat, 'refused-read-only', readOnly),
+        [rests]: delivery(rests, 'delivered', 'pushed to the live session'),
+      },
+    },
+  });
+  render(
+    <DeskContext.Provider value={{ connection, member: 'm', sessions: new Map() }}>
+      <StreamView items={[{ kind: 'human', key: 'h4', offset: 4, event, text: 'ping', to, wake: false }]} outbox={[]} />
+    </DeskContext.Provider>,
+  );
+  const line = (session: string) => document.querySelector(`[data-recipient="${session}"]`)!;
+  expect(line(live).textContent).toBe(`walk-b: not delivered: the machine is read-only — ${readOnly}`);
+  expect(line(seat).textContent).toBe(`web-1a2b3c: not delivered: the machine is read-only — ${readOnly}`);
+  // Delivered says no more on the line; its reason is there on hover.
+  expect(line(rests).textContent).toBe('maws-45: delivered');
+  expect(line(rests).getAttribute('title')).toBe('pushed to the live session');
   connection.stop();
 });

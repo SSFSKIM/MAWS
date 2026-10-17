@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import { FakePlane, mount, settle } from '../../../test/double/fake-plane';
 import { readRecording, scriptOf, snapshotAt } from '../../../test/double/session-stream';
+import { useSeenModels } from '../../state/models';
 import { DeskTranscript } from './desk-transcript';
 
 const recording = readRecording();
@@ -87,6 +88,8 @@ describe('session info and the diff on the main subscription', () => {
     expect(controller.state.getState().model).toBe('claude-opus-5-5');
     plane.send('row', { row: { ...latest, uuid: 'synthetic', message: { ...(latest.message as object), model: '<synthetic>' } }, agentId: null });
     expect(controller.state.getState().model).toBe('claude-opus-5-5');
+    // Each model a transcript answered from leads the project's list the pickers offer, newest first.
+    expect(useSeenModels.getState().proj).toEqual(['claude-opus-5-5', (latest.message as { model: string }).model]);
   });
 
   it('never asks a subagent’s subscription for the diff', () => {

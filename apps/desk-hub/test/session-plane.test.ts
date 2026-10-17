@@ -4,7 +4,7 @@
 // evict), which drops a `Project`'s memory and keeps its sockets open; a `Machine` holding a stream is an active
 // reference workerd will not evict, so its termination is `ctx.abort()` through a suite seam.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { GridDown, ProjectDown } from '../src/protocol/browser';
+import type { GridDown, ProjectDown, ProjectSummary } from '../src/protocol/browser';
 import { FRAME_LIMIT, PartAssembler } from '../src/protocol/parts';
 import { importOrgKey, newNonce, seal, sealRpc, verify } from '../src/protocol/codes';
 import type { DownFrame } from '../src/protocol/machine';
@@ -924,6 +924,92 @@ describe('the grid', () => {
     });
     grid.close();
   });
+
+  it('stops counting a machine once it is revoked, and counts it again once the name is enrolled anew and opens the project', async () => {
+    const project = newProject();
+    const kept = await machine(project, CLOSES);
+    const revoked = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    const reached = (from: number, machines: number, online: number, what: string) => gridReached(grid, project, from, { machines, machines_online: online }, what);
+    await reached(0, 2, 2, 'both machines');
+    let from = grid.frames.length;
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${revoked.name}`, { method: 'DELETE' })).status).toBe(200);
+    await reached(from, 1, 1, 'the revoked machine no longer counted');
+
+    from = grid.frames.length;
+    const again = new MachineClient(hub, revoked.name, await enroll(hub, ADMIN, revoked.name));
+    await again.connect();
+    await again.sync(project);
+    await reached(from, 2, 2, 'the name enrolled anew counted again');
+    grid.close();
+    await again.close();
+    await kept.close();
+  });
+
+  it('a revoked machine is offline in the project at once, though its Machine object restarted and sent no close', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'presence', presence('waiting')) }]);
+    const grid = await GridClient.open(hub, ADMIN);
+    await gridReached(grid, project, 0, { machines_online: 1, waiting: 1 }, 'the machine online, its session waiting');
+    // Its object terminated: the stream ends unannounced, and the project holds the lease for its 45 s.
+    hub.expectRuntimeLog(/terminated by the suite/);
+    await hub.terminate(m.name);
+    await waitFor(() => (m.isEnded ? true : undefined));
+    const b = await browser(project);
+    await b.next((f) => f.t === 'machines', 'machines');
+    expect(ofType(b, 'machines')[0].machines.find((x) => x.machine === m.name)).toMatchObject({ online: true });
+
+    const from = b.frames.length;
+    const gridFrom = grid.frames.length;
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${m.name}`, { method: 'DELETE' })).status).toBe(200);
+    await b.next((f) => f.t === 'machines' && f.machines.some((x) => x.machine === m.name && !x.online), 'the machine offline', from);
+    await gridReached(grid, project, gridFrom, { machines: 0, machines_online: 0, waiting: 0 }, 'the machine and its waiting session no longer counted');
+    b.close();
+    grid.close();
+    await m.close();
+  });
+
+  it('a project that fails to take a revocation is told again until it does, and stops counting the machine then', async () => {
+    const project = newProject();
+    const m = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    await gridReached(grid, project, 0, { machines: 1, machines_online: 1 }, 'the machine');
+    await hub.failNextForget(project);
+    const from = grid.frames.length;
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${m.name}`, { method: 'DELETE' })).status).toBe(200);
+    // Its stream's close took it offline, and the revocation failed to reach the project: still counted.
+    await gridReached(grid, project, from, { machines: 1, machines_online: 0 }, 'the machine offline and still counted');
+    // The registry's next sweep tells the project again: its alarm's, or here the one a redemption runs first.
+    await enroll(hub, ADMIN, `${m.name}-next`);
+    await gridReached(grid, project, from, { machines: 0, machines_online: 0 }, 'the revoked machine no longer counted');
+    grid.close();
+    await m.close();
+  });
+
+  it("a removal whose answer from the machine's object was lost after it took it completes when asked again", async () => {
+    const project = newProject();
+    const m = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    await gridReached(grid, project, 0, { machines: 1, machines_online: 1 }, 'the machine');
+    const listed = async () => ((await (await hub.fetchAs(ADMIN, '/api/machines')).json()) as { machines: Array<{ name: string }> }).machines.some((x) => x.name === m.name);
+
+    // The object refuses the credential and ends the stream, and its answer is lost: the removal fails, the record stays.
+    hub.expectRuntimeLog(/a revocation answer the suite lost/);
+    await hub.faultNextRevoke(m.name, 'lose');
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${m.name}`, { method: 'DELETE' })).status).not.toBe(200);
+    await waitFor(() => (m.isEnded ? true : undefined));
+    expect(await listed()).toBe(true);
+    expect((await hub.fetchAs(m.creds, '/machine/stream')).status).toBe(403);
+
+    // Asked again, the object answers as it did, and the removal completes: the record goes and the project is told.
+    const from = grid.frames.length;
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${m.name}`, { method: 'DELETE' })).status).toBe(200);
+    expect(await listed()).toBe(false);
+    await gridReached(grid, project, from, { machines: 0, machines_online: 0 }, 'the removed machine no longer counted');
+    grid.close();
+    await m.close();
+  });
 });
 
 describe('the grid, past the frame bound', () => {
@@ -953,6 +1039,15 @@ function say(m: MachineClient, project: string, seq: number, text: string) {
   };
   m.store(project, event);
   return event;
+}
+
+/** Waits for a grid frame after `from` (the grid on connect, a summary after) that carries `project` with `counts`. */
+async function gridReached(grid: GridClient, project: string, from: number, counts: Partial<ProjectSummary>, what: string): Promise<void> {
+  const carries = (f: GridDown) =>
+    (f.t === 'grid' ? f.projects : f.t === 'summary' ? [f.project] : []).some((p) => p.id === project && Object.entries(counts).every(([key, value]) => p[key as keyof ProjectSummary] === value));
+  await waitFor(() => (grid.frames.slice(from).some(carries) ? true : undefined)).catch(() => {
+    throw new Error(`no ${what}; got ${JSON.stringify(grid.frames.slice(from))}`);
+  });
 }
 
 async function waitFor<T>(probe: () => T | undefined | Promise<T | undefined>, ms = 5000): Promise<T> {

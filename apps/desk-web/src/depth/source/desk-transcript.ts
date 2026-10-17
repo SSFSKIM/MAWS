@@ -48,6 +48,7 @@ import type { createTranscriptStore } from '../../../../../src/renderer/src/stor
 import { emptyGraph, type TaskGraph } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import type { TranscriptSource } from '../../../../../src/renderer/src/transcript/source/types';
 import { transcriptKey, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionMessage } from '../../shell/session-plane';
+import { noteModel } from '../../state/models';
 import { taskGraphOf, withEvents, withMetas } from '../agents/task-feed';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
 import { rowsInRange, type BoundState, type Range } from './range';
@@ -208,6 +209,7 @@ export class DeskTranscript {
   readonly target: SessionTarget;
   readonly state: StoreApi<DepthTranscriptState>;
   private readonly plane: SessionPlane;
+  private readonly project: string;
   private readonly store: TranscriptStoreApi;
   private readonly page: number;
   private subscription: Subscription | null = null;
@@ -246,6 +248,7 @@ export class DeskTranscript {
 
   constructor(options: DeskTranscriptOptions) {
     this.plane = options.plane;
+    this.project = options.project;
     this.store = options.store;
     this.target = options.target;
     this.page = options.page ?? PAGE;
@@ -412,7 +415,7 @@ export class DeskTranscript {
     this.uuids.add(row.uuid);
     this.rows.push(row);
     const model = modelOf(row);
-    if (model !== null && model !== this.state.getState().model) this.state.setState({ model });
+    if (model !== null && model !== this.state.getState().model) this.setModel(model);
     if (this.range === null) this.source.live(row);
     else this.rangeRow(row);
     if (this.treeContext !== null) this.state.setState({ tasks: withEvents(this.state.getState().tasks, eventsOf(row, this.treeContext)) });
@@ -477,13 +480,19 @@ export class DeskTranscript {
     this.state.setState({ tasks: taskGraphOf(this.metas, this.rows.flatMap((row) => eventsOf(row, ctx))) });
   }
 
+  /** The transcript's latest response came from `model`: the session info names it, and the pickers offer it. */
+  private setModel(model: string): void {
+    this.state.setState({ model });
+    noteModel(this.project, model);
+  }
+
   private setRows(rows: Row[]): void {
     this.rows = rows;
     this.uuids.clear();
     this.silent.clear();
     for (const row of rows) this.uuids.add(row.uuid);
     const latest = rows.findLast((row) => modelOf(row) !== null);
-    if (latest) this.state.setState({ model: modelOf(latest) });
+    if (latest) this.setModel(modelOf(latest)!);
     this.reshow();
   }
 

@@ -3,7 +3,9 @@
 // review row): its header, file list, file section with the mode, wrap, hunk and file navigation, and its diff body, with
 // none of its four scopes, its git store, its viewed marks, or its Open file (the desk has no files to open). The diff is
 // asked for when the tab opens and again on the reader's Refresh, never polled; the last answer stays drawn while a new
-// one is on its way. The body (the diff library, its stylesheet, and the highlighter) loads on first use.
+// one is on its way. An answer the machine could not take says why: its `error` when git failed, and no base when the
+// session's directory is no git working tree. The body (the diff library, its stylesheet, and the highlighter) loads on
+// first use.
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
@@ -35,7 +37,11 @@ export function DiffPane({ controller, state, view }: Props) {
   useEffect(() => controller.requestDiff(), [controller]);
   const answer = state.diff?.answer ?? null;
   const pending = state.diff?.pending ?? true;
-  const files = useMemo(() => (answer ? diffFiles(answer.text) : null), [answer]);
+  const machine = controller.target.machine;
+  const failed = answer?.error ? answer.error : null;
+  // A diff against a base: the machine took it. Otherwise it says why it could not.
+  const based = answer !== null && failed === null && answer.base !== '';
+  const files = useMemo(() => (answer && based ? diffFiles(answer.text) : null), [answer, based]);
 
   const selected = useStore(view.ui, (s) => s.selected);
   const file = files?.find((f) => f.path === selected) ?? files?.[0] ?? null;
@@ -47,7 +53,7 @@ export function DiffPane({ controller, state, view }: Props) {
     <div data-review data-testid="depth-diff" className="flex h-full min-h-0 flex-col bg-bg">
       <div className="flex shrink-0 items-baseline gap-2 px-3 pt-2 pb-1">
         <p data-review-header className="m-0 min-w-0 flex-1 truncate text-ui font-medium text-fg">
-          {files && answer ? REVIEW_COPY.header(diffTotals(files).files, diffTotals(files).added, diffTotals(files).removed, `Since ${answer.base}`) : 'Diff'}
+          {files && answer && based ? REVIEW_COPY.header(diffTotals(files).files, diffTotals(files).added, diffTotals(files).removed, `Since ${answer.base}`) : 'Diff'}
         </p>
         <button type="button" className={quiet} data-testid="depth-diff-refresh" disabled={pending} onClick={() => controller.requestDiff()}>
           {pending && answer ? 'Refreshing…' : 'Refresh'}
@@ -56,6 +62,14 @@ export function DiffPane({ controller, state, view }: Props) {
       {state.phase === 'ended' && !answer ? (
         <p role="status" className="px-3 py-2 text-ui text-fg-muted">
           The diff is unavailable while the transcript is.
+        </p>
+      ) : failed !== null ? (
+        <p role="status" className="px-3 py-2 text-ui text-warning">
+          The diff failed on {machine}: {failed}
+        </p>
+      ) : answer !== null && !based ? (
+        <p role="status" className="px-3 py-2 text-ui text-fg-muted">
+          No diff: the session's directory on {machine} is not in a git working tree.
         </p>
       ) : files === null ? (
         <Loading />
@@ -69,7 +83,7 @@ export function DiffPane({ controller, state, view }: Props) {
           {file ? <FileSection file={file} files={files} view={view} /> : null}
         </>
       )}
-      {answer ? (
+      {answer && based ? (
         <p data-review-footer className="mt-auto shrink-0 truncate border-t border-border px-3 py-1.5 text-ui-sm text-fg-faint">
           Working tree · Since {answer.base}
         </p>

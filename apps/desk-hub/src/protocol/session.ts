@@ -166,8 +166,9 @@ export type SessionBodies = {
   rows: { rows: JsonObject[]; before: string; more: boolean };
   subagents: { subagents: SubagentMeta[] };
   /** Unified diff of the session's working tree against its base branch, answering a browser's `diff` (main-scope subs
-   * only; computed on request, never pushed). */
-  diff: { base: string; text: string };
+   * only; computed on request, never pushed). The daemon answers no `base` when the session's directory is no git
+   * working tree, and adds `error` when git failed: a field beyond these, carried as received. */
+  diff: { base: string; text: string; error?: string };
   /** After each main turn, on main-scope subs only: the one source of a session's context use and cost on the web. */
   usage: Usage;
   /**
