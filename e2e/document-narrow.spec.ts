@@ -119,6 +119,34 @@ const oneRow = (toolbar: Locator) =>
     });
   });
 
+// The toolbar's buttons whose label is not one whole line inside the button, each named with what its text's line boxes
+// read: the label's text runs (Range rects of its text nodes, which a fixed-height button's clipping does not hide)
+// spanning more than one line's height, or reaching past the button's sides. None, when every control keeps its own
+// width and its label on one line.
+const wrappedLabels = (toolbar: Locator) =>
+  toolbar.evaluate((bar) => {
+    const wrapped: string[] = [];
+    for (const button of Array.from(bar.querySelectorAll<HTMLElement>('button'))) {
+      if (!button.closest('[role="toolbar"] > div') || button.closest('[role="menu"], form')) continue; // the row's own controls, not an open menu's
+      const rects: DOMRect[] = [];
+      const walker = document.createTreeWalker(button, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent?.trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        rects.push(...Array.from(range.getClientRects()).filter((r) => r.width > 0));
+      }
+      if (rects.length === 0) continue;
+      const line = Math.max(...rects.map((r) => r.height));
+      const [top, bottom] = [Math.min(...rects.map((r) => r.top)), Math.max(...rects.map((r) => r.bottom))];
+      const [left, right] = [Math.min(...rects.map((r) => r.left)), Math.max(...rects.map((r) => r.right))];
+      const box = button.getBoundingClientRect();
+      const lines = Math.round((bottom - top) / line);
+      if (lines > 1 || left < box.left - 0.5 || right > box.right + 0.5) wrapped.push(`${button.getAttribute('aria-label') ?? button.textContent}: ${lines} lines, text ${Math.round(left)}–${Math.round(right)} in ${Math.round(box.left)}–${Math.round(box.right)}`);
+    }
+    return wrapped;
+  });
+
 test('in a 600 px panel the comments rail is a drawer over the page, the toolbar one row whose menus open whole; maximized, the rail sits beside the page as before', async () => {
   test.setTimeout(150_000);
   const page = await start();
@@ -142,6 +170,7 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
     await expect.poll(() => img.evaluate((el: HTMLImageElement) => (el.complete ? el.naturalWidth : -1)), { timeout: 15_000, message: 'the image loaded' }).toBe(2);
     expect(await oneRow(toolbar)).toBe(true);
     expect((await box(toolbar)).height).toBeLessThan(44);
+    expect(await wrappedLabels(toolbar), 'every label one line inside its button at 600 px').toEqual([]);
 
     const insert = toolbar.getByRole('button', { name: 'Insert', exact: true });
     await insert.click();
@@ -163,6 +192,7 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
     await page.keyboard.press('Tab');
     await page.keyboard.type('Status of the review');
     expect(await oneRow(toolbar), 'one row with the table’s controls in the strip').toBe(true);
+    expect(await wrappedLabels(toolbar), 'every label one line with the table’s controls').toEqual([]);
   });
 
   await test.step('a comment on the passage, kept', async () => {
@@ -191,6 +221,7 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
     expect(railBox.width).toBeLessThan(bodyBox.width / 2 + 40);
     expect(railBox.y, 'the drawer under the toolbar').toBeGreaterThanOrEqual(barBox.y + barBox.height - 1);
     expect(await oneRow(toolbar)).toBe(true);
+    expect(await wrappedLabels(toolbar), 'every label one line with the drawer open').toEqual([]);
     for (const name of ['Comment', 'Find']) expect(await takesClicks(toolbar.getByRole('button', { name, exact: true })), `${name} uncovered`).toBe(true);
     expect(await takesClicks(toolbar.getByRole('button', { name: /^Comments/ })), 'the rail’s toggle uncovered').toBe(true);
 
@@ -223,6 +254,11 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
     expect(Math.abs(railBox.width - RAIL_PX), 'the rail at its old width').toBeLessThan(1);
     expect(Math.abs(frameBox.width - (bodyBox.width - RAIL_PX)), 'the page beside it').toBeLessThan(1);
     expect(await oneRow(toolbar)).toBe(true);
+    expect(await wrappedLabels(toolbar), 'every label one line maximized').toEqual([]);
+    await text.locator('td p').first().click(); // the caret in the table: its controls in the row too
+    await expect(toolbar.getByRole('button', { name: 'Add row below', exact: true })).toBeVisible();
+    expect(await oneRow(toolbar)).toBe(true);
+    expect(await wrappedLabels(toolbar), 'every label one line maximized, with the table’s controls').toEqual([]);
     await test.info().attach('maximized-rail-beside', { body: await page.screenshot(), contentType: 'image/png' });
   });
 });

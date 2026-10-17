@@ -184,6 +184,17 @@
   margin-right: -2px;
   padding-inline: 2px;
 }
+/* each control at its own width, its label on one line: the row scrolls rather than any control narrowing (a shrunk
+   "Insert ▾" or "</>" wrapped inside its fixed-height button) */
+.doc-toolbar-tools > *,
+.doc-toolbar-end > * {
+  flex-shrink: 0;
+}
+.doc-format-toolbar .doc-tool,
+.doc-format-toolbar .doc-toolbar-select,
+.doc-format-toolbar .doc-toolbar-error {
+  white-space: nowrap;
+}
 .doc-toolbar-tools::before,
 .doc-toolbar-tools::after {
   content: '';
