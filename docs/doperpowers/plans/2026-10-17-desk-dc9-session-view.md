@@ -606,6 +606,25 @@ in their own worktrees.
   executors is at `.doperpowers/sde/2026-10-17-desk-dc9-session-view/dc8/`.
   Date/Author: 2026-10-17, the composite's writer, folded by the controller.
 
+- Decision (M1, as built at `af5604760`): the widened entry keeps the
+  name `SubagentMeta` (about ten desk-web files use it; `SubagentEntry`
+  collides with MAWS's name in `task-feed.ts`), typed `{agentId, meta} &
+  (SubagentStatusFacts | none of them)`, so `status` and `evidence` come
+  together (a DC8 producer) or not at all (an older one); `jobs` and `mcp`
+  are optional on the snapshot and the `subagents` body. Open field types:
+  `SubagentSpawn` follows the bridge's emit (`parentAgentId` and `name`
+  `string | null`, `toolUseId?` `string | null`, `background` and `model`
+  optional for the seed); `outcome.status` the full status set;
+  `file.firstAt`/`lastAt` `string | null`; a job's `startedAt`/`endedAt`
+  strings — to be confirmed against DC8's fixture at M2. The bounds
+  (`OUTPUT_TAIL_MAX`, `isTaskId`, `isOutputTail`) live in
+  `protocol/browser.ts`, shared by the hub, the client and the double; the
+  client clamps `tail` and sends nothing for an invalid task id, as it
+  clamps `rows`. The hub double shape-checks `output` and leaves answering
+  to the test; until M2 the fake machine passes `output` by, as a daemon
+  older than DC8 does.
+  Date/Author: 2026-10-17, M1 executor, folded by the controller.
+
 ## Surprises & Discoveries
 
 ## Outcomes & Retrospective
