@@ -224,8 +224,49 @@ export async function setPanel(page: Page, shown: boolean): Promise<void> {
   await expect(toggle).toHaveAttribute('aria-pressed', String(shown));
 }
 
-export async function windowSize(run: Run, width: number, height: number): Promise<void> {
+/** The window as it actually is: its native frame and content size, its minimum, and the renderer's CSS viewport and
+ * device pixel ratio (what a screenshot's pixels mean). */
+export interface WindowGeometry {
+  native: { width: number; height: number };
+  content: { width: number; height: number };
+  minimum: { width: number; height: number };
+  viewport: { width: number; height: number };
+  dpr: number;
+}
+
+export async function windowGeometry(run: Run): Promise<WindowGeometry> {
+  const native = await run.maws.app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0]!;
+    const [width, height] = win.getSize();
+    const [cw, ch] = win.getContentSize();
+    const [mw, mh] = win.getMinimumSize();
+    return { native: { width: width!, height: height! }, content: { width: cw!, height: ch! }, minimum: { width: mw!, height: mh! } };
+  });
+  const page = await run.page.evaluate(() => ({ viewport: { width: window.innerWidth, height: window.innerHeight }, dpr: window.devicePixelRatio }));
+  return { ...native, ...page };
+}
+
+/**
+ * The window resized to `width` × `height`, answered once the native frame has that size and the renderer's viewport
+ * has followed its content area. A size below the window's own minimum is refused, never clamped silently: the
+ * narrowest a spec can show is that minimum.
+ */
+export async function windowSize(run: Run, width: number, height: number): Promise<WindowGeometry> {
+  const { minimum } = await windowGeometry(run);
+  if (width < minimum.width || height < minimum.height) throw new Error(`${width}×${height} is below the window’s minimum ${minimum.width}×${minimum.height}`);
   await run.maws.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0]!.setSize(w!, h!), [width, height]);
+  let geometry = await windowGeometry(run);
+  await expect
+    .poll(
+      async () => {
+        geometry = await windowGeometry(run);
+        const settled = geometry.native.width === width && geometry.native.height === height && Math.abs(geometry.viewport.width - geometry.content.width) <= 1 && Math.abs(geometry.viewport.height - geometry.content.height) <= 1;
+        return settled ? 'settled' : JSON.stringify(geometry);
+      },
+      { timeout: 10_000, message: `the window at ${width}×${height}, its renderer following` },
+    )
+    .toBe('settled');
+  return geometry;
 }
 
 /** What keeps the live block's controls from lying wholly inside the sheet and the window, on both axes (none when

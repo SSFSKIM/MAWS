@@ -31,7 +31,7 @@
 //      minutes with no call, no new session and no new launch
 // Route D (P3-HD's direct connector route) is its own named case, skipped while that runtime is absent (Decision Log 14).
 import { mkdirSync } from 'node:fs';
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type Locator } from '@playwright/test';
 import { DATASET_STATES, utcTime } from '../src/artifacts/dashboard/states';
 import { invoke, SERVER, TOOL, TOOL_NAME, value, wait, withScene, type ConnectorScene, type Run } from './support/connector-scene';
 import { durable, ok, openInMain, openInPanel, refusalOf } from './support/dashboards';
@@ -70,6 +70,7 @@ import {
   TITLE,
   unclipped,
   userMessages,
+  windowGeometry,
   windowSize,
 } from './support/live-data';
 import { sidebarRow } from './support/sidebar';
@@ -93,11 +94,15 @@ const TRIALS = [3, 5];
 const NEVER = [99];
 const AGAIN = [20, 22];
 
-async function shot(page: Page, name: string): Promise<void> {
+// A screenshot named by the CSS width it actually shows, its window's geometry attached beside it.
+async function shot(run: Run, name: string): Promise<void> {
   mkdirSync(PROOF, { recursive: true });
-  const path = `${PROOF}/${name}.png`;
-  await page.screenshot({ path });
-  await test.info().attach(name, { path, contentType: 'image/png' });
+  const geometry = await windowGeometry(run);
+  const named = `${name}-${geometry.viewport.width}css`;
+  const path = `${PROOF}/${named}.png`;
+  await run.page.screenshot({ path });
+  await test.info().attach(named, { path, contentType: 'image/png' });
+  await test.info().attach(`${named}.geometry.json`, { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
 }
 
 const nativeVisible = (run: Run) => run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible());
@@ -135,11 +140,14 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         await expect(block).toContainText('Not allowed');
         await expect(block, 'the watch found no live route').toContainText('No live session for this dashboard has this server.', { timeout: 20_000 });
         await expect(block.getByRole('button', { name: 'Start session', exact: true })).toBeEnabled();
-        expect(await unclipped(block), 'the live block whole at 1440 px').toEqual([]);
-        await shot(page, 'paused-no-session-wide');
-        await windowSize(run, 820, 900);
-        await expect.poll(() => unclipped(block), { message: 'the live block whole at 820 px' }).toEqual([]);
-        await shot(page, 'paused-no-session-narrow');
+        expect(await unclipped(block), 'the live block whole at the sceneâ€™s width').toEqual([]);
+        await shot(run, 'paused-no-session');
+        // the narrowest the window takes (its own minimum, src/main/window.ts), then back to the scene's size
+        const { minimum } = await windowGeometry(run);
+        const narrow = await windowSize(run, minimum.width, 900);
+        scene.note('narrow window', narrow);
+        await expect.poll(() => unclipped(block), { message: `the live block whole at ${narrow.viewport.width} CSS px` }).toEqual([]);
+        await shot(run, 'paused-no-session');
         await windowSize(run, 1440, 900);
         await page.keyboard.press('Escape');
         await expect(sheet).toBeHidden();
@@ -159,7 +167,7 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         await expect(block).toContainText('Allow it to read before this dashboard can refresh it.');
         await expect(block.getByRole('button', { name: 'Start session', exact: true }), 'the route found: no Start offered').toHaveCount(0);
         await expect(labelOf(views)).toHaveText(`${NOT_FETCHED} Â· ${DATASET_STATES.notAllowed}`);
-        await shot(page, 'not-allowed-wide');
+        await shot(run, 'not-allowed');
         const refused = await agentDataset(page, agent, engine.appSessionId, id, { refresh: true });
         expect(refusalOf(refused)).toMatchObject({ reason: 'unavailable', dataset: DATASET });
         expect(refused.text).toContain(`the owner has not granted ${TOOL_NAME} to this dashboard`);
@@ -180,12 +188,12 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         await closeSheet(sheet);
         await drawsRows(views, FIRST, 'the first fetch');
         const read = await readDataset(agent, AUTHOR, id);
-        expect(read.updated).toMatchObject({ by: 'user' });
+        expect(read.updated, 'the owner is the actor').toEqual({ at: expect.any(String), by: 'user' });
         expect(read.at!, 'fetched after the call was made').toBeGreaterThanOrEqual(Date.parse(first.at) - 1_000);
         await expect(labelOf(views)).toHaveText(fetched(read.at!, 'You'));
         firstAt = read.at!;
         await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'First rows' });
-        await shot(page, 'allowed-rows-wide');
+        await shot(run, 'allowed-rows');
       });
 
       await test.step('4. the ownerâ€™s Refresh with the sheet open: the captured rows and time stay until Show latest', async () => {
@@ -204,7 +212,7 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', String(OWNERS.length + 1));
         await closeSheet(sheet);
         const read = await readDataset(agent, AUTHOR, id);
-        expect(read.updated).toMatchObject({ by: 'user' });
+        expect(read.updated, 'the owner is the actor').toEqual({ at: expect.any(String), by: 'user' });
         await expect(labelOf(views)).toHaveText(fetched(read.at!, 'You'));
       });
 
@@ -222,10 +230,14 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         expect(asked.result).toMatchObject({ status: 'dataset', id: DATASET, rows: AGENTS.length });
         expect(scene.toolCallsBetween(before, Date.now()).filter((call) => call.pid === server), 'the agentâ€™s call reached the started sessionâ€™s server').not.toHaveLength(0);
         await drawsRows(views, AGENTS, 'the agentâ€™s refresh');
+        // the footer names the actor from the reader's side (tool-server/documents.ts `authorOf`): the session itself
+        // reads `this session`; another reads `another session` with the started session's id
         const read = await readDataset(agent, engine.appSessionId, id);
-        expect(read.updated, 'the session is the actor').toMatchObject({ by: 'this session', appSessionId: engine.appSessionId });
+        expect(read.updated, 'the session reads itself as the actor').toEqual({ at: expect.any(String), by: 'this session' });
+        const observed = await readDataset(agent, AUTHOR, id);
+        expect(observed.updated, 'another session reads the started session as the actor').toEqual({ at: read.updated!.at, by: 'another session', appSessionId: engine.appSessionId });
         await expect(labelOf(views)).toHaveText(fetched(read.at!, 'session'));
-        await shot(page, 'agent-refresh-wide');
+        await shot(run, 'agent-refresh');
 
         const replayFrom = Date.now();
         const replay = await agent.call(engine.appSessionId, 'artifact_dataset', { artifact: id, id: DATASET, refresh: true, baseRevision: asked.result!.revision }, { toolUseId: asked.toolUseId });
@@ -247,7 +259,7 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         await expect(labelOf(views)).toContainText(MALFORMED, { timeout: 20_000 });
         await expect(labelOf(views)).not.toContainText('not rows');
         await drawsRows(views, AGENTS, 'after the malformed result');
-        await shot(page, 'malformed-kept-wide');
+        await shot(run, 'malformed-kept');
         await closeSheet(sheet);
         scene.fixtureReply({ reply: 'isError' });
         const failed = await agentDataset(page, agent, engine.appSessionId, id, { refresh: true });
@@ -344,7 +356,7 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         const sheet = page.getByRole('dialog', { name: new RegExp(`^(Source of ${TITLE}|Datasets)$`) });
         await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', String(FIRST.length + 1));
         await expect(liveBlock(sheet)).toHaveCount(0);
-        await shot(page, 'preview-read-only-wide');
+        await shot(run, 'preview-read-only');
         await page.keyboard.press('Escape');
         await expect(sheet).toBeHidden();
         const previewing = await silence(scene, 'a retained version is previewed');
@@ -374,7 +386,7 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         await expect(labelOf(views)).toContainText(DATASET_STATES.notAllowed);
         await wait(Math.max(0, revokedAt + 35_000 - Date.now()));
         expect(scene.toolCallsBetween(revokedAt, Date.now()), 'no call after the revoke, the stale label from expiry alone').toEqual([]);
-        await shot(page, 'revoked-stale-wide');
+        await shot(run, 'revoked-stale');
       });
 
       await test.step('11. Restore brings the first rows back past the latest two snapshots of their query, and a reopened tab keeps them', async () => {
@@ -425,7 +437,7 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         await expect(block).toContainText('Allowed to read');
         await expect(block).toContainText('Refreshes every 30 seconds while this dashboard is on screen');
         await expect(block.getByRole('button', { name: 'Start session', exact: true })).toBeVisible();
-        await shot(page, 'soak-paused-wide');
+        await shot(run, 'soak-paused');
         await closeSheet(sheet);
         // Route D: no direct connector route exists on this branch (P3-HD has not landed; Decision Log 14). With it
         // present, this scene must prove that route absent independently of the engine's absence.
