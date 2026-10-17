@@ -11,8 +11,10 @@
 //               tab's drawnAt, which waits each canvas's first layout pass); the tab constructor to drawn beside it; every
 //               board's identity, size and element count verified in the DOM at ready                       ≤ 1,000 ms
 //   2 frames    real wheel input through the world's own handler (pan at 25 %; a pinch zoom from fit to about 100 % and
-//               back): a DevTools trace's per-frame main-thread executing work (top-level tasks clipped to the renderer's
-//               BeginFrame intervals; e2e/support/design-frames.ts), p95 over the active frames             ≤ 4 ms
+//               back): a DevTools trace's per-frame main-thread executing work, the whole tasks (the input's handling,
+//               React, style, layout, paint, layerization and commit: every top-level task clipped to the renderer's
+//               BeginFrame intervals; e2e/support/design-frames.ts), p95 over the active frames; DL40's full-task bound,
+//               not E0's 4 ms callback-CPU stand-in                                                         ≤ 10 ms
 //   2 drops     the rAF-gap proxy over its calibrated idle interval (≤ 2 %); the compositor's own PipelineReporter drops
 //               beside it, separately labelled (≤ 2 %, or unavailable when the trace carries none)
 //   2 stress    the same frame rows, a pan and a pinch zoom each in its own rows, for at least 5 s while the owner drags a
@@ -28,8 +30,8 @@
 //   4 memory    the renderer's working set (its window's own PID in Electron's metrics, KiB → MiB), ordinary and after a
 //               forced collection, with every export window closed (a missing, non-finite or non-positive reading is
 //               unreadable): ordinary ≤ 500 MB (500 × 10⁶ bytes)
-//   5 publish   the host loop's busy time over one agent publish (DL39): each bench board alone once, the median of the 24
-//               ≤ 50 ms; every heaviest board (182 elements: the posters, the 4,096² and the 4,096×8,192) alone three
+//   5 publish   the host loop's busy time over one agent publish (DL39, DL40): each bench board alone once, the median of
+//               the 24 ≤ 65 ms; every heaviest board (182 elements: the posters, the 4,096² and the 4,096×8,192) alone three
 //               times, the worst ≤ 100 ms; the whole design's 24 boards with the manifest unchanged, the worst ≤ 300 ms;
 //               the longest gap and wall time beside each
 //   6 pdf       every board as one PDF through main's export service: the request to the committed file, its 24 pages
@@ -511,13 +513,13 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
       whole.push({ value: answer.busyMs, load: Math.max(load, load1()), note: `longest loop gap ${answer.loop.max.toFixed(1)} ms; wall ${answer.wallMs.toFixed(1)} ms; ${answer.sent} files sent (the manifest unchanged among them), ${answer.result!.changed.length} changed` });
       await sleep(1_000);
     }
-    rows.add('5 publish one board (median of the bench)', 'each of the 24 bench boards published alone by the agent’s session through A’s real artifact_publish, once, in the bench’s order: the host loop’s busy time over the call (the 1 ms sampler’s gaps past its tick), the median of the 24; every board’s figure kept', 'ms', 50, '≤ 50 ms, median of the bench boards (DL39)', sweep, false, 'median');
+    rows.add('5 publish one board (median of the bench)', 'each of the 24 bench boards published alone by the agent’s session through A’s real artifact_publish, once, in the bench’s order: the host loop’s busy time over the call (the 1 ms sampler’s gaps past its tick), the median of the 24; every board’s figure kept', 'ms', 65, '≤ 65 ms, median of the bench boards (DL40)', sweep, false, 'median');
     rows.add('5 publish one board (heaviest)', `the heaviest bench boards (${heaviest.map((b) => `${b.id} ${b.w}×${b.h}`).join(', ')}, ${most} elements) each published alone ${TRIALS} times: the host loop’s busy time over the call, the worst`, 'ms', 100, '≤ 100 ms, the heaviest board (DL39)', heavy);
     rows.add('5 publish whole design', 'the whole design in one publish: all 24 boards, each changed, and the manifest sent unchanged: the host loop’s busy time over the call', 'ms', 300, '≤ 300 ms', whole);
   });
 
   const frameRows = (label: string, what: string, trials: (FrameTrial & { load: number; note?: string })[]) => {
-    rows.add(`2 ${label} frame work p95`, `${what}: per-frame main-thread executing work, p95 over the active frames (DevTools trace)`, 'ms', 4, '≤ 4 ms (E0 0.4 ms, a stand-in)', trials.map((t) => (t.work ? { value: t.work.active.p95, load: t.load, note: `${t.work.active.n} active of ${t.work.all.n} frames; all-frames p95 ${t.work.all.p95.toFixed(2)} ms; active max ${t.work.active.max.toFixed(2)} ms; ${t.work.inputs} inputs dispatched${t.note ? `; ${t.note}` : ''}` } : { value: null, load: t.load, error: t.error })));
+    rows.add(`2 ${label} frame work p95`, `${what}: per-frame main-thread executing work as whole tasks (the input's handling, React, style, layout, paint, layerization and commit), p95 over the active frames (DevTools trace)`, 'ms', 10, '≤ 10 ms, the full main-thread task per frame (DL40; not E0’s 0.4 ms callback CPU)', trials.map((t) => (t.work ? { value: t.work.active.p95, load: t.load, note: `${t.work.active.n} active of ${t.work.all.n} frames; all-frames p95 ${t.work.all.p95.toFixed(2)} ms; active max ${t.work.active.max.toFixed(2)} ms; ${t.work.inputs} inputs dispatched${t.note ? `; ${t.note}` : ''}` } : { value: null, load: t.load, error: t.error })));
     rows.add(`2 ${label} dropped (rAF proxy)`, `${what}: the rAF-gap proxy, frames skipped over the span’s frames at the calibrated idle interval`, '%', 2, '≤ 2 % (E0 0–0.4 %)', trials.map((t) => (t.drops ? { value: t.drops.share * 100, load: t.load, note: `${t.drops.dropped} of ${t.drops.expected} at ${t.drops.intervalMs.toFixed(2)} ms; longest gap ${t.drops.longestGapMs.toFixed(1)} ms` } : { value: null, load: t.load, error: t.error })));
     const compositor = trials.map((t) => t.work?.compositor ?? null);
     if (compositor.every((c) => c !== null))

@@ -108,11 +108,11 @@ describe('the within-a-frame probe', () => {
 // DL39: the layout probe knows the requested override stands from the scope's stylesheet text alone (no style forced):
 // the token's last declaration, the override block the system's tokens are followed by
 describe('a scope stylesheet’s last declaration of a token', () => {
-  const css = '[data-ds-scope="ds-1"] {\n  --ds-color-bg: #fbfbf8;\n  --ds-color-bg-subtle: #eeeeee;\n  --ds-color-text: var(--ds-color-bg);\n}\n\n[data-ds-scope="ds-1"] {\n  --ds-color-bg: #123456;\n}\n';
+  const css = '[data-ds-scope="ds-1"] {\n  --ds-color-bg: ivory;\n  --ds-color-bg-subtle: gainsboro;\n  --ds-color-text: var(--ds-color-bg);\n}\n\n[data-ds-scope="ds-1"] {\n  --ds-color-bg: navy;\n}\n';
   it('reads the override that comes last, not a longer name or a var() use', () => {
-    expect(lastDeclaration(css, '--ds-color-bg')).toBe('#123456');
-    expect(lastDeclaration(css, '--ds-color-bg-subtle')).toBe('#eeeeee');
-    expect(lastDeclaration(css.replace('  --ds-color-bg: #123456;\n', ''), '--ds-color-bg')).toBe('#fbfbf8');
+    expect(lastDeclaration(css, '--ds-color-bg')).toBe('navy');
+    expect(lastDeclaration(css, '--ds-color-bg-subtle')).toBe('gainsboro');
+    expect(lastDeclaration(css.replace('  --ds-color-bg: navy;\n', ''), '--ds-color-bg')).toBe('ivory');
     expect(lastDeclaration(css, '--ds-color-accent')).toBeNull();
     expect(lastDeclaration('', '--ds-color-bg')).toBeNull();
   });
