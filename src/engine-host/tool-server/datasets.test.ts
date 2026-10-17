@@ -25,8 +25,10 @@ import type { McpToolContext, McpToolDefinition, McpToolResult } from './server'
 import { mawsTools } from './tools';
 
 // E2 M6 (panel P1, E's Decision Log 40): a hook run once just before the validated file is opened or read, by its real
-// path, where a concurrent workspace process could replace it.
-const race = vi.hoisted(() => ({ path: null as string | null, swap: null as (() => void) | null }));
+// path, where a concurrent workspace process could replace it; and one run once just after the opened file's own fstat
+// answers, before its bytes are read (`grown`), where the process could lengthen it; `readTotal` counts the bytes read
+// from that descriptor.
+const race = vi.hoisted(() => ({ path: null as string | null, swap: null as (() => void) | null, grown: null as { path: string; grow: () => void } | null, readTotal: 0 }));
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>();
   const fire = (path: unknown) => {
@@ -37,7 +39,31 @@ vi.mock('node:fs/promises', async (original) => {
   };
   const open = (async (...args: Parameters<typeof actual.open>) => {
     fire(args[0]);
-    return actual.open(...args);
+    const handle = await actual.open(...args);
+    const grown = race.grown;
+    if (grown === null || String(args[0]) !== grown.path) return handle;
+    race.grown = null;
+    race.readTotal = 0;
+    return new Proxy(handle, {
+      get(target, key) {
+        if (key === 'stat') {
+          return async (...a: Parameters<typeof target.stat>) => {
+            const stats = await target.stat(...a);
+            grown.grow();
+            return stats;
+          };
+        }
+        if (key === 'read') {
+          return async (...a: Parameters<typeof target.read>) => {
+            const result = await target.read(...a);
+            race.readTotal += result.bytesRead;
+            return result;
+          };
+        }
+        const value: unknown = Reflect.get(target, key);
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+      },
+    });
   }) as typeof actual.open;
   const readFile = (async (...args: Parameters<typeof actual.readFile>) => {
     fire(args[0]);
@@ -85,6 +111,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   race.path = race.swap = null;
+  race.grown = null;
   close();
   rmSync(data, { recursive: true, force: true });
   rmSync(cwd, { recursive: true, force: true });
@@ -271,6 +298,39 @@ describe('artifact_dataset', () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  it('reads a file lengthened after its descriptor\'s fstat on to the cap: one byte over is refused with nothing written, and never read past', async () => {
+    const { id, revision } = await created();
+    const limit = 16 * 1024 * 1024;
+    const nothingWritten = () => {
+      expect(world.store.revision(id)).toBe(revision);
+      expect(world.store.listAssets(id)).toEqual([]);
+      expect(readDataset(world.service.live(id), 'sales')).toBeNull();
+    };
+    const grow = (name: string, bytes: Uint8Array | string) => {
+      race.grown = { path: realpathSync(join(cwd, name)), grow: () => appendFileSync(join(cwd, name), bytes) };
+    };
+    const toolUseId = 'toolu_grown' as ToolUseId;
+    file('long.csv', SALES);
+    grow('long.csv', new Uint8Array(limit + 1 - SALES.length).fill(0x61));
+    expect(refusal(await bind({ baseRevision: revision, id: 'sales', path: 'long.csv' }, { toolUseId }))).toMatchObject({ reason: 'tooLarge', limit, size: limit + 1 });
+    expect(race.grown).toBeNull(); // the growth ran, after fstat
+    expect(race.readTotal).toBe(limit + 1); // the one byte over is read, and nothing past it
+    nothingWritten();
+
+    file('longer.csv', SALES);
+    grow('longer.csv', new Uint8Array(limit + 4096).fill(0x61));
+    expect(refusal(await bind({ baseRevision: revision, id: 'sales', path: 'longer.csv' }))).toMatchObject({ reason: 'tooLarge', limit });
+    expect(race.readTotal).toBe(limit + 1);
+    nothingWritten();
+
+    // lengthened within the cap: the rows appended after fstat are read and bound
+    file('more.csv', SALES);
+    grow('more.csv', 'Daegu,7\n');
+    expect(json<Bound>(await bind({ baseRevision: revision, id: 'sales', path: 'more.csv' }, { toolUseId }))).toMatchObject({ rows: 4 });
+    expect(race.readTotal).toBe(SALES.length + 'Daegu,7\n'.length);
+    expect(readDataset(world.service.live(id), 'sales')!.source).toMatchObject({ size: SALES.length + 'Daegu,7\n'.length });
   });
 
   it('binds an asset the dashboard holds by ref, its format by its name; a ref it does not hold is refused', async () => {
