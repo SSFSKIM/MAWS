@@ -3516,6 +3516,14 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
+  the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
+  `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
+  a secret put or rotated still waits for the owner. The two Macs enroll as `macbook` and `mini`, the walk sheet's
+  names. Rejected: the owner approving each deploy in the moment (Part F's redeploy is timed against running
+  traffic, and the earlier deploys rested on the plan's M5 rather than a direct confirmation, which the deploy
+  tooling flagged).
+  Date/Author: 2026-10-16, owner ruling.
 - Decision: A removal whose answer from the machine's object is lost is finished by the admin's Remove again, with
   nothing persisted for it in Phase 1. The object fences the credential before it answers and answers a second
   revocation of a fenced credential as it did the first, so the retried DELETE completes (pinned by a test, MAWS #20);
