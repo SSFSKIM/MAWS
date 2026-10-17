@@ -30,12 +30,14 @@ import type { ConnectorFence } from '../documents/store';
 import { callMcpTool, probeMcpCall, type McpCallSupport } from '../mcp-call';
 import { ControlError, type ControlClient } from '../rpc';
 import { connectorToolState } from './status';
+import type { ConnectorLaunchContext, ConnectorStatusCache } from './provenance'; // P3-HD
 
 // The host's view of a session (an EngineSession is one).
 export interface ConnectorSessionView {
   readonly lifecycle: string;
   readonly control: ControlClient | null;
   status(): { launchId: string; cwd: string };
+  connectorLaunchContext?(): ConnectorLaunchContext; // P3-HD: the launch's facts, for route D's observations
 }
 
 // The store's grant authority as the host's last check uses it (an ArtifactStore is one).
@@ -54,6 +56,8 @@ export interface ConnectorCallsOptions {
   resultTtlMs?: number;
   maxResultBytes?: number;
   log?: (line: string) => void;
+  // P3-HD: route D's observation cache; each mcp_status answer read here is observed before it is discarded
+  statusCache?: ConnectorStatusCache;
 }
 
 // main's input, as the IPC validated it
@@ -247,14 +251,31 @@ export class ConnectorCalls {
     return null;
   }
 
-  private async toolState(client: ControlClient, input: { server: string; tool: string }, signal: AbortSignal) {
+  private async toolState(client: ControlClient, input: ConnectorSessionTool, signal: AbortSignal) {
+    const ticket = this.observing(client, input); // P3-HD
     try {
-      return connectorToolState(await mcpStatus(client, {}, { signal }), input.server, input.tool);
+      const answer = await mcpStatus(client, {}, { signal });
+      if (ticket) this.options.statusCache?.observe(ticket, answer); // P3-HD
+      return connectorToolState(answer, input.server, input.tool);
     } catch (error) {
+      if (ticket && error instanceof ControlError && error.code === 'invalid_response') this.options.statusCache?.reject(ticket); // P3-HD
       if (error instanceof ControlError) return null;
       throw error;
     }
   }
+
+  // P3-HD start: an observation is taken only for the session's live launch, still in the directory it was launched in
+  // (a set_cwd since then makes its report another directory's), its place in that launch's order taken before the
+  // request is written.
+  private observing(client: ControlClient, input: ConnectorSessionTool) {
+    const cache = this.options.statusCache;
+    const session = this.options.session(input.appSessionId);
+    const context = session?.connectorLaunchContext?.();
+    if (!cache || !session || !context || session.control !== client) return null;
+    const status = session.status();
+    return status.launchId === context.launchId && status.cwd === context.cwd ? cache.begin(context) : null;
+  }
+  // P3-HD end
 
   private supportOf(client: ControlClient, signal: AbortSignal): Promise<McpCallSupport> {
     let known = this.support.get(client);

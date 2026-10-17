@@ -31,6 +31,10 @@
     "src/engine-host/binary-info.ts",
     // P3-H: the connector runs drive a scratch engine through the host's control client and route E's call
     "src/engine-host/controls.ts",
+    // P3-HD: the direct-route probe observes real reports through route D's cache and compares H's fingerprint
+    "src/engine-host/connectors/provenance.ts",
+    "src/engine-host/connectors/source-entry.ts",
+    "src/engine-host/connectors/status.ts",
     "src/engine-host/mcp-call.ts",
     "src/engine-host/outbound-writer.ts",
     "src/engine-host/rpc.ts",

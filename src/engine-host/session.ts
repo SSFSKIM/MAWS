@@ -59,6 +59,7 @@ import type { ObservedFactsAnswer } from '@shared/engine/observed-facts';
 import type { ObservedFactsRecorder, ObservedFactsService } from './observed-facts';
 import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 // P2-A end
+import { connectorLaunchContext, type ConnectorLaunchContext } from './connectors/provenance'; // P3-HD
 
 export { HostHookRegistry } from './host-hooks';
 export type { Catalog } from './session-status';
@@ -536,6 +537,16 @@ export class EngineSession {
   catalog(): Catalog {
     return this.tracker.catalog();
   }
+
+  // P3-HD start: the launch facts route D's observations are tied to (connectors/provenance.ts): this launch's id, its
+  // spawn cwd and a reference to the environment its plan handed the engine. Host-only: never part of `status()`, a
+  // journal row or an IPC answer.
+  connectorLaunchContext(): ConnectorLaunchContext {
+    this.launchContext ??= connectorLaunchContext({ appSessionId: this.spec.appSessionId, launchId: this.plan.launchId, cwd: this.plan.cwd, environment: this.plan.env });
+    return this.launchContext;
+  }
+  private launchContext: ConnectorLaunchContext | undefined;
+  // P3-HD end
 
   status(): EngineSessionStatus {
     const turn = this.normalizer.state.currentTurn;

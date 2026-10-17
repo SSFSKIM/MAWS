@@ -16,6 +16,7 @@ import type { ArtifactStore } from '../documents/store';
 import type { DeadlineShape } from '../ipc';
 import type { EngineSession } from '../session';
 import { ConnectorCalls } from './calls';
+import { ConnectorStatusCache } from './provenance'; // P3-HD
 
 type HostConnectorCommand = { [N in keyof typeof ConnectorCommands]: (typeof ConnectorCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof ConnectorCommands];
 
@@ -25,23 +26,27 @@ export const CONNECTORS_DEADLINE_SHAPES: Record<HostConnectorCommand, DeadlineSh
 };
 
 export interface ConnectorsSurfaceDeps {
-  sessions: { get(appSessionId: AppSessionId): Pick<EngineSession, 'lifecycle' | 'control' | 'status'> | undefined }; // the process table
+  sessions: { get(appSessionId: AppSessionId): (Pick<EngineSession, 'lifecycle' | 'control' | 'status'> & Partial<Pick<EngineSession, 'connectorLaunchContext'>>) | undefined }; // the process table (P3-HD: and its launch facts)
   store: ArtifactStore | null; // null: the store failed to open this run
   calls?: ConnectorCalls; // tests
+  statusCache?: ConnectorStatusCache; // P3-HD: tests
 }
 
 function refused(reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}, code: 'invalid_input' | 'internal' = 'invalid_input'): HostCommandError {
   return new HostCommandError(ipcError(code, message, { reason, data } satisfies ArtifactRefusal));
 }
 
-export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onClientGone'>, deps: ConnectorsSurfaceDeps): { close(): void } {
+export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onClientGone'>, deps: ConnectorsSurfaceDeps): { close(): void; statusCache: ConnectorStatusCache } {
   const { store } = deps;
+  // P3-HD: route D's observations, host memory for main's attachment only (cleared with the operations below)
+  const statusCache = deps.statusCache ?? new ConnectorStatusCache();
   const calls =
     deps.calls ??
     new ConnectorCalls({
       session: (id) => deps.sessions.get(id as AppSessionId),
       store: () => store,
       completed: (operationId) => void emit('connectors.operation', { operationId }),
+      statusCache, // P3-HD
     });
   const storeOf = (): ArtifactStore => {
     if (!store) throw refused('unavailable', 'the artifact store could not be opened this run', {}, 'internal');
@@ -69,12 +74,17 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
   serve('connectors.cancel', ({ operationId }) => ({ cancelled: calls.cancel(operationId) }));
 
   const stopFeed = store?.onConnectorGrantChange((change) => void emit('connectors.grantChanged', change));
-  const stopGone = client.onClientGone(() => calls.close());
+  const stopGone = client.onClientGone(() => {
+    calls.close();
+    statusCache.clear(); // P3-HD
+  });
   return {
     close: () => {
       stopFeed?.();
       stopGone();
       calls.close();
+      statusCache.clear(); // P3-HD
     },
+    statusCache, // P3-HD: M2's direct route reads it
   };
 }
