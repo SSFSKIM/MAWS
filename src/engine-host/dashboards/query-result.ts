@@ -9,8 +9,10 @@
 // - without it, exactly one text: the wire's string `content`, or a `content` of one `text` block, whose JSON is one of
 //   those two forms. Images, resources and several blocks are refused.
 //
-// The array alone is the snapshot (its JSON, never the envelope's); whether its records are flat and finite is the
-// parser's to say. The problems are this module's own closed words, never the server's text.
+// The array alone is the snapshot (its JSON, never the envelope's); whether its records are flat is the parser's to
+// say. A record's number no JSON can carry (JSON.parse reads 1e400 as Infinity) is refused here, in the parser's own
+// words, in either arm: serializing the rows for the parser would turn it into a valid null cell (E3 M2 fix). The
+// problems are this module's own closed words, never the server's text.
 export type QueryRows = { ok: true; rows: unknown[] } | { ok: false; problem: string };
 
 export const QUERY_RESULT_PROBLEMS = {
@@ -20,9 +22,23 @@ export const QUERY_RESULT_PROBLEMS = {
   content: 'its content is not one text block',
   notJson: 'its text is not JSON',
   shape: 'its JSON is neither an array of rows nor an object with a rows array',
+  // the parser's wording for the same value in a JSON file (src/artifacts/dashboard/parse.ts), without its line
+  nonfinite: (record: number, key: string) => `record ${record} holds a number in ${JSON.stringify(key)} too large to read`,
 } as const;
 
 const refused = (problem: string): QueryRows => ({ ok: false, problem });
+
+// The rows, unless a record's own value is a number no JSON can carry.
+function finite(rows: unknown[]): QueryRows {
+  for (const [r, record] of rows.entries()) {
+    if (!isRecord(record)) continue; // the parser refuses it
+    for (const key of Object.keys(record)) {
+      const cell = record[key];
+      if (typeof cell === 'number' && !Number.isFinite(cell)) return refused(QUERY_RESULT_PROBLEMS.nonfinite(r + 1, key));
+    }
+  }
+  return { ok: true, rows };
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -45,7 +61,7 @@ export function queryRowsOf(envelope: unknown): QueryRows {
   if (envelope.isError === true) return refused(QUERY_RESULT_PROBLEMS.toolError);
   if (Object.hasOwn(envelope, 'structuredContent') && envelope.structuredContent !== undefined) {
     const rows = rowsIn(envelope.structuredContent);
-    return rows ? { ok: true, rows } : refused(QUERY_RESULT_PROBLEMS.structured);
+    return rows ? finite(rows) : refused(QUERY_RESULT_PROBLEMS.structured);
   }
   const text = textOf(envelope.content);
   if (text === null) return refused(QUERY_RESULT_PROBLEMS.content);
@@ -56,5 +72,5 @@ export function queryRowsOf(envelope: unknown): QueryRows {
     return refused(QUERY_RESULT_PROBLEMS.notJson);
   }
   const rows = rowsIn(parsed);
-  return rows ? { ok: true, rows } : refused(QUERY_RESULT_PROBLEMS.shape);
+  return rows ? finite(rows) : refused(QUERY_RESULT_PROBLEMS.shape);
 }

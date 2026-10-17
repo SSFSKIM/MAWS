@@ -113,6 +113,25 @@ describe('a query refresh at the host boundary', () => {
     expect(live(id)!.state).toEqual({ status: 'ok', at: now });
   });
 
+  // E3 M2 fix (reviewer finding 1): an overflowing number never becomes a null cell of a new snapshot
+  it('records an overflowing number in the text or the structured rows as a validation error: the previous snapshot, rows and provenance stay', async () => {
+    const id = await board();
+    await (await admitted(id)).publish({ kind: 'result', result: envelope(rowsOf(1, 2)) }, HELD);
+    const good = live(id)!;
+    const assets = assetsOf(id);
+    now += 60_000;
+    for (const result of [{ content: '[{"t":0,"v":1e400}]' }, { content: '', structuredContent: { rows: [{ t: 0, v: Infinity }] } }]) {
+      const publication = await (await admitted(id)).publish({ kind: 'result', result }, HELD);
+      const after = live(id)!;
+      expect(after.source).toEqual(good.source);
+      expect(after.updated).toEqual(good.updated);
+      expect({ columns: after.columns, rows: after.rows }).toEqual({ columns: good.columns, rows: good.rows });
+      expect(after.state).toEqual({ status: 'error', message: 'the last refresh was refused: record 1 holds a number in "v" too large to read', at: now });
+      expect(assetsOf(id)).toEqual(assets);
+      expect(publication).toMatchObject({ published: { revision: store().revision(id), columns: good.columns, rows: 2, state: { status: 'error' } } });
+    }
+  });
+
   it('records a tool failure, a result too large and a row key the rows break as the error state, a query never fetched staying unfetched', async () => {
     const id = await board(unfetched({ rowKey: 't' }));
     for (const reason of ['toolError', 'tooLarge', 'timeout'] as const) {

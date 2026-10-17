@@ -52,4 +52,16 @@ describe('a query result’s rows', () => {
     expect(queryRowsOf([ROWS])).toEqual({ ok: false, problem: QUERY_RESULT_PROBLEMS.notAResult });
     expect(queryRowsOf(null)).toEqual({ ok: false, problem: QUERY_RESULT_PROBLEMS.notAResult });
   });
+
+  // E3 M2 fix (reviewer finding 1): JSON.parse reads 1e400 as Infinity, which JSON.stringify would turn into a valid
+  // null cell; refused here, in either arm, in the parser's own words, before the rows are ever serialized
+  it('refuses a number no JSON can carry, in the text or the structured rows, before anything serializes it', () => {
+    expect(queryRowsOf({ content: '[{"t":1,"v":107},{"t":2,"v":1e400}]' })).toEqual({ ok: false, problem: QUERY_RESULT_PROBLEMS.nonfinite(2, 'v') });
+    expect(queryRowsOf({ content: [{ type: 'text', text: '{"rows":[{"v":-1e400}]}' }] })).toEqual({ ok: false, problem: QUERY_RESULT_PROBLEMS.nonfinite(1, 'v') });
+    expect(queryRowsOf({ content: '', structuredContent: { rows: [{ t: 1, v: Infinity }] } })).toEqual({ ok: false, problem: QUERY_RESULT_PROBLEMS.nonfinite(1, 'v') });
+    expect(queryRowsOf({ content: '', structuredContent: [{ t: 1 }, { t: Number.NaN }] })).toEqual({ ok: false, problem: QUERY_RESULT_PROBLEMS.nonfinite(2, 't') });
+    expect(QUERY_RESULT_PROBLEMS.nonfinite(2, 'v')).toBe('record 2 holds a number in "v" too large to read');
+    // a nested value stays the parser's to refuse, once
+    expect(queryRowsOf({ content: '[{"v":[1e400]}]' })).toEqual({ ok: true, rows: [{ v: [Infinity] }] });
+  });
 });
