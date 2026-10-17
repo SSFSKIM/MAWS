@@ -1,0 +1,26 @@
+[
+  {
+    "method": "initialize",
+    "httpMethod": "POST",
+    "path": "/mcp",
+    "probeHeader": "configured-literal"
+  },
+  {
+    "method": "notifications/initialized",
+    "httpMethod": "POST",
+    "path": "/mcp",
+    "probeHeader": "configured-literal"
+  },
+  {
+    "method": "tools/list",
+    "httpMethod": "POST",
+    "path": "/mcp",
+    "probeHeader": "configured-literal"
+  },
+  {
+    "method": "tools/call",
+    "httpMethod": "POST",
+    "path": "/mcp",
+    "probeHeader": "configured-literal"
+  }
+]
