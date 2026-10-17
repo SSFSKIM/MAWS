@@ -13,28 +13,70 @@ const authorizeUrl = (overrides: Record<string, string> = {}) => `${ORIGIN}/auth
 interface Fetched {
   url: string;
   redirect: RequestInit['redirect'];
+  signal: AbortSignal | null | undefined;
 }
+type Respond = (url: string, init: RequestInit) => Promise<Response>;
 
-function harness(options: { lines?: string[]; location?: string | null; authorizeStatus?: number; callbackStatus?: number } = {}) {
+// A fake clock whose one deadline fires when the clock reaches it or when a case calls `expire`.
+function harness(options: { lines?: string[]; location?: string | null; authorizeStatus?: number; callbackStatus?: number; authorize?: Respond; callback?: Respond; readOpenLog?: (log: string) => string } = {}) {
   let log = (options.lines ?? []).map((line) => `${line}\n`).join('');
   let clock = 0;
+  let end = Infinity;
+  const timer = new AbortController();
+  const state = { cleared: false };
   const fetched: Fetched[] = [];
+  const expire = () => timer.abort();
   const deps: FakeBrowserDeps = {
-    readOpenLog: () => log,
+    readOpenLog: () => (options.readOpenLog ?? ((text) => text))(log),
     now: () => clock,
-    sleep: async (ms) => { clock += ms; },
+    sleep: async (ms) => {
+      clock += ms;
+      if (clock >= end) expire();
+    },
+    deadline: (ms) => {
+      end = clock + ms;
+      return { signal: timer.signal, clear: () => { state.cleared = true; } };
+    },
     fetch: async (url, init) => {
-      fetched.push({ url, redirect: init.redirect });
+      fetched.push({ url, redirect: init.redirect, signal: init.signal });
       if (url.startsWith(`${ORIGIN}/authorize`)) {
+        if (options.authorize) return options.authorize(url, init);
         const location = options.location === undefined ? `${REDIRECT}?code=secret-code&state=secret-state&iss=${encodeURIComponent(ORIGIN)}` : options.location;
         return new Response(null, { status: options.authorizeStatus ?? 302, headers: location === null ? {} : { location } });
       }
+      if (options.callback) return options.callback(url, init);
       return new Response('MAWS is connected. You can close this window.', { status: options.callbackStatus ?? 200 });
     },
   };
-  return { deps, fetched, append: (line: string) => { log += `${line}\n`; } };
+  return {
+    deps, fetched, state, expire,
+    advance: (ms: number) => { clock += ms; },
+    append: (line: string) => { log += `${line}\n`; },
+  };
 }
 const follow = (deps: FakeBrowserDeps, afterOpens = 0) => followAuthorization({ openLog: '/scratch/open.log', afterOpens, origin: ORIGIN, timeoutMs: 1_000 }, deps);
+// A request that never answers until its signal aborts.
+const stalled = (onStart: () => void): Respond => (_url, init) => new Promise<Response>((_resolve, reject) => {
+  init.signal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+  queueMicrotask(onStart);
+});
+// A body that yields `first`, then (on the next pull) calls `onStall` and never yields again; or, unbounded, yields forever.
+function body(first: string, then: { onStall?: () => void; unbounded?: boolean }) {
+  const seen = { pulls: 0, cancelled: false };
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      seen.pulls += 1;
+      if (seen.pulls === 1 || then.unbounded) controller.enqueue(new TextEncoder().encode(first));
+      else {
+        then.onStall?.();
+        return new Promise<void>(() => {});
+      }
+      return undefined;
+    },
+    cancel() { seen.cancelled = true; },
+  }, { highWaterMark: 0 });
+  return { stream, seen };
+}
 
 async function refusal(promise: Promise<unknown>): Promise<FakeBrowserRefusal> {
   const error = await promise.then(() => null, (caught: unknown) => caught);
@@ -61,9 +103,10 @@ describe('following an authorization', () => {
     h.append(`openExternal ${authorizeUrl()}`);
     const followed = await pending;
     expect(h.fetched).toEqual([
-      { url: authorizeUrl(), redirect: 'manual' },
-      { url: `${REDIRECT}?code=secret-code&state=secret-state&iss=${encodeURIComponent(ORIGIN)}`, redirect: 'manual' },
+      { url: authorizeUrl(), redirect: 'manual', signal: expect.any(AbortSignal) },
+      { url: `${REDIRECT}?code=secret-code&state=secret-state&iss=${encodeURIComponent(ORIGIN)}`, redirect: 'manual', signal: expect.any(AbortSignal) },
     ]);
+    expect(h.state.cleared).toBe(true); // the shared deadline's timer does not outlive the follow
     expect(followed).toEqual({ authorizeStatus: 302, outcome: 'code', callbackPort: 52000, callbackStatus: 200, callbackBody: 'MAWS is connected. You can close this window.' });
     expect(JSON.stringify(followed)).not.toMatch(/secret/);
   });
@@ -135,6 +178,49 @@ describe('following an authorization', () => {
     const h = harness({ lines: [`openExternal ${authorizeUrl()}`] });
     expect((await refusal(follow(h.deps, 1))).reason).toBe('timeout');
     expect(h.fetched).toEqual([]);
+  });
+
+  it.each(['authorize', 'callback'] as const)('gives up on a %s request that stalls before its headers, aborting it', async (which) => {
+    const h: ReturnType<typeof harness> = harness({ lines: [`openExternal ${authorizeUrl()}`], [which]: stalled(() => h.expire()) });
+    expect((await refusal(follow(h.deps))).reason).toBe('timeout');
+    expect(h.fetched).toHaveLength(which === 'authorize' ? 1 : 2);
+    expect(h.fetched.at(-1)!.signal!.aborted).toBe(true);
+  });
+
+  it('gives up on a callback body that stalls mid-stream, cancelling it and the request', async () => {
+    const stalling = body('MAWS is', { onStall: () => h.expire() });
+    const h: ReturnType<typeof harness> = harness({ lines: [`openExternal ${authorizeUrl()}`], callback: async () => new Response(stalling.stream, { status: 200 }) });
+    expect((await refusal(follow(h.deps))).reason).toBe('timeout');
+    expect(stalling.seen.cancelled).toBe(true);
+    expect(h.fetched[1]!.signal!.aborted).toBe(true);
+  });
+
+  it('gives up on an authorize body whose cancellation stalls', async () => {
+    const stream = new ReadableStream<Uint8Array>({ cancel: () => { h.expire(); return new Promise<void>(() => {}); } });
+    const h: ReturnType<typeof harness> = harness({ lines: [`openExternal ${authorizeUrl()}`], authorize: async () => new Response(stream, { status: 302, headers: { location: `${REDIRECT}?code=c&state=s` } }) });
+    expect((await refusal(follow(h.deps))).reason).toBe('timeout');
+    expect(h.fetched).toHaveLength(1);
+  });
+
+  it('fetches nothing when the budget is already spent once the open arrives', async () => {
+    const h: ReturnType<typeof harness> = harness({ lines: [`openExternal ${authorizeUrl()}`], readOpenLog: (text) => { h.advance(1_000); return text; } });
+    expect((await refusal(follow(h.deps))).reason).toBe('timeout');
+    expect(h.fetched).toEqual([]);
+  });
+
+  it('shares one budget across both requests: a slow authorization leaves no time for the callback', async () => {
+    const h: ReturnType<typeof harness> = harness({ lines: [`openExternal ${authorizeUrl()}`], authorize: async () => { h.advance(1_000); return new Response(null, { status: 302, headers: { location: `${REDIRECT}?code=c&state=s` } }); } });
+    expect((await refusal(follow(h.deps))).reason).toBe('timeout');
+    expect(h.fetched).toHaveLength(1);
+  });
+
+  it('reads at most 512 bytes of the callback body and cancels the rest', async () => {
+    const endless = body('x'.repeat(100), { unbounded: true });
+    const h = harness({ lines: [`openExternal ${authorizeUrl()}`], callback: async () => new Response(endless.stream, { status: 200 }) });
+    const followed = await follow(h.deps);
+    expect(followed.callbackBody).toBe('x'.repeat(512));
+    expect(endless.seen.cancelled).toBe(true);
+    expect(endless.seen.pulls).toBeLessThanOrEqual(7);
   });
 
   it('never puts a URL, state or code in its refusal', async () => {

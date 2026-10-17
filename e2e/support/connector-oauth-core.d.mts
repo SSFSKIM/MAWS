@@ -50,7 +50,7 @@ export interface OAuthLogEntry {
   error?: string; // the fixture's closed reason for a refusal
 }
 
-export type OAuthSecretKind = 'state' | 'code' | 'codeVerifier' | 'accessToken' | 'refreshToken';
+export type OAuthSecretKind = 'state' | 'codeChallenge' | 'code' | 'codeVerifier' | 'accessToken' | 'refreshToken';
 export interface OAuthSecret {
   kind: OAuthSecretKind;
   value: string;

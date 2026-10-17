@@ -103,7 +103,8 @@ function oauthRun() {
   s.send(oauth, 'GET', '/.well-known/oauth-authorization-server');
   const registered = JSON.parse(s.send(oauth, 'POST', '/register', JSON.stringify({ redirect_uris: ['http://127.0.0.1:52000/callback'], token_endpoint_auth_method: 'none' })).response.body) as { client_id: string };
   const verifier = 'z'.repeat(43);
-  const query = new URLSearchParams({ response_type: 'code', client_id: registered.client_id, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', redirect_uri: 'http://127.0.0.1:52000/callback', state: 'the-state-value-0123456789', resource: 'http://127.0.0.1:41000/mcp' });
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  const query = new URLSearchParams({ response_type: 'code', client_id: registered.client_id, code_challenge: challenge, code_challenge_method: 'S256', redirect_uri: 'http://127.0.0.1:52000/callback', state: 'the-state-value-0123456789', resource: 'http://127.0.0.1:41000/mcp' });
   const code = new URL(s.send(oauth, 'GET', `/authorize?${query.toString()}`).response.headers.location!).searchParams.get('code')!;
   const first = JSON.parse(s.send(oauth, 'POST', '/token', new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: 'http://127.0.0.1:52000/callback', resource: 'http://127.0.0.1:41000/mcp', client_id: registered.client_id }).toString(), formHeaders).response.body) as { access_token: string; refresh_token: string };
   s.send(oauth, 'POST', '/mcp', call, bearer(first.access_token));
@@ -114,7 +115,7 @@ function oauthRun() {
   s.send(oauth, 'POST', '/revoke', new URLSearchParams({ token: second.refresh_token, client_id: registered.client_id }).toString(), formHeaders);
   s.send(reopened, 'POST', '/mcp', rpc('tools/list'));
   s.flush();
-  return { first, second, code, verifier };
+  return { first, second, code, verifier, challenge };
 }
 
 describe('the safe log', () => {
@@ -164,6 +165,11 @@ describe('the secret scan', () => {
     const report = scanForSecrets(paths, ['nothing here', `a page with ${first.access_token}`, `log ${code} and ${encodeURIComponent('the-state-value-0123456789')}`, verifier]);
     expect(report).toEqual({ clean: false, found: { accessToken: 1, code: 1, state: 1, codeVerifier: 1 } });
     expect(JSON.stringify(report)).not.toContain(first.access_token);
+  });
+
+  it('counts a diagnostic carrying only the PKCE challenge, raw or encoded', () => {
+    const { challenge } = oauthRun();
+    expect(scanForSecrets(paths, [`challenge ${challenge}`, `url ?code_challenge=${encodeURIComponent(challenge)}`, 'unrelated'])).toEqual({ clean: false, found: { codeChallenge: 2 } });
   });
 
   it('is clean for the safe log itself', () => {

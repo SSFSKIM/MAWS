@@ -227,7 +227,8 @@ export interface SecretScan {
   found: Partial<Record<OAuthSecretKind, number>>; // how many texts carry a secret of each kind; never a value
 }
 
-// Every state, code, verifier and token the fixture saw or minted, checked against each text as written and URL-encoded.
+// Every state, PKCE challenge and verifier, code and token the fixture saw or minted, checked against each text as written
+// and URL-encoded.
 export function scanForSecrets(paths: Pick<OAuthFixturePaths, 'secrets'>, texts: readonly string[]): SecretScan {
   if (!existsSync(paths.secrets)) throw new Error('scanForSecrets: the fixture recorded no secrets yet, so a scan could not fail');
   const secrets = (jsonLines(paths.secrets) as OAuthSecret[]).filter((secret) => secret.value.length > 0);

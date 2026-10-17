@@ -193,6 +193,9 @@ export function createOAuthFixtureCore({ id, origin, tools = ['read_series'], no
     const params = url.searchParams;
     const state = single(params, 'state');
     if (state !== null) secrets.push({ kind: 'state', value: state });
+    // the challenge is derived from the verifier but is PKCE data all the same: recorded before any refusal, so a
+    // diagnostic carrying it alone still fails a scan
+    for (const value of params.getAll('code_challenge')) if (value !== '') secrets.push({ kind: 'codeChallenge', value });
     const client = clients.get(single(params, 'client_id') ?? '');
     const redirectUri = single(params, 'redirect_uri');
     const refuse = (reason) => {

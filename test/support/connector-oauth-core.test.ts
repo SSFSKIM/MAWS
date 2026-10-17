@@ -177,7 +177,8 @@ describe('the OAuth phase: authorization', () => {
     expect(location.searchParams.get('state')).toBe('state-abc');
     expect(location.searchParams.get('iss')).toBe(ORIGIN);
     expect(out.entry).toMatchObject({ route: 'authorize', client: 1, status: 302 });
-    expect(secrets.map((s) => s.kind)).toEqual(['state', 'code']);
+    expect(secrets.map((s) => s.kind)).toEqual(['state', 'codeChallenge', 'code']);
+    expect(secrets.find((s) => s.kind === 'codeChallenge')!.value).toBe(CHALLENGE);
   });
 
   it.each([
@@ -191,6 +192,7 @@ describe('the OAuth phase: authorization', () => {
     expect(out.response.status).toBe(400);
     expect(out.response.headers.location).toBeUndefined();
     expect(out.entry.error).toBe(reason);
+    expect(secrets).toContainEqual({ kind: 'codeChallenge', value: CHALLENGE }); // recorded before any refusal
   });
 
   it.each([
@@ -227,7 +229,7 @@ describe('the OAuth phase: code exchange', () => {
     expect(tokens).toMatchObject({ token_type: 'Bearer', expires_in: 60, scope: 'series:read' });
     const last = entries.at(-1)!;
     expect(last).toMatchObject({ route: 'token', grant: 'authorization_code', status: 200, client: 1, issued: { family: 1, generation: 1, access: tokenHash(tokens.access_token), refresh: tokenHash(tokens.refresh_token) } });
-    expect(secrets.map((s) => s.kind)).toEqual(['state', 'code', 'codeVerifier', 'accessToken', 'refreshToken']);
+    expect(secrets.map((s) => s.kind)).toEqual(['state', 'codeChallenge', 'code', 'codeVerifier', 'accessToken', 'refreshToken']);
   });
 
   it('takes its lifetime from the control at issuance', () => {
