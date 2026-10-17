@@ -8,6 +8,7 @@
 // disposer it answers. Under the figure: the source label (a button opening the source sheet on the descriptor as it
 // was drawn) and the notes (validation mismatches, what the view could not show). The caption above is the spec's title.
 // Portable: DOM only, no window.maws; the renderer's tab supplies the reader and the source sheet.
+import type { TiptapEditorHTMLElement } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ViewEnvironment } from '../../document/editor/nodes/views';
@@ -115,8 +116,14 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
     // (run 39001816938 at 30d7035fd) the Word comment case fails, 9/10, its log showing the block selection, the
     // editor's focus, a DOM caret in the first paragraph and a text selection replacing the block's; with it (run
     // 39002799612 at e6168906c) 10/10 pass, the editor's own DOM range and its NodeSelection held through Comment.
+    // The refused default would also have moved the keyboard, so a press while the editor does not hold it (it went to
+    // a control since gone, a drawer's Close) has the editor take it at once through its own focus, which puts the
+    // editor's selection in the DOM with it (E2 landing): the block's cut and keys then reach the editor.
     const pressed = (event: MouseEvent) => {
-      if (event.button === 0 && view.contains(event.target as Node) && !source.contains(event.target as Node)) event.preventDefault();
+      if (event.button !== 0 || !view.contains(event.target as Node) || source.contains(event.target as Node)) return;
+      event.preventDefault();
+      const editor = into.closest<TiptapEditorHTMLElement>('.ProseMirror')?.editor;
+      if (editor && !editor.view.dom.contains(into.ownerDocument.activeElement)) editor.view.focus();
     };
     into.ownerDocument.addEventListener('mousedown', pressed);
     const detachHover = attachHover(frame, tip);

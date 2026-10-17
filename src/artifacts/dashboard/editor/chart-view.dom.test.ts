@@ -8,6 +8,11 @@ import type { DatasetPage } from '../../host';
 import { displayedDocument, type ViewEnvironment } from '../../document/editor/nodes/views';
 import { newDoc, type Doc } from '../../yjs';
 import { removeDataset, setDataset, type DatasetDescriptor } from '../datasets';
+import { Editor } from '@tiptap/core';
+import { NodeSelection } from '@tiptap/pm/state';
+import { coreExtensionOptions } from '../../document/ids';
+import { editorExtensions } from '../../document/editor/extensions';
+import { memoryEditorHost } from '../../document/editor/memory-host';
 import { createChartRenderer, type SourceCapture } from './chart-view';
 import { SnapshotReader } from '../snapshots';
 
@@ -135,6 +140,35 @@ describe('the chart view', () => {
     expect(seenByEditor).toEqual([false, false, false]);
     release();
     expect(press(into.querySelector('.dash-caption')!)).toBe(false);
+  });
+
+  it('takes the keyboard for the editor on a press on the view when the editor does not hold it, the block selection kept; its controls keep theirs (E2 landing)', async () => {
+    const data = newDoc();
+    setDataset(data, 'sales', descriptor('assets/sales.csv'));
+    const renderChart = world().renderChart;
+    const e = new Editor({
+      element: document.body.appendChild(document.createElement('div')),
+      coreExtensionOptions,
+      extensions: editorExtensions({ collaboration: null, env: { artifactId: 'dash1', host: memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-1' }), renderChart, displayed: displayedDocument(data) } }),
+      content: { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Sales rose in every region.' }] }, { type: 'chart', attrs: { id: 'c1', source: 'sales', spec: { view: 'bar', x: 'region', y: 'total', title: 'Sales by region' } } }] },
+    });
+    releases.push(() => e.destroy());
+    await settle();
+    const at = e.state.doc.child(0).nodeSize;
+    e.view.dispatch(e.state.tr.setSelection(NodeSelection.create(e.state.doc, at)));
+    // the keyboard left the editor for a control that is then gone (a drawer's Close): the page's body holds it
+    const parked = document.body.appendChild(document.createElement('button'));
+    parked.focus();
+    parked.remove();
+    expect(e.view.dom.contains(document.activeElement)).toBe(false);
+    const press = (target: Element) => target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+    press(e.view.dom.querySelector('.dash-source-label')!);
+    expect(e.view.dom.contains(document.activeElement)).toBe(false); // the source label's press is its own
+    press(e.view.dom.querySelector('.dash-caption')!);
+    expect(e.view.dom.contains(document.activeElement)).toBe(true);
+    expect(e.view.hasFocus()).toBe(true);
+    expect(e.state.selection).toBeInstanceOf(NodeSelection);
+    expect(e.state.selection.from).toBe(at);
   });
 
   it('redraws on a replacement, never letting an earlier snapshot\'s late read paint over it', async () => {
