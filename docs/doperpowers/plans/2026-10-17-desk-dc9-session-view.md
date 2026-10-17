@@ -650,6 +650,17 @@ in their own worktrees.
   keeps `reason` required.
   Date/Author: 2026-10-17, M1 executor, folded by the controller.
 
+- Decision: `desk-dc9` merged `origin/master` (the titles PR and the
+  architect's work), S1's `desk-ask-classify` (reviewed clean) and the
+  mockups branch at `8a1890125`. M2 and M3 then run at once, each in its
+  own worktree — M2 in `/tmp/desk-dc9`, M3 in `/tmp/desk-dc9-m3` on branch
+  `desk-dc9-m3`, merged back into `desk-dc9` after its review — since they
+  touch disjoint trees (M2 the hub's fake machine, M3 desk-web's view and
+  column). Their one shared file, `apps/desk-web/e2e/fake-machine.ts`, is
+  M2's; M3's browser tests run on the committed `two-subagents` recording
+  and leave that file alone, and M4 onward moves to `session-view`.
+  Date/Author: 2026-10-17, controller.
+
 ## Surprises & Discoveries
 - 2026-10-17: reviewers and workers dispatched from this controller
   inherit a worktree guard that refuses git commands aimed outside the
