@@ -428,6 +428,14 @@ owner's verdict on T0. A screenshot set of the session view, the inline requests
 the end marker and the jobs view under the workspace for the composite's
 writer.
 
+M6 also polishes from the owner's review of M4: the `[sminos chat …]`
+frame line is stripped from the display of a row matched to the owner's
+own send (its bubble already says who wrote it), and a row a peer
+delivered keeps who sent it — its frame line drawn as a compact sender
+label from the frame's `from` — the text the session read unchanged in
+both; a landing on a message (not only a request) marks its row in the
+session view.
+
 G2's proof pages across a compaction boundary: rows before a
 `compact_boundary` in the same transcript file load and draw above MAWS's
 "Compacted earlier" divider, never stopping there (the owner's ask is the
