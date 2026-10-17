@@ -3503,9 +3503,13 @@ a hub that connects into machines (§2).
   headless Chromium), growth above the reader (native anchoring moved `scrollTop` and read as a return to the
   tail), shrink above (the browser clamps before the hook runs), growth inside the one long row being read, and an
   unreported scroll-up landing with a collapse. Every one of those is now a browser regression. Safari has scroll
-  anchoring only from 27.0; Playwright's WebKit (26.6) held the row within a pixel, but a phone on iOS 26 or older
-  may move about one row when a message arrives below a reader scrolled back, so the owner's iOS version decides
-  whether that needs a follow-up. Rejected: a fourth hand-rolled pass (it was rebuilding scroll anchoring case by
+  anchoring only from 27.0, and the owner's phone is on iOS 26 or older, so an engine without it gets a fallback
+  (MAWS #16, `4c70f5c8`): feature-detected by `overflow-anchor` (WebKit gates the property and the anchoring on one
+  setting), active only while the reader is off the tail, it keeps the row at the top of their view in place when the
+  list changes size below them. Playwright's WebKit has the anchoring setting on, which is why it held the row; with
+  anchoring forced off it shows the phone's one-row jump, and the fallback's browser case proves the hold in Chromium
+  and WebKit. A reader less than a shrink's height from the oldest edge still moves (tech debt), and whether setting
+  the scroll position cuts an iOS flick short is for the walk. Rejected: a fourth hand-rolled pass (it was rebuilding scroll anchoring case by
   case); a follow-output component (none fit the stack without a heavy dependency). DC6's transcript and subagent
   panes are unaffected: they follow through MAWS's virtualized `Transcript` list, the desktop app's own chat-mode
   follow, and hand-roll only the paging of older rows.
