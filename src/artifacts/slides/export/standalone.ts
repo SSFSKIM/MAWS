@@ -23,6 +23,7 @@ import { readDeckJson, readSlide, slideOrder } from '../model';
 import { cropStyle, embedDocument } from '../render-rules';
 import { canonicalOrder, escAttr, escText, partition, serializeInline } from '../serialize';
 import type { Doc } from '../../yjs';
+import { slideScalars } from '../../yjs/slides'; // P3-E (E1 M5): a design board's size
 import { connectorSvg, iconSvg, shapeSvg } from './glyphs-svg';
 import { containSvgMarkup } from './svg-contain';
 import type { MeasuredDeck, MeasuredElement } from './measure';
@@ -33,6 +34,13 @@ export interface ExportSlide {
   hidden: boolean;
   transition: 'fade' | 'push' | 'magic' | null;
   notes: string;
+  /**
+   * P3-E (E1 M5, X27 additive; E0's finding (e)): a design board's size, its node's plain `w` and `h` keys (both positive
+   * numbers, as the canvas reads them); absent for a deck's slide, which keeps 1920×1080. A sized slide's frame and
+   * section are written at it whatever width or height the section's style says, the section marked `data-board`, and
+   * in `print` mode it prints on a page of its own size.
+   */
+  size?: { w: number; h: number };
 }
 
 export interface ExportDeck {
@@ -53,7 +61,9 @@ export function exportDeckOf(doc: Doc, fallbackTitle: string): ExportDeck {
   const slides = slideOrder(doc).map((id): ExportSlide => {
     const ir = readSlide(doc, id);
     const transition = ir.attrs['data-transition'];
-    return { id, ir, hidden: ir.attrs.hidden !== undefined, transition: transition && TRANSITIONS.has(transition) ? (transition as ExportSlide['transition']) : null, notes: ir.notes };
+    const { w, h } = slideScalars(doc, id); // P3-E (E1 M5): a design board's size
+    const size = typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0 ? { size: { w, h } } : {};
+    return { id, ir, hidden: ir.attrs.hidden !== undefined, transition: transition && TRANSITIONS.has(transition) ? (transition as ExportSlide['transition']) : null, notes: ir.notes, ...size };
   });
   const title = typeof deck.title === 'string' && deck.title.trim() ? deck.title : fallbackTitle;
   const cover = typeof deck.cover === 'string' && slides.some((s) => s.id === deck.cover) ? deck.cover : null;
@@ -105,6 +115,11 @@ export interface PageOptions {
   pictures?: ReadonlyMap<string, ReadonlyMap<string, string>>;
   /** The slides to write, in deck order (default: the visible ones; every one when measuring). */
   only?: readonly string[];
+  /**
+   * P3-E (E1 M5; the parent's Decision Log 11 (2)): style rules written after the page's own, from trusted code alone
+   * (the design's screen type defaults and its scaled draw); empty by default.
+   */
+  extraCss?: string;
 }
 
 // The page's own policy: nothing but itself and `data:`.
@@ -271,11 +286,32 @@ function slideHtml(slide: ExportSlide, options: PageOptions, drawings: ReadonlyM
     if (k === 'hidden') attrs.push('data-hidden=""');
     else attrs.push(`${k}="${escAttr(slide.ir.attrs[k]!)}"`);
   }
-  const css = styleText(inlinedStyle(slide.ir.style, options));
+  // P3-E (E1 M5): a board's frame and section at its manifest size, over any width or height its own style says (the
+  // canvas's rule), the section marked a board for the design's type defaults
+  const style = inlinedStyle(slide.ir.style, options);
+  const sized = slide.size ? `width:${slide.size.w}px; height:${slide.size.h}px` : '';
+  if (slide.size) {
+    delete style.width;
+    delete style.height;
+    if (slide.ir.attrs['data-board'] === undefined) attrs.splice(1, 0, 'data-board=""');
+  }
+  const css = [sized, styleText(style)].filter(Boolean).join('; ');
   if (css) attrs.push(`style="${escAttr(css)}"`);
   const { under, flow, over } = partition(slide.ir.children);
   const children = [...under.map((c) => elementHtml(c, w, true)), ...[...flow, ...over].map((c) => elementHtml(c, w, false))].join('');
-  return `<div class="maws-frame" data-frame="${escAttr(slide.id)}"><section ${attrs.join(' ')}>${children}</section></div>`;
+  const frame = slide.size ? ` data-size="${sizeKey(slide.size)}" style="${sized}"` : ''; // P3-E
+  return `<div class="maws-frame" data-frame="${escAttr(slide.id)}"${frame}><section ${attrs.join(' ')}>${children}</section></div>`;
+}
+
+/** P3-E (E1 M5): a board size's key (`<w>x<h>`) and its named print page (an identifier: a fraction's point as `_`). */
+const sizeKey = (size: { w: number; h: number }) => `${size.w}x${size.h}`;
+const pageName = (size: { w: number; h: number }) => `board-${sizeKey(size).replace(/[^A-Za-z0-9_-]/g, '_')}`;
+
+/** P3-E (E1 M5): in `print` mode, one named page per board size, so the printer pages each board at its own size. */
+function boardPages(slides: readonly ExportSlide[]): string {
+  const sizes = new Map<string, { w: number; h: number }>();
+  for (const s of slides) if (s.size) sizes.set(sizeKey(s.size), s.size);
+  return [...sizes.values()].map((size) => `@page ${pageName(size)} { size: ${size.w}px ${size.h}px; margin: 0; }\n.maws-frame[data-size="${sizeKey(size)}"] { page: ${pageName(size)}; }`).join('\n');
 }
 
 /** The deck as one page in `mode` (see the header). */
@@ -285,13 +321,14 @@ export function deckPage(deck: ExportDeck, options: PageOptions): string {
   const drawings = drawingNumbers(deck);
   const body = slides.map((s) => slideHtml(s, options, drawings.get(s.id) ?? new Map())).join('\n');
   const script = options.mode === 'html' ? `<script>${VIEWER}</script>` : '';
+  const extra = [options.mode === 'print' ? boardPages(slides) : '', options.extraCss ?? ''].filter(Boolean).map((css) => `\n${css}`).join(''); // P3-E (E1 M5)
   return [
     '<!doctype html>',
     '<html lang="en"><head><meta charset="utf-8">',
     `<meta http-equiv="Content-Security-Policy" content="${escAttr(PAGE_CSP)}">`,
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${escText(deck.title)}</title>`,
-    `<style>${options.facesCss}\n${CANVAS_CSS}\n${PAGE_CSS[options.mode]}</style>`,
+    `<style>${options.facesCss}\n${CANVAS_CSS}\n${PAGE_CSS[options.mode]}${extra}</style>`, // P3-E: `extra`
     `</head><body data-mode="${options.mode}">`,
     body,
     `${script}</body></html>`,

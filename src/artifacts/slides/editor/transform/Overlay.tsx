@@ -375,7 +375,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
 
   return (
     <div className="deck-overlay" data-overlay>
-      <svg className="deck-overlay-lines" width={s(1920)} height={s(1080)} aria-hidden>
+      <svg className="deck-overlay-lines" width={s(canvas?.size.w ?? 1920)} height={s(canvas?.size.h ?? 1080)} aria-hidden>{/* P3-E: a board's size */}
         {remote.flatMap((r) =>
           r.elementIds.flatMap((id) => {
             const m = measured.get(id);

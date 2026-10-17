@@ -64,7 +64,8 @@ const savedToast = (path: string) => void toast({ level: 'info', text: VIEWERS_C
 export async function exportArtifact(artifactId: string, format: ArtifactExportFormat, versionId?: number, client: MawsBridge = ipc): Promise<void> {
   const exported = await client.invoke('artifacts.export', { artifactId, format, ...(versionId !== undefined && { versionId }) });
   if (!exported.ok) return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
-  const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision: exported.value.revision, format } } });
+  const { revision, exportId } = exported.value;
+  const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) /* P3-E (Decision Log 33) */ } } });
   if (!saved.ok) return toastFailure(VIEWERS_COPY.exportFailed(saved.error.message));
   if (saved.value.saved) savedToast(saved.value.path);
 }

@@ -48,6 +48,8 @@ type CommentLead = (anchor: Anchor) => string;
 const ARTIFACT_COMMENT_LEADS: { document: CommentLead } & Partial<Record<ArtifactKind, CommentLead>> = {
   document: (anchor) => `passage "${anchor.locator}"${anchor.artifactId !== undefined ? ` in document ${anchor.artifactId}` : ''}`,
   presentation: (anchor) => `element "${anchor.locator}"${anchor.artifactId !== undefined ? ` in presentation ${anchor.artifactId}` : ''}`,
+  // P3-E (E1 M4; the P3-E spec's Decision Log 12): a design's board or element, by the anchor's target (absent, an element)
+  design: (anchor) => `${anchor.artifactTarget === 'board' ? 'board' : 'element'} "${anchor.locator}"${anchor.artifactId !== undefined ? ` in design ${anchor.artifactId}` : ''}`,
 };
 // P3-C end
 
@@ -67,7 +69,7 @@ const unescapeAttribute = (value: string) => value.replace(/&(amp|quot|lt|gt);/g
 
 // The tag's attributes, in the order they are written (Interfaces): the tag is byte-stable, and the parse accepts it
 // only when re-writing the anchor it read gives the same bytes.
-const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */, 'artifactId', 'threadId' /* P3-B */, 'artifactKind' /* P3-C */] as const;
+const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */, 'artifactId', 'threadId' /* P3-B */, 'artifactKind' /* P3-C */, 'artifactTarget' /* P3-E */] as const;
 const NUMERIC_FIELDS: ReadonlySet<string> = new Set(['line', 'prNumber']);
 
 // E4d start: the browser-element box (E4d execution document, Design §6) is one attribute, `x,y,width,height`; any other

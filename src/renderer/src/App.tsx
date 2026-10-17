@@ -129,6 +129,9 @@ import { provideDocumentDesignSystem } from './tools/document/design-system';
 // P3-C start
 import { registerPresentationEditor } from './tools/presentation';
 // P3-C end
+// P3-E start (E1 M3)
+import { registerDesignEditor } from './tools/design';
+// P3-E end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -309,6 +312,10 @@ export function App() {
   // Artifacts tool mount it)
   useEffect(() => registerPresentationEditor(), []);
   // P3-C end
+  // P3-E start: the design workbench as the `design` kind's editor in L's registry (E1 M3; the library's tab and the
+  // panel's Artifacts tool mount it)
+  useEffect(() => registerDesignEditor(), []);
+  // P3-E end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

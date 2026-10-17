@@ -24,8 +24,8 @@ const LABEL_MAX = 200; // X10's label cap
 const QUOTE_MAX = 300; // the passage as the lead line and the card's title read it; the thread keeps it whole
 
 /** X10's anchor for a comment on a document's passage: the document and tab as the label, the passage as the locator. */
-export function artifactCommentAnchor({ artifactId, title, threadId, tabTitle, quote, artifactKind }: CommentedPassage & { artifactId: string; title: string; artifactKind?: ArtifactKind /* P3-C */ }): Anchor {
-  return { kind: 'artifact-comment', label: anchorField(`${title}, ${tabTitle}`, LABEL_MAX), locator: anchorField(quote, QUOTE_MAX), artifactId, threadId, ...(artifactKind !== undefined && { artifactKind }) /* P3-C */ };
+export function artifactCommentAnchor({ artifactId, title, threadId, tabTitle, quote, artifactKind, artifactTarget }: CommentedPassage & { artifactId: string; title: string; artifactKind?: ArtifactKind /* P3-C */ }): Anchor {
+  return { kind: 'artifact-comment', label: anchorField(`${title}, ${tabTitle}`, LABEL_MAX), locator: anchorField(quote, QUOTE_MAX), artifactId, threadId, ...(artifactKind !== undefined && { artifactKind }) /* P3-C */, ...(artifactTarget !== undefined && { artifactTarget }) /* P3-E */ };
 }
 
 interface Options {

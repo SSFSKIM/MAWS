@@ -3065,8 +3065,15 @@ deployment, so they never switch the production Worker's org, is deferred.
 **The owner's first steps** (DX7's ordering): sign in, set up the org key first (the first unlock method), then
 enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the code pasted at its hidden prompt).
 
-**State** (2026-10-16, evening):
-- **Deployed:** `hub@47fa64ff web@master.47fa64ff` (Worker version `09cc96e0`), adding machine removal in the web
+**State** (2026-10-16, night):
+- **Deployed:** `hub@f12b122b web@master.f12b122b` (Worker version `ff8af865`), the build the two-Mac walk runs on:
+  MAWS #20, the defects found preparing the walk (the web's blank async question, a refused Skip, the delivery reason
+  and read-only drawing, the Diff error, a stale spawn dialog, model ids, revoked machines in the grid; on the hub, a
+  removal that ends the machine's lease in every project, retried until each takes it, and leaves a name enrolled
+  anew alone). No migration: #20's two tables are created on first use inside the objects' own SQLite; variables,
+  bindings, secrets and Access unchanged. MAWS #21 (a test's port race) and #22 (item 8's console snippet, pasted by
+  the owner, never served) change nothing deployed.
+- **Before it:** `hub@47fa64ff web@master.47fa64ff` (Worker version `09cc96e0`), adding machine removal in the web
   (#17), over `hub@2ee490bc web@master.2ee490bc` (Worker `c44f4cd4`): MAWS master after DC3, DC5, DC6 and the
   channel's anchoring fallback (#16) merged, built from a clean checkout of master. The hub's code is
   byte-identical to the previous deploy's (no migration, the same variables, bindings and secrets); the web gained
@@ -3079,7 +3086,8 @@ enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the 
   its project "phone walk"; the walk has ended and its stand-in is stopped. The web had no way to remove a machine
   (the hub's `DELETE /api/machines/<name>` had no caller); MAWS #17 adds an admin's Remove to the Machines dialog,
   with a confirmation step, proven against the double and the real local hub (the stream ends within one heartbeat,
-  the reconnect is refused). The owner removes `phone-walk` with it. No real machine is enrolled yet.
+  the reconnect is refused). The owner removed `phone-walk` with it on the deployment (2026-10-16), and read the
+  org key's fingerprint unchanged, `8133-6dc8-be8e`, after both deploys. No machine is enrolled now.
 - **Leftovers:** the proofs' throwaway org `dc3-m5-test` keeps its Durable Objects' storage on the same Worker,
   unreachable from `ssfskim`.
 
@@ -3508,6 +3516,36 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A removal whose answer from the machine's object is lost is finished by the admin's Remove again, with
+  nothing persisted for it in Phase 1. The object fences the credential before it answers and answers a second
+  revocation of a fenced credential as it did the first, so the retried DELETE completes (pinned by a test, MAWS #20);
+  until then the machine stays listed and its daemon is refused. A removal re-reads the name by enrollment after the
+  object answers and touches nothing when that enrollment no longer holds it, so a removal racing another removal and
+  a re-enrollment leaves the new machine alone. Rejected: a persisted revocation intent with a sweep that finishes it
+  (self-healing, but a second retry machine beside the projects' lease one for a state the admin sees and clears in
+  one click); kept in the backlog.
+  Date/Author: 2026-10-16, design session (PR #20's review).
+- Decision: Acceptance 8 is checked on the deployment with a browser-console snippet for two attacks, a forged
+  `human` and a forged RPC to a live session, each with a wrong code. The machine-side suites are the evidence for
+  the other three (a `say` under another machine's writer, an Allow whose card digest does not match, a spawn into
+  a directory that is not a known checkout). A forged RPC's refusal is evidenced by the refusing daemon's log line
+  and the `rpc-state` the snippet prints, not by the web. As built, the web ignores `rpc-state` for a nonce it did
+  not send, and the hub neither audits a daemon's RPC refusal nor keeps an `rpc-result` for a nonce it has no record
+  of, so "the refusal shows in the web" cannot hold for an RPC the hub forged; drawing those refusals is backlog.
+  Nothing deployable could place events at the hub without the org key: the proof commands refuse the real org, and
+  an RPC is never stored. Rejected: hand-editing the walk project's Durable Object storage through Cloudflare's Data
+  Studio (literal, but a hand-written row in production storage, and a misplaced one stops a writer's uploads); a
+  test route or a second Worker bound to the hub's classes (a standing production write path); relying on the
+  suites alone (the two live attacks are the cheapest proof that the deployed path refuses).
+  Date/Author: 2026-10-16, owner ruling (the walk's preparation).
+- Decision: MAWS's recomposition panel is the three children's own xhigh panels. DC3's, DC5's and DC6's ran over
+  their own ranges, each landing on master after the one before it (DC5's on top of DC3's hub, DC6's on top of
+  both), so every MAWS line of Phase 1 was read by a panel, and the seams between them were read from the later
+  child's side and exercised by the real-hub suite. The doperpowers repository's panel ran once over DC2, DC4 and
+  DC7's merged range, as planned, and its eight fixes landed (doperpowers #201). Rejected: a second MAWS panel over
+  the merged range (master moved with unrelated work in between, so the range would mostly be other initiatives',
+  and every desk line in it has had a panel).
+  Date/Author: 2026-10-16, design session.
 - Decision: An admin removes a machine from the web's Machines dialog (MAWS #17). DX7 specified
   `DELETE /api/machines/<name>` and the hub served it, but no child's web scope named the action, so after the walk
   the owner had no way to remove its stand-in machine. Removal is a full confirmation step, because what it means

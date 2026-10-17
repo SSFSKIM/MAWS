@@ -13,6 +13,8 @@ export interface CommentedPassage {
   tabId: string;
   tabTitle: string;
   quote: string;
+  /** P3-E (E1 M4; the P3-E spec's Decision Log 12): a design's comment target, forwarded to the anchor; absent elsewhere. */
+  artifactTarget?: 'board' | 'element';
 }
 
 /** A box in the overlay's own coordinates (its top-left 0,0), in CSS pixels. */

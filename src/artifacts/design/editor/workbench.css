@@ -1,0 +1,419 @@
+/* The design workbench's chrome (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, M3): the world around the
+   boards, the boards' titles and frames, the board list and the inspector column. App chrome, so the app's tokens only,
+   beside C's deck chrome (chrome.css) whose toolbar, buttons, menus, handles and guides it reuses; the boards paint
+   their own ground in the design system's scope. The world dominates; the rails are narrow and quiet. */
+
+/* the editor never overflows its surface sideways (a narrow panel included): its toolbar wraps onto another row
+   rather than squeezing a control, and in a narrow editor its rails stack (below) */
+.design-workbench {
+  min-width: 0;
+  overflow: hidden;
+}
+.design-workbench .deck-toolbar {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 36px;
+  padding: 4px 8px;
+  row-gap: 2px;
+}
+.design-workbench .deck-element-bar {
+  flex-wrap: wrap;
+}
+.design-workbench .deck-toolbar > :not(.deck-notice):not(.deck-toolbar-spacer):not(.deck-element-bar),
+.design-workbench .deck-element-bar > * {
+  flex-shrink: 0;
+}
+/* the element bar is a group of controls, not one: it may be narrower than all of them in a row (its own controls never
+   shrink, they wrap within it), else its one-row width overflows a narrow editor (the regate's 21 px) */
+.design-workbench .deck-toolbar > .deck-element-bar {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+.design-workbench .deck-toolbar button,
+.design-workbench .deck-zoom {
+  white-space: nowrap;
+}
+
+/* the world */
+.design-world {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-active);
+  touch-action: none;
+  user-select: none;
+}
+.design-world:focus {
+  outline: none;
+}
+.design-world:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.design-world[data-space] {
+  cursor: grab;
+}
+.design-world[data-panning] {
+  cursor: grabbing;
+}
+.design-world-empty {
+  display: flex;
+}
+.design-world-ground {
+  position: absolute;
+  inset: 0;
+}
+.design-world-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* a board: its canvas at scale 1 inside the world's one transform; its title kept at screen size above it */
+.design-board {
+  position: absolute;
+  box-shadow: var(--shadow-float);
+}
+.design-board > .design-board-canvas {
+  contain: layout paint;
+}
+/* the title spans the board's drawn width and no more (its layout px are screen px: the layer's zoom times its own
+   inverse), so titles never run into a neighbour; the name truncates, the size drops out when there is no room for it,
+   and the button's accessible name and tooltip keep both whole */
+.design-board-title {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: calc(var(--board-w) * var(--design-zoom, 1) * 1px);
+  container-type: inline-size;
+  overflow: hidden;
+  padding: 0 0 4px;
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  line-height: 16px;
+  white-space: nowrap;
+  transform-origin: 0 100%;
+  transform: scale(var(--design-inv-zoom, 1));
+  cursor: default;
+}
+.design-board-title:hover,
+.design-board[data-active] .design-board-title {
+  color: var(--fg);
+}
+.design-board[data-frame-selected] .design-board-title-name {
+  color: var(--accent);
+}
+.design-board-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+.design-board-title-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.design-board-title-size {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+@container (width < 160px) {
+  .design-board-title-size,
+  .design-board-title .design-board-badge {
+    display: none;
+  }
+}
+.design-board-badge {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--danger);
+  color: var(--bg);
+  font-size: var(--text-ui-sm);
+}
+/* a board whose file never arrived: its ground (its label is screen chrome, below) */
+.design-board-missing {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-raised);
+}
+
+/* M6 (the scale gate's frame work): the live world's chrome is drawn in screen px at the zoom from the world's origin,
+   inside one wrapper the pan moves by a transform alone, and the boards' layer carries no custom property its canvases
+   would inherit, so a pan re-lays nothing and a zoom restyles no board. (The history preview's world keeps its own
+   counter-scaled titles above.) */
+.design-world-pan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.design-screen-title {
+  position: absolute;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  padding: 0 0 4px;
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  line-height: 16px;
+  white-space: nowrap;
+  transform: translateY(-100%);
+  pointer-events: auto;
+  cursor: default;
+}
+.design-screen-title:hover,
+.design-screen-title[data-active] {
+  color: var(--fg);
+}
+.design-screen-title[data-frame-selected] .design-board-title-name {
+  color: var(--accent);
+}
+.design-screen-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+.design-board-mark {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  outline: 1.5px dashed var(--danger);
+}
+.design-board-mark-label {
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+}
+
+/* screen-space chrome over the world: the active board's outline, the selected frame, its handles, the guides */
+.design-world-screen,
+.design-active,
+.design-frame-handles {
+  position: absolute;
+  pointer-events: none;
+}
+.design-world-screen {
+  inset: 0;
+}
+.design-active-outline,
+.design-frame-outline {
+  position: absolute;
+  box-sizing: border-box;
+}
+.design-active-outline {
+  outline: 1px solid var(--border-strong);
+}
+.design-frame-outline {
+  outline: 1.5px solid var(--accent);
+}
+.design-board-handle {
+  pointer-events: auto;
+}
+
+/* the board list, in the rail */
+.design-boards {
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  flex-shrink: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.design-boards-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0 6px 0 12px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+}
+.design-boards-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0 6px 8px;
+  list-style: none;
+  overflow-y: auto;
+}
+.design-board-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+.design-board-item[data-current] {
+  background: var(--bg-hover);
+}
+.design-board-item[data-frame-selected] {
+  background: var(--accent-soft);
+}
+.design-board-item[data-dragging] {
+  z-index: 1;
+  opacity: 0.8;
+}
+.design-board-row {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 28px 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  line-height: 28px;
+  text-align: left;
+  cursor: default;
+  touch-action: none;
+}
+.design-board-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.design-board-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.design-board-size {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  font-variant-numeric: tabular-nums;
+}
+.design-board-item .design-board-menu {
+  top: 4px;
+}
+.design-board-item:hover .design-board-menu,
+.design-board-item:focus-within .design-board-menu {
+  opacity: 1;
+}
+.design-board-rename {
+  width: 100%;
+  margin: 2px 0;
+}
+
+/* the inspector column: the board's section above C's; C's "Slide" title is the board's own here */
+.design-inspector {
+  display: flex;
+  flex-direction: column;
+  width: 248px;
+  flex-shrink: 0;
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.design-inspector > .deck-inspector,
+.design-inspector .deck-inspector {
+  width: auto;
+  flex-shrink: 0;
+  overflow: visible;
+  border-left: 0;
+}
+.design-board-inspector {
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+}
+.design-inspector[data-board-context] .deck-inspector .deck-inspector-title {
+  display: none;
+}
+
+/* M4: the comment frame around the world (C's frame, P2's card drawn over it) takes the world's place in the body; the
+   boards' own comment pins at their frames' top-right corners, in screen px over the world */
+.design-workbench .design-comment-frame {
+  min-width: 0;
+}
+.design-board-pins {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.design-board-pins .deck-comment-pin {
+  pointer-events: auto;
+}
+.design-board-element-pins {
+  position: absolute;
+}
+.design-move-to-board {
+  display: flex;
+  padding: 8px 12px 0;
+}
+
+/* M4: a version's world: a changed board's frame edged in its author's colour (C's history edges), a new one badged, a
+   deleted one dashed and faded where it was; the marks over the world are C's */
+.design-history-board[data-history-change] {
+  outline: calc(2px * var(--design-inv-zoom, 1)) solid var(--deck-history-author, var(--accent));
+}
+.design-history-board[data-history-change='removed'] {
+  outline-style: dashed;
+}
+.design-history-board[data-history-change='removed'] > .design-board-canvas {
+  opacity: 0.45;
+}
+.design-history-board[data-focused] {
+  outline-offset: calc(4px * var(--design-inv-zoom, 1));
+}
+.design-history-board .design-board-title {
+  pointer-events: none;
+}
+.design-board-item[data-history-change] {
+  box-shadow: inset 3px 0 0 var(--deck-history-author, var(--accent));
+}
+
+/* a narrow editor (the panel's widths): the board list lies over the world as a sheet (C's overlay-rail pattern;
+   picking a board closes it in the panel); the inspector sits under the world, full width and scrolling, so the world
+   keeps the room it is fitted into and every field is reachable */
+@container deck-editor (width < 720px) {
+  .design-workbench .deck-editor-body {
+    flex-direction: column;
+  }
+  .design-workbench .design-world,
+  .design-workbench .design-comment-frame {
+    min-height: 40%;
+  }
+  .design-workbench .design-boards {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 20;
+    max-width: 100%;
+    box-shadow: var(--shadow-float);
+  }
+  .design-workbench .design-inspector {
+    width: auto;
+    max-height: 45%;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}

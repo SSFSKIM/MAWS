@@ -49,6 +49,7 @@ import {
   type Guide,
   type Handle,
   type Pt,
+  type SnapContext,
 } from '../../geometry';
 import { isPinned } from '../../ir';
 import { reorderFlow, ROOT } from '../../model';
@@ -110,6 +111,14 @@ function placeOf(style: Readonly<Record<string, string>>, m: Measured): Box {
 }
 const num = (n: number) => String(Math.round(n * 100) / 100);
 const threshold = (ctx: GestureContext) => SNAP_SCREEN_PX / ctx.scale;
+/**
+ * P3-E (E1 M3, X27 additive): the canvas's own lines and the extent their guides span: a design board's edges and centre
+ * with no margin (a board has no 128 px margin), a deck's slide as built.
+ */
+const canvasLines = (ctx: GestureContext): { lines: SnapContext['lines']; extent: { w: number; h: number } } => {
+  const { w, h } = ctx.canvas.size;
+  return { lines: ctx.canvas.isBoard ? slideLines(w, h, 0) : slideLines(), extent: { w, h } };
+};
 /** A move on the slide as the host's px move (its turn, scale and skew undone). */
 const inHost = (hostMatrix: Affine, d: Pt): Pt => applyLinear(invert(linear(hostMatrix)), d);
 
@@ -180,7 +189,7 @@ export function startMove(ctx: GestureContext, ids: readonly string[], p0: Pt): 
   const bases = ms.map((m) => moveBase(tree, m));
   const start = union(ms.map((m) => m.bounds));
   const siblings = siblingBounds(ctx, tree, ids);
-  const lines = slideLines();
+  const { lines, extent } = canvasLines(ctx); // P3-E
   const drag = dragWriter(ctx);
   let last = '';
   let first = true;
@@ -198,7 +207,7 @@ export function startMove(ctx: GestureContext, ids: readonly string[], p0: Pt): 
       let guides: Guide[] = [];
       if (!mods.meta) {
         const moved = { ...start, x: start.x + dx, y: start.y + dy };
-        const snapped = snapMove(moved, { lines, siblings }, threshold(ctx));
+        const snapped = snapMove(moved, { lines, siblings, extent }, threshold(ctx));
         if (!mods.shift || dx !== 0) dx += snapped.x - moved.x;
         if (!mods.shift || dy !== 0) dy += snapped.y - moved.y;
         guides = snapped.guides.filter((g) => (g.axis === 'x' ? !mods.shift || dx !== 0 : !mods.shift || dy !== 0));
@@ -289,7 +298,7 @@ export function startResize(ctx: GestureContext, id: string, handle: Handle, p0:
   const plain = isIdentityLinear(m.matrix);
   const origin = apply(m.hostMatrix, { x: 0, y: 0 });
   const siblings = siblingBounds(ctx, tree, [id]);
-  const lines = slideLines();
+  const { lines, extent } = canvasLines(ctx); // P3-E
   const drag = dragWriter(ctx);
   let first = true;
   let last = '';
@@ -306,7 +315,7 @@ export function startResize(ctx: GestureContext, id: string, handle: Handle, p0:
           return { x: m.e, y: m.f };
         };
         const at = t(b.w, b.h);
-        const snapped = snapResize({ ...b, x: b.x + at.x + origin.x, y: b.y + at.y + origin.y }, handle, { lines, siblings }, threshold(ctx), MIN_SIZE);
+        const snapped = snapResize({ ...b, x: b.x + at.x + origin.x, y: b.y + at.y + origin.y }, handle, { lines, siblings, extent }, threshold(ctx), MIN_SIZE);
         const after = t(snapped.box.w, snapped.box.h);
         b = { ...snapped.box, x: snapped.box.x - origin.x - after.x, y: snapped.box.y - origin.y - after.y };
         guides = snapped.guides;
@@ -381,7 +390,7 @@ export function startEndpoint(ctx: GestureContext, id: string, end: 0 | 1): Gest
   const plain = isIdentityLinear(m.hostMatrix);
   const tree = slideTree(ctx.session.doc, ctx.slideId);
   const siblings = siblingBounds(ctx, tree, [id]);
-  const lines = slideLines();
+  const { lines, extent } = canvasLines(ctx); // P3-E
   const drag = dragWriter(ctx);
   const [xn, yn] = end === 0 ? ['x1', 'y1'] : ['x2', 'y2'];
   let last = '';
@@ -390,7 +399,7 @@ export function startEndpoint(ctx: GestureContext, id: string, end: 0 | 1): Gest
       let q = { x: Math.round(p.x), y: Math.round(p.y) };
       let guides: readonly Guide[] = [];
       if (plain && !mods.meta) {
-        const s = snapMove({ x: q.x, y: q.y, w: 0, h: 0 }, { lines, siblings }, threshold(ctx));
+        const s = snapMove({ x: q.x, y: q.y, w: 0, h: 0 }, { lines, siblings, extent }, threshold(ctx));
         q = { x: s.x, y: s.y };
         guides = s.guides;
       }

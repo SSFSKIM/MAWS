@@ -129,6 +129,7 @@ import { registerDocumentExporters } from './artifacts/export-document'; // P3-B
 import { engineHostCall, governDocumentExporter } from './design-systems/documents';
 import { registerDesignSystemExporters } from './design-systems/export';
 import { registerPresentationExporters } from './presentations/export'; // P3-C M9
+import { registerDesignExporters } from './design/export'; // P3-E (E1's M5)
 import { registerPresenter } from './presentations/present'; // P3-C M6
 // P3-D end
 import { startConnectors } from './connectors'; // P3-H H3b
@@ -594,6 +595,7 @@ void startWithProfileLock(app, () => {
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
   registerPresentationExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude; the governing system from D's `designSystems.governing` (Decision Log 27 (2))
+  registerDesignExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-E (E1's M5): `design` as png and pdf over C's capture window, never cropped (XE9)
   shutdown.add('presenter', registerPresenter({ register: registerMainHandler, appUrl, env: process.env }).end); // P3-C M6: `presentations.present`, the show's windows
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
   // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the

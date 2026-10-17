@@ -232,6 +232,25 @@ describe('the anchored message (X10)', () => {
       expect(anchorLead(comment, false)).toBe('Comment on "Q3 plan, Main" (passage "ships quarterly with "design" review" in document art-7f3a, thread k2m9x0qa):');
       expect(anchorTag(comment)).toBe(TAG); // a document's anchor carries no field
     });
+
+    // P3-E (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, M4; the P3-E spec's Decision Log 12): a design's
+    // comment names its target, a board or an element, through the anchor's `artifactTarget`; absent, an element's
+    it('writes a design board’s and element’s leads from `artifactTarget`, round-trips both, and leaves every other tag unchanged', () => {
+      const board: Anchor = { kind: 'artifact-comment', locator: 'Phone', label: 'Launch screens, Phone', artifactId: 'art-d1', threadId: 't2', artifactKind: 'design', artifactTarget: 'board' };
+      expect(anchorTag(board)).toBe('<maws_anchor kind="artifact-comment" label="Launch screens, Phone" locator="Phone" artifactId="art-d1" threadId="t2" artifactKind="design" artifactTarget="board"/>');
+      expect(anchorLead(board, false)).toBe('Comment on "Launch screens, Phone" (board "Phone" in design art-d1, thread t2):');
+      const element: Anchor = { ...board, locator: 'Ship the first week.', artifactTarget: 'element' };
+      expect(anchorLead(element, false)).toBe('Comment on "Launch screens, Phone" (element "Ship the first week." in design art-d1, thread t2):');
+      const unnamed: Anchor = { kind: 'artifact-comment', locator: element.locator, label: element.label, artifactId: 'art-d1', threadId: 't2', artifactKind: 'design' };
+      expect(anchorLead(unnamed, false)).toBe(anchorLead(element, false)); // absent: an element's
+      for (const anchor of [board, element, unnamed]) {
+        const message = anchoredMessage({ anchor, text: 'Tighter?', destination: 'main', screenshot: false });
+        expect(parseAnchoredText(message)).toEqual({ anchor, text: 'Tighter?', destination: 'main' });
+      }
+      expect(AnchorSchema.safeParse({ ...board, artifactTarget: 'slide' }).success).toBe(false);
+      expect(anchorTag(comment)).toBe(TAG);
+      for (const anchor of ANCHORS) expect(anchorTag(anchor)).not.toMatch(/artifactTarget/);
+    });
   });
   // P3-B end
 
