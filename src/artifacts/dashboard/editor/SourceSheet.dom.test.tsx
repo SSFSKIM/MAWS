@@ -106,6 +106,55 @@ describe('the source sheet', () => {
     expect(cells(bodyRows().at(-1)!)[0]).toBe(`r${BIG - 1}`);
   });
 
+  it('re-measures its row window when the sheet grows, once a frame however many resizes, and stops when closed (E2 panel)', async () => {
+    // the scroller is flex-sized: its height is whatever the window gives it, here 280 px, then 1,120 px
+    let height = 280;
+    const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get(this: HTMLElement) { return this.classList.contains('dash-sheet-table') ? height : 0; } });
+    const observers = new Set<{ callback: ResizeObserverCallback; targets: Set<Element> }>();
+    vi.stubGlobal('ResizeObserver', class {
+      private readonly entry: { callback: ResizeObserverCallback; targets: Set<Element> };
+      constructor(callback: ResizeObserverCallback) { observers.add((this.entry = { callback, targets: new Set() })); }
+      observe(target: Element) { this.entry.targets.add(target); }
+      unobserve(target: Element) { this.entry.targets.delete(target); }
+      disconnect() { this.entry.targets.clear(); observers.delete(this.entry); }
+    });
+    const frames = new Map<number, FrameRequestCallback>();
+    let next = 1;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => (frames.set(next, callback), next++));
+    const cancelAnimationFrame = vi.fn((id: number) => void frames.delete(id));
+    vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrame);
+    const resized = (target: Element) => act(() => { for (const o of observers) if (o.targets.has(target)) o.callback([{ target } as ResizeObserverEntry], {} as ResizeObserver); });
+    const flush = () => act(() => { const due = [...frames.values()]; frames.clear(); for (const run of due) run(0); });
+    try {
+      const view = mount();
+      act(() => sheet.open([{ id: 'big', descriptor: descriptor('assets/big.tsv', BIG) }]));
+      await until(() => screen.queryAllByRole('row').length > 1, 'the rows');
+      const scroller = within(dialog()).getByRole('table', { name: 'Rows' });
+      expect(bodyRows()).toHaveLength(20); // 280 px of 28 px rows, and ten beyond
+      height = 1_120;
+      resized(scroller);
+      resized(scroller);
+      resized(scroller);
+      expect(frames.size).toBe(1); // coalesced to one frame
+      expect(bodyRows()).toHaveLength(20); // not before the frame
+      flush();
+      expect(bodyRows()).toHaveLength(50); // 40 rows fill the taller window, and ten beyond
+      expect(bodyRows().at(-1)?.getAttribute('aria-rowindex')).toBe('51');
+      // a resize pending when the sheet closes is cancelled with its observer
+      resized(scroller);
+      expect(frames.size).toBe(1);
+      view.unmount();
+      expect(observers.size).toBe(0);
+      expect(frames.size).toBe(0);
+      expect(cancelAnimationFrame).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      if (own) Object.defineProperty(HTMLElement.prototype, 'clientHeight', own);
+      else delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight;
+    }
+  });
+
   it('downloads the captured snapshot by its ref under its own source name', async () => {
     mount();
     act(() => sheet.open([{ id: 'sales', descriptor: descriptor('assets/sales.tsv', 3) }]));

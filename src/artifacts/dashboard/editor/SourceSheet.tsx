@@ -212,9 +212,28 @@ function Rows({ table, order, sort, onSort, overflowed }: { table: ViewTable; or
   const scroller = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0);
   const [height, setHeight] = useState(VIEWPORT_FALLBACK);
+  // The scroller is flex-sized, so its height follows the window: measured on mount, then again whenever it resizes, once
+  // a frame however many resizes land in it (E2 panel); the observer and a pending frame end with the rows.
   useLayoutEffect(() => {
-    const measured = scroller.current?.clientHeight ?? 0;
-    if (measured > 0) setHeight(measured);
+    const box = scroller.current;
+    if (!box) return;
+    const measure = () => {
+      if (box.clientHeight > 0) setHeight(box.clientHeight);
+    };
+    measure();
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (frame !== null) return;
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        measure();
+      });
+    });
+    observer.observe(box);
+    return () => {
+      observer.disconnect();
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
   }, []);
   const first = Math.max(0, Math.floor(top / ROW_H) - OVERSCAN);
   const last = Math.min(order.length, Math.ceil((top + height) / ROW_H) + OVERSCAN);
