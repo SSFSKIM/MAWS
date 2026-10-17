@@ -7,9 +7,14 @@
 // prompt typed at the terminal, or a row that marks no origin, never is.
 //
 // The tail matches a send by its frame (`tail.ts`). The session view draws a delivered row without its frame line: the
-// owner's own send (`from human`) needs none, its bubble says who wrote it; a peer's keeps who sent it as a label beside
-// the bubble. The text the session read is otherwise unchanged; only the drawing's copy of the row is cut, the held row
-// stays verbatim.
+// owner's own send (`from human`) needs none, its bubble says who wrote it; a peer's draws it as a label, the sender's
+// name in its own first paragraph. The label is in the text, not beside the bubble, because a delivery the engine queued
+// into a running turn is drawn as MAWS draws any prompt queued there — a bubble in the turn, under the queued message's
+// own uuid (`source_uuid`), captioned "Sent during this turn" — and that caption is MAWS's alone. MAWS's backfill would
+// otherwise keep such a delivery as a synthetic peer message and draw no body for it (its peer parser reads MAWS's own
+// envelope, not sminos's frame), so its drawing's copy takes the shape MAWS gives a prompt queued at the terminal
+// (`humanQueuedPrompt`). The text the session read is otherwise unchanged; only the drawing's copy of the row changes,
+// the held row stays verbatim for the tail.
 import type { JsonObject } from 'desk-hub/protocol';
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
@@ -69,12 +74,25 @@ export function deliveryFrame(row: JsonObject): { from: string; own: boolean } |
   return from === null ? null : { from, own: from === 'human' };
 }
 
-/** The row as the session view draws it: a delivered row without its frame line; any other row as it is. */
-export function withoutDeliveryFrame(row: JsonObject): JsonObject {
-  if (deliveryFrame(row) === null) return row;
-  const cut = (text: string) => text.slice(text.indexOf('\n') + 1);
+/** A sender's name as Markdown text: every character Markdown could read as syntax escaped. */
+const literal = (text: string) => text.replace(/[\\`*_{}[\]()#+\-.!|<>~]/g, '\\$&');
+
+/**
+ * The row as the session view draws it: a delivered row with its frame line dropped (the owner's own send) or drawn as
+ * a label naming the peer who sent it, and a delivery queued into a running turn in the shape of a prompt queued there,
+ * under the queued message's own uuid; any other row as it is.
+ */
+export function deliveryAsDrawn(row: JsonObject): JsonObject {
+  const frame = deliveryFrame(row);
+  if (frame === null) return row;
+  const cut = (text: string) => (frame.own ? '' : `*From ${literal(frame.from)}*\n\n`) + text.slice(text.indexOf('\n') + 1);
   const prompts = deliveredPrompts(row)!;
-  if (prompts.kind === 'queued') return { ...row, attachment: { ...object(row.attachment), prompt: cut(prompts.prompt) } };
+  if (prompts.kind === 'queued') {
+    const attachment = { ...object(row.attachment)! };
+    delete attachment.isMeta; // MAWS reads a meta queued prompt as context, not as a prompt
+    const source = typeof attachment.source_uuid === 'string' && attachment.source_uuid !== '' ? attachment.source_uuid : row.uuid;
+    return { ...row, attachment: { ...attachment, prompt: cut(prompts.prompt), commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: source as string } };
+  }
   const message = object(row.message)!;
   if (typeof prompts.content === 'string') return { ...row, message: { ...message, content: cut(prompts.content) } };
   const first = prompts.content.findIndex(isText);

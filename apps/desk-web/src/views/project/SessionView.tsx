@@ -33,6 +33,7 @@ import { useSessionOwner } from '../../depth/owner/session-owner';
 import { DESK_ACTIONS } from '../../depth/view/actions';
 import { TranscriptPane, transcriptStatus, useKeptTranscript } from '../../depth/view/TranscriptPane';
 import { sessionName } from '../../log/projection';
+import { useLanding } from '../../pwa/service-worker';
 import { useDeskLayout } from '../../shell/layout';
 import type { SessionPlane } from '../../shell/session-plane';
 import type { DeskSession } from '../../shell/sessions';
@@ -75,11 +76,6 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
       openSubagent: (ref: SubagentRef) => {
         owner.openSubagent(ref);
         if (!useDeskLayout.getState().depth.open) useDeskLayout.getState().setDepth({ open: true });
-      },
-      // A peer's send keeps who sent it, its frame line drawn as this label under the bubble (the line itself is not).
-      userRowMark: (row) => {
-        const from = row.messageUuid === null ? null : owner.main.senderOf(row.messageUuid);
-        return from === null ? null : `From ${from}`;
       },
     }),
     [owner],
@@ -137,7 +133,7 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
 
   const unavailable = useNoTranscript(state, heldCount);
   useLandOnCard(root, landedRequest, requests.some((r) => r.request === landedRequest));
-  useLandOnMessage(root, owner.main, landedMessage);
+  const landing = useLandOnMessage(root, owner.main, state, landedMessage);
 
   if (unavailable && fallback)
     return fallback(`${session.machine} serves no transcript for this session: its daemon predates the session view, or a /clear left the history under another id. What it sent and was sent stays here, from the project's log.`);
@@ -151,6 +147,17 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
       data-session={session.session}
       aria-label={`${sessionName(session)}'s session`}
     >
+      {landing !== null && (
+        // The landed message's row is being paged toward, or the history ran out without it.
+        <div className="flex items-center gap-2 border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm" role="status" data-testid="landing" data-landing={landing === 'finding' ? 'checking' : 'missing'}>
+          <span className="text-fg-muted">{landing === 'finding' ? 'Finding the message in the session’s history…' : 'This message’s row is not in the session’s transcript.'}</span>
+          {landing === 'missing' && (
+            <button type="button" className="ml-auto rounded-sm px-1 text-fg-muted hover:bg-bg-hover hover:text-fg" onClick={() => useLanding.getState().clear()}>
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
       <ReportToggle storeKey={owner.main.key} />
       <TailProvider value={tail}>
         <TranscriptPane controller={owner.main} state={state} variant="session" ownerLane actions={actions} list={list} extraTail={drawn.rows} renderRequest={renderTailRow} />

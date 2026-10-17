@@ -24,6 +24,9 @@ export class FakeMachineReplay {
   readonly depth: SessionDepth;
   /** How many steps of the timeline have been applied. */
   played = 0;
+  /** Holds each `rows` request until `releaseRows`, so a suite can look at the view while a page is on its way. */
+  holdRows = false;
+  private readonly heldRows: Array<{ sub: string; before: string; limit: number }> = [];
   /** An `output` answer a suite puts in the machine's place for a task (a race the recording cannot stage); else none. */
   answerOutput: ((taskId: string) => TaskOutput | null) | null = null;
   /** The next subscription's snapshot hooks (`raceNextSnapshot`'s `advance` and `overlap`) and its scope, used once. */
@@ -84,6 +87,13 @@ export class FakeMachineReplay {
     return null;
   }
 
+  /** Answers the `rows` requests held so far; how many there were. */
+  releaseRows(): number {
+    const held = this.heldRows.splice(0);
+    for (const { sub, before, limit } of held) this.depth.page(sub, before, limit);
+    return held.length;
+  }
+
   /** The browser's socket drops: the hub forgets its subscriptions, and so does the machine. */
   drop(): void {
     this.hub.dropConnections();
@@ -135,7 +145,10 @@ export class FakeMachineReplay {
         if (raced) this.nextSnapshot = null;
         void this.depth.subscribe(frame.sub, frame.agentId, raced?.options ?? {});
       } else if (frame.t === 'unsubscribe') this.depth.end(frame.sub, 'unsubscribed');
-      else if (frame.t === 'rows') this.depth.page(frame.sub, frame.before, frame.limit);
+      else if (frame.t === 'rows') {
+        if (this.holdRows) this.heldRows.push({ sub: frame.sub, before: frame.before, limit: frame.limit });
+        else this.depth.page(frame.sub, frame.before, frame.limit);
+      }
       else if (frame.t === 'output') {
         const forced = this.answerOutput?.(frame.taskId);
         if (forced) this.hub.sendSub(this.where.project, frame.sub, 'output', forced);

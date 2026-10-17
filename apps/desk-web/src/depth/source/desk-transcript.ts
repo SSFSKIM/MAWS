@@ -55,7 +55,7 @@ import { noteModel } from '../../state/models';
 import { taskGraphOf, withEvents, withMetas, withStatuses } from '../agents/task-feed';
 import { OutputRequests } from '../jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
-import { deliveryFrame, withoutDeliveryFrame } from '../../conversation/delivery-frame';
+import { deliveryAsDrawn } from '../../conversation/delivery-frame';
 import { normalizeInterruptRow, withInterruptEnd } from './interrupt';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
@@ -130,10 +130,11 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
  * backfill reads as a `subagent.message`) is the session woken by its subagent, not a peer session's: it takes the
  * engine's origin, whose divider MAWS reads as "Continued for …", as it reads a task notification's turn. An interrupt
  * marker ends the turn it interrupted, the bridge's record of one read as its marker line alone (`interrupt.ts`). A
- * delivered send is drawn without its frame line (`conversation/delivery-frame.ts`); the held row keeps it.
+ * delivered send is drawn without its frame line, a peer's under a label naming it, and one queued into a running turn
+ * as a prompt queued there (`conversation/delivery-frame.ts`); the held row keeps its frame.
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
-  const mapped = withoutDeliveryFrame(normalizeInterruptRow(row));
+  const mapped = deliveryAsDrawn(normalizeInterruptRow(row));
   const record = TranscriptRecordSchema.safeParse(mapped);
   if (!record.success) return [];
   const events = withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx);
@@ -224,8 +225,6 @@ export class DeskTranscript {
   private readonly uuids = new Set<string>();
   /** Held rows whose mapping gave no event under the row's own uuid: in the store as soon as they are mapped. */
   private readonly silent = new Set<string>();
-  /** A peer's delivered rows by uuid, with who sent each (their frame line, which the drawing drops). */
-  private readonly senders = new Map<string, string>();
   private metas: readonly SubagentMeta[] = [];
   /** The tree the held rows and metas build, before each agent's DX4 status is laid over it (`tasks` in the state). */
   private heldTasks: TaskGraph = emptyGraph();
@@ -351,14 +350,7 @@ export class DeskTranscript {
     return () => this.resets.delete(listener);
   }
 
-  /** Who sent a row a peer delivered to the session, by its uuid; null for any other row (the owner's own sends too). */
-  senderOf(uuid: string): string | null {
-    return this.senders.get(uuid) ?? null;
-  }
-
   mapRow(row: Row, ctx: BackfillContext): SessionEvent[] {
-    const frame = deliveryFrame(row);
-    if (frame !== null && !frame.own) this.senders.set(row.uuid, frame.from);
     const events = eventsOf(row, ctx);
     if (!events.some((event) => event.id === row.uuid)) this.silent.add(row.uuid);
     return events;

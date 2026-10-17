@@ -355,14 +355,26 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   // Three bubbles: the typed prompt and the two sends' own rows, each drawn without its frame line, with no label.
   await expect(bubbles('continue')).toHaveCount(3);
   await expect(view).not.toContainText('[sminos chat');
-  await expect(view.locator('.transcript-user-caption').filter({ hasText: 'From ' })).toHaveCount(0);
+  await expect(bubbles('continue').filter({ hasText: 'From ' })).toHaveCount(0);
 
   // A peer's send, delivered as its frame: drawn without the frame line, labelled with who sent it.
   land(userRow('[sminos chat MAWS 5e0c1f2a:2 from fakepeer → @you]\nI read recorded.txt: blue, as you chose.', BRIDGE));
   const peer = bubbles('I read recorded.txt: blue, as you chose.');
   await expect(peer).toHaveCount(1);
   await expect(peer).not.toContainText('[sminos');
-  await expect(peer.locator('.transcript-user-caption')).toHaveText('From fakepeer');
+  await expect(peer.locator('em').first()).toHaveText('From fakepeer');
+
+  // A peer's send queued into the running turn (the engine's `queued_command`, under its own `source_uuid`): a bubble in
+  // that turn, as MAWS draws a prompt queued there, labelled with who sent it.
+  const call = { type: 'assistant', uuid: '5e55a11d-0000-4000-8000-0000000000c1', parentUuid: last.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, message: { id: 'msg_queued1', role: 'assistant', model: 'claude-haiku-5-5', type: 'message', content: [{ type: 'tool_use', id: 'toolu_queued1', name: 'Bash', input: { command: 'ls', description: 'List files' } }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } } };
+  const result = { type: 'user', uuid: '5e55a11d-0000-4000-8000-0000000000c2', parentUuid: call.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_queued1', content: 'notes.md', is_error: false }] }, toolUseResult: { stdout: 'notes.md', stderr: '', interrupted: false, isImage: false } };
+  const queuedDelivery = { type: 'attachment', uuid: '5e55a11d-0000-4000-8000-0000000000c3', parentUuid: result.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, attachment: { type: 'queued_command', prompt: '[sminos chat MAWS 5e0c1f2a:3 from fakepeer → @you]\nPing me when the count is done.', source_uuid: '5e55a11d-0000-4000-8000-0000000000c4', commandMode: 'prompt', origin: { kind: 'peer' }, isMeta: true } };
+  for (const row of [call, result, queuedDelivery]) land(row);
+  const queuedBubble = bubbles('Ping me when the count is done.');
+  await expect(queuedBubble).toHaveCount(1);
+  await expect(queuedBubble).not.toContainText('[sminos');
+  await expect(queuedBubble.locator('em').first()).toHaveText('From fakepeer');
+  await expect(view.locator('[data-row-id="user:5e55a11d-0000-4000-8000-0000000000c4"]')).toHaveCount(1); // the queued message's own identity
   await shot(page, 'tail-framed-rows');
 
   // A submission delayed, then refused: it stays, saying so.
@@ -484,4 +496,50 @@ test("a notification's landing on a <message> opens the session view at its row,
   await expect(row).toBeInViewport();
   await expect(page.getByTestId('landing')).toHaveCount(0); // found: nothing to say
   await shot(page, 'landing-on-message');
+});
+
+/** Opens the session cold on a landing naming a `message` event whose `src` is `src`, once every row is in (so the
+ * snapshot holds only the newest rows and the oldest come as pages). */
+async function landCold(page: Page, hub: HubDouble, src: (recording: Recording) => string, text: string): Promise<{ fm: FakeMachineReplay; view: Locator }> {
+  return openSession(page, hub, {
+    before: async (replay) => {
+      replay.step(endOf(replay.recording));
+      replay.holdRows = true; // each page waits for the suite
+      const { event } = await hub.append(PROJECT, { writer: `${MACHINE}/${replay.session}`, kind: 'message', from: ALIAS, to: 'host', text, src: src(replay.recording) } as never);
+      return `?writer=${encodeURIComponent(event.writer)}&seq=${event.seq}`;
+    },
+  });
+}
+/** The older history's reply to notes part `k` (a `<message>` for every part not divisible by 3). */
+const partReply = (recording: Recording, k: number) => recording.rows.main.find((row) => JSON.stringify(row.message ?? {}).includes(`<message>Part ${String(k).padStart(2, '0')} is forty`))!.uuid;
+
+test("a landing on a <message> older than the snapshot pages toward its row, saying so, and lands on it", async ({ page, hub }) => {
+  const { fm, view } = await landCold(page, hub, (recording) => `${partReply(recording, 2)}#0`, 'Part 02 is forty numbered lines about replaying a session and paging its history.');
+  expect(fm.recording.rows.main.findIndex((row) => row.uuid === partReply(fm.recording, 2))).toBeLessThan(10); // far older than the snapshot reaches
+  // While the page is out, the view says it is looking for the message.
+  const notice = page.getByTestId('landing');
+  await expect(notice).toHaveAttribute('data-landing', 'checking');
+  await expect(notice).toHaveText('Finding the message in the session’s history…');
+  await expect.poll(() => fm.releaseRows()).toBe(1);
+  fm.holdRows = false;
+  const row = view.locator('[data-row-id][data-landed]');
+  await expect(row).toHaveCount(1, { timeout: 15_000 });
+  await expect(row).toContainText('Part 02 is forty numbered lines');
+  await expect(row).toBeInViewport();
+  await expect(notice).toHaveCount(0); // found: nothing left to say
+});
+
+test("a landing on a <message> whose row is in no page of the transcript says so once the history runs out", async ({ page, hub }) => {
+  const { fm, view } = await landCold(page, hub, () => '0d0d0d0d-0000-4000-8000-000000000000#0', 'A message from a row this transcript does not hold.');
+  const notice = page.getByTestId('landing');
+  await expect(notice).toHaveAttribute('data-landing', 'checking');
+  fm.holdRows = false;
+  await expect.poll(() => fm.releaseRows()).toBe(1); // the one page there is, to the first row
+  await expect(notice).toHaveAttribute('data-landing', 'missing');
+  await expect(notice).toHaveText(/This message’s row is not in the session’s transcript\./);
+  await page.waitForTimeout(300);
+  expect(hub.up.filter((u) => u.frame.t === 'rows').length).toBe(1); // nothing asked once the history ran out
+  await expect(view.locator('[data-row-id][data-landed]')).toHaveCount(0);
+  await notice.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(notice).toHaveCount(0);
 });
