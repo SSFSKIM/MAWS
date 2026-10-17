@@ -53,7 +53,10 @@
     "src/renderer/src/test-support/relative-time.ts",
     "src/renderer/src/artifacts/host.ts", // P3-A M5: the detached-channel test drives the real ArtifactHost under Node
     // P3-B: test/artifacts/document-writer-bench.test.ts benches the patch writer on the 200-page seed M9's gate uses
-    "e2e/support/document-seed.ts"
+    "e2e/support/document-seed.ts",
+    // P3-E (E2 M6): test/support/dashboard-bundle.test.ts runs the dashboard acceptance run's final bundle checks
+    "e2e/support/dashboard-bundle.ts",
+    "e2e/support/dashboard-acceptance.ts"
   ],
   // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
   // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:

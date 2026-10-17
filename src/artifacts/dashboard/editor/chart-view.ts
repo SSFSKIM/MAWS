@@ -82,6 +82,14 @@ function watchScopes(document: Document): void {
   new Observer(all).observe(document.body, { attributes: true, attributeFilter: ['data-ds-scope'], subtree: true });
 }
 
+// E2 M6: a drawing's cost (the renderer's view and its insertion into the page, from the snapshot's rows in hand) as a
+// User Timing entry, `dash:view` with the dataset and the caption, which the scale gate observes (acceptance 7's
+// 10,000-point row); cleared from the timeline at once, so a long session keeps none (an observer has it already).
+function timed(start: number, dataset: string, caption: string): void {
+  performance.measure('dash:view', { start, end: performance.now(), detail: { dataset, caption } });
+  performance.clearMeasures('dash:view');
+}
+
 export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEnvironment['renderChart']> {
   return (into: HTMLElement, node: PMNode, env: ViewEnvironment) => {
     const datasetId = typeof node.attrs.source === 'string' ? node.attrs.source.trim() : '';
@@ -158,11 +166,13 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
         frame.classList.add('dash-loading');
       }
       let rendered: Rendered;
+      let started: number | null = null;
       try {
         const table = descriptor ? await deps.reader.read(snapshotOf(descriptor)) : null;
         if (!(await placed(mine))) return;
         const theme = themeOf(into);
         drawnTheme = JSON.stringify(theme);
+        started = performance.now();
         rendered = renderView(spec, table, theme, datasetId);
       } catch {
         if (!(await placed(mine))) return;
@@ -172,6 +182,7 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       }
       frame.classList.remove('dash-loading');
       show(rendered, descriptor);
+      if (started !== null) timed(started, datasetId, caption);
     };
 
     // The displayed document's descriptor for this block, drawn whenever it changes (a replacement, a removal, a restore).

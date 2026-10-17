@@ -22,6 +22,7 @@ import { GDP_CSV, PENGUINS_CSV } from '../src/artifacts/dashboard/fixtures/datas
 import { DatasetError, parseDataset } from '../src/artifacts/dashboard/parse';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
+import { bindCsv, commentSelectedChart, durable, openInMain, openInPanel, pinArtifactsTool, railOf, refusalOf, reply, revisionOf, selectChart, startApp, watchSelection, type DashboardApp } from './support/dashboards'; // M6
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -408,4 +409,241 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await expect(page.getByRole('dialog')).toBeHidden();
   });
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// ---- P3-E2 M6: the agent's path through the real tools (the host's acceptance seam), acceptance 1 to 3 ------------------
+
+const AGENT_CSV = 'region,total\n서울,120\n부산,98\n제주,40\n';
+const REPLACED_CSV = 'region,total\n서울,310\n부산,280\n제주,250\n';
+const AGENT_TIPS = ['서울 · total: 120', '부산 · total: 98', '제주 · total: 40'];
+const chartFence = (dataset: string, spec: Record<string, unknown>, block: string) => [`:::chart {spec-json='${JSON.stringify(spec)}'}`, dataset, ':::', `^${block}`, ''];
+const BOARD_MARKDOWN = [
+  '# 지역별 매출 ^h1',
+  '',
+  'Revenue by region this quarter. ^p1',
+  '',
+  ...chartFence('sales', { view: 'bar', x: 'region', y: 'total', title: 'Sales by region' }, 'c1'),
+  ...chartFence('sales', { view: 'table', columns: ['region', 'total'], title: 'Sales table' }, 'c2'),
+].join('\n');
+type Created = { artifactId: string; kind: string; revision: number; viewWarnings?: unknown[] };
+type Bound = { status: string; artifactId: string; id: string; revision: number; columns: { name: string; type: string; mismatches?: number }[]; rows: number };
+type BoardRead = { revision: number; kind: string; markdown: string; datasets: { id: string; title: string; file: string; rows: number; columns: { name: string; type: string }[]; updated: { by: string } }[] };
+const minuteOf = (label: string) => /updated (\S+ \S+) UTC/.exec(label)?.[1];
+
+let agentApp: DashboardApp | null = null;
+test.afterEach(async () => {
+  await agentApp?.close();
+  agentApp = null;
+});
+
+test('the agent creates a dashboard from markdown and binds a CSV, a TSV and a JSON array in one call each, answered with columns, rows and the live revision; a ragged and an oversize file are refused naming why, nothing written; a replay answers its first result; two sessions conflict on one dataset and merge across prose', async () => {
+  test.setTimeout(180_000);
+  agentApp = await startApp(PROOF);
+  const { page, agent, launch } = agentApp;
+
+  const created = await agent.ok<Created>('A', 'artifact_create', { kind: 'dashboard', title: '지역별 매출', content: BOARD_MARKDOWN });
+  expect(created.kind).toBe('dashboard');
+  expect(created.viewWarnings).toBeUndefined();
+  const id = created.artifactId;
+  const read = await agent.ok<BoardRead>('A', 'artifact_read', { artifact: id });
+  expect(read.datasets).toEqual([]);
+  let revision = read.revision;
+
+  await test.step('one artifact_dataset call per file binds a CSV, a TSV and a flat JSON array: columns, rows and the live revision', async () => {
+    const csv = await agent.ok<Bound>('A', 'artifact_dataset', { artifact: id, baseRevision: revision, id: 'sales', title: 'Sales', path: await agent.write('A', 'sales.csv', AGENT_CSV) });
+    expect(csv).toMatchObject({ status: 'dataset', id: 'sales', rows: 3, columns: [{ name: 'region', type: 'string' }, { name: 'total', type: 'number' }] });
+    expect(csv.revision).toBe(await revisionOf(page, id));
+    const tsv = await agent.ok<Bound>('A', 'artifact_dataset', { artifact: id, baseRevision: csv.revision, id: 'costs', path: await agent.write('A', 'costs.tsv', 'region\tcost\n서울\t3.5\n부산\t2\n') });
+    expect(tsv).toMatchObject({ rows: 2, columns: [{ name: 'region', type: 'string' }, { name: 'cost', type: 'number' }] });
+    const json = await agent.ok<Bound>('A', 'artifact_dataset', { artifact: id, baseRevision: tsv.revision, id: 'people', path: await agent.write('A', 'people.json', JSON.stringify([{ name: '김', age: 30 }, { name: 'Lee', active: true }])) });
+    expect(json).toMatchObject({ rows: 2, columns: [{ name: 'name', type: 'string' }, { name: 'age', type: 'number' }, { name: 'active', type: 'boolean' }] });
+    expect(json.revision).toBe(await revisionOf(page, id));
+    revision = json.revision;
+    const listed = await agent.ok<BoardRead>('A', 'artifact_read', { artifact: id });
+    expect(listed.datasets.map(({ id: dataset, file, rows, updated }) => ({ id: dataset, file, rows, by: updated.by }))).toEqual([
+      { id: 'costs', file: 'costs.tsv', rows: 2, by: 'this session' },
+      { id: 'people', file: 'people.json', rows: 2, by: 'this session' },
+      { id: 'sales', file: 'sales.csv', rows: 3, by: 'this session' },
+    ]);
+  });
+
+  await test.step('a ragged record is refused naming its physical line and why; 16 MiB + 1 is refused by size; nothing is written', async () => {
+    const assets = async () => (await agent.ok<{ assets: unknown[] }>('A', 'artifact_list_assets', { artifact: id })).assets.length;
+    const before = { revision: await revisionOf(page, id), assets: await assets() };
+    // the first record spans two physical lines (a quoted newline), so the ragged one is on line 4
+    const ragged = await agent.call('A', 'artifact_dataset', { artifact: id, baseRevision: revision, id: 'sales', path: await agent.write('A', 'ragged.csv', 'region,total\n"서울\n중구",120\n부산\n') });
+    expect(refusalOf(ragged)).toMatchObject({ reason: 'invalid', line: 4 });
+    expect(ragged.text).toMatch(/line 4/);
+    const big = await agent.call('A', 'artifact_dataset', { artifact: id, baseRevision: revision, id: 'big', path: await agent.write('A', 'big.csv', new Uint8Array(16 * 1024 * 1024 + 1)) });
+    expect(refusalOf(big)).toMatchObject({ reason: 'tooLarge', size: 16 * 1024 * 1024 + 1 });
+    expect({ revision: await revisionOf(page, id), assets: await assets() }).toEqual(before);
+    expect((await agent.ok<BoardRead>('A', 'artifact_read', { artifact: id })).datasets.map((d) => d.id)).toEqual(['costs', 'people', 'sales']);
+  });
+
+  await test.step('a replay of one tool-use id answers its first result, its file gone since', async () => {
+    const args = { artifact: id, baseRevision: revision, id: 'regions', path: await agent.write('A', 'regions.csv', 'region\n서울\n') };
+    const first = await agent.call<Bound>('A', 'artifact_dataset', args, { toolUseId: 'toolu_dashboard_replay' });
+    expect(first.isError, first.text).toBe(false);
+    rmSync(join(await agent.cwd('A'), 'regions.csv'));
+    const again = await agent.call<Bound>('A', 'artifact_dataset', args, { toolUseId: 'toolu_dashboard_replay' });
+    expect(again.result).toEqual(first.result);
+  });
+
+  await test.step('two sessions replacing `sales` from one base: the second is refused `conflict`; after an unrelated prose edit, a replacement merges', async () => {
+    const base = (await agent.ok<BoardRead>('A', 'artifact_read', { artifact: id })).revision;
+    expect((await agent.ok<BoardRead>('B', 'artifact_read', { artifact: id })).revision).toBe(base);
+    await agent.ok('B', 'artifact_dataset', { artifact: id, baseRevision: base, id: 'sales', path: await agent.write('B', 'sales.csv', 'region,total\n서울,1\n') });
+    const second = await agent.call('A', 'artifact_dataset', { artifact: id, baseRevision: base, id: 'sales', path: await agent.write('A', 'sales-2.csv', 'region,total\n서울,2\n') });
+    expect(refusalOf(second)).toMatchObject({ reason: 'conflict', dataset: 'sales' });
+    const seen = (await agent.ok<BoardRead>('A', 'artifact_read', { artifact: id })).revision;
+    const other = (await agent.ok<BoardRead>('B', 'artifact_read', { artifact: id })).revision;
+    await agent.ok('B', 'artifact_edit', { artifact: id, baseRevision: other, ops: [{ op: 'replace_text', block: 'p1', old: 'this quarter', new: 'in Q4' }] });
+    expect(await revisionOf(page, id)).toBeGreaterThan(seen);
+    const merged = await agent.ok<Bound>('A', 'artifact_dataset', { artifact: id, baseRevision: seen, id: 'sales', path: await agent.write('A', 'sales.csv', AGENT_CSV) });
+    expect(merged.revision).toBe(await revisionOf(page, id));
+    expect((await agent.ok<BoardRead>('A', 'artifact_read', { artifact: id })).markdown).toContain('Revenue by region in Q4.');
+  });
+
+  await test.step('the owner opens it in a main tab: both views draw the bound data under the session-credited source label', async () => {
+    const main = await openInMain(page, id);
+    await expect(figures(main)).toHaveCount(2, { timeout: 15_000 });
+    const bar = figures(main).nth(0);
+    await expect(bar.locator('.dash-figure > svg')).toBeVisible({ timeout: 15_000 });
+    await expect.poll(() => tipsOf(bar), { timeout: 15_000 }).toEqual(AGENT_TIPS);
+    await expect(figures(main).nth(1).locator('.dash-figure > table tbody')).toContainText('제주');
+    await expect(bar.locator('button.dash-source-label')).toHaveText(/^Sales · from sales\.csv · updated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC by Harness A$/);
+    await main.screenshot({ path: `${PROOF}/agent-board.png` });
+  });
+  await agent.release('A');
+  await agent.release('B');
+  expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+test('beside the agent’s views the owner comments on the chart and writes; B’s thread tools answer the block’s thread; the agent’s replacement changes both views, keeping the prose, the comment and the captions, its label the new time and session; a removal keeps the captions', async () => {
+  test.setTimeout(240_000);
+  agentApp = await startApp(PROOF);
+  const { page, agent, launch } = agentApp;
+  await pinArtifactsTool(page);
+  const { artifactId: id, revision } = await agent.ok<Created>('A', 'artifact_create', { kind: 'dashboard', title: 'Owner and agent', content: BOARD_MARKDOWN });
+  await agent.ok<Bound>('A', 'artifact_dataset', { artifact: id, baseRevision: revision, id: 'sales', title: 'Sales', path: await agent.write('A', 'sales.csv', AGENT_CSV) });
+  const record = await openInPanel(page, id);
+  const views = figures(record);
+  await expect(views).toHaveCount(2, { timeout: 15_000 });
+  await expect(views.nth(0).locator('.dash-figure > svg')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(() => tipsOf(views.nth(0)), { timeout: 15_000 }).toEqual(AGENT_TIPS);
+  const firstLabel = (await views.nth(0).locator('button.dash-source-label').textContent())!;
+  expect(firstLabel).toMatch(/ by Harness A$/);
+  const chartBlock = record.locator('.doc-chart').first();
+
+  let threadId = '';
+  await test.step('the owner comments on the chart block, replies in the rail and writes beside it', async () => {
+    const watched = await watchSelection(record);
+    await selectChart(record);
+    await commentSelectedChart(record, watched);
+    const card = page.locator('[data-comment-card]');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-anchor-locator', 'chart: Sales by region');
+    await expect.poll(async () => (await chartBlock.getAttribute('class'))?.match(/\bcomment-(?!active\b)([\w-]+)/)?.[1] ?? '').not.toBe('');
+    threadId = (await chartBlock.getAttribute('class'))!.match(/\bcomment-(?!active\b)([\w-]+)/)![1]!;
+    // kept the owner's way, as the comments group keeps it: Resolve on the card, Reopen and a reply in the rail
+    await card.getByRole('button', { name: 'Resolve' }).click();
+    await expect(card).toHaveCount(0);
+    const rail = await railOf(record);
+    await rail.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
+    await reply(rail, threadId, 'Is Jeju this low every quarter?');
+    await expect(rail.locator(`article[data-thread="${threadId}"]`).getByRole('listitem')).toHaveText(['YouIs Jeju this low every quarter?']);
+    const prose = record.locator('.ds-doc .ProseMirror p', { hasText: 'Revenue by region this quarter.' });
+    await prose.click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' Owner: compare with last year.');
+    await expect(prose).toHaveText('Revenue by region this quarter. Owner: compare with last year.');
+    await durable(record);
+  });
+
+  await test.step('B’s thread tools answer the block’s thread: listed with its view locator, replied to, resolved and reopened', async () => {
+    const listed = await agent.ok<{ threads: { threadId: string; quote: string; block: string | null; orphaned: boolean; messages: { body: string }[] }[] }>('A', 'artifact_comments', { artifact: id });
+    const thread = listed.threads.find((t) => t.threadId === threadId);
+    expect(thread).toMatchObject({ quote: 'chart: Sales by region', orphaned: false, block: 'c1' });
+    expect(thread!.messages.map((m) => m.body)).toEqual(['Is Jeju this low every quarter?']);
+    expect(await agent.ok('A', 'artifact_reply', { artifact: id, threadId, body: 'Yes: visitors peak in summer.' })).toMatchObject({ status: 'replied' });
+    const rail = await railOf(record);
+    const item = rail.locator(`article[data-thread="${threadId}"]`);
+    await expect(item.getByRole('listitem')).toHaveText(['YouIs Jeju this low every quarter?', /Yes: visitors peak in summer\.$/], { timeout: 15_000 });
+    expect(await agent.ok('A', 'artifact_resolve', { artifact: id, threadId })).toMatchObject({ status: 'resolved' });
+    await expect(rail.getByRole('region', { name: /Resolved/ }).locator(`article[data-thread="${threadId}"]`)).toHaveAttribute('data-status', 'resolved', { timeout: 15_000 });
+    expect(await agent.ok('A', 'artifact_resolve', { artifact: id, threadId, reopen: true })).toMatchObject({ status: 'reopened' });
+    await expect(item).toHaveAttribute('data-status', 'open', { timeout: 15_000 });
+  });
+
+  await test.step('session B replaces `sales` with new bytes: both views change; the prose, the comment and the captions stay; the label names the new time and session B', async () => {
+    // a later UTC minute than the first bind's, so the label's time visibly moves
+    for (const deadline = Date.now() + 65_000; new Date().toISOString().slice(0, 16).replace('T', ' ') === minuteOf(firstLabel) && Date.now() < deadline; ) await page.waitForTimeout(1_000);
+    const base = (await agent.ok<BoardRead>('B', 'artifact_read', { artifact: id })).revision;
+    await agent.ok<Bound>('B', 'artifact_dataset', { artifact: id, baseRevision: base, id: 'sales', path: await agent.write('B', 'sales.csv', REPLACED_CSV) });
+    await expect.poll(() => tipsOf(views.nth(0)), { timeout: 15_000, message: 'the chart draws the new snapshot' }).toEqual(['서울 · total: 310', '부산 · total: 280', '제주 · total: 250']);
+    await expect(views.nth(1).locator('.dash-figure > table tbody')).toContainText('310');
+    const label = views.nth(0).locator('button.dash-source-label');
+    await expect(label).toHaveText(/^Sales · from sales\.csv · updated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC by Harness B$/);
+    expect(minuteOf((await label.textContent())!), 'the label shows the replacement’s time').not.toBe(minuteOf(firstLabel));
+    await expect(record.locator('.ds-doc .ProseMirror p', { hasText: 'Owner: compare with last year.' })).toHaveCount(1);
+    await expect(views.nth(0).locator('.dash-caption')).toHaveText('Sales by region');
+    await expect(chartBlock).toHaveClass(new RegExp(`\\bcomment-${threadId}\\b`));
+    await record.screenshot({ path: `${PROOF}/agent-replaced.png` });
+  });
+
+  await test.step('a removal draws both views as `no dataset "sales"`, their captions kept', async () => {
+    const base = (await agent.ok<BoardRead>('A', 'artifact_read', { artifact: id })).revision;
+    await agent.ok('A', 'artifact_dataset', { artifact: id, baseRevision: base, id: 'sales', remove: true });
+    for (const k of [0, 1]) await expect(views.nth(k).locator('.dash-source-label')).toHaveText('no dataset "sales"', { timeout: 15_000 });
+    await expect(views.nth(0).locator('.dash-caption')).toHaveText('Sales by region');
+    await expect(views.nth(1).locator('.dash-caption')).toHaveText('Sales table');
+    await expect(chartBlock).toHaveClass(new RegExp(`\\bcomment-${threadId}\\b`));
+    await record.screenshot({ path: `${PROOF}/agent-removed.png` });
+  });
+  expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+test('every dataset state draws in place from a fixture: a missing column, an unreadable snapshot, mixed types, an error, a stale and a paused source, and no dataset', async () => {
+  test.setTimeout(120_000);
+  agentApp = await startApp(PROOF);
+  const { page, agent, launch } = agentApp;
+  const at = Date.UTC(2026, 9, 1, 9, 0);
+  const STATES: [string, Record<string, unknown>][] = [
+    ['missing', { view: 'bar', x: 'region', y: 'revenue', title: 'A missing column' }],
+    ['broken', { view: 'bar', x: 'region', y: 'total', title: 'An unreadable snapshot' }],
+    ['mixed', { view: 'bar', x: 'region', y: 'total', title: 'Mixed types' }],
+    ['failing', { view: 'bar', x: 'region', y: 'total', title: 'An error' }],
+    ['stale', { view: 'bar', x: 'region', y: 'total', title: 'A stale source' }],
+    ['paused', { view: 'bar', x: 'region', y: 'total', title: 'A paused source' }],
+    ['nothing', { view: 'bar', x: 'region', y: 'total', title: 'No dataset' }],
+  ];
+  const content = ['# States ^h1', '', ...STATES.flatMap(([dataset, spec], k) => chartFence(dataset, spec, `v${k}`))].join('\n');
+  const { artifactId: id, revision } = await agent.ok<Created>('A', 'artifact_create', { kind: 'dashboard', title: 'States', content });
+  // mixed types and the missing column through the agent's own binds: the host keeps the text and counts it
+  const mixed = await agent.ok<Bound>('A', 'artifact_dataset', { artifact: id, baseRevision: revision, id: 'mixed', title: 'Mixed', path: await agent.write('A', 'mixed.csv', 'region,total\n서울,120\n부산,n/a\n제주,40\n') });
+  expect(mixed.columns).toEqual([{ name: 'region', type: 'string' }, { name: 'total', type: 'number', mismatches: 1 }]);
+  await agent.ok('A', 'artifact_dataset', { artifact: id, baseRevision: mixed.revision, id: 'missing', title: 'Sales', path: await agent.write('A', 'sales.csv', AGENT_CSV) });
+  // the states E3's query lifecycle writes (error, stale, paused), as their descriptors hold them, and a snapshot whose
+  // bytes no longer read as the descriptor's format
+  await bindCsv(page, id, 'failing', { title: 'Sales', name: 'sales.csv', csv: AGENT_CSV, at, state: { status: 'error', message: 'the source answered 503', at } });
+  await bindCsv(page, id, 'stale', { title: 'Sales', name: 'sales.csv', csv: AGENT_CSV, at, state: { status: 'stale', at } });
+  await bindCsv(page, id, 'paused', { title: 'Sales', name: 'sales.csv', csv: AGENT_CSV, at, state: { status: 'paused', at } });
+  await bindCsv(page, id, 'broken', { title: 'Broken', name: 'broken.csv', csv: 'region,total\n서울\n', shape: AGENT_CSV, at });
+
+  const main = await openInMain(page, id);
+  const views = figures(main);
+  await expect(views).toHaveCount(STATES.length, { timeout: 15_000 });
+  const frame = (k: number) => views.nth(k).locator('.dash-figure');
+  const label = (k: number) => views.nth(k).locator('.dash-source-label');
+  const TIME = 'updated 2026-10-01 09:00 UTC by You';
+  await expect(frame(0)).toContainText('dataset "missing" has no column "revenue"', { timeout: 15_000 });
+  await expect(frame(1)).toContainText('the file of "broken" could not be read', { timeout: 15_000 });
+  await expect(views.nth(2).locator('.dash-notes')).toContainText('1 of 3 values in total are not number', { timeout: 15_000 });
+  await expect(label(3)).toHaveText(`Sales · from sales.csv · ${TIME} · the source answered 503`);
+  await expect(label(4)).toHaveText(`Sales · from sales.csv · ${TIME} · stale since 2026-10-01 09:00 UTC`);
+  await expect(label(5)).toHaveText(`Sales · from sales.csv · ${TIME} · paused: no live session`);
+  await expect(label(6)).toHaveText('no dataset "nothing"');
+  for (let k = 0; k < STATES.length; k++) await expect(views.nth(k).locator('.dash-caption')).toHaveText(String(STATES[k]![1].title));
+  await main.screenshot({ path: `${PROOF}/states.png` });
+  expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });

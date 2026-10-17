@@ -80,6 +80,27 @@ describe('the chart view', () => {
     expect(w.readDataset).toHaveBeenCalledWith('dash1', 'assets/sales.csv', { format: 'csv' });
   });
 
+  it('times each drawing as a `dash:view` User Timing entry naming its dataset and caption, and keeps none in the timeline (E2 M6)', async () => {
+    const measure = vi.spyOn(performance, 'measure');
+    const cleared = vi.spyOn(performance, 'clearMeasures');
+    try {
+      const doc = newDoc();
+      setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+      mount(world().renderChart, doc);
+      await settle();
+      const calls = measure.mock.calls.filter(([name]) => name === 'dash:view');
+      expect(calls).toHaveLength(1);
+      const options = calls[0]![1] as PerformanceMeasureOptions;
+      expect(options.detail).toEqual({ dataset: 'sales', caption: 'Sales by region' });
+      expect(options.end! - (options.start as number)).toBeGreaterThanOrEqual(0);
+      expect(cleared).toHaveBeenCalledWith('dash:view');
+      expect(performance.getEntriesByName('dash:view')).toEqual([]);
+    } finally {
+      measure.mockRestore();
+      cleared.mockRestore();
+    }
+  });
+
   it('redraws on a replacement, never letting an earlier snapshot\'s late read paint over it', async () => {
     const doc = newDoc();
     setDataset(doc, 'sales', descriptor('assets/sales.csv'));

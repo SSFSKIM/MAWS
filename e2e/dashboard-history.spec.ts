@@ -112,6 +112,8 @@ test('a replacement-only agent change counts, marks and steps after a host resta
     await expect(entry).toBeVisible();
     await expect(entry).toHaveAttribute('data-current', '');
     await expect(main.locator('.ProseMirror[data-editor="preview"] .doc-change-current')).toHaveCount(0);
+    // M6 (the tracker's unbound-stop row): the table reached before keeps no block selection outline
+    await expect(main.locator('.ProseMirror[data-editor="preview"] .ProseMirror-selectednode')).toHaveCount(0);
     await main.screenshot({ path: `${PROOF}/history-steps.png` });
     await bar.getByRole('button', { name: 'Next change' }).click(); // wraps to the chart
     await expect(previewed.nth(0)).toHaveClass(/\bdoc-change-current\b/);
@@ -128,11 +130,32 @@ test('a replacement-only agent change counts, marks and steps after a host resta
     await expect(bar).toBeVisible({ timeout: 15_000 });
     await showsOld(previewed(main));
     await main.screenshot({ path: `${PROOF}/history-preview-old.png` });
+    // M6 (the displayed document, E2's Decision Log 12 and 17): the header's Datasets inspects the version shown, its
+    // old snapshot's rows, not the live one's; back on the document it inspects the live snapshot
+    const sourceRows = async () => {
+      await page.locator('[data-region="main"] [data-editor-header]').getByRole('button', { name: 'More actions' }).click();
+      await page.getByRole('menuitemcheckbox', { name: 'Datasets' }).click();
+      const sheet = page.getByRole('dialog').filter({ has: page.getByRole('combobox', { name: 'Dataset' }) });
+      await expect(sheet).toBeVisible();
+      await sheet.getByRole('combobox', { name: 'Dataset' }).selectOption({ label: 'Sales (sales)' });
+      const rows = sheet.getByRole('table', { name: 'Rows' });
+      await expect(rows).toHaveAttribute('aria-rowcount', '3');
+      const text = (await rows.textContent()) ?? '';
+      await page.keyboard.press('Escape');
+      await expect(sheet).toBeHidden();
+      return text;
+    };
+    const versionRows = await sourceRows();
+    expect(versionRows).toContain('10');
+    expect(versionRows).not.toContain('30');
 
     await bar.getByRole('button', { name: 'Make a copy' }).click();
     await expect(rail.getByRole('status')).toHaveText('A copy of this version was made.', { timeout: 15_000 });
     await bar.getByRole('button', { name: 'Back to document' }).click();
     await showsNew(live(main));
+    const liveRows = await sourceRows();
+    expect(liveRows).toContain('30');
+    expect(liveRows).not.toContain('10');
   });
 
   await test.step('Restore brings the old snapshot back as a new version; a closed and reopened tab keeps it', async () => {

@@ -11,7 +11,8 @@
 //   declares the face and the PDF embeds it (pdffonts).
 // - The agent's `artifact_export` through the real `maws` server (a recorded session replayed, its five calls a create
 //   and the four formats) writes all four.
-// - The owner's comment on a chart, replied to in the rail, is a Word comment on the view's caption, resolved as it is.
+// - The owner's comment on a chart, replied to in the rail, is a Word comment on the view's caption, resolved as it is;
+//   M6: with the chart the last block written (its selection watched, the tracker's last-block row).
 // Evidence (the files, the standalone page's picture, the PDF's first page) goes to test-results/dashboard-proof/.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -19,7 +20,7 @@ import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import JSZip from 'jszip';
 import { asDocumentReplay } from './support/document-replay';
-import { bindCsv, chart, durable, figures, insertBlocks, ok, openInMain, openInPanel, paragraph, pinArtifactsTool, railOf, reply, selectChart, SESSION_A, startApp, type DashboardApp } from './support/dashboards';
+import { bindCsv, chart, commentSelectedChart, durable, figures, insertBlocks, ok, openInMain, openInPanel, paragraph, pinArtifactsTool, railOf, reply, selectChart, SESSION_A, startApp, watchSelection, type DashboardApp } from './support/dashboards';
 import { allowNext, idle, mcpCalls, mcpResultOf, PASS3, recordedCwd, replay, resultText, scene, show } from './support/maws-tools';
 
 const PROOF = 'test-results/dashboard-proof';
@@ -298,13 +299,21 @@ test('the owner’s comment on a chart, replied to in the rail, is a Word commen
   const id = artifact.id;
   const record = await openInPanel(page, id);
   await bindCsv(page, id, 'sales', { title: 'Sales', name: 'sales.csv', csv: 'region,total\nNorth,10\nSouth,20\nWest,15\n', at: OLD.at });
-  await insertBlocks(record, [paragraph('Sales rose in every region.'), chart('sales', { view: 'bar', x: 'region', y: 'total', title: 'Sales by region' }), paragraph('Notes follow.')]);
+  // M6: the layout M5's first correction run failed on (38983757083), restored: the chart is the last block the owner
+  // wrote, the editor's trailing paragraph empty after it (the tracker's last-block row); the selection is watched from
+  // the click to Comment, its log kept as evidence and given in any failure
+  await insertBlocks(record, [paragraph('Sales rose in every region.'), chart('sales', { view: 'bar', x: 'region', y: 'total', title: 'Sales by region' })]);
   await expect(figures(record).first().locator('.dash-figure > svg')).toBeVisible({ timeout: 15_000 });
   const chartBlock = record.locator('.doc-chart');
+  const layout = await record.locator('.ds-doc .ProseMirror').first().evaluate((el) => Array.from(el.children, (child) => `${child.tagName.toLowerCase()}${child.textContent ? ' text' : ' empty'}${child.classList.contains('doc-chart') ? ' chart' : ''}`));
+  expect(layout.slice(-2), 'the chart the last block written, an empty paragraph after it').toEqual(['div text chart', 'p empty']);
 
   // the owner's comment on the chart, kept the owner's way (Resolve on the card, Reopen in the rail), and a reply
+  const watched = await watchSelection(record);
   await selectChart(record);
-  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+  await page.waitForTimeout(1_500); // the selection must hold, not only be reached
+  await commentSelectedChart(record, watched);
+  writeFileSync(`${PROOF}/last-block-selection.txt`, `${layout.join('\n')}\n----\n${(await watched.log()).join('\n')}\n`);
   const card = page.locator('[data-comment-card]');
   await expect(card).toBeVisible();
   await expect.poll(async () => (await chartBlock.getAttribute('class'))?.match(/\bcomment-(?!active\b)([\w-]+)/)?.[1] ?? '').not.toBe('');
