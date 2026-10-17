@@ -16,7 +16,7 @@
 // the replayed session ends, answering `rows` and `output`. The defaults (`TWO_SUBAGENTS`, `dc3`) are DC6's.
 import type { SessionMessage } from 'desk-hub/protocol';
 import { loadRecording, SessionDepth, TWO_SUBAGENTS, type Producer, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
-import type { JsonObject, Raised } from 'desk-hub/protocol';
+import type { JsonObject, Raised, TaskOutput } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
 
 export class FakeMachineReplay {
@@ -24,6 +24,8 @@ export class FakeMachineReplay {
   readonly depth: SessionDepth;
   /** How many steps of the timeline have been applied. */
   played = 0;
+  /** An `output` answer a suite puts in the machine's place for a task (a race the recording cannot stage); else none. */
+  answerOutput: ((taskId: string) => TaskOutput | null) | null = null;
   /** The next subscription's snapshot hooks (`raceNextSnapshot`'s `advance` and `overlap`) and its scope, used once. */
   private nextSnapshot: { agentId: string | null; options: SnapshotOptions } | null = null;
   private cursor = 0;
@@ -32,9 +34,10 @@ export class FakeMachineReplay {
   constructor(
     private readonly hub: HubDouble,
     readonly where: { project: string; machine: string },
-    options: { recording?: string; producer?: Producer } = {},
+    options: { recording?: string | Recording; producer?: Producer } = {},
   ) {
-    this.recording = loadRecording(options.recording ?? TWO_SUBAGENTS);
+    // A recording by its directory, or one a suite built in memory (a recorded one with rows of its own appended).
+    this.recording = typeof options.recording === 'object' ? options.recording : loadRecording(options.recording ?? TWO_SUBAGENTS);
     this.depth = new SessionDepth(this.recording.session, this.recording, (message) => this.relay(message), where, true, 'main', options.producer ?? 'dc3');
     this.hub.diffs.set(this.recording.session, { base: 'main', text: this.depth.diffText });
     this.timer = setInterval(() => this.poll(), 5);
@@ -133,7 +136,11 @@ export class FakeMachineReplay {
         void this.depth.subscribe(frame.sub, frame.agentId, raced?.options ?? {});
       } else if (frame.t === 'unsubscribe') this.depth.end(frame.sub, 'unsubscribed');
       else if (frame.t === 'rows') this.depth.page(frame.sub, frame.before, frame.limit);
-      else if (frame.t === 'output') this.depth.output(frame.sub, frame.taskId, frame.tail);
+      else if (frame.t === 'output') {
+        const forced = this.answerOutput?.(frame.taskId);
+        if (forced) this.hub.sendSub(this.where.project, frame.sub, 'output', forced);
+        else this.depth.output(frame.sub, frame.taskId, frame.tail);
+      }
     }
   }
 }

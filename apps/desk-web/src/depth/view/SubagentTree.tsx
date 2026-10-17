@@ -2,10 +2,11 @@
 // `tools/agents/subagents/AgentList.tsx`, copied and adapted — over the tree the main subscription gives
 // (`agents/task-feed.ts`). Its sections, rows, and copy are MAWS's: **Agents**, the running roots with their subtrees
 // (a running parent's finished children folded under one `Done · N`); **Done**, the finished roots newest end first,
-// collapsed until opened; **On disk**, agents whose status the held rows do not say. What MAWS's list draws from its own
-// host is left out, since the desk has no source for it: the team roster (MAWS's transcript activity of teammate
-// listings), an agent waiting on a request (MAWS's attention store), and the live footer and disk-only note (MAWS's
-// engine status). A row opens the agent's own transcript. A section's heading carries MAWS's disclosure chevron (its
+// collapsed until opened; **On disk**, agents whose status the held rows do not say — or, from a producer of DC8 or
+// later, which carries every agent's status (`agents/task-feed.ts`), **Status unavailable**: the few DX4 leaves
+// unknown. What MAWS's list draws from its own host is left out, since the desk has no source for it: the team roster
+// (MAWS's transcript activity of teammate listings), an agent waiting on a request (MAWS's attention store), and the
+// live footer and disk-only note (MAWS's engine status). A row opens the agent's own transcript. A section's heading carries MAWS's disclosure chevron (its
 // transcript's, turned while open), which MAWS's list draws without: the tree is the column's first tab, and a closed
 // Done must read as closed, not as empty.
 import type { TaskId } from '@shared/graph/ids';
@@ -36,16 +37,20 @@ type Props = {
   view: TreeView;
   onView: (view: TreeView) => void;
   onOpen: (agentId: string) => void;
+  /** The machine sends each agent's status (DC8 or later): what is left unknown is said to be, not to be on disk. */
+  statusesKnown?: boolean;
 };
 
-export function SubagentTree({ tasks, view, onView, onOpen }: Props) {
+export const statusUnavailableHeading = (n: number) => `Status unavailable · ${n}`;
+
+export function SubagentTree({ tasks, view, onView, onOpen, statusesKnown = false }: Props) {
   const tree = agentTree(tasks);
   const rows: Record<TreeSection, TreeRow[]> = {
     agents: shownRows(tree.agents, view.folds),
     done: tree.done,
     disk: agentRows(tasks, 'disk').map((row): TreeRow => ({ kind: 'agent', ...row, foldedUnder: null })),
   };
-  const headings: Record<TreeSection, string> = { agents: SUBAGENTS_COPY.agents(tree.running), done: SUBAGENTS_COPY.done(rows.done.length), disk: SUBAGENTS_COPY.onDisk(rows.disk.length) };
+  const headings: Record<TreeSection, string> = { agents: SUBAGENTS_COPY.agents(tree.running), done: SUBAGENTS_COPY.done(rows.done.length), disk: (statusesKnown ? statusUnavailableHeading : SUBAGENTS_COPY.onDisk)(rows.disk.length) };
   const boundOf = (name: TreeSection) => (name === 'disk' ? rows.disk.length : view.shown[name]);
   const visible = SECTIONS.flatMap((name) => (view.expanded[name] ? rows[name].slice(0, boundOf(name)) : []));
   const nodeOf = (row: TreeRow) => (row.kind === 'agent' ? tasks.tasks.get(row.taskId) : undefined);

@@ -22,7 +22,14 @@
 // The subagent tree. The same rows, mapped once more under a context of the tree's own (so it never waits for the view
 // to attach a source), feed MAWS's task graph beside the subscription's `subagents` metas (`agents/task-feed.ts`): it
 // is rebuilt whenever the transcript is, and follows each row and each `subagents` message in between. A main-thread
-// subscription carries the session's tree; a subagent's, that agent's own.
+// subscription carries the session's tree; a subagent's, that agent's own. The tree the rows and metas build is kept
+// apart from the one published, which lays each agent's status (DX4, a producer of DC8 or later) over it.
+//
+// Jobs (DC9 M5). The same `subagents` body, from a producer of DC8 or later, carries the loop's background jobs and
+// MCP server names (absent from an older one: null here), and a job's output is asked for on the subscription and
+// answered as an `output` message (`jobs/output-requests.ts`, which also asks again what a reset or an end lost).
+//
+// An interrupted turn ends at the engine's marker row (`interrupt.ts`), in the mapping every rule above shares.
 //
 // Beside the transcript (M3). A main-thread subscription carries the session's context use and cost (DX4 `usage`, in the
 // snapshot and after each main turn) and answers `diff()` with the working tree's diff against its base branch: both
@@ -37,7 +44,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, TranscriptRecordSchema } from '@shared/wire/transcript';
-import type { JsonObject, SessionBodies, SubagentMeta, Usage } from 'desk-hub/protocol';
+import type { Job, JsonObject, McpServer, SessionBodies, SubagentMeta, Usage } from 'desk-hub/protocol';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { createBackfillContext, recordToEvents, type BackfillContext, type SubagentLookup } from '../../../../../src/engine-host/fs/backfill';
 import type { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
@@ -45,8 +52,10 @@ import { emptyGraph, type TaskGraph } from '../../../../../src/renderer/src/tool
 import type { TranscriptSource } from '../../../../../src/renderer/src/transcript/source/types';
 import { transcriptKey, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionMessage } from '../../shell/session-plane';
 import { noteModel } from '../../state/models';
-import { taskGraphOf, withEvents, withMetas } from '../agents/task-feed';
+import { taskGraphOf, withEvents, withMetas, withStatuses } from '../agents/task-feed';
+import { OutputRequests } from '../jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
+import { normalizeInterruptRow, withInterruptEnd } from './interrupt';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
 export type TranscriptStoreApi = Pick<ReturnType<typeof createTranscriptStore>, 'getState' | 'subscribe'>;
@@ -66,8 +75,11 @@ export type DepthTranscriptState = {
   /** Older rows exist before the oldest held one. */
   more: boolean;
   loadingOlder: boolean;
-  /** The subagent tree this subscription knows: MAWS's task graph over its metas and its held rows. */
+  /** The subagent tree this subscription knows: MAWS's task graph over its metas and its held rows, each agent's DX4 status laid over it. */
   tasks: TaskGraph;
+  /** The loop's background jobs and MCP server names (DX4 `subagents`); null until a producer of DC8 or later sends them. */
+  jobs: Job[] | null;
+  mcp: McpServer[] | null;
   /**
    * The session's context use and cost (DX4 `usage`), a main-thread subscription's only: undefined until its snapshot
    * (and after a reset, until the fresh one), null when the session has no bridge or none has come yet.
@@ -115,12 +127,14 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
  * One row's X1 events under a backfill context; a row that is not a transcript record yields none. A turn that a
  * message from the session's own subagent opens (its hand-back, an `<agent-message>` of the peer origin, which MAWS's
  * backfill reads as a `subagent.message`) is the session woken by its subagent, not a peer session's: it takes the
- * engine's origin, whose divider MAWS reads as "Continued for …", as it reads a task notification's turn.
+ * engine's origin, whose divider MAWS reads as "Continued for …", as it reads a task notification's turn. An interrupt
+ * marker ends the turn it interrupted, the bridge's record of one read as its marker line alone (`interrupt.ts`).
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
-  const record = TranscriptRecordSchema.safeParse(row);
+  const mapped = normalizeInterruptRow(row);
+  const record = TranscriptRecordSchema.safeParse(mapped);
   if (!record.success) return [];
-  const events = recordToEvents(record.data, ctx);
+  const events = withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx);
   if (!events.some((event) => event.kind === 'subagent.message')) return events;
   return events.map((event) => (event.kind === 'turn.started' && event.origin === 'peer' ? { ...event, origin: 'task-notification' } : event));
 }
@@ -209,6 +223,8 @@ export class DeskTranscript {
   /** Held rows whose mapping gave no event under the row's own uuid: in the store as soon as they are mapped. */
   private readonly silent = new Set<string>();
   private metas: readonly SubagentMeta[] = [];
+  /** The tree the held rows and metas build, before each agent's DX4 status is laid over it (`tasks` in the state). */
+  private heldTasks: TaskGraph = emptyGraph();
   private subagents: SubagentLookup = subagentLookupOf([]);
   /** The tree's own backfill context, continued by each row after the held ones; null until a snapshot. */
   private treeContext: BackfillContext | null = null;
@@ -232,6 +248,12 @@ export class DeskTranscript {
   private served = false;
   private source: RowsSource;
   private offStore: (() => void) | null = null;
+  /** The jobs view's open outputs, asked for on this subscription (a main-thread one's). */
+  readonly outputs = new OutputRequests((taskId, tail) => {
+    if (!this.served || this.subscription === null) return false;
+    this.subscription.output(taskId, tail);
+    return true;
+  });
 
   constructor(options: DeskTranscriptOptions) {
     this.plane = options.plane;
@@ -249,6 +271,8 @@ export class DeskTranscript {
       more: false,
       loadingOlder: false,
       tasks: emptyGraph(),
+      jobs: null,
+      mcp: null,
       usage: undefined,
       diff: null,
       model: null,
@@ -268,6 +292,7 @@ export class DeskTranscript {
     this.subscription = null;
     this.offStore?.();
     this.offStore = null;
+    this.outputs.clear();
   }
 
   /** After an `end` other than a reset: subscribe again; the fresh snapshot takes up from what is drawn. */
@@ -336,6 +361,7 @@ export class DeskTranscript {
       reset: () => this.reset(),
       end: (body) => {
         this.subscription = null;
+        this.outputs.lost();
         this.state.setState({ phase: 'ended', ended: body, loadingOlder: false });
       },
     });
@@ -361,7 +387,9 @@ export class DeskTranscript {
     this.served = true;
     this.snapshotted.resolve();
     this.state.setState({ phase: 'live', ended: null, more, loadingOlder: false, usage: this.target.agentId === null ? (body.usage ?? null) : undefined });
+    this.setJobs(body);
     if (this.state.getState().diff?.pending) this.subscription?.diff(); // a request the reset or end lost
+    this.outputs.resend(); // the outputs the reset or end lost
     this.publish();
   }
 
@@ -384,7 +412,10 @@ export class DeskTranscript {
       case 'rows':
         return this.older(message.body);
       case 'subagents':
-        return this.metadata(message.body.subagents);
+        this.metadata(message.body.subagents);
+        return this.setJobs(message.body);
+      case 'output':
+        return this.outputs.answer(message.body);
       case 'usage':
         if (this.target.agentId === null) this.state.setState({ usage: message.body });
         return;
@@ -400,7 +431,7 @@ export class DeskTranscript {
     const model = modelOf(row);
     if (model !== null && model !== this.state.getState().model) this.setModel(model);
     this.source.live(row);
-    if (this.treeContext !== null) this.state.setState({ tasks: withEvents(this.state.getState().tasks, eventsOf(row, this.treeContext)) });
+    if (this.treeContext !== null) this.setTree(withEvents(this.heldTasks, eventsOf(row, this.treeContext)));
     this.publish();
   }
 
@@ -410,7 +441,13 @@ export class DeskTranscript {
     const resolved = [...this.unresolved].filter((toolUseId) => this.subagents.byToolUseId(toolUseId) !== null);
     for (const toolUseId of resolved) this.unresolved.delete(toolUseId);
     if (resolved.length > 0 && this.served) this.rebuild();
-    else this.state.setState({ tasks: withMetas(this.state.getState().tasks, subagents) });
+    else this.setTree(withMetas(this.heldTasks, subagents));
+  }
+
+  /** The jobs and MCP names a snapshot or `subagents` message carries; a producer older than DC8 sends neither. */
+  private setJobs({ jobs, mcp }: { jobs?: Job[]; mcp?: McpServer[] }): void {
+    this.state.setState({ jobs: jobs ?? null, mcp: mcp ?? null });
+    if (jobs !== undefined) this.outputs.jobs(jobs);
   }
 
   private older(body: SessionBodies['rows']): void {
@@ -431,7 +468,9 @@ export class DeskTranscript {
     this.unresolved.clear();
     this.metas = [];
     this.treeContext = null;
-    this.state.setState({ phase: 'reconnecting', ended: null, more: false, loadingOlder: false, streaming: [], tasks: emptyGraph(), usage: undefined });
+    this.heldTasks = emptyGraph();
+    this.outputs.lost();
+    this.state.setState({ phase: 'reconnecting', ended: null, more: false, loadingOlder: false, streaming: [], tasks: this.heldTasks, jobs: null, mcp: null, usage: undefined });
     this.source.reset();
     for (const listener of [...this.resets]) listener(); // MAWS's store empties the key and hydrates it again
   }
@@ -447,7 +486,13 @@ export class DeskTranscript {
   private retree(): void {
     const ctx = this.newContext();
     this.treeContext = ctx;
-    this.state.setState({ tasks: taskGraphOf(this.metas, this.rows.flatMap((row) => eventsOf(row, ctx))) });
+    this.setTree(taskGraphOf(this.metas, this.rows.flatMap((row) => eventsOf(row, ctx))));
+  }
+
+  /** The tree as the held rows and metas build it, published with each agent's DX4 status laid over it. */
+  private setTree(held: TaskGraph): void {
+    this.heldTasks = held;
+    this.state.setState({ tasks: withStatuses(held, this.metas) });
   }
 
   /** The transcript's latest response came from `model`: the session info names it, and the pickers offer it. */
