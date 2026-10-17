@@ -9,17 +9,20 @@
 // turn as stopped. A `turn_duration` that follows names the turn already closed and, with no other turn open, MAWS's
 // reducer keeps it loose, ending nothing.
 //
-// Only those two rows end a turn, recognized strictly, since MAWS's `INTERRUPT_MARKER` admits any bracketed words after
-// "interrupted by user" and reads no origin:
-// - the engine's marker: a user row, not meta, with no `origin` (a typed prompt carries `origin.kind`), its one text
-//   block exactly one of the engine's two forms;
-// - the bridge's record (`hooks/mods/bridge.tsx` `interruptText`, appended with `$.session.append`, which the engine
-//   stores as a meta user row of text blocks with the plugin's origin, 2.1.300 `cli.pretty.js:1462`): one text block
-//   whose first line is one of the bridge's two marker lines and whose other lines, if any, are each one of the bridge's
-//   own "Task …" lines for a Bash call the interrupt stopped or could not stop.
-// A typed prompt, a steer (the bridge's steers are appended rows too, but not with the bridge's lines alone) or a
-// delivery frame carrying the same words never ends one. Residual: a steer whose whole text is the bridge's record is
-// indistinguishable from it.
+// Only these rows end a turn, recognized strictly, since MAWS's `INTERRUPT_MARKER` admits any bracketed words after
+// "interrupted by user" and reads no origin. The bridge's rows are appended with `$.session.append`, which the engine
+// stores as meta user rows of text blocks with the plugin's origin (2.1.300 `cli.pretty.js:1462`):
+// - the engine's marker, one text block exactly one of the engine's two forms, on a user row with no `origin` and not
+//   meta (Esc; a typed prompt carries `origin.kind`), or on the bridge's meta row (the bridge's interrupt from
+//   doperpowers #225 on, which writes the marker alone and then a note row, "The interrupt came from …", with a line
+//   per background task; the note is meta, so neither a prompt nor a bubble, and ends nothing);
+// - the bridge's record before #225 (`interruptText`), kept for the history that holds it and the plugins that still
+//   write it: on the bridge's meta row, one text block whose first line is one of its two marker lines ("… from the
+//   desk]", "… from outside the terminal]") and whose other lines, if any, are each one of its own "Task …" lines for a
+//   Bash call the interrupt stopped or could not stop.
+// A typed prompt, another plugin's row, or a row whose lines are not those never ends one, nor does a delivery frame.
+// Residual (the composite's writer's ruling, tech debt): a steer through a plugin older than #225 whose whole text is
+// one of these, since the bridge's steers are the same meta rows; #225's steer refuses such a text.
 //
 // The bridge's record with "Task …" lines is multi-line, so MAWS's marker rule misses it. Its mapping takes it
 // normalized (`normalizeInterruptRow`, before MAWS's backfill sees it): its marker line alone, so the backfill reads the
@@ -49,16 +52,23 @@ function singleText(row: JsonObject): string | null {
 
 const isUserRow = (row: JsonObject) => row.type === 'user';
 
+/** The bridge's own appended row: meta, with the plugin's origin. */
+function isBridgeRow(row: JsonObject): boolean {
+  const origin = row.origin as { kind?: unknown; name?: unknown } | null | undefined;
+  return isUserRow(row) && row.isMeta === true && origin?.kind === 'plugin' && origin.name === BRIDGE_PLUGIN;
+}
+
+/** The engine's marker text, written by the engine (Esc) or by the bridge. */
 function isEngineMarker(row: JsonObject): boolean {
-  if (!isUserRow(row) || row.isMeta === true || row.origin != null) return false;
+  const engines = isUserRow(row) && row.isMeta !== true && row.origin == null;
+  if (!engines && !isBridgeRow(row)) return false;
   const text = singleText(row);
   return text !== null && ENGINE_MARKERS.has(text.trim());
 }
 
-/** The bridge's record's lines, its marker line first; null for any other row. */
+/** The bridge's record before #225, its lines with its marker line first; null for any other row. */
 function bridgeRecordLines(row: JsonObject): string[] | null {
-  const origin = row.origin as { kind?: unknown; name?: unknown } | null | undefined;
-  if (!isUserRow(row) || row.isMeta !== true || origin?.kind !== 'plugin' || origin.name !== BRIDGE_PLUGIN) return null;
+  if (!isBridgeRow(row)) return null;
   const text = singleText(row);
   if (text === null) return null;
   const [first, ...rest] = text.split('\n');
@@ -70,7 +80,7 @@ export function isInterruptRow(row: JsonObject): boolean {
   return isEngineMarker(row) || bridgeRecordLines(row) !== null;
 }
 
-/** The row as the mapping takes it: the bridge's record with "Task …" lines as its marker line alone; any other as is. */
+/** The row as the mapping takes it: the bridge's older record with "Task …" lines as its marker line alone; any other as is. */
 export function normalizeInterruptRow(row: JsonObject): JsonObject {
   const lines = bridgeRecordLines(row);
   if (lines === null || lines.length === 1) return row;

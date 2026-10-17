@@ -160,6 +160,10 @@ test('the jobs view: shells and the monitor with MAWS’s rows, Stop disabled wi
   await expect(tab).toHaveText('Jobs · 4');
   await expect(jobRow(jobs, SUITE)).toContainText('completed');
   await expect(jobRow(jobs, SERVE)).toContainText('stopped');
+  // Its file is still gone; its summary, from the notification, stands under MAWS's row beside the open output.
+  await expect(outputOf(jobs, SERVE)).toHaveAttribute('data-phase', 'missing');
+  await expect(jobRow(jobs, SERVE).locator('[data-part="summary"]')).toBeVisible();
+  await expect(jobRow(jobs, SERVE).locator('[data-part="summary"]')).toHaveText('Task "Serve the mockups" was stopped by the user');
   await expect(jobRow(jobs, WATCH)).toContainText('ended with the session');
   await expect(jobRow(jobs, MONITOR)).not.toContainText('No output file yet');
 

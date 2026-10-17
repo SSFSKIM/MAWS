@@ -1,6 +1,7 @@
 // DC9's M5 proofs of the status patch (`task-feed.ts`, `withStatuses`): DX4's widened `subagents` body patched onto MAWS's
 // task graph on the desk side — each status and its evidence, a nested agent placed under the parent its meta or spawn
-// record names, the held rows' terminal events outranking the body, and a producer older than DC8 drawn as DC6 drew it.
+// record names, DX4's status authoritative over what the held rows' events say (the machine reads the whole transcript
+// with DX4's precedence; the web holds a window of it), and a producer older than DC8 drawn as DC6 drew it.
 import type { SessionEvent } from '@shared/graph/events';
 import type { SubagentMeta, SubagentStatusFacts } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
@@ -77,25 +78,32 @@ describe('the status patch', () => {
     expect(node.agent).toMatchObject({ subagentType: 'Explore', name: 'scout', model: 'haiku' });
   });
 
-  it('never overrides a status the held rows’ events made terminal', () => {
+  it('takes DX4’s status over a terminal one the held rows’ events gave, and drops what that end claimed', () => {
     const metas = [entry('a1', 'alpha', { status: 'running', evidence: 'bridge', running: true }), entry('a2', 'beta', { status: 'exited', evidence: 'session' })];
     const graph = patched(metas, [started('a1', 'alpha'), finished('a1', 'failed'), started('a2', 'beta'), finished('a2', 'completed')]);
-    expect(statusOf(graph, 'a1')).toBe('failed');
-    expect(statusOf(graph, 'a2')).toBe('completed');
+    expect(graph.tasks.get('a1' as never)).toMatchObject({ status: 'running', endedAt: null, summary: null });
+    expect(graph.tasks.get('a2' as never)).toMatchObject({ status: 'exited', summary: null });
   });
 
-  it('lets better evidence replace a held running status, and keeps it where DX4 has none', () => {
+  it('takes DX4’s status over a held running one, and shows DX4’s unknown as unknown', () => {
     const metas = [entry('a1', 'alpha', { status: 'exited', evidence: 'session' }), entry('a2', 'beta', { status: 'unknown', evidence: 'none' })];
     const graph = patched(metas, [started('a1', 'alpha'), started('a2', 'beta')]);
     expect(statusOf(graph, 'a1')).toBe('exited');
-    expect(statusOf(graph, 'a2')).toBe('running');
+    expect(statusOf(graph, 'a2')).toBe('unknown');
   });
 
-  it('follows the held rows as they come: a terminal event after the patch is the status', () => {
-    const metas = [entry('a1', 'alpha', { status: 'running', evidence: 'rows', outcome: { status: 'running', raw: 'async_launched', at: AT } })];
-    const held = taskGraphOf(metas, [started('a1', 'alpha')]);
-    expect(statusOf(withStatuses(held, metas), 'a1')).toBe('running');
-    expect(statusOf(withStatuses(withEvents(held, [finished('a1', 'stopped')]), metas), 'a1')).toBe('stopped');
+  it('takes DX4’s completed over a meta that says the human stopped the agent', () => {
+    const metas = [entry('a1', 'alpha', { status: 'completed', evidence: 'rows', outcome: { status: 'completed', raw: 'completed', at: AT } }, { stoppedByUser: true })];
+    expect(statusOf(taskGraphOf(metas, []), 'a1')).toBe('stopped'); // MAWS's sidecar rule alone
+    expect(statusOf(patched(metas), 'a1')).toBe('completed');
+  });
+
+  it('follows the body, not the rows between two bodies: a later body’s status is the status', () => {
+    const running = [entry('a1', 'alpha', { status: 'running', evidence: 'rows', outcome: { status: 'running', raw: 'async_launched', at: AT } })];
+    const held = withEvents(taskGraphOf(running, [started('a1', 'alpha')]), [finished('a1', 'stopped')]);
+    expect(statusOf(withStatuses(held, running), 'a1')).toBe('running');
+    const stopped = [entry('a1', 'alpha', { status: 'stopped', evidence: 'rows', outcome: { status: 'stopped', raw: 'killed', at: AT } })];
+    expect(statusOf(withStatuses(held, stopped), 'a1')).toBe('stopped');
   });
 
   it('draws an older producer’s body (agentId and meta alone) as DC6 drew it: the same graph', () => {

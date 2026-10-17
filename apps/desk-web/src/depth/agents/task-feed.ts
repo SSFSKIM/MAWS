@@ -9,11 +9,14 @@
 // Status (DC9; the composite's §9.3, DX4's precedence). The held rows give a status only to an agent whose start or end
 // they hold, so an agent that ran before them, or a nested one (its spawn is in its parent's transcript), would sit
 // under "On disk / status unavailable". A producer of DC8 or later sends each agent's status with what it rests on;
-// `withStatuses` patches it onto the graph the held rows built, on the desk side and never in MAWS's `mergeSidecars`:
-// DX4's word replaces a status the held rows leave unknown or running (the machine sees more: the parent's transcript,
-// the bridge, the process's end), and never one their events made terminal. The graph it patches is kept apart (the
-// caller holds both), so a body that changes later is laid over the rows' own word again, not over its own earlier
-// patch. A producer older than DC8 sends no status, and the graph is the one DC6 drew.
+// `withStatuses` patches it onto the graph the held rows built, on the desk side and never in MAWS's `mergeSidecars`.
+// DX4's status is authoritative for every entry that carries one, `unknown` included: the machine derives it over the
+// whole transcript with DX4's precedence (the parent's transcript, the bridge, the process's end), while the web holds a
+// window of rows, and MAWS's backfill reads some of them otherwise (an older launch written without a `toolUseResult`
+// is a finished Agent call to it; a sidecar's `stoppedByUser` makes an agent stopped). Where the held rows ended an agent
+// DX4 does not, the end's time and summary go with it. The graph it patches is kept apart (the caller holds both), so a
+// body that changes later is laid over the rows' own graph again, not over its own earlier patch. A producer older than
+// DC8 sends no status: the held rows' events give it, and the graph is the one DC6 drew.
 import type { SubagentEntry } from '@shared/ipc/schema/fs';
 import type { AgentId, TaskId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
@@ -63,10 +66,12 @@ function patchedNode(node: TaskNode, { status, spawn, outcome, file }: StatusEnt
       model: agent.model ?? text(spawn?.model),
     },
   };
-  // The held rows' terminal word stands (DX4's level 1); otherwise the machine's, unless it has none.
-  if (!isEnded(node.status) && status !== 'unknown' && status !== node.status) {
+  // DX4's status stands. An end the held rows claimed for another status is not this one's: its time and summary go.
+  if (status !== node.status) {
     next.status = status;
-    if (isEnded(status)) next.endedAt = node.endedAt ?? outcome?.at ?? null;
+    next.endedAt = isEnded(status) ? (outcome?.at ?? null) : null;
+    next.summary = text(outcome?.summary);
+    next.stopping = false;
   }
   return sameNode(node, next) ? node : next;
 }

@@ -2,7 +2,8 @@
 // main subscription's `jobs`, drawn with MAWS's `ShellRow` and `MonitorRow` (`tools/agents/background/TaskRows.tsx`)
 // under MAWS's Background work headings (`Group`), then the MCP servers by name. A shell's Output asks the machine for
 // its file's tail and opens it under its row, a few lines high, the list staying in view; the answer is drawn by its
-// variant (`jobs/output-requests.ts`), the tail as plain text only (a row's text is untrusted, and so is a file's).
+// variant (`jobs/output-requests.ts`), the tail as plain text only (a row's text is untrusted, and so is a file's). A
+// job's summary, which MAWS's row does not draw, stands under it.
 //
 // Stop is MAWS's row as it stands, drawn on every running job; the desk has no web Stop yet (no DX6 RPC; the owner's
 // first follow-up once DC8 and DC9 land), so it is drawn disabled with its reason on hover. MAWS's button takes no such
@@ -58,6 +59,7 @@ export function JobsPane({ controller, state, machine, ended }: { controller: De
             return (
               <JobRow key={node.taskId} open={view !== undefined}>
                 <ShellRow node={node} now={now} selected={false} stopError={null} onStop={noop} onOutput={() => (view ? controller.outputs.close(node.taskId) : controller.outputs.open(node.taskId))} />
+                <JobSummary node={node} />
                 {view && <OutputPanel taskId={node.taskId} path={node.outputFile} view={view} machine={machine} final={ended || node.status !== 'running'} controller={controller} />}
               </JobRow>
             );
@@ -70,6 +72,7 @@ export function JobsPane({ controller, state, machine, ended }: { controller: De
           lists.monitors.map((node) => (
             <JobRow key={node.taskId}>
               <MonitorRow node={node} now={now} selected={false} stopError={null} onStop={noop} />
+              <JobSummary node={node} />
               {node.outputFile === null && <p className="m-0 mx-3 px-2 pb-1 pl-[22px] text-ui-sm text-fg-muted">{JOBS_COPY.monitorNoFile}</p>}
             </JobRow>
           )),
@@ -97,6 +100,19 @@ function JobRow({ open = false, children }: { open?: boolean; children: ReactNod
     <div ref={ref} data-job-row="" data-open={open} className={open ? 'mx-3 flex flex-col rounded-sm border border-accent [&>[data-task-id]]:mx-0' : undefined}>
       {children}
     </div>
+  );
+}
+
+/**
+ * The job's summary, as its notification or `task_status` gave it, under MAWS's row, which draws none: what a job did
+ * stays readable when its output file is gone (DX4: `missing` leaves the row's own summary standing). Plain text.
+ */
+function JobSummary({ node }: { node: TaskNode }) {
+  if (!node.summary) return null;
+  return (
+    <p data-part="summary" title={node.summary} className="m-0 mx-3 truncate px-2 pb-1 pl-[22px] text-ui-sm text-fg-muted">
+      {node.summary}
+    </p>
   );
 }
 
