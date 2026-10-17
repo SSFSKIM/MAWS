@@ -14,7 +14,7 @@
 // `holdAll` duplicates a cached snapshot's hold synchronously and holds the rest in one group, all or none, its lease
 // invalidated with any hold it rests on. Without holds (main's exporter, whose capture holds what it reads), nothing is
 // held.
-import type { ArtifactHost } from '../host';
+import type { ArtifactHost, DatasetPage } from '../host';
 import type { DatasetFormat } from './datasets';
 import type { ViewTable } from './render';
 
@@ -53,6 +53,7 @@ const CACHED = 6; // snapshots kept per tab (12 views over one dataset read it o
 export class SnapshotReader {
   private readonly cache = new Map<string, Entry>();
   private readonly leases = new Set<() => void>(); // E3: the holdAll leases not yet released
+  private readonly reads = new Set<Entry>(); // E3: every read still paging, cached or already evicted
 
   constructor(
     private readonly host: Pick<ArtifactHost, 'readDataset'> & Partial<Pick<ArtifactHost, 'holdDatasets'>>,
@@ -70,10 +71,12 @@ export class SnapshotReader {
     }
     const entry: Entry = { ref: snapshot.ref, reading: null as unknown as Promise<ViewTable>, current: null, acquired: [], cached: true, inFlight: true, pins: 0, lost: false, reheld: false, cancelled: false, dropped: false, onLost: new Set() };
     if (this.host.holdDatasets) this.acquire(entry); // E3
+    this.reads.add(entry);
     entry.reading = (async () => {
       try {
         return await this.readAll(snapshot, entry);
       } finally {
+        this.reads.delete(entry);
         entry.inFlight = false;
         if (entry.lost) this.uncache(key, entry); // read whole, yet its hold is gone: the next read holds afresh
         this.drop(entry);
@@ -127,28 +130,30 @@ export class SnapshotReader {
   /** E3: the tab is gone: every hold goes once no read pages through it, and no read asks another page. */
   dispose(): void {
     for (const release of [...this.leases]) release();
-    for (const entry of this.cache.values()) {
+    for (const entry of [...this.cache.values(), ...this.reads]) {
       entry.cached = false;
-      entry.cancelled = true;
+      entry.cancelled = true; // a read in flight asks no further page; its hold goes once the page out settles
       this.drop(entry);
     }
     this.cache.clear();
   }
 
-  // A hold of the entry's ref, made its current one; its loss is heard as the current hold's alone.
+  // A hold of the entry's ref, made its current one; its loss is heard as the current hold's alone. The current hold
+  // settles a turn after it is answered, so a loss already signalled with the answer (a restart while it was asked for)
+  // has landed before anything reads through it.
   private acquire(entry: Entry): void {
-    const hold = this.host.holdDatasets!(this.artifactId, [entry.ref]);
-    entry.current = hold;
-    hold.then(
-      (taken) => {
-        entry.acquired.push(taken);
-        if (entry.dropped) return taken.release();
+    const current: Promise<Hold> = this.host.holdDatasets!(this.artifactId, [entry.ref]).then(async (taken) => {
+      entry.acquired.push(taken);
+      if (entry.dropped) taken.release();
+      else
         void taken.invalidated?.then(() => {
-          if (entry.current === hold && !entry.dropped) this.lose(entry);
+          if (entry.current === current && !entry.dropped) this.lose(entry);
         });
-      },
-      () => {}, // its failure is the read's
-    );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return taken;
+    });
+    entry.current = current;
+    current.catch(() => {}); // its failure is the read's
   }
 
   private lose(entry: Entry): void {
@@ -172,29 +177,30 @@ export class SnapshotReader {
     for (const hold of entry.acquired.splice(0)) hold.release();
   }
 
-  // Before each page: a disposal stops the read; a lost hold is taken again once (the same immutable ref), else the
-  // snapshot is unavailable.
-  private async ready(entry: Entry): Promise<void> {
-    if (entry.cancelled) throw new Error(`the snapshot ${entry.ref} was not read: the dashboard was closed`);
-    if (!entry.current) return;
-    if (entry.lost) {
-      if (entry.reheld) throw new Error(`the snapshot ${entry.ref} is unavailable: the host restarted twice while it was read`);
-      entry.reheld = true;
-      entry.lost = false;
-      for (const hold of entry.acquired.splice(0)) hold.release();
-      this.acquire(entry);
+  // One page, asked only through a hold still the entry's own: a disposal stops the read; a hold lost (before or while
+  // its acquisition settled, or since the last page) is taken again once, the same immutable ref, else the snapshot is
+  // unavailable. Ownership is checked in the very turn that asks for the page.
+  private async page(entry: Entry, format: DatasetFormat, offset?: number): Promise<DatasetPage> {
+    for (;;) {
+      if (entry.cancelled) throw new Error(`the snapshot ${entry.ref} was not read: the dashboard was closed`);
+      if (!entry.current) return this.host.readDataset(this.artifactId, entry.ref, { format, ...(offset !== undefined && { offset }) });
+      if (entry.lost) {
+        if (entry.reheld) throw new Error(`the snapshot ${entry.ref} is unavailable: the host restarted twice while it was read`);
+        entry.reheld = true;
+        entry.lost = false;
+        for (const hold of entry.acquired.splice(0)) hold.release();
+        this.acquire(entry);
+      }
+      await entry.current;
+      if (!entry.cancelled && !entry.lost) return this.host.readDataset(this.artifactId, entry.ref, { format, ...(offset !== undefined && { offset }) });
     }
-    await entry.current;
-    if (entry.cancelled) throw new Error(`the snapshot ${entry.ref} was not read: the dashboard was closed`);
   }
 
   private async readAll({ ref, format }: SnapshotRef, entry: Entry): Promise<ViewTable> {
-    await this.ready(entry);
-    const first = await this.host.readDataset(this.artifactId, ref, { format });
+    const first = await this.page(entry, format);
     const rows = [...first.rows];
     while (rows.length < first.total) {
-      await this.ready(entry);
-      const page = await this.host.readDataset(this.artifactId, ref, { format, offset: rows.length });
+      const page = await this.page(entry, format, rows.length);
       if (page.rows.length === 0) throw new Error(`the snapshot ${ref} answered no rows at ${rows.length} of ${first.total}`);
       rows.push(...page.rows);
     }

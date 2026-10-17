@@ -151,8 +151,10 @@ export class ExportBudget {
   private timer!: ReturnType<typeof setTimeout>;
   private readonly expiry: Promise<never>;
   private timedOut = false;
+  readonly deadline: number; // E3: the epoch ms it ends at, so what is left of it can be handed on (a retry's allowance)
 
   constructor(readonly ms: number) {
+    this.deadline = Date.now() + ms;
     this.expiry = new Promise<never>((_, reject) => {
       this.timer = setTimeout(() => {
         this.timedOut = true;
@@ -377,13 +379,16 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
     const answered = await slot(async () => {
       // E3 (the architect's restart ruling): the engine host's restart between a dashboard's capture and its run's end
       // left the capture's holds to a host that is gone, whatever the run answered: one fresh capture (the latest live
-      // state, or the same version) and run, a fresh budget of its own; a second restart is a failure
+      // state, or the same version) and run within what is left of the same budget; a second restart is a failure
       const watched = request.kind === 'dashboard' && hostGeneration !== undefined;
       const before = hostGeneration?.();
       const first = await attempt(time);
       if (!watched || hostGeneration!() === before) return first;
       const again = hostGeneration!();
-      const retried = await attempt(new ExportBudget(EXPORT_BUDGET_MS));
+      // the retry has what is left of the export's one budget, counted from its receipt (the first run ended `time`)
+      const left = time.deadline - Date.now();
+      if (left <= 0) return { ok: false, error: `the engine host restarted during the dashboard's export and no time was left within its ${time.ms / 1000} s to capture it again; try again` } satisfies MawsArtifactExportAnswer;
+      const retried = await attempt(new ExportBudget(left));
       return hostGeneration!() === again ? retried : ({ ok: false, error: 'the engine host restarted twice while the dashboard was exported; try again' } satisfies MawsArtifactExportAnswer);
     }, busy);
     time.end();

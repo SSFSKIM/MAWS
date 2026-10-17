@@ -12,7 +12,8 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
-import { ExporterRegistry, startExportService, type Exporter, type ExportServiceDeps } from './export';
+import { existsSync } from 'node:fs';
+import { EXPORT_BUDGET_MS, ExporterRegistry, startExportService, type Exporter, type ExportServiceDeps } from './export';
 
 const BOARD = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 const HOLD = '00000000-0000-4000-8000-0000000000a1';
@@ -167,5 +168,51 @@ describe('a dashboard export across a host restart (E3)', () => {
     await expect(service.exportForLibrary({ artifactId: BOARD, format: 'md' })).rejects.toThrow(/restarted/);
     expect(runs).toBe(2);
     service.stop();
+  });
+});
+
+// E3 M1 residual correction (re-review): the retry across a host restart lives inside the export's one budget, counted
+// from its receipt (queue, capture and both runs): what is left of it is the retry's, never a fresh budget. A retry with
+// nothing left is answered, by name, without a second capture; one that runs out publishes nothing.
+describe('a dashboard export’s retry within its one budget (E3)', () => {
+  it('a retry gets only what is left of the budget, and one that overruns it publishes nothing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      let runs = 0;
+      const w = restarting(async (request, context) => {
+        runs += 1;
+        await context.state();
+        if (runs === 1) {
+          w.restart();
+          vi.advanceTimersByTime(EXPORT_BUDGET_MS - 500); // the first run took nearly all of the budget
+        } else vi.advanceTimersByTime(1_000); // the retry overruns what was left
+        await context.writeFile(request.path, '# Board');
+      });
+      const service = startExportService(w.deps);
+      await expect(service.exportForLibrary({ artifactId: BOARD, format: 'md' })).rejects.toThrow(/did not finish within/);
+      expect(runs).toBe(2);
+      expect(existsSync(join(root, BOARD, 'exports', '8-md.md'))).toBe(false); // the retry's file: never published late
+      service.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a restart that leaves no budget is answered by name, without a second capture', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const w = restarting(async (request, context) => {
+        await context.state();
+        w.restart();
+        vi.advanceTimersByTime(EXPORT_BUDGET_MS); // the whole budget, spent in the first run
+        await context.writeFile(request.path, '# Board');
+      });
+      const service = startExportService(w.deps);
+      await expect(service.exportForLibrary({ artifactId: BOARD, format: 'md' })).rejects.toThrow(/restarted.*no time was left/);
+      expect(w.captures()).toBe(1);
+      service.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

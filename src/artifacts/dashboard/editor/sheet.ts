@@ -70,17 +70,19 @@ export class SourceSheetState {
     this.set(next);
     if (!hold) return;
     const mine = () => this.lease === hold && this.current.open && this.current.opened === next.opened;
+    let lost = false; // a loss is terminal for this capture: its late ready or failure revives nothing
     hold.ready.then(
-      () => mine() && this.set({ ...this.current, hold: 'held' }),
-      () => mine() && this.set({ ...this.current, hold: 'unavailable' }),
+      () => mine() && !lost && this.set({ ...this.current, hold: 'held' }),
+      () => mine() && !lost && this.set({ ...this.current, hold: 'unavailable' }),
     );
     void hold.invalidated.then(async () => {
       if (!mine()) return;
+      lost = true;
+      this.set({ ...this.current, hold: 'pending' }); // nothing of the lost capture is shown or read meanwhile
       if (!recapture) {
         hold.release();
         return this.set({ ...this.current, hold: 'unavailable' }); // the one recapture is spent, or none is offered
       }
-      this.set({ ...this.current, hold: 'pending' });
       const fresh = await recapture(this.current.datasets.map((dataset) => dataset.id)).catch(() => null);
       if (this.lease !== hold || !this.current.open || this.current.opened !== next.opened) return fresh?.hold.release();
       if (!fresh) {

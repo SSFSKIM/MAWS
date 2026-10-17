@@ -140,3 +140,42 @@ describe('the source sheet across a host restart (E3)', () => {
     expect(within(screen.getByRole('dialog')).getByRole('alert').textContent).toMatch(/no longer available/);
   });
 });
+
+// E3 M1 residual correction (re-review): a loss is terminal for the capture it struck. A hold answered after its loss
+// (its ready settling late) never shows that capture as held, and nothing of it is read while the recapture is pending.
+describe('the source sheet’s lost capture stays lost (E3)', () => {
+  it('a loss before the hold is ready: the late ready shows nothing held, the old capture is never read', async () => {
+    const m = mount();
+    const first = lease();
+    const second = lease();
+    let answer!: (fresh: { datasets: { id: string; descriptor: ReturnType<typeof fetched> }[]; hold: typeof second }) => void;
+    const recapture = vi.fn(() => new Promise<{ datasets: { id: string; descriptor: ReturnType<typeof fetched> }[]; hold: typeof second }>((resolve) => (answer = resolve)));
+    act(() => m.sheet.open([{ id: 'live', descriptor: fetched('assets/q1.json') }], 'live', first, recapture));
+    first.lose(); // the host restarted before the hold was in place
+    await settle();
+    first.resolve(); // its acquisition answers late
+    await settle();
+    expect(m.sheet.snapshot().hold).toBe('pending');
+    expect(m.readDataset).not.toHaveBeenCalled();
+    answer({ datasets: [{ id: 'live', descriptor: fetched('assets/q2.json') }], hold: second });
+    await settle();
+    expect(m.sheet.snapshot().hold).toBe('pending');
+    second.resolve();
+    await settle();
+    expect(m.sheet.snapshot().hold).toBe('held');
+    expect(m.readDataset.mock.calls.map((call) => (call as unknown[])[1])).toEqual(['assets/q2.json']);
+  });
+
+  it('a loss then a late failure of the same hold leaves the recapture in charge', async () => {
+    const m = mount();
+    const first = lease();
+    const second = lease();
+    act(() => m.sheet.open([{ id: 'live', descriptor: fetched('assets/q1.json') }], 'live', first, async () => ({ datasets: [{ id: 'live', descriptor: fetched('assets/q2.json') }], hold: second })));
+    first.lose();
+    first.reject(new Error('unavailable'));
+    await settle();
+    second.resolve();
+    await settle();
+    expect(m.sheet.snapshot().hold).toBe('held');
+  });
+});

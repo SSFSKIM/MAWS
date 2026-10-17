@@ -123,7 +123,7 @@ describe('the snapshot reader’s holds (E3)', () => {
 // apart. An evicted or disposed snapshot keeps its hold until its read has completed or stopped (no page is asked after
 // a disposal); a hold the host lost (`invalidated`, a host restart) takes a settled snapshot out of the cache, and an
 // in-flight read re-holds the same immutable ref once and pages on, or fails as unavailable.
-function pagedHost() {
+function pagedHost(options: { lostWhenAsked?: number[] } = {}) {
   const log: string[] = [];
   const held = new Map<number, string>();
   const invalidations = new Map<number, () => void>();
@@ -135,6 +135,7 @@ function pagedHost() {
     let invalidate!: () => void;
     const invalidated = new Promise<void>((resolve) => (invalidate = resolve));
     invalidations.set(id, invalidate);
+    if (options.lostWhenAsked?.includes(id)) invalidate(); // the host restarted while this hold was asked for
     log.push(`hold#${id} ${refs.join(',')}`);
     return { release: () => void (held.delete(id) && log.push(`release#${id}`)), invalidated };
   });
@@ -240,5 +241,42 @@ describe('the snapshot reader’s holds and its reads in flight (E3)', () => {
     await settle();
     expect(lost).toBe(true);
     lease.release();
+  });
+});
+
+// E3 M1 residual correction (re-review): a disposal stops every read still in flight, those an eviction already took out
+// of the cache included; a hold found lost when its acquisition settles (or just before a page) is never read through.
+describe('the snapshot reader’s reads in flight, residual cases (E3)', () => {
+  it('disposal stops an evicted read still in flight: no page after it, its hold let go once the page out settles', async () => {
+    const h = pagedHost();
+    const reader = new SnapshotReader(h.host, 'dash1', 1);
+    h.gate('assets/a.json@1');
+    const reading = reader.read(snap('assets/a.json'));
+    await vi.waitFor(() => expect(h.log).toContain('page assets/a.json@1'));
+    await reader.read(snap('assets/b.json')); // a leaves the cache, its read still paging
+    reader.dispose();
+    expect(h.heldRefs()).toContain('assets/a.json'); // the page out still reads its bytes
+    h.open('assets/a.json@1');
+    await expect(reading).rejects.toThrow(/closed/);
+    await settle();
+    expect(h.log.filter((line) => line.startsWith('page assets/a'))).toEqual(['page assets/a.json@0', 'page assets/a.json@1']);
+    expect(h.heldRefs()).toEqual([]);
+  });
+
+  it('a hold already lost when it is answered is never read through: the reader holds once more, then reads', async () => {
+    const h = pagedHost({ lostWhenAsked: [1] });
+    const reader = new SnapshotReader(h.host, 'dash1');
+    const table = await reader.read(snap('assets/a.json'));
+    expect(table.rows).toHaveLength(3);
+    expect(h.log.slice(0, 4)).toEqual(['hold#1 assets/a.json', 'release#1', 'hold#2 assets/a.json', 'page assets/a.json@0']);
+  });
+
+  it('lost at its acquisition twice, a snapshot is unavailable and no page is read', async () => {
+    const h = pagedHost({ lostWhenAsked: [1, 2] });
+    const reader = new SnapshotReader(h.host, 'dash1');
+    await expect(reader.read(snap('assets/a.json'))).rejects.toThrow(/unavailable/);
+    expect(h.log.filter((line) => line.startsWith('page'))).toEqual([]);
+    await settle();
+    expect(h.heldRefs()).toEqual([]);
   });
 });
