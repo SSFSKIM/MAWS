@@ -10,7 +10,13 @@
 //   required → the 127.0.0.1 listener is bound → registration for exactly its redirect URI → authorization URL with
 //   state, PKCE and the resource → the system browser → one callback (exact path, GET, single-valued state, iss when
 //   advertised or present) → one code exchange → a Bearer token answer.
+// From binding on, the flow is bounded by `CONNECT_CALLBACK_TIMEOUT_MS` as well as the owner's signal: a binding, a
+// browser opener or a callback that never answers settles the flow, and a listener bound too late is closed at once.
 // The listener closes on every exit; a cancelled flow sends nothing further and returns no tokens.
+//
+// SDK 1.32.1 parses an OpenID discovery document (its fallback when RFC 8414 metadata is absent) with a schema that
+// drops members it does not declare, among them `authorization_response_iss_parameter_supported` and the revocation
+// fields. The policy fields are therefore read from the same bounded document the SDK parsed, validated, and kept.
 //
 // Refresh is one POST to the stored token endpoint with the stored client and resource; no discovery, browser or
 // retry. Its failures say what the provider (M3c) should do: `rejected` needs a Reconnect, `transient` keeps the refresh
@@ -24,6 +30,7 @@ import {
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { AuthorizationServerMetadata, OAuthClientInformationFull, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { checkResourceAllowed, resourceUrlFromServerUrl } from '@modelcontextprotocol/sdk/shared/auth-utils.js';
+import * as z from 'zod';
 import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
 import { boundedOAuthFetch, isPermittedOAuthUrl, OAuthTransportError, type OAuthFetch } from './oauth-http';
 import type { ConnectorOAuthGrant, ConnectorOAuthTokens } from './oauth-types';
@@ -66,25 +73,50 @@ export interface ConnectorOAuthFlow {
 
 const fail = (code: ConnectorOAuthFailure) => new ConnectorOAuthError(code);
 
+// The reason Connect's own bound aborts with; any other abort is the owner's cancellation.
+const DEADLINE = Object.freeze({ deadline: true });
+const ended = (signal: AbortSignal) => fail(signal.reason === DEADLINE ? 'timeout' : 'cancelled');
+
 // The code an SDK step's failure becomes: the request's own failure, else the step's word.
 function stepFailure(error: unknown, signal: AbortSignal, code: ConnectorOAuthFailure): ConnectorOAuthError {
-  if (signal.aborted) return fail('cancelled');
+  if (signal.aborted) return ended(signal);
   if (error instanceof ConnectorOAuthError) return error;
   if (error instanceof OAuthTransportError) return fail(error.code === 'tooLarge' ? code : error.code);
   return fail(code);
 }
 
 async function step<T>(signal: AbortSignal, code: ConnectorOAuthFailure, run: () => Promise<T>): Promise<T> {
-  if (signal.aborted) throw fail('cancelled');
+  if (signal.aborted) throw ended(signal);
   let value: T;
   try {
     value = await run();
   } catch (error) {
     throw stepFailure(error, signal, code);
   }
-  if (signal.aborted) throw fail('cancelled');
+  if (signal.aborted) throw ended(signal);
   return value;
 }
+
+// A wait that is not a request (binding, the browser opener): it ends with the signal even if it never answers.
+function untilEnded<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(ended(signal));
+  const pending = Promise.resolve().then(work);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(ended(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    pending.then(
+      (value) => { signal.removeEventListener('abort', onAbort); resolve(value); },
+      (error: unknown) => { signal.removeEventListener('abort', onAbort); reject(error); },
+    );
+  });
+}
+
+// The policy members of the parsed metadata document that the SDK's OpenID schema drops; malformed values refuse.
+const AdvertisedPolicySchema = z.object({
+  authorization_response_iss_parameter_supported: z.boolean().optional(),
+  revocation_endpoint: z.string().max(8_192).optional(),
+  revocation_endpoint_auth_methods_supported: z.array(z.string().max(256)).max(32).optional(),
+});
 
 function secretExpired(client: OAuthClientInformationFull, now: number): boolean {
   const expiresAt = client.client_secret_expires_at;
@@ -150,15 +182,8 @@ function callbackWaiter(issuer: string, issRequired: boolean) {
   return {
     handle,
     arm(state: string) { expectedState = state; },
-    wait(signal: AbortSignal, timeoutMs: number): Promise<string> {
-      return new Promise<string>((resolve, reject) => {
-        const done = () => { clearTimeout(timer); signal.removeEventListener('abort', onAbort); };
-        const onAbort = () => { done(); reject(fail('cancelled')); };
-        const timer = setTimeout(() => { done(); reject(fail('timeout')); }, timeoutMs);
-        if (signal.aborted) return onAbort();
-        signal.addEventListener('abort', onAbort, { once: true });
-        result.then((code) => { done(); resolve(code); }, (error: unknown) => { done(); reject(error); });
-      });
+    wait(signal: AbortSignal): Promise<string> {
+      return untilEnded(() => result, signal);
     },
   };
 }
@@ -188,6 +213,19 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
   const now = deps.now ?? Date.now;
   const randomState = deps.randomState ?? (() => randomBytes(32).toString('base64url'));
 
+  // The listener, owned by the caller once this resolves. A binding that completes only after the flow ended is
+  // closed here, since no caller will.
+  async function bind(handle: (request: LoopbackRequest) => LoopbackReply, signal: AbortSignal) {
+    if (signal.aborted) throw ended(signal);
+    const binding = Promise.resolve().then(() => deps.listen(handle));
+    try {
+      return await untilEnded(() => binding, signal);
+    } catch (error) {
+      binding.then((late) => late.close().catch(() => {}), () => {});
+      throw error instanceof ConnectorOAuthError ? error : fail('listener');
+    }
+  }
+
   async function discover(requestUrl: string, signal: AbortSignal, fetchFn: OAuthFetch) {
     const prm = await step(signal, 'discovery', () => discoverOAuthProtectedResourceMetadata(requestUrl, undefined, fetchFn));
     let covers: boolean;
@@ -200,8 +238,23 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
     const server = prm.authorization_servers?.[0];
     if (server === undefined) throw fail('discovery');
     if (!isPermittedOAuthUrl(server)) throw fail('insecure');
-    const metadata = await step(signal, 'discovery', () => discoverAuthorizationServerMetadata(server, { fetchFn }));
-    if (metadata === undefined) throw fail('discovery');
+    let document: unknown; // the last document the discovery answered, which is the one the SDK parsed
+    const capturing: OAuthFetch = async (url, init) => {
+      const response = await fetchFn(url, init);
+      document = response.ok ? await response.clone().json().catch(() => undefined) : document;
+      return response;
+    };
+    const parsed = await step(signal, 'discovery', () => discoverAuthorizationServerMetadata(server, { fetchFn: capturing }));
+    if (parsed === undefined) throw fail('discovery');
+    const policy = AdvertisedPolicySchema.safeParse(document);
+    if (!policy.success) throw fail('discovery');
+    const { authorization_response_iss_parameter_supported: iss, revocation_endpoint: revocation, revocation_endpoint_auth_methods_supported: revocationMethods } = policy.data;
+    const metadata: AuthorizationServerMetadata = {
+      ...parsed,
+      ...(iss !== undefined && { authorization_response_iss_parameter_supported: iss }),
+      ...(revocation !== undefined && { revocation_endpoint: revocation }),
+      ...(revocationMethods !== undefined && { revocation_endpoint_auth_methods_supported: revocationMethods }),
+    };
     // RFC 8414 §3.3: identical to the identifier it was discovered from, compared as written (no URL normalization)
     if (metadata.issuer !== server) throw fail('issuer');
     if (!endpointsOf(metadata).every((url) => isPermittedOAuthUrl(url))) throw fail('insecure');
@@ -217,27 +270,39 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
       const fetchFn = boundedOAuthFetch(deps.fetch, signal);
       const { resource, server, metadata, scope, issRequired } = await discover(requestUrl, signal, fetchFn);
       const callback = callbackWaiter(metadata.issuer, issRequired);
-      const listener = await step(signal, 'listener', () => deps.listen(callback.handle));
+      const bound = new AbortController(); // the owner's signal or the deadline, from binding on
+      const onCancel = () => bound.abort(signal.reason);
+      signal.addEventListener('abort', onCancel, { once: true });
+      const deadline = setTimeout(() => bound.abort(DEADLINE), CONNECT_CALLBACK_TIMEOUT_MS);
+      if (signal.aborted) onCancel();
+      const flow = bound.signal;
+      const flowFetch = boundedOAuthFetch(deps.fetch, flow);
       try {
-        if (signal.aborted) throw fail('cancelled');
-        const redirectUri = `http://${OAUTH_CALLBACK_HOST}:${listener.port}${OAUTH_CALLBACK_PATH}`;
-        const client = await step(signal, 'registration', () => registerClient(server, {
-          metadata,
-          clientMetadata: { redirect_uris: [redirectUri], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], client_name: 'MAWS' },
-          ...(scope !== undefined && { scope }),
-          fetchFn,
-        }));
-        if (secretExpired(client, now())) throw fail('registration');
-        const state = randomState();
-        const { authorizationUrl, codeVerifier } = await step(signal, 'unsupported', () => startAuthorization(server, { metadata, clientInformation: client, redirectUrl: redirectUri, ...(scope !== undefined && { scope }), state, resource }));
-        if (!isPermittedOAuthUrl(authorizationUrl)) throw fail('insecure');
-        callback.arm(state);
-        await step(signal, 'browser', () => deps.openBrowser(authorizationUrl.href));
-        const code = await callback.wait(signal, CONNECT_CALLBACK_TIMEOUT_MS);
-        const raw = await step(signal, 'exchange', () => exchangeAuthorization(server, { metadata, clientInformation: client, authorizationCode: code, codeVerifier, redirectUri, resource, fetchFn }));
-        return { issuer: metadata.issuer, resource, redirectUri, authorizationServer: metadata, client, tokens: acceptTokens(raw, now()) };
+        const listener = await bind(callback.handle, flow);
+        try {
+          if (flow.aborted) throw ended(flow);
+          const redirectUri = `http://${OAUTH_CALLBACK_HOST}:${listener.port}${OAUTH_CALLBACK_PATH}`;
+          const client = await step(flow, 'registration', () => registerClient(server, {
+            metadata,
+            clientMetadata: { redirect_uris: [redirectUri], token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], client_name: 'MAWS' },
+            ...(scope !== undefined && { scope }),
+            fetchFn: flowFetch,
+          }));
+          if (secretExpired(client, now())) throw fail('registration');
+          const state = randomState();
+          const { authorizationUrl, codeVerifier } = await step(flow, 'unsupported', () => startAuthorization(server, { metadata, clientInformation: client, redirectUrl: redirectUri, ...(scope !== undefined && { scope }), state, resource }));
+          if (!isPermittedOAuthUrl(authorizationUrl)) throw fail('insecure');
+          callback.arm(state);
+          await step(flow, 'browser', () => untilEnded(() => deps.openBrowser(authorizationUrl.href), flow));
+          const code = await callback.wait(flow);
+          const raw = await step(flow, 'exchange', () => exchangeAuthorization(server, { metadata, clientInformation: client, authorizationCode: code, codeVerifier, redirectUri, resource, fetchFn: flowFetch }));
+          return { issuer: metadata.issuer, resource, redirectUri, authorizationServer: metadata, client, tokens: acceptTokens(raw, now()) };
+        } finally {
+          await listener.close().catch(() => {});
+        }
       } finally {
-        await listener.close().catch(() => {});
+        clearTimeout(deadline);
+        signal.removeEventListener('abort', onCancel);
       }
     },
 

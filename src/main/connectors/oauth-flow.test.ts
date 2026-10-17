@@ -20,6 +20,7 @@ interface Script {
   register?: object | number;
   token?: object | number | 'hang';
   revoke?: number | 'network';
+  oidc?: object; // served as OpenID discovery metadata, the RFC 8414 document then answering 404
 }
 const metadataFor = (as: string) => ({
   issuer: as, authorization_endpoint: `${as}/authorize`, token_endpoint: `${as}/token`, registration_endpoint: `${as}/register`,
@@ -41,6 +42,8 @@ class Harness {
   closed = 0;
   opened: string[] = [];
   openFails = false;
+  openHangs = false; // the opener never answers
+  listenGate: Promise<void> | null = null; // binding answers only once this settles
   private openedWaiters: Array<() => void> = [];
   readonly fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input instanceof Request ? input.url : input));
@@ -56,7 +59,8 @@ class Harness {
     };
     const { mcp, as } = this;
     if (url.origin === mcp && url.pathname.startsWith('/.well-known/oauth-protected-resource')) return answer(s.prm, { ...PRM, resource: mcp, authorization_servers: [as] });
-    if (url.origin === as && url.pathname === '/.well-known/oauth-authorization-server') return answer(s.metadata, metadataFor(as));
+    if (url.origin === as && url.pathname === '/.well-known/oauth-authorization-server') return s.oidc ? new Response('not found', { status: 404 }) : answer(s.metadata, metadataFor(as));
+    if (url.origin === as && url.pathname === '/.well-known/openid-configuration' && s.oidc) return answer(s.oidc, {});
     if (url.origin === as && url.pathname === '/register') {
       const sent = JSON.parse(body) as { redirect_uris: string[] };
       return answer(s.register, { client_id: 'client-1', client_id_issued_at: 1, redirect_uris: sent.redirect_uris, token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], client_name: 'MAWS' });
@@ -69,12 +73,14 @@ class Harness {
     fetch: this.fetch,
     listen: async (handle) => {
       this.events.push('listen');
+      if (this.listenGate) await this.listenGate;
       this.handle = handle;
       return { port: 53_100, close: async () => { this.closed += 1; this.events.push('close'); this.handle = null; } };
     },
     openBrowser: async (url) => {
       this.events.push('browser');
       if (this.openFails) throw new Error('no browser');
+      if (this.openHangs) return new Promise<void>(() => {});
       this.opened.push(url);
       for (const wake of this.openedWaiters.splice(0)) wake();
     },
@@ -373,6 +379,94 @@ describe('connect', () => {
       expect(h.events).not.toContain('browser');
       expect(h.closed).toBe(1);
     }
+  });
+
+  it('a listener bound only after cancellation is closed exactly once, and nothing is registered or opened', async () => {
+    const h = new Harness();
+    let bind!: () => void;
+    h.listenGate = new Promise<void>((resolve) => { bind = resolve; });
+    const owner = new AbortController();
+    const pending = failureOf(connect(h, owner.signal));
+    await vi.waitFor(() => expect(h.events).toContain('listen'));
+    owner.abort();
+    bind();
+    expect(await pending).toMatchObject({ code: 'cancelled' });
+    await vi.waitFor(() => expect(h.closed).toBe(1));
+    expect(h.posts('/register')).toEqual([]);
+    expect(h.events).not.toContain('browser');
+  });
+
+  it('a binding that never answers still settles on cancellation and on the deadline, and a late binding is closed', async () => {
+    vi.useFakeTimers();
+    for (const end of ['cancel', 'deadline'] as const) {
+      const h = new Harness();
+      let bind!: () => void;
+      h.listenGate = new Promise<void>((resolve) => { bind = resolve; });
+      const owner = new AbortController();
+      let outcome: unknown;
+      void failureOf(connect(h, owner.signal)).then((error) => { outcome = error; });
+      await vi.waitFor(() => expect(h.events).toContain('listen'));
+      if (end === 'cancel') owner.abort();
+      else await vi.advanceTimersByTimeAsync(CONNECT_CALLBACK_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome, end).toMatchObject({ code: end === 'cancel' ? 'cancelled' : 'timeout' });
+      bind();
+      await vi.waitFor(() => expect(h.closed).toBe(1));
+      expect(h.posts('/register')).toEqual([]);
+    }
+  });
+
+  it('a browser opener that never answers is bounded: cancellation and the callback deadline both settle and close the listener', async () => {
+    vi.useFakeTimers();
+    for (const end of ['cancel', 'deadline'] as const) {
+      const h = new Harness();
+      h.openHangs = true;
+      const owner = new AbortController();
+      let outcome: unknown;
+      void failureOf(connect(h, owner.signal)).then((error) => { outcome = error; });
+      await vi.waitFor(() => expect(h.events).toContain('browser'));
+      if (end === 'cancel') owner.abort();
+      else await vi.advanceTimersByTimeAsync(CONNECT_CALLBACK_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome, end).toMatchObject({ code: end === 'cancel' ? 'cancelled' : 'timeout' });
+      expect(h.closed, end).toBe(1);
+      expect(h.posts('/token')).toEqual([]);
+    }
+  });
+
+  it('keeps the callback-issuer and revocation policy an OpenID discovery document advertises (the SDK schema strips them)', async () => {
+    const oidc = {
+      issuer: AS, authorization_endpoint: `${AS}/authorize`, token_endpoint: `${AS}/token`, registration_endpoint: `${AS}/register`, jwks_uri: `${AS}/jwks`,
+      response_types_supported: ['code'], subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'], code_challenge_methods_supported: ['S256'],
+      token_endpoint_auth_methods_supported: ['none'], authorization_response_iss_parameter_supported: true, revocation_endpoint: `${AS}/revoke`, revocation_endpoint_auth_methods_supported: ['none'],
+    };
+    const refused = new Harness();
+    refused.script.oidc = oidc;
+    const missingIss = connect(refused);
+    await refused.browserOpened();
+    refused.deliver('/callback?code=c&state=state-abc');
+    expect(await failureOf(missingIss)).toMatchObject({ code: 'state' });
+    expect(refused.posts('/token')).toEqual([]);
+
+    const h = new Harness();
+    h.script.oidc = oidc;
+    const pending = connect(h);
+    await h.browserOpened();
+    h.deliver(`/callback?code=c&state=state-abc&iss=${encodeURIComponent(AS)}`);
+    const grant = await pending;
+    expect(await h.flow.revoke(grant, new AbortController().signal)).toBe('revoked');
+    expect(h.posts('/revoke')).toHaveLength(2);
+  });
+
+  it('refuses an OpenID discovery document whose revocation endpoint breaks the endpoint policy', async () => {
+    const h = new Harness();
+    h.script.oidc = {
+      issuer: AS, authorization_endpoint: `${AS}/authorize`, token_endpoint: `${AS}/token`, registration_endpoint: `${AS}/register`, jwks_uri: `${AS}/jwks`,
+      response_types_supported: ['code'], subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'], code_challenge_methods_supported: ['S256'],
+      revocation_endpoint: 'http://auth.example.com/revoke',
+    };
+    expect(await failureOf(connect(h))).toMatchObject({ code: 'insecure' });
+    expect(h.posts('/register')).toEqual([]);
   });
 
   it('a browser that cannot open fails the flow and closes the listener', async () => {

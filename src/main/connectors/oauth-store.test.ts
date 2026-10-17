@@ -228,6 +228,26 @@ describe('ConnectorOAuthStore', () => {
     expect(await store().read(A)).toMatchObject({ tokens: { accessToken: 'at-2', refreshToken: 'rt-2' } });
   });
 
+  it('a record too large to read back is refused before it replaces the saved one', async () => {
+    const s = store();
+    await s.save(s.claim(A), identity(), grant());
+    const huge = grant({ authorizationServer: { ...grant().authorizationServer, padding: 'p'.repeat(900_000) } });
+    await expect(s.save(s.claim(A), identity(), huge)).rejects.toMatchObject({ code: 'tooLarge' });
+    expect(await store().read(A)).toMatchObject({ tokens: { accessToken: ACCESS } });
+  });
+
+  it('a re-encryption that cannot be written fails the read with its closed code', async () => {
+    const s = store();
+    await s.save(s.claim(A), identity(), grant());
+    sealer.reseal = true;
+    chmodSync(dir, 0o500); // no temporary file can be created: the commit fails as io, not stale
+    try {
+      await expect(store().read(A)).rejects.toMatchObject({ code: 'io' });
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+  });
+
   it('bounds the number of saved connections', async () => {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     for (let i = 0; i < 256; i += 1) writeFileSync(join(dir, `${i.toString(16).padStart(8, '0')}-0000-4000-8000-000000000000.sealed`), 'x', { mode: 0o600 });

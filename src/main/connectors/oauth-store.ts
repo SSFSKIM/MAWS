@@ -61,7 +61,8 @@ export function electronOAuthSealer(
   };
 }
 
-export type ConnectorOAuthStoreFailure = 'unavailable' | 'unreadable' | 'io' | 'stale' | 'full';
+// `tooLarge`: a record that could not be read back within the file bound is never written.
+export type ConnectorOAuthStoreFailure = 'unavailable' | 'unreadable' | 'io' | 'stale' | 'full' | 'tooLarge';
 export class ConnectorOAuthStoreError extends Error {
   constructor(readonly code: ConnectorOAuthStoreFailure) {
     super(`connector OAuth store ${code}`);
@@ -203,7 +204,9 @@ export function createConnectorOAuthStore(deps: { directory: string; sealer: Con
     } catch {
       throw new ConnectorOAuthStoreError('unavailable');
     }
-    return `${FORMAT}\n${sealed.toString('base64')}\n`;
+    const text = `${FORMAT}\n${sealed.toString('base64')}\n`;
+    if (Buffer.byteLength(text, 'utf8') > FILE_LIMIT_BYTES) throw new ConnectorOAuthStoreError('tooLarge');
+    return text;
   }
 
   async function ensureDirectory(): Promise<void> {
@@ -250,7 +253,9 @@ export function createConnectorOAuthStore(deps: { directory: string; sealer: Con
     if (record === null) throw new ConnectorOAuthStoreError('unreadable');
     if (opened.reseal) {
       // the key was rotated: the same record, re-encrypted through the same guarded commit (a removal meanwhile wins)
-      await commit(claim, await seal(record), written).catch(() => {});
+      await commit(claim, await seal(record), written).catch((error: unknown) => {
+        if (!(error instanceof ConnectorOAuthStoreError && error.code === 'stale')) throw error; // stale: a newer save or a removal won
+      });
     }
     return record;
   }
