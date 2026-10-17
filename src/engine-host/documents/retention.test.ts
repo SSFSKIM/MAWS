@@ -7,11 +7,11 @@
 // says. The refresh below is the write M2's trusted refresh makes: one `writeWithAssets` whose snapshot asset is marked a
 // query snapshot under a fresh UUID name, the descriptor moved, and `retainQuerySnapshots` in the same frame.
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readDataset, removeDataset, setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
+import { listDatasets, readDataset, removeDataset, setDataset, snapshotOf, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { registerDashboards, type Dashboards } from '../dashboards';
@@ -180,6 +180,63 @@ describe('collection after the commit', () => {
     await writing;
     await vi.waitFor(() => expect(rowOf(id, a)).toBeUndefined());
     expect(existsSync(fileOf(id, sha256))).toBe(false);
+  });
+});
+
+describe('the invariants under reuse, failure and concurrency', () => {
+  it('a refresh deduplicating to a retired snapshot keeps its original ref; once collected, the same bytes get a new ref', async () => {
+    const id = await dashboard();
+    const a = await refresh(id, 'live', 'A');
+    const b = await refresh(id, 'live', 'B');
+    await refresh(id, 'live', 'C');
+    expect(retired(id, a)).toBe(true);
+    expect(await refresh(id, 'live', 'A')).toBe(a); // reactivated under its own immutable ref
+    expect(retired(id, a)).toBe(false);
+    store().collectRetiredAssets(id);
+    expect(rowOf(id, b)).toBeUndefined();
+    const again = await refresh(id, 'live', 'B');
+    expect(again).not.toBe(b); // a collected ref is never reused
+  });
+
+  it('a failed unlink leaves an orphan file, never a committed row without its bytes', async () => {
+    const id = await dashboard();
+    const a = await refresh(id, 'live', 'A');
+    await refresh(id, 'live', 'B');
+    await refresh(id, 'live', 'C');
+    const path = fileOf(id, rowOf(id, a)!.sha256);
+    rmSync(path);
+    mkdirSync(path); // the unlink of a file now fails
+    writeFileSync(join(path, 'x'), '');
+    store().collectRetiredAssets(id);
+    expect(rowOf(id, a)).toBeUndefined();
+    expect(existsSync(path)).toBe(true);
+    for (const asset of store().listAssets(id)) expect(existsSync(fileOf(id, asset.sha256)), asset.ref).toBe(true);
+  });
+
+  it('a restore and a refresh committing together leave every named snapshot active, its bytes present, each query at most two', async () => {
+    const id = await dashboard();
+    await refresh(id, 'live', 'A');
+    const v1 = (await store().createVersion(id, { kind: 'named', actor: human, label: 'v1' }))!;
+    await refresh(id, 'live', 'B');
+    await refresh(id, 'live', 'C');
+    await Promise.all([store().restore(id, v1, human), refresh(id, 'live', 'D'), refresh(id, 'other', 'E')]);
+    await refresh(id, 'live', 'B');
+    store().collectRetiredAssets();
+    const live = store().service.live(id);
+    for (const datasetId of ['live', 'other']) {
+      const descriptor = readDataset(live, datasetId);
+      if (!descriptor) {
+        expect(members(id, datasetId), datasetId).toEqual([]); // the restore took it back: so went its membership
+        continue;
+      }
+      const { snapshot } = descriptor.source as { snapshot: { ref: string } };
+      expect(rowOf(id, snapshot.ref), datasetId).toMatchObject({ retiredAt: null });
+      expect(members(id, datasetId).length).toBeLessThanOrEqual(2);
+    }
+    const named = new Set(listDatasets(live).map(({ descriptor }) => snapshotOf(descriptor)!.ref));
+    for (const asset of store().listAssets(id)) expect(existsSync(fileOf(id, asset.sha256)), asset.ref).toBe(true);
+    for (const ref of named) expect(rowOf(id, ref)).toBeDefined();
+    for (const version of store().listVersions(id)) for (const ref of versionRefs(id, version.id)) expect(existsSync(fileOf(id, rowOf(id, ref)!.sha256)), ref).toBe(true);
   });
 });
 
