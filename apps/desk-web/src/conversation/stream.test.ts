@@ -142,56 +142,30 @@ describe('a direct channel', () => {
     const items = buildStream({ kind: 'session', session: S1 }, log(), aliases, [placed('toolu_2', S1, 9), placed('toolu_x', S2, 9)]);
     expect(shape(items)).toEqual(['system:1', 'work:2', 'message:2', 'agents:3,4', 'human:6', 'work:7', 'question:7', 'agents:8', 'request:toolu_2', 'system:10']);
     expect(items.find((i) => i.kind === 'question')).toMatchObject({ answered: { text: 'user_id' } });
-    // Each fold bounds the working record by the `src` of the session's exchange items around it (null for an open end).
-    expect(items.filter((i) => i.kind === 'work').map((i) => (i as { range: unknown }).range)).toEqual([
-      { from: null, to: 'r1#0' },
-      { from: 'r1#0', to: 'toolu_1' },
-    ]);
   });
 
   it('folds the working record after its last exchange item, open-ended, while the session is live', () => {
     const items = buildStream({ kind: 'session', session: S1 }, log().slice(0, 9), aliases, [], { live: true });
-    expect(items.at(-1)).toMatchObject({ kind: 'work', range: { from: 'toolu_1', to: null } });
+    expect(items.at(-1)).toMatchObject({ kind: 'work', key: 'work:live' });
     expect(buildStream({ kind: 'session', session: S1 }, log().slice(0, 9), aliases, []).at(-1)?.kind).not.toBe('work');
   });
 
-  it('bounds the working record at a native question, which is a request with no question event, by its call id', () => {
+  it('folds the working record before a native question, which is a request with no question event', () => {
     const items = buildStream({ kind: 'session', session: S1 }, log().slice(0, 2), aliases, [placed('toolu_native', S1, 2, { question: true })], { live: true });
     expect(shape(items)).toEqual(['system:1', 'work:2', 'message:2', 'work:2', 'request:toolu_native', 'work:9007199254740991']);
-    expect(items.filter((i) => i.kind === 'work').map((i) => (i as { range: unknown }).range)).toEqual([
-      { from: null, to: 'r1#0' },
-      { from: 'r1#0', to: 'toolu_native' },
-      { from: 'toolu_native', to: null },
-    ]);
   });
 
-  it("bounds it by the transcript's call id, a raised question's `toolUseId ?? request`, never the dialog's id", () => {
-    const raised = (request: string, toolUseId?: string) => ({ request, session: S1, tool: 'AskUserQuestion', input: {}, mac: { nonce: 'n', value: 'v' }, ...(toolUseId && { toolUseId }) });
-    const bounds = (record: Parameters<typeof placedRequest>[0]) =>
-      buildStream({ kind: 'session', session: S1 }, log().slice(0, 2), aliases, [placedRequest(record)], { live: true })
-        .filter((i) => i.kind === 'work')
-        .map((i) => (i as { range: unknown }).range);
-    // The ask mod's blocking question: raised under the engine dialog's id, its transcript call the outer one.
-    expect(bounds({ key: 'k', request: 'toolu_plugin_q', raised: raised('toolu_plugin_q', 'toolu_01outer'), at: 2 })).toEqual([
-      { from: null, to: 'r1#0' },
-      { from: 'r1#0', to: 'toolu_01outer' },
-      { from: 'toolu_01outer', to: null },
-    ]);
-    // A native question names its own call.
-    expect(bounds({ key: 'k', request: 'toolu_native', raised: raised('toolu_native'), at: 2 })[1]).toEqual({ from: 'r1#0', to: 'toolu_native' });
-    // Decisions still go to `request`: the placed request keeps it.
-    expect(placedRequest({ key: 'k', request: 'toolu_plugin_q', raised: raised('toolu_plugin_q', 'toolu_01outer'), at: 2 })).toMatchObject({ request: 'toolu_plugin_q', call: 'toolu_01outer', question: true });
+  it('places a raised question with its request id, which decisions and answers go to', () => {
+    const raised = { request: 'toolu_plugin_q', session: S1, tool: 'AskUserQuestion', input: {}, mac: { nonce: 'n', value: 'v' }, toolUseId: 'toolu_01outer' };
+    expect(placedRequest({ key: 'k', request: 'toolu_plugin_q', raised, at: 2 })).toEqual({ key: 'k', request: 'toolu_plugin_q', session: S1, at: 2, question: true });
   });
 
-  it('makes one bound of a question that is pending and in the log, and none of a permission prompt', () => {
+  it('folds once before a question that is pending and in the log, and never before a permission prompt', () => {
     const items = buildStream({ kind: 'session', session: S1 }, log(), aliases, [
       placed('toolu_1', S1, 2, { question: true }), // also the `question` event at 7
       placed('toolu_perm', S1, 7, { question: false }),
     ]);
-    expect(items.filter((i) => i.kind === 'work').map((i) => (i as { range: unknown }).range)).toEqual([
-      { from: null, to: 'r1#0' },
-      { from: 'r1#0', to: 'toolu_1' },
-    ]);
+    expect(shape(items).filter((k) => k.startsWith('work'))).toEqual(['work:2', 'work:7']);
     expect(shape(items).filter((k) => k.startsWith('request'))).toEqual(['request:toolu_perm']);
   });
 

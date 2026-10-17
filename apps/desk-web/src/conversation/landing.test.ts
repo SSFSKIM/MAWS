@@ -7,7 +7,7 @@ const event = (writer: string, seq: number, kind = 'message') => ({ ts: '2026-10
 const items: StreamItem[] = [
   { kind: 'message', key: 'm1', offset: 1, event: event('mini/s1', 4), session: 's1', from: 'maws-45', text: 'hi' },
   { kind: 'question', key: 'q1', offset: 2, event: event('mini/s1', 5, 'question'), session: 's1', from: 'maws-45', text: 'which?', choices: [], request: 'toolu_async', ref: 'ref-async', answered: null },
-  { kind: 'work', key: 'w1', offset: 2, session: 's1', range: { from: null, to: null } },
+  { kind: 'work', key: 'w1', offset: 2, session: 's1' },
   { kind: 'request', key: 'r1', request: 'toolu_native', ref: 'ref-native' },
 ];
 

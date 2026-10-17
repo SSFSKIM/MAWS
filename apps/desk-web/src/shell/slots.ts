@@ -1,7 +1,8 @@
 // DX8 — the shell's slots, copied from MAWS's `src/renderer/src/app/slots.ts` (the survey's copy-and-adapt): components
 // the shell renders at a fixed place with a fixed prop contract, whose real implementation a later child registers.
 // Until DC6 registers them the fallbacks (`slot-fallbacks.tsx`) render. The names and props are the seam DC6 codes
-// against; a change to them is a Decision Log entry that flags DC6.
+// against; a change to them is a Decision Log entry that flags DC6. DC9 retired the `transcript` slot (the working
+// record a fold unfolded in the center): a direct channel's center is the session view, the center's own.
 import type { ComponentType } from 'react';
 import { create } from 'zustand';
 import type { SessionPlane } from './session-plane';
@@ -15,24 +16,9 @@ export type DepthSlotProps = {
   plane: SessionPlane;
 };
 
-export type TranscriptSlotProps = {
-  project: string;
-  session: DeskSession;
-  plane: SessionPlane;
-  /**
-   * The stretch of working record this fold stands for: each end the `src` of a bounding exchange item (a `<message>`
-   * span's `<row uuid>#<span index>`; a question's call id), or null for an open end. The slot draws only what lies
-   * strictly between, at span granularity — a bounding message's marked span excluded, unmarked text in its row drawn —
-   * through the to-human Presenter; the shell passes the bounds and trims nothing.
-   */
-  range: { from: string | null; to: string | null };
-};
-
 export interface Slots {
-  /** The right column: the selected session's depth (transcript, subagents, diff, session info). DC6. */
+  /** The right column: the selected session's depth (subagents, jobs, diff, session info). DC6, DC9. */
   depth: ComponentType<DepthSlotProps>;
-  /** A direct channel's working record, unfolded in the center: the live transcript. DC6 registers it; DC5's M3 mounts it. */
-  transcript: ComponentType<TranscriptSlotProps>;
 }
 
 // A store rather than a plain map, so a registration after the first render still reaches the page.

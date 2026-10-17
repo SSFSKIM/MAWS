@@ -13,7 +13,9 @@
 //
 // On a desktop whose session's machine is online, a direct channel's center is its session view (DC9,
 // `SessionView.tsx`): MAWS's report over the session's own transcript, the status word of that transcript in the
-// header; the composer stays below it.
+// header; the composer stays below it. The channel built from the log stays where the session view cannot draw: on the
+// phone, for a machine that is offline, and for a session its machine serves no transcript for (the view says why);
+// its working record is then a label saying where the record is.
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent } from 'desk-hub/protocol';
@@ -59,7 +61,12 @@ export function ChannelView(props: {
   }, [channel, events, sessions, requests, session, member]);
   const outbox = Object.values(outboxAll).filter((o) => channel.kind === 'group' || (o.to !== '*' && o.to.some((r) => r.session === channel.session)));
   const landed = useLanded(channel, items);
+  const landedRequest = useLanding((s) => (s.landed?.landing.kind === 'request' && s.landed.project === connection.project && channel.kind === 'session' && s.landed.session === channel.session ? s.landed.landing.request : null));
   const sessionView = channel.kind === 'session' && drawsSessionView(session, phone) ? session : null;
+  // Keyed by channel, so each opens at its own tail (the composer beside it is keyed by the session alone).
+  const stream = (workLabel: string) => (
+    <StreamView key={channel.kind === 'group' ? 'stream:group' : `stream:${channel.session}`} items={items} outbox={outbox} landed={landed.item} workLabel={workLabel} />
+  );
   const { module: views, failed: viewFailed, retry: retryView } = useLoadedModule(sessionViews, sessionView !== null);
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg" aria-label="Channel">
@@ -113,7 +120,24 @@ export function ChannelView(props: {
       )}
       {sessionView ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {views && <views.default key={sessionView.session} project={connection.project} session={sessionView} plane={connection.client} />}
+          {views && (
+            <views.default
+              key={sessionView.session}
+              project={connection.project}
+              session={sessionView}
+              plane={connection.client}
+              events={events}
+              landedRequest={landedRequest}
+              fallback={(why) => (
+                <>
+                  <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-fg-muted" role="status" data-testid="no-transcript">
+                    {why}
+                  </div>
+                  {stream(`no transcript on ${sessionView.machine}`)}
+                </>
+              )}
+            />
+          )}
           {viewFailed !== null && (
             <div className="m-4 flex items-center gap-2 text-ui-sm text-danger" role="alert" data-testid="session-view-failed">
               <span className="min-w-0">The session view could not be loaded ({viewFailed}).</span>
@@ -129,8 +153,7 @@ export function ChannelView(props: {
           )}
         </div>
       ) : (
-        // Keyed by channel, so each opens at its own tail (the composer beside it is keyed by the session alone).
-        <StreamView key={channel.kind === 'group' ? 'stream:group' : `stream:${channel.session}`} items={items} outbox={outbox} landed={landed.item} />
+        stream(phone || !session ? 'on a computer' : `${session.machine} is offline`)
       )}
       {channel.kind === 'group' ? (
         <GroupComposer name={name} />

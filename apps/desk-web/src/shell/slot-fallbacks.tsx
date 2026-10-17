@@ -7,16 +7,10 @@ const Depth: Slots['depth'] = ({ session }) => (
     <div className="text-ui font-medium text-fg">{session ? sessionName(session) : 'Session depth'}</div>
     <p className="m-0 leading-5">
       {session
-        ? 'The transcript as it streams, the subagents, the diff of the working tree, and session info will be here.'
-        : 'Open a session to see its transcript, subagents, and diff here.'}
+        ? 'The subagents, the background jobs, the diff of the working tree, and session info will be here.'
+        : 'Open a session to see its subagents, diff and details here.'}
     </p>
   </div>
 );
 
-const Transcript: Slots['transcript'] = () => (
-  <div className="rounded-md border border-border px-3 py-2 text-ui-sm text-fg-muted" data-slot="transcript">
-    The live transcript opens here.
-  </div>
-);
-
-export const FALLBACKS: Slots = { depth: Depth, transcript: Transcript };
+export const FALLBACKS: Slots = { depth: Depth };
