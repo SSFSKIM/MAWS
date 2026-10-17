@@ -1,9 +1,10 @@
 // E3 M2 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3, "Linearization and transitions"): route E's host
 // leg with a dataset sink. A real artifact store with the dashboard kind, the host's real sink (./dataset-sink.ts) and
 // registry, and a scripted engine behind a real ControlClient. The result stays in the host: the call's end is
-// announced, main's first take starts the publication and answers null (a second take joins it), the publication's end
-// is announced again and the next take answers its metadata alone. The grant's fence, the operation's cancellation and
-// the dataset's identity hold until the commit.
+// announced, main's first take starts the publication and answers `publishing` (any later take joins it), the
+// publication's end is announced again and the next take answers its end once: the metadata alone, or a typed
+// failure (E3 M2 fix: explicit phases, `connectors.take`'s `dataset` beside H's nullable outcome). The grant's fence,
+// the operation's cancellation and the dataset's identity hold until the commit.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -128,6 +129,9 @@ const startOf = (patch: Partial<ConnectorStart> = {}): ConnectorStart => ({
   operationId: opId(), artifactId, appSessionId: SESSION, launchId: 'L1', cwd: '/work/project', server: 'fixture', tool: 'rows', arguments: { series: 'revenue' }, fingerprint, mode: 'read', dataset: { id: 'live' }, ...patch,
 });
 const announcements = (operationId: string) => completed.filter((id) => id === operationId).length;
+const take = (operationId: string) => calls.takeOperation(operationId);
+const publishing = (operationId: string) => ({ outcome: null, dataset: { status: 'publishing', operationId } });
+const failedTake = (reason: string) => ({ outcome: null, dataset: { status: 'failed', reason } });
 async function announced(operationId: string, times: number) {
   await vi.waitFor(() => expect(announcements(operationId)).toBe(times));
 }
@@ -135,27 +139,37 @@ async function announced(operationId: string, times: number) {
 describe('ConnectorCalls with a dataset sink', () => {
   it('keeps the result in the host until main’s take, publishes once however many takes join, and answers the metadata alone', async () => {
     const { operationId } = calls.start(startOf());
+    expect(take(operationId)).toEqual({ outcome: null }); // still calling: H's null, no phase
     await announced(operationId, 1);
     expect(engine.calls()).toHaveLength(1);
     const revision = store.revision(artifactId);
     expect(live()).toEqual(unfetched); // nothing published before main’s take
-    expect(calls.take(operationId)).toBeNull(); // the publication starts
-    expect(calls.take(operationId)).toBeNull(); // and is joined
+    expect(take(operationId)).toEqual(publishing(operationId)); // the publication starts
+    expect(take(operationId)).toEqual(publishing(operationId)); // and is joined, explicitly
+    expect(take(operationId)).toEqual(publishing(operationId));
     await announced(operationId, 2);
-    const outcome = calls.take(operationId);
-    expect(outcome).toEqual({ ok: true, result: { status: 'dataset', artifactId, id: 'live', revision: store.revision(artifactId), columns: [{ name: 't', type: 'number' }, { name: 'v', type: 'number' }], rows: 2 } });
-    expect(JSON.stringify(outcome)).not.toContain('107'); // no row value leaves the host
+    const ended = take(operationId);
+    expect(ended).toEqual({ outcome: null, dataset: { status: 'dataset', artifactId, id: 'live', revision: store.revision(artifactId), columns: [{ name: 't', type: 'number' }, { name: 'v', type: 'number' }], rows: 2 } });
+    expect(JSON.stringify(ended)).not.toContain('107'); // no row value leaves the host
     expect(store.revision(artifactId)).toBeGreaterThan(revision);
     expect(store.listAssets(artifactId)).toHaveLength(1);
     expect(live()).toMatchObject({ rows: 2, updated: { by: human }, state: { status: 'ok' } });
-    expect(calls.take(operationId)).toBeNull(); // taken once
+    expect(take(operationId)).toEqual({ outcome: null }); // its end taken once
+    expect(announcements(operationId)).toBe(2);
+  });
+
+  it('answers H’s own take of a dataset operation as H’s nullable outcome, never a phase', async () => {
+    const { operationId } = calls.start(startOf());
+    await announced(operationId, 1);
+    expect(calls.take(operationId)).toBeNull();
+    expect(take(operationId)).toEqual(publishing(operationId));
   });
 
   it('turns a revoke while the result waits for main’s take into the revoke’s refusal, publishing nothing', async () => {
     const { operationId } = calls.start(startOf());
     await announced(operationId, 1);
     await store.revokeConnectorTool(artifactId, { server: 'fixture', tool: 'rows' });
-    expect(calls.take(operationId)).toMatchObject({ ok: false, failure: 'refused', refusal: 'revoked' });
+    expect(take(operationId)).toEqual(failedTake('revoked'));
     expect(live()).toEqual(unfetched);
     expect(store.listAssets(artifactId)).toEqual([]);
   });
@@ -165,59 +179,60 @@ describe('ConnectorCalls with a dataset sink', () => {
       const { operationId } = calls.start(startOf());
       await announced(operationId, 1);
       beforePublish = async () => void (await during());
-      expect(calls.take(operationId)).toBeNull();
+      expect(take(operationId)).toEqual(publishing(operationId));
       if (expected === null) {
         await vi.waitFor(() => expect(beforePublish).toBeNull());
         for (let i = 0; i < 20; i++) await Promise.resolve();
         expect(announcements(operationId)).toBe(1); // a cancelled operation is never announced again
-        expect(calls.take(operationId)).toBeNull();
+        expect(take(operationId)).toEqual({ outcome: null });
       } else {
         await announced(operationId, 2);
-        expect(calls.take(operationId)).toMatchObject(expected);
+        expect(take(operationId)).toEqual(expected);
       }
     };
     const before = store.revision(artifactId);
-    await race(() => store.revokeConnectorTool(artifactId, { server: 'fixture', tool: 'rows' }), { ok: false, failure: 'refused', refusal: 'revoked' });
+    await race(() => store.revokeConnectorTool(artifactId, { server: 'fixture', tool: 'rows' }), failedTake('revoked'));
     expect(store.revision(artifactId)).toBe(before);
     await store.grantConnectorTool(artifactId, { server: 'fixture', tool: 'rows', fingerprint, mode: 'read' });
     const { operationId } = calls.start(startOf());
     await announced(operationId, 1);
     beforePublish = () => void calls.cancel(operationId);
-    expect(calls.take(operationId)).toBeNull();
+    expect(take(operationId)).toEqual(publishing(operationId));
     await vi.waitFor(() => expect(beforePublish).toBeNull());
     for (let i = 0; i < 20; i++) await Promise.resolve();
     expect(announcements(operationId)).toBe(1); // a cancelled operation is never announced again
     expect(store.revision(artifactId)).toBe(before);
-    await race(() => store.writeWithAssets(artifactId, human, [], (doc) => setDataset(doc, 'live', { ...unfetched, title: 'Replaced' })), { ok: false, failure: 'failed' });
+    // E3 M2 fix (reviewer finding 5): a concurrent change of the dataset is a typed conflict, never a tool's failure
+    await race(() => store.writeWithAssets(artifactId, human, [], (doc) => setDataset(doc, 'live', { ...unfetched, title: 'Replaced' })), failedTake('stale'));
     expect(live()).toEqual({ ...unfetched, title: 'Replaced' });
     expect(store.listAssets(artifactId)).toEqual([]);
   });
 
-  it('writes a malformed result or a tool failure as the error state alone, answered as its dataset outcome', async () => {
+  it('writes a malformed result or a tool failure as the error state alone, its end the typed failure', async () => {
     engine.state.call = () => success({ data: ROWS });
     const malformed = calls.start(startOf());
     await announced(malformed.operationId, 1);
-    calls.take(malformed.operationId);
+    take(malformed.operationId);
     await announced(malformed.operationId, 2);
-    expect(calls.take(malformed.operationId)).toMatchObject({ ok: true, result: { status: 'dataset', rows: 0, notFetched: true, state: { status: 'error' } } });
+    expect(take(malformed.operationId)).toEqual(failedTake('validation'));
     expect(live()!.state.status).toBe('error');
     engine.state.call = () => ({ subtype: 'error', error: 'upstream exploded: secret-token-xyz' });
     const failing = calls.start(startOf());
     await announced(failing.operationId, 1);
-    calls.take(failing.operationId);
+    take(failing.operationId);
     await announced(failing.operationId, 2);
-    expect(calls.take(failing.operationId)).toMatchObject({ ok: true, result: { state: { status: 'error' } } });
+    expect(take(failing.operationId)).toEqual(failedTake('toolError'));
     expect(JSON.stringify(live())).not.toContain('secret-token-xyz');
     expect(store.listAssets(artifactId)).toEqual([]);
   });
 
-  it('refuses before any call a start its dataset’s query does not name, and a dataset start under an Allow once', async () => {
+  it('refuses before any call a start its dataset’s query no longer names (stale), and a dataset start under an Allow once', async () => {
     const mismatch = calls.start(startOf({ arguments: { series: 'cost' } }));
     await announced(mismatch.operationId, 1);
-    expect(calls.take(mismatch.operationId)).toMatchObject({ ok: false, failure: 'failed', message: expect.stringContaining('query') });
+    expect(take(mismatch.operationId)).toEqual(failedTake('stale'));
     const once = calls.start(startOf({ mode: 'once' }));
     await announced(once.operationId, 1);
-    expect(calls.take(once.operationId)).toMatchObject({ ok: false, failure: 'refused', refusal: 'wrongMode' });
+    expect(take(once.operationId)).toEqual({ outcome: expect.objectContaining({ ok: false, failure: 'refused', refusal: 'wrongMode' }) });
     expect(engine.calls()).toEqual([]);
     expect(live()).toEqual(unfetched);
   });
@@ -226,7 +241,7 @@ describe('ConnectorCalls with a dataset sink', () => {
     engine.state.call = () => ({ subtype: 'error', error: 'MCP server not connected: fixture' });
     const { operationId } = calls.start(startOf());
     await announced(operationId, 1);
-    expect(calls.take(operationId)).toMatchObject({ ok: false, failure: 'unavailable' });
+    expect(take(operationId)).toEqual({ outcome: expect.objectContaining({ ok: false, failure: 'unavailable' }) });
     expect(live()).toEqual(unfetched);
   });
 
@@ -245,15 +260,16 @@ describe('ConnectorCalls with a dataset sink', () => {
     // a start claiming another base is not the request
     const wrong = calls.start(startOf({ dataset: { id: 'live', baseRevision: base + 1, requestId } }));
     await announced(wrong.operationId, 1);
-    expect(calls.take(wrong.operationId)).toMatchObject({ ok: false, failure: 'failed' });
+    expect(take(wrong.operationId)).toEqual({ outcome: expect.objectContaining({ ok: false, failure: 'failed' }) });
     const { operationId } = calls.start(startOf({ dataset: { id: 'live', baseRevision: base, requestId } }));
     await announced(operationId, 1);
-    calls.take(operationId);
+    take(operationId);
     await announced(operationId, 2);
-    expect(calls.take(operationId)).toMatchObject({ ok: true, result: { status: 'dataset', rows: 2 } });
+    expect(take(operationId)).toMatchObject({ outcome: null, dataset: { status: 'dataset', rows: 2 } });
     expect(live()!.updated).toMatchObject({ by: { kind: 'session', appSessionId: SESSION } });
-    expect(requests.answer(requestId, { ok: true })).toBe('delivered');
+    // the host's own end is the request's answer, at once: main's reply after it is not pending
     expect(await asked).toMatchObject({ kind: 'published', answer: { status: 'dataset', rows: 2 } });
+    expect(requests.answer(requestId, { ok: true })).toBe('not_pending');
     expect(await store.replayOf(`${SESSION}/toolu_1`)).toMatchObject({ found: true, result: { status: 'dataset', rows: 2 } });
 
     // the engine withdraws the tool call while the mcp_call runs: the operation ends cancelled, nothing published
@@ -266,7 +282,7 @@ describe('ConnectorCalls with a dataset sink', () => {
     withdrawn.abort();
     expect(await second).toEqual({ kind: 'withdrawn' });
     await announced(running.operationId, 1);
-    expect(calls.take(running.operationId)).toMatchObject({ ok: false, failure: 'unavailable' });
+    expect(take(running.operationId)).toEqual({ outcome: expect.objectContaining({ ok: false, failure: 'unavailable' }) });
     engine.release();
     expect(store.revision(artifactId)).toBe(revision);
   });

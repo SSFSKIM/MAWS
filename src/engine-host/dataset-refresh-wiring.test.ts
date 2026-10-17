@@ -11,6 +11,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, EventName } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { MAIN_ONLY_COMMANDS, NAMES } from '@shared/ipc/names';
+import { setDataset } from '@artifacts/dashboard/datasets';
 import { hostDatasetRefresh, type DatasetRefreshRequests } from './connectors/dataset-requests';
 import { registerConnectors } from './connectors/register';
 import { registerDashboards, type Dashboards } from './dashboards';
@@ -74,12 +75,15 @@ describe('an agent’s dataset refresh through the host’s handlers', () => {
 
   it('serves main’s read, a start’s one claim and main’s reply from the one registry', async () => {
     const artifactId = (await documents.store.create({ kind: 'dashboard', title: 'Board' }, { kind: 'human' })).id;
-    const asked = requests.ask({ artifactId, datasetId: 'live', baseRevision: 0, appSessionId: 'app-1' as AppSessionId, opId: 'app-1/toolu_1', server: 'fixture', tool: 'rows', args: {} }, new AbortController().signal);
+    // E3 M2 fix: the query the request names (a dataset gone would settle the request at once, as a conflict)
+    await documents.store.writeWithAssets(artifactId, { kind: 'human' }, [], (doc) => setDataset(doc, 'live', { title: 'Live', source: { kind: 'query', server: 'fixture', tool: 'rows', args: {}, snapshot: null }, columns: [], rows: 0, state: { status: 'ok', at: 1 } }));
+    const baseRevision = documents.store.revision(artifactId);
+    const asked = requests.ask({ artifactId, datasetId: 'live', baseRevision, appSessionId: 'app-1' as AppSessionId, opId: 'app-1/toolu_1', server: 'fixture', tool: 'rows', args: {} }, new AbortController().signal);
     const [announcement] = emitted.filter((entry) => entry.name === 'maws.artifact.datasetRefresh');
     const { requestId } = announcement!.payload as { requestId: string };
     expect(Object.keys(announcement!.payload as object)).toEqual(['requestId']);
-    expect(await call('artifacts.datasetRefreshRequest', { requestId })).toEqual({ request: { artifactId, datasetId: 'live', baseRevision: 0, appSessionId: 'app-1', server: 'fixture', tool: 'rows', args: {} } });
-    const start = { appSessionId: 'app-1', launchId: 'L1', cwd: '/work', artifactId, server: 'fixture', tool: 'rows', arguments: {}, fingerprint: 'f'.repeat(64), mode: 'read', dataset: { id: 'live', baseRevision: 0, requestId } };
+    expect(await call('artifacts.datasetRefreshRequest', { requestId })).toEqual({ request: { artifactId, datasetId: 'live', baseRevision, appSessionId: 'app-1', server: 'fixture', tool: 'rows', args: {} } });
+    const start = { appSessionId: 'app-1', launchId: 'L1', cwd: '/work', artifactId, server: 'fixture', tool: 'rows', arguments: {}, fingerprint: 'f'.repeat(64), mode: 'read', dataset: { id: 'live', baseRevision, requestId } };
     await call('connectors.start', { ...start, operationId: '00000000-0000-4000-8000-0000000000a1' });
     await call('connectors.start', { ...start, operationId: '00000000-0000-4000-8000-0000000000a2' });
     await new Promise((resolve) => setTimeout(resolve, 20));

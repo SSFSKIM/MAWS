@@ -38,12 +38,15 @@
 //   the work not aborted, the lease visible) before each step that would let the backend publish. An agent's one
 //   refresh (`refreshForSession`) needs no lease: the asking session's own engine (`sessionRoute`) or a direct route
 //   serves it, never another session's, under the same read grant; the owner's revoke, the store's revoke or delete and
-//   main's stop end it as they end a page's work.
+//   main's stop end it as they end a page's work. E3 M2 fix: a dataset work, a page's or an agent's, runs on one
+//   budget (CONNECTOR_OPERATION_DEADLINE_MS) from its admission here through the route, the grant, the call and the
+//   host's publication; at its end the work is aborted (`paused: unavailable`) and may no longer publish.
 import { randomUUID } from 'node:crypto';
 import * as z from 'zod';
 import {
   CONNECTOR_ARGS_MAX_BYTES,
   CONNECTOR_DECLARE_LIMIT,
+  CONNECTOR_OPERATION_DEADLINE_MS, // E3
   CONNECTOR_WATCH_LIMIT,
   ConnectorCallOptionsSchema, // E3
   ConnectorCallRequestSchema,
@@ -338,6 +341,7 @@ export class ConnectorBroker {
     if (this.revoking.has(work.key)) return refusal('revoked', 'revoked');
     this.agentWork.set(work, request.artifactId);
     const { signal } = work.controller;
+    const unbound = bounded(work);
     try {
       const found = await this.agentTarget(request, tool, signal);
       if ('ok' in found) return signal.aborted ? (signal.reason as ConnectorRefusal) : found;
@@ -345,6 +349,7 @@ export class ConnectorBroker {
       const outcome = await this.callTarget(request.artifactId, found.route, found.target, tool, args, 'call', signal, null, { sink: request.dataset, publishable });
       return signal.aborted ? (signal.reason as ConnectorRefusal) : outcome;
     } finally {
+      unbound();
       this.agentWork.delete(work);
     }
   }
@@ -426,8 +431,13 @@ export class ConnectorBroker {
     if (!this.visible(lease)) return refusal('paused', 'hidden');
     if (this.revoking.has(work.key)) return refusal('revoked', 'revoked');
     lease.work.add(work);
-    const outcome = await this.attempt(lease, tool, args, use, work.controller.signal, sink);
-    return work.controller.signal.aborted ? (work.controller.signal.reason as ConnectorRefusal) : outcome;
+    const unbound = sink ? bounded(work) : null; // E3
+    try {
+      const outcome = await this.attempt(lease, tool, args, use, work.controller.signal, sink);
+      return work.controller.signal.aborted ? (work.controller.signal.reason as ConnectorRefusal) : outcome;
+    } finally {
+      unbound?.();
+    }
   }
 
   private async attempt(lease: Lease, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, signal: AbortSignal, sink?: ConnectorDatasetSink): Promise<ConnectorCallOutcome> {
@@ -700,6 +710,13 @@ export class ConnectorBroker {
     const watch = typeof watchId === 'string' ? this.watches.get(watchId) : undefined;
     return lease !== undefined && watch?.lease === lease ? watch : undefined;
   }
+}
+
+// E3 M2 fix: a dataset work's one budget, from now: at its end the work is aborted (and so no longer publishable).
+// Answers what lets the timer go.
+function bounded(work: Work): () => void {
+  const timer = setTimeout(() => work.controller.abort(refusal('paused', 'unavailable')), CONNECTOR_OPERATION_DEADLINE_MS);
+  return () => clearTimeout(timer);
 }
 
 // E3: the owner's sink from a call's options: none, the sink, or false for options that are not one.

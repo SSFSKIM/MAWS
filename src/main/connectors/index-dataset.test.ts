@@ -1,7 +1,7 @@
 // E3 M2 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): main's connector service with the dataset sink,
 // through its registered handlers over a scripted engine host whose every dispatch is validated against the registry.
-// A window's call forwards the owner's sink to route E's start; the host's phased take (null while it publishes, the
-// metadata after the publication's end) answers the window. An agent's refresh is heard by its id alone, read,
+// A window's call forwards the owner's sink to route E's start; the host's phased take (`publishing` while it
+// publishes, the metadata after the publication's end) answers the window. An agent's refresh is heard by its id alone, read,
 // run through the asking session's own engine with no lease, and answered on the main-only reply; a request already
 // gone is left alone.
 import { EventEmitter } from 'node:events';
@@ -20,7 +20,7 @@ const status = (appSessionId: string, launchId: string) => ({ appSessionId, laun
 class FakeHost {
   readonly dispatched: { name: string; input: Record<string, unknown> }[] = [];
   readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
-  takes: (unknown | null)[] = []; // what each `connectors.take` answers, in order
+  takes: ('publishing' | Record<string, unknown>)[] = []; // what each `connectors.take` answers, in order (none left: H's null)
   request: Record<string, unknown> | null = { artifactId: ART, datasetId: 'live', baseRevision: 4, appSessionId: 'app-asker', server: 'fixture', tool: 'rows', args: { series: 'revenue' } };
   granted = true;
   dispatch = async (owner: string, name: CommandName, input: Record<string, unknown>) => {
@@ -47,9 +47,10 @@ class FakeHost {
         queueMicrotask(() => this.emit('connectors.operation', { operationId: input.operationId }));
         return { operationId: input.operationId };
       case 'connectors.take': {
-        const outcome = this.takes.shift() ?? null;
-        if (outcome === null) queueMicrotask(() => this.emit('connectors.operation', { operationId: input.operationId })); // its publication's end
-        return { outcome };
+        const next = this.takes.shift() ?? { outcome: null };
+        if (next !== 'publishing') return next;
+        queueMicrotask(() => this.emit('connectors.operation', { operationId: input.operationId })); // its publication's end
+        return { outcome: null, dataset: { status: 'publishing', operationId: input.operationId } };
       }
       case 'connectors.cancel':
         return { cancelled: true };
@@ -137,7 +138,7 @@ describe('main’s connector service with a dataset sink', () => {
     const { leaseId } = (await invoke('connectors.open', { artifactId: ART })) as { leaseId: string };
     await invoke('connectors.declare', { leaseId, tools: [{ server: 'fixture', tool: 'rows' }] });
     await invoke('connectors.visibility', { leaseId, visible: true });
-    fake.takes = [null, { ok: true, result: META }];
+    fake.takes = ['publishing', { outcome: null, dataset: META }];
     const answer = invoke('connectors.call', { leaseId, request: { server: 'fixture', tool: 'rows', args: { series: 'revenue' } }, dataset: { id: 'live', baseRevision: 4 } });
     await settle();
     expect(await answer).toMatchObject({ ok: true, result: META });
@@ -146,7 +147,7 @@ describe('main’s connector service with a dataset sink', () => {
   });
 
   it('runs an agent’s refresh heard by its id alone in the asking session’s engine, and answers on the main-only reply', async () => {
-    fake.takes = [null, { ok: true, result: META }];
+    fake.takes = ['publishing', { outcome: null, dataset: META }];
     fake.emit('maws.artifact.datasetRefresh', { requestId: REQUEST });
     await settle();
     expect(fake.sent('artifacts.datasetRefreshRequest')).toEqual([{ requestId: REQUEST }]);

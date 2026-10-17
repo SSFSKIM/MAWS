@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readDataset, setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
+import { readDataset, removeDataset, setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import type { MawsDatasetRefreshOutcome } from '@shared/ipc/schema/maws';
 import { artifactRefusalOf } from '@shared/maws/tools';
@@ -264,17 +264,21 @@ describe('artifact_dataset: one refresh', () => {
     expect(refusal(await bare.get('artifact_dataset')!.call({ artifact: 'board', baseRevision: store.revision(boardId), id: 'live', refresh: true }, ctx()))).toMatchObject({ reason: 'unavailable' });
   });
 
-  it('answers the host’s own refusal words when its admission refused the call main started', async () => {
+  // E3 M2 fix (reviewer finding 5): a concurrent change of the dataset is XE6's descriptor-level conflict, never a
+  // tool's failure or an invalid input, whether the host's admission or its publication found it
+  it('answers a descriptor-level conflict when the dataset changed before the host admitted the call main started', async () => {
     const base = await configured();
     main = async (requestId, read) => {
       await store.writeWithAssets(boardId, { kind: 'human' }, [], (doc) => setDataset(doc, 'live', { ...live('live')!, title: 'Moved' }));
       await asMain(requestId, read);
     };
-    expect(text(await dataset({ baseRevision: base, id: 'live', refresh: true }))).toMatch(/changed since revision/);
+    const answer = await dataset({ baseRevision: base, id: 'live', refresh: true });
+    expect(refusal(answer)).toMatchObject({ reason: 'conflict', dataset: 'live', detail: 'replaced since your read', liveRevision: store.revision(boardId) });
+    expect(text(answer)).toMatch(/changed since revision/);
     expect(live('live')).toMatchObject({ title: 'Moved', source: { snapshot: null } });
   });
 
-  it('answers the host’s own words when the dataset changed between the call’s admission and its publication', async () => {
+  it('answers a descriptor-level conflict when the dataset changed between the call’s admission and its publication', async () => {
     const base = await configured();
     main = async (requestId, read) => {
       const sink = connectorDatasetSink({ store: () => store, requests });
@@ -286,7 +290,18 @@ describe('artifact_dataset: one refresh', () => {
     };
     const answer = await dataset({ baseRevision: base, id: 'live', refresh: true });
     expect(text(answer)).toMatch(/changed since the refresh began/);
-    expect(refusal(answer)).toMatchObject({ reason: 'invalid', dataset: 'live' });
-    expect(live('live')).toMatchObject({ title: 'Moved', rows: 0, source: { snapshot: null } });
+    expect(refusal(answer)).toMatchObject({ reason: 'conflict', dataset: 'live', detail: 'replaced since your read', liveRevision: store.revision(boardId) });
+    expect(live('live')).toMatchObject({ title: 'Moved', rows: 0, source: { snapshot: null } }); // the move alone: no descriptor write
+    expect(store.listAssets(boardId)).toEqual([]);
+    // removed meanwhile: the conflict says so
+    const again = store.revision(boardId);
+    main = async (requestId, read) => {
+      const sink = connectorDatasetSink({ store: () => store, requests });
+      const admission = await sink.admit({ appSessionId: read.appSessionId, artifactId: read.artifactId, server: read.server, tool: read.tool, arguments: read.args, dataset: { id: read.datasetId, baseRevision: read.baseRevision, requestId } }, () => {});
+      if (!('publish' in admission)) throw new Error(admission.refusal);
+      await store.writeWithAssets(boardId, { kind: 'human' }, [], (doc) => removeDataset(doc, 'live'));
+      await admission.publish({ kind: 'result', result: { content: '', structuredContent: ROWS } }, () => 'held');
+    };
+    expect(refusal(await dataset({ baseRevision: again, id: 'live', refresh: true }))).toMatchObject({ reason: 'conflict', dataset: 'live', detail: 'removed since your read' });
   });
 });

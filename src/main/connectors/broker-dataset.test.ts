@@ -5,7 +5,7 @@
 // the asking session's own engine (route E for that session alone) or a direct route, never another session's, and
 // the owner's revoke, the artifact's deletion and main's stop end it as they end a page's work.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ConnectorAuthorization, ConnectorCallOutcome, ConnectorCallRef, ConnectorGrant, ConnectorGrantMode, ConnectorGrantRequest, ConnectorRouteName, ConnectorToolRef } from '@shared/artifacts/connectors';
+import { CONNECTOR_OPERATION_DEADLINE_MS, type ConnectorAuthorization, type ConnectorCallOutcome, type ConnectorCallRef, type ConnectorGrant, type ConnectorGrantMode, type ConnectorGrantRequest, type ConnectorRouteName, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import { ConnectorBroker, type ConnectorAgentRefresh } from './broker';
 import type { ConnectorGrantAuthority, ConnectorRoute, ConnectorRouteAnswer, ConnectorRouteCallContext, ConnectorRouteTarget } from './route';
 
@@ -199,5 +199,68 @@ describe('an agent’s one refresh', () => {
       expect(await running, what).toEqual(expected);
       await stopped;
     }
+  });
+});
+
+// E3 M2 fix (reviewer finding 3): one CONNECTOR_OPERATION_DEADLINE_MS from the work's admission here, through the
+// route's resolution, the grant, the call and the host's consumption, never a new budget per phase
+describe('a dataset work’s one budget', () => {
+  const pending = async (promise: Promise<unknown>) => {
+    let done = false;
+    void promise.then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(0);
+    return !done;
+  };
+
+  it('ends an agent’s refresh at the deadline from its admission, a delayed resolution included, calling nothing', async () => {
+    grants.put(ROWS, 'read');
+    broker.stop();
+    let resolve!: (target: ConnectorRouteTarget | null) => void;
+    broker = new ConnectorBroker({ routes: [engine, direct], grants, log: () => {}, sessionRoute: () => new Promise((done) => (resolve = done)) });
+    const running = broker.refreshForSession(agentRefresh());
+    await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS - 1);
+    expect(await pending(running)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await running).toEqual({ ok: false, state: 'paused', reason: 'unavailable' });
+    resolve(engine.target('app-asker'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.calls).toEqual([]);
+  });
+
+  it('leaves a call started late only the rest of the budget: no longer publishable at the deadline', async () => {
+    grants.put(ROWS, 'read');
+    broker.stop();
+    broker = new ConnectorBroker({
+      routes: [engine, direct],
+      grants,
+      log: () => {},
+      sessionRoute: async () => {
+        await new Promise((done) => setTimeout(done, 100_000));
+        return engine.target('app-asker');
+      },
+    });
+    engine.hold = true;
+    const running = broker.refreshForSession(agentRefresh());
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(engine.calls).toHaveLength(1);
+    const { signal, publishable } = engine.calls[0]!.context;
+    await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS - 100_000);
+    expect(signal.aborted).toBe(true);
+    expect(publishable!()).toBe(false);
+    expect(await running).toEqual({ ok: false, state: 'paused', reason: 'unavailable' });
+  });
+
+  it('bounds a page’s dataset call the same way, and adds no bound to a call without a sink', async () => {
+    grants.put(ROWS, 'read');
+    const lease = page();
+    engine.hold = true;
+    const calling = broker.callTool(ME, lease, ROWS, { dataset: { id: 'live' } });
+    await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS);
+    expect(await calling).toEqual({ ok: false, state: 'paused', reason: 'unavailable' });
+    const plain = broker.callTool(ME, lease, ROWS);
+    await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS);
+    expect(await pending(plain)).toBe(true); // H's route keeps its own deadline
+    engine.calls.at(-1)!.answer({ ok: true, result: 1 });
+    expect(await plain).toMatchObject({ ok: true, result: 1 });
   });
 });

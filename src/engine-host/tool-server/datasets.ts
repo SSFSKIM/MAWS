@@ -179,6 +179,13 @@ export function artifactDatasetTool(deps: ArtifactToolDeps & { refreshes?: Pick<
           switch (settled.kind) {
             case 'published':
               return toolText(settled.answer);
+            // E3 M2 fix (reviewer finding 5): the dataset changed or went while it was fetched: XE6's descriptor-level
+            // conflict, as a write would answer it, nothing written
+            case 'stale': {
+              const now = await store.readCommitted(() => ({ exists: Boolean(store.get(artifactId)) && readDataset(store.service.live(artifactId), input.id) !== null, liveRevision: store.revision(artifactId) }));
+              const detail = now.exists ? 'replaced since your read' : 'removed since your read';
+              throw refuse(TOOL, { reason: 'conflict', dataset: input.id, detail, liveRevision: now.liveRevision }, `${settled.detail}; nothing was published; read the dashboard again`);
+            }
             case 'refused':
               if (settled.refusal !== null) throw refuse(TOOL, { reason: 'invalid', dataset: input.id }, `${settled.refusal}; nothing was published`);
               throw refuse(TOOL, { reason: 'unavailable', dataset: input.id }, notPublished(settled.outcome, named, query.server));

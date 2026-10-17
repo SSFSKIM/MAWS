@@ -146,4 +146,10 @@ export const ConnectorDatasetSinkSchema = z.strictObject({
 export type ConnectorDatasetSink = z.infer<typeof ConnectorDatasetSinkSchema>;
 export const ConnectorCallOptionsSchema = z.strictObject({ dataset: ConnectorDatasetSinkSchema });
 export type ConnectorCallOptions = z.infer<typeof ConnectorCallOptionsSchema>;
+
+// The one budget of a connector operation (moved here from main's route E by the E3 M2 fix, which re-exports it):
+// past the host's own bound on an operation (two mcp_status reads of 8 s, the store, mcp_call's 120 s long deadline).
+// A dataset refresh's runs from its admission through its route, grant, call and the host's publication, never a new
+// budget per phase.
+export const CONNECTOR_OPERATION_DEADLINE_MS = 180_000;
 // E3 end

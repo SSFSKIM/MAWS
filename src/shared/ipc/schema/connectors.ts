@@ -91,6 +91,29 @@ export const ConnectorOperationOutcomeSchema = z.union([
 ]);
 export type ConnectorOperationOutcome = z.infer<typeof ConnectorOperationOutcomeSchema>;
 
+// E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3; the architect's M2 correction): a dataset
+// operation's take, beside H's nullable outcome, for main alone. Main's first take after the call's end (made only once
+// main rechecked that the work may still publish) starts the host's publication: `publishing` while it runs (any later
+// take joins it); then its end once: `dataset`, the committed snapshot's compact metadata (never a row), or `failed`
+// with nothing new to draw: `stale` the dataset changed or went meanwhile (a descriptor-level conflict, nothing
+// written), `revoked` its grant's fence broke before the commit, and `validation`, `toolError` or `timeout` the error
+// state recorded in its place, the previous snapshot kept.
+export const ConnectorDatasetTakeSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('publishing'), operationId: OperationId }),
+  z.strictObject({
+    status: z.literal('dataset'),
+    artifactId: ArtifactId,
+    id: ConnectorDatasetSinkSchema.shape.id,
+    revision: Time,
+    columns: z.array(z.strictObject({ name: z.string(), type: z.string(), mismatches: z.number().int().nonnegative().optional() })),
+    rows: z.number().int().nonnegative(),
+    warnings: z.array(z.string()).optional(),
+  }),
+  z.strictObject({ status: z.literal('failed'), reason: z.enum(['stale', 'validation', 'toolError', 'timeout', 'revoked']) }),
+]);
+export type ConnectorDatasetTake = z.infer<typeof ConnectorDatasetTakeSchema>;
+// E3 end
+
 export const ConnectorAuthorizationSchema = z.discriminatedUnion('granted', [
   z.strictObject({ granted: z.literal(true), mode: z.enum(CONNECTOR_GRANT_MODES) }),
   z.strictObject({ granted: z.literal(false), refusal: z.enum(['notGranted', 'fingerprintChanged', 'wrongMode']) }),
@@ -127,8 +150,10 @@ export const commands = {
   'connectors.check': host(z.strictObject({ artifactId: ArtifactId, call: ConnectorCallRefSchema }), ConnectorAuthorizationSchema),
   'connectors.resolve': host(ConnectorSessionToolSchema, ConnectorResolveAnswerSchema),
   'connectors.start': host(ConnectorStartSchema, z.strictObject({ operationId: OperationId })),
-  // null: no such operation (taken, cancelled, expired, or still running)
-  'connectors.take': host(z.strictObject({ operationId: OperationId }), z.strictObject({ outcome: ConnectorOperationOutcomeSchema.nullable() })),
+  // null: no such operation (taken, cancelled, expired, or still running). E3: `dataset`, a dataset operation's phase
+  // or end (its `outcome` then null); a dataset operation that ended before its call (refused, unavailable) answers
+  // its `outcome` as H's do.
+  'connectors.take': host(z.strictObject({ operationId: OperationId }), z.strictObject({ outcome: ConnectorOperationOutcomeSchema.nullable(), dataset: ConnectorDatasetTakeSchema.optional() /* E3 */ })),
   'connectors.cancel': host(z.strictObject({ operationId: OperationId }), z.strictObject({ cancelled: z.boolean() })),
 } as const satisfies Record<`connectors.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

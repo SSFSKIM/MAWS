@@ -10,13 +10,15 @@
 //   2. `publish`, once the call answered: the result's rows (./query-result.ts) parsed once by the host's dataset
 //      parser, and its row key checked, before anything is written. Then one serialized commit
 //      (`ArtifactStore.writeWithAssets`) whose `prepare`, synchronous with the write, requires the caller's guard (the
-//      grant's fence held, the operation not cancelled), the scope still live (an agent's request still pending) and the
-//      dataset's identity unchanged; inside that savepoint: the snapshot (`query-<uuid>.json`, a query snapshot), the
-//      descriptor, its retention (`retainQuerySnapshots`), an agent's op answer. A discarded publication writes nothing:
-//      no snapshot, descriptor, retention or op, and no retry over the newer source. A result that fails validation, or a
-//      tool that failed, writes the error state alone under the same guard, so an old failure never covers a newer
-//      success. Right after a successful commit, `collectRetiredAssets` removes what that retention retired and nothing
-//      else protects.
+//      grant's fence held, the operation not cancelled), the dataset's identity unchanged and, last, the scope's
+//      admission (an agent's request still pending and within its deadline; from that step the request's registry
+//      holds its end until the commit or its rollback says how it went); inside that savepoint: the snapshot
+//      (`query-<uuid>.json`, a query snapshot), the descriptor, its retention (`retainQuerySnapshots`), an agent's op
+//      answer. A discarded publication writes nothing: no snapshot, descriptor, retention or op, and no retry over the
+//      newer source; a dataset changed since the admission is `stale` (E3 M2 fix: a descriptor-level conflict, never a
+//      tool's failure). A result that fails validation, or a tool that failed, writes the error state alone under the
+//      same guard, so an old failure never covers a newer success, and says which failure it was. Right after a
+//      successful commit, `collectRetiredAssets` removes what that retention retired and nothing else protects.
 import { randomUUID } from 'node:crypto';
 import { readDataset, setDataset, type DatasetDescriptor, type QuerySource } from '@artifacts/dashboard/datasets';
 import { legacyDashboardFiles } from '@artifacts/dashboard/legacy';
@@ -28,7 +30,7 @@ import { ArtifactStoreError } from '../documents/errors';
 import type { ArtifactStore } from '../documents/store';
 import type { OpScope } from '../documents/ops';
 import { dashboardAdapterOf } from '.';
-import { queryRowsOf } from './query-result';
+import { QUERY_RESULT_PROBLEMS, queryRowsOf } from './query-result';
 
 const TOOL = 'artifact_dataset'; // an agent's refresh is this tool's op
 const MESSAGE_MAX = 1_000;
@@ -43,32 +45,41 @@ export interface RefreshStart {
 }
 
 /** Who publishes, and whether they may still: the human for a page, the asking session for an agent's refresh (its op
- * id, its request's liveness and the host registry's record of the durable answer). */
+ * id, and its request in the host's registry). */
 export interface RefreshScope {
   actor: Actor;
   opId: string | null;
-  live(): boolean;
-  published?(answer: ArtifactDatasetResult): void;
+  /** In the commit's prepare, synchronously and last: whether it may still publish. True hands the publication's end
+   * to the scope's owner, which then waits for `ended` rather than settle "nothing published" meanwhile. */
+  admit(): boolean;
+  /** How the publication ended: committed, discarded before its commit, or rolled back with its write (`error`). */
+  ended?(end: RefreshPublication | { error: string }): void;
 }
 
 /** What the call came back with, as the host's connector leg read it. */
 export type RefreshRaw = { kind: 'result'; result: unknown } | { kind: 'failed'; reason: 'toolError' | 'tooLarge' | 'timeout' };
 /** The caller's guard, read inside the commit's prepare: the grant's fence and the operation. */
 export type RefreshGuard = () => 'held' | 'revoked' | 'cancelled';
-export type RefreshPublication = { published: ArtifactDatasetResult } | { discarded: 'revoked' | 'cancelled' | 'changed'; detail: string };
-export type RefreshAdmission = { ok: true; publish(raw: RefreshRaw, guard: RefreshGuard): Promise<RefreshPublication> } | { ok: false; refusal: string };
+/** A failure the publication recorded as the error state: the result refused by validation (its rows, its size), the
+ * tool's own error, or its deadline. */
+export type RefreshFailure = 'validation' | 'toolError' | 'timeout';
+/** The publication's end: its durable answer (with the failure an error state records), or why nothing was written. */
+export type RefreshPublication = { published: ArtifactDatasetResult; failed?: RefreshFailure } | { discarded: 'revoked' | 'cancelled' | 'stale'; detail: string };
+/** `stale`: the dashboard or the dataset went, or the dataset changed since the base (a concurrent mutation). */
+export type RefreshAdmission = { ok: true; publish(raw: RefreshRaw, guard: RefreshGuard): Promise<RefreshPublication> } | { ok: false; refusal: string; stale?: true };
 
-// The closed words a failed refresh records (never a server's text).
+// The closed words a failed refresh records (never a server's text), and which failure each is.
 const FAILED = {
   toolError: 'the last refresh failed: the tool reported an error',
   tooLarge: 'the last refresh failed: the tool answered too large a result',
   timeout: 'the last refresh failed: the tool did not answer in time',
 } as const;
+const FAILURE_OF: Record<keyof typeof FAILED, RefreshFailure> = { toolError: 'toolError', tooLarge: 'validation', timeout: 'timeout' };
 const bounded = (message: string) => message.slice(0, MESSAGE_MAX);
 
 class Discard extends Error {
   constructor(
-    readonly why: 'revoked' | 'cancelled' | 'changed',
+    readonly why: 'revoked' | 'cancelled' | 'stale',
     detail: string,
   ) {
     super(detail);
@@ -104,39 +115,41 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
     if (!adapter) return { ok: false, refusal: 'dashboards are not registered with the artifact store in this run of MAWS' };
     const { artifactId } = start;
     const { id, baseRevision } = start.dataset;
-    const found = await store.readCommitted((): { refusal: string } | { prior: DatasetDescriptor & { source: QuerySource }; identity: number } => {
+    // E3 M2 fix: a dashboard or dataset gone, or a dataset no longer this query, is a concurrent change (`stale`)
+    const found = await store.readCommitted((): { refusal: string; stale?: true } | { prior: DatasetDescriptor & { source: QuerySource }; identity: number } => {
       const artifact = store.get(artifactId);
-      if (!artifact) return { refusal: `${artifactId} is gone` };
+      if (!artifact) return { refusal: `${artifactId} is gone`, stale: true };
       if (artifact.kind !== 'dashboard') return { refusal: `${artifactId} is a ${artifact.kind} artifact, not a dashboard` };
       const doc = store.service.live(artifactId);
       if (legacyDashboardFiles(doc)) return { refusal: `${artifactId} is a dashboard made from files, which is never written` };
       const descriptor = readDataset(doc, id);
-      if (!descriptor) return { refusal: DATASET_STATES.noDataset(id) };
-      if (descriptor.source.kind !== 'query') return { refusal: `dataset "${id}" is not a query` };
-      if (!sameQuery(descriptor.source, start)) return { refusal: `the call is not dataset "${id}"'s query` };
+      if (!descriptor) return { refusal: DATASET_STATES.noDataset(id), stale: true };
+      if (descriptor.source.kind !== 'query') return { refusal: `dataset "${id}" is not a query`, stale: true };
+      if (!sameQuery(descriptor.source, start)) return { refusal: `the call is not dataset "${id}"'s query`, stale: true };
       const identity = adapter.lastChange(artifactId, id);
       if (baseRevision !== undefined) {
         const liveRevision = store.revision(artifactId);
         if (baseRevision > liveRevision) return { refusal: `baseRevision ${baseRevision} is newer than the live revision ${liveRevision}` };
-        if (identity > baseRevision) return { refusal: `dataset "${id}" changed since revision ${baseRevision}; read the dashboard again` };
+        if (identity > baseRevision) return { refusal: `dataset "${id}" changed since revision ${baseRevision}; read the dashboard again`, stale: true };
       }
       return { prior: descriptor as DatasetDescriptor & { source: QuerySource }, identity };
     });
-    if ('refusal' in found) return { ok: false, refusal: found.refusal };
+    if ('refusal' in found) return { ok: false, ...found };
     const { prior, identity } = found;
     return { ok: true, publish: (raw, guard) => publish(start, scope, prior, identity, raw, guard) };
   }
 
-  // The candidate, validated before the frame: the parsed rows and their bytes, or the error state's words.
-  function candidate(prior: DatasetDescriptor, raw: RefreshRaw): { table: ParsedDataset; bytes: Uint8Array } | { problem: string } {
-    if (raw.kind === 'failed') return { problem: FAILED[raw.reason] };
+  // The candidate, validated before the frame: the parsed rows and their bytes, or the error state's words and failure.
+  function candidate(prior: DatasetDescriptor, raw: RefreshRaw): { table: ParsedDataset; bytes: Uint8Array } | { problem: string; failure: RefreshFailure } {
+    if (raw.kind === 'failed') return { problem: FAILED[raw.reason], failure: FAILURE_OF[raw.reason] };
+    const refused = (problem: string, failure: RefreshFailure = 'validation') => ({ problem: bounded(`the last refresh was refused: ${problem}`), failure });
     const rows = queryRowsOf(raw.result);
-    if (!rows.ok) return { problem: bounded(`the last refresh was refused: ${rows.problem}`) };
+    if (!rows.ok) return refused(rows.problem, rows.problem === QUERY_RESULT_PROBLEMS.toolError ? 'toolError' : 'validation');
     const bytes = new TextEncoder().encode(JSON.stringify(rows.rows));
     const table = parseDataset(bytes, 'json');
-    if (table instanceof DatasetError) return { problem: bounded(`the last refresh was refused: ${table.reason}`) };
+    if (table instanceof DatasetError) return refused(table.reason);
     const keyProblem = prior.rowKey === undefined ? null : rowKeyProblem(table, prior.rowKey);
-    if (keyProblem) return { problem: bounded(`the last refresh was refused: ${keyProblem}`) };
+    if (keyProblem) return refused(keyProblem);
     return { table, bytes };
   }
 
@@ -153,13 +166,14 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
     const prepare = () => {
       const held = guard();
       if (held !== 'held') throw new Discard(held, `${artifactId}'s dataset "${id}": the call's grant or operation ended before the publication (${held})`);
-      if (!scope.live()) throw new Discard('cancelled', `${artifactId}'s dataset "${id}": the request ended before the publication`);
-      const changed = () => new Discard('changed', `${artifactId}'s dataset "${id}" changed since the refresh began; nothing was published`);
+      const changed = () => new Discard('stale', `${artifactId}'s dataset "${id}" changed since the refresh began; nothing was published`);
       if (!store.get(artifactId)) throw changed();
       const doc = store.service.live(artifactId);
       if (legacyDashboardFiles(doc) || adapter.lastChange(artifactId, id) !== identity) throw changed();
       const current = readDataset(doc, id);
       if (current?.source.kind !== 'query' || !sameQuery(current.source, start)) throw changed();
+      // last, so nothing after it refuses: from here the scope's owner holds the publication's end until `ended`
+      if (!scope.admit()) throw new Discard('cancelled', `${artifactId}'s dataset "${id}": the request ended before the publication`);
     };
     const write = (op: OpScope | null) =>
       store.writeWithAssets(
@@ -194,14 +208,20 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
       // an agent's op answers its first durable result: one already recorded under its id is that answer, unwritten
       answer = await store.writeCommitted(async () => (scope.opId === null ? (await write(null), recorded!) : store.withOp(scope.opId, TOOL, artifactId, async (op) => (await write(op), recorded!), { actor })));
     } catch (error) {
-      if (error instanceof Discard) return { discarded: error.why, detail: error.message };
+      let end: RefreshPublication | null = null;
+      if (error instanceof Discard) end = { discarded: error.why, detail: error.message };
       // the dashboard deleted since the admission: refused by the write before its prepare
-      if (error instanceof ArtifactStoreError && error.code === 'notFound') return { discarded: 'changed', detail: `${artifactId} is gone; nothing was published` };
+      else if (error instanceof ArtifactStoreError && error.code === 'notFound') end = { discarded: 'stale', detail: `${artifactId} is gone; nothing was published` };
+      scope.ended?.(end ?? { error: error instanceof Error ? error.message : String(error) });
+      if (end) return end;
       throw error;
     }
     if (recorded && 'table' in made) store.collectRetiredAssets(artifactId); // what this publication's retention retired, at once
-    scope.published?.(answer);
-    return { published: answer };
+    // the failure an error state records (a replayed answer is the op's first, whatever this call brought)
+    const failed = answer.state === undefined ? undefined : 'problem' in made ? made.failure : 'validation';
+    const end: RefreshPublication = { published: answer, ...(failed && { failed }) };
+    scope.ended?.(end);
+    return end;
   }
 
   return { admit };

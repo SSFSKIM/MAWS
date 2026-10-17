@@ -69,7 +69,7 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
   serve('connectors.check', ({ artifactId, call }) => storeOf().checkConnectorCall(artifactId, call));
   serve('connectors.resolve', (input) => calls.resolve(input));
   serve('connectors.start', (input) => calls.start(input));
-  serve('connectors.take', ({ operationId }) => ({ outcome: calls.take(operationId) }));
+  serve('connectors.take', ({ operationId }) => calls.takeOperation(operationId)); // E3: a dataset operation's phase beside H's outcome
   serve('connectors.cancel', ({ operationId }) => ({ cancelled: calls.cancel(operationId) }));
 
   const stopFeed = store?.onConnectorGrantChange((change) => void emit('connectors.grantChanged', change));

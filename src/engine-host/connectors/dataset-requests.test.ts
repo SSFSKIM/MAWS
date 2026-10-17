@@ -1,12 +1,14 @@
 // E3 M2 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): the host's private registry of agents' dataset
 // refresh requests. It announces a request by its id alone, answers main's read of it, binds the one connector
-// operation that carries it (only a start that matches it), owns the durable answer that operation's publication
-// records, and settles at most once: main's reply, the deadline, the engine's withdrawal or main's going, the last
-// three cancelling the bound operation.
+// operation that carries it (only a start that matches it), and settles at most once: the host's own end of the
+// publication (its durable answer, a stale dataset, a revoke) at once; main's reply, the deadline, the engine's
+// withdrawal or main's going otherwise, the last three cancelling the bound operation. E3 M2 fix: between the
+// publication's admission and its commit or rollback, every other end is held, and the commit's outcome answers.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CONNECTOR_OPERATION_DEADLINE_MS } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactDatasetResult } from '@shared/maws/dashboard-tools';
-import { DatasetRefreshRequests, type DatasetRefreshAsk } from './dataset-requests';
+import { DatasetRefreshRequests, type DatasetRefreshAsk, type DatasetRefreshSettlement } from './dataset-requests';
 
 const ARTIFACT = '11111111-1111-4111-8111-111111111111';
 const ASK: DatasetRefreshAsk = { artifactId: ARTIFACT, datasetId: 'live', baseRevision: 4, appSessionId: 'app-1' as AppSessionId, opId: 'app-1/toolu_1', server: 'fixture', tool: 'rows', args: { series: 'revenue', limit: 2 } };
@@ -15,14 +17,23 @@ const ANSWER: ArtifactDatasetResult = { status: 'dataset', artifactId: ARTIFACT,
 
 let announced: string[];
 let client: boolean;
-function registry(answerMs = 1_000) {
+let clock: number;
+function registry(deadlineMs?: number) {
   announced = [];
   client = true;
+  clock = Date.now();
   let n = 0;
-  return new DatasetRefreshRequests({ announce: (requestId) => announced.push(requestId), hasClient: () => client, answerMs, newId: () => `00000000-0000-4000-8000-00000000000${++n}` });
+  return new DatasetRefreshRequests({ announce: (requestId) => announced.push(requestId), hasClient: () => client, ...(deadlineMs !== undefined && { deadlineMs }), now: () => clock, newId: () => `00000000-0000-4000-8000-00000000000${++n}` });
 }
 afterEach(() => vi.useRealTimers());
 const startOf = (requestId: string, over: Record<string, unknown> = {}) => ({ ...START, dataset: { ...START.dataset, requestId }, ...over });
+// whether a promise has settled, after its microtasks ran
+async function settled<T>(promise: Promise<T>): Promise<boolean> {
+  let done = false;
+  void promise.then(() => (done = true));
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  return done;
+}
 
 describe('the dataset refresh requests', () => {
   it('announces a request by its id alone, answers main’s read of it, and settles once on main’s reply', async () => {
@@ -38,21 +49,37 @@ describe('the dataset refresh requests', () => {
     expect(requests.read('00000000-0000-4000-8000-00000000000f')).toBeNull();
   });
 
-  it('answers the durable record of the publication, never main’s words; a host refusal’s own words over main’s reason', async () => {
+  it('answers the host’s own end at once: its durable answer, a stale dataset as a conflict, a revoke; main’s reply after it is not pending', async () => {
     const requests = registry();
     const asked = requests.ask(ASK, new AbortController().signal);
     const scope = requests.claim(announced[0]!, startOf(announced[0]!), () => {})!;
     expect(scope).toMatchObject({ actor: { kind: 'session', appSessionId: 'app-1' }, opId: 'app-1/toolu_1' });
-    expect(scope.live()).toBe(true);
-    scope.published!(ANSWER);
-    requests.answer(announced[0]!, { ok: false, state: 'failed', reason: 'toolError' });
+    expect(scope.admit()).toBe(true);
+    scope.ended!({ published: ANSWER });
     expect(await asked).toEqual({ kind: 'published', answer: ANSWER });
-    expect(scope.live()).toBe(false);
+    expect(requests.answer(announced[0]!, { ok: false, state: 'failed', reason: 'toolError' })).toBe('not_pending');
+    expect(scope.admit()).toBe(false);
 
+    const stale = requests.ask(ASK, new AbortController().signal);
+    requests.claim(announced[1]!, startOf(announced[1]!), () => {})!.ended!({ discarded: 'stale', detail: 'dataset "live" changed since the refresh began' });
+    expect(await stale).toEqual({ kind: 'stale', detail: 'dataset "live" changed since the refresh began' });
+
+    const changedBefore = requests.ask(ASK, new AbortController().signal);
+    requests.claim(announced[2]!, startOf(announced[2]!), () => {})!.refused('dataset "live" changed since revision 4; read the dashboard again', true);
+    expect(await changedBefore).toEqual({ kind: 'stale', detail: 'dataset "live" changed since revision 4; read the dashboard again' });
+
+    const revoked = requests.ask(ASK, new AbortController().signal);
+    requests.claim(announced[3]!, startOf(announced[3]!), () => {})!.ended!({ discarded: 'revoked', detail: 'the grant ended' });
+    expect(await revoked).toEqual({ kind: 'refused', outcome: { ok: false, state: 'revoked', reason: 'revoked' }, refusal: 'the grant ended' });
+  });
+
+  it('answers a host refusal’s own words over main’s reason when nothing was published', async () => {
+    const requests = registry();
     const refused = requests.ask(ASK, new AbortController().signal);
-    requests.claim(announced[1]!, startOf(announced[1]!), () => {})!.refused('dataset "live" changed since revision 4; read the dashboard again');
-    requests.answer(announced[1]!, { ok: false, state: 'failed', reason: 'toolError' });
-    expect(await refused).toEqual({ kind: 'refused', outcome: { ok: false, state: 'failed', reason: 'toolError' }, refusal: 'dataset "live" changed since revision 4; read the dashboard again' });
+    requests.claim(announced[0]!, startOf(announced[0]!), () => {})!.refused('a dashboard made from files is never written');
+    expect(await settled(refused)).toBe(false); // main's reply settles it
+    requests.answer(announced[0]!, { ok: false, state: 'failed', reason: 'toolError' });
+    expect(await refused).toEqual({ kind: 'refused', outcome: { ok: false, state: 'failed', reason: 'toolError' }, refusal: 'a dashboard made from files is never written' });
   });
 
   it('binds only the one start that is the request: its session, dashboard, dataset, base and query', () => {
@@ -102,14 +129,75 @@ describe('the dataset refresh requests', () => {
     expect(announced).toHaveLength(3);
   });
 
-  it('answers the durable publication even when the request ends otherwise (its op is recorded either way)', async () => {
+  it('runs on the one shared budget: no publication is admitted at or past it, nor once the request ended', async () => {
     vi.useFakeTimers();
-    const requests = registry(5_000);
+    expect(CONNECTOR_OPERATION_DEADLINE_MS).toBe(180_000);
+    const requests = registry();
+    void requests.ask(ASK, new AbortController().signal);
+    const scope = requests.claim(announced[0]!, startOf(announced[0]!), () => {})!;
+    clock += CONNECTOR_OPERATION_DEADLINE_MS; // its clock at the deadline, before its timer ran
+    expect(scope.admit()).toBe(false);
     const late = requests.ask(ASK, new AbortController().signal);
-    const cancels: number[] = [];
-    requests.claim(announced[0]!, startOf(announced[0]!), () => cancels.push(1))!.published!(ANSWER);
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(await late).toEqual({ kind: 'published', answer: ANSWER });
-    expect(cancels).toEqual([]);
+    const lateScope = requests.claim(announced[1]!, startOf(announced[1]!), () => {})!;
+    await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS);
+    expect(await late).toEqual({ kind: 'timeout' }); // the one budget, not 190 s
+    expect(lateScope.admit()).toBe(false);
+    const withdrawn = new AbortController();
+    void requests.ask(ASK, withdrawn.signal);
+    const ended = requests.claim(announced[2]!, startOf(announced[2]!), () => {})!;
+    withdrawn.abort();
+    expect(ended.admit()).toBe(false);
+  });
+
+  // E3 M2 fix (reviewer finding 2): the commit outlives no settlement that says nothing was published
+  describe('a publication admitted and not yet committed', () => {
+    const triggers: [string, (requests: DatasetRefreshRequests, requestId: string, engine: AbortController) => unknown, DatasetRefreshSettlement][] = [
+      ['main’s reply', (requests, requestId) => requests.answer(requestId, { ok: false, state: 'paused', reason: 'unavailable' }), { kind: 'refused', outcome: { ok: false, state: 'paused', reason: 'unavailable' }, refusal: 'the publication was not committed: disk full' }],
+      ['the engine’s withdrawal', (_requests, _requestId, engine) => engine.abort(), { kind: 'withdrawn' }],
+      ['the deadline', () => vi.advanceTimersByTimeAsync(5_000), { kind: 'timeout' }],
+      ['main’s going', (requests) => requests.clientGone(), { kind: 'noClient' }],
+    ];
+
+    it.each(triggers)('holds %s until the commit, which answers its durable record', async (_what, trigger) => {
+      vi.useFakeTimers();
+      const requests = registry(5_000);
+      const engine = new AbortController();
+      const cancels: number[] = [];
+      const asked = requests.ask(ASK, engine.signal);
+      const scope = requests.claim(announced[0]!, startOf(announced[0]!), () => cancels.push(1))!;
+      expect(scope.admit()).toBe(true);
+      await trigger(requests, announced[0]!, engine);
+      expect(await settled(asked)).toBe(false);
+      expect(requests.read(announced[0]!)).not.toBeNull();
+      scope.ended!({ published: ANSWER });
+      expect(await asked).toEqual({ kind: 'published', answer: ANSWER });
+      expect(cancels).toEqual([]);
+    });
+
+    it.each(triggers)('answers %s held meanwhile when the commit rolls back, nothing published', async (_what, trigger, expected) => {
+      vi.useFakeTimers();
+      const requests = registry(5_000);
+      const engine = new AbortController();
+      const cancels: number[] = [];
+      const asked = requests.ask(ASK, engine.signal);
+      const scope = requests.claim(announced[0]!, startOf(announced[0]!), () => cancels.push(1))!;
+      expect(scope.admit()).toBe(true);
+      await trigger(requests, announced[0]!, engine);
+      expect(await settled(asked)).toBe(false);
+      scope.ended!({ error: 'disk full' });
+      expect(await asked).toEqual(expected);
+      expect(cancels).toEqual([1]);
+    });
+
+    it('waits for main’s reply after a rollback no other end preceded', async () => {
+      const requests = registry();
+      const asked = requests.ask(ASK, new AbortController().signal);
+      const scope = requests.claim(announced[0]!, startOf(announced[0]!), () => {})!;
+      expect(scope.admit()).toBe(true);
+      scope.ended!({ error: 'disk full' });
+      expect(await settled(asked)).toBe(false);
+      requests.answer(announced[0]!, { ok: false, state: 'failed', reason: 'toolError' });
+      expect(await asked).toEqual({ kind: 'refused', outcome: { ok: false, state: 'failed', reason: 'toolError' }, refusal: 'the publication was not committed: disk full' });
+    });
   });
 });

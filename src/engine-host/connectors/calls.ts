@@ -22,15 +22,17 @@
 //   (`close`).
 // - E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): a start that carries `dataset` is a dataset
 //   refresh. It is admitted by the sink (`datasets`) before the engine is asked anything, needs a read grant, and its
-//   result never leaves the host: the call's end is announced as any is, and main's first take, made only once main
-//   has rechecked that the work may still publish, starts the publication and answers null; later takes join it. The
-//   publication's end is announced by id again, and the next take answers its compact metadata (the dataset outcome)
-//   and lets go of the fence. Until then the operation stays registered: a cancel, main's going, the request's end or a
-//   broken fence stops it before the commit, and its outcome then is the cancel's or the revoke's.
+//   result never leaves the host: the call's end is announced as any is, and main's first take
+//   (`takeOperation`, `connectors.take`), made only once main has rechecked that the work may still publish, starts the
+//   publication and answers `publishing`; later takes join it, explicitly. The publication's end is announced by id
+//   again, and the next take answers it once (`ConnectorDatasetTake`: the compact metadata, or a typed failure) and
+//   lets go of the fence. Until then the operation stays registered: a cancel, main's going, the request's end or a
+//   broken fence stops it before the commit. H's own `take` keeps its nullable outcome; a dataset operation that ended
+//   before its call (refused, unavailable) answers that outcome as H's do.
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrantMode } from '@shared/artifacts/connectors';
 import type { CommandInput } from '@shared/ipc/schema';
-import type { ConnectorOperationOutcome, ConnectorResolveAnswer } from '@shared/ipc/schema/connectors';
+import type { ConnectorDatasetTake, ConnectorOperationOutcome, ConnectorResolveAnswer } from '@shared/ipc/schema/connectors';
 import { mcpStatus } from '../controls';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import type { ConnectorFence } from '../documents/store';
@@ -83,14 +85,17 @@ interface Operation {
   outcome?: ConnectorOperationOutcome;
   expiry?: ReturnType<typeof setTimeout>;
   release?: () => void; // lets go of its fence (Decision Log 91: with the operation, not the call)
-  publication?: () => Promise<ConnectorOperationOutcome>; // E3: a dataset's result, waiting in the host for main's take
-  publishing?: boolean; // E3: main took it, and its publication runs
+  dataset?: DatasetPhase; // E3: a dataset operation past its call
 }
 
-// E3: what a dataset start's execution ends with when the call answered: its publication, run at main's take.
-interface Publishable {
-  publish(): Promise<ConnectorOperationOutcome>;
+// E3: a dataset operation's result in the host: waiting for main's take (`publish`), publishing, or its end (`take`).
+interface DatasetPhase {
+  publish?: () => Promise<ConnectorDatasetTake | ConnectorOperationOutcome>;
+  publishing?: boolean;
+  take?: ConnectorDatasetTake;
 }
+// what a dataset start's execution ends with past the sink: its publication to run at main's take, or its end already
+type DatasetExecution = { publish(): Promise<ConnectorDatasetTake | ConnectorOperationOutcome> } | { take: ConnectorDatasetTake };
 
 const unavailable = (message: string): ConnectorOperationOutcome => ({ ok: false, failure: 'unavailable', message: message.slice(0, MESSAGE_MAX) });
 const failed = (message: string): ConnectorOperationOutcome => ({ ok: false, failure: 'failed', message: message.slice(0, MESSAGE_MAX) });
@@ -135,7 +140,11 @@ export class ConnectorCalls {
     const operation: Operation = { id: input.operationId, controller: new AbortController() };
     this.operations.set(operation.id, operation);
     void this.execute(operation, input).then(
-      (outcome) => ('publish' in outcome && !operation.revoked ? this.keep(operation, input, outcome) : this.finish(operation, operation.revoked ? revokedWhile(input, 'it ran') : (outcome as ConnectorOperationOutcome))),
+      (outcome) => {
+        if (operation.revoked) return this.finish(operation, revokedWhile(input, 'it ran'));
+        if ('ok' in outcome) return this.finish(operation, outcome);
+        this.keep(operation, outcome); // E3
+      },
       (error: unknown) => this.finish(operation, failed(`the connector call failed in the host: ${words(error)}`)),
     );
     return { operationId: operation.id };
@@ -143,13 +152,25 @@ export class ConnectorCalls {
 
   // The ended operation's outcome, once; null for one unknown, still running, already taken, cancelled or expired. A
   // fence broken while it waited answers the revoke's refusal instead (Decision Log 91).
-  // E3: a dataset's result waiting for main's take is published now, and null answered; its end is announced again.
   take(operationId: string): ConnectorOperationOutcome | null {
     const operation = this.operations.get(operationId);
-    if (operation?.publication && !operation.publishing) this.publish(operation, operation.publication);
     if (!operation?.outcome) return null;
     this.drop(operation);
     return operation.outcome;
+  }
+
+  // E3: what `connectors.take` answers: H's outcome as `take`'s, or a dataset operation's phase past its call. Its
+  // result waiting for main's take starts publishing now; publishing, every take answers so; its end is answered once.
+  takeOperation(operationId: string): { outcome: ConnectorOperationOutcome | null; dataset?: ConnectorDatasetTake } {
+    const operation = this.operations.get(operationId);
+    const phase = operation?.outcome === undefined ? operation?.dataset : undefined;
+    if (!operation || !phase) return { outcome: this.take(operationId) };
+    if (phase.take) {
+      this.drop(operation);
+      return { outcome: null, dataset: phase.take };
+    }
+    if (!phase.publishing) this.consume(operation, phase);
+    return { outcome: null, dataset: { status: 'publishing', operationId } };
   }
 
   // Main withdrew it (its page's hide, close or revoke, or its own abort): it stops, before its write or through the
@@ -178,7 +199,7 @@ export class ConnectorCalls {
 
   private finish(operation: Operation, outcome: ConnectorOperationOutcome): void {
     if (this.operations.get(operation.id) !== operation) return; // cancelled or closed: nobody waits for it
-    delete operation.publication; // E3
+    delete operation.dataset; // E3
     operation.outcome = outcome;
     this.announce(operation);
   }
@@ -194,43 +215,51 @@ export class ConnectorCalls {
     }, 0);
   }
 
-  // E3: a dataset's result kept in the host for main's take, its call's end announced.
-  private keep(operation: Operation, input: ConnectorStart, ready: Publishable): void {
+  // E3: a dataset operation past its call: its result kept in the host for main's take, or its end already (a dataset
+  // found changed before the call); announced either way.
+  private keep(operation: Operation, execution: DatasetExecution): void {
     if (this.operations.get(operation.id) !== operation) return;
-    if (operation.controller.signal.aborted) return this.finish(operation, operation.revoked ? revokedWhile(input, 'it ran') : unavailable('cancelled'));
-    operation.publication = () => ready.publish();
+    if ('publish' in execution && operation.controller.signal.aborted) return this.finish(operation, unavailable('cancelled'));
+    operation.dataset = 'take' in execution ? { take: execution.take } : { publish: execution.publish };
     this.announce(operation);
   }
 
-  // E3: main's take: the publication runs, still registered (cancellable, its fence held) until it ends.
-  private publish(operation: Operation, publication: () => Promise<ConnectorOperationOutcome>): void {
-    operation.publishing = true;
+  // E3: main's first take: the publication runs, still registered (cancellable, its fence held) until it ends.
+  private consume(operation: Operation, phase: DatasetPhase): void {
+    phase.publishing = true;
     clearTimeout(operation.expiry);
-    void publication().then(
-      (outcome) => this.finish(operation, outcome),
+    void phase.publish!().then(
+      (end) => {
+        if ('ok' in end) return this.finish(operation, end);
+        if (this.operations.get(operation.id) !== operation) return; // cancelled or closed: nobody waits for it
+        phase.take = end;
+        this.announce(operation);
+      },
       (error: unknown) => this.finish(operation, failed(`the dataset publication failed in the host: ${words(error)}`)),
     );
   }
 
-  // E3: the operation withdrawn from outside main's commands (an agent's request ended otherwise): it stops, and its
-  // end is announced, so main takes the cancel's outcome rather than waiting out its deadline.
-  private withdraw(operation: Operation, input: ConnectorStart): void {
+  // E3: the operation withdrawn from outside main's commands (an agent's request ended otherwise): it stops, and a
+  // result still waiting for main's take ends cancelled and is announced, so main takes that rather than wait out its
+  // deadline. A publication already running ends as its commit's guard says.
+  private withdraw(operation: Operation): void {
     if (this.operations.get(operation.id) !== operation) return;
     operation.controller.abort();
-    if (operation.publication && !operation.publishing) this.finish(operation, operation.revoked ? revokedWhile(input, 'it ran') : unavailable('cancelled'));
+    if (operation.dataset?.publish && !operation.dataset.publishing) this.finish(operation, unavailable('cancelled'));
   }
 
-  private async execute(operation: Operation, input: ConnectorStart): Promise<ConnectorOperationOutcome | Publishable> {
+  private async execute(operation: Operation, input: ConnectorStart): Promise<ConnectorOperationOutcome | DatasetExecution> {
     const { signal } = operation.controller;
     const store = this.options.store();
     if (!store) return failed('the artifact store is unavailable this run');
-    // E3: a dataset's call is admitted by its sink first, under a read grant only
+    // E3: a dataset's call is admitted by its sink first, under a read grant only; a dataset found changed or gone since
+    // it was asked for ends `stale` there, nothing called
     let sink: { publish(raw: RefreshRaw, guard: RefreshGuard): Promise<RefreshPublication> } | null = null;
     if (input.dataset) {
       if (input.mode !== 'read') return refused('wrongMode', `a dataset refresh of ${input.server} · ${input.tool} needs a read grant`);
       if (!this.options.datasets) return failed('this host publishes no datasets');
-      const admitted = await this.options.datasets.admit({ ...input, dataset: input.dataset }, () => this.withdraw(operation, input));
-      if ('refusal' in admitted) return failed(`the dataset refresh was refused: ${admitted.refusal}`);
+      const admitted = await this.options.datasets.admit({ ...input, dataset: input.dataset }, () => this.withdraw(operation));
+      if ('refusal' in admitted) return admitted.stale ? { take: { status: 'failed', reason: 'stale' } } : failed(`the dataset refresh was refused: ${admitted.refusal}`);
       if (signal.aborted || this.operations.get(operation.id) !== operation) return unavailable('cancelled');
       sink = admitted;
     }
@@ -252,8 +281,12 @@ export class ConnectorCalls {
       operation.revoked = true;
       operation.controller.abort();
       if (operation.outcome) operation.outcome = revokedWhile(input, 'its outcome waited for main');
-      // E3: a dataset's result waiting for main's take is the revoke's refusal, never published
-      else if (operation.publication && !operation.publishing) this.finish(operation, revokedWhile(input, 'its result waited for main'));
+      // E3: a dataset's result waiting for main's take ends revoked, never published (one publishing ends as its guard
+      // says; an end already there stands)
+      else if (operation.dataset?.publish && !operation.dataset.publishing && this.operations.get(operation.id) === operation) {
+        operation.dataset = { take: { status: 'failed', reason: 'revoked' } };
+        this.announce(operation);
+      }
     });
     // Taken and its cleanup installed in the same synchronous step as the check above found the operation registered,
     // so its `drop` (take, cancel, expiry, close) is what lets go of the fence.
@@ -267,7 +300,7 @@ export class ConnectorCalls {
       return store.connectorFenceHolds(fence, call, input.mode) === 'held' ? 'held' : 'revoked';
     };
     const publishing = sink!;
-    return { publish: async () => outcomeOf(await publishing.publish(outcome.raw, guard), input) };
+    return { publish: async () => takeOf(await publishing.publish(outcome.raw, guard)) };
   }
 
   private async fenced(store: ConnectorGrantStore, fence: ConnectorFence, client: ControlClient, input: ConnectorStart, signal: AbortSignal, dataset = false): Promise<ConnectorOperationOutcome | { raw: RefreshRaw }> {
@@ -367,18 +400,13 @@ export class ConnectorCalls {
   }
 }
 
-// E3: a publication's end as main's take answers it: the dataset outcome (metadata, never a row), or why nothing was
-// published.
-function outcomeOf(publication: RefreshPublication, input: ConnectorStart): ConnectorOperationOutcome {
-  if ('published' in publication) return { ok: true, result: { ...publication.published } };
-  switch (publication.discarded) {
-    case 'revoked':
-      return revokedWhile(input, 'it was published');
-    case 'cancelled':
-      return unavailable('cancelled');
-    case 'changed':
-      return failed(publication.detail);
-  }
+// E3: a publication's end as main's take answers it: the committed snapshot's metadata (never a row), the failure an
+// error state recorded, or why nothing was written; a cancelled one is the operation's own outcome.
+function takeOf(publication: RefreshPublication): ConnectorDatasetTake | ConnectorOperationOutcome {
+  if ('discarded' in publication) return publication.discarded === 'cancelled' ? unavailable('cancelled') : { status: 'failed', reason: publication.discarded };
+  if (publication.failed) return { status: 'failed', reason: publication.failed };
+  const { artifactId, id, revision, columns = [], rows = 0, warnings } = publication.published;
+  return { status: 'dataset', artifactId, id, revision, columns, rows, ...(warnings && { warnings }) };
 }
 
 function jsonBytes(value: unknown): number | null {

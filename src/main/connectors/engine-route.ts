@@ -18,13 +18,17 @@
 //
 // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): a call with a dataset sink starts with it, and its
 // result stays in the host. Each take of it (on its end, on reconciliation, at its deadline) follows the context's
-// `publishable` recheck in the same turn, and a work that may no longer publish is withdrawn, never taken. The host's
-// first take after the call ended starts the publication and answers null, so the operation stays pending for the
-// publication's own end; one more null after that end is a lost outcome. The deadline covers the route, the call and
-// the publication together. `resolveSession` is an agent's: the asking session alone, never another eligible one.
+// `publishable` recheck in the same turn, and a work that may no longer publish is withdrawn, never taken. E3 M2 fix
+// (the architect's explicit phases): the host answers its phase beside H's outcome (`ConnectorDatasetTake`):
+// `publishing` keeps the operation pending for the publication's own end, which is answered once, typed (its metadata
+// and every failure but a revoke in the result's slot, a revoke as the route's own refusal); no null is ever read as
+// a phase. A dataset operation's takes run one at a time, every fetch asked meanwhile coalesced into one more. The
+// deadline withdraws what has not ended, a publication still running included. `resolveSession` is an agent's: the
+// asking session alone, never another eligible one.
 import { randomUUID } from 'node:crypto';
-import type { ConnectorToolRef } from '@shared/artifacts/connectors';
+import { CONNECTOR_OPERATION_DEADLINE_MS, type ConnectorToolRef } from '@shared/artifacts/connectors'; // E3: the deadline
 import type { CommandInput, CommandOutput, CommandResult } from '@shared/ipc/schema';
+import type { ConnectorDatasetTake } from '@shared/ipc/schema/connectors'; // E3
 import type { ConnectorRoute, ConnectorRouteAnswer, ConnectorRouteCallContext, ConnectorRouteTarget } from './route';
 import { eligibleSessions, ownSessionOf, type EligibleSession } from './eligibility';
 
@@ -52,12 +56,28 @@ export interface EngineRoute extends ConnectorRoute {
 interface Pending {
   settle(answer: ConnectorRouteAnswer): void;
   publishable?: () => boolean; // E3: a dataset operation's recheck, asked before each of its takes
-  publishing?: boolean; // E3: the host answered a take of its ended call null: its publication runs
+  taking?: boolean; // E3: a take of it is out
+  again?: DatasetFetch; // E3: the fetch asked while it was, the most final of them
+}
+
+// E3: why a dataset operation's outcome is fetched, least final first: reconciliation (still calling is fine), its end
+// announced (none held is a lost outcome), its deadline (anything not ended is withdrawn).
+const DATASET_FETCHES = ['reconcile', 'ended', 'deadline'] as const;
+type DatasetFetch = (typeof DATASET_FETCHES)[number];
+const finalOf = (a: DatasetFetch | undefined, b: DatasetFetch): DatasetFetch => (a !== undefined && DATASET_FETCHES.indexOf(a) > DATASET_FETCHES.indexOf(b) ? a : b);
+const LOST: ConnectorRouteAnswer = { ok: false, failure: 'failed', message: 'the host kept no outcome for the operation' };
+const DEADLINE: ConnectorRouteAnswer = { ok: false, failure: 'unavailable', message: 'the operation outlived its deadline' };
+
+// E3: a dataset publication's end as the route answers it: a revoke as the route's own refusal; the metadata and every
+// other failure in the result's slot, typed (the descriptor the host wrote, or kept, is what is drawn).
+function datasetAnswer(take: Exclude<ConnectorDatasetTake, { status: 'publishing' }>): ConnectorRouteAnswer {
+  if (take.status === 'failed' && take.reason === 'revoked') return { ok: false, failure: 'refused', refusal: 'revoked', message: 'the grant was revoked before the publication' };
+  return { ok: true, result: take };
 }
 
 // Past the host's own bound on an operation (two mcp_status reads of 8 s, the store, mcp_call's 120 s long deadline):
 // main then takes the outcome, or withdraws an operation the host still runs or has forgotten.
-export const CONNECTOR_OPERATION_DEADLINE_MS = 180_000;
+export { CONNECTOR_OPERATION_DEADLINE_MS }; // E3: the one shared budget, now in @shared/artifacts/connectors
 
 const unavailable = (message: string): ConnectorRouteAnswer => ({ ok: false, failure: 'unavailable', message });
 
@@ -83,24 +103,46 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
   }
 
   // The operation's outcome from the host: settled when there is one; `whenNone` otherwise (null: still running).
-  // E3: `ended`, the take follows the operation's announced end: a dataset operation's first null there is its
-  // publication starting, not a lost outcome.
-  function fetch(operationId: string, whenNone: ConnectorRouteAnswer | null, ended = false): void {
-    const asked = pending.get(operationId);
-    if (!asked) return;
-    // E3: the recheck and the take's dispatch in one turn
-    if (asked.publishable && !asked.publishable()) return withdraw(operationId, unavailable('the work may no longer publish'));
+  function fetch(operationId: string, whenNone: ConnectorRouteAnswer | null): void {
+    if (!pending.has(operationId)) return;
     void deps.call('connectors.take', { operationId }).then(
       (taken) => {
         const operation = pending.get(operationId);
         if (!operation) return;
         if (!taken.ok) return operation.settle(unavailable(`connectors.take failed: ${taken.error.code} ${taken.error.message}`));
         if (taken.value.outcome !== null) return operation.settle(taken.value.outcome);
-        if (ended && operation.publishable && !operation.publishing) {
-          operation.publishing = true; // E3: its end comes again with the outcome
-          return;
-        }
         if (whenNone !== null) withdraw(operationId, whenNone);
+      },
+      (error: unknown) => pending.get(operationId)?.settle(unavailable(`connectors.take failed: ${error instanceof Error ? error.message : String(error)}`)),
+    );
+  }
+
+  // E3: a dataset operation's outcome or phase from the host, one take at a time. The recheck and the take's dispatch
+  // in one turn; a fetch asked while a take is out runs once after it, as the most final of those asked.
+  function fetchDataset(operationId: string, why: DatasetFetch): void {
+    const asked = pending.get(operationId);
+    if (!asked) return;
+    if (asked.taking) {
+      asked.again = finalOf(asked.again, why);
+      return;
+    }
+    if (!asked.publishable!()) return withdraw(operationId, unavailable('the work may no longer publish'));
+    asked.taking = true;
+    void deps.call('connectors.take', { operationId }).then(
+      (taken) => {
+        const operation = pending.get(operationId);
+        if (!operation) return;
+        operation.taking = false;
+        if (!taken.ok) return operation.settle(unavailable(`connectors.take failed: ${taken.error.code} ${taken.error.message}`));
+        const { outcome, dataset } = taken.value;
+        if (outcome !== null) return operation.settle(outcome); // ended before its call: H's outcome
+        if (dataset && dataset.status !== 'publishing') return operation.settle(datasetAnswer(dataset));
+        // publishing, or (no phase) still calling: an end announced with neither is lost; the deadline ends either
+        if (why === 'deadline') return withdraw(operationId, DEADLINE);
+        if (!dataset && why === 'ended') return withdraw(operationId, LOST);
+        const again = operation.again;
+        delete operation.again;
+        if (again !== undefined) fetchDataset(operationId, again);
       },
       (error: unknown) => pending.get(operationId)?.settle(unavailable(`connectors.take failed: ${error instanceof Error ? error.message : String(error)}`)),
     );
@@ -120,7 +162,7 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
     const operationId = randomUUID();
     const { signal } = context;
     return new Promise<ConnectorRouteAnswer>((resolve) => {
-      const deadline = setTimeout(() => fetch(operationId, unavailable('the operation outlived its deadline')), CONNECTOR_OPERATION_DEADLINE_MS);
+      const deadline = setTimeout(() => (context.dataset ? fetchDataset(operationId, 'deadline') : fetch(operationId, DEADLINE)), CONNECTOR_OPERATION_DEADLINE_MS);
       const cancel = () => withdraw(operationId, unavailable('cancelled'));
       pending.set(operationId, {
         settle: (answer) => {
@@ -173,12 +215,16 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
     },
     // an end announced: its outcome, or (taken already, expired) a failure
     operationEnded(operationId) {
-      fetch(operationId, { ok: false, failure: 'failed', message: 'the host kept no outcome for the operation' }, true);
+      if (pending.get(operationId)?.publishable) return fetchDataset(operationId, 'ended'); // E3
+      fetch(operationId, LOST);
     },
     // streaming again: an end announced before then was dropped, so each pending operation's outcome is asked for; one
     // still running announces its end now that events flow
     reconcile() {
-      for (const operationId of [...pending.keys()]) fetch(operationId, null);
+      for (const [operationId, operation] of [...pending]) {
+        if (operation.publishable) fetchDataset(operationId, 'reconcile'); // E3
+        else fetch(operationId, null);
+      }
     },
     hostLost() {
       for (const operationId of [...pending.keys()]) withdraw(operationId, unavailable('the engine host is no longer ready'));
