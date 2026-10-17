@@ -4,8 +4,8 @@
 // 50,000-row ledger, explicitly synthetic, and twelve views of every kind, one a scatter of exactly 10,000 points).
 // Rows, the candidates acceptance 7 names (ratified after measurement by the architect, never relaxed here):
 //   1 bind      artifact_dataset validates, uploads and binds the 50,000 rows ≤ 2 s on the host (the call's wall time)
-//   2 open      cold (the host restarted, so its copy and its parse cache are cold; the tab closed) from the click on the
-//               library row to every one of the twelve views drawn ≤ 1,000 ms
+//   2 open      cold (the tab closed, a snapshot the host never read bound, the host's copy unloaded after its idle
+//               minute) from the click on the library row to every one of the twelve views drawn ≤ 1,000 ms
 //   3 render    one view of 10,000 points renders ≤ 200 ms (the chart view's `dash:view` User Timing entry: the
 //               renderer's view and its insertion into the page, from the rows in hand)
 //   4 replace   from the agent's replacement answering (its commit landed) to every view drawn again ≤ 500 ms
@@ -30,7 +30,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { BENCH_DATASET, BENCH_ROWS, BENCH_SCATTER_POINTS, BENCH_VIEWS, benchCsv, benchMarkdown } from '../src/artifacts/dashboard/fixtures/bench';
 import { collectGarbage, jsHeapMB, load1, processMemory } from './support/document-scale';
 import { REPO_ROOT } from './support/launch';
-import { restartHost, startApp, type DashboardApp } from './support/dashboards';
+import { startApp, type DashboardApp } from './support/dashboards';
 
 test.skip(process.env.MAWS_DASHBOARD_SCALE !== '1', 'the dashboard scale gate runs only under MAWS_DASHBOARD_SCALE=1');
 test.describe.configure({ timeout: 1_500_000 });
@@ -40,6 +40,7 @@ const PROOF = 'test-results/dashboard-proof';
 const TITLE = '판매 원장 대시보드';
 const AGENT = 'A';
 const TRIALS = 3;
+const UNLOAD_WAIT_MS = 66_000; // the host's idle unload (A's IDLE_UNLOAD_MS, 60 s) and a margin
 const LOAD_BELOW = 10;
 const FIRST_SETTLE_MS = 5 * 60_000; // after the build's CPU burst, which the 1-minute load trails
 const TRIAL_SETTLE_MS = 90_000;
@@ -236,12 +237,15 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
       rows.add('1b bind at the row limit', 'artifact_dataset of a 200,000-row CSV (the parser’s row limit candidate), bound to no view', 'ms', null, 'recorded', [limit]);
     });
 
-    await test.step('2 and 3: open cold (the host restarted) three times; the 10,000-point view’s render in each; warm once', async () => {
+    await test.step('2 and 3: open cold (a snapshot never read, the host’s copy unloaded) three times; the 10,000-point view’s render in each; warm once', async () => {
       const cold: Trial[] = [];
       const render: Trial[] = [];
       for (let k = 0; k < TRIALS; k++) {
         await closeTab(page);
-        await restartHost(page);
+        // a snapshot the host has never read (its parse cache misses it; a bind parses apart from the reader), then the
+        // host's idle unload of the dashboard nobody holds: cold for the document and for the rows
+        await replace();
+        await sleep(UNLOAD_WAIT_MS);
         let views: { caption: string; ms: number }[] = [];
         cold.push(
           await trial(async () => {
@@ -254,7 +258,7 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
         expect(scatter.length, 'the 10,000-point view was drawn and timed').toBeGreaterThan(0);
         render.push({ ...cold.at(-1)!, value: Math.max(...scatter), note: `the scatter's dash:view entries ${scatter.map((ms) => ms.toFixed(1)).join(', ')} ms` });
       }
-      rows.add('2 open cold', `cold open: the click on the library row to all ${VIEWS} views drawn, the engine host restarted first (its copy and its parse cache cold, the tab closed)`, 'ms', 1000, '≤ 1,000 ms', cold);
+      rows.add('2 open cold', `cold open: the click on the library row to all ${VIEWS} views drawn, the tab closed, a snapshot the host has never read bound and the host’s copy of the dashboard unloaded (66 s idle) first`, 'ms', 1000, '≤ 1,000 ms', cold);
       rows.add('3 render 10,000 points', `one view of ${BENCH_SCATTER_POINTS} points (the scatter): the chart view's dash:view entry, the renderer's view and its insertion into the page, from the rows in hand, during each cold open`, 'ms', 200, '≤ 200 ms', render);
       await closeTab(page);
       const warm = await trial(async () => {
