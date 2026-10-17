@@ -62,6 +62,15 @@ async function expectDisconnected(sheet: Locator, row: Locator): Promise<void> {
   for (const text of [S.disconnecting, S.unconfirmed]) await expect(servers.locator('[data-connector-server-state]').filter({ hasText: text }), `no row is still “${text}”`).toHaveCount(0, { timeout: 20_000 });
 }
 
+// Disconnect forgets locally first and revokes asynchronously (oauth-provider.ts), so the withdrawn row does not yet
+// show the server's revocation or the record's removal: wait, within the provider's 30 s revoke budget, for the fixture's
+// own counter to pass its value from before the click and for the sealed store to be empty, then assert both.
+async function expectRevocationSettled(scene: ConnectorScene, fixture: OAuthFixture, counter: 'revocations' | 'revocationsUnavailable', baseline: number): Promise<void> {
+  await expect.poll(() => summaryOf(fixture).oauth[counter], { timeout: 30_000, message: `the fixture counted the ${counter === 'revocations' ? 'revocation' : 'unavailable revocation'}` }).toBeGreaterThan(baseline);
+  await expect.poll(() => sealedRecords(scene).records.length, { timeout: 10_000, message: 'the sealed record was removed' }).toBe(0);
+  expectSealed(scene, fixture, 0);
+}
+
 // The sealed store holds `count` records: ciphertext, 0600 in a 0700 directory, nothing of the identity or tokens readable.
 function expectSealed(scene: ConnectorScene, fixture: OAuthFixture, count: number): unknown {
   const store = sealedRecords(scene);
@@ -307,12 +316,12 @@ test('oauth relaunch: after a quit nothing reaches the server until an open-phas
         // Disconnect with revocation available: revoked, forgotten, and D blocked without a request
         sheet = await scene.openSheet(run.page);
         row = serverRow(sheet, SERVER, 'source');
+        const revokedBefore = summaryOf(series).oauth.revocations;
         await row.getByRole('button', { name: S.disconnectLabel(SERVER) }).click();
         await expectDisconnected(sheet, row);
         await scene.closeSheet(run.page);
-        let disconnectedAt = Date.now();
-        expect(summaryOf(series).oauth.revocations, 'the grant was revoked').toBeGreaterThan(0);
-        expectSealed(scene, series, 0);
+        let disconnectedAt = Date.now(); // the host has retired the connection: nothing reaches the server from here on
+        await expectRevocationSettled(scene, series, 'revocations', revokedBefore);
         const blocked = await refreshes.next(WATCH_MS + 30_000);
         expect(blocked.last).not.toMatch(/^ok/);
         expect(mcpRequestsSince(series, disconnectedAt), 'D sent nothing after the Disconnect').toEqual([]);
@@ -332,12 +341,12 @@ test('oauth relaunch: after a quit nothing reaches the server until an open-phas
         updateOAuthControl(series, { revocation: 'unavailable' });
         sheet = await scene.openSheet(run.page);
         row = serverRow(sheet, SERVER, 'source');
+        const unavailableBefore = summaryOf(series).oauth.revocationsUnavailable;
         await row.getByRole('button', { name: S.disconnectLabel(SERVER) }).click();
         await expectDisconnected(sheet, row);
         await scene.closeSheet(run.page);
         disconnectedAt = Date.now();
-        expect(summaryOf(series).oauth.revocationsUnavailable, 'the revocation was attempted').toBeGreaterThan(0);
-        expectSealed(scene, series, 0);
+        await expectRevocationSettled(scene, series, 'revocationsUnavailable', unavailableBefore);
         const blockedAgain = await refreshes.next(WATCH_MS + 30_000);
         expect(blockedAgain.last).not.toMatch(/^ok/);
         expect(mcpRequestsSince(series, disconnectedAt), 'D sent nothing after the Disconnect').toEqual([]);
