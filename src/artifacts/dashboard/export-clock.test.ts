@@ -16,7 +16,7 @@ const table: ViewTable = { columns: [{ name: 'region', type: 'string' }, { name:
 const query = (ref: string, staleAfter: number): DatasetDescriptor => ({
   title: `Live ${ref}`,
   source: { kind: 'query', server: 'fixture', tool: 'rows', args: {}, staleAfter, snapshot: { ref, at: AT } },
-  columns: table.columns,
+  columns: [...table.columns],
   rows: 1,
   updated: { at: AT, by: { kind: 'human' } },
   state: { status: 'ok', at: AT },
