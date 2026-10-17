@@ -9,7 +9,11 @@ import type { EventName, EventPayload } from '@shared/ipc/schema';
 const stages: { options: unknown; children: Set<unknown>; destroyed: boolean }[] = [];
 vi.mock('electron', () => ({
   WebContentsView: class {
-    constructor(readonly options?: unknown) {}
+    // P3-F1: the view's webContents, as Electron's: the adopted child's own, else a new page's, which says what was asked of it
+    readonly webContents: unknown;
+    constructor(readonly options?: { webContents?: unknown }) {
+      this.webContents = options?.webContents ?? fakePage();
+    }
   },
   BaseWindow: class {
     readonly children = new Set<unknown>();
@@ -34,6 +38,18 @@ vi.mock('electron', () => ({
     }
   },
 }));
+
+// P3-F1: a new page's webContents, the calls TabStore and createTabView make on it in order
+function fakePage() {
+  const calls: string[] = [];
+  return {
+    calls,
+    setWebRTCIPHandlingPolicy: (policy: string) => void calls.push(`policy ${policy}`),
+    loadURL: (url: string) => (calls.push(`load ${url}`), Promise.resolve()),
+    close: () => void calls.push('close'),
+    isDestroyed: () => false,
+  };
+}
 
 const { TabStore } = await import('./tabs');
 const { BROWSER_PRELOAD, ViewManager, createTabView, registerBrowserPreload, shown, tabWebPreferences } = await import('./view');
@@ -802,9 +818,32 @@ describe('createTabView: the page\'s webPreferences (Design §3, §14)', () => {
   });
 
   it('adopts a window.open child\'s own webContents (its preferences came through the open handler\'s override)', () => {
-    const child = { id: 7 };
+    const child = { id: 7, setWebRTCIPHandlingPolicy: vi.fn() }; // P3-F1: a webContents has the policy's setter
     const view = createTabView({ session: vi.fn() } as never)({ partition: DEFAULT_PARTITION } as never, child as never) as unknown as { options: unknown };
     expect(view.options).toEqual({ webContents: child });
+  });
+
+  // P3-F1 (docs/doperpowers/ledgers/2026-10-17-P3-F1.md): main turns WebRtcHideLocalIpsWithMdns off app-wide
+  // (chromium-features.ts), so a page's host candidates are no longer hidden behind .local names; every tab's webContents
+  // therefore gathers only on the default route's public interface, which keeps a site's WebRTC working and puts no local
+  // address in its candidates. Through the store's own tab setup, as index.ts wires it.
+  const tabStore = () =>
+    new TabStore({ emit: () => {}, createView: createTabView({ session: vi.fn() } as never), resolvePartition: () => DEFAULT_PARTITION, schedule: () => {}, now: () => 0 });
+
+  it('gives a new tab\'s page the default-public-interface WebRTC policy before its first load', () => {
+    const store = tabStore();
+    const { tabId } = store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab;
+    const page = store.entry(tabId)!.view!.webContents as unknown as ReturnType<typeof fakePage>;
+    expect(page.calls).toEqual(['policy default_public_interface_only', 'load https://a.test/']);
+  });
+
+  it('gives an adopted window.open child the same policy, on Chromium\'s child itself, before the adoption returns', () => {
+    const store = tabStore();
+    const opener = store.entry(store.open({ appSessionId: A, url: 'https://a.test/', select: true }).tab.tabId)!;
+    const child = fakePage();
+    const adopted = store.adoptChild(opener, { url: 'https://b.test/', select: true, webContents: child as never });
+    expect(adopted.view!.webContents).toBe(child);
+    expect(child.calls, 'Chromium navigates the child itself, after createWindow returns').toEqual(['policy default_public_interface_only']);
   });
 });
 

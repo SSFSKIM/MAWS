@@ -20,6 +20,7 @@
 // selection) come with it. M9 (the scale gate): the version is drawn by an editor of its own, read-only, bound to the
 // version's doc from its creation, while the live editor stays bound to the tab, hidden: entering and leaving history
 // never re-binds (and re-renders) the live tab, and leaving keeps its undo. Awareness (D11): the other replicas' cursors and an agent's editing blocks.
+// P3-F1: the rail beside the page in a body 720 px wide or more, a drawer over the page's right side below (rail-layout.ts).
 import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model'; // P3-E
 import { EditorContent, useEditor } from '@tiptap/react';
@@ -55,6 +56,7 @@ import type { MentionSource } from './MentionPicker';
 import { Toolbar } from './Toolbar';
 import { Suggestions, type SuggestionHost } from './Suggestions';
 import { useReadOnly } from './read-only';
+import { useRailLayout } from './rail-layout'; // P3-F1
 import './chrome.css';
 import './theme.css';
 
@@ -102,6 +104,15 @@ export type DocumentRail = 'comments' | 'history' | null;
 type Rail = DocumentRail;
 const NO_CARRIES: ReadonlyMap<string, Carry['kind']> = new Map();
 const NO_EXTRAS: readonly ExtraChange[] = []; // P3-E
+
+// P3-F1: the input types the owner types text into (an unknown type reads as 'text')
+const TEXT_ENTRY_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
+// P3-F1: a text-entry control (a text field, a text area, an editable region) with text in it
+function holdsTypedText(element: Element): boolean {
+  if (element instanceof HTMLTextAreaElement) return element.value !== '';
+  if (element instanceof HTMLInputElement) return TEXT_ENTRY_TYPES.has(element.type) && element.value !== '';
+  return element instanceof HTMLElement && element.isContentEditable && (element.textContent ?? '') !== '';
+}
 
 /** A request to show a thread's passage: a new serial for each ask, so asking twice shows twice. */
 interface Showing {
@@ -167,6 +178,24 @@ export function DocumentEditor(props: DocumentEditorProps) {
     if (!held) setOwnRail('history');
     onRailChange?.('history');
   }, [saveVersionRequest, history, held, onRailChange]);
+  // P3-F1: the rail beside the page in a wide body, a drawer over the page's right side in a narrow one (rail-layout.ts)
+  const body = useRef<HTMLDivElement>(null);
+  const railShown = rail === 'comments' || (rail === 'history' && Boolean(history && snapshot));
+  const railLayout = useRailLayout(body, railShown);
+  const drawer = railShown && railLayout.mode === 'drawer';
+  // Escape inside the drawer closes it, and the keyboard goes back to the page; one the rail's own control took is its
+  // own, and one in a text field holding text (a reply or a version name being written) is the field's, so the draft is
+  // not lost. A checkbox, a radio or a button holds no draft, whatever its value.
+  const onBodyKeyDown = (event: KeyboardEvent) => {
+    const { target } = event;
+    if (!drawer || event.key !== 'Escape' || event.defaultPrevented || !(target instanceof Element) || !target.closest('.doc-rail')) return;
+    if (holdsTypedText(target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const pages = body.current?.querySelectorAll<HTMLElement>('.doc-page-frame .ProseMirror') ?? [];
+    [...pages].find((page) => page.checkVisibility())?.focus({ preventScroll: true }); // the page shown (a preview's, a review's)
+    openRail(null);
+  };
   return (
     <div className="doc-editor" data-document-editor="">
       {!preview && <Tabs doc={doc} tabs={tabs} active={active?.id ?? null} readOnly={readOnly} onSelect={setSelected} />}
@@ -178,7 +207,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
           </button>
         </div>
       )}
-      <div className="doc-editor-body">
+      <div ref={body} className="doc-editor-body" data-rail-layout={railShown ? railLayout.mode : undefined} style={drawer ? ({ '--doc-drawer-top': `${railLayout.top}px` } as CSSProperties) : undefined} onKeyDown={onBodyKeyDown}>
         {active && props.suggestions && (
           <div className="doc-tab-editor" style={{ display: preview ? 'none' : pendingSuggestions ? undefined : 'contents' }}>
             <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} hold={hold} typing={typing} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} renderChart={props.renderChart} onDisplayedDocument={setSuggestionDoc} /* P3-E */ />
