@@ -84,6 +84,9 @@ export interface ConnectorOAuthClaim {
 
 export interface ConnectorOAuthStore {
   list(): Promise<ConnectorOAuthSaved[]>;
+  // P3-HD M3c1: the saved connection ids from the file names alone, never touching safeStorage or reading a file, so
+  // a record can be forgotten while nothing decrypts. Nothing about its identity is inferred.
+  ids(): Promise<string[]>;
   read(connectionId: string): Promise<ConnectorOAuthRecord | null>;
   claim(connectionId: string): ConnectorOAuthClaim;
   // Replaces the connection's record; `stale` when the claim was overtaken by a removal.
@@ -279,6 +282,9 @@ export function createConnectorOAuthStore(deps: { directory: string; sealer: Con
         }
       }
       return listed;
+    },
+    async ids() {
+      return (await names()).map((name) => name.slice(0, -SUFFIX.length));
     },
     async read(connectionId) {
       fileOf(connectionId);

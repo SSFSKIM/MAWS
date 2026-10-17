@@ -1,0 +1,612 @@
+// P3-HD M3c1: MAWS's own OAuth provider, main-only (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md, "OAuth
+// custody and owner controls", M3 and Decision Log 13, 18, 19, 21 and 22; P3 co-work Decision Log 98). It joins the
+// sealed store (./oauth-store.ts) and the explicit flow (./oauth-flow.ts) into the lifecycle of one saved grant per
+// configured identity (./oauth-types.ts: the exact request URL plus server, scope, config file and entry path), and is
+// route D's credential preparation (./direct-route.ts's `DirectCredentialPreparation`) as well as the owner's Connect,
+// Reconnect and Disconnect. Refresh tokens, registrations and safeStorage stay here; the engine host receives only an
+// access token under a credential epoch, for one operation the route prepared.
+//
+// - Lazy: nothing touches the store (so safeStorage) until a demand, a state query, a listing or an owner action.
+// - Grant authority. While an owned grant exists for the identity it is the only credential: unusable, it means no
+//   credential at all (`{ok: false}`), never the entry's own header or none. Only where the store proves no owned grant
+//   is `credential: null` answered. A store that cannot say (safeStorage unavailable with records saved, an unreadable
+//   record whose identity is unknown) or two saved grants for the exact identity (never ranked) prove nothing: refused.
+// - Attachment memory, never persisted: `withdrawn` (the owner's Disconnect, or a failed Reconnect: blocked until an
+//   explicit Connect), `needsConnect` (no owned grant, and the server refused the credential-less request: a cold 401),
+//   `needsReconnect` (the owned grant's refresh was rejected, or it expired without a refresh token).
+// - Access epochs are immutable: an epoch names one access token, a new token gets a new, higher epoch, and a 401
+//   reported for an epoch marks it unusable for good (the next demand refreshes; nothing is replayed here).
+// - Demand refresh only, single-flight per identity, never aborted by a caller (a rotation the server already made
+//   must not be lost): the rotated grant is persisted, then the host confirms the old epoch closed (`closeHost`, the
+//   engine host's `connectors.directClose`) when it was ever delivered, and only then is the new epoch released. An
+//   unsaved rotation or an unconfirmed close holds the release; the next demand retries that step, never the refresh.
+// - Fences. Every await is followed by checks: the identity's generation (advanced synchronously by Disconnect, a
+//   Reconnect's withdrawal and stop) for saved state; the caller's signal and the host attachment for a delivery.
+//   Store saves use a claim taken before the work that leads to them, so a removal meanwhile makes them stale.
+// - Owner flows. Connect reuses a usable saved grant without a browser, answers `needsReconnect` over an unusable one,
+//   and runs the browser flow only where no owned grant exists (including a withdrawn identity). Its connection id is
+//   allocated and claimed at its start, so a Disconnect of that id cancels it and stales its save. Reconnect withdraws
+//   the old grant first and replaces it under a new connection id; failing, it leaves the identity withdrawn.
+// - Disconnect is idempotent: blocking, the identity's generation, the host close of every epoch and the local
+//   removal begin at once; revocation is best effort from the stored metadata. A host close unconfirmed stays visible
+//   (`disconnecting`) until a later close confirms it or the host's attachment ends (`hostLost`).
+// - Lifetime: `hostLost` (main's attachment to the engine host ended, its cleanup ran) ends every waiting demand and
+//   owner flow and forgets pending old-epoch closes; a refresh in flight still persists its rotation under its claim,
+//   for the next attachment's demand. `stop` (main stopping) ends everything and refuses later work.
+import { randomUUID } from 'node:crypto';
+import type { DirectSource } from '@shared/ipc/schema/connectors';
+import type { DirectCredentialPreparation, DirectCredentialPrepared } from './direct-route';
+import { ConnectorOAuthError, type ConnectorOAuthFailure, type ConnectorOAuthFlow } from './oauth-flow';
+import { ConnectorOAuthStoreError, type ConnectorOAuthClaim, type ConnectorOAuthSaved, type ConnectorOAuthStore } from './oauth-store';
+import { oauthIdentityOf, sameOAuthIdentity, type ConnectorOAuthGrant, type ConnectorOAuthIdentity, type ConnectorOAuthRecord, type ConnectorOAuthTokens } from './oauth-types';
+
+// A token this close to its expiry is refreshed on demand (and used meanwhile while still valid).
+export const OAUTH_REFRESH_MARGIN_MS = 60_000;
+// The host's acknowledgment of a credential close, past which it counts as unconfirmed.
+export const OAUTH_HOST_CLOSE_TIMEOUT_MS = 10_000;
+// Disconnect's best-effort revocation, both requests together.
+export const OAUTH_REVOKE_TIMEOUT_MS = 30_000;
+// Disconnect's read of a record main does not hold (for its revocation); past it, the record is forgotten unrevoked.
+export const OAUTH_FORGET_READ_TIMEOUT_MS = 10_000;
+// Identities held in attachment memory at once; past it, idle ones without state are dropped, else work is refused.
+export const OAUTH_PROVIDER_IDENTITY_LIMIT = 1_024;
+
+export interface ConnectorOAuthProviderDeps {
+  store: ConnectorOAuthStore;
+  flow: ConnectorOAuthFlow;
+  // The engine host's `connectors.directClose` for one connection: its `credentialEpoch` and every earlier one, or
+  // (absent) every epoch. True only when the host acknowledged it.
+  closeHost(target: { connectionId: string; credentialEpoch?: number }): Promise<boolean>;
+  now?: () => number;
+  newConnectionId?: () => string;
+  log?: (line: string) => void;
+}
+
+// One identity's MAWS connection, main-only (an owner answer selects its own safe fields).
+export type ConnectorOAuthState =
+  | { state: 'disconnected' } // no owned grant: the entry's own configuration applies
+  | { state: 'connecting'; connectionId: string }
+  | { state: 'connected'; connectionId: string; refreshable: boolean; expiresAt?: number }
+  | { state: 'needsReconnect'; connectionId: string }
+  | { state: 'withdrawn' }
+  | { state: 'needsConnect' }
+  // `store`: the store cannot be read; `unknown`: an unreadable record may be this identity's; `duplicate`: two are
+  | { state: 'unavailable'; why: 'store' | 'unknown' | 'duplicate' };
+
+export type ConnectorOAuthConnectFailure = ConnectorOAuthFailure | 'busy' | 'needsReconnect' | 'unavailable' | 'notHttp' | 'stopped' | 'capacity' | 'failed';
+export type ConnectorOAuthConnectResult = { ok: true; connectionId: string; reused: boolean } | { ok: false; why: ConnectorOAuthConnectFailure };
+export interface ConnectorOAuthDisconnectResult {
+  local: 'forgotten' | 'absent' | 'failed';
+  host: 'confirmed' | 'unconfirmed';
+  revocation: 'revoked' | 'unsupported' | 'failed' | 'none';
+}
+
+export interface ConnectorOAuthProvider extends DirectCredentialPreparation {
+  state(identity: ConnectorOAuthIdentity): Promise<ConnectorOAuthState>;
+  // The saved connections, forgotten ones excepted; with safeStorage unavailable, their ids alone (as unreadable).
+  // Null: not even the ids could be read.
+  saved(): Promise<ConnectorOAuthSaved[] | null>;
+  // The owner's Connect for a verified HTTP source: answers when the connection is made, reused or refused.
+  connect(source: DirectSource, signal?: AbortSignal): Promise<ConnectorOAuthConnectResult>;
+  // The owner's explicit replacement: the old grant is withdrawn first.
+  reconnect(source: DirectSource, signal?: AbortSignal): Promise<ConnectorOAuthConnectResult>;
+  // A saved (or connecting) connection, by id alone: needs no current source and no decryption.
+  disconnect(connectionId: string): Promise<ConnectorOAuthDisconnectResult>;
+  // A Disconnect's host close still unanswered (`pending`) or answered without confirmation (`unconfirmed`).
+  disconnecting(connectionId: string): 'pending' | 'unconfirmed' | null;
+  hostLost(): void;
+  stop(): void;
+}
+
+interface Epoch {
+  readonly connectionId: string;
+  readonly credentialEpoch: number;
+  readonly accessToken: string;
+  readonly expiresAt?: number;
+  unusable: boolean; // a 401 was reported for it: one-way
+  deliveredTo: AbortSignal | null; // the attachment it was last delivered to: while that stands, its replacement waits for its close
+}
+interface Held {
+  record: ConnectorOAuthRecord; // as main knows it: a rotation not yet saved included
+  readonly claim: ConnectorOAuthClaim; // taken before the record was read or the flow began
+  unsaved: boolean;
+}
+interface Slot {
+  readonly identity: ConnectorOAuthIdentity;
+  generation: number;
+  held: Held | null;
+  issued: Epoch | null;
+  closing: { connectionId: string; credentialEpoch: number }[];
+  work: Promise<void> | null;
+  refresh: AbortController | null;
+  flow: { connectionId: string; controller: AbortController } | null;
+  blocked: 'withdrawn' | 'needsConnect' | 'needsReconnect' | null;
+  users: number;
+}
+type Found = 'held' | 'none' | 'stale' | 'store' | 'unknown' | 'duplicate';
+
+const REFUSED: DirectCredentialPrepared = { ok: false };
+const NONE: DirectCredentialPrepared = { ok: true, credential: null };
+const keyOf = (identity: ConnectorOAuthIdentity) => JSON.stringify([identity.requestUrl, identity.server, identity.scope, identity.configPath, identity.entryPath]);
+const grantOf = ({ issuer, resource, redirectUri, authorizationServer, client, tokens }: ConnectorOAuthRecord): ConnectorOAuthGrant => ({ issuer, resource, redirectUri, authorizationServer, client, tokens });
+
+// Resolves once `work` settles or any signal aborts.
+function settledOrEnded(work: Promise<unknown>, ...signals: AbortSignal[]): Promise<void> {
+  return new Promise((resolve) => {
+    if (signals.some((signal) => signal.aborted)) return resolve();
+    const done = () => {
+      for (const signal of signals) signal.removeEventListener('abort', done);
+      resolve();
+    };
+    for (const signal of signals) signal.addEventListener('abort', done, { once: true });
+    work.then(done, done);
+  });
+}
+
+export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): ConnectorOAuthProvider {
+  const { store, flow } = deps;
+  const now = deps.now ?? Date.now;
+  const newConnectionId = deps.newConnectionId ?? randomUUID;
+  const log = deps.log ?? ((line: string) => console.warn(`[connectors] ${line}`));
+  const slots = new Map<string, Slot>();
+  const forgotten = new Set<string>(); // connection ids this main removed (or is removing)
+  const progress = new Map<string, { state: 'pending' | 'unconfirmed' }>(); // a Disconnect's host close
+  let epochs = 0;
+  let stopped = false;
+  let attachment = new AbortController(); // the engine host's attachment; aborted when it ends, and at stop
+  const lifetime = new AbortController(); // main's: aborted at stop
+
+  const expiring = (tokens: { expiresAt?: number }) => tokens.expiresAt !== undefined && tokens.expiresAt - now() <= OAUTH_REFRESH_MARGIN_MS;
+  const expired = (tokens: { expiresAt?: number }) => tokens.expiresAt !== undefined && tokens.expiresAt <= now();
+  const epochOf = (record: ConnectorOAuthRecord): Epoch => ({
+    connectionId: record.connectionId, credentialEpoch: ++epochs, accessToken: record.tokens.accessToken,
+    ...(record.tokens.expiresAt !== undefined && { expiresAt: record.tokens.expiresAt }), unusable: false, deliveredTo: null,
+  });
+
+  // ── slots: an identity's attachment memory, held while someone uses it ──
+
+  function enter(identity: ConnectorOAuthIdentity): Slot | null {
+    const key = keyOf(identity);
+    let slot = slots.get(key);
+    if (!slot) {
+      if (slots.size >= OAUTH_PROVIDER_IDENTITY_LIMIT) {
+        for (const [other, idle] of slots) {
+          if (idle.users === 0 && !idle.held && !idle.flow && !idle.work && !idle.blocked && idle.closing.length === 0) slots.delete(other);
+        }
+        if (slots.size >= OAUTH_PROVIDER_IDENTITY_LIMIT) return null;
+      }
+      slot = { identity, generation: 0, held: null, issued: null, closing: [], work: null, refresh: null, flow: null, blocked: null, users: 0 };
+      slots.set(key, slot);
+    }
+    slot.users += 1;
+    return slot;
+  }
+  async function withSlot<T>(identity: ConnectorOAuthIdentity, full: T, use: (slot: Slot) => Promise<T>): Promise<T> {
+    const slot = enter(identity);
+    if (!slot) return full;
+    try {
+      return await use(slot);
+    } finally {
+      slot.users -= 1;
+    }
+  }
+
+  // Ends the slot's saved state at once (Disconnect, a Reconnect's withdrawal): no later step of earlier work lands.
+  function withdraw(slot: Slot): void {
+    slot.generation += 1;
+    slot.blocked = 'withdrawn';
+    slot.refresh?.abort();
+    slot.flow?.controller.abort();
+    slot.flow = null;
+    slot.held = null;
+    slot.issued = null;
+    slot.closing = [];
+  }
+
+  // The identity's saved grant into `slot.held`, or why there is none to use.
+  async function adopt(slot: Slot): Promise<Found> {
+    const generation = slot.generation;
+    let listed: ConnectorOAuthSaved[];
+    try {
+      listed = await store.list();
+    } catch {
+      return 'store';
+    }
+    if (slot.generation !== generation) return 'stale';
+    if (slot.held) return 'held';
+    const matches = listed.filter((entry) => entry.state === 'sealed' && !forgotten.has(entry.connectionId) && sameOAuthIdentity(entry.identity, slot.identity));
+    if (matches.length > 1) return 'duplicate';
+    if (matches.length === 0) return listed.some((entry) => entry.state === 'unreadable' && !forgotten.has(entry.connectionId)) ? 'unknown' : 'none';
+    const { connectionId } = matches[0]!;
+    const claim = store.claim(connectionId);
+    let record: ConnectorOAuthRecord | null;
+    try {
+      record = await store.read(connectionId);
+    } catch {
+      return 'store';
+    }
+    if (slot.generation !== generation || forgotten.has(connectionId)) return 'stale';
+    if (slot.held) return 'held';
+    if (!record || !sameOAuthIdentity(record.identity, slot.identity)) return 'none';
+    slot.held = { record, claim, unsaved: false };
+    return 'held';
+  }
+
+  // ── demand: the serialized work that makes the held grant deliverable ──
+
+  function deliverable(slot: Slot): Epoch | null {
+    const { held, issued } = slot;
+    if (!held || held.unsaved || slot.closing.length > 0 || slot.blocked || slot.flow || !issued) return null;
+    if (issued.unusable || issued.connectionId !== held.record.connectionId || expired(issued)) return null;
+    return issued;
+  }
+
+  function ensure(slot: Slot): Promise<void> {
+    slot.work ??= work(slot).catch(() => log('connectors: an OAuth credential step failed')).finally(() => { slot.work = null; });
+    return slot.work;
+  }
+
+  // Saves the held record under its claim; false when it did not land (stale: a removal won; else kept unsaved).
+  async function persist(slot: Slot, held: Held, generation: number): Promise<boolean> {
+    try {
+      const saved = await store.save(held.claim, slot.identity, grantOf(held.record));
+      if (slot.generation !== generation || slot.held !== held) return false;
+      held.record = saved;
+      held.unsaved = false;
+      return true;
+    } catch (error) {
+      if (!(error instanceof ConnectorOAuthStoreError && error.code === 'stale')) log('connectors: a rotated OAuth grant could not be saved yet');
+      return false;
+    }
+  }
+
+  async function work(slot: Slot): Promise<void> {
+    const generation = slot.generation;
+    const held = slot.held;
+    const current = () => !stopped && slot.generation === generation && slot.held === held;
+    if (!held || slot.blocked) return;
+    if (held.unsaved && !(await persist(slot, held, generation))) return;
+    slot.issued ??= epochOf(held.record);
+    const issued = slot.issued;
+    if (issued.unusable || expiring(issued)) {
+      const refreshToken = held.record.tokens.refreshToken;
+      if (refreshToken === undefined) {
+        if (issued.unusable || expired(issued)) slot.blocked = 'needsReconnect';
+        return; // a still-valid token is used until it expires
+      }
+      const controller = new AbortController();
+      slot.refresh = controller;
+      let rotated: ConnectorOAuthTokens;
+      try {
+        rotated = await flow.refresh(grantOf(held.record), controller.signal);
+      } catch (error) {
+        if (current() && error instanceof ConnectorOAuthError && error.code === 'rejected') slot.blocked = 'needsReconnect';
+        return;
+      } finally {
+        if (slot.refresh === controller) slot.refresh = null;
+      }
+      if (!current()) return;
+      held.record = { ...held.record, tokens: rotated };
+      held.unsaved = true;
+      slot.issued = epochOf(held.record);
+      if (issued.deliveredTo && !issued.deliveredTo.aborted) slot.closing.push({ connectionId: issued.connectionId, credentialEpoch: issued.credentialEpoch });
+      if (!(await persist(slot, held, generation))) return;
+    }
+    while (slot.closing.length > 0) {
+      const target = slot.closing[0]!;
+      const host = attachment.signal;
+      const confirmed = await closeBounded(target);
+      if (!current()) return;
+      if (host.aborted) continue; // that attachment ended, and with it the epoch (`hostLost` cleared the list)
+      if (!confirmed) return;
+      slot.closing = slot.closing.filter((entry) => entry !== target);
+    }
+  }
+
+  function closeBounded(target: { connectionId: string; credentialEpoch?: number }): Promise<boolean> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), OAUTH_HOST_CLOSE_TIMEOUT_MS);
+      const answer = (confirmed: boolean) => {
+        clearTimeout(timer);
+        resolve(confirmed);
+      };
+      let asked: Promise<boolean>;
+      try {
+        asked = deps.closeHost(target);
+      } catch {
+        asked = Promise.resolve(false);
+      }
+      asked.then((confirmed) => answer(confirmed === true), () => answer(false));
+    });
+  }
+
+  async function revokeBounded(grant: ConnectorOAuthGrant): Promise<ConnectorOAuthDisconnectResult['revocation']> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OAUTH_REVOKE_TIMEOUT_MS);
+    const onStop = () => controller.abort();
+    lifetime.signal.addEventListener('abort', onStop, { once: true });
+    if (lifetime.signal.aborted) controller.abort();
+    try {
+      return await flow.revoke(grant, controller.signal);
+    } catch {
+      return 'failed';
+    } finally {
+      clearTimeout(timer);
+      lifetime.signal.removeEventListener('abort', onStop);
+    }
+  }
+
+  // ── owner: the flow, and forgetting ──
+
+  function readBounded(connectionId: string): Promise<ConnectorOAuthRecord | null> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), OAUTH_FORGET_READ_TIMEOUT_MS);
+      store.read(connectionId).catch(() => null).then((record) => {
+        clearTimeout(timer);
+        resolve(record);
+      });
+    });
+  }
+
+  // Starts the host close of every epoch of `connectionId`, tracked for `disconnecting`.
+  function closeAll(connectionId: string): Promise<boolean> {
+    const entry = { state: 'pending' as const };
+    progress.set(connectionId, entry);
+    const host = attachment.signal;
+    return closeBounded({ connectionId }).then((confirmed) => {
+      if (progress.get(connectionId) === entry) {
+        if (confirmed || host.aborted) progress.delete(connectionId);
+        else progress.set(connectionId, { state: 'unconfirmed' });
+      }
+      return confirmed;
+    });
+  }
+
+  // Forgets one connection: callers have blocked it synchronously. `known`: its record when main holds it.
+  function forget(connectionId: string, known: ConnectorOAuthRecord | null) {
+    forgotten.add(connectionId);
+    const host = closeAll(connectionId);
+    const local = (async (): Promise<{ local: ConnectorOAuthDisconnectResult['local']; record: ConnectorOAuthRecord | null }> => {
+      let record = known;
+      if (!record) {
+        record = await readBounded(connectionId);
+        const slot = record && enter(record.identity);
+        if (slot) {
+          // the identity is withdrawn too, unless main holds another connection for it
+          if (!slot.held || slot.held.record.connectionId === connectionId) withdraw(slot);
+          slot.users -= 1;
+        }
+      }
+      try {
+        return { local: (await store.remove(connectionId)) ? 'forgotten' : 'absent', record };
+      } catch {
+        forgotten.delete(connectionId); // still on disk: listed again, for another attempt
+        return { local: 'failed', record };
+      }
+    })();
+    const revocation = local.then(({ record }) => (record ? revokeBounded(grantOf(record)) : ('none' as const)));
+    return { host, local: local.then(({ local: answer }) => answer), revocation };
+  }
+
+  async function runFlow(slot: Slot, replacing: ConnectorOAuthRecord | null, signal: AbortSignal | undefined): Promise<ConnectorOAuthConnectResult> {
+    const { identity } = slot;
+    let replaced: Promise<ConnectorOAuthDisconnectResult['local']> | null = null;
+    if (replacing) {
+      withdraw(slot);
+      replaced = forget(replacing.connectionId, replacing).local;
+    }
+    const connectionId = newConnectionId();
+    const claim = store.claim(connectionId); // before any await: a Disconnect of this id stales its save
+    const controller = new AbortController();
+    const me = { connectionId, controller };
+    slot.flow = me;
+    const onOwner = () => controller.abort();
+    signal?.addEventListener('abort', onOwner, { once: true });
+    if (signal?.aborted) controller.abort();
+    const current = () => !stopped && slot.flow === me && !controller.signal.aborted;
+    try {
+      if (replaced && (await replaced) === 'failed') return { ok: false, why: 'unavailable' };
+      if (!current()) return { ok: false, why: 'cancelled' };
+      let granted: ConnectorOAuthGrant;
+      try {
+        granted = await flow.connect({ requestUrl: identity.requestUrl, signal: controller.signal });
+      } catch (error) {
+        if (!current()) return { ok: false, why: 'cancelled' };
+        return { ok: false, why: error instanceof ConnectorOAuthError ? error.code : 'failed' };
+      }
+      if (!current()) {
+        void revokeBounded(granted);
+        return { ok: false, why: 'cancelled' };
+      }
+      let record: ConnectorOAuthRecord;
+      try {
+        record = await store.save(claim, identity, granted);
+      } catch (error) {
+        void revokeBounded(granted);
+        return { ok: false, why: error instanceof ConnectorOAuthStoreError && error.code === 'stale' ? 'cancelled' : 'unavailable' };
+      }
+      if (slot.flow !== me) return { ok: false, why: 'cancelled' }; // a Disconnect of this id: its removal follows
+      slot.held = { record, claim, unsaved: false };
+      slot.issued = null;
+      slot.closing = [];
+      slot.blocked = null;
+      return { ok: true, connectionId, reused: false };
+    } finally {
+      signal?.removeEventListener('abort', onOwner);
+      if (slot.flow === me) slot.flow = null; // a failed replacement leaves `withdraw`'s block: nothing is revived
+    }
+  }
+
+  function needsReconnect(slot: Slot, held: Held): boolean {
+    if (slot.blocked === 'needsReconnect') return true;
+    const unusable = slot.issued?.connectionId === held.record.connectionId && slot.issued.unusable;
+    return held.record.tokens.refreshToken === undefined && (unusable || expired(held.record.tokens));
+  }
+
+  // An owner action's lookup of the identity's saved grant: why it cannot go on, or null (`slot.held` then says).
+  async function lookUp(slot: Slot): Promise<Extract<ConnectorOAuthConnectResult, { ok: false }> | null> {
+    if (slot.flow) return { ok: false, why: 'busy' };
+    if (slot.held) return null;
+    const found = await adopt(slot);
+    if (stopped) return { ok: false, why: 'stopped' };
+    if (slot.flow) return { ok: false, why: 'busy' };
+    if (found === 'stale') return { ok: false, why: 'cancelled' }; // a Disconnect overtook it
+    if (!slot.held && unavailableOf(found)) return { ok: false, why: 'unavailable' };
+    return null;
+  }
+
+  function unavailableOf(found: Found): ConnectorOAuthState | null {
+    if (found === 'store' || found === 'stale') return { state: 'unavailable', why: 'store' };
+    if (found === 'unknown' || found === 'duplicate') return { state: 'unavailable', why: found };
+    return null;
+  }
+
+  return {
+    async prepare({ source, signal }) {
+      const identity = oauthIdentityOf(source);
+      if (!identity) return NONE; // stdio: no OAuth
+      if (stopped || signal.aborted) return REFUSED;
+      const host = attachment.signal;
+      return withSlot(identity, REFUSED, async (slot) => {
+        const generation = slot.generation;
+        const live = () => !stopped && !signal.aborted && !host.aborted && slot.generation === generation && !slot.blocked && !slot.flow;
+        if (!live()) return REFUSED;
+        if (!slot.held) {
+          let found = 'stale' as Found; // until the lookup answers
+          await settledOrEnded(adopt(slot).then((answer) => { found = answer; }), signal, host);
+          if (!live()) return REFUSED;
+          if (found === 'none' && !slot.held) return NONE;
+          if (!slot.held) return REFUSED;
+        }
+        const ready = deliverable(slot);
+        if (!ready || expiring(ready)) {
+          const joined = slot.work !== null;
+          await settledOrEnded(ensure(slot), signal, host);
+          if (!live()) return REFUSED;
+          if (joined && !deliverable(slot)) {
+            await settledOrEnded(ensure(slot), signal, host);
+            if (!live()) return REFUSED;
+          }
+        }
+        const issued = deliverable(slot);
+        if (!issued) return REFUSED;
+        issued.deliveredTo = host;
+        return { ok: true, credential: { connectionId: issued.connectionId, credentialEpoch: issued.credentialEpoch, accessToken: issued.accessToken, ...(issued.expiresAt !== undefined && { expiresAt: issued.expiresAt }) } };
+      });
+    },
+
+    unauthorized({ source, credential }) {
+      const identity = oauthIdentityOf(source);
+      if (!identity || stopped) return;
+      const slot = credential === null ? enter(identity) : (slots.get(keyOf(identity)) ?? null);
+      if (!slot) return;
+      if (credential === null) {
+        slot.users -= 1;
+        // sent with none, refused: the server needs authorization; parked until the owner connects
+        if (!slot.held && !slot.flow && slot.blocked === null) slot.blocked = 'needsConnect';
+        return;
+      }
+      const { issued } = slot;
+      if (issued && issued.connectionId === credential.connectionId && issued.credentialEpoch === credential.credentialEpoch) issued.unusable = true;
+    },
+
+    async state(identity) {
+      return withSlot<ConnectorOAuthState>(identity, { state: 'unavailable', why: 'store' }, async (slot) => {
+        if (!slot.held && !slot.flow && slot.blocked !== 'withdrawn' && slot.blocked !== 'needsConnect') {
+          const found = await adopt(slot);
+          if (!slot.held && !slot.flow && !slot.blocked) return unavailableOf(found) ?? { state: 'disconnected' };
+        }
+        if (slot.flow) return { state: 'connecting', connectionId: slot.flow.connectionId };
+        if (slot.blocked === 'withdrawn' || slot.blocked === 'needsConnect') return { state: slot.blocked };
+        const held = slot.held;
+        if (!held) return { state: 'disconnected' };
+        if (needsReconnect(slot, held)) return { state: 'needsReconnect', connectionId: held.record.connectionId };
+        const { tokens, connectionId } = held.record;
+        return { state: 'connected', connectionId, refreshable: tokens.refreshToken !== undefined, ...(tokens.expiresAt !== undefined && { expiresAt: tokens.expiresAt }) };
+      });
+    },
+
+    async saved() {
+      let listed: ConnectorOAuthSaved[];
+      try {
+        listed = await store.list();
+      } catch {
+        try {
+          listed = (await store.ids()).map((connectionId) => ({ state: 'unreadable', connectionId }));
+        } catch {
+          return null;
+        }
+      }
+      return listed.filter((entry) => !forgotten.has(entry.connectionId));
+    },
+
+    async connect(source, signal) {
+      const identity = oauthIdentityOf(source);
+      if (!identity) return { ok: false, why: 'notHttp' };
+      if (stopped) return { ok: false, why: 'stopped' };
+      return withSlot<ConnectorOAuthConnectResult>(identity, { ok: false, why: 'capacity' }, async (slot) => {
+        const refused = await lookUp(slot);
+        if (refused) return refused;
+        const held = slot.held;
+        if (held) {
+          if (needsReconnect(slot, held)) return { ok: false, why: 'needsReconnect' };
+          slot.blocked = null; // an explicit Connect over a saved grant: no browser, no registration
+          return { ok: true, connectionId: held.record.connectionId, reused: true };
+        }
+        return runFlow(slot, null, signal);
+      });
+    },
+
+    async reconnect(source, signal) {
+      const identity = oauthIdentityOf(source);
+      if (!identity) return { ok: false, why: 'notHttp' };
+      if (stopped) return { ok: false, why: 'stopped' };
+      return withSlot<ConnectorOAuthConnectResult>(identity, { ok: false, why: 'capacity' }, async (slot) => {
+        const refused = await lookUp(slot);
+        if (refused) return refused;
+        return runFlow(slot, slot.held?.record ?? null, signal);
+      });
+    },
+
+    async disconnect(connectionId) {
+      let known: ConnectorOAuthRecord | null = null;
+      for (const slot of slots.values()) {
+        if (slot.held?.record.connectionId === connectionId) {
+          known = slot.held.record;
+          withdraw(slot);
+        } else if (slot.flow?.connectionId === connectionId) {
+          withdraw(slot);
+        }
+      }
+      const { host, local, revocation } = forget(connectionId, known);
+      const [localAnswer, revoked, confirmed] = await Promise.all([local, revocation, host]);
+      return { local: localAnswer, host: confirmed ? 'confirmed' : 'unconfirmed', revocation: revoked };
+    },
+
+    disconnecting(connectionId) {
+      return progress.get(connectionId)?.state ?? null;
+    },
+
+    hostLost() {
+      attachment.abort();
+      attachment = new AbortController();
+      progress.clear(); // the attachment's own cleanup closed every transport
+      for (const slot of slots.values()) {
+        slot.closing = [];
+        slot.flow?.controller.abort();
+      }
+    },
+
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      attachment.abort();
+      lifetime.abort();
+      for (const slot of slots.values()) {
+        slot.generation += 1;
+        slot.refresh?.abort();
+        slot.flow?.controller.abort();
+      }
+    },
+  };
+}

@@ -142,6 +142,25 @@ describe('ConnectorOAuthStore', () => {
     await expect(store().read(B)).rejects.toMatchObject({ code: 'unreadable' });
   });
 
+  // P3-HD M3c1: the opaque inventory, for forgetting a record while safeStorage is unavailable
+  it('inventories saved connection ids from the file names alone, without the sealer, and each is removable', async () => {
+    const s = store();
+    await s.save(s.claim(A), identity(), grant());
+    await s.save(s.claim(B), identity({ server: 'other' }), grant());
+    writeFileSync(join(dir, 'not-a-uuid.sealed'), 'x');
+    writeFileSync(join(dir, `${A}.sealed.tmp`), 'x');
+    sealer.isAvailable = false;
+    const touched = [vi.spyOn(sealer, 'available'), vi.spyOn(sealer, 'open'), vi.spyOn(sealer, 'seal')];
+    const relaunched = store();
+    expect((await relaunched.ids()).sort()).toEqual([A, B]);
+    expect(await relaunched.remove(A)).toBe(true);
+    expect(await relaunched.ids()).toEqual([B]);
+    for (const spy of touched) expect(spy).not.toHaveBeenCalled();
+    expect(await store().ids()).toEqual([B]);
+    rmSync(dir, { recursive: true, force: true });
+    expect(await store().ids()).toEqual([]);
+  });
+
   it('a record whose sealed id differs from its file name is unreadable', async () => {
     const s = store();
     await s.save(s.claim(A), identity(), grant());
