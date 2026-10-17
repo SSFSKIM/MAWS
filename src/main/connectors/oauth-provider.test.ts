@@ -11,7 +11,7 @@ import type { DirectSource } from '@shared/ipc/schema/connectors';
 import type { DirectCredentialPrepared } from './direct-route';
 import type { ConnectorOAuthFlow } from './oauth-flow';
 import { ConnectorOAuthError } from './oauth-flow';
-import { createConnectorOAuthProvider, OAUTH_FORGET_READ_TIMEOUT_MS, type ConnectorOAuthProvider, type ConnectorOAuthProviderDeps } from './oauth-provider';
+import { createConnectorOAuthProvider, OAUTH_FORGET_READ_TIMEOUT_MS, OAUTH_HOST_CLOSE_TIMEOUT_MS, type ConnectorOAuthProvider, type ConnectorOAuthProviderDeps } from './oauth-provider';
 import { createConnectorOAuthStore, type ConnectorOAuthSealer, type ConnectorOAuthStore } from './oauth-store';
 import { oauthIdentityOf, type ConnectorOAuthGrant, type ConnectorOAuthIdentity, type ConnectorOAuthTokens } from './oauth-types';
 
@@ -58,13 +58,29 @@ class FakeSealer implements ConnectorOAuthSealer {
   failOpen = false;
   openHangs = false; // a keychain prompt nobody answers
   readonly failOpenFor = new Set<string>(); // connection ids whose record no longer decrypts
+  holdSeal: Deferred<void> | null = null; // the next encryption waits for it
+  sealWaiting = false;
+  holdOpen: Deferred<void> | null = null; // the next decryption waits for it
+  openWaiting = false;
   async available() { return this.isAvailable; }
   async seal(text: string) {
+    const gate = this.holdSeal;
+    this.holdSeal = null;
+    if (gate) {
+      this.sealWaiting = true;
+      await gate.promise;
+    }
     events.push(`seal:${(JSON.parse(text) as { tokens: { accessToken: string } }).tokens.accessToken}`);
     return Buffer.from(Buffer.from(text, 'utf8').map((byte) => byte ^ 0x5a));
   }
   async open(sealed: Buffer) {
     if (this.openHangs) await new Promise(() => {});
+    const gate = this.holdOpen;
+    this.holdOpen = null;
+    if (gate) {
+      this.openWaiting = true;
+      await gate.promise;
+    }
     const text = Buffer.from(sealed.map((byte) => byte ^ 0x5a)).toString('utf8');
     if (this.failOpen || this.failOpenFor.has((JSON.parse(text) as { connectionId: string }).connectionId)) throw new Error('decrypt failed');
     return { text, reseal: false };
@@ -398,7 +414,7 @@ describe('owner Connect and Reconnect', () => {
     const replacing = provider.reconnect(source());
     await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
     expect(onDisk()).toEqual([]);
-    expect(closes).toContainEqual({ connectionId: SAVED });
+    expect(closes).toContainEqual({ connectionId: SAVED, credentialEpoch: old.credentialEpoch });
     expect(await prepare()).toEqual({ ok: false });
     flow.connects[0]!.answer.reject(new ConnectorOAuthError('timeout'));
     expect(await replacing).toEqual({ ok: false, why: 'timeout' });
@@ -466,12 +482,12 @@ describe('owner Connect and Reconnect', () => {
 describe('Disconnect', () => {
   it('blocks at once, closes every epoch in the host, forgets locally, revokes, and stays withdrawn until Connect', async () => {
     await seed();
-    await prepare();
+    const used = credentialOf(await prepare()) as { credentialEpoch: number };
     closeAnswers = [];
     const disconnecting = provider.disconnect(SAVED);
     expect(provider.disconnecting(SAVED)).toBe('pending');
     expect(await prepare()).toEqual({ ok: false });
-    await vi.waitFor(() => expect(closes).toContainEqual({ connectionId: SAVED }));
+    await vi.waitFor(() => expect(closes).toContainEqual({ connectionId: SAVED, credentialEpoch: used.credentialEpoch }));
     closeAnswers.at(-1)!.resolve(true);
     expect(await disconnecting).toEqual({ local: 'forgotten', host: 'confirmed', revocation: 'revoked' });
     expect(provider.disconnecting(SAVED)).toBeNull();
@@ -505,6 +521,21 @@ describe('Disconnect', () => {
       vi.useRealTimers();
     }
     expect(onDisk()).toEqual([]);
+    sealer.openHangs = false;
+    expect(await prepare()).toEqual({ ok: false }); // unattributed: never a silent switch of authentication
+  });
+
+  it('a cold Disconnect still reading its record is no proof of absence: a concurrent demand is refused, never sent without', async () => {
+    await seed();
+    sealer.holdOpen = deferred();
+    const release = sealer.holdOpen;
+    const disconnecting = provider.disconnect(SAVED);
+    await vi.waitFor(() => expect(sealer.openWaiting).toBe(true));
+    expect(await prepare()).toEqual({ ok: false }); // its listing finished while the Disconnect's read waits
+    release.resolve();
+    expect(await disconnecting).toMatchObject({ local: 'forgotten', revocation: 'revoked' });
+    expect(await prepare()).toEqual({ ok: false });
+    expect(await provider.state(IDENTITY)).toEqual({ state: 'withdrawn' });
   });
 
   it('a Connect whose lookup a Disconnect overtakes is cancelled, not run', async () => {
@@ -562,7 +593,9 @@ describe('Disconnect', () => {
     expect(await provider.connect(source())).toEqual({ ok: false, why: 'unavailable' });
     expect(flow.connects).toEqual([]);
     expect(await provider.disconnect(SAVED)).toEqual({ local: 'forgotten', host: 'confirmed', revocation: 'none' });
-    expect(await prepare()).toEqual({ ok: true, credential: null });
+    // whose grant it was is unknown: no source switches to its own configuration or none in this main's lifetime
+    expect(await prepare()).toEqual({ ok: false });
+    expect(await provider.state(IDENTITY)).toEqual({ state: 'unavailable', why: 'unknown' });
   });
 
   it('a readable exact match is served even beside an unrelated unreadable record', async () => {
@@ -602,6 +635,162 @@ describe('Disconnect', () => {
     expect(listed).toEqual([{ state: 'unreadable', connectionId: SAVED }]);
     expect(await provider.disconnect(SAVED)).toMatchObject({ local: 'forgotten', host: 'confirmed' });
     expect(onDisk()).toEqual([]);
+  });
+});
+
+describe('owner actions keep their own lifetime', () => {
+  const gatedList = async () => {
+    const store = storeOf();
+    const list = store.list.bind(store);
+    const gate = deferred<void>();
+    const listed = deferred<void>();
+    vi.spyOn(store, 'list').mockImplementationOnce(async () => { const answer = await list(); listed.resolve(); await gate.promise; return answer; });
+    provider.stop();
+    provider = makeProvider(store);
+    return { gate, listed };
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  for (const action of ['connect', 'reconnect'] as const) {
+    it(`${action}: the host’s attachment ending during its lookup ends it; no browser opens`, async () => {
+      const { gate, listed } = await gatedList();
+      const pending = provider[action](source());
+      await listed.promise;
+      provider.hostLost();
+      gate.resolve();
+      await settle();
+      expect(flow.connects).toEqual([]);
+      expect(await pending).toEqual({ ok: false, why: 'cancelled' });
+    });
+
+    it(`${action}: a Disconnect after its held-grant lookup ends it, never read as a fresh Connect`, async () => {
+      await seed();
+      await prepare(); // main holds the grant: the lookup answers at once
+      const pending = provider[action](source());
+      const disconnected = provider.disconnect(SAVED);
+      await settle();
+      expect(flow.connects).toEqual([]);
+      expect(await pending).toEqual({ ok: false, why: 'cancelled' });
+      await disconnected;
+      expect(await provider.state(IDENTITY)).toEqual({ state: 'withdrawn' });
+    });
+  }
+
+  for (const end of ['owner', 'hostLost', 'stop', 'disconnect'] as const) {
+    it(`a grant whose save is still encrypting when the ${end} ends the flow is not installed, delivered or kept`, async () => {
+      const owner = new AbortController();
+      const connecting = provider.connect(source(), owner.signal);
+      await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+      sealer.holdSeal = deferred();
+      const release = sealer.holdSeal;
+      flow.connects[0]!.answer.resolve(grant(tokens(5)));
+      await vi.waitFor(() => expect(sealer.sealWaiting).toBe(true));
+      if (end === 'owner') owner.abort();
+      else if (end === 'hostLost') provider.hostLost();
+      else if (end === 'stop') provider.stop();
+      else void provider.disconnect(FRESH);
+      release.resolve();
+      expect(await connecting).toEqual({ ok: false, why: 'cancelled' });
+      await vi.waitFor(() => expect(onDisk()).toEqual([]));
+      expect(flow.revokes.map((g) => g.tokens.accessToken)).toContain('at-5');
+      if (end === 'stop') provider = makeProvider();
+      expect(credentialOf(await prepare())).not.toMatchObject({ connectionId: FRESH });
+      expect(await storeOf().read(FRESH)).toBeNull();
+    });
+  }
+});
+
+describe('a flow ended just after its save committed', () => {
+  for (const end of ['owner', 'hostLost'] as const) {
+    it(`the ${end}: the committed grant is unlinked and revoked, never installed or delivered`, async () => {
+      const store = storeOf();
+      const save = store.save.bind(store);
+      const owner = new AbortController();
+      vi.spyOn(store, 'save').mockImplementationOnce(async (...args) => {
+        const saved = await save(...args);
+        expect(onDisk()).toEqual([`${FRESH}.sealed`]); // committed
+        if (end === 'owner') owner.abort();
+        else provider.hostLost();
+        return saved;
+      });
+      provider.stop();
+      provider = makeProvider(store);
+      const connecting = provider.connect(source(), owner.signal);
+      await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+      flow.connects[0]!.answer.resolve(grant(tokens(5)));
+      expect(await connecting).toEqual({ ok: false, why: 'cancelled' });
+      await vi.waitFor(() => expect(onDisk()).toEqual([]));
+      expect(flow.revokes.map((g) => g.tokens.accessToken)).toContain('at-5');
+      expect(await prepare()).toEqual({ ok: true, credential: null });
+    });
+  }
+});
+
+describe('a withdrawn connection’s retirement', () => {
+  it('Reconnect: the replacement is not delivered until the old connection’s close is confirmed', async () => {
+    await seed();
+    const old = credentialOf(await prepare()) as { credentialEpoch: number };
+    closeAnswers = [];
+    const replacing = provider.reconnect(source());
+    await vi.waitFor(() => expect(closeAnswers).toHaveLength(1));
+    expect(closes[0]).toEqual({ connectionId: SAVED, credentialEpoch: old.credentialEpoch });
+    closeAnswers[0]!.resolve(false);
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+    flow.connects[0]!.answer.resolve(grant(tokens(9)));
+    expect(await replacing).toEqual({ ok: true, connectionId: FRESH, reused: false });
+    expect(provider.disconnecting(SAVED)).toBe('unconfirmed');
+    const held = prepare();
+    await vi.waitFor(() => expect(closeAnswers).toHaveLength(2)); // retried for the old connection, the same floor
+    expect(closes[1]).toEqual({ connectionId: SAVED, credentialEpoch: old.credentialEpoch });
+    closeAnswers[1]!.resolve(false);
+    expect(await held).toEqual({ ok: false });
+    closeAnswers = null;
+    expect(credentialOf(await prepare())).toMatchObject({ connectionId: FRESH, accessToken: 'at-9' });
+    expect(provider.disconnecting(SAVED)).toBeNull();
+  });
+
+  it('an unanswered old close times out as unconfirmed and holds the replacement', async () => {
+    await seed();
+    await prepare();
+    closeAnswers = [];
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const replacing = provider.reconnect(source());
+      await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(OAUTH_HOST_CLOSE_TIMEOUT_MS);
+      expect(provider.disconnecting(SAVED)).toBe('unconfirmed');
+      flow.connects[0]!.answer.resolve(grant(tokens(9)));
+      expect(await replacing).toMatchObject({ ok: true });
+      const held = prepare();
+      await vi.waitFor(() => expect(closeAnswers).toHaveLength(2));
+      await vi.advanceTimersByTimeAsync(OAUTH_HOST_CLOSE_TIMEOUT_MS);
+      expect(await held).toEqual({ ok: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a failed Reconnect keeps the retirement through a later Connect: nothing new is delivered before the old close confirms', async () => {
+    await seed();
+    await prepare();
+    closeAnswers = [];
+    const replacing = provider.reconnect(source());
+    await vi.waitFor(() => expect(closeAnswers).toHaveLength(1));
+    closeAnswers[0]!.resolve(false);
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+    flow.connects[0]!.answer.reject(new ConnectorOAuthError('denied'));
+    expect(await replacing).toEqual({ ok: false, why: 'denied' });
+    const connecting = provider.connect(source());
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(2));
+    flow.connects[1]!.answer.resolve(grant(tokens(4)));
+    expect(await connecting).toEqual({ ok: true, connectionId: FRESH2, reused: false });
+    const held = prepare();
+    await vi.waitFor(() => expect(closeAnswers).toHaveLength(2));
+    closeAnswers[1]!.resolve(false);
+    expect(await held).toEqual({ ok: false });
+    expect(provider.disconnecting(SAVED)).toBe('unconfirmed');
+    closeAnswers = null;
+    expect(credentialOf(await prepare())).toMatchObject({ connectionId: FRESH2, accessToken: 'at-4' });
   });
 });
 

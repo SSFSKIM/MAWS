@@ -21,18 +21,29 @@
 //   engine host's `connectors.directClose`) when it was ever delivered, and only then is the new epoch released. An
 //   unsaved rotation or an unconfirmed close holds the release; the next demand retries that step, never the refresh.
 // - Fences. Every await is followed by checks: the identity's generation (advanced synchronously by Disconnect, a
-//   Reconnect's withdrawal and stop) for saved state; the caller's signal and the host attachment for a delivery.
-//   Store saves use a claim taken before the work that leads to them, so a removal meanwhile makes them stale.
+//   Reconnect's withdrawal and stop) for saved state; the caller's signal and the host attachment for a delivery; an
+//   owner action's own signal, generation and attachment, captured before its lookup. Store saves use a claim taken
+//   before the work that leads to them, so a removal meanwhile makes them stale.
 // - Owner flows. Connect reuses a usable saved grant without a browser, answers `needsReconnect` over an unusable one,
 //   and runs the browser flow only where no owned grant exists (including a withdrawn identity). Its connection id is
-//   allocated and claimed at its start, so a Disconnect of that id cancels it and stales its save. Reconnect withdraws
-//   the old grant first and replaces it under a new connection id; failing, it leaves the identity withdrawn.
-// - Disconnect is idempotent: blocking, the identity's generation, the host close of every epoch and the local
-//   removal begin at once; revocation is best effort from the stored metadata. A host close unconfirmed stays visible
-//   (`disconnecting`) until a later close confirms it or the host's attachment ends (`hostLost`).
-// - Lifetime: `hostLost` (main's attachment to the engine host ended, its cleanup ran) ends every waiting demand and
-//   owner flow and forgets pending old-epoch closes; a refresh in flight still persists its rotation under its claim,
-//   for the next attachment's demand. `stop` (main stopping) ends everything and refuses later work.
+//   allocated and claimed at its start, so a Disconnect of that id cancels it and stales its save. A flow whose
+//   lifetime ends (the owner's signal, Disconnect, `hostLost`, `stop`) while its grant is being saved removes that
+//   connection (a save not yet committed goes stale; one already committed is unlinked) and revokes the grant: an ended
+//   flow installs nothing. Reconnect withdraws the old grant first and replaces it under a new connection id; failing,
+//   it leaves the identity withdrawn.
+// - Retirement. Withdrawing a connection (Disconnect, Reconnect) closes it in the host with an explicit floor, the
+//   highest epoch main ever issued for it (`connectors.directClose` without one fences only the epochs the host has
+//   seen, and a prepared credential can still be on its way). Until that close is confirmed, or the host's attachment
+//   ends, no credential of the same identity is delivered, through a failed replacement and any later Connect; the
+//   retirement stays visible (`disconnecting`) and every demand of that identity retries it. Disconnect is
+//   idempotent and begins blocking, the retirement and the local removal at once; revocation is best effort.
+// - A connection being forgotten is not proof of absence: a listing that still shows it withdraws its identity, and
+//   one forgotten without its identity learned (unreadable, or its read past its bound) leaves every source without an
+//   owned grant refused (`unavailable`, `unknown`) for this main's lifetime, never switched to its own configuration.
+// - Lifetime: `hostLost` (main's attachment to the engine host ended; the host runs that attachment's cleanup before it
+//   serves another's requests) ends every waiting demand and owner flow and drops pending closes, whose epochs end with
+//   that attachment; a refresh in flight still persists its rotation under its claim, for the next attachment's
+//   demand. `stop` (main stopping) ends everything and refuses later work.
 import { randomUUID } from 'node:crypto';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
 import type { DirectCredentialPreparation, DirectCredentialPrepared } from './direct-route';
@@ -54,8 +65,8 @@ export const OAUTH_PROVIDER_IDENTITY_LIMIT = 1_024;
 export interface ConnectorOAuthProviderDeps {
   store: ConnectorOAuthStore;
   flow: ConnectorOAuthFlow;
-  // The engine host's `connectors.directClose` for one connection: its `credentialEpoch` and every earlier one, or
-  // (absent) every epoch. True only when the host acknowledged it.
+  // The engine host's `connectors.directClose` for one connection: `credentialEpoch` and every earlier one (the
+  // provider always names the floor). True only when the host acknowledged it.
   closeHost(target: { connectionId: string; credentialEpoch?: number }): Promise<boolean>;
   now?: () => number;
   newConnectionId?: () => string;
@@ -92,7 +103,8 @@ export interface ConnectorOAuthProvider extends DirectCredentialPreparation {
   reconnect(source: DirectSource, signal?: AbortSignal): Promise<ConnectorOAuthConnectResult>;
   // A saved (or connecting) connection, by id alone: needs no current source and no decryption.
   disconnect(connectionId: string): Promise<ConnectorOAuthDisconnectResult>;
-  // A Disconnect's host close still unanswered (`pending`) or answered without confirmation (`unconfirmed`).
+  // A withdrawn connection's retirement still unanswered (`pending`) or answered without confirmation (`unconfirmed`):
+  // until it clears, its identity is delivered nothing.
   disconnecting(connectionId: string): 'pending' | 'unconfirmed' | null;
   hostLost(): void;
   stop(): void;
@@ -113,6 +125,7 @@ interface Held {
 }
 interface Slot {
   readonly identity: ConnectorOAuthIdentity;
+  readonly key: string;
   generation: number;
   held: Held | null;
   issued: Epoch | null;
@@ -124,6 +137,13 @@ interface Slot {
   users: number;
 }
 type Found = 'held' | 'none' | 'stale' | 'store' | 'unknown' | 'duplicate';
+// A withdrawn connection's host close: `floor` covers every epoch main issued for it; `key` the identity it blocks
+// (null: none was ever issued, so none can be in the host).
+interface Retirement {
+  readonly key: string | null;
+  readonly floor: number;
+  state: 'pending' | 'unconfirmed';
+}
 
 const REFUSED: DirectCredentialPrepared = { ok: false };
 const NONE: DirectCredentialPrepared = { ok: true, credential: null };
@@ -150,7 +170,10 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
   const log = deps.log ?? ((line: string) => console.warn(`[connectors] ${line}`));
   const slots = new Map<string, Slot>();
   const forgotten = new Set<string>(); // connection ids this main removed (or is removing)
-  const progress = new Map<string, { state: 'pending' | 'unconfirmed' }>(); // a Disconnect's host close
+  const discarding = new Set<string>(); // an ended flow's connection whose removal has not settled
+  const issuedHigh = new Map<string, { epoch: number; key: string }>(); // per connection: the highest epoch issued
+  const retirements = new Map<string, Retirement>();
+  let unattributed = false; // a connection was forgotten without its identity learned
   let epochs = 0;
   let stopped = false;
   let attachment = new AbortController(); // the engine host's attachment; aborted when it ends, and at stop
@@ -158,10 +181,15 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
 
   const expiring = (tokens: { expiresAt?: number }) => tokens.expiresAt !== undefined && tokens.expiresAt - now() <= OAUTH_REFRESH_MARGIN_MS;
   const expired = (tokens: { expiresAt?: number }) => tokens.expiresAt !== undefined && tokens.expiresAt <= now();
-  const epochOf = (record: ConnectorOAuthRecord): Epoch => ({
-    connectionId: record.connectionId, credentialEpoch: ++epochs, accessToken: record.tokens.accessToken,
-    ...(record.tokens.expiresAt !== undefined && { expiresAt: record.tokens.expiresAt }), unusable: false, deliveredTo: null,
-  });
+  const epochOf = (slot: Slot, record: ConnectorOAuthRecord): Epoch => {
+    const credentialEpoch = ++epochs;
+    issuedHigh.set(record.connectionId, { epoch: credentialEpoch, key: slot.key });
+    return {
+      connectionId: record.connectionId, credentialEpoch, accessToken: record.tokens.accessToken,
+      ...(record.tokens.expiresAt !== undefined && { expiresAt: record.tokens.expiresAt }), unusable: false, deliveredTo: null,
+    };
+  };
+  const retiring = (key: string) => [...retirements.values()].some((entry) => entry.key === key);
 
   // ── slots: an identity's attachment memory, held while someone uses it ──
 
@@ -175,7 +203,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         }
         if (slots.size >= OAUTH_PROVIDER_IDENTITY_LIMIT) return null;
       }
-      slot = { identity, generation: 0, held: null, issued: null, closing: [], work: null, refresh: null, flow: null, blocked: null, users: 0 };
+      slot = { identity, key, generation: 0, held: null, issued: null, closing: [], work: null, refresh: null, flow: null, blocked: null, users: 0 };
       slots.set(key, slot);
     }
     slot.users += 1;
@@ -214,9 +242,14 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     }
     if (slot.generation !== generation) return 'stale';
     if (slot.held) return 'held';
-    const matches = listed.filter((entry) => entry.state === 'sealed' && !forgotten.has(entry.connectionId) && sameOAuthIdentity(entry.identity, slot.identity));
+    const matches = listed.filter((entry) => entry.state === 'sealed' && sameOAuthIdentity(entry.identity, slot.identity));
+    if (matches.some((entry) => forgotten.has(entry.connectionId))) {
+      withdraw(slot); // being forgotten: its identity is withdrawn, never read as absent
+      return 'stale';
+    }
+    if (matches.some((entry) => discarding.has(entry.connectionId))) return 'stale'; // an ended flow's, still on disk
     if (matches.length > 1) return 'duplicate';
-    if (matches.length === 0) return listed.some((entry) => entry.state === 'unreadable' && !forgotten.has(entry.connectionId)) ? 'unknown' : 'none';
+    if (matches.length === 0) return unattributed || listed.some((entry) => entry.state === 'unreadable') ? 'unknown' : 'none';
     const { connectionId } = matches[0]!;
     const claim = store.claim(connectionId);
     let record: ConnectorOAuthRecord | null;
@@ -225,7 +258,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     } catch {
       return 'store';
     }
-    if (slot.generation !== generation || forgotten.has(connectionId)) return 'stale';
+    if (slot.generation !== generation || forgotten.has(connectionId) || discarding.has(connectionId)) return 'stale';
     if (slot.held) return 'held';
     if (!record || !sameOAuthIdentity(record.identity, slot.identity)) return 'none';
     slot.held = { record, claim, unsaved: false };
@@ -236,7 +269,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
 
   function deliverable(slot: Slot): Epoch | null {
     const { held, issued } = slot;
-    if (!held || held.unsaved || slot.closing.length > 0 || slot.blocked || slot.flow || !issued) return null;
+    if (!held || held.unsaved || slot.closing.length > 0 || slot.blocked || slot.flow || !issued || retiring(slot.key)) return null;
     if (issued.unusable || issued.connectionId !== held.record.connectionId || expired(issued)) return null;
     return issued;
   }
@@ -266,7 +299,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     const current = () => !stopped && slot.generation === generation && slot.held === held;
     if (!held || slot.blocked) return;
     if (held.unsaved && !(await persist(slot, held, generation))) return;
-    slot.issued ??= epochOf(held.record);
+    slot.issued ??= epochOf(slot, held.record);
     const issued = slot.issued;
     if (issued.unusable || expiring(issued)) {
       const refreshToken = held.record.tokens.refreshToken;
@@ -288,9 +321,14 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       if (!current()) return;
       held.record = { ...held.record, tokens: rotated };
       held.unsaved = true;
-      slot.issued = epochOf(held.record);
+      slot.issued = epochOf(slot, held.record);
       if (issued.deliveredTo && !issued.deliveredTo.aborted) slot.closing.push({ connectionId: issued.connectionId, credentialEpoch: issued.credentialEpoch });
       if (!(await persist(slot, held, generation))) return;
+    }
+    for (const [connectionId, entry] of [...retirements]) {
+      if (entry.key !== slot.key) continue;
+      await retire(connectionId);
+      if (!current() || retirements.has(connectionId)) return;
     }
     while (slot.closing.length > 0) {
       const target = slot.closing[0]!;
@@ -338,25 +376,28 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
 
   // ── owner: the flow, and forgetting ──
 
-  function readBounded(connectionId: string): Promise<ConnectorOAuthRecord | null> {
+  // The record, `absent` (no file), or `unknown` (unreadable, or no answer within the bound).
+  function readBounded(connectionId: string): Promise<ConnectorOAuthRecord | 'absent' | 'unknown'> {
     return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(null), OAUTH_FORGET_READ_TIMEOUT_MS);
-      store.read(connectionId).catch(() => null).then((record) => {
+      const timer = setTimeout(() => resolve('unknown'), OAUTH_FORGET_READ_TIMEOUT_MS);
+      store.read(connectionId).then((record) => record ?? ('absent' as const), () => 'unknown' as const).then((answer) => {
         clearTimeout(timer);
-        resolve(record);
+        resolve(answer);
       });
     });
   }
 
-  // Starts the host close of every epoch of `connectionId`, tracked for `disconnecting`.
-  function closeAll(connectionId: string): Promise<boolean> {
-    const entry = { state: 'pending' as const };
-    progress.set(connectionId, entry);
+  // Starts (or retries) a withdrawn connection's host close, floored at the highest epoch main issued for it, and
+  // keeps it as a retirement until confirmed or the attachment ends. Answers whether the host confirmed.
+  function retire(connectionId: string): Promise<boolean> {
+    const issued = issuedHigh.get(connectionId);
+    const entry: Retirement = { key: issued?.key ?? null, floor: issued?.epoch ?? 0, state: 'pending' };
+    retirements.set(connectionId, entry);
     const host = attachment.signal;
-    return closeBounded({ connectionId }).then((confirmed) => {
-      if (progress.get(connectionId) === entry) {
-        if (confirmed || host.aborted) progress.delete(connectionId);
-        else progress.set(connectionId, { state: 'unconfirmed' });
+    return closeBounded({ connectionId, credentialEpoch: entry.floor }).then((confirmed) => {
+      if (retirements.get(connectionId) === entry) {
+        if (confirmed || host.aborted) retirements.delete(connectionId);
+        else entry.state = 'unconfirmed';
       }
       return confirmed;
     });
@@ -365,11 +406,14 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
   // Forgets one connection: callers have blocked it synchronously. `known`: its record when main holds it.
   function forget(connectionId: string, known: ConnectorOAuthRecord | null) {
     forgotten.add(connectionId);
-    const host = closeAll(connectionId);
+    const host = retire(connectionId);
     const local = (async (): Promise<{ local: ConnectorOAuthDisconnectResult['local']; record: ConnectorOAuthRecord | null }> => {
       let record = known;
       if (!record) {
-        record = await readBounded(connectionId);
+        const read = await readBounded(connectionId);
+        record = typeof read === 'string' ? null : read;
+        // whose grant it was is unknown: no source without its own owned grant is served for this main's lifetime
+        if (read === 'unknown') unattributed = true;
         const slot = record && enter(record.identity);
         if (slot) {
           // the identity is withdrawn too, unless main holds another connection for it
@@ -404,6 +448,16 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     signal?.addEventListener('abort', onOwner, { once: true });
     if (signal?.aborted) controller.abort();
     const current = () => !stopped && slot.flow === me && !controller.signal.aborted;
+    // The flow ended while its grant is being saved: the connection is removed (a save not yet committed goes stale,
+    // one committed is unlinked), and kept from adoption until that settles.
+    let saving = false;
+    const discard = () => {
+      if (!saving) return;
+      saving = false;
+      discarding.add(connectionId);
+      store.remove(connectionId).then(() => discarding.delete(connectionId), () => log('connectors: an ended OAuth connection could not be removed'));
+    };
+    controller.signal.addEventListener('abort', discard, { once: true });
     try {
       if (replaced && (await replaced) === 'failed') return { ok: false, why: 'unavailable' };
       if (!current()) return { ok: false, why: 'cancelled' };
@@ -419,13 +473,19 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         return { ok: false, why: 'cancelled' };
       }
       let record: ConnectorOAuthRecord;
+      saving = true;
       try {
         record = await store.save(claim, identity, granted);
       } catch (error) {
+        saving = false;
         void revokeBounded(granted);
         return { ok: false, why: error instanceof ConnectorOAuthStoreError && error.code === 'stale' ? 'cancelled' : 'unavailable' };
       }
-      if (slot.flow !== me) return { ok: false, why: 'cancelled' }; // a Disconnect of this id: its removal follows
+      if (!current()) {
+        void revokeBounded(granted); // ended while saving: `discard` (or the Disconnect) removes it
+        return { ok: false, why: 'cancelled' };
+      }
+      saving = false;
       slot.held = { record, claim, unsaved: false };
       slot.issued = null;
       slot.closing = [];
@@ -433,6 +493,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       return { ok: true, connectionId, reused: false };
     } finally {
       signal?.removeEventListener('abort', onOwner);
+      controller.signal.removeEventListener('abort', discard);
       if (slot.flow === me) slot.flow = null; // a failed replacement leaves `withdraw`'s block: nothing is revived
     }
   }
@@ -443,14 +504,20 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     return held.record.tokens.refreshToken === undefined && (unusable || expired(held.record.tokens));
   }
 
-  // An owner action's lookup of the identity's saved grant: why it cannot go on, or null (`slot.held` then says).
-  async function lookUp(slot: Slot): Promise<Extract<ConnectorOAuthConnectResult, { ok: false }> | null> {
+  // An owner action's lookup of the identity's saved grant: why it cannot go on, or null (`slot.held` then says). The
+  // action's lifetime (its signal, the identity's generation, the host attachment) is taken first: an action whose
+  // lifetime ended meanwhile ends, rather than reading what changed as a new state to act on.
+  async function lookUp(slot: Slot, signal: AbortSignal | undefined): Promise<Extract<ConnectorOAuthConnectResult, { ok: false }> | null> {
+    const generation = slot.generation;
+    const host = attachment.signal;
+    const ended = () => host.aborted || signal?.aborted === true || slot.generation !== generation;
     if (slot.flow) return { ok: false, why: 'busy' };
-    if (slot.held) return null;
-    const found = await adopt(slot);
+    let found: Found = 'held';
+    if (!slot.held) found = await adopt(slot);
+    else await Promise.resolve(); // the same turn boundary either way: what happened meanwhile is checked below
     if (stopped) return { ok: false, why: 'stopped' };
+    if (found === 'stale' || ended()) return { ok: false, why: 'cancelled' };
     if (slot.flow) return { ok: false, why: 'busy' };
-    if (found === 'stale') return { ok: false, why: 'cancelled' }; // a Disconnect overtook it
     if (!slot.held && unavailableOf(found)) return { ok: false, why: 'unavailable' };
     return null;
   }
@@ -545,7 +612,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       if (!identity) return { ok: false, why: 'notHttp' };
       if (stopped) return { ok: false, why: 'stopped' };
       return withSlot<ConnectorOAuthConnectResult>(identity, { ok: false, why: 'capacity' }, async (slot) => {
-        const refused = await lookUp(slot);
+        const refused = await lookUp(slot, signal);
         if (refused) return refused;
         const held = slot.held;
         if (held) {
@@ -562,7 +629,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       if (!identity) return { ok: false, why: 'notHttp' };
       if (stopped) return { ok: false, why: 'stopped' };
       return withSlot<ConnectorOAuthConnectResult>(identity, { ok: false, why: 'capacity' }, async (slot) => {
-        const refused = await lookUp(slot);
+        const refused = await lookUp(slot, signal);
         if (refused) return refused;
         return runFlow(slot, slot.held?.record ?? null, signal);
       });
@@ -584,13 +651,13 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     },
 
     disconnecting(connectionId) {
-      return progress.get(connectionId)?.state ?? null;
+      return retirements.get(connectionId)?.state ?? null;
     },
 
     hostLost() {
       attachment.abort();
       attachment = new AbortController();
-      progress.clear(); // the attachment's own cleanup closed every transport
+      retirements.clear(); // their epochs end with that attachment: the host cleans it up before serving another
       for (const slot of slots.values()) {
         slot.closing = [];
         slot.flow?.controller.abort();
