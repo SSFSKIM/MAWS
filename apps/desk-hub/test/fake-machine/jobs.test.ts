@@ -1,6 +1,6 @@
 // The fake machine's derivation and `output` beyond DC8's shared vectors (jobs-parity.test.ts): what a review found
 // the vectors do not reach — a raw word that names a property every object has, and a dangling symlink under a root.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -81,6 +81,22 @@ describe('output under a dangling symlink', () => {
     symlinkSync(join(root, 'a.loop'), join(root, 'bdang0003.output'));
     const answer = answerOutput({ taskId: 'bdang0003', tail: 100 }, indexOf(shell('bdang0003', root)), SESSION, [`${root}/`]);
     expect(answer).toMatchObject({ result: 'refused' });
+  });
+
+  it('is refused when a `..` follows a link, which the filesystem applies past the link, not before it', () => {
+    // `<dir>/link/../legit/…` with link → `<dir>/outside/nested`: lexically `<dir>/legit/…`, under the root; on disk
+    // `<dir>/outside/legit/…`, where another file waits.
+    dir = realpathSync(mkdtempSync(join(tmpdir(), 'fm-dotdot-')));
+    const root = join(dir, 'legit', SESSION, 'tasks');
+    mkdirSync(root, { recursive: true });
+    const outside = join(dir, 'outside', 'legit', SESSION, 'tasks');
+    mkdirSync(outside, { recursive: true });
+    mkdirSync(join(dir, 'outside', 'nested'));
+    writeFileSync(join(outside, 'bdot00001.output'), 'secret\n');
+    symlinkSync(join(dir, 'outside', 'nested'), join(dir, 'link'));
+    const named = `${join(dir, 'link')}/../legit/${SESSION}/tasks`;
+    const answer = answerOutput({ taskId: 'bdot00001', tail: 100 }, indexOf(shell('bdot00001', named)), SESSION, [`${root}/`]);
+    expect(answer).toMatchObject({ taskId: 'bdot00001', result: 'refused', path: `${named}/bdot00001.output` });
   });
 
   it('is missing, with its path, when nothing is at the task’s own place under the root', () => {

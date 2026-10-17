@@ -4,7 +4,7 @@
 // file. DC8's shared vectors pin it (dx4/dx4-jobs.json, `outputCases`). It reads the tail synchronously: the fake has no
 // thread to spare, and a recording's files are small.
 import { closeSync, fstatSync, lstatSync, openSync, readlinkSync, readSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { TaskOutput } from '../src/protocol/session';
 import type { LoopIndex } from './jobs';
 
@@ -19,29 +19,38 @@ export type Locate = (named: string) => string | null;
 const MAX_LINKS = 32;
 
 /**
- * The realpath of `path` (Python's non-strict `os.path.realpath`): every symlink on it resolved, a dangling one to the
- * target it names, and only what does not exist at all kept as named, so a link pointing outside the roots is never
- * taken for a missing file under one. Null when the links cannot be resolved (a loop, an unreadable component): the
- * destination is not established, and the caller refuses.
+ * The realpath of `path` as the filesystem resolves it: component by component from `base` (or `/` for an absolute
+ * path), each symlink expanded where it stands — a dangling one to the target it names — and a `..` applied to the
+ * prefix resolved so far, never collapsed lexically past a link before it. What does not exist is kept as named, so a
+ * link pointing outside the roots is never taken for a missing file under one. Null when the destination cannot be
+ * established — a loop past `MAX_LINKS`, an unreadable component, or a `..` after a component that does not exist —
+ * and the caller refuses.
  */
-function resolvedPath(path: string, links = { followed: 0 }): string | null {
-  let current = '/';
-  const parts = resolve(path).split('/').filter(Boolean);
+function resolvedPath(path: string, links = { followed: 0 }, base = '/'): string | null {
+  let current = path.startsWith('/') ? '/' : base;
+  const parts = path.split('/');
   for (let i = 0; i < parts.length; i++) {
-    const next = join(current, parts[i]);
+    const part = parts[i];
+    if (part === '' || part === '.') continue;
+    if (part === '..') {
+      current = dirname(current);
+      continue;
+    }
+    const next = current === '/' ? `/${part}` : `${current}/${part}`;
     let stat;
     try {
       stat = lstatSync(next);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return join(next, ...parts.slice(i + 1));
-      return null;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null;
+      const rest = parts.slice(i + 1).filter((p) => p !== '' && p !== '.');
+      return rest.includes('..') ? null : [next, ...rest].join('/');
     }
     if (!stat.isSymbolicLink()) {
       current = next;
       continue;
     }
     if (++links.followed > MAX_LINKS) return null;
-    const resolved = resolvedPath(resolve(current, readlinkSync(next)), links);
+    const resolved = resolvedPath(readlinkSync(next), links, current);
     if (resolved === null) return null;
     current = resolved;
   }
@@ -71,9 +80,10 @@ export function answerOutput(request: { taskId: string; tail: number }, index: L
   if (target === null || !allowed.includes(target)) {
     return refuse(`The path the session named for ${taskId} resolves outside the session's task directories, or to another file, so it is not read.`);
   }
+  // What is opened is the path that was checked, every link already expanded, never the named one again.
   let fd: number;
   try {
-    fd = openSync(local, 'r');
+    fd = openSync(target, 'r');
   } catch {
     return { taskId, result: 'missing', path };
   }
