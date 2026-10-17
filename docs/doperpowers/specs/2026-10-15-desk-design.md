@@ -2592,6 +2592,11 @@ two mappings (`backfill.ts` `parseTaskNotification`; `task-graph.ts` `statusOfPa
 | anything else | no change; kept in `outcome.raw` | — |
 
 A result row is terminal: `completed`, or `failed` when `is_error`; a `TaskStop` with a non-error result is `stopped`.
+A monitor's expiry notice is terminal (DC8, 2026-10-17): a task-notification for a task the index holds as a
+monitor, with no `<status>`, whose `<event>` begins `[Monitor expired after ` or is `[Monitor timed out` (engine 2.1.300,
+`dEr`) is `completed` with raw `expired`, `endedAt` the notice's time and `summary` its `<event>` — the word MAWS's
+backfill lands on for a notification without `<status>` (`backfill.ts:678-682`); a monitor's other statusless event
+notices are no evidence, so a monitor that expired never stays `running` until its session ends.
 
 **Precedence** (the review's round 2, 2026-10-17), highest first — better evidence is never overridden by worse:
 (1) an explicit terminal outcome in a row — `completed`, `failed` or `stopped` after the table, the newest in row
