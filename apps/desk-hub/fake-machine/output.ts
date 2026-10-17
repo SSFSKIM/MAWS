@@ -3,8 +3,8 @@
 // `<session>/tasks/<taskId>.output`, and its realpath is exactly `<realpath of a root>/<taskId>.output` and a regular
 // file. DC8's shared vectors pin it (dx4/dx4-jobs.json, `outputCases`). It reads the tail synchronously: the fake has no
 // thread to spare, and a recording's files are small.
-import { closeSync, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { closeSync, fstatSync, lstatSync, openSync, readlinkSync, readSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type { TaskOutput } from '../src/protocol/session';
 import type { LoopIndex } from './jobs';
 
@@ -15,14 +15,37 @@ import type { LoopIndex } from './jobs';
  */
 export type Locate = (named: string) => string | null;
 
-/** The realpath of `path`, resolving what exists and keeping the rest as named (Python's `os.path.realpath`). */
-function resolvedPath(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    const parent = dirname(path);
-    return parent === path ? path : join(resolvedPath(parent), basename(path));
+/** How many symlinks one resolution follows before it gives up (the kernel's own limit on macOS and Linux). */
+const MAX_LINKS = 32;
+
+/**
+ * The realpath of `path` (Python's non-strict `os.path.realpath`): every symlink on it resolved, a dangling one to the
+ * target it names, and only what does not exist at all kept as named, so a link pointing outside the roots is never
+ * taken for a missing file under one. Null when the links cannot be resolved (a loop, an unreadable component): the
+ * destination is not established, and the caller refuses.
+ */
+function resolvedPath(path: string, links = { followed: 0 }): string | null {
+  let current = '/';
+  const parts = resolve(path).split('/').filter(Boolean);
+  for (let i = 0; i < parts.length; i++) {
+    const next = join(current, parts[i]);
+    let stat;
+    try {
+      stat = lstatSync(next);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return join(next, ...parts.slice(i + 1));
+      return null;
+    }
+    if (!stat.isSymbolicLink()) {
+      current = next;
+      continue;
+    }
+    if (++links.followed > MAX_LINKS) return null;
+    const resolved = resolvedPath(resolve(current, readlinkSync(next)), links);
+    if (resolved === null) return null;
+    current = resolved;
   }
+  return current;
 }
 
 /**
@@ -44,7 +67,8 @@ export function answerOutput(request: { taskId: string; tail: number }, index: L
   const local = locate(path);
   if (local === null) return refuse(`The path the session named for ${taskId} is outside the session's task directories, so it is not read.`);
   const target = resolvedPath(local);
-  if (!roots.some((root) => join(resolvedPath(root), `${taskId}.output`) === target)) {
+  const allowed = roots.map((root) => resolvedPath(root)).filter((root): root is string => root !== null).map((root) => join(root, `${taskId}.output`));
+  if (target === null || !allowed.includes(target)) {
     return refuse(`The path the session named for ${taskId} resolves outside the session's task directories, or to another file, so it is not read.`);
   }
   let fd: number;

@@ -13,14 +13,16 @@
 //   its own transcript's rows; an agent-scope one carries that agent's alone;
 // - as a DC8 producer (`producer: 'dc8'`), the tree is DX4's widened `subagents` body — each agent's status and what it
 //   rests on, the loop's jobs, its MCP names (jobs.ts) — derived again whenever a row, the bridge's agent state, or the
-//   session's presence changes, and sent whenever it changed; and `output` is answered from the recording's `tasks/`;
+//   session's presence changes, and sent whenever it changed (an agent-scope subscription carries that agent's own
+//   loop's jobs and MCP names); an agent joins the tree at its spawn, a seed naming it, or its first row, whichever
+//   comes first; and `output` is answered from the recording's `tasks/`;
 // - a subscription outlives the replayed session: it stays open, idle, answering `rows` and `output` (DX4, "History and
 //   ended sessions").
 import { join, posix } from 'node:path';
 import { isOutputTail, isTaskId } from '../src/protocol/browser';
 import type { JsonObject } from '../src/protocol/json';
 import type { SessionBodies, SessionMessage, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
-import { derive, fileFacts, LoopIndex, type Body, type BridgeAgent, type Derivation } from './jobs';
+import { derive, fileFacts, LoopIndex, loopJobs, type Body, type BridgeAgent, type Derivation } from './jobs';
 import { answerOutput, type Locate } from './output';
 import type { Recording, Row, Step } from './recording';
 
@@ -93,6 +95,8 @@ export class SessionDepth {
   /** The widened body as last derived (a DC8 producer's), and its JSON, to send only what changed. */
   private body: Body | null = null;
   private bodyJson = '';
+  /** Each subscribed agent's own jobs and MCP names as last sent, as JSON. */
+  private readonly agentBodies = new Map<string, string>();
   private record: JsonObject | null = { status: 'idle', waitingFor: null, needs: null };
   usage: Usage | null = null;
   /** The main loop's turn running now, or null. */
@@ -162,15 +166,41 @@ export class SessionDepth {
     return this.body;
   }
 
-  /** A DC8 producer derives the body again, and sends `subagents` to the main-scope subscriptions when it changed. */
+  /** What an agent-scope subscription carries of the body: no tree (as before DC8), that agent's own loop's jobs and
+   * MCP names. */
+  private agentBody(agentId: string): { subagents: SubagentMeta[] } & Pick<Body, 'jobs' | 'mcp'> {
+    const loop = this.indexes.get(agentId)?.index ?? new LoopIndex();
+    return { subagents: [], ...loopJobs(loop, this.record !== null) };
+  }
+
+  /**
+   * A DC8 producer derives the body again, and sends `subagents` where it changed: the session's to the main-scope
+   * subscriptions, each subscribed agent's own jobs and MCP names to that agent's.
+   */
   private refresh(): void {
     if (this.producer !== 'dc8') return;
     const body = this.derived();
     const json = JSON.stringify(body);
-    if (json === this.bodyJson) return;
-    this.body = body;
-    this.bodyJson = json;
-    this.fanOut(null, { kind: 'subagents', body }, false);
+    if (json !== this.bodyJson) {
+      this.body = body;
+      this.bodyJson = json;
+      this.fanOut(null, { kind: 'subagents', body }, false);
+    }
+    for (const agentId of new Set([...this.subs.values()].map((s) => s.agentId))) {
+      if (agentId === null) continue;
+      const scoped = this.agentBody(agentId);
+      const scopedJson = JSON.stringify(scoped);
+      if (scopedJson === this.agentBodies.get(agentId)) continue;
+      this.agentBodies.set(agentId, scopedJson);
+      this.fanOut(agentId, { kind: 'subagents', body: scoped }, false);
+    }
+  }
+
+  /** The agent's `meta.json` joins the session's tree: at its spawn, a seed naming it, or its first row on disk, whichever
+   * the machine sees first (the plane reads the metas from disk, whatever the bridge saw). */
+  private joinTree(agentId: string): void {
+    if (!this.tree.has(agentId)) this.tree.set(agentId, this.recording?.meta[agentId] ?? { agentType: 'general-purpose' });
+    if (!this.rows.has(agentId)) this.rows.set(agentId, []);
   }
 
   hasAgent(agentId: string): boolean {
@@ -215,8 +245,7 @@ export class SessionDepth {
         this.appendRow(step.agentId, step.row);
         return;
       case 'agent': {
-        this.tree.set(step.agentId, this.recording?.meta[step.agentId] ?? { agentType: 'general-purpose' });
-        if (!this.rows.has(step.agentId)) this.rows.set(step.agentId, []);
+        this.joinTree(step.agentId);
         if (step.spawn) this.bridgeAgents.set(step.agentId, { agentId: step.agentId, ...step.spawn, running: true });
         if (this.producer === 'dc8') this.refresh();
         else this.fanOut(null, { kind: 'subagents', body: { subagents: this.subagents() } }, false);
@@ -230,7 +259,10 @@ export class SessionDepth {
       }
       case 'agents':
         this.bridgeAgents.clear();
-        for (const a of step.agents) this.bridgeAgents.set(a.agentId, a);
+        for (const a of step.agents) {
+          this.bridgeAgents.set(a.agentId, a);
+          if (this.producer === 'dc8') this.joinTree(a.agentId);
+        }
         this.refresh();
         return;
       case 'usage':
@@ -249,6 +281,7 @@ export class SessionDepth {
   /** A row reaches the disk: its transcript's subscribers receive it. */
   appendRow(agentId: string | null, row: Row): void {
     const key = agentId ?? 'main';
+    if (agentId !== null && this.producer === 'dc8') this.joinTree(agentId);
     let list = this.rows.get(key);
     if (!list) this.rows.set(key, (list = []));
     if (list.some((r) => r.uuid === row.uuid)) return;
@@ -368,7 +401,13 @@ export class SessionDepth {
     }
     for (const r of scope.slice(0, cut)) s.held.add(r.uuid);
     for (const m of streaming) s.marks.set(keyOf(m), m.upTo);
-    const widened = agentId === null && this.producer === 'dc8' ? this.current() : null;
+    // A DC8 producer's snapshot carries the subscribed loop's jobs and MCP names: the session's, or the agent's own.
+    let widened: Pick<Body, 'jobs' | 'mcp'> | null = null;
+    if (this.producer === 'dc8' && agentId === null) widened = this.current();
+    else if (this.producer === 'dc8' && agentId !== null) {
+      widened = this.agentBody(agentId);
+      this.agentBodies.set(agentId, JSON.stringify(widened));
+    }
     const body: SessionBodies['snapshot'] = {
       rows,
       more: rows.length < cut,

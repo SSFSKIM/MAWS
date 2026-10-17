@@ -51,6 +51,24 @@ function notification(prompt: string): Record<string, string> {
   return out;
 }
 
+const PREAMBLE = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n';
+const OPENING = '<task-notification>';
+
+/**
+ * The notification a plain user row carries, or null: the form the engine writes when a notification starts a turn
+ * (bare in the main transcript; after its fixed preamble, then a blank line, in a subagent's). Only a row the engine
+ * marked `origin.kind: task-notification` is one: a person can type the same text, and a peer's message can quote it.
+ */
+function plainNotification(row: JsonObject): string | null {
+  if (obj(row.origin)?.kind !== 'task-notification') return null;
+  const content = obj(row.message)?.content;
+  const text = typeof content === 'string' ? content : Array.isArray(content) ? blocksOf(row).filter((b) => b.type === 'text').map((b) => str(b.text) ?? '').join('') : '';
+  if (text.startsWith(OPENING)) return text;
+  if (!text.startsWith(PREAMBLE)) return null;
+  const at = text.indexOf(`\n\n${OPENING}`);
+  return at < 0 ? null : text.slice(at + 2);
+}
+
 /** The path a background Bash result's text names after "Output is being written to:", a trailing '.' dropped. */
 function bashOutputPath(text: string): string | null {
   const match = /Output is being written to: (\S+)/.exec(text);
@@ -85,10 +103,8 @@ export class LoopIndex {
     }
     if (row.type === 'attachment') return this.attachment(obj(row.attachment) ?? {}, at);
     if (row.type !== 'user') return;
-    const content = obj(row.message)?.content;
-    // A notification the engine wrote as the user row of a turn it started (the session idle), not as an attachment:
-    // the same element grammar MAWS's backfill reads in both places (`parseTaskNotification`).
-    if (typeof content === 'string' && content.trimStart().startsWith('<task-notification>')) return this.notified(content, at);
+    const plain = plainNotification(row);
+    if (plain !== null) return this.notified(plain, at);
     for (const b of blocksOf(row)) if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') this.result(b, row.toolUseResult, at);
   }
 
@@ -173,7 +189,7 @@ function judge(m: Mention, monitor: boolean): { status: Exclude<SubagentStatus, 
     return null;
   }
   if (m.from === 'result' && m.raw === LAUNCHED) return { status: 'running', raw: LAUNCHED, terminal: false };
-  const known = TABLE[m.raw];
+  const known = Object.hasOwn(TABLE, m.raw) ? TABLE[m.raw] : undefined;
   return known ? { ...known, raw: m.raw } : 'unrecognized';
 }
 
@@ -279,21 +295,26 @@ export function derive(d: Derivation): Body {
     return entry;
   });
 
-  const jobs = d.main.started.map((s): Job => {
-    const mentions = d.main.mentions.filter((m) => m.taskId === s.taskId && m.from !== 'result');
+  return { subagents, ...loopJobs(d.main, running) };
+}
+
+/** One loop's background shells and monitors, and its MCP server names: the main loop's for the session's body, an
+ * agent's own for a subscription to that agent. `running`: whether the session's process runs. */
+export function loopJobs(loop: LoopIndex, running: boolean): Pick<Body, 'jobs' | 'mcp'> {
+  const jobs = loop.started.map((s): Job => {
+    const mentions = loop.mentions.filter((m) => m.taskId === s.taskId && m.from !== 'result');
     const start: Outcome = { status: 'running', raw: 'running', at: s.startedAt, terminal: false };
-    const outcome = fold(mentions, d.main.monitors.has(s.taskId), start)!;
+    const outcome = fold(mentions, loop.monitors.has(s.taskId), start)!;
     const status: JobStatus = outcome.terminal ? (outcome.status as JobStatus) : running ? 'running' : 'exited';
     return {
       ...s,
-      outputFile: d.main.paths.get(s.taskId) ?? null,
+      outputFile: loop.paths.get(s.taskId) ?? null,
       status,
       ...(outcome.terminal && { endedAt: outcome.at }),
       ...(outcome !== start && outcome.summary !== undefined && { summary: outcome.summary }),
     };
   });
-
-  return { subagents, jobs, mcp: d.main.mcp.map((name) => ({ name })) };
+  return { jobs, mcp: loop.mcp.map((name) => ({ name })) };
 }
 
 /** An agent transcript's file facts from its rows: the timestamps of its first and last rows that carry one. */

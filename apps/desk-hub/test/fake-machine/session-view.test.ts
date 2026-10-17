@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeMachine, loadRecording, SESSION_VIEW, SNAPSHOT_ROW_BUDGET, TWO_SUBAGENTS, type Recording, type Step } from '../../fake-machine';
 import { SessionDepth, type Producer } from '../../fake-machine/session';
 import { newNonce } from '../../src/protocol/codes';
+import type { JsonObject } from '../../src/protocol/json';
 import type { SessionBodies, SessionMessage, SubagentMeta, TaskOutput } from '../../src/protocol/session';
 import { BrowserClient, enroll } from '../support/clients';
 import { ADMIN, startLocalHub, type LocalHub } from '../support/local';
@@ -220,6 +221,52 @@ describe('a DC8 producer replaying it', () => {
     expect('name' in (entry(t.held('main'), ALPHA) as { spawn: object }).spawn).toBe(false);
     t.play();
     expect(statusOf(t.held('main'))).toEqual({ [ALPHA]: 'completed/rows', [BETA]: 'completed/rows', [NESTED]: 'completed/rows' });
+  });
+
+  it('builds the tree from a seed alone, and from an agent’s first row, with no spawn ever seen', async () => {
+    // A recording that begins with the module's seed and holds no spawn event at all.
+    const seed: Step = {
+      at: 0,
+      k: 'agents',
+      agents: [ALPHA, BETA].map((agentId) => ({ agentId, parentAgentId: null, subagentType: 'general-purpose', description: String(recording.meta[agentId].description), running: true })),
+    };
+    const steps = [seed, ...recording.steps.filter((s) => s.k !== 'agent' && s.k !== 'agent-stop' && s.k !== 'agents')];
+    const t = replay(recording, 'dc8', steps);
+    t.play((s) => s === seed);
+    await t.depth.subscribe('early', null);
+    expect(t.held('early').subagents.map((a) => [a.agentId, a.meta])).toEqual([ALPHA, BETA].map((a) => [a, recording.meta[a]]));
+    expect(statusOf(t.held('early'))).toEqual({ [ALPHA]: 'running/bridge', [BETA]: 'running/bridge' });
+    t.play();
+    // The nested agent, which no seed named, joins at its first row.
+    expect(statusOf(t.held('early'))).toEqual({ [ALPHA]: 'completed/rows', [BETA]: 'completed/rows', [NESTED]: 'completed/rows' });
+    await t.depth.subscribe('late', null);
+    expect(t.held('late')).toEqual(t.held('early'));
+  });
+
+  it('gives an agent-scope subscription that agent’s own jobs and MCP names, in its snapshot and as they change', async () => {
+    const agent = 'a0000000000000aa';
+    const row = (uuid: string, s: number, fields: JsonObject): Step => ({ at: s, k: 'row', agentId: agent, row: { uuid, timestamp: `2026-10-17T09:00:0${s}.000Z`, isSidechain: true, agentId: agent, ...fields } });
+    const rec: Recording = { ...recording, rows: { main: [], agents: {} }, meta: { [agent]: { agentType: 'general-purpose', description: 'Watch', toolUseId: 'toolu_W' } }, steps: [] };
+    const steps: Step[] = [
+      { at: 0, k: 'agent', agentId: agent },
+      row('w1', 1, { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_M', name: 'Monitor', input: { command: 'tail -F x', description: 'x' } }] } }),
+      row('w2', 2, { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_M', content: 'Monitor started (task bagent001).' }] }, toolUseResult: { taskId: 'bagent001', timeoutMs: 1000, persistent: false } }),
+      row('w3', 3, { type: 'attachment', attachment: { type: 'mcp_instructions_delta', addedNames: ['plugin:agent:only'], removedNames: [] } }),
+      row('w4', 4, { type: 'attachment', attachment: { type: 'task_status', taskId: 'bagent001', status: 'running', deltaSummary: null, outputFilePath: `/private/tmp/claude-501/-x/${recording.session}/tasks/bagent001.output` } }),
+    ];
+    const t = replay(rec, 'dc8', steps);
+    await t.depth.subscribe('main', null);
+    t.play((s) => s.k === 'row' && s.row.uuid === 'w3');
+    await t.depth.subscribe('agent', agent);
+    const snapshot = t.of('agent', 'snapshot')[0].body;
+    expect(snapshot).toMatchObject({ subagents: [], mcp: [{ name: 'plugin:agent:only' }], jobs: [{ taskId: 'bagent001', kind: 'monitor', status: 'running', outputFile: null }] });
+    t.play();
+    expect(t.of('agent', 'subagents').map((m) => m.body.jobs?.[0]?.outputFile)).toEqual([`/private/tmp/claude-501/-x/${recording.session}/tasks/bagent001.output`]);
+    t.depth.presence = null;
+    expect(t.of('agent', 'subagents').at(-1)?.body.jobs?.[0]?.status).toBe('exited');
+    // The main loop's are its own: none of the agent's.
+    expect(t.held('main')).toMatchObject({ jobs: [], mcp: [] });
+    expect(t.output('agent', 'bagent001')).toMatchObject({ result: 'refused' }); // its row names a root of no slug this recording knows
   });
 
   it('as an older producer, sends each agent’s id and meta alone, and passes output by', async () => {
