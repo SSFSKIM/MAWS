@@ -490,3 +490,64 @@ describe('ConnectorStatusCache: launch metadata is bounded', () => {
     }
   });
 });
+
+// Re-review: the fence spans the whole logical lookup, to the public answer's completion. File access answers without
+// I/O waits beyond the real stat/read, and from the lookup's last file access a mutation is scheduled `depth`
+// microtasks later, so the sweep lands it at every point from inside the inner lookup through the public method's
+// completion. The mutation reads the public promise's own state as it runs (util.inspect shows `<pending>` until it
+// settles): one still pending must answer the fresh meaning; one already settled may hold the older meaning (later
+// caller scheduling is not the cache's to promise).
+describe('ConnectorStatusCache: the fence holds to the public completion', () => {
+  const lastAccess = (onLastAccess: () => void): SourceFiles => ({
+    ...nodeSourceFiles,
+    executable: async (path) => {
+      const answer = await nodeSourceFiles.executable(path);
+      onLastAccess();
+      return answer;
+    },
+  });
+  const later = (depth: number, run: () => void) => {
+    const step = (left: number) => queueMicrotask(() => (left === 0 ? run() : step(left - 1)));
+    step(depth);
+  };
+  const cases = [
+    ['a contradicting launch', (cache: ConnectorStatusCache) => observed(cache, launch('app-2', 'L2'), without(USER_REPORT(), 'usertoy')), { ok: false, why: 'ambiguous' }],
+    ['a clear and a fresh observation', (cache: ConnectorStatusCache) => (cache.clear(), observed(cache, launch('app-3', 'L3'), USER_REPORT())), { ok: false, why: 'unavailable' }],
+  ] as const;
+
+  for (const [label, mutate, fresh] of cases) {
+    for (const method of ['resolveSource', 'resolve', 'readEntry'] as const) {
+      it(`${method}: ${label} before its completion is never answered with the older meaning`, async () => {
+        writeConfig();
+        let landedBeforeCompletion = 0;
+        for (let depth = 0; depth < 24; depth++) {
+          let pendingAtMutation = false;
+          let armed = false;
+          const watched: { pending?: Promise<{ ok: boolean }> } = {};
+          const cache = new ConnectorStatusCache({
+            files: lastAccess(() => {
+              if (!armed) return;
+              armed = false;
+              later(depth, () => {
+                pendingAtMutation = inspect(watched.pending).includes('<pending>');
+                mutate(cache);
+              });
+            }),
+          });
+          observed(cache, launch(), USER_REPORT());
+          const resolved = await cache.resolveSource(project, 'usertoy');
+          if (!resolved.ok) throw new Error(resolved.why);
+          armed = true;
+          const pending = (watched.pending = method === 'resolveSource' ? cache.resolveSource(project, 'usertoy') : method === 'resolve' ? cache.resolve(project, 'usertoy', 'metrics_snapshot') : cache.readEntry(resolved.source));
+          const answer = await pending;
+          await new Promise((resolve) => setTimeout(resolve, 0)); // any scheduled mutation has run
+          if (pendingAtMutation) {
+            landedBeforeCompletion += 1;
+            expect(answer, `depth ${depth}`).toMatchObject(fresh);
+          }
+        }
+        expect(landedBeforeCompletion, 'the sweep reached the window').toBeGreaterThan(0);
+      });
+    }
+  }
+});

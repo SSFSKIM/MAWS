@@ -209,25 +209,25 @@ export class ConnectorStatusCache {
     if (state) this.fail(state);
   }
 
+  // The three lookups return `lookup`'s own promise (no further await or `then` of theirs), so the fence's last check is
+  // synchronous with their completion.
   resolveSource(cwd: string, server: string): Promise<ConnectorSourceAnswer> {
-    return this.verify(cwd, server).then((verified) => (typeof verified === 'string' ? { ok: false, why: verified } : { ok: true, source: verified.source }));
+    return this.lookup(cwd, server, (verified): ConnectorSourceAnswer => ({ ok: true, source: verified.source }));
   }
 
-  async resolve(cwd: string, server: string, tool: string): Promise<ConnectorToolAnswer> {
-    const verified = await this.verify(cwd, server);
-    if (typeof verified === 'string') return { ok: false, why: verified };
-    const { source, visible, observation, positives } = verified;
-    const config = visible.transport === 'stdio' ? { type: 'stdio', command: visible.command, ...(observation.argsReported && { args: visible.args }) } : { type: 'http', url: visible.url };
-    const listed = positives.map((positive) => positive.tools.get(tool)).filter((readOnly): readOnly is boolean => readOnly !== undefined);
-    return { ok: true, source, tool: { fingerprint: connectorFingerprint({ name: server, scope: observation.scope, config }, tool), readOnly: listed.length === 0 ? null : listed.every(Boolean) } };
+  resolve(cwd: string, server: string, tool: string): Promise<ConnectorToolAnswer> {
+    return this.lookup(cwd, server, ({ source, visible, observation, positives }): ConnectorToolAnswer => {
+      const config = visible.transport === 'stdio' ? { type: 'stdio', command: visible.command, ...(observation.argsReported && { args: visible.args }) } : { type: 'http', url: visible.url };
+      const listed = positives.map((positive) => positive.tools.get(tool)).filter((readOnly): readOnly is boolean => readOnly !== undefined);
+      return { ok: true, source, tool: { fingerprint: connectorFingerprint({ name: server, scope: observation.scope, config }, tool), readOnly: listed.length === 0 ? null : listed.every(Boolean) } };
+    });
   }
 
   // The whole entry of a source resolved earlier, re-read and re-matched now; `changed` if its meaning moved since.
-  async readEntry(source: VerifiedConnectorSource): Promise<ConnectorEntryAnswer> {
-    const verified = await this.verify(source.cwd, source.server);
-    if (typeof verified === 'string') return { ok: false, why: verified };
-    if (verified.source.sourceId !== source.sourceId || verified.source.generation !== source.generation) return { ok: false, why: 'changed' };
-    return { ok: true, source: verified.source, entry: verified.entry };
+  readEntry(source: VerifiedConnectorSource): Promise<ConnectorEntryAnswer> {
+    return this.lookup(source.cwd, source.server, (verified): ConnectorEntryAnswer =>
+      verified.source.sourceId !== source.sourceId || verified.source.generation !== source.generation ? { ok: false, why: 'changed' } : { ok: true, source: verified.source, entry: verified.entry },
+    );
   }
 
   // Main detached, or the host shuts down: every observation goes, and nothing begun before lands.
@@ -333,15 +333,23 @@ export class ConnectorStatusCache {
     state.revisions.set(name, (state.revisions.get(name) ?? 0) + 1);
   }
 
-  private async verify(cwd: string, server: string): Promise<Verified | ConnectorSourceRefusal> {
+  // One logical lookup: the attachment it began in is the only one it answers for (a clear at any point is
+  // unavailable, a retry never adopts the new epoch), and an answer stands only if nothing changed between the attempt's
+  // start and this method's completion, `answer` running synchronously before it returns.
+  private async lookup<T>(cwd: string, server: string, answer: (verified: Verified) => T): Promise<T | { ok: false; why: ConnectorSourceRefusal }> {
+    const epoch = this.epoch;
     for (let attempt = 0; attempt < VERIFY_ATTEMPTS; attempt++) {
-      const answer = await this.verifyOnce(cwd, server);
-      if (answer !== OVERTAKEN) return answer;
+      const version = this.version;
+      const verified = await this.verifyOnce(cwd, server, epoch);
+      if (this.epoch !== epoch) return { ok: false, why: 'unavailable' };
+      if (verified === OVERTAKEN || this.version !== version) continue;
+      return typeof verified === 'string' ? { ok: false, why: verified } : answer(verified);
     }
-    return 'unavailable';
+    return { ok: false, why: 'unavailable' };
   }
 
-  private async verifyOnce(cwd: string, server: string): Promise<Verified | ConnectorSourceRefusal | typeof OVERTAKEN> {
+  private async verifyOnce(cwd: string, server: string, epoch: number): Promise<Verified | ConnectorSourceRefusal | typeof OVERTAKEN> {
+    if (this.epoch !== epoch) return 'unavailable';
     if (this.saturated || this.refused.has(cwd)) return 'unavailable';
     const states = [...this.contexts.values()].filter((state) => state.cwd === cwd);
     if (states.length === 0) return 'unobserved';
@@ -363,7 +371,6 @@ export class ConnectorStatusCache {
     const legacies = [...new Set(positives.map(({ snapshot }) => snapshot.context.legacyConfigFile))];
     if (state.configFile === null || legacies.includes(null)) return 'unidentified';
 
-    const epoch = this.epoch;
     const version = this.version;
     const revision = state.revisions.get(server);
     // after every await: a clear is unavailable; any other change of the cache starts the lookup again
