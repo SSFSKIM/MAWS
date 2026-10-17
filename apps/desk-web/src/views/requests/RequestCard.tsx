@@ -142,11 +142,16 @@ function PermissionCard({ record, state, member }: { record: RequestRecord; stat
 
 function QuestionCard({ record, state, member }: { record: RequestRecord; state: CardState; member: string }) {
   const { connection } = useDesk();
+  const [skipNote, setSkipNote] = useState(false);
   const questions = questionsOf(record.raised);
   const asyncQuestion = isAsyncQuestion(record.raised);
+  // DX6's `answer` carries an answer to at least one of the request's questions: the machine refuses an empty one
+  // (`bad-shape`). A reply with every question skipped is the question declined, as Esc in the terminal declines it, for
+  // a native question; an async one is answered, never declined, so nothing is sent and it stays open.
   const submit = (answer: RequestAnswer) => {
-    if (answer.kind === 'question') void connection.answer(member, record, answer.answers);
-    else if (answer.kind === 'permission' && answer.decision !== 'allow' && !asyncQuestion) void connection.decide(member, record, 'deny');
+    if (answer.kind === 'question' && Object.keys(answer.answers).length > 0) void connection.answer(member, record, answer.answers);
+    else if (answer.kind === 'question' && asyncQuestion) setSkipNote(true);
+    else if (answer.kind === 'question' || (answer.kind === 'permission' && answer.decision !== 'allow' && !asyncQuestion)) void connection.decide(member, record, 'deny');
   };
   if (!answerable(state) || questions.length === 0) {
     return (
@@ -166,6 +171,11 @@ function QuestionCard({ record, state, member }: { record: RequestRecord; state:
   return (
     <>
       <QuestionBody item={item} request={request} placement="card" busy={false} submit={submit} bindKeys={() => {}} />
+      {skipNote && (
+        <p className="m-0 text-ui-sm text-warning" role="status" data-testid="skip-note">
+          Nothing was sent: an async question waits for an answer to at least one of its questions, and cannot be declined.
+        </p>
+      )}
       {!asyncQuestion && (
         <Controls>
           <CardButton className="mr-auto border-transparent text-fg-muted" onClick={() => void connection.decide(member, record, 'deny')}>
