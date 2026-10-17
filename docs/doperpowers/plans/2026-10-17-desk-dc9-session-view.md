@@ -434,7 +434,10 @@ own send (its bubble already says who wrote it), and a row a peer
 delivered keeps who sent it — its frame line drawn as a compact sender
 label from the frame's `from` — the text the session read unchanged in
 both; a landing on a message (not only a request) marks its row in the
-session view.
+session view. And a job's `missing` with `path: null` says plainly that
+no output file was named when the job is terminal or the session has
+ended (no "asks again"); the retry wording stays for a running job in a
+live session.
 
 G2's proof pages across a compaction boundary: rows before a
 `compact_boundary` in the same transcript file load and draw above MAWS's
