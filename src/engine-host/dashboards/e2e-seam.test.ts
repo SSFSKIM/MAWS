@@ -17,10 +17,11 @@ import { DashboardE2eSeam, dashboardE2eSeamRequested, startDashboardE2eSeam, typ
 let data: string;
 let world: { storage: SqliteDocumentStorage; service: DocumentService; store: ArtifactStore; kind: DocumentKind; dashboards: Dashboards };
 let seam: DashboardE2eSeam;
+const IDLE_MS = 80; // the service's idle unload, short here (the app's is 60 s)
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'maws-dashboard-seam-'));
   const storage = SqliteDocumentStorage.open(join(data, 'store.sqlite'), { log: () => {} });
-  const service = new DocumentService(storage, { log: () => {}, kindOf: (id) => storage.kindOf(id) });
+  const service = new DocumentService(storage, { log: () => {}, kindOf: (id) => storage.kindOf(id), idleUnloadMs: IDLE_MS });
   const store = new ArtifactStore(service, storage, { root: data, log: () => {} });
   world = { storage, service, store, kind: registerDocumentKind(store), dashboards: registerDashboards({ documents: { store, service } }) };
   seam = new DashboardE2eSeam(store, join(data, 'cwd'));
@@ -103,6 +104,95 @@ describe('the seam’s commands', () => {
     expect(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_publish' as never, args: {} })).toMatchObject({ ok: false, error: expect.stringContaining('artifact_publish') });
     expect(await seam.run({ cmd: 'nope' } as never)).toMatchObject({ ok: false, error: expect.stringContaining('nope') });
     expect(await seam.run({ cmd: 'release', session: 'A' })).toEqual({ ok: true });
+  });
+});
+
+describe('the measurement corrections (E2 M6 review; parent Decision Log 42)', () => {
+  const bind = (session: string, artifactId: string, toolUseId?: string) => seam.run({ cmd: 'call', session, tool: 'artifact_dataset', args: { artifact: artifactId, id: 'sales', path: 'sales.csv', baseRevision: 'last' }, ...(toolUseId && { toolUseId }) });
+  const write = async (session: string, csv: string) => writeFileSync(join(((await seam.run({ cmd: 'cwd', session })) as { cwd: string }).cwd, 'sales.csv'), csv);
+  const created = async (session: string) => result<{ artifactId: string }>(await seam.run({ cmd: 'call', session, tool: 'artifact_create', args: { kind: 'dashboard', title: 'Board', content: MARKDOWN } })).artifactId;
+  const loaded = async (artifactId: string) => ((await seam.run({ cmd: 'loaded', artifactId })) as { ok: true; loaded: boolean }).loaded;
+
+  it('observes whether the host holds the document: held while a session holds it, unloaded once released and idle', async () => {
+    const id = await created('A');
+    expect(await loaded(id)).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, IDLE_MS * 3));
+    expect(await loaded(id), 'the agent’s replica still holds it').toBe(true);
+    expect(await seam.run({ cmd: 'release', session: 'A' })).toEqual({ ok: true });
+    for (let k = 0; k < 50 && (await loaded(id)); k++) await new Promise((resolve) => setTimeout(resolve, IDLE_MS));
+    expect(await loaded(id)).toBe(false);
+    expect(await loaded('no-such-artifact')).toBe(false);
+  });
+
+  it('answers when the call started, beside when it answered', async () => {
+    const before = Date.now();
+    const answer = answered(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_create', args: { kind: 'dashboard', title: 'Board', content: MARKDOWN } }));
+    expect(answer.startedAt).toBeGreaterThanOrEqual(before);
+    expect(answer.startedAt).toBeLessThanOrEqual(answer.endedAt);
+    expect(answer.endedAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('times the first observed post-write revision announcement of a successful write, absent for a refusal or a replay, its subscription ended with the call', async () => {
+    const subscribed: { off: number } = { off: 0 };
+    const onChange = world.store.onChange.bind(world.store);
+    world.store.onChange = (listener) => {
+      const off = onChange(listener);
+      return () => {
+        subscribed.off += 1;
+        off();
+      };
+    };
+    const id = await created('A');
+    await write('A', 'region,sales\nSeoul,1\n');
+    const bound = answered(await bind('A', id, 'toolu_announced'));
+    expect(bound.isError, bound.text).toBe(false);
+    expect((bound.result as { revision: number }).revision).toBe(world.store.revision(id));
+    expect(bound.announcedAt).toBeGreaterThanOrEqual(bound.startedAt);
+    expect(bound.announcedAt).toBeLessThanOrEqual(bound.endedAt);
+    // a refusal writes nothing: no announcement
+    const refused = answered(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_dataset', args: { artifact: id, id: 'sales', path: 'none.csv', baseRevision: 'last' } }));
+    expect(refused.isError).toBe(true);
+    expect(refused.announcedAt).toBeUndefined();
+    // a replay answers its first result and writes nothing: no announcement either
+    const replayed = answered(await bind('A', id, 'toolu_announced'));
+    expect(replayed.result).toEqual(bound.result);
+    expect(replayed.announcedAt).toBeUndefined();
+    // an announcement of another artifact during a call is not the call's
+    const other = await created('B');
+    expect(answered(await seam.run({ cmd: 'call', session: 'B', tool: 'artifact_read', args: { artifact: other } })).announcedAt).toBeUndefined();
+    const calls = 6; // two creates, the bind, the refusal, the replay and the read
+    expect(subscribed.off, 'every call ends its subscription').toBe(calls);
+  });
+
+  it('mints fresh tool-use ids across a release and a recreated seam; a given id still replays its first answer', async () => {
+    const id = await created('A');
+    await write('A', 'region,sales\nSeoul,1\n');
+    const first = answered(await bind('A', id));
+    expect(first.toolUseId).toMatch(/^toolu_dash_[0-9a-f-]{36}_\d+$/);
+    await seam.run({ cmd: 'release', session: 'A' });
+    await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_read', args: { artifact: id } });
+    await write('A', 'region,sales\nSeoul,1\nBusan,2\n');
+    const afterRelease = answered(await bind('A', id));
+    expect(afterRelease.toolUseId).not.toBe(first.toolUseId);
+    expect(afterRelease.isError, afterRelease.text).toBe(false);
+    expect((afterRelease.result as { rows: number }).rows, 'a fresh bind, not the first one replayed').toBe(2);
+    // a seam made again over the same store (a host's seam after a restart)
+    seam.close();
+    seam = new DashboardE2eSeam(world.store, join(data, 'cwd'));
+    await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_read', args: { artifact: id } });
+    await write('A', 'region,sales\nSeoul,1\nBusan,2\nJeju,3\n');
+    const recreated = answered(await bind('A', id));
+    expect([first.toolUseId, afterRelease.toolUseId]).not.toContain(recreated.toolUseId);
+    expect((recreated.result as { rows: number }).rows, 'a fresh bind after the seam was made again').toBe(3);
+    // an explicit id is the caller's: repeated after a release and a recreated seam, it replays its first answer
+    const given = answered(await bind('A', id, 'toolu_given'));
+    await seam.run({ cmd: 'release', session: 'A' });
+    seam.close();
+    seam = new DashboardE2eSeam(world.store, join(data, 'cwd'));
+    await write('A', 'region,sales\nSeoul,9\n');
+    const replayed = answered(await bind('A', id, 'toolu_given'));
+    expect(replayed.toolUseId).toBe('toolu_given');
+    expect(replayed.result).toEqual(given.result);
   });
 });
 

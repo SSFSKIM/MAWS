@@ -1,36 +1,44 @@
-// The dashboard's scale gate (P3-E2 M6 of docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md, acceptance 7; P3-E
-// Decision Log 36 (4) and (5)): the product build, the agent's real tools through the host's acceptance seam
-// (src/engine-host/dashboards/e2e-seam.ts), and the scale bench (src/artifacts/dashboard/fixtures/bench.ts: a seeded
-// 50,000-row ledger, explicitly synthetic, and twelve views of every kind, one a scatter of exactly 10,000 points).
-// Rows, the candidates acceptance 7 names (ratified after measurement by the architect, never relaxed here):
+// The dashboard's scale gate (P3-E2 M6 of docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md, acceptance 7, its
+// "Acceptance seam and measurement definitions" and Decision Log 36; P3-E Decision Logs 36 and 42): the product build,
+// the agent's real tools through the host's acceptance seam (src/engine-host/dashboards/e2e-seam.ts), and the scale bench
+// (src/artifacts/dashboard/fixtures/bench.ts: a seeded 50,000-row ledger, explicitly synthetic, and twelve views of every
+// kind, one a scatter of exactly 10,000 points). Rows, the candidates acceptance 7 names (ratified by the architect after
+// measurement, never relaxed here):
 //   1 bind      artifact_dataset validates, uploads and binds the 50,000 rows ≤ 2 s on the host (the call's wall time)
-//   2 open      cold (the tab closed, a snapshot the host never read bound, the host's copy unloaded after its idle
-//               minute) from the click on the library row to every one of the twelve views drawn ≤ 1,000 ms
+//   2 open      cold: the tab closed, a snapshot the host never read bound, the agent's holder released and the host's copy
+//               proved unloaded (the seam's `loaded`, within 90 s); from the click on the library row to the frame after
+//               the last of the twelve views is in the page ≤ 1,000 ms
 //   3 render    one view of 10,000 points renders ≤ 200 ms (the chart view's `dash:view` User Timing entry: the
-//               renderer's view and its insertion into the page, from the rows in hand)
-//   4 replace   from the agent's replacement answering (its commit landed) to every view drawn again ≤ 500 ms
+//               renderer's view and its insertion into the page, from the rows in hand), in each cold open
+//   4 replace   from the first observed post-write revision announcement of the agent's replacement (the seam's
+//               `announcedAt`: the public ArtifactStore.onChange `updated` at the answer's revision, from either producer;
+//               not the durable commit) to the frame after the last view is drawn again ≤ 500 ms; an absent announcement
+//               or a paint before it fails the trial; the call's start to that frame is end-to-end information
 //   5 scroll    the source sheet scrolling the 50,000 raw rows: per scroll event, the main thread's time from the event to
-//               the virtual rows' DOM commit, p95 ≤ 16 ms, from Performance marks the page takes (a mark at each scroll
-//               event's timestamp, a mark at each commit the rows' MutationObserver sees); every long task over 50 ms
-//               during a scroll fails the row on its own; the animation-frame interval's p95 and max and the cadence
-//               they imply are recorded beside it, never folded into the bound (the mini's display runs near 54 Hz)
-//   6 renderer  the renderer's working set ≤ 500 MB, read after a forced collection
-// Recorded beside them, with no bound: a bind at the parser's 200,000-row limit, a warm reopen, the sheet's read of every
-// raw row, each call's host loop and the JS heap. The load rule (E2's own, Decision Log 36 (4)): after the build, a
-// bounded settle until the 1-minute load is below 10, and again before every trial; a trial measured at a load of 10
-// or more makes its row `hardware-blocked`, never met and never a product failure. Each row is judged on the median of
-// its trials (every trial and the best kept beside it). The run fails on any failed row, and separately on any
-// hardware-blocked row, naming them; everything is in `test-results/dashboard-scale.json` with the run's environment.
+//               the virtual rows' DOM commit (a Performance mark at each scroll event's timestamp, one at each commit the
+//               rows' MutationObserver sees), p95 over every admitted trial's events pooled; each trial's own p95 and the
+//               animation-frame interval's p95, max and cadence are information; any long task over 50 ms fails the row
+//   6 renderer  the renderer process's private footprint (macOS footprint(1): phys_footprint, what Chromium calls the
+//               private memory footprint) after the workload and no input: the later of the first two consecutive 10 s
+//               samples within 5 %, within 60 s, ≤ 500 MB; a forced collection's figures are a diagnostic only
+// Admission (parent Decision Log 42): every trial follows a bounded settle toward a 1-minute load below 10; a timing row
+// (1 to 4) needs three admitted trials (started below 10), every one within its bound, at most five attempts; a trial at
+// 10 or more is excluded, and fewer than three admitted is `hardware-blocked`, never met; the median and the best are
+// description. Recorded beside them, with no bound: a bind at the parser's 200,000-row limit, a warm reopen, the sheet's
+// read of every raw row. The run fails on a failed row, and separately on a hardware-blocked or unsettled one, naming
+// them; everything is in `test-results/dashboard-scale.json` with the run's environment.
 // Run on purpose only (the script sets the flag):
 //   pnpm e2e:dashboard-scale        (scripts/e2e-build.sh plain && MAWS_DASHBOARD_SCALE=1 playwright test e2e/dashboard-scale.spec.ts)
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { cpus, platform, release, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { BENCH_DATASET, BENCH_ROWS, BENCH_SCATTER_POINTS, BENCH_VIEWS, benchCsv, benchMarkdown } from '../src/artifacts/dashboard/fixtures/bench';
+import { footprintMB, LOAD_BELOW, percentile, replacementInterval, REQUIRED_TRIALS, scrollVerdict, settledMemory, timingVerdict, type Verdict } from './support/dashboard-scale';
 import { collectGarbage, jsHeapMB, load1, processMemory } from './support/document-scale';
 import { REPO_ROOT } from './support/launch';
-import { startApp, type DashboardApp } from './support/dashboards';
+import { startApp, type AgentCall, type DashboardApp } from './support/dashboards';
 
 test.skip(process.env.MAWS_DASHBOARD_SCALE !== '1', 'the dashboard scale gate runs only under MAWS_DASHBOARD_SCALE=1');
 test.describe.configure({ timeout: 1_500_000 });
@@ -39,18 +47,18 @@ const RESULTS = join(REPO_ROOT, 'test-results', 'dashboard-scale.json');
 const PROOF = 'test-results/dashboard-proof';
 const TITLE = '판매 원장 대시보드';
 const AGENT = 'A';
-const TRIALS = 3;
-const UNLOAD_WAIT_MS = 66_000; // the host's idle unload (A's IDLE_UNLOAD_MS, 60 s) and a margin
-const LOAD_BELOW = 10;
+const MAX_ATTEMPTS = 5; // three admitted trials at most this many attempts, never retried without end
+const UNLOAD_MS = 90_000; // the bound on the host's unload of the released dashboard (its idle minute and a margin)
 const FIRST_SETTLE_MS = 5 * 60_000; // after the build's CPU burst, which the 1-minute load trails
 const TRIAL_SETTLE_MS = 90_000;
 const SETTLE_BUDGET_MS = 6 * 60_000; // every settle after the first, together
+const MEMORY_SAMPLE_MS = 10_000;
+const MEMORY_SAMPLES = 7; // 0 to 60 s
 const VIEWS = BENCH_VIEWS.length;
 const SCATTER = String(BENCH_VIEWS.find((spec) => spec.view === 'scatter')!.title);
 const RAW_TABLE = BENCH_VIEWS.findIndex((spec) => spec.view === 'table' && spec.columns === undefined && spec.agg === undefined);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
-const pct = (xs: number[], p: number) => (xs.length === 0 ? NaN : [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.ceil(p * xs.length) - 1)]!);
 
 // ---- the load rule and the rows ---------------------------------------------------------------------------------------
 
@@ -76,10 +84,9 @@ async function settle(maxMs: number): Promise<{ settled: boolean; readings: Read
 }
 const trialSettle = () => settle(Math.max(0, Math.min(TRIAL_SETTLE_MS, SETTLE_BUDGET_MS - settleSpent)));
 
-type Verdict = 'met' | 'failed' | 'recorded' | 'hardware-blocked';
 interface Trial {
   value: number;
-  load: number; // at the trial's start, after its settle
+  load: number; // at the trial's start, after its settle: admitted below 10
   loadAfter: number;
   settle: Reading[];
   note?: string;
@@ -90,34 +97,42 @@ interface Row {
   bound: string;
   limit: number | null;
   unit: string;
-  value: number; // the trials' median
-  best: number;
+  value: number | null; // the gated figure: a timing row's worst admitted trial, the pooled p95, the settled footprint
+  median: number | null; // description
+  best: number | null; // description
   verdict: Verdict;
+  admitted: number;
   trials: Trial[];
+  reason?: string;
   note?: string;
 }
+
+const fixed = (n: number | null) => (n === null || Number.isNaN(n) ? null : +n.toFixed(2));
 
 class Rows {
   readonly rows: Row[] = [];
   private readonly extra: Record<string, unknown> = {};
   constructor(private readonly meta: Record<string, unknown>) {}
 
-  /** A row judged on its trials' median; `failedBy` a reason that fails it whatever its value (a long task). */
-  add(row: string, measure: string, unit: string, limit: number | null, bound: string, trials: Trial[], note?: string, failedBy?: string): Row {
-    const value = median(trials.map((t) => t.value));
-    const blocked = trials.some((t) => t.load >= LOAD_BELOW);
-    const verdict: Verdict = limit === null ? 'recorded' : blocked ? 'hardware-blocked' : failedBy !== undefined || !(value <= limit) ? 'failed' : 'met';
-    const entry: Row = { row, measure, bound, limit, unit, value: +value.toFixed(2), best: +Math.min(...trials.map((t) => t.value)).toFixed(2), verdict, trials: trials.map((t) => ({ ...t, value: +t.value.toFixed(2) })), ...((note || failedBy) && { note: [failedBy, note].filter(Boolean).join('; ') }) };
+  add(entry: Row): Row {
     this.rows.push(entry);
     this.write();
-    console.log(`[dashboard scale] ${row}: ${entry.value} ${unit} (median of ${trials.length}; best ${entry.best}; ${verdict}; bound ${bound}; loads ${trials.map((t) => t.load).join(', ')})${entry.note ? `; ${entry.note}` : ''}`);
+    console.log(`[dashboard scale] ${entry.row}: ${entry.value ?? '—'} ${entry.unit} (${entry.verdict}; bound ${entry.bound}; ${entry.admitted} admitted of ${entry.trials.length}; loads ${entry.trials.map((t) => t.load).join(', ')})${entry.reason ? `; ${entry.reason}` : ''}${entry.note ? `; ${entry.note}` : ''}`);
     return entry;
+  }
+
+  /** A timing row (parent Decision Log 42): every admitted trial within the bound, three of them; or recorded. */
+  timing(row: string, measure: string, unit: string, limit: number | null, bound: string, trials: Trial[], note?: string): Row {
+    const judged = timingVerdict(trials, limit);
+    const admittedValues = trials.filter((t) => t.load < LOAD_BELOW).map((t) => t.value);
+    const values = trials.map((t) => t.value);
+    return this.add({ row, measure, bound, limit, unit, value: fixed(admittedValues.length > 0 ? Math.max(...admittedValues) : null), median: fixed(values.length > 0 ? median(values) : null), best: fixed(values.length > 0 ? Math.min(...values) : null), verdict: judged.verdict, admitted: judged.admitted, trials: trials.map((t) => ({ ...t, value: +t.value.toFixed(2) })), ...(judged.reason && { reason: judged.reason }), ...(note && { note }) });
   }
 
   write(extra: Record<string, unknown> = {}): void {
     Object.assign(this.extra, extra);
     mkdirSync(join(RESULTS, '..'), { recursive: true });
-    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: `E2's load rule (P3-E Decision Log 36 (4)): every trial after a bounded settle to a 1-minute load below ${LOAD_BELOW}; a trial at ${LOAD_BELOW} or more makes its row hardware-blocked; a row judged on its trials' median, the best kept beside it; a long task over 50 ms during a scroll fails the scroll row on its own`, rows: this.rows }, null, 2)}\n`);
+    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: `parent Decision Log 42: every trial after a bounded settle toward a 1-minute load below ${LOAD_BELOW}; a timing row needs ${REQUIRED_TRIALS} admitted trials (started below ${LOAD_BELOW}) each within its bound, at most ${MAX_ATTEMPTS} attempts, fewer admitted hardware-blocked; the scroll row the p95 of every admitted event pooled, a long task over 50 ms failing it; the renderer's settled private footprint; median and best descriptive`, rows: this.rows }, null, 2)}\n`);
   }
 }
 
@@ -127,6 +142,13 @@ async function trial(measure: () => Promise<{ value: number; note?: string }>): 
   const load = load1();
   const { value, note } = await measure();
   return { value, load, loadAfter: load1(), settle: readings, ...(note && { note }) };
+}
+
+/** Attempts until three are admitted (started below load 10), at most five: the excluded ones kept beside them. */
+async function admittedTrials(attempt: (k: number) => Promise<Trial>): Promise<Trial[]> {
+  const trials: Trial[] = [];
+  for (let k = 0; k < MAX_ATTEMPTS && trials.filter((t) => t.load < LOAD_BELOW).length < REQUIRED_TRIALS; k++) trials.push(await attempt(k));
+  return trials;
 }
 
 // ---- the app's surfaces --------------------------------------------------------------------------------------------
@@ -143,45 +165,65 @@ async function closeTab(page: Page): Promise<void> {
   await close.click();
   await expect(close).toHaveCount(0, { timeout: 15_000 });
 }
-/** Collects every `dash:view` User Timing entry from now on, under `key`, as {caption, ms}. */
+/** Collects every `dash:view` User Timing entry from now on, under `key`, as {caption, ms}, until it is read. */
 const observeViews = (page: Page, key: string) =>
   page.evaluate((k) => {
     const into: { caption: string; ms: number }[] = [];
-    (window as unknown as Win)[k] = into;
-    new PerformanceObserver((list) => {
+    const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) if (entry.name === 'dash:view') into.push({ caption: String((entry as PerformanceMeasure).detail?.caption ?? ''), ms: entry.duration });
-    }).observe({ type: 'measure' });
+    });
+    observer.observe({ type: 'measure' });
+    (window as unknown as Win)[k] = { into, observer };
   }, key);
-const viewTimings = (page: Page, key: string) => page.evaluate((k) => [...((window as unknown as Win)[k] as { caption: string; ms: number }[])], key);
+const viewTimings = (page: Page, key: string) =>
+  page.evaluate((k) => {
+    const held = (window as unknown as Win)[k] as { into: { caption: string; ms: number }[]; observer: PerformanceObserver };
+    held.observer.disconnect();
+    return [...held.into];
+  }, key);
 
-/** Opens the dashboard from the library; answers the click's timestamp to every view drawn, in ms, and the views' timings. */
+// In the page, both timed waits mark `done` at the frame after their condition first holds: a MutationObserver sees the
+// condition, then requestAnimationFrame and a posted message, as near that frame's paint as a page sees it.
+
+/** Opens the dashboard from the library: the click's timestamp to the frame after the last view is in the page, and the views' timings. */
 async function openTimed(page: Page, id: string, key: string): Promise<{ ms: number; views: { caption: string; ms: number }[] }> {
   await showLibrary(page);
   await observeViews(page, key);
   await page.evaluate(
     ({ artifactId, count }) => {
-      const state: { click: number | null; drawn: number | null } = { click: null, drawn: null };
+      const state: { click: number | null; seen: boolean; done: number | null } = { click: null, seen: false, done: null };
       (window as unknown as Win).__dashOpen = state;
       document.addEventListener('click', (event) => {
         if ((event.target as Element | null)?.closest?.(`[data-artifact-row="${artifactId}"]`)) state.click ??= event.timeStamp;
       }, { capture: true, once: true });
       const drawn = () => {
+        if (state.click === null) return false;
         const figures = document.querySelectorAll(`[data-artifact-tab="${artifactId}"] .ds-doc figure.dash-view`);
         return figures.length === count && Array.from(figures).every((figure) => figure.querySelector('.dash-figure > svg, .dash-figure > table') !== null && !figure.hasAttribute('aria-busy') && !figure.querySelector('.dash-loading'));
       };
       const observer = new MutationObserver(() => {
-        if (state.click === null || !drawn()) return;
-        state.drawn = performance.now();
+        if (state.seen || !drawn()) return;
+        state.seen = true;
         observer.disconnect();
+        requestAnimationFrame(() => {
+          const channel = new MessageChannel();
+          channel.port1.onmessage = () => void (state.done = performance.now());
+          channel.port2.postMessage(0);
+        });
       });
       observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-busy', 'class'] });
     },
     { artifactId: id, count: VIEWS },
   );
   await page.locator(`[data-library] article[data-artifact-row="${id}"]`).click({ timeout: 15_000 });
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __dashOpen: { drawn: number | null } }).__dashOpen.drawn !== null), { timeout: 60_000, message: 'every view drawn' }).toBe(true);
-  const { click, drawn } = await page.evaluate(() => (window as unknown as { __dashOpen: { click: number; drawn: number } }).__dashOpen);
-  return { ms: drawn - click, views: await viewTimings(page, key) };
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __dashOpen: { done: number | null } }).__dashOpen.done !== null), { timeout: 60_000, message: 'every view drawn and painted' }).toBe(true);
+  const { click, done } = await page.evaluate(() => (window as unknown as { __dashOpen: { click: number; done: number } }).__dashOpen);
+  return { ms: done - click, views: await viewTimings(page, key) };
+}
+
+/** The renderer's private footprint in MB (footprint(1) on its pid; a macOS tool, the gate's lane). */
+function rendererFootprintMB(pid: number): number {
+  return footprintMB(execFileSync('/usr/bin/footprint', ['-p', String(pid)], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
 }
 
 const ledgerCsv = (variant: number) => benchCsv(BENCH_ROWS, variant);
@@ -207,26 +249,25 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
 
     const { artifactId: id } = await agent.ok<{ artifactId: string }>(AGENT, 'artifact_create', { kind: 'dashboard', title: TITLE, content: benchMarkdown() });
     let variant = 0;
-    const replace = async () => {
+    /** The agent's replacement of the ledger with new bytes, from the revision it just read. */
+    const replace = async (): Promise<AgentCall<{ revision: number; rows: number }>> => {
       const name = await agent.write(AGENT, 'ledger.csv', ledgerCsv(variant++));
-      await agent.ok(AGENT, 'artifact_read', { artifact: id }); // the session's base, after any host restart
+      await agent.ok(AGENT, 'artifact_read', { artifact: id });
       const answer = await agent.call<{ revision: number; rows: number }>(AGENT, 'artifact_dataset', { artifact: id, baseRevision: 'last', id: BENCH_DATASET, title: '판매 원장', path: name }, { timeoutMs: 120_000 });
       if (answer.isError) throw new Error(`the agent's bind was refused: ${answer.text}`);
       expect(answer.result!.rows).toBe(BENCH_ROWS);
       return answer;
     };
+    const loaded = async () => (await agent.loaded(id)).loaded;
 
-    await test.step('1: artifact_dataset binds the 50,000-row ledger, three times (each new bytes), the dashboard closed', async () => {
-      const trials: Trial[] = [];
-      for (let k = 0; k < TRIALS; k++)
-        trials.push(
-          await trial(async () => {
-            const answer = await replace();
-            return { value: answer.wallMs, note: `host loop busy ${answer.busyMs.toFixed(1)} ms, its longest stretch ${answer.loop.max.toFixed(1)} ms` };
-          }),
-        );
-      rows.add('1 bind', `artifact_dataset on the host: read the ${BENCH_ROWS}-row CSV under the session's directory, parse and validate it, register its asset, write its descriptor in one commit (the call's wall time)`, 'ms', 2000, '≤ 2,000 ms', trials);
-      // the parser's row limit (DATASET_LIMITS.rows), recorded: a dataset no view binds
+    await test.step('1: artifact_dataset binds the 50,000-row ledger (each attempt new bytes), the dashboard closed', async () => {
+      const trials = await admittedTrials(() =>
+        trial(async () => {
+          const answer = await replace();
+          return { value: answer.wallMs, note: `host loop busy ${answer.busyMs.toFixed(1)} ms, its longest stretch ${answer.loop.max.toFixed(1)} ms` };
+        }),
+      );
+      rows.timing('1 bind', `artifact_dataset on the host: read the ${BENCH_ROWS}-row CSV under the session's directory, parse and validate it, register its asset, write its descriptor in one commit (the call's wall time)`, 'ms', 2000, 'every admitted trial ≤ 2,000 ms', trials);
       const limit = await trial(async () => {
         const name = await agent.write(AGENT, 'limit.csv', benchCsv(200_000, 9));
         const answer = await agent.call<{ rows: number }>(AGENT, 'artifact_dataset', { artifact: id, baseRevision: 'last', id: 'limit', path: name }, { timeoutMs: 120_000 });
@@ -234,70 +275,87 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
         expect(answer.result!.rows).toBe(200_000);
         return { value: answer.wallMs, note: `host loop busy ${answer.busyMs.toFixed(1)} ms, longest stretch ${answer.loop.max.toFixed(1)} ms` };
       });
-      rows.add('1b bind at the row limit', 'artifact_dataset of a 200,000-row CSV (the parser’s row limit candidate), bound to no view', 'ms', null, 'recorded', [limit]);
+      rows.timing('1b bind at the row limit', 'artifact_dataset of a 200,000-row CSV (the parser’s row limit candidate), bound to no view', 'ms', null, 'recorded', [limit]);
     });
 
-    await test.step('2 and 3: open cold (a snapshot never read, the host’s copy unloaded) three times; the 10,000-point view’s render in each; warm once', async () => {
-      const cold: Trial[] = [];
+    await test.step('2 and 3: open cold (a snapshot never read, the holder released, the host’s copy proved unloaded); the 10,000-point view’s render in each; warm once', async () => {
       const render: Trial[] = [];
-      for (let k = 0; k < TRIALS; k++) {
+      const cold = await admittedTrials(async (k) => {
         await closeTab(page);
-        // a snapshot the host has never read (its parse cache misses it; a bind parses apart from the reader), then the
-        // host's idle unload of the dashboard nobody holds: cold for the document and for the rows
+        // a snapshot the host has never read (its parse cache misses it: a bind parses apart from the reader), the
+        // agent's replicas closed, then the host's idle unload of the dashboard nobody holds, observed
         await replace();
-        await sleep(UNLOAD_WAIT_MS);
+        await agent.release(AGENT);
+        const releasedAt = Date.now();
+        await expect.poll(loaded, { timeout: UNLOAD_MS, intervals: [1_000], message: `the host unloads the released dashboard within ${UNLOAD_MS / 1000} s` }).toBe(false);
+        const unloadedIn = Date.now() - releasedAt;
         let views: { caption: string; ms: number }[] = [];
-        cold.push(
-          await trial(async () => {
-            const open = await openTimed(page, id, `__dashCold${k}`);
-            views = open.views;
-            return { value: open.ms, note: `${open.views.length} views drawn; slowest ${Math.max(...open.views.map((v) => v.ms)).toFixed(1)} ms` };
-          }),
-        );
+        const done = await trial(async () => {
+          expect(await loaded(), 'still unloaded as the open starts').toBe(false);
+          const open = await openTimed(page, id, `__dashCold${k}`);
+          views = open.views;
+          return { value: open.ms, note: `unloaded ${(unloadedIn / 1000).toFixed(1)} s after the release; ${open.views.length} views drawn; slowest ${Math.max(...open.views.map((v) => v.ms)).toFixed(1)} ms` };
+        });
         const scatter = views.filter((v) => v.caption === SCATTER).map((v) => v.ms);
         expect(scatter.length, 'the 10,000-point view was drawn and timed').toBeGreaterThan(0);
-        render.push({ ...cold.at(-1)!, value: Math.max(...scatter), note: `the scatter's dash:view entries ${scatter.map((ms) => ms.toFixed(1)).join(', ')} ms` });
-      }
-      rows.add('2 open cold', `cold open: the click on the library row to all ${VIEWS} views drawn, the tab closed, a snapshot the host has never read bound and the host’s copy of the dashboard unloaded (66 s idle) first`, 'ms', 1000, '≤ 1,000 ms', cold);
-      rows.add('3 render 10,000 points', `one view of ${BENCH_SCATTER_POINTS} points (the scatter): the chart view's dash:view entry, the renderer's view and its insertion into the page, from the rows in hand, during each cold open`, 'ms', 200, '≤ 200 ms', render);
+        render.push({ ...done, value: Math.max(...scatter), note: `the scatter's dash:view entries ${scatter.map((ms) => ms.toFixed(1)).join(', ')} ms` });
+        return done;
+      });
+      rows.timing('2 open cold', `cold open: the click on the library row to the frame after the last of ${VIEWS} views is in the page; first the tab closed, a snapshot the host has never read bound, the agent's holder released and the host's copy proved unloaded (the seam's loaded, ≤ ${UNLOAD_MS / 1000} s)`, 'ms', 1000, 'every admitted trial ≤ 1,000 ms', cold);
+      rows.timing('3 render 10,000 points', `one view of ${BENCH_SCATTER_POINTS} points (the scatter): the chart view's dash:view entry, the renderer's view and its insertion into the page, from the rows in hand, in each cold open (the largest of an open's entries)`, 'ms', 200, 'every admitted trial ≤ 200 ms', render);
       await closeTab(page);
       const warm = await trial(async () => {
         const open = await openTimed(page, id, '__dashWarm');
         return { value: open.ms };
       });
-      rows.add('2b open warm', 'warm reopen: the same, the host’s copy and parse cache loaded', 'ms', null, 'recorded', [warm]);
+      rows.timing('2b open warm', 'warm reopen: the same, the host’s copy and parse cache loaded', 'ms', null, 'recorded', [warm]);
       await page.locator(`[data-artifact-tab="${id}"]`).screenshot({ path: `${PROOF}/scale-open.png` });
     });
 
-    await test.step('4: the agent’s replacement to every view drawn again, three times', async () => {
-      const trials: Trial[] = [];
-      for (let k = 0; k < TRIALS; k++) {
-        trials.push(
-          await trial(async () => {
-            await page.evaluate(({ artifactId, count }) => {
+    await test.step('4: the agent’s replacement, from its first observed post-write revision announcement to every view painted again', async () => {
+      const failures: string[] = [];
+      const trials = await admittedTrials(() =>
+        trial(async () => {
+          await page.evaluate(
+            ({ artifactId, count }) => {
               const frames = () => Array.from(document.querySelectorAll(`[data-artifact-tab="${artifactId}"] .ds-doc figure.dash-view .dash-figure`));
               const old = frames().map((frame) => frame.firstElementChild);
-              const state: { drawn: number | null } = { drawn: null };
+              const state: { seen: boolean; done: number | null } = { seen: false, done: null };
               (window as unknown as Win).__dashSwap = state;
-              const observer = new MutationObserver(() => {
+              const drawn = () => {
                 const now = frames();
-                if (now.length !== count || !now.every((frame, i) => frame.firstElementChild !== old[i] && frame.querySelector(':scope > svg, :scope > table') !== null && !frame.closest('figure')!.hasAttribute('aria-busy'))) return;
-                state.drawn = Date.now();
+                return now.length === count && now.every((frame, i) => frame.firstElementChild !== old[i] && frame.querySelector(':scope > svg, :scope > table') !== null && !frame.closest('figure')!.hasAttribute('aria-busy'));
+              };
+              const observer = new MutationObserver(() => {
+                if (state.seen || !drawn()) return;
+                state.seen = true;
                 observer.disconnect();
+                requestAnimationFrame(() => {
+                  const channel = new MessageChannel();
+                  channel.port1.onmessage = () => void (state.done = Date.now());
+                  channel.port2.postMessage(0);
+                });
               });
               observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-busy'] });
-            }, { artifactId: id, count: VIEWS });
-            const answer = await replace();
-            await expect.poll(() => page.evaluate(() => (window as unknown as { __dashSwap: { drawn: number | null } }).__dashSwap.drawn !== null), { timeout: 60_000, message: 'every view drawn again' }).toBe(true);
-            const drawn = await page.evaluate(() => (window as unknown as { __dashSwap: { drawn: number } }).__dashSwap.drawn);
-            return { value: drawn - answer.endedAt, note: `from the call's start ${(drawn - answer.endedAt + answer.wallMs).toFixed(0)} ms (the bind ${answer.wallMs.toFixed(0)} ms)` };
-          }),
-        );
-      }
-      rows.add('4 replace to all views', `a replacement by the agent (artifact_dataset, new bytes) from its answer, just after its commit, to all ${VIEWS} views drawn again in the open tab (host and page on one clock)`, 'ms', 500, '≤ 500 ms', trials);
+            },
+            { artifactId: id, count: VIEWS },
+          );
+          const answer = await replace();
+          await expect.poll(() => page.evaluate(() => (window as unknown as { __dashSwap: { done: number | null } }).__dashSwap.done !== null), { timeout: 60_000, message: 'every view drawn again and painted' }).toBe(true);
+          const painted = await page.evaluate(() => (window as unknown as { __dashSwap: { done: number } }).__dashSwap.done);
+          const interval = replacementInterval(answer.announcedAt, painted);
+          const endToEnd = `the call's start to the paint ${painted - answer.startedAt} ms (the bind ${answer.wallMs.toFixed(0)} ms)`;
+          if (!interval.ok) {
+            failures.push(interval.reason);
+            return { value: Number.POSITIVE_INFINITY, note: `${interval.reason}; ${endToEnd}` };
+          }
+          return { value: interval.value, note: `${endToEnd}; announced ${answer.announcedAt! - answer.startedAt} ms after the call's start` };
+        }),
+      );
+      rows.timing('4 replace to all views', `a replacement by the agent (artifact_dataset, new bytes): from its first observed post-write revision announcement (the seam's announcedAt, the public ArtifactStore.onChange updated at the answer's revision; not the durable commit) to the frame after the last of ${VIEWS} views is drawn again in the open tab (host and page on one clock)`, 'ms', 500, 'every admitted trial ≤ 500 ms', trials, failures.length > 0 ? failures.join('; ') : undefined);
     });
 
-    await test.step('5: the source sheet scrolls the 50,000 raw rows: event to DOM commit, three times; the long tasks and the frame cadence beside it', async () => {
+    await test.step('5: the source sheet scrolls the 50,000 raw rows: event to DOM commit pooled over three admitted trials; the long tasks and the frame cadence beside it', async () => {
       const tab = page.locator(`[data-artifact-tab="${id}"]`);
       await tab.locator('.ds-doc figure.dash-view').nth(RAW_TABLE).locator('button.dash-source-label').click();
       const sheet = page.getByRole('dialog', { name: /^Source of / });
@@ -308,106 +366,138 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
         await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', String(BENCH_ROWS + 1), { timeout: 60_000 });
         return { value: Date.now() - started };
       });
-      rows.add('5b sheet reads every raw row', `the sheet's bounded pages of the ${BENCH_ROWS}-row snapshot read and shown (the click to its row count)`, 'ms', null, 'recorded', [readAll]);
+      rows.timing('5b sheet reads every raw row', `the sheet's bounded pages of the ${BENCH_ROWS}-row snapshot read and shown (the click to its row count; the tab's reader may hold them from the raw table view)`, 'ms', null, 'recorded', [readAll]);
       const table = sheet.getByRole('table', { name: 'Rows' });
       const box = (await table.boundingBox())!;
-      const trials: Trial[] = [];
-      const longest: number[] = [];
-      for (let k = 0; k < TRIALS; k++) {
-        trials.push(
-          await trial(async () => {
-            await table.evaluate((scroller) => {
-              scroller.scrollTop = 0;
-              const rows = scroller.querySelector('.dash-sheet-rows')!;
-              const record = { frames: [] as number[], longTasks: [] as number[], done: false, stop: () => {} };
-              (window as unknown as Win).__dashScroll = record;
-              performance.clearMarks('dash:scroll');
-              performance.clearMarks('dash:commit');
-              // one listener and two observers per trial, each removed when the trial ends
-              const onScroll = (event: Event) => void performance.mark('dash:scroll', { startTime: event.timeStamp });
-              scroller.addEventListener('scroll', onScroll, { passive: true });
-              const commits = new MutationObserver(() => void performance.mark('dash:commit'));
-              commits.observe(rows, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'aria-rowindex'] });
-              const longTasks = new PerformanceObserver((list) => list.getEntries().forEach((entry) => record.longTasks.push(entry.duration)));
-              longTasks.observe({ type: 'longtask' });
-              record.stop = () => {
-                scroller.removeEventListener('scroll', onScroll);
-                commits.disconnect();
-                longTasks.disconnect();
-              };
-              const frame = (at: number) => {
-                record.frames.push(at);
-                if (!record.done) requestAnimationFrame(frame);
-              };
-              requestAnimationFrame(frame);
-            });
-            await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-            for (let i = 0; i < 150; i++) {
-              await page.mouse.wheel(0, 120);
-              await page.waitForTimeout(16);
-            }
-            // jumps across the whole snapshot, as a scrollbar drag lands
-            for (let i = 1; i <= 20; i++)
-              await table.evaluate(async (scroller, fraction) => {
-                scroller.scrollTop = fraction * (scroller.scrollHeight - scroller.clientHeight);
-                await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-              }, i / 20);
-            await page.waitForTimeout(300);
-            const seen = await table.evaluate(() => {
-              const record = (window as unknown as { __dashScroll: { frames: number[]; longTasks: number[]; done: boolean; stop(): void } }).__dashScroll;
-              record.done = true;
-              record.stop();
-              const scrolls = performance.getEntriesByName('dash:scroll').map((m) => m.startTime);
-              const commits = performance.getEntriesByName('dash:commit').map((m) => m.startTime);
-              performance.clearMarks('dash:scroll');
-              performance.clearMarks('dash:commit');
-              return { scrolls, commits, frames: record.frames, longTasks: record.longTasks };
-            });
-            // each scroll event's time to the first rows commit after it (an event whose commit came later, past the
-            // next event, is charged the whole wait); an event no commit followed is counted apart
-            const work: number[] = [];
-            let uncommitted = 0;
-            for (const at of seen.scrolls) {
-              const commit = seen.commits.find((c) => c >= at);
-              if (commit === undefined) uncommitted += 1;
-              else work.push(commit - at);
-            }
-            const intervals = seen.frames.slice(1).map((at, i) => at - seen.frames[i]!);
-            const overLong = seen.longTasks.filter((ms) => ms > 50);
-            longest.push(Math.max(0, ...seen.longTasks));
-            return {
-              value: pct(work, 0.95),
-              note: `${seen.scrolls.length} scroll events, ${work.length} committed (${uncommitted} without a commit after them); work p50 ${pct(work, 0.5).toFixed(2)}, max ${Math.max(...work).toFixed(2)} ms; rAF interval p50 ${pct(intervals, 0.5).toFixed(2)} (cadence ${(1000 / pct(intervals, 0.5)).toFixed(1)} Hz), p95 ${pct(intervals, 0.95).toFixed(2)}, max ${Math.max(...intervals).toFixed(2)} ms; long tasks ${seen.longTasks.length} (over 50 ms: ${overLong.map((ms) => ms.toFixed(1)).join(', ') || 'none'})`,
+      const seenTrials: { work: number[]; load: number; longTasks: number[] }[] = [];
+      const trials = await admittedTrials(() =>
+        trial(async () => {
+          await table.evaluate((scroller) => {
+            scroller.scrollTop = 0;
+            const rows = scroller.querySelector('.dash-sheet-rows')!;
+            const record = { frames: [] as number[], longTasks: [] as number[], done: false, stop: () => {} };
+            (window as unknown as Win).__dashScroll = record;
+            performance.clearMarks('dash:scroll');
+            performance.clearMarks('dash:commit');
+            // one listener and two observers per trial, each removed when the trial ends
+            const onScroll = (event: Event) => void performance.mark('dash:scroll', { startTime: event.timeStamp });
+            scroller.addEventListener('scroll', onScroll, { passive: true });
+            const commits = new MutationObserver(() => void performance.mark('dash:commit'));
+            commits.observe(rows, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'aria-rowindex'] });
+            const longTasks = new PerformanceObserver((list) => list.getEntries().forEach((entry) => record.longTasks.push(entry.duration)));
+            longTasks.observe({ type: 'longtask' });
+            record.stop = () => {
+              scroller.removeEventListener('scroll', onScroll);
+              commits.disconnect();
+              longTasks.disconnect();
             };
-          }),
-        );
-      }
-      const failedBy = longest.some((ms) => ms > 50) ? `a long task over 50 ms during a scroll (longest per trial ${longest.map((ms) => ms.toFixed(1)).join(', ')} ms)` : undefined;
-      rows.add('5 source scroll', `the source sheet scrolling ${BENCH_ROWS} raw rows (150 wheel steps of 120 px, then 20 jumps across the snapshot): per scroll event, the main thread's time from the event to the virtual rows' DOM commit, p95 (Performance marks)`, 'ms', 16, 'p95 ≤ 16 ms; any long task over 50 ms fails it', trials, 'the frame cadence is information, never the bound', failedBy);
+            const frame = (at: number) => {
+              record.frames.push(at);
+              if (!record.done) requestAnimationFrame(frame);
+            };
+            requestAnimationFrame(frame);
+          });
+          await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+          for (let i = 0; i < 150; i++) {
+            await page.mouse.wheel(0, 120);
+            await page.waitForTimeout(16);
+          }
+          // jumps across the whole snapshot, as a scrollbar drag lands
+          for (let i = 1; i <= 20; i++)
+            await table.evaluate(async (scroller, fraction) => {
+              scroller.scrollTop = fraction * (scroller.scrollHeight - scroller.clientHeight);
+              await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            }, i / 20);
+          await page.waitForTimeout(300);
+          const seen = await table.evaluate(() => {
+            const record = (window as unknown as { __dashScroll: { frames: number[]; longTasks: number[]; done: boolean; stop(): void } }).__dashScroll;
+            record.done = true;
+            record.stop();
+            const scrolls = performance.getEntriesByName('dash:scroll').map((m) => m.startTime);
+            const commits = performance.getEntriesByName('dash:commit').map((m) => m.startTime);
+            performance.clearMarks('dash:scroll');
+            performance.clearMarks('dash:commit');
+            return { scrolls, commits, frames: record.frames, longTasks: record.longTasks };
+          });
+          // each scroll event's time to the first rows commit after it (an event whose commit came later, past the next
+          // event, is charged the whole wait); an event no commit followed is counted apart
+          const work: number[] = [];
+          let uncommitted = 0;
+          for (const at of seen.scrolls) {
+            const commit = seen.commits.find((c) => c >= at);
+            if (commit === undefined) uncommitted += 1;
+            else work.push(commit - at);
+          }
+          seenTrials.push({ work, load: Number.NaN, longTasks: seen.longTasks }); // its start load set below, from the trial's
+          const intervals = seen.frames.slice(1).map((at, i) => at - seen.frames[i]!);
+          return {
+            value: percentile(work, 0.95),
+            note: `this trial's own p95 (information); ${seen.scrolls.length} scroll events, ${work.length} committed (${uncommitted} without a commit after them); work p50 ${percentile(work, 0.5).toFixed(2)}, max ${Math.max(...work).toFixed(2)} ms; rAF interval p50 ${percentile(intervals, 0.5).toFixed(2)} (cadence ${(1000 / percentile(intervals, 0.5)).toFixed(1)} Hz), p95 ${percentile(intervals, 0.95).toFixed(2)}, max ${Math.max(...intervals).toFixed(2)} ms; long tasks ${seen.longTasks.length} (longest ${Math.max(0, ...seen.longTasks).toFixed(1)} ms)`,
+          };
+        }),
+      );
+      // the trial's admission is its start load, the same as every row's
+      seenTrials.forEach((t, k) => (t.load = trials[k]!.load));
+      const judged = scrollVerdict(seenTrials, 16);
+      rows.add({
+        row: '5 source scroll',
+        measure: `the source sheet scrolling ${BENCH_ROWS} raw rows (150 wheel steps of 120 px, then 20 jumps across the snapshot): per scroll event, the main thread's time from the event to the virtual rows' DOM commit (Performance marks), p95 over every admitted trial's events pooled`,
+        bound: 'pooled p95 ≤ 16 ms; any long task over 50 ms fails it',
+        limit: 16,
+        unit: 'ms',
+        value: fixed(judged.pooledP95),
+        median: fixed(median(judged.perTrialP95)),
+        best: fixed(Math.min(...judged.perTrialP95)),
+        verdict: judged.verdict,
+        admitted: seenTrials.filter((t) => t.load < LOAD_BELOW).length,
+        trials: trials.map((t) => ({ ...t, value: +t.value.toFixed(2) })),
+        ...(judged.reason && { reason: judged.reason }),
+        note: `${judged.events} admitted events pooled; per-trial p95 ${judged.perTrialP95.map((v) => v.toFixed(2)).join(', ')} ms and the frame cadence are information, never the bound`,
+      });
       await page.screenshot({ path: `${PROOF}/scale-sheet.png` });
       await page.keyboard.press('Escape');
     });
 
-    await test.step('6: the renderer’s working set with the dashboard open, after a forced collection', async () => {
-      const memory = await trial(async () => {
-        const before = await processMemory(launch.app);
-        await collectGarbage(page);
-        await sleep(500);
-        const after = await processMemory(launch.app);
-        const heap = await jsHeapMB(page);
-        rows.write({ memory: { before, after, jsHeapMB: heap } });
-        const main = after.renderers[0]!;
-        return { value: main.workingSetMB, note: `window ${main.windowId}; ${before.renderers[0]?.workingSetMB ?? '?'} MB before the collection; JS heap ${heap} MB` };
+    await test.step('6: the renderer’s private footprint after the workload and no input, settled; a forced collection’s figures beside it', async () => {
+      const pid = await launch.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getOSProcessId());
+      const load = load1();
+      const samples: { at: string; footprintMB: number; workingSetMB: number }[] = [];
+      let judged: ReturnType<typeof settledMemory> = { settled: false, value: null, index: -1 };
+      for (let k = 0; k < MEMORY_SAMPLES && !judged.settled; k++) {
+        if (k > 0) await sleep(MEMORY_SAMPLE_MS);
+        const working = (await processMemory(launch.app)).renderers.find((r) => r.pid === pid)?.workingSetMB ?? NaN;
+        samples.push({ at: new Date().toISOString(), footprintMB: +rendererFootprintMB(pid).toFixed(1), workingSetMB: working });
+        judged = settledMemory(samples.map((s) => s.footprintMB));
+      }
+      // the diagnostic: the same process after a forced collection (never the gate)
+      await collectGarbage(page);
+      await sleep(500);
+      const collected = { footprintMB: +rendererFootprintMB(pid).toFixed(1), workingSetMB: (await processMemory(launch.app)).renderers.find((r) => r.pid === pid)?.workingSetMB ?? NaN, jsHeapMB: await jsHeapMB(page) };
+      rows.write({ memory: { pid, samples, settled: judged, afterForcedCollection: collected } });
+      const value = judged.settled ? judged.value : null;
+      rows.add({
+        row: '6 renderer',
+        measure: `the renderer process's private footprint (macOS footprint(1), phys_footprint) with the ${VIEWS}-view dashboard open after the scrolls and replacements, no input: the later of the first two consecutive ${MEMORY_SAMPLE_MS / 1000} s samples within 5 %, within ${((MEMORY_SAMPLES - 1) * MEMORY_SAMPLE_MS) / 1000} s`,
+        bound: '≤ 500 MB, settled',
+        limit: 500,
+        unit: 'MB',
+        value,
+        median: null,
+        best: null,
+        verdict: !judged.settled ? 'unsettled' : value! <= 500 ? 'met' : 'failed',
+        admitted: 1,
+        trials: [{ value: value ?? NaN, load, loadAfter: load1(), settle: [] }],
+        ...(!judged.settled && { reason: `no two consecutive samples within 5 % in ${samples.length}: ${samples.map((s) => s.footprintMB).join(', ')} MB` }),
+        note: `samples ${samples.map((s) => `${s.footprintMB} MB (working set ${s.workingSetMB} MB)`).join(', ')}; after a forced collection (diagnostic) ${collected.footprintMB} MB footprint, ${collected.workingSetMB} MB working set, JS heap ${collected.jsHeapMB} MB`,
       });
-      rows.add('6 renderer', `the renderer's working set with the ${VIEWS}-view dashboard open after the scrolls and replacements, read after a forced collection`, 'MB', 500, '≤ 500 MB', [memory]);
     });
 
     await agent.release(AGENT);
     const failed = rows.rows.filter((r) => r.verdict === 'failed');
-    const blocked = rows.rows.filter((r) => r.verdict === 'hardware-blocked');
-    rows.write({ settleSpentMs: settleSpent, end: { load: load1() }, failed: failed.map((r) => r.row), hardwareBlocked: blocked.map((r) => r.row) });
-    expect(failed.map((r) => `${r.row}: ${r.value} ${r.unit} against ${r.limit}${r.note ? ` (${r.note})` : ''}`), `bounds failed (every figure is in ${RESULTS})`).toEqual([]);
-    expect(blocked.map((r) => `${r.row}: loads ${r.trials.map((t) => t.load).join(', ')}`), `hardware-blocked: a trial ran at a 1-minute load of ${LOAD_BELOW} or more (never a bound met; ${RESULTS})`).toEqual([]);
+    const blocked = rows.rows.filter((r) => r.verdict === 'hardware-blocked' || r.verdict === 'unsettled');
+    rows.write({ settleSpentMs: settleSpent, end: { load: load1() }, failed: failed.map((r) => r.row), hardwareBlockedOrUnsettled: blocked.map((r) => r.row) });
+    expect(failed.map((r) => `${r.row}: ${r.value} ${r.unit} against ${r.limit}${r.reason ? ` (${r.reason})` : ''}`), `bounds failed (every figure is in ${RESULTS})`).toEqual([]);
+    expect(blocked.map((r) => `${r.row} ${r.verdict}: ${r.reason ?? ''}`), `hardware-blocked or unsettled: never a bound met (${RESULTS})`).toEqual([]);
     expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await app?.close();

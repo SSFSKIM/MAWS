@@ -192,7 +192,9 @@ export interface AgentCall<R = Record<string, unknown>> {
   text: string;
   toolUseId: string;
   wallMs: number;
-  endedAt: number; // when the call answered, epoch ms on the host's clock
+  startedAt: number; // when the production call started, epoch ms on the host's clock
+  endedAt: number; // when the call answered (never its commit), epoch ms on the host's clock
+  announcedAt?: number; // the first observed post-write revision announcement at the answer's revision, host clock
   loop: { max: number; p99: number; mean: number };
   busyMs: number;
 }
@@ -257,6 +259,11 @@ export class AgentSeam {
 
   release(session: string): Promise<unknown> {
     return this.send({ cmd: 'release', session });
+  }
+
+  /** Whether the host holds the artifact's document in memory (M6: a cold open is proved unloaded first). */
+  loaded(artifactId: string): Promise<{ loaded: boolean }> {
+    return this.send({ cmd: 'loaded', artifactId });
   }
 }
 
