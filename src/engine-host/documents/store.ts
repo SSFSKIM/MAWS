@@ -26,6 +26,7 @@ import { ArtifactStoreError, StoreTooNewError } from './errors'; // P3-H: StoreT
 import { Maintenance } from './maintenance';
 import { OpLedger, type OpScope } from './ops';
 import { restoreArtifact } from './restore';
+import { SnapshotRetention, type AssetHold } from './retention'; // E3
 import type { Committed, DocumentService, WriteOptions } from './service';
 import type { SqliteDocumentStorage } from './storage';
 import { actorFromKey, VersionStore, type DesignSystemRef, type VersionKind } from './versions';
@@ -184,6 +185,7 @@ export class ArtifactStore {
   // P3-E (ensureMigrated): the artifacts this run found in their kind's current model, and the migrations under way
   private readonly migrated = new Set<string>();
   private readonly migrating = new Map<string, Promise<void>>();
+  private readonly retention: SnapshotRetention; // E3: the query snapshots' retention and the readers' holds
 
   constructor(
     readonly service: DocumentService,
@@ -202,6 +204,7 @@ export class ArtifactStore {
       inBatch: (write) => service.inBatch(write),
     });
     this.maintenance = new Maintenance(this, { now: this.now, log: this.log });
+    this.retention = new SnapshotRetention(this, { now: this.now, log: this.log, closed: () => this.closed }); // E3
     this.unsubscribe.push(service.onCommitted((change) => this.committed(change)));
     this.unsubscribe.push(service.onBeforeCommit((ids) => this.stamp(ids)));
     // the last version's state is kept only while its doc is loaded (versionInFrame): it goes when the doc does
@@ -532,10 +535,12 @@ export class ArtifactStore {
   // order kept.
   private copyAssetsInFrame(fromId: string, toId: string, assetIds: string[]): void {
     const wanted = new Set(assetIds);
-    const rows = (this.storage.db.prepare('SELECT * FROM artifact_assets WHERE artifactId = ? ORDER BY createdAt, rowid').all(fromId) as unknown as { assetId: string; name: string; mime: string; size: number; sha256: string; createdAt: number; createdBy: string }[]).filter((row) =>
+    const rows = (this.storage.db.prepare('SELECT * FROM artifact_assets WHERE artifactId = ? ORDER BY createdAt, rowid').all(fromId) as unknown as { assetId: string; name: string; mime: string; size: number; sha256: string; createdAt: number; createdBy: string; querySnapshot: number }[]).filter((row) =>
       wanted.has(row.assetId),
     );
-    const insert = this.storage.db.prepare('INSERT INTO artifact_assets (artifactId, assetId, name, mime, size, sha256, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    // E3: a copy keeps each asset's classification, every copied row active; the copy's own frame (the dashboard kind's
+    // hook) starts its membership with the snapshots its state names and retires the copied candidates it does not need
+    const insert = this.storage.db.prepare('INSERT INTO artifact_assets (artifactId, assetId, name, mime, size, sha256, createdAt, createdBy, querySnapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const row of rows) {
       const path = ArtifactFiles.assetPath(row.sha256);
       if (!this.files.exists(toId, path)) {
@@ -546,7 +551,7 @@ export class ArtifactStore {
           this.files.discard(stage.temp);
         }
       }
-      insert.run(toId, row.assetId, row.name, row.mime, row.size, row.sha256, row.createdAt, row.createdBy);
+      insert.run(toId, row.assetId, row.name, row.mime, row.size, row.sha256, row.createdAt, row.createdBy, row.querySnapshot);
     }
   }
 
@@ -689,7 +694,14 @@ export class ArtifactStore {
       if (existing) {
         // Nothing to write, yet the answer names a row that may still sit in the open batch (a concurrent upload of the
         // same bytes): it waits for that batch's commit, and fails with it. The seam still runs, in a frame of its own.
-        if (inFrame) await this.service.inBatch(() => inFrame(existing));
+        // E3: an upload answered with a managed query snapshot adopts it (whatever the uploader does with the ref, it is
+        // ordinary now, never collected), in a frame of its own too.
+        const adopt = this.retention.isManaged(artifactId, existing.assetId);
+        if (inFrame || adopt)
+          await this.service.inBatch(() => {
+            if (adopt) this.retention.adoptInFrame(artifactId, existing.assetId);
+            inFrame?.(existing);
+          });
         else await this.service.whenCommitted();
         return existing;
       }
@@ -717,10 +729,12 @@ export class ArtifactStore {
   // `options.inFrame`. A `prepare` that throws refuses the write: nothing else of it is written (it must write nothing
   // before it throws), the document stays loaded, and the promise rejects with its error once the batch open then has
   // committed. A throw anywhere later takes the whole frame back, as `writeAs` does. Resolves with the revision.
+  // E3: an asset marked `querySnapshot` is registered as a query's snapshot (retention.ts), and an identical one already
+  // held keeps its classification; an unmarked asset answered with a managed snapshot adopts it.
   async writeWithAssets(
     artifactId: string,
     actor: Actor,
-    assets: { bytes: Uint8Array; name: string; mime: string }[],
+    assets: { bytes: Uint8Array; name: string; mime: string; querySnapshot?: boolean }[],
     edit: (doc: Doc, assets: { assetId: string; ref: string }[]) => void,
     options?: WriteOptions,
   ): Promise<number> {
@@ -750,10 +764,13 @@ export class ArtifactStore {
           const taken = this.assetNames(artifactId);
           named.forEach((asset, k) => {
             const existing = this.existingAsset(artifactId, stages[k]!.sha256);
-            if (existing) return void refs.push(existing);
+            if (existing) {
+              if (!asset.querySnapshot && this.retention.isManaged(artifactId, existing.assetId)) this.retention.adoptInFrame(artifactId, existing.assetId); // E3
+              return void refs.push(existing);
+            }
             const unique = uniqueName(asset.name, taken);
             taken.add(unique);
-            refs.push(this.placeAssetInFrame(artifactId, stages[k]!, { name: unique, mime: asset.mime }, actor, at));
+            refs.push(this.placeAssetInFrame(artifactId, stages[k]!, { name: unique, mime: asset.mime }, actor, at, asset.querySnapshot === true));
           });
           if (actor.kind === 'session') this.linkInFrame(artifactId, actor.appSessionId, 'edited', at);
         },
@@ -783,12 +800,12 @@ export class ArtifactStore {
 
   // Inside a savepoint: one new asset's file in place (an orphan of a crash replaced or reused) and its row, under the
   // unique name given.
-  private placeAssetInFrame(artifactId: string, stage: { temp: string; sha256: string; size: number }, meta: { name: string; mime: string }, actor: Actor, at: number): { assetId: string; ref: string } {
+  private placeAssetInFrame(artifactId: string, stage: { temp: string; sha256: string; size: number }, meta: { name: string; mime: string }, actor: Actor, at: number, querySnapshot = false): { assetId: string; ref: string } {
     const assetId = randomUUID();
     if (!this.files.exists(artifactId, ArtifactFiles.assetPath(stage.sha256))) this.files.place(artifactId, stage.temp, ArtifactFiles.assetPath(stage.sha256));
     this.storage.db
-      .prepare('INSERT INTO artifact_assets (artifactId, assetId, name, mime, size, sha256, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(artifactId, assetId, meta.name, meta.mime, stage.size, stage.sha256, at, actorKey(actor));
+      .prepare('INSERT INTO artifact_assets (artifactId, assetId, name, mime, size, sha256, createdAt, createdBy, querySnapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(artifactId, assetId, meta.name, meta.mime, stage.size, stage.sha256, at, actorKey(actor), querySnapshot ? 1 : 0); // E3: querySnapshot
     return { assetId, ref: `assets/${meta.name}` };
   }
   // P3-E end
@@ -810,9 +827,64 @@ export class ArtifactStore {
     return rows.map((row) => ({ assetId: row.assetId, ref: `assets/${row.name}`, name: row.name, mime: row.mime, size: row.size, sha256: row.sha256, createdAt: row.createdAt, createdBy: actorFromKey(row.createdBy) }));
   }
 
+  // The asset ids a version written now pins. E3: a retired query snapshot is left out (earlier versions keep theirs).
   private assetIds(artifactId: string): string[] {
-    return (this.storage.db.prepare('SELECT assetId FROM artifact_assets WHERE artifactId = ? ORDER BY assetId').all(artifactId) as { assetId: string }[]).map((row) => row.assetId);
+    return (this.storage.db.prepare('SELECT assetId FROM artifact_assets WHERE artifactId = ? AND retiredAt IS NULL ORDER BY assetId').all(artifactId) as { assetId: string }[]).map((row) => row.assetId);
   }
+
+  // ── E3 start: query snapshots' retention and the readers' holds (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md
+  // R1 and R1b; E's Decision Log 48 (1) and (3); retention.ts) ──
+
+  /** In a publication's frame (its `inFrame`): `ref`, the snapshot `datasetId` just published at `revision`, is kept
+   * as that query's latest use; the query keeps its latest two distinct snapshots and what nothing protects any more is
+   * retired in the same frame. An ordinary asset is never enrolled. Refused outside a write frame. */
+  retainQuerySnapshots(artifactId: string, datasetId: string, ref: string, revision: number): void {
+    this.retention.retain(artifactId, datasetId, ref, revision);
+  }
+
+  /** The dashboard kind's hook in each write's frame (src/engine-host/dashboards): membership follows `doc`'s datasets
+   * (`restored`: a restore's, each query reset to the snapshot it names), a file dataset adopts a managed snapshot it
+   * names, and every managed snapshot is active exactly while a membership or a current descriptor names it. */
+  reconcileQuerySnapshots(artifactId: string, doc: Doc, options?: { restored?: boolean }): void {
+    this.retention.reconcile(artifactId, doc, options);
+  }
+
+  /** Retires a managed snapshot no current descriptor names and collects it unless a version or a hold protects it:
+   * `removed` once its row and bytes are gone, `retained` while something still protects its bytes (an ordinary
+   * asset always), `notFound` for a ref the artifact does not hold. */
+  removeAsset(artifactId: string, ref: string): Promise<{ status: 'removed' | 'retained' | 'notFound' }> {
+    return this.retention.remove(artifactId, ref);
+  }
+
+  /** Post-commit: the retired snapshots of `artifactId` (every artifact's when omitted) that no current descriptor,
+   * retained version or hold names lose their rows, then their bytes. Asked while a batch is open, it runs after it. */
+  collectRetiredAssets(artifactId?: string): void {
+    this.retention.collect(artifactId);
+  }
+
+  /** A hold over one of the artifact's assets: its bytes stay until `release`, whatever retires it meanwhile. */
+  holdAsset(artifactId: string, ref: string): AssetHold {
+    return this.retention.hold(artifactId, [ref]);
+  }
+
+  /** `capture` read from the store and the refs it answers held in the same synchronous turn, all or none (the hold
+   * bounds of retention.ts, an unavailable ref refused), answered once the batch its read may have seen has committed
+   * (Decision Log 33's barrier; a lost batch releases the hold and fails the capture). */
+  async captureWithAssets<T>(artifactId: string, capture: () => { value: T; refs: readonly string[] }): Promise<{ value: T; release(): void }> {
+    let hold: AssetHold | null = null;
+    try {
+      const value = await this.readCommitted(() => {
+        const captured = capture();
+        hold = this.retention.hold(artifactId, captured.refs);
+        return captured.value;
+      });
+      return { value, release: hold!.release };
+    } catch (error) {
+      (hold as AssetHold | null)?.release();
+      throw error;
+    }
+  }
+  // ── E3 end ──
 
   // ── versions ──
 
@@ -935,6 +1007,7 @@ export class ArtifactStore {
     const plan = targets.map((row) => ({ row, ids: this.versions.prunable(row.id, olderThan, pinned, !isDocKind(row.kind)) })).filter((p) => p.ids.length > 0);
     const files = await this.service.inBatch(() => plan.flatMap(({ row, ids }) => this.versions.drop(row.id, ids).map((ref) => ({ artifactId: row.id, ref }))));
     this.removeUnreferenced(files);
+    this.collectRetiredAssets(artifactId ?? undefined); // E3: what only the pruned versions pinned
     for (const { row } of plan) this.emit(row.id, 'updated');
     return plan.reduce((n, p) => n + p.ids.length, 0);
   }

@@ -1646,7 +1646,7 @@ describe('ipc schema validates both directions', () => {
 
     it('owns artifacts.* in the engine host but artifacts.open (main), keeps setDefaults and content main-only, and emits both events across the host wire', () => {
       const owners = Object.fromEntries(Object.entries({ ...artifacts.commands, ...spaces.commands }).map(([name, spec]) => [name, spec.owner]));
-      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open', 'artifacts.export' /* M7 */, 'artifacts.downloadAsset' /* P3-E (E2 M3): main's, E's Decision Log 18 */, 'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool' /* P3-H H3b: main's, the route's fingerprint and the revoke's abort */]);
+      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open', 'artifacts.export' /* M7 */, 'artifacts.downloadAsset' /* P3-E (E2 M3): main's, E's Decision Log 18 */, 'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool' /* P3-H H3b: main's, the route's fingerprint and the revoke's abort */, 'artifacts.holdDatasets', 'artifacts.releaseDatasets' /* E3: main's, a window's holds (E's Decision Log 48 (3)) */]);
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['artifacts.setDefaults', 'artifacts.content']));
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.setDefaults');
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.content');

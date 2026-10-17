@@ -86,6 +86,7 @@ export class Maintenance {
     const files = plan.length === 0 ? [] : await service.inBatch(() => plan.flatMap(({ id, drop }) => store.versions.drop(id, drop).map((ref) => ({ artifactId: id, ref }))));
     store.removeUnreferenced(files);
     service.commitNow();
+    store.collectRetiredAssets(); // E3: the query snapshots only the thinned versions pinned (retention.ts)
     storage.incrementalVacuum();
     storage.setMeta(LAST_RUN_KEY, String(now));
     const report = { heads: behind.length, logRowsPruned, versionsThinned: plan.reduce((n, p) => n + p.drop.length, 0), attributionsMerged };
