@@ -89,6 +89,20 @@ describe('the group chat', () => {
       ['B asks', 'Answer to B'],
     ]);
   });
+
+  it('draws the text of a question as sminos records it, a list of the questions asked, each its own paragraph', () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'question', { from: 'maws-45', to: 'host', text: ['Which shape?'], choices: ['circle', 'square'], src: 'toolu_1' }), // 1
+      ev(`mini/${S1}`, 'question', { from: 'maws-45', to: 'host', text: ['Which colour?', 'How many?'], choices: ['red', 'blue', 'one', 'two'], src: 'toolu_2' }), // 2
+      ev(`mini/${S1}`, 'answered', { from: 'maws-45', src: 'toolu_1', text: 'square' }), // 3
+    ];
+    const questions = buildStream({ kind: 'group' }, entries, aliases, []).filter((i) => i.kind === 'question');
+    expect(questions.map((q) => [q.text, q.answered?.text ?? null])).toEqual([
+      ['Which shape?', 'square'],
+      ['Which colour?\n\nHow many?', null],
+    ]);
+  });
 });
 
 describe('status and state', () => {

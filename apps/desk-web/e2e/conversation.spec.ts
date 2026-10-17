@@ -338,7 +338,8 @@ test('a question is answered in place, a native one may be denied, an async one 
 
   // An async question: its `question` log event carries the card while the request is pending.
   const ask = 'toolu_plugin_q2';
-  await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'question', from: 'maws-45', to: 'host', text: 'Ship it tonight?', choices: ['yes', 'no'], src: ask });
+  // sminos records the questions an ask put as a list.
+  await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'question', from: 'maws-45', to: 'host', text: ['Ship it tonight?'], choices: ['yes', 'no'], src: ask });
   await hub.raise(PROJECT, 'mini', { request: ask, session: S.asks, tool: 'mcp__doperpowers__AskUserQuestion', input: { questions: [{ question: 'Ship it tonight?', header: 'Ship', options: [{ label: 'yes' }, { label: 'no' }], multiSelect: false }] }, async: true });
   const asyncCard = center(page).locator(`[data-request="${ask}"]`);
   await expect(asyncCard).toContainText('it keeps working while it waits');
@@ -349,6 +350,8 @@ test('a question is answered in place, a native one may be denied, an async one 
   await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'answered', from: 'maws-45', src: ask, text: 'no' });
   await hub.settle(PROJECT, 'mini', S.asks, { request: ask, winner: 'web', outcome: 'answered', by: M });
   await expect(center(page).getByTestId('answered')).toHaveText('Answered: no');
+  // Answered, the question is drawn from its event: its text with its answer.
+  await expect(center(page).locator('[data-item="question"]').getByTestId('prose')).toHaveText('Ship it tonight?');
 });
 
 test('an uncertain RPC is drawn as such and its Retry sends the same sealed RPC, nonce and all', async ({ page, hub }) => {

@@ -189,7 +189,11 @@ function Prose({ text }: { text: string }) {
   );
 }
 
-/** Each recipient's DX4 delivery outcome for a `human` this browser can see, kept by the hub across a reload. */
+/**
+ * Each recipient's DX4 delivery outcome for a `human` this browser can see, kept by the hub across a reload. An outcome
+ * other than delivered carries the machine's reason on its line (why it was only recorded, held back, or failed); a
+ * delivered one keeps it on hover.
+ */
 function Deliveries({ event, to, wake }: { event: LogEvent; to: '*' | Recipient[]; wake: boolean }) {
   const { connection } = useDesk();
   const outcomes = useStore(connection.conversation.store, (s) => s.deliveries[deliveryKey({ writer: event.writer, seq: event.seq })]);
@@ -202,9 +206,11 @@ function Deliveries({ event, to, wake }: { event: LogEvent; to: '*' | Recipient[
         const delivery = outcomes?.[r.session];
         const outcome = delivery?.outcome;
         const tone = outcome === 'delivered' ? 'text-fg-muted' : outcome === 'uncertain' ? 'text-fg-muted italic' : outcome ? 'text-warning' : 'text-fg-faint';
+        const reason = delivery?.reason || null;
         return (
-          <li key={r.session} data-recipient={r.session} data-outcome={outcome ?? 'pending'} className={tone}>
+          <li key={r.session} data-recipient={r.session} data-outcome={outcome ?? 'pending'} className={tone} title={reason ?? undefined}>
             {r.alias}: {outcome ? DELIVERY_TEXT[outcome] : 'not delivered yet'}
+            {reason && outcome !== 'delivered' && <span className="text-fg-faint" data-testid="delivery-reason">{` — ${reason}`}</span>}
           </li>
         );
       })}

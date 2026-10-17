@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectConnection } from '../../project/connection';
 import type { DeskSession } from '../../shell/sessions';
+import { noteModel } from '../../state/models';
 import { DeskContext } from '../conversation/desk-context';
 import { GroupComposer, SessionComposer } from './Composer';
 
@@ -111,5 +112,17 @@ describe('the session composer’s hint', () => {
     phone(true);
     mount(<SessionComposer session={working} />);
     expect(screen.getByRole('textbox', { name: 'Message maws-fe' }).getAttribute('placeholder')).toBe('Steer maws-fe, or Send to queue it');
+  });
+});
+
+describe('Model', () => {
+  it("offers the session's own default and the ids the project's sessions were seen answering from, never a bare alias", () => {
+    noteModel('p1', 'claude-fable-5-1');
+    noteModel('p1', 'claude-opus-5-5');
+    mount(<SessionComposer session={session(S1, 'maws-45')} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Model' }));
+    const input = screen.getByPlaceholderText('a model id, or default');
+    const list = document.getElementById(input.getAttribute('list') ?? '');
+    expect([...(list?.querySelectorAll('option') ?? [])].map((o) => o.value)).toEqual(['default', 'claude-opus-5-5', 'claude-fable-5-1']);
   });
 });

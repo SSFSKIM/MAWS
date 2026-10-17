@@ -51,6 +51,8 @@ export function placedRequest(record: { key: string; request: string; raised: Ra
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+/** A `question` event's text: sminos records the questions an ask put as a list, drawn one paragraph each. */
+const questionText = (v: unknown): string => (Array.isArray(v) ? v.filter((t): t is string => typeof t === 'string').join('\n\n') : str(v));
 const recipients = (to: unknown): Recipient[] =>
   Array.isArray(to) ? to.filter((r): r is Recipient => typeof r === 'object' && r !== null && typeof (r as Recipient).session === 'string') : [];
 const addressedTo = (event: LogEvent, session: string) => recipients(event.to).some((r) => r.session === session);
@@ -201,7 +203,7 @@ export function buildStream(
           event,
           session,
           from: str(event.from),
-          text: str(event.text),
+          text: questionText(event.text),
           choices: Array.isArray(event.choices) ? event.choices.filter((c): c is string => typeof c === 'string') : [],
           request: str(event.src),
           ref: questionRef(event),

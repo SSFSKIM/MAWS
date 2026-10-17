@@ -59,6 +59,16 @@ describe('capabilities', () => {
     expect(c.answer).toEqual({ can: false, reason: 'mini is offline: shown, not answerable' });
   });
 
+  it('a machine set read-only: a send is recorded and not delivered, and every RPC is refused, live session and stopped seat alike', () => {
+    const readOnly = 'mini is read-only: it runs nothing sent from outside it';
+    for (const c of [at({ machineReadOnly: true }), at({ machineReadOnly: true, group: 'ended', seat: 'maws-45', presence: { record: null, bridge: false } })]) {
+      expect(c.send).toEqual({ can: true, reason: null, note: 'recorded, not delivered: mini is read-only' });
+      for (const verb of ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume'] as const) expect(c[verb], verb).toEqual({ can: false, reason: readOnly });
+    }
+    // Offline says more than read-only: nothing reaches the machine at all.
+    expect(at({ machineReadOnly: true, machineOnline: false }).steer).toEqual({ can: false, reason: 'mini is offline' });
+  });
+
   it('an ended session: Resume, and a send that is only recorded unless a seat resumes to read it', () => {
     const terminal = at({ group: 'ended', presence: { record: null, bridge: false } });
     expect(terminal.resume).toEqual({ can: true, reason: null });
