@@ -1,11 +1,12 @@
-// The session view (DC9; the composite's §9.1): a direct channel's center on a desktop whose session's machine is
-// online — MAWS's `Transcript` over the session's main transcript with its owner lane on, so MAWS's report by default
-// (the `<message>` spans and questions, one working record per marked turn, an unmarked turn whole) and the full
-// transcript a toggle away. The transcript is the session's shared owner's (`depth/owner/session-owner.ts`), which the
-// depth column holds too: one subscription feeds both. Its streaming text joins the turn it answers, older rows page in
-// at the top until the first, and an ended session stays pageable while the view is open, its liveness read from its
-// presence. An `Agent` row opens its agent in the column. Loaded as a chunk of its own, so the phone, which never draws
-// it, loads none of MAWS's transcript.
+// The session view (DC9; the composite's §9.1): a direct channel's center wherever its session's machine is online,
+// on a phone as on a desktop (the owner, 2026-10-18) — MAWS's `Transcript` over the session's main transcript with its
+// owner lane on, so MAWS's report by default (the `<message>` spans and questions, one working record per marked turn,
+// an unmarked turn whole) and the full transcript a toggle away. The transcript is the session's shared owner's
+// (`depth/owner/session-owner.ts`), which the depth column holds too: one subscription feeds both. Its streaming text
+// joins the turn it answers, older rows page in at the top until the first, and an ended session stays pageable while
+// the view is open, its liveness read from its presence. On a desktop an `Agent` row opens its agent in the column; on
+// a phone, which has no column, it is a plain row. Loaded as a chunk of its own, the first time a session channel
+// opens, so the grid and the group chat load none of MAWS's transcript.
 //
 // What only the log and the hub know joins the transcript (M4; `tail/`): at its tail, the sends not yet in it, each with
 // its delivery state in its bubble's foot; then the session's pending requests as the channel's cards, answered in
@@ -39,6 +40,7 @@ import { useLanding } from '../../pwa/service-worker';
 import { useDeskLayout } from '../../shell/layout';
 import type { SessionPlane } from '../../shell/session-plane';
 import type { DeskSession } from '../../shell/sessions';
+import { useNarrow } from '../../shell/viewport';
 import { useDesk } from '../conversation/desk-context';
 import { useLandOnCard } from './land-on-card';
 import { useLandOnMessage } from './landed-message';
@@ -73,16 +75,21 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
   const [root, setRoot] = useState<HTMLElement | null>(null);
   const { connection } = useDesk();
   const conversation = useStore(connection.conversation.store);
+  const phone = useNarrow();
   const actions = useMemo<Partial<TranscriptActions>>(
-    () => ({
-      ...DESK_ACTIONS,
-      // The column takes the request and opens its Subagents tab on the agent; a closed column opens for it.
-      openSubagent: (ref: SubagentRef) => {
-        owner.openSubagent(ref);
-        if (!useDeskLayout.getState().depth.open) useDeskLayout.getState().setDepth({ open: true });
-      },
-    }),
-    [owner],
+    () =>
+      // A phone has no column (depth stays desktop-only), so MAWS draws an Agent row as a plain row there.
+      phone
+        ? DESK_ACTIONS
+        : {
+            ...DESK_ACTIONS,
+            // The column takes the request and opens its Subagents tab on the agent; a closed column opens for it.
+            openSubagent: (ref: SubagentRef) => {
+              owner.openSubagent(ref);
+              if (!useDeskLayout.getState().depth.open) useDeskLayout.getState().setDepth({ open: true });
+            },
+          },
+    [owner, phone],
   );
 
   // The rows held, as the subscription keeps them: read again whenever the held set changes (a row, a page, a reset),

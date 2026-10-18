@@ -1,0 +1,22 @@
+--- before
+desk-walk
+  web-a07368   idle               his  · now: brief is just 'his'; awaiting clarification  · by 1858fe3c549a424fe314c429383eb453
+  walk-g       idle
+  walk-c       idle @macbook 47m
+  web-7641de   retired            walk seat: answers pings  · now: standing by for pings  · by 1858fe3c549a424fe314c429383eb453
+read-only: no
+ceiling: auto (from your settings' defaultMode)
+--- stop
+stopped 94a88d4f
+--- policy on
+read-only: yes — nothing written outside this machine is delivered
+ceiling: auto (from your settings' defaultMode)
+--- after
+desk-walk
+  web-a07368   stopped            his  · now: brief is just 'his'; awaiting clarification  · by 1858fe3c549a424fe314c429383eb453
+  walk-g       idle
+  walk-c       idle @macbook 48m
+  web-7641de   retired            walk seat: answers pings  · now: standing by for pings  · by 1858fe3c549a424fe314c429383eb453
+read-only: yes — nothing written outside this machine is delivered
+ceiling: auto (from your settings' defaultMode)
+07:25:13
