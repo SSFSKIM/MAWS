@@ -33,7 +33,7 @@ import type { TranscriptRecord } from '@shared/wire/transcript';
 import type { JsonObject } from 'desk-hub/protocol';
 import { eventBase, isTaskNotification, localCommandKind, startsTurn, type BackfillContext } from '../../../../../src/engine-host/fs/backfill';
 import { deliveryAsDrawn, deliveryFrame, supersededDeliveries } from '../../conversation/delivery-frame';
-import { bridgeRowKind } from './bridge-rows';
+import { bridgeRowKind, steerContent } from './bridge-rows';
 
 /** What the desk says under an owner input the session never read: its turn was undone first. */
 export const UNDONE = 'Not read: the turn was undone';
@@ -89,7 +89,7 @@ export function ownerInput(row: JsonObject): OwnerInput | null {
     found = drawn === null ? null : input(drawn.type === 'attachment' ? object(drawn.attachment)?.prompt : object(drawn.message)?.content);
   } else {
     const kind = bridgeRowKind(row);
-    found = kind === 'steer' ? input(object(row.message)?.content) : kind === null ? typedPrompt(row) : null;
+    found = kind === 'steer' ? input(steerContent(row)) : kind === null ? typedPrompt(row) : null;
   }
   inputs.set(row, found);
   return found;

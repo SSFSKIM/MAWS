@@ -89,6 +89,30 @@ export class Chain {
     return this.appended(`${frame(msgId)}\n${words}`, parent);
   }
 
+  /** A steer as the bridge appends it from doperpowers 7.180.0: its own first line, then the owner's words. */
+  steer(words: string, parent?: JsonObject | null): JsonObject {
+    return this.appended(`[sminos steer from human]\n${words}`, parent);
+  }
+
+  /** The ask mod's async question (`mcp__doperpowers__AskUserQuestion`, `async: true`) and the result it returns at once. */
+  asyncAsk(id: string, questions: Array<{ question: string; header: string; options: Array<{ label: string }> }>): JsonObject {
+    const call = this.assistant([{ type: 'tool_use', id, name: 'mcp__doperpowers__AskUserQuestion', input: { questions: questions.map((q) => ({ ...q, multiSelect: false })), async: true } }]);
+    const text = 'Your questions are waiting for the human; this call does not wait for them. Their answer will reach you in a later message that quotes each question. Go on with work that does not depend on it.';
+    return this.row('user', { message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] }, sourceToolAssistantUUID: call.uuid, toolUseResult: text }, call);
+  }
+
+  /** The answer's prompt the ask mod submits while the session is idle (`$.prompt.submit({text})`), as 2.1.302 keeps it. */
+  answerPrompt(text: string, parent?: JsonObject | null): JsonObject {
+    const framed = `The doperpowers plugin sent a message:\n${text}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.`;
+    return this.row('user', { origin: { kind: 'plugin', name: 'doperpowers' }, promptId: `q${this.n}`, message: { role: 'user', content: framed } }, parent);
+  }
+
+  /** The answer as context on a tool's result (`tool.call`) or on the human's next prompt (`prompt.submit`). */
+  answerContext(text: string, hookName: 'tool.call' | 'prompt.submit', parent?: JsonObject | null): JsonObject {
+    const hookEvent = hookName === 'tool.call' ? 'PostToolUse' : 'UserPromptSubmit';
+    return this.row('attachment', { attachment: { type: 'hook_additional_context', content: [text], hookName, toolUseID: `${hookName}-${this.n}-context`, hookEvent } }, parent);
+  }
+
   /** The bridge's mirror of an append (`$.ui.log`), a notice under the plugin's name. */
   mirror(kind: 'delivered' | 'steer', text: string, parent?: JsonObject | null): JsonObject {
     return this.row('system', { subtype: 'informational', content: `doperpowers: ${kind}: ${text.replaceAll('\n', ' ')}`, isMeta: false, level: 'notice' }, parent);
