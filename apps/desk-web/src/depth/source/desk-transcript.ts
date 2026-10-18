@@ -60,6 +60,10 @@
 // under a new source, which MAWS's store installs staged, so the old rows stay drawn until the new state is whole; a
 // block the snapshot no longer streams (its row written, or its step ended, in the gap) stays drawn until the rows the
 // snapshot brought have landed, so it never leaves before its row is drawn.
+//
+// Latency (desk ticket #57). The hops this transcript sees are timed for `latency/latency.ts`: a main thread's first rows
+// (subscribe, snapshot, drawn), each live row and each of its own chunks from the machine's stamp until drawn, the
+// owner's own send until its row, each tool call's time (a raised request's anchor), and each resume's gap.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, TranscriptRecordSchema } from '@shared/wire/transcript';
@@ -74,7 +78,9 @@ import { noteModel } from '../../state/models';
 import { taskGraphOf, withEvents, withMetas, withStatuses } from '../agents/task-feed';
 import { OutputRequests } from '../jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
-import { deliveryAsDrawn, deliveryFrame } from '../../conversation/delivery-frame';
+import { deliveredLines, deliveryAsDrawn, deliveryFrame } from '../../conversation/delivery-frame';
+import { framePattern } from '../../conversation/tail';
+import { latency } from '../../latency/latency';
 import { withAppendedTurn } from './appended-turn';
 import { withAnswerLines } from './ask-answer';
 import { isMirrorLine, steerAsDrawn } from './bridge-rows';
@@ -136,6 +142,14 @@ const modelOf = (row: JsonObject): string | null => {
   const model = row.type === 'assistant' ? (row.message as JsonObject | undefined)?.model : undefined;
   return typeof model === 'string' && model !== '' && model !== '<synthetic>' ? model : null;
 };
+
+/** Each tool call a response row makes, told to `latency.ts` with the row's time: the anchor of a request it raises. */
+function noteCalls(row: JsonObject): void {
+  if (row.type !== 'assistant') return;
+  const content = (row.message as JsonObject | undefined)?.content;
+  if (!Array.isArray(content)) return;
+  for (const block of content as JsonObject[]) if (block?.type === 'tool_use' && typeof block.id === 'string') latency.noteCall(block.id, row.timestamp);
+}
 
 /** The backfill's subagent lookup over DX4's `subagents` metas (each `subagents/*.meta.json` verbatim). */
 export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLookup {
@@ -290,6 +304,10 @@ export class DeskTranscript {
   private serving = false;
   private source: RowsSource;
   private offStore: (() => void) | null = null;
+  /** A main thread's first rows on their way (`latency.ts`): when it subscribed, and when the snapshot came in. */
+  private firstRows: { subscribed: number; snapshot: number | null } | null = null;
+  /** When the disruption the next snapshot resumes from began (`latency.ts`'s resume gap). */
+  private disruptedAt: number | null = null;
   /** The jobs view's open outputs, asked for on this subscription (a main-thread one's). */
   readonly outputs = new OutputRequests((taskId, tail) => {
     if (!this.serving || this.subscription === null) return false;
@@ -325,7 +343,9 @@ export class DeskTranscript {
     if (this.subscription) return;
     this.offStore ??= this.store.subscribe(() => {
       if (this.settleLanded()) this.publish();
+      this.firstRowsDrawn();
     });
+    if (!this.held && this.target.agentId === null) this.firstRows = { subscribed: performance.now(), snapshot: null };
     this.subscribe();
   }
 
@@ -405,6 +425,7 @@ export class DeskTranscript {
       end: (body) => {
         this.subscription = null;
         this.serving = false;
+        this.disruptedAt ??= performance.now();
         this.outputs.lost();
         this.state.setState({ phase: 'ended', ended: body, loadingOlder: false });
       },
@@ -436,7 +457,18 @@ export class DeskTranscript {
       this.setRows(fresh);
       this.retree();
       this.layer.load(body.streaming);
+      if (this.firstRows !== null) {
+        this.firstRows.snapshot = performance.now();
+        latency.record('view.snapshot', this.firstRows.snapshot - this.firstRows.subscribed);
+        if (fresh.length === 0) this.firstRows = null; // nothing to draw: no first rows to time
+      }
     }
+    for (const row of fresh) noteCalls(row);
+    if (this.held && this.disruptedAt !== null) {
+      latency.record('resume.gap', performance.now() - this.disruptedAt);
+      latency.count('subscription.resumes');
+    }
+    this.disruptedAt = null;
     this.held = true;
     this.serving = true;
     this.snapshotted.resolve();
@@ -451,9 +483,14 @@ export class DeskTranscript {
     switch (message.kind) {
       case 'row':
         return this.row(message.body);
-      case 'chunk':
-        if (this.layer.chunk(message.body)) this.publish();
+      case 'chunk': {
+        if (!this.layer.chunk(message.body)) return;
+        this.publish();
+        // The bridge's stamp, ms on the machine's clock; `t` joins the chunk's type with the hub's #57 change.
+        const t = (message.body as { t?: unknown }).t;
+        if (message.body.agentId === this.target.agentId && typeof t === 'number') latency.drawn('stream.chunk', t, true);
         return;
+      }
       case 'block-row':
         this.layer.blockRow(message.body);
         // Another transcript's block (a subagent's, on the main subscription): its row never comes on this
@@ -493,6 +530,7 @@ export class DeskTranscript {
       this.rows.push(row);
       const model = modelOf(row);
       if (model !== null && model !== this.state.getState().model) this.setModel(model);
+      this.timeRow(row);
     }
     // What is drawn of the rows already mapped changes only with the marks, an owner input (it may repeat an undone one's
     // words), a delivery (a later copy of a held one), or, while an input draws as undone, a response (the session read
@@ -546,8 +584,35 @@ export class DeskTranscript {
    */
   private interrupted(): void {
     this.serving = false;
+    this.disruptedAt ??= performance.now();
     this.outputs.lost();
     this.state.setState({ phase: 'reconnecting', ended: null, loadingOlder: false });
+  }
+
+  /**
+   * A live row's hops (`latency.ts`): from its engine timestamp until it is drawn; a tool call's time, for the request it
+   * may raise; and, for the owner's own send delivered here, from its sending until its row was written.
+   */
+  private timeRow(row: Row): void {
+    latency.drawn('stream.row', Date.parse(String(row.timestamp)), true);
+    noteCalls(row);
+    if (this.target.agentId !== null || deliveryFrame(row)?.own !== true) return;
+    const lines = deliveredLines(row);
+    latency.ownerRow((ref) => {
+      const frame = framePattern({ ...ref, from: 'human' });
+      return lines.some((line) => frame.test(line));
+    }, row.timestamp);
+  }
+
+  /** A main thread's first rows are in the store: drawn at the next frame. */
+  private firstRowsDrawn(): void {
+    const first = this.firstRows;
+    if (first === null || first.snapshot === null) return;
+    const entry = this.store.getState().entries[this.key];
+    if (entry?.phase !== 'live' || entry.rows.length === 0) return;
+    this.firstRows = null;
+    latency.drawn('view.drawn', first.snapshot);
+    latency.drawn('view.first-rows', first.subscribed);
   }
 
   /**
