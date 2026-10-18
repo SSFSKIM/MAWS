@@ -788,8 +788,8 @@ export class Project extends DurableObject<Env> {
 
   /**
    * The project's line on the org's grid, sent to the registry when it changes. Its counts are of the machines that hold
-   * the project; `machines_state` names every machine leased here, followers included, with whether its lease is fresh,
-   * which is how the Registry knows each machine's online state.
+   * the project; `machines_state` names every machine leased here, followers included, with whether its lease is fresh
+   * and its stream generation, which is how the Registry knows each machine's online state.
    */
   private reportSummary(): void {
     // A revoked machine is no machine of the project, unless its name was enrolled anew and opened the project since.
@@ -808,7 +808,7 @@ export class Project extends DurableObject<Env> {
       machines_online: online.size,
       working,
       waiting: this.waitingSessions().size,
-      machines_state: leased.map((l) => ({ name: l.machine, online: this.isFresh(l) })),
+      machines_state: leased.map((l) => ({ name: l.machine, online: this.isFresh(l), generation: l.generation })),
     };
     const text = JSON.stringify(summary);
     if (this.ctx.storage.kv.get('summary') === text) return;

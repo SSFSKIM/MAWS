@@ -17,10 +17,11 @@
 //   - a `Project` armed to fail its next `forget`, as a failed RPC from the Registry would;
 //   - a `Registry` whose org record can be rewritten, as an object still on a deploy's previous version would make it;
 //   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand;
-//   - a `Registry` that drops a project's row, as a hub from before machine projects lacks a machine's.
+//   - a `Registry` that drops a project's row, as a hub from before machine projects lacks a machine's, and takes a
+//     project's summary report straight, as a late one would arrive.
 import { Machine as DeployedMachine, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
-import { Registry as DeployedRegistry } from '../../src/objects/registry';
+import { Registry as DeployedRegistry, type SummaryReport } from '../../src/objects/registry';
 import type { DownFrame, UpFrame } from '../../src/protocol/machine';
 import type { MachineContext } from '../../src/objects/project';
 import type { Env } from '../../src/env';
@@ -47,6 +48,7 @@ import {
   SEND_FAULT_PATH,
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
+  REPORT_PATH,
   TIMING_PATH,
   UNREGISTER_PATH,
 } from './send-fault';
@@ -67,6 +69,11 @@ export class Registry extends DeployedRegistry {
         }
       });
       return new Response('added');
+    }
+    if (url.pathname === REPORT_PATH) {
+      const { project, report } = (await request.json()) as { project: string; report: SummaryReport };
+      this.summary(project, report);
+      return Response.json(this.orgFrame().frame);
     }
     if (url.pathname === UNREGISTER_PATH) {
       const { id } = (await request.json()) as { id: string };

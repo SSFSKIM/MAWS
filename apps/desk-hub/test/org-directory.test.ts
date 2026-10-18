@@ -233,6 +233,26 @@ describe("a machine's project", () => {
     await watcher.close();
   });
 
+  it("is not made online by a late report of the revoked enrollment's lease, once the name is enrolled anew", async () => {
+    const name = newName();
+    const project = newProject();
+    const old = await connected(name);
+    await old.sync(project);
+    const generation = old.generation;
+    await nextOrg(old, 0, (f) => machineIn(f, name)?.online === true, 'the first enrollment online');
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${name}`, { method: 'DELETE' })).status).toBe(200);
+    const again = await connected(name);
+    // A report the project sent before it took the revocation, delivered only now: its lease is the old stream's.
+    const late = await hub.report(project, { machines: 1, machines_online: 1, working: 0, waiting: 0, machines_state: [{ name, online: true, generation }] });
+    expect(machineIn(late, name)).toEqual({ name, online: false, seen: null });
+    // The new enrollment's own lease counts as soon as it opens a project.
+    const from = again.frames.length;
+    await again.sync(project);
+    await nextOrg(again, from, (f) => machineIn(f, name)?.online === true, 'the new enrollment online');
+    await again.close();
+    await old.close();
+  });
+
   it("missing at the hub (a machine enrolled before machine projects) is registered as the machine's by its first hello, whoever sends it", async () => {
     const m = await connected();
     const id = machineProjectId(ORG, m.name);

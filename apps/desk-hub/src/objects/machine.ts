@@ -9,7 +9,8 @@
 // and the projects then find the lease lapsed (Project's alarm).
 //
 // The org's directory (`org`) is second on every stream: the object asks the org's `Registry` for it as the stream
-// opens and writes nothing else after `welcome` until it is written. The `Registry` sends it again on every change
+// opens and writes nothing else after `welcome` until it is written (a stream it cannot be had for ends, and the daemon
+// reconnects for it). The `Registry` sends it again on every change
 // (`directory`), each carrying its version, so one that arrives behind a later one, or behind the snapshot, is passed by.
 //
 // A revocation is a fence: the revoked credential's client id is kept, and a request carrying it is refused here, so
@@ -142,7 +143,8 @@ export class Machine extends DurableObject<Env> {
     // The client's close reaches the object as the request's abort (compatibility flag enable_request_signal).
     request.signal.addEventListener('abort', () => this.end(stream));
     void this.write(stream, { t: 'welcome', org, machine, generation, heartbeat_ms: heartbeatMs }, false);
-    // A directory the Registry cannot give now comes with its next change.
+    // A stream the Registry could not give its directory ends before anything else is written on it: the daemon
+    // reconnects, and its next stream asks again. Nothing waits for a change that may never come.
     stream.ready = this.env.REGISTRY.get(this.env.REGISTRY.idFromName(org))
       .orgFrame()
       .then(async ({ frame, version }) => {
@@ -150,7 +152,7 @@ export class Machine extends DurableObject<Env> {
         stream.directoryVersion = version;
         await this.write(stream, frame, false);
       })
-      .catch(() => {});
+      .catch(() => this.end(stream));
     return new Response(readable, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' } });
   }
 

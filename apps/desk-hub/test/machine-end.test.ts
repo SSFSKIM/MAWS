@@ -16,11 +16,13 @@ vi.mock('cloudflare:workers', () => ({
 const { Machine } = await import('../src/objects/machine');
 const { CLIENT_HEADER, MACHINE_HEADER, ORG_HEADER } = await import('../src/env');
 
-function machineObject() {
+const directory = async () => ({ frame: { t: 'org', projects: [], machines: [] }, version: 0 });
+
+function machineObject(orgFrame: () => Promise<unknown> = directory) {
   const kv = new Map<string, unknown>();
   const ctx = { storage: { kv: { get: (k: string) => kv.get(k), put: (k: string, v: unknown) => kv.set(k, v), delete: (k: string) => kv.delete(k) } } };
   const project = { closed: async () => {}, renew: async () => {} };
-  const registry = { orgFrame: async () => ({ frame: { t: 'org', projects: [], machines: [] }, version: 0 }) };
+  const registry = { orgFrame };
   const env = { PROJECT: { idFromName: (name: string) => name, get: () => project }, REGISTRY: { idFromName: (name: string) => name, get: () => registry } };
   return new Machine(ctx as never, env as never);
 }
@@ -50,5 +52,37 @@ describe("a stream nobody reads, ended", () => {
     expect(await within(stalled, 100)).toBe('pending');
     machine.revoke('client-1');
     expect(await within(stalled)).toBe('offline');
+  });
+});
+
+describe("a stream whose org directory the Registry could not give", () => {
+  it('ends, so the machine reconnects for it, and nothing queued behind the directory is written', async () => {
+    const machine = machineObject(async () => {
+      throw new Error('the Registry is unreachable');
+    });
+    const response = await open(machine);
+    const reply = machine.send({ t: 'rpc-ack', project: 'p', nonce: 'AQEBAQEBAQEBAQEBAQEBAQ' });
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    const ended = (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return 'ended';
+          text += decoder.decode(value, { stream: true });
+        }
+      } catch {
+        return 'ended';
+      }
+    })();
+    const outcome = await Promise.race([ended, new Promise<'open'>((resolve) => setTimeout(() => resolve('open'), 1000))]);
+    // The welcome may or may not reach the client before the end (an errored stream drops what it had not handed over);
+    // either way the daemon takes the end as a dead stream and opens another.
+    expect(text).not.toContain('rpc-ack');
+    expect(text).not.toContain('event: hb');
+    expect(outcome).toBe('ended');
+    expect(await within(reply)).toBe('offline');
+    machine.revoke('client-1');
   });
 });
