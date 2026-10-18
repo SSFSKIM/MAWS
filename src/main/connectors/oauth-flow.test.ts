@@ -551,6 +551,21 @@ describe('refresh', () => {
     expect(tokens).toEqual({ accessToken: 'at-1', refreshToken: 'rt-1', tokenType: 'Bearer', grantedScope: 'metrics:read', expiresAt: NOW + 60_000, obtainedAt: NOW });
   });
 
+  // P3-F F-connectors 3 sibling: the SDK's token requests (Connect's code exchange and the refresh) carry the same
+  // form-encoded Basic authentication as the revocation, never the SDK's own unencoded one
+  it('form-encodes Basic authentication on the code exchange and on the refresh', async () => {
+    const basic = `Basic ${btoa('client+1:se%2Bc%2Fr%3Dt%25')}`;
+    const h = new Harness();
+    h.script.metadata = { ...METADATA, token_endpoint_auth_methods_supported: ['client_secret_basic'] };
+    h.script.register = { client_id: 'client 1', client_secret: 'se+c/r=t%', client_id_issued_at: 1, redirect_uris: ['http://127.0.0.1:53100/callback'], token_endpoint_auth_method: 'client_secret_basic', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], client_name: 'MAWS' };
+    const pending = connect(h);
+    await h.browserOpened();
+    h.deliver('/callback?code=code-1&state=state-abc');
+    const grant = await pending;
+    await h.flow.refresh(grant, new AbortController().signal);
+    expect(h.posts('/token').map((post) => post.headers.get('authorization'))).toEqual([basic, basic]);
+  });
+
   it('keeps the old refresh token when the server does not rotate it', async () => {
     const h = new Harness();
     const noRotation = { ...TOKENS, refresh_token: undefined };

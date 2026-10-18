@@ -27,7 +27,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   discoverAuthorizationServerMetadata, discoverOAuthProtectedResourceMetadata, exchangeAuthorization, refreshAuthorization, registerClient,
-  selectClientAuthMethod, startAuthorization,
+  selectClientAuthMethod, startAuthorization, type AddClientAuthentication,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { AuthorizationServerMetadata, OAuthClientInformationFull, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { checkResourceAllowed, resourceUrlFromServerUrl } from '@modelcontextprotocol/sdk/shared/auth-utils.js';
@@ -207,6 +207,13 @@ function applyClientAuthentication(method: string, client: OAuthClientInformatio
   if (method === 'client_secret_post' && client.client_secret !== undefined) params.set('client_secret', client.client_secret);
 }
 
+// P3-F F-connectors 3 sibling: the SDK's token requests (Connect's code exchange and the refresh) authenticate the
+// client here, the method chosen as the SDK chooses it, so a Basic credential is form-encoded there too (the SDK's own
+// is not); passed through the SDK's public `addClientAuthentication`.
+function tokenClientAuthentication(client: OAuthClientInformationFull, metadata: Pick<AuthorizationServerMetadata, 'token_endpoint_auth_methods_supported'> | undefined): AddClientAuthentication {
+  return (headers, params) => applyClientAuthentication(selectClientAuthMethod(client, metadata?.token_endpoint_auth_methods_supported ?? []), client, headers, params);
+}
+
 // RFC 7009's fields as RFC 8414 metadata declares them; OpenID discovery metadata carries them only as extra members.
 function revocationOf(metadata: AuthorizationServerMetadata): { endpoint?: string; methods?: string[] } {
   const { revocation_endpoint: endpoint, revocation_endpoint_auth_methods_supported: methods } = metadata as { revocation_endpoint?: unknown; revocation_endpoint_auth_methods_supported?: unknown };
@@ -326,7 +333,7 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
           callback.arm(state);
           await step(flow, 'browser', () => untilEnded(() => deps.openBrowser(authorizationUrl.href), flow));
           const code = await callback.wait(flow);
-          const raw = await step(flow, 'exchange', () => exchangeAuthorization(server, { metadata, clientInformation: client, authorizationCode: code, codeVerifier, redirectUri, resource, fetchFn: flowFetch }));
+          const raw = await step(flow, 'exchange', () => exchangeAuthorization(server, { metadata, clientInformation: client, authorizationCode: code, codeVerifier, redirectUri, resource, addClientAuthentication: tokenClientAuthentication(client, metadata), fetchFn: flowFetch }));
           return { issuer: metadata.issuer, resource, redirectUri, authorizationServer: metadata, client, tokens: acceptTokens(raw, now()) };
         } finally {
           await listener.close().catch(() => {});
@@ -344,7 +351,7 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
       const fetchFn = boundedOAuthFetch(deps.fetch, signal);
       let raw: OAuthTokens;
       try {
-        raw = await refreshAuthorization(grant.issuer, { metadata: grant.authorizationServer, clientInformation: grant.client, refreshToken, resource: grant.resource, fetchFn });
+        raw = await refreshAuthorization(grant.issuer, { metadata: grant.authorizationServer, clientInformation: grant.client, refreshToken, resource: grant.resource, addClientAuthentication: tokenClientAuthentication(grant.client, grant.authorizationServer), fetchFn });
       } catch (error) {
         if (signal.aborted) throw fail('cancelled');
         if (error instanceof OAuthTransportError) throw fail(error.code === 'timeout' ? 'timeout' : error.code === 'insecure' ? 'rejected' : 'transient');
