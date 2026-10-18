@@ -255,10 +255,10 @@ export class ConnectorCalls {
     const ticket = this.observing(client, input); // P3-HD
     try {
       const answer = await mcpStatus(client, {}, { signal });
-      if (ticket) this.options.statusCache?.observe(ticket, answer); // P3-HD
+      if (ticket && this.stillObserving(client, input, ticket.context)) this.options.statusCache?.observe(ticket, answer); // P3-HD
       return connectorToolState(answer, input.server, input.tool);
     } catch (error) {
-      if (ticket && error instanceof ControlError && error.code === 'invalid_response') this.options.statusCache?.reject(ticket); // P3-HD
+      if (ticket && error instanceof ControlError && error.code === 'invalid_response' && this.stillObserving(client, input, ticket.context)) this.options.statusCache?.reject(ticket); // P3-HD
       if (error instanceof ControlError) return null;
       throw error;
     }
@@ -266,14 +266,25 @@ export class ConnectorCalls {
 
   // P3-HD start: an observation is taken only for the session's live launch, still in the directory it was launched in
   // (a set_cwd since then makes its report another directory's), its place in that launch's order taken before the
-  // request is written.
+  // request is written; and (panel correction) its answer lands only if that still holds once it arrives, so a
+  // set_cwd or a relaunch while the request was pending discards it.
   private observing(client: ControlClient, input: ConnectorSessionTool) {
     const cache = this.options.statusCache;
+    const context = this.observedContext(client, input);
+    return cache && context ? cache.begin(context) : null;
+  }
+
+  private stillObserving(client: ControlClient, input: ConnectorSessionTool, begun: ConnectorLaunchContext): boolean {
+    const context = this.observedContext(client, input);
+    return context !== null && context.appSessionId === begun.appSessionId && context.launchId === begun.launchId && context.cwd === begun.cwd;
+  }
+
+  private observedContext(client: ControlClient, input: ConnectorSessionTool): ConnectorLaunchContext | null {
     const session = this.options.session(input.appSessionId);
     const context = session?.connectorLaunchContext?.();
-    if (!cache || !session || !context || session.control !== client) return null;
+    if (!session || !context || session.control !== client) return null;
     const status = session.status();
-    return status.launchId === context.launchId && status.cwd === context.cwd ? cache.begin(context) : null;
+    return status.launchId === context.launchId && status.cwd === context.cwd ? context : null;
   }
   // P3-HD end
 

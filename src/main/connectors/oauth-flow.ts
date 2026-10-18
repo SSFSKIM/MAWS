@@ -5,8 +5,9 @@
 //
 // Connect is one explicit pass, each external step taken once and only while the owner's signal stands:
 //   protected-resource metadata of the request URL (no fallback to a guessed server) → its resource must cover the
-//   request URL (`checkResourceAllowed`) and is kept verbatim → the first advertised authorization server's metadata,
-//   whose issuer must name that server → HTTPS endpoints (127.0.0.1 HTTP for fixtures), dynamic registration and S256
+//   request URL (`resourceCovers`: same origin; exact with a query on either side, else `checkResourceAllowed`) and is
+//   kept verbatim → the first advertised authorization server's metadata, every discovery request on its origin, whose
+//   issuer must name that server → HTTPS endpoints (127.0.0.1 HTTP for fixtures), dynamic registration and S256
 //   required → the 127.0.0.1 listener is bound → registration for exactly its redirect URI → authorization URL with
 //   state, PKCE and the resource → the system browser → one callback (exact path, GET, single-valued state, iss when
 //   advertised or present) → one code exchange → a Bearer token answer.
@@ -206,6 +207,28 @@ function revocationOf(metadata: AuthorizationServerMetadata): { endpoint?: strin
   };
 }
 
+// P3-HD panel correction (Decision Log 45 and 46): whether the advertised resource indicator may stand for the request
+// URL. Always the same origin. With a query on either side, exactly the requested resource (origin, path and query: a
+// query names a tenant, which the SDK's path-prefix check ignores); with none, the SDK's path-prefix coverage, so a
+// parent path or the origin may be advertised for a deeper request.
+function resourceCovers(requestUrl: string, advertised: string): boolean {
+  let requested: URL;
+  let resource: URL;
+  try {
+    requested = resourceUrlFromServerUrl(requestUrl);
+    resource = new URL(advertised);
+  } catch {
+    return false;
+  }
+  if (requested.origin !== resource.origin) return false;
+  if (requested.search !== '' || resource.search !== '') return requested.pathname === resource.pathname && requested.search === resource.search;
+  try {
+    return checkResourceAllowed({ requestedResource: requested, configuredResource: resource });
+  } catch {
+    return false;
+  }
+}
+
 const endpointsOf = (metadata: AuthorizationServerMetadata) =>
   [metadata.authorization_endpoint, metadata.token_endpoint, metadata.registration_endpoint, revocationOf(metadata).endpoint].filter((url): url is string => url !== undefined);
 
@@ -228,18 +251,17 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
 
   async function discover(requestUrl: string, signal: AbortSignal, fetchFn: OAuthFetch) {
     const prm = await step(signal, 'discovery', () => discoverOAuthProtectedResourceMetadata(requestUrl, undefined, fetchFn));
-    let covers: boolean;
-    try {
-      covers = checkResourceAllowed({ requestedResource: resourceUrlFromServerUrl(requestUrl), configuredResource: prm.resource });
-    } catch {
-      covers = false;
-    }
-    if (!covers) throw fail('resource');
+    if (!resourceCovers(requestUrl, prm.resource)) throw fail('resource');
     const server = prm.authorization_servers?.[0];
     if (server === undefined) throw fail('discovery');
     if (!isPermittedOAuthUrl(server)) throw fail('insecure');
+    // P3-HD panel correction (Decision Log 45): every discovery candidate, and any redirect the SDK follows through
+    // this fetch, stays on the advertised issuer's origin, checked before the request; the SDK's last OpenID candidate
+    // for an issuer path beginning `//` would otherwise resolve to another origin
+    const issuerOrigin = new URL(server).origin;
     let document: unknown; // the last document the discovery answered, which is the one the SDK parsed
     const capturing: OAuthFetch = async (url, init) => {
+      if (new URL(url).origin !== issuerOrigin) throw fail('issuer');
       const response = await fetchFn(url, init);
       document = response.ok ? await response.clone().json().catch(() => undefined) : document;
       return response;

@@ -9,7 +9,7 @@ import type { ConnectorOAuthGrant } from './oauth-types';
 
 const MCP = 'https://mcp.example.com';
 const AS = 'https://auth.example.com';
-const REQUEST_URL = `${MCP}/mcp?tenant=7`;
+const REQUEST_URL = `${MCP}/mcp`; // query-free: a pathless resource indicator covers it (P3-HD Decision Log 46)
 const NOW = 1_700_000_000_000;
 const SECRET_BODY = 'raw-body-sentinel-3c9e';
 
@@ -21,7 +21,12 @@ interface Script {
   token?: object | number | 'hang';
   revoke?: number | 'network';
   oidc?: object; // served as OpenID discovery metadata, the RFC 8414 document then answering 404
+  foreign?: object; // P3-HD panel correction: what another origin, FOREIGN, serves at its OpenID discovery path
+  redirect?: string; // P3-HD panel correction: the first authorization-server discovery candidate answers 302 there
 }
+const FOREIGN = 'https://foreign.example.net';
+// what an OpenID discovery document needs beyond RFC 8414's members to parse
+const OIDC_REQUIRED = { jwks_uri: `${FOREIGN}/jwks`, subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'] };
 const metadataFor = (as: string) => ({
   issuer: as, authorization_endpoint: `${as}/authorize`, token_endpoint: `${as}/token`, registration_endpoint: `${as}/register`,
   response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'], code_challenge_methods_supported: ['S256'],
@@ -59,6 +64,8 @@ class Harness {
     };
     const { mcp, as } = this;
     if (url.origin === mcp && url.pathname.startsWith('/.well-known/oauth-protected-resource')) return answer(s.prm, { ...PRM, resource: mcp, authorization_servers: [as] });
+    if (s.redirect !== undefined && url.origin === as && url.pathname.startsWith('/.well-known/oauth-authorization-server')) return new Response(null, { status: 302, headers: { location: s.redirect } });
+    if (url.origin === FOREIGN && url.pathname === '/.well-known/openid-configuration' && s.foreign) return answer(s.foreign, {});
     if (url.origin === as && url.pathname === '/.well-known/oauth-authorization-server') return s.oidc ? new Response('not found', { status: 404 }) : answer(s.metadata, metadataFor(as));
     if (url.origin === as && url.pathname === '/.well-known/openid-configuration' && s.oidc) return answer(s.oidc, {});
     if (url.origin === as && url.pathname === '/register') {
@@ -138,7 +145,7 @@ describe('connect', () => {
       client: { client_id: 'client-1' }, authorizationServer: { token_endpoint: `${AS}/token` },
       tokens: { accessToken: 'at-1', refreshToken: 'rt-1', tokenType: 'Bearer', grantedScope: 'metrics:read', expiresAt: NOW + 60_000, obtainedAt: NOW },
     });
-    expect(JSON.stringify(grant)).not.toContain('tenant=7'); // the request URL is the identity's, never the grant's resource
+    expect(JSON.stringify(grant)).not.toContain('mcp.example.com/mcp'); // the request URL is the identity's, never the grant's resource
   });
 
   it('compares the issuer as an exact string: a pathless PRM issuer is not the slash-suffixed metadata issuer', async () => {
@@ -184,6 +191,56 @@ describe('connect', () => {
       expect(await failureOf(connect(h)), resource).toMatchObject({ code: 'resource' });
       expect(h.events).toEqual([`GET ${MCP}/.well-known/oauth-protected-resource/mcp`]);
     }
+  });
+
+  // P3-HD panel correction (Decision Log 45, refined by 46): the advertised resource stays on the requested origin; a
+  // query on either side makes it the requested resource exactly (origin, path and query); query-free, it covers the
+  // request by path. Refused before any listener, registration or authorization.
+  it('binds a query-bearing resource exactly to the requested one, before registering or authorizing anything', async () => {
+    const tenant = (name: string) => `${MCP}/mcp?tenant=${name}`;
+    const refused: [string, string][] = [
+      [tenant('alpha'), tenant('beta')], // another tenant's resource
+      [tenant('alpha'), `${MCP}/mcp`], // the query on the request only
+      [tenant('alpha'), MCP],
+      [`${MCP}/mcp`, tenant('alpha')], // the query on the advertisement only
+      [tenant('alpha'), `${MCP}/other?tenant=alpha`],
+      [tenant('alpha'), `https://other.example.com/mcp?tenant=alpha`],
+    ];
+    for (const [requestUrl, resource] of refused) {
+      const h = new Harness();
+      h.script.prm = { ...PRM, resource };
+      expect(await failureOf(h.flow.connect({ requestUrl, signal: new AbortController().signal })), `${requestUrl} ← ${resource}`).toMatchObject({ code: 'resource' });
+      expect(h.events, `${requestUrl} ← ${resource}`).toEqual([`GET ${MCP}/.well-known/oauth-protected-resource/mcp`]);
+      expect(h.opened).toEqual([]);
+    }
+    const exact = new Harness();
+    exact.script.prm = { ...PRM, resource: tenant('alpha') };
+    const pending = exact.flow.connect({ requestUrl: tenant('alpha'), signal: new AbortController().signal });
+    expect((await exact.browserOpened()).searchParams.get('resource')).toBe(tenant('alpha'));
+    exact.deliver('/callback?code=c&state=state-abc');
+    expect((await pending).resource).toBe(tenant('alpha'));
+    expect(exact.form(exact.posts('/token')[0]!).resource).toBe(tenant('alpha'));
+  });
+
+  it('keeps every authorization-server discovery request on the advertised issuer’s origin', async () => {
+    // an issuer whose path starts with `//`: the SDK's last OpenID candidate would resolve to another origin, which would
+    // answer metadata naming that issuer string after the issuer origin's own candidates answered 404
+    const issuer = `${AS}//foreign.example.net`;
+    const h = new Harness();
+    h.script.prm = { ...PRM, authorization_servers: [issuer] };
+    h.script.foreign = { ...metadataFor(FOREIGN), ...OIDC_REQUIRED, issuer };
+    expect(await failureOf(connect(h))).toMatchObject({ code: 'issuer' });
+    expect(h.seen.filter((seen) => seen.url.origin !== MCP && seen.url.origin !== AS), 'nothing left the issuer’s origin').toEqual([]);
+    expect(h.seen.filter((seen) => seen.url.origin === AS).length, 'its own candidates were asked').toBeGreaterThan(0);
+    expect(h.events).not.toContain('listen');
+    expect(h.posts('/register')).toEqual([]);
+
+    const redirected = new Harness();
+    redirected.script.redirect = `${FOREIGN}/.well-known/openid-configuration`;
+    redirected.script.foreign = { ...metadataFor(FOREIGN), ...OIDC_REQUIRED, issuer: AS };
+    await failureOf(connect(redirected));
+    expect(redirected.seen.filter((seen) => seen.url.origin === FOREIGN), 'a redirect is not followed off the issuer’s origin').toEqual([]);
+    expect(redirected.posts('/register')).toEqual([]);
   });
 
   it('never guesses an authorization server: missing or unreachable protected-resource metadata stops the flow', async () => {

@@ -20,6 +20,7 @@ import { mcpStatus } from '../../src/engine-host/controls';
 import { buildEnvironment, ENGINE_FLAGS, mergeFlagSettings, RELAY_URL, type LaunchPlan } from '../../src/engine-host/launch';
 import { ControlClient } from '../../src/engine-host/rpc';
 import { MAX_LINE_CHARS, spawnEngine } from '../../src/engine-host/transport';
+import { shellQuoted } from './connector-direct-checks'; // P3-HD panel correction
 import { installedEngine } from './p1-live';
 
 export const DIRECT_SERVER = join(__dirname, 'connector-direct-server.mjs');
@@ -41,7 +42,7 @@ export function probeLayout(): ProbeLayout {
   const layout = { scratch, home: join(scratch, 'home'), config: join(scratch, 'config'), project: join(scratch, 'project'), bin: join(scratch, 'bin'), log: join(scratch, 'calls.jsonl') };
   for (const dir of [layout.home, layout.config, layout.project, layout.bin]) mkdirSync(dir);
   // a bare command the engine and MAWS can find only through the launch PATH
-  writeFileSync(join(layout.bin, 'probe-node'), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`);
+  writeFileSync(join(layout.bin, 'probe-node'), `#!/bin/sh\nexec ${shellQuoted(process.execPath)} "$@"\n`); // P3-HD panel correction: never expanded
   chmodSync(join(layout.bin, 'probe-node'), 0o755);
   return { ...layout, close: () => rmSync(scratch, { recursive: true, force: true }) };
 }

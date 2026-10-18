@@ -29,13 +29,15 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function scriptedClient(): ControlClient {
+// `onStatus`: runs as the engine receives an mcp_status request, before it answers (what changes while it is pending)
+function scriptedClient(onStatus: () => void = () => {}): ControlClient {
   const transport: EngineTransport = {
     pid: null,
     frames: (async function* () {})(),
     stderr: (async function* () {})(),
     write: (frame) => {
       const subtype = frame.type === 'control_request' ? (frame.request as { subtype: string }).subtype : null;
+      if (subtype === 'mcp_status') onStatus();
       // mcp_status as scripted; the support probe's mcp_call answered as the engine answers an unknown server
       const envelope = subtype === 'mcp_status' ? { subtype: 'success', response: structuredClone(answer) } : subtype === 'mcp_call' ? { subtype: 'error', error: 'MCP server not connected: probe' } : null;
       if (envelope && frame.type === 'control_request') queueMicrotask(() => client.observe({ type: 'control_response', response: { ...envelope, request_id: frame.request_id } } as never));
@@ -79,6 +81,26 @@ describe('ConnectorCalls observing for route D', () => {
     expect(await bare.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
   });
 
+  // P3-HD panel correction: what was checked before the request is checked again once it is answered
+  it('discards an answer whose session moved (set_cwd) or relaunched while the request was pending', async () => {
+    const elsewhere = join(dir, 'elsewhere');
+    let status = { launchId: 'L1', cwd: project };
+    const moved = new ConnectorStatusCache();
+    const client = scriptedClient(() => (status = { launchId: 'L1', cwd: elsewhere }));
+    const view: ConnectorSessionView = { lifecycle: 'ready', control: client, status: () => status, connectorLaunchContext: context };
+    await calls(view, moved).resolve(tool());
+    expect(await moved.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
+    expect(await moved.resolveSource(elsewhere, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
+
+    const relaunched = new ConnectorStatusCache();
+    const second = connectorLaunchContext({ appSessionId: SESSION, launchId: 'L2', cwd: project, environment: { HOME: dir, PATH: join(dir, 'bin') } });
+    let current: ConnectorSessionView;
+    const old = scriptedClient(() => (current = { lifecycle: 'ready', control: scriptedClient(), status: () => ({ launchId: 'L2', cwd: project }), connectorLaunchContext: () => second }));
+    current = { lifecycle: 'ready', control: old, status: () => ({ launchId: 'L1', cwd: project }), connectorLaunchContext: context };
+    await new ConnectorCalls({ session: (id) => (id === SESSION ? current : undefined), store: () => null, completed: () => {}, probe: async () => 'supported', statusCache: relaunched }).resolve(tool());
+    expect(await relaunched.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
+  });
+
   it('fails the context closed when a newer answer fails mcp_status’s schema', async () => {
     const client = scriptedClient();
     const cache = new ConnectorStatusCache();
@@ -107,5 +129,23 @@ describe('registerConnectors and the observation cache', () => {
     await handlers.get('connectors.resolve')!(tool());
     surface.close();
     expect(await surface.statusCache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
+  });
+
+  // P3-HD panel correction: the process table's row change retires a replaced launch at once
+  it('retires a session’s replaced launch when the process table’s rows change', async () => {
+    const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
+    const on = ((name: string, handler: (input: unknown) => Promise<unknown>) => void handlers.set(name, handler)) as unknown as HostOn;
+    let rowsChanged: () => void = () => {};
+    const first = context();
+    const second = connectorLaunchContext({ appSessionId: SESSION, launchId: 'L2', cwd: project, environment: { HOME: dir, PATH: join(dir, 'bin') } });
+    let row = { lifecycle: 'ready', control: scriptedClient(), status: () => ({ appSessionId: SESSION, launchId: 'L1', cwd: project }), connectorLaunchContext: () => first };
+    const sessions = { get: (id: string) => (id === SESSION ? (row as never) : undefined), list: () => [row as never], onRowsChanged: (listener: () => void) => ((rowsChanged = listener), () => {}) };
+    const surface = registerConnectors(on, (() => true) as unknown as HostEmit, { onClientGone: () => () => {} }, { sessions, store: null });
+    const pending = surface.statusCache.begin(first); // L1's request, still unanswered
+    row = { lifecycle: 'ready', control: scriptedClient(), status: () => ({ appSessionId: SESSION, launchId: 'L2', cwd: project }), connectorLaunchContext: () => second };
+    rowsChanged();
+    surface.statusCache.observe(pending, answer as never);
+    expect(await surface.statusCache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
+    surface.close();
   });
 });

@@ -378,6 +378,8 @@ describe('DirectCalls: the grant at the actual write', () => {
     ['the server cannot start', () => (pool.startupFailure = { ok: false, failure: 'unavailable', admitted: false, message: SECRET_SERVER_TEXT }), { failure: 'unavailable', reason: 'connection' }],
     ['the server asks for authorization', () => (pool.startupFailure = { ok: false, failure: 'unauthorized', admitted: false, message: SECRET_SERVER_TEXT }), { failure: 'unavailable', reason: 'unauthorized' }],
     ['the live tools/list lacks the tool', () => (pool.tools = [{ name: 'rows', readOnly: true }]), { failure: 'unavailable', reason: 'toolMissing' }],
+    // P3-HD panel correction: the SDK would refuse it before tools/call, after the Allow once was spent
+    ['the live tool requires task execution', () => (pool.tools = [{ name: 'rows', readOnly: true }, { name: 'send', readOnly: false, taskRequired: true }]), { failure: 'unavailable', reason: 'taskRequired' }],
   ];
   for (const [label, arrange, expected] of notReady) {
     it(`burns no Allow once when ${label}`, async () => {
@@ -402,6 +404,28 @@ describe('DirectCalls: the grant at the actual write', () => {
     expect(await callOutcome(input.operationId)).toEqual({ ok: false, failure: 'unavailable', reason: 'changed' });
     expect(await documents.store.connectorGrants(artifactId)).toMatchObject([{ tool: 'rows', mode: 'read' }]);
     expect(toolCalls()).toEqual([]);
+  });
+
+  // P3-HD panel correction: a task-required tool is unusable through route D, said at the call and, once a live
+  // listing showed it, at the resolution the owner's rows read (a session's alone), the durable grant untouched
+  it('refuses a task-required tool before any Allow once is consumed, and resolves it as unusable once listed', async () => {
+    const grant = await granted();
+    pool.tools = [{ name: 'rows', readOnly: true, taskRequired: true }];
+    const input = grant.start();
+    calls.start(input);
+    expect(await callOutcome(input.operationId)).toEqual({ ok: false, failure: 'unavailable', reason: 'taskRequired' });
+    expect(toolCalls()).toEqual([]);
+    expect(await documents.store.connectorGrants(artifactId)).toMatchObject([{ tool: 'rows', mode: 'read' }]);
+    const operationId = nextId();
+    calls.resolve({ operationId, artifactId, directories: [project], server: 'usertoy', tool: 'rows' });
+    expect(await taken(operationId)).toEqual({ kind: 'resolve', answer: { ready: false, why: 'taskRequired' } });
+    pool.tools = [{ name: 'rows', readOnly: true }]; // listed again without the requirement: usable again
+    const again = grant.start();
+    calls.start(again);
+    expect(await callOutcome(again.operationId)).toMatchObject({ ok: true });
+    const later = nextId();
+    calls.resolve({ operationId: later, artifactId, directories: [project], server: 'usertoy', tool: 'rows' });
+    expect(await taken(later)).toMatchObject({ kind: 'resolve', answer: { ready: true } });
   });
 
   it('refuses before connecting when main’s fingerprint, source or grant no longer matches', async () => {

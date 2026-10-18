@@ -31,7 +31,13 @@ export const CONNECTORS_DEADLINE_SHAPES: Record<HostConnectorCommand, DeadlineSh
 };
 
 export interface ConnectorsSurfaceDeps {
-  sessions: { get(appSessionId: AppSessionId): (Pick<EngineSession, 'lifecycle' | 'control' | 'status'> & Partial<Pick<EngineSession, 'connectorLaunchContext'>>) | undefined }; // the process table (P3-HD: and its launch facts)
+  sessions: {
+    get(appSessionId: AppSessionId): (Pick<EngineSession, 'lifecycle' | 'control' | 'status'> & Partial<Pick<EngineSession, 'connectorLaunchContext'>>) | undefined;
+    // P3-HD panel correction: the table's rows and their change (a launch replacing a row), so a replaced launch's
+    // pending observation is retired at once
+    list?(): readonly Pick<EngineSession, 'status'>[];
+    onRowsChanged?(listener: () => void): () => void;
+  }; // the process table (P3-HD: and its launch facts)
   store: ArtifactStore | null; // null: the store failed to open this run
   calls?: ConnectorCalls; // tests
   statusCache?: ConnectorStatusCache; // P3-HD: tests
@@ -94,6 +100,13 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
   // P3-HD M2 end
 
   const stopFeed = store?.onConnectorGrantChange((change) => void emit('connectors.grantChanged', change));
+  // P3-HD panel correction: every row's current launch, told to the observation cache as the rows change
+  const stopRows = deps.sessions.onRowsChanged?.(() => {
+    for (const session of deps.sessions.list?.() ?? []) {
+      const { appSessionId, launchId } = session.status();
+      statusCache.launched(appSessionId, launchId);
+    }
+  });
   // Main's going ends its attachment, not the host: everything of it goes now (P3-HD: the observations, and direct work
   // with its credentials, whose processes' end follows), and the next attachment starts afresh.
   const stopGone = client.onClientGone(() => {
@@ -104,6 +117,7 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
   return {
     close: () => {
       stopFeed?.();
+      stopRows?.(); // P3-HD panel correction
       stopGone();
       calls.close();
       statusCache.clear(); // P3-HD

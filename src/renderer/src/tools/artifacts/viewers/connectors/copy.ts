@@ -66,9 +66,10 @@ const ENGINE_ONLY: Record<Extract<ConnectorServerRow, { kind: 'engineOnly' }>['w
   unidentified: 'MAWS couldn’t tell which configuration file defines it',
   changed: 'Its configuration changed since a session reported it',
   unattested: 'MAWS couldn’t confirm how the session launched it',
-  unresolved: 'MAWS couldn’t find the command it runs',
+  unresolved: 'MAWS couldn’t tell which command it runs', // P3-HD panel correction: also a PATH whose search depends on the session’s directory
   unavailable: 'MAWS couldn’t check this server just now',
   toolMissing: 'The session’s report doesn’t list these tools',
+  taskRequired: 'These tools run as tasks, which MAWS’s own connection doesn’t support', // P3-HD panel correction
 };
 
 const FAILURE: Partial<Record<ConnectorOwnerFailure, string>> = {

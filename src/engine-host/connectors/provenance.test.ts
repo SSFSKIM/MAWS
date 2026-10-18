@@ -284,6 +284,23 @@ describe('ConnectorStatusCache: complete reports, replacement and negative prove
     expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
   });
 
+  // P3-HD panel correction: retired when its session's launch is replaced, not only when the replacement first asks
+  it('a late answer from a replaced launch is refused as soon as the replacement is known, before it requests anything', async () => {
+    writeConfig();
+    const cache = new ConnectorStatusCache();
+    const replaced = cache.begin(launch('app-1', 'L1'));
+    cache.launched('app-1', 'L2');
+    cache.observe(replaced, USER_REPORT());
+    expect(await cache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
+    // a session never observed is not tracked by a launch alone; one already tracked at that launch is unchanged
+    cache.launched('app-untracked', 'U1');
+    cache.launched('app-1', 'L2');
+    const held = cache as unknown as Private;
+    expect([...held.current]).toEqual([['app-1', 'L2']]);
+    cache.observe(cache.begin(launch('app-1', 'L2')), USER_REPORT());
+    expect(await cache.resolveSource(project, 'usertoy')).toMatchObject({ ok: true });
+  });
+
   it('positive, exit, then another launch reporting it absent or disabled: engine-only until the attachment resets', async () => {
     writeConfig();
     for (const contrary of [without(USER_REPORT(), 'usertoy'), report(...(USER_REPORT().mcpServers as Server[]).map((server) => (server.name === 'usertoy' ? { ...server, status: 'disabled' } : server)))]) {

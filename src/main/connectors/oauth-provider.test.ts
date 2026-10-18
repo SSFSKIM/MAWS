@@ -736,6 +736,60 @@ describe('owner actions keep their own lifetime', () => {
   }
 });
 
+// P3-HD panel correction: a lifetime's end is not held hostage by an encryption still pending
+describe('work outliving its generation or its flow', () => {
+  const settled = <T>(promise: Promise<T>, ms = 200) => Promise.race([promise, new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), ms))]);
+
+  it('a refresh whose rotation is still encrypting when Reconnect replaces it does not hold the new connection; its late save lands nowhere', async () => {
+    await seed(tokens(1, { expiresAt: NOW }));
+    const demand = prepare();
+    await vi.waitFor(() => expect(flow.refreshes).toHaveLength(1));
+    sealer.holdSeal = deferred();
+    const release = sealer.holdSeal;
+    flow.refreshes[0]!.answer.resolve(tokens(2));
+    await vi.waitFor(() => expect(sealer.sealWaiting).toBe(true)); // the rotation's save, outside the store's lock
+    const replacing = provider.reconnect(source());
+    await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+    flow.connects[0]!.answer.resolve(grant(tokens(9)));
+    expect(await settled(replacing)).toEqual({ ok: true, connectionId: FRESH, reused: false });
+    const next = await settled(prepare());
+    expect(next === 'pending' ? next : credentialOf(next)).toMatchObject({ connectionId: FRESH, accessToken: 'at-9' });
+    release.resolve();
+    expect(await demand).toEqual({ ok: false }); // the withdrawn generation's demand: nothing of it is delivered
+    await vi.waitFor(() => expect(onDisk()).toEqual([`${FRESH}.sealed`]));
+    expect(await storeOf().read(SAVED)).toBeNull();
+    expect(credentialOf(await prepare())).toMatchObject({ connectionId: FRESH, accessToken: 'at-9' });
+    expect(closes.filter((close) => close.connectionId === FRESH)).toEqual([]);
+  });
+
+  for (const end of ['owner', 'hostLost'] as const) {
+    it(`a flow whose save is still encrypting when the ${end} ends it frees its slot at once; the late save lands nothing`, async () => {
+      const owner = new AbortController();
+      const connecting = provider.connect(source(), owner.signal);
+      await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
+      sealer.holdSeal = deferred();
+      const release = sealer.holdSeal;
+      flow.connects[0]!.answer.resolve(grant(tokens(5)));
+      await vi.waitFor(() => expect(sealer.sealWaiting).toBe(true));
+      if (end === 'owner') owner.abort();
+      else provider.hostLost();
+      expect(await settled(connecting)).toEqual({ ok: false, why: 'cancelled' }); // the save still unanswered
+      expect(await provider.state(IDENTITY)).toEqual({ state: 'disconnected' });
+      expect(await settled(prepare())).toEqual({ ok: true, credential: null });
+      const again = provider.connect(source());
+      await vi.waitFor(() => expect(flow.connects).toHaveLength(2)); // not busy
+      expect(flow.revokes.map((g) => g.tokens.accessToken)).toContain('at-5');
+      release.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(await storeOf().read(FRESH)).toBeNull();
+      flow.connects[1]!.answer.resolve(grant(tokens(6)));
+      expect(await again).toEqual({ ok: true, connectionId: FRESH2, reused: false });
+      expect(onDisk()).toEqual([`${FRESH2}.sealed`]);
+      expect(credentialOf(await prepare())).toMatchObject({ connectionId: FRESH2, accessToken: 'at-6' });
+    });
+  }
+});
+
 describe('a flow ended just after its save committed', () => {
   for (const end of ['owner', 'hostLost'] as const) {
     it(`the ${end}: the committed grant is unlinked and revoked, never installed or delivered`, async () => {
@@ -994,6 +1048,20 @@ describe('owner notifications and the unattributed snapshot', () => {
     expect(await demand).toEqual({ ok: false });
     expect(later).toHaveBeenCalled();
     expect(await provider.state(IDENTITY)).toEqual({ state: 'needsReconnect', connectionId: SAVED });
+  });
+
+  // P3-HD panel correction: closes the access-only-401 status debt; an open sheet re-reads on the notice
+  it('announces a 401 for an access-only token at once: its state turns needsReconnect without another demand', async () => {
+    await seed(tokens(1, { refreshToken: undefined }));
+    const used = credentialOf(await prepare()) as { connectionId: string; credentialEpoch: number };
+    expect(await provider.state(IDENTITY)).toMatchObject({ state: 'connected' });
+    const heard = vi.fn();
+    provider.onChange(heard);
+    provider.unauthorized({ source: source(), purpose: 'call', credential: { connectionId: used.connectionId, credentialEpoch: used.credentialEpoch } });
+    expect(heard).toHaveBeenCalledTimes(1);
+    expect(await provider.state(IDENTITY)).toEqual({ state: 'needsReconnect', connectionId: SAVED });
+    provider.unauthorized({ source: source(), purpose: 'call', credential: { connectionId: used.connectionId, credentialEpoch: used.credentialEpoch } });
+    expect(heard).toHaveBeenCalledTimes(1); // the same rejection again changes nothing
   });
 
   it('announces a retirement while it is pending, unconfirmed and cleared', async () => {

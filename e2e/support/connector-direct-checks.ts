@@ -17,7 +17,8 @@
 // - `pageVariant` / `oncePageHtml`: H's page re-pointed at another server, and a page that calls once per click;
 // - `heldFate`: whether one held call was answered late by its instance, or its instance was torn down first;
 // - `attachIfClean`: a screenshot captured and attached only after the live documents scanned clean;
-// - `scanScratchTree`: every retainable scratch file read whole in bounded chunks, every unreadable one a failure.
+// - `scanScratchTree`: every retainable scratch file read whole in bounded chunks, every unreadable one a failure;
+// - `shellQuoted` (P3-HD panel correction): a value as one literal /bin/sh word, for a generated launcher script.
 import { closeSync, lstatSync, openSync, readdirSync, readFileSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -532,3 +533,6 @@ export function scanScratchTree(
   walk(root, '');
   return scan;
 }
+
+// P3-HD panel correction: single quotes suppress every expansion and substitution; an embedded quote is `'\''`.
+export const shellQuoted = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;

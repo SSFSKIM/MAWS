@@ -226,8 +226,9 @@ export async function materializeEntry(entry: Record<string, unknown>, environme
   return { visible, launch: { transport: 'stdio', command: visible.command, executable, args: visible.args, cwd, env } };
 }
 
-// As the spawn finds it: a path with a slash against the cwd, a bare name along the final environment's PATH (absolute
-// directories only).
+// As the spawn finds it: a path with a slash against the cwd, a bare name along the final environment's PATH. P3-HD
+// panel correction: a relative or empty PATH component (searched from the engine's cwd) before the first absolute match
+// refuses resolution rather than being skipped, so MAWS never runs a later directory's executable the engine would not.
 async function resolveExecutable(command: string, path: string | undefined, cwd: string, files: SourceFiles): Promise<string | null> {
   if (command.length === 0) return null;
   if (command.includes('/')) {
@@ -235,7 +236,7 @@ async function resolveExecutable(command: string, path: string | undefined, cwd:
     return (await files.executable(candidate)) ? candidate : null;
   }
   for (const directory of (path ?? '').split(delimiter)) {
-    if (!isAbsolute(directory)) continue;
+    if (!isAbsolute(directory)) return null;
     const candidate = join(directory, command);
     if (await files.executable(candidate)) return candidate;
   }

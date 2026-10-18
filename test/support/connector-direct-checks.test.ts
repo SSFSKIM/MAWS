@@ -1,13 +1,13 @@
 // P3-HD M4b: the pure checks route D's integrated scenes (e2e/connectors-direct.spec.ts, e2e/connectors-oauth.spec.ts) rest their custody, listener,
 // sealed-record, journal, bearer and page claims on (e2e/support/connector-direct-checks.ts). No app, engine, socket or
 // fixture process: each check is driven with the values a scene would read.
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addedListeners, attachIfClean, bearerCrossings, blankResumeStartupRejection, boundedAcquire, boundedMetaRows, forbiddenFrames, isBlankResume, journalFilesOf, journalFrameShapes, readJournalRows, custodyProblems, heldFate, isRetainedScratch, journalTurns, loopbackPort, nodeScratchFs, oncePageHtml, pageVariant, plaintextHits, readSealedText,
-  scanScratchTree, scrubDiagnostic, SEALED_FORMAT, type ScratchFs,
+  scanScratchTree, scrubDiagnostic, SEALED_FORMAT, shellQuoted, type ScratchFs,
 } from '../../e2e/support/connector-direct-checks';
 
 describe('custodyProblems: the scratch profile and mock keychain a launch must show before any owner action', () => {
@@ -591,5 +591,19 @@ describe('scanScratchTree: every retainable scratch file read in bounded chunks,
 
   it('fails a root it cannot list', () => {
     expect(scanScratchTree(join(root, 'missing'), clean).failures).toEqual([{ path: '.', code: 'ENOENT' }]);
+  });
+});
+
+// P3-HD panel correction: the probe's launcher names node's path in shell source; JSON quoting would still expand it
+describe('shellQuoted: a value spelled for /bin/sh as one literal word', () => {
+  it('suppresses expansion, substitution and an embedded quote', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const scratch = mkdtempSync(join(tmpdir(), 'maws-shell-quote-'));
+    const marker = join(scratch, 'expanded');
+    for (const value of [`/opt/$(touch ${marker})/node`, `/opt/\`touch ${marker}\`/node`, "/opt/it's/$HOME/node", '/plain/node']) {
+      expect(execFileSync('/bin/sh', ['-c', `printf %s ${shellQuoted(value)}`], { encoding: 'utf8' }), value).toBe(value);
+    }
+    expect(existsSync(marker)).toBe(false);
+    rmSync(scratch, { recursive: true, force: true });
   });
 });

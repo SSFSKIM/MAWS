@@ -12,7 +12,7 @@
 // - A call, in order: the source re-resolved and its id, generation and fingerprint exact-matched; its entry re-read
 //   (with the cache's synchronous `stillValid`); the store's fence taken (before anything can consume an Allow once) and
 //   a non-consuming grant check; the connection acquired (initialize); a live tools/list showing the tool, read-only for
-//   a read grant; only then the Allow once consumed; then the call, its `admit` checking synchronously at the actual
+//   a read grant and (panel correction) not requiring task execution; only then the Allow once consumed; then the call, its `admit` checking synchronously at the actual
 //   stdin write or fetch: not cancelled or timed out, the fence held, the source still valid, the credential's epoch
 //   not withdrawn, the same attachment. Every async step is followed by the same check. An unavailable server never
 //   burns an unused once grant. Nothing is retried, and nothing switches route: an engine appearing meanwhile does not
@@ -334,6 +334,11 @@ export class DirectCalls {
         refusedWith(answer.why);
         continue;
       }
+      // P3-HD panel correction: a tool the live listing says requires task execution is unusable here
+      if (this.hints.taskRequired(answer.source, tool)) {
+        refusedWith('taskRequired');
+        continue;
+      }
       const { fingerprint } = answer.tool;
       const readOnly = combined(answer.tool.readOnly, this.hints.readOnly(answer.source, tool));
       if (readOnly === null && grantBacked !== null) continue; // a later grant-backed candidate ranks no higher
@@ -424,6 +429,8 @@ export class DirectCalls {
     this.publish(operation, source, listed.tools); // P3-HD M3b: in the same synchronous step as the check above
     const tool = listed.tools.find((entry) => entry.name === input.tool);
     if (!tool) return unavailable('toolMissing');
+    // P3-HD panel correction: the SDK refuses a task-required tool before tools/call; said before an Allow once is spent
+    if (tool.taskRequired) return unavailable('taskRequired');
     // P3-HD M3b (Decision Log 18): the live metadata no longer admits the grant's use; the grant is the owner's to review
     if (input.mode === 'read' && !tool.readOnly) return unavailable('changed');
     // now, and only now, the durable use of an Allow once

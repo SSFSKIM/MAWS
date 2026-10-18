@@ -291,6 +291,42 @@ describe('the HTTP transport', () => {
     expect(Date.now() - started).toBeLessThan(5_000);
   });
 
+  // P3-HD panel correction: a server answering each POST over an SSE stream it keeps open; the SDK's reader would keep
+  // every completed request's stream (and its response body) open while the pooled connection stays in use
+  it('closes each completed request’s answer stream, keeping the pooled connection usable', async () => {
+    let open = 0;
+    let cancelled = 0;
+    const lingering = (reply: unknown) => {
+      open += 1;
+      let counted = false;
+      const done = () => {
+        if (counted) return;
+        counted = true;
+        open -= 1;
+        cancelled += 1;
+      };
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(`event: message\ndata: ${JSON.stringify(reply)}\n\n`));
+          },
+          cancel: done,
+        }),
+        { status: 200, headers: { 'content-type': 'text/event-stream' } },
+      );
+    };
+    const server = new FakeMcpServer();
+    const { pool } = httpPool(async (message) => {
+      if (message?.method !== 'tools/call') return undefined;
+      return lingering(await server.answer(message));
+    });
+    const lease = await leaseOf(pool, httpSpec());
+    for (let n = 0; n < 5; n += 1) expect(await lease.callTool(call, { admit: () => true, signal: new AbortController().signal })).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(open).toBe(0));
+    expect(cancelled).toBe(5);
+    expect(server.calls()).toHaveLength(5); // each answered once, none resent
+  });
+
   it('a server refusing the credential at initialize is an unauthorized acquire', async () => {
     const { pool } = httpPool((message) => (message?.method === 'initialize' ? new Response('{}', { status: 401 }) : undefined));
     expect(await pool.acquire(httpSpec(), new AbortController().signal)).toMatchObject({ ok: false, failure: 'unauthorized', admitted: false });
@@ -377,6 +413,18 @@ describe('tools/list', () => {
     expect(await lease.listTools(new AbortController().signal)).toEqual({ ok: true, tools: [{ name: 'rows', readOnly: true }, { name: 'write', readOnly: false }] });
     server.tools = [{ name: 'rows', annotations: { readOnlyHint: false } }];
     expect(await lease.listTools(new AbortController().signal)).toEqual({ ok: true, tools: [{ name: 'rows', readOnly: false }] });
+  });
+
+  // P3-HD panel correction: the SDK's callTool throws for a task-required tool before tools/call, so the listing says so
+  it('marks a tool whose execution requires a task, and only that one', async () => {
+    const { pool, server } = httpPool();
+    server.tools = [
+      { name: 'rows', annotations: { readOnlyHint: true }, execution: { taskSupport: 'required' } },
+      { name: 'maybe', execution: { taskSupport: 'optional' } },
+      { name: 'plain', execution: { taskSupport: 'forbidden' } },
+    ];
+    const lease = await leaseOf(pool, httpSpec());
+    expect(await lease.listTools(new AbortController().signal)).toEqual({ ok: true, tools: [{ name: 'rows', readOnly: true, taskRequired: true }, { name: 'maybe', readOnly: false }, { name: 'plain', readOnly: false }] });
   });
 });
 

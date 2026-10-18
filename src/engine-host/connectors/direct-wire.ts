@@ -10,7 +10,7 @@
 //   the SDK's awaited headers (./direct-http.ts). It checks the connection's fence and, for a bound tools/call, its
 //   operation's own synchronous admission, exactly once: a request is never written twice.
 // - `received` marks a request answered the moment its response arrives, before the SDK settles it, so a later abort
-//   of its operation sends no spurious cancellation.
+//   of its operation sends no spurious cancellation; once the SDK has it, the answer's HTTP stream is ended.
 import type { Transport, TransportSendOptions } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { JSONRPCMessage, MessageExtraInfo } from '@modelcontextprotocol/sdk/types.js';
 
@@ -28,6 +28,9 @@ export interface WireRequest {
   admitted: boolean; // written: it may have reached the server
   answered: boolean;
   fault: WireFault | null;
+  // P3-HD panel correction: ends its answer's HTTP stream once the answer was delivered (./direct-http.ts), so a server
+  // holding each POST's SSE stream open leaves no reader behind; the SDK request itself is never aborted after it
+  endStream?: () => void;
 }
 
 type Armed = Pick<WireRequest, 'admit' | 'signal' | 'abort'>;
@@ -140,13 +143,15 @@ export class DirectWire {
     return request;
   }
 
-  received(message: JSONRPCMessage): void {
+  // The request a response answers, marked answered (undefined for any other message).
+  received(message: JSONRPCMessage): WireRequest | undefined {
     const fields = message as unknown as Record<string, unknown>;
-    if (!isResponse(fields)) return;
+    if (!isResponse(fields)) return undefined;
     const request = this.requests.get(Number(fields.id));
-    if (!request) return;
+    if (!request) return undefined;
     request.answered = true;
     this.requests.delete(Number(fields.id));
+    return request;
   }
 
   // A transport fault, attributed to the request it answered when there is one. An over-bound answer also fails its
@@ -184,8 +189,9 @@ export class WireTransport implements Transport {
 
   async start(): Promise<void> {
     this.inner.onmessage = (message, extra) => {
-      this.wire.received(message);
+      const answered = this.wire.received(message);
       this.onmessage?.(message, extra);
+      answered?.endStream?.(); // P3-HD panel correction: delivered, so its answer's stream ends
     };
     this.inner.onerror = (error) => this.onerror?.(error);
     this.inner.onclose = () => this.onclose?.();

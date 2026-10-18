@@ -128,6 +128,22 @@ describe('materializeEntry (the whole entry, for MAWS’s own instance)', () => 
     expect(await materializeEntry({ command: join(dir, 'absent') }, {}, dir, nodeSourceFiles)).toBe('unresolved');
   });
 
+  // P3-HD panel correction: the engine's spawn searches a relative or empty PATH component from its cwd, so skipping one
+  // could select a later absolute match the engine never runs, under the same visible command and fingerprint
+  it('refuses a bare command when a relative or empty PATH component precedes its first match', async () => {
+    const project = join(dir, 'project');
+    const absolute = join(dir, 'absolute');
+    mkdirSync(join(project, 'rel'), { recursive: true });
+    mkdirSync(absolute);
+    executable(join(project, 'rel', 'probe'));
+    const tool = executable(join(absolute, 'probe'));
+    for (const path of [`rel:${absolute}`, `:${absolute}`, `${absolute}/../absolute/../nowhere::${absolute}`, `./rel:${absolute}`]) {
+      expect(await materializeEntry({ command: 'probe' }, { PATH: path }, project, nodeSourceFiles), path).toBe('unresolved');
+    }
+    // a relative component after the first absolute match is never reached by either search
+    expect(await materializeEntry({ command: 'probe' }, { PATH: `${absolute}:rel:` }, project, nodeSourceFiles)).toMatchObject({ launch: { executable: tool } });
+  });
+
   it('reads an http entry’s headers transiently; a referencing url or header is unattested', async () => {
     expect(await materializeEntry({ type: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'literal' } }, {}, '/w', nodeSourceFiles)).toEqual({
       visible: { transport: 'http', url: 'http://127.0.0.1:1/mcp', headers: { 'X-H': 'literal' } },

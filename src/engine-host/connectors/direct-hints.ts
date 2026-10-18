@@ -28,6 +28,7 @@ interface Slot {
   readonly entryDigest: string;
   readonly publisher: DirectHintPublisher;
   readonly tools: ReadonlyMap<string, boolean>; // name → readOnly
+  readonly taskRequired: ReadonlySet<string>; // P3-HD panel correction: names whose listing required task execution
 }
 
 export class DirectToolHints {
@@ -42,21 +43,30 @@ export class DirectToolHints {
   }
 
   // Whether the listing was kept.
-  publish(source: SourceIdentity, tools: readonly { readonly name: string; readonly readOnly: boolean }[], publisher: DirectHintPublisher): boolean {
+  publish(source: SourceIdentity, tools: readonly { readonly name: string; readonly readOnly: boolean; readonly taskRequired?: boolean }[], publisher: DirectHintPublisher): boolean {
     if (tools.length > this.bounds.toolsPerSource) return false;
     const held = this.slots.get(source.sourceId);
     if (held ? !supersedes(publisher, held.publisher) : publisher.admittedAt <= this.createdAfter) return false;
     if (held) this.slots.delete(source.sourceId);
     else if (this.slots.size >= this.bounds.sources) this.evictOldest();
-    this.slots.set(source.sourceId, { generation: source.generation, entryDigest: source.entryDigest, publisher, tools: new Map(tools.map((tool) => [tool.name, tool.readOnly])) });
+    this.slots.set(source.sourceId, { generation: source.generation, entryDigest: source.entryDigest, publisher, tools: new Map(tools.map((tool) => [tool.name, tool.readOnly])), taskRequired: new Set(tools.filter((tool) => tool.taskRequired === true).map((tool) => tool.name)) });
     return true;
   }
 
   // The tool's readOnly as the source's current listing said, or null with no listing of exactly this source naming it.
   readOnly(source: SourceIdentity, tool: string): boolean | null {
+    return this.slotOf(source)?.tools.get(tool) ?? null;
+  }
+
+  // P3-HD panel correction: whether the source's current listing said the tool requires task execution (route D
+  // cannot run it); false with no listing of exactly this source.
+  taskRequired(source: SourceIdentity, tool: string): boolean {
+    return this.slotOf(source)?.taskRequired.has(tool) ?? false;
+  }
+
+  private slotOf(source: SourceIdentity): Slot | null {
     const slot = this.slots.get(source.sourceId);
-    if (!slot || slot.generation !== source.generation || slot.entryDigest !== source.entryDigest) return null;
-    return slot.tools.get(tool) ?? null;
+    return !slot || slot.generation !== source.generation || slot.entryDigest !== source.entryDigest ? null : slot;
   }
 
   // The credential's epochs at or below `floor` were withdrawn: their slots go.

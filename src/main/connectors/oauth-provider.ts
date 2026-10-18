@@ -16,8 +16,9 @@
 //   `needsReconnect` (the owned grant's refresh was rejected, or it expired without a refresh token).
 // - Access epochs are immutable: an epoch names one access token, a new token gets a new, higher epoch, and a 401
 //   reported for an epoch marks it unusable for good (the next demand refreshes; nothing is replayed here).
-// - Demand refresh only, single-flight per identity, never aborted by a caller (a rotation the server already made
-//   must not be lost): the rotated grant is persisted, then the host confirms the old epoch closed (`closeHost`, the
+// - Demand refresh only, single-flight per identity and grant generation (panel correction: work a withdrawal left
+//   behind is never joined, so its stalled save cannot hold a replacement), never aborted by a caller (a rotation the
+//   server already made must not be lost): the rotated grant is persisted, then the host confirms the old epoch closed (`closeHost`, the
 //   engine host's `connectors.directClose`) when it was ever delivered, and only then is the new epoch released. An
 //   unsaved rotation or an unconfirmed close holds the release; the next demand retries that step, never the refresh.
 // - Fences. Every await is followed by checks: the identity's generation (advanced synchronously by Disconnect, a
@@ -29,8 +30,9 @@
 //   allocated and claimed at its start, so a Disconnect of that id cancels it and stales its save. A flow whose
 //   lifetime ends (the owner's signal, Disconnect, `hostLost`, `stop`) while its grant is being saved removes that
 //   connection (a save not yet committed goes stale; one already committed is unlinked) and revokes the grant: an ended
-//   flow installs nothing. Reconnect withdraws the old grant first and replaces it under a new connection id; failing,
-//   it leaves the identity withdrawn.
+//   flow installs nothing, and (panel correction) frees its slot at once rather than when the encryption answers.
+//   Reconnect withdraws the old grant first and replaces it under a new connection id; failing, it leaves the identity
+//   withdrawn.
 // - Retirement. Withdrawing a connection (Disconnect, Reconnect) closes it in the host with an explicit floor, the
 //   highest epoch main ever issued for it (`connectors.directClose` without one fences only the epochs the host has
 //   seen, and a prepared credential can still be on its way). Until that close is confirmed, or the host's attachment
@@ -139,7 +141,8 @@ interface Slot {
   held: Held | null;
   issued: Epoch | null;
   closing: { connectionId: string; credentialEpoch: number }[];
-  work: Promise<void> | null;
+  // P3-HD panel correction: the single-flight work of one grant generation; a withdrawn generation's is never joined
+  work: { readonly generation: number; readonly done: Promise<void> } | null;
   refresh: AbortController | null;
   flow: { connectionId: string; controller: AbortController } | null;
   blocked: 'withdrawn' | 'needsConnect' | 'needsReconnect' | null;
@@ -160,6 +163,19 @@ const REFUSED: DirectCredentialPrepared = { ok: false };
 const NONE: DirectCredentialPrepared = { ok: true, credential: null };
 const keyOf = (identity: ConnectorOAuthIdentity) => JSON.stringify([identity.requestUrl, identity.server, identity.scope, identity.configPath, identity.entryPath]);
 const grantOf = ({ issuer, resource, redirectUri, authorizationServer, client, tokens }: ConnectorOAuthRecord): ConnectorOAuthGrant => ({ issuer, resource, redirectUri, authorizationServer, client, tokens });
+
+// `work`'s answer, or 'ended' once `signal` aborts first.
+function untilFlowEnded<T>(work: Promise<T>, signal: AbortSignal): Promise<T | 'ended'> {
+  if (signal.aborted) return Promise.resolve('ended');
+  return new Promise((resolve) => {
+    const onAbort = () => resolve('ended');
+    signal.addEventListener('abort', onAbort, { once: true });
+    void work.then((value) => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(value);
+    });
+  });
+}
 
 // Resolves once `work` settles or any signal aborts.
 function settledOrEnded(work: Promise<unknown>, ...signals: AbortSignal[]): Promise<void> {
@@ -298,10 +314,20 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     return issued;
   }
 
+  // The generation's work, joined while it runs; work a withdrawal left behind is not (its late steps land nothing:
+  // every one is checked against its generation), so it cannot hold the replacement's preparation.
   function ensure(slot: Slot): Promise<void> {
-    slot.work ??= work(slot).catch(() => log('connectors: an OAuth credential step failed')).finally(() => { slot.work = null; });
-    return slot.work;
+    if (slot.work?.generation === slot.generation) return slot.work.done;
+    const mine = {
+      generation: slot.generation,
+      done: work(slot).catch(() => log('connectors: an OAuth credential step failed')).finally(() => {
+        if (slot.work === mine) slot.work = null;
+      }),
+    };
+    slot.work = mine;
+    return mine.done;
   }
+  const working = (slot: Slot) => slot.work?.generation === slot.generation;
 
   // Saves the held record under its claim; false when it did not land (stale: a removal won; else kept unsaved).
   async function persist(slot: Slot, held: Held, generation: number): Promise<boolean> {
@@ -510,15 +536,22 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         void revokeBounded(granted);
         return { ok: false, why: 'cancelled' };
       }
-      let record: ConnectorOAuthRecord;
       saving = true;
-      try {
-        record = await store.save(claim, identity, granted);
-      } catch (error) {
+      // P3-HD panel correction: the save is raced against the flow's end, so an encryption still pending never holds
+      // the slot (`connecting`, busy, and no preparation) past a cancellation, a Disconnect or the host's loss; `discard`
+      // stales or unlinks the late save
+      const save = store.save(claim, identity, granted).then((answer) => ({ record: answer }), (error: unknown) => ({ error }));
+      const saved = await untilFlowEnded(save, controller.signal);
+      if (saved === 'ended') {
+        void revokeBounded(granted);
+        return { ok: false, why: 'cancelled' };
+      }
+      if ('error' in saved) {
         saving = false;
         void revokeBounded(granted);
-        return { ok: false, why: error instanceof ConnectorOAuthStoreError && error.code === 'stale' ? 'cancelled' : 'unavailable' };
+        return { ok: false, why: saved.error instanceof ConnectorOAuthStoreError && saved.error.code === 'stale' ? 'cancelled' : 'unavailable' };
       }
+      const { record } = saved;
       if (!current()) {
         void revokeBounded(granted); // ended while saving: `discard` (or the Disconnect) removes it
         return { ok: false, why: 'cancelled' };
@@ -595,7 +628,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         }
         const ready = deliverable(slot);
         if (!ready || expiring(ready)) {
-          const joined = slot.work !== null;
+          const joined = working(slot);
           await settledOrEnded(ensure(slot), signal, host);
           if (!live()) return REFUSED;
           if (joined && !deliverable(slot)) {
@@ -624,8 +657,12 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         }
         return;
       }
-      const { issued } = slot;
-      if (issued && issued.connectionId === credential.connectionId && issued.credentialEpoch === credential.credentialEpoch) issued.unusable = true;
+      const { issued, held } = slot;
+      if (!issued || issued.unusable || issued.connectionId !== credential.connectionId || issued.credentialEpoch !== credential.credentialEpoch) return;
+      // P3-HD panel correction: an access-only grant's rejection is its row's needsReconnect now, not at the next demand
+      const before = held !== null && needsReconnect(slot, held);
+      issued.unusable = true;
+      if (held !== null && !before && needsReconnect(slot, held)) notify();
     },
 
     async state(identity) {

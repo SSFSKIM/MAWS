@@ -69,6 +69,9 @@ export interface DirectFailure {
 export interface DirectTool {
   readonly name: string;
   readonly readOnly: boolean; // annotations.readOnlyHint === true
+  // P3-HD panel correction: execution.taskSupport === 'required'. The SDK's callTool throws for such a tool before any
+  // tools/call is written (it needs the experimental task API), so route D cannot run it; absent otherwise.
+  readonly taskRequired?: true;
 }
 
 export interface DirectCallOptions {
@@ -207,7 +210,7 @@ class Connection {
       if (!answer.ok) return answer;
       for (const tool of answer.value.tools) {
         if (tools.length >= this.bounds.tools) return failure('unavailable', true, 'the server lists more tools than the bound');
-        tools.push({ name: tool.name, readOnly: tool.annotations?.readOnlyHint === true });
+        tools.push({ name: tool.name, readOnly: tool.annotations?.readOnlyHint === true, ...(tool.execution?.taskSupport === 'required' && { taskRequired: true as const }) });
       }
       cursor = answer.value.nextCursor;
       if (cursor === undefined) return { ok: true, tools };

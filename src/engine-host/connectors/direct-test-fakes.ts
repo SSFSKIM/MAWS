@@ -12,7 +12,7 @@ type Message = Record<string, unknown>;
 
 export class FakeMcpServer {
   readonly received: Message[] = [];
-  tools: Array<{ name: string; annotations?: Record<string, unknown> }> = [{ name: 'rows', annotations: { readOnlyHint: true } }, { name: 'write' }];
+  tools: Array<{ name: string; annotations?: Record<string, unknown>; execution?: Record<string, unknown> }> = [{ name: 'rows', annotations: { readOnlyHint: true } }, { name: 'write' }];
   holdCalls = false; // tools/call answers wait for `release`
   sessionId: string | undefined; // HTTP: the session initialize opens
   result: (params: Message) => unknown = (params) => ({ content: [{ type: 'text', text: `called ${String(params.name)}` }] });
@@ -74,7 +74,7 @@ export interface SeenFetch {
 }
 
 // A fetch answering from `server`; `respond` may answer a message itself (a redirect, a 401, an over-bound body).
-export function fakeFetch(server: FakeMcpServer, respond?: (message: Message | null, init: RequestInit | undefined) => Response | Promise<Response> | undefined) {
+export function fakeFetch(server: FakeMcpServer, respond?: (message: Message | null, init: RequestInit | undefined) => Response | Promise<Response | undefined> | undefined) {
   const seen: SeenFetch[] = [];
   const fetch: FetchLike = async (url, init) => {
     const message = typeof init?.body === 'string' ? (JSON.parse(init.body) as Message) : null;

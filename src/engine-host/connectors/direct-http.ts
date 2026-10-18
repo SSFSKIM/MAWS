@@ -10,7 +10,8 @@
 // - No auth provider (main owns OAuth; a supplied access token is attached here, to that URL only), no resumption, no
 //   reconnection (`maxRetries: 0`), and the optional standalone SSE GET is answered 405 without a request, which the
 //   SDK treats as a server offering none.
-// - Each answer's body is bounded before the SDK parses it, a streamed one included.
+// - Each answer's body is bounded before the SDK parses it, a streamed one included, and ended once its JSON-RPC answer
+//   was delivered (a server may keep a POST's SSE stream open after it): a completed request leaves no stream open.
 // - A 401, any other non-success answer, a redirect, a network failure or an over-bound body is a fault: the
 //   connection is not reused. Nothing is retried here.
 // - A normal close (idle) ends the server's session with the SDK's DELETE, once, bounded, and only while the fence
@@ -113,8 +114,12 @@ function bounded(response: Response, maxBytes: number, request: WireRequest | un
     throw new DirectWireRefusal('the server answered more than the bound');
   }
   let total = 0;
+  let stream: TransformStreamDefaultController<Uint8Array> | undefined;
   const body = response.body.pipeThrough(
     new TransformStream<Uint8Array, Uint8Array>({
+      start(controller) {
+        stream = controller;
+      },
       transform(chunk, controller) {
         total += chunk.byteLength;
         if (total > maxBytes) {
@@ -126,5 +131,16 @@ function bounded(response: Response, maxBytes: number, request: WireRequest | un
       },
     }),
   );
+  // P3-HD panel correction: once its answer is delivered, the SDK's reader sees this stream end (no error, no
+  // reconnection: it has its response) and the server's body is cancelled, even if the server kept it open
+  if (request) {
+    request.endStream = () => {
+      try {
+        stream?.terminate();
+      } catch {
+        // already ended
+      }
+    };
+  }
   return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
 }

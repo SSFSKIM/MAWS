@@ -110,8 +110,10 @@ export const DIRECT_SOURCE_REFUSALS = ['unobserved', 'ambiguous', 'engineOnly', 
 // reached, `capacity` a bound of the host's, `toolMissing` the live tools/list lacks it, `grant` the store's check,
 // `store` the store unavailable, `cancelled`/`timeout`, `transport` the exchange failed once started (never resent),
 // `notJson`/`tooLarge` the result. P3-HD M3b: `changed`, the live tools/list no longer admits the grant's use (a read
-// grant's tool that may write now): the page reads paused/unavailable, the durable grant is left for the owner.
-export const DIRECT_REASONS = ['source', 'credential', 'unauthorized', 'connection', 'capacity', 'toolMissing', 'grant', 'store', 'cancelled', 'timeout', 'transport', 'notJson', 'tooLarge', 'changed'] as const;
+// grant's tool that may write now): the page reads paused/unavailable, the durable grant is left for the owner. P3-HD
+// panel correction: `taskRequired`, the live tools/list says the tool requires task execution, which MAWS's own
+// connection cannot run (a session's alone); refused before any Allow once is spent.
+export const DIRECT_REASONS = ['source', 'credential', 'unauthorized', 'connection', 'capacity', 'toolMissing', 'grant', 'store', 'cancelled', 'timeout', 'transport', 'notJson', 'tooLarge', 'changed', 'taskRequired'] as const;
 const Reason = z.enum(DIRECT_REASONS);
 export const DirectCredentialSchema = z.strictObject({ connectionId: z.uuid(), credentialEpoch: CredentialEpoch, accessToken: z.string().min(1).max(16_384), expiresAt: Time.optional() });
 export const DirectSourceSchema = z.strictObject({
@@ -137,14 +139,15 @@ export const DirectResolveInputSchema = z.strictObject({
 // with the host's own live listing hints; the live tools/list still decides at the call), or, P3-HD M3b (Decision Log
 // 18), `grantBacked` where none is known but the artifact's existing grant matches the identified entry's fingerprint:
 // no readOnly is invented for it. Main's directories are ranked: the first known candidate the grant matches, else the
-// first grant-backed one, else the first known one. `toolMissing` where a source is verified but none of these stands.
+// first grant-backed one, else the first known one. `toolMissing` where a source is verified but none of these stands;
+// P3-HD panel correction: `taskRequired` where the source's live listing said the tool requires task execution.
 const DirectToolMetadataSchema = z.union([
   z.strictObject({ fingerprint: ConnectorGrantRequestSchema.shape.fingerprint, readOnly: z.boolean() }),
   z.strictObject({ fingerprint: ConnectorGrantRequestSchema.shape.fingerprint, grantBacked: z.literal(true) }), // P3-HD M3b
 ]);
 export const DirectResolveAnswerSchema = z.discriminatedUnion('ready', [
   z.strictObject({ ready: z.literal(true), source: DirectSourceSchema, tool: DirectToolMetadataSchema.optional() }),
-  z.strictObject({ ready: z.literal(false), why: z.enum([...DIRECT_SOURCE_REFUSALS, 'toolMissing']) }),
+  z.strictObject({ ready: z.literal(false), why: z.enum([...DIRECT_SOURCE_REFUSALS, 'toolMissing', 'taskRequired']) }),
 ]);
 const DirectSourceRef = { directory: Directory, sourceId: SourceId, generation: Generation, server: ConnectorToolRefSchema.shape.server };
 // One tool run under the source a resolution answered and the grant main's check admitted.
@@ -202,6 +205,7 @@ export const CONNECTOR_OWNER_FAILURES = [
   'exchange', 'token', 'rejected', 'transient',
   'busy', 'needsReconnect', 'unavailable', 'notHttp', 'stopped', 'capacity', 'failed',
   'source', 'credential', 'unauthorized', 'connection', 'toolMissing', 'grant', 'store', 'transport', 'notJson', 'tooLarge', 'changed',
+  'taskRequired', // P3-HD panel correction
   'stale',
 ] as const;
 export type ConnectorOwnerFailure = (typeof CONNECTOR_OWNER_FAILURES)[number];
@@ -237,7 +241,7 @@ export const ConnectorServerRowSchema = z.discriminatedUnion('kind', [
     last: LastAction.optional(),
   }),
   // a server these tools name that MAWS cannot reach itself: a session's alone
-  z.strictObject({ kind: z.literal('engineOnly'), server: ConnectorToolRefSchema.shape.server, why: z.enum([...DIRECT_SOURCE_REFUSALS, 'toolMissing']), tools: z.array(ToolName).max(256) }),
+  z.strictObject({ kind: z.literal('engineOnly'), server: ConnectorToolRefSchema.shape.server, why: z.enum([...DIRECT_SOURCE_REFUSALS, 'toolMissing', 'taskRequired']), tools: z.array(ToolName).max(256) }),
   // a saved MAWS connection of a named server that no current source uses: not usable, Disconnect only
   z.strictObject({ kind: z.literal('saved'), connectionId: ConnectionId, ...Origin, disconnecting: Disconnecting.optional(), last: LastAction.optional() }),
   // a saved MAWS connection that cannot be read: no server or file is invented; Forget only

@@ -186,17 +186,29 @@ export class ConnectorStatusCache {
 
   begin(context: ConnectorLaunchContext): ConnectorStatusTicket {
     const ticket = { epoch: this.epoch, seq: ++this.seq, context };
-    if (this.saturated) return ticket; // refused at observe; nothing more is tracked
-    const latest = this.current.get(context.appSessionId);
-    const replacing = latest !== undefined && latest !== context.launchId;
+    this.track(context.appSessionId, context.launchId, true);
+    return ticket;
+  }
+
+  // P3-HD panel correction: a session's launch is now `launchId` (the host's process table changed rows). A session
+  // already tracked has its earlier launch retired at once, so that launch's pending answer never lands even before
+  // the replacement requests anything; an untracked session is not tracked by this alone.
+  launched(appSessionId: string, launchId: string): void {
+    this.track(appSessionId, launchId, false);
+  }
+
+  private track(appSessionId: string, launchId: string, add: boolean): void {
+    if (this.saturated) return; // refused at observe; nothing more is tracked
+    const latest = this.current.get(appSessionId);
+    if (latest === undefined && !add) return;
+    const replacing = latest !== undefined && latest !== launchId;
     const added = (replacing ? 1 : 0) + (latest === undefined ? 1 : 0);
     if (this.current.size + this.retired.size + added > CONNECTOR_STATUS_BOUNDS.launches) {
       this.saturate();
-      return ticket;
+      return;
     }
-    if (replacing) this.retired.add(`${context.appSessionId}\0${latest}`);
-    if (!this.retired.has(launchKeyOf(context))) this.current.set(context.appSessionId, context.launchId);
-    return ticket;
+    if (replacing) this.retired.add(`${appSessionId}\0${latest}`);
+    if (!this.retired.has(`${appSessionId}\0${launchId}`)) this.current.set(appSessionId, launchId);
   }
 
   // A complete successful report of the ticket's launch.
