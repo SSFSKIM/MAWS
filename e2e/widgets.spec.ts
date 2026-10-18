@@ -444,7 +444,12 @@ test.describe('interactive', () => {
     await expect.poll(async () => (await calls(backend)).filter((c) => c.subtype === 'apply_flag_settings')).toEqual([{ subtype: 'apply_flag_settings', input: { appSessionId: READY, settings: { fastMode: true } } }]);
 
     await expect(selector.locator('[data-effort-title]')).toHaveText('High'); // get_settings read again after the model changed
-    await selector.getByRole('slider', { name: 'Effort' }).press('ArrowRight'); // the slider writes the effort for this session
+    // P3-F (tracker row 201): the selector holds every control while a write is in flight, the slider too (aria-disabled,
+    // and a key on it then moves nothing); the fast-mode answer reaches the page after the backend records the request,
+    // so the arrow waits for the selector to take input again
+    const effort = selector.getByRole('slider', { name: 'Effort' });
+    await expect(effort).toBeEnabled();
+    await effort.press('ArrowRight'); // the slider writes the effort for this session
     await expect.poll(async () => (await commandsOf(backend)).filter((c) => c.command === 'session.setEffort').map((c) => c.input)).toEqual([{ appSessionId: READY, effort: 'xhigh' }]);
 
     await selector.getByRole('button', { name: /Select model$/ }).click();
