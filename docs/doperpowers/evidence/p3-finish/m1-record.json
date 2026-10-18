@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 80,
-    "defer:pending": 43,
+    "defer:committed": 81,
+    "defer:pending": 42,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1134,7 +1134,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L135; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "Each test's bound raised to its measured p99 under load 20, or the clock faked; the suite clean at load 20 without reruns. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L135; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "2d4dc1de4197c16b28f1a15c527f7a9b13982189"
     },
     {
       "line": 136,
@@ -1144,8 +1144,8 @@
       "triageReason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L136; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
       "remainingClause": "The retry sweeps the failed attempt's directory before writing, with a test. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L136; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 137,
