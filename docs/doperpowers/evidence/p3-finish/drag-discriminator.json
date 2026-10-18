@@ -1,5 +1,5 @@
 {
-  "status": "A1/B1 measured; A2 running; no comparison conclusion",
+  "status": "A1/B1/A2 measured; final B2 running; no final comparison yet",
   "order": [
     "drag-a",
     "drag-b",
@@ -116,6 +116,38 @@
       "task": "bqr3snsr4",
       "log": "/tmp/maws-review/gates/p3f-drag-a2-ci.log",
       "jobId": 117704533159,
+      "status": "completed",
+      "conclusion": "failure",
+      "attempt": 1,
+      "wrapperExit": 1,
+      "rawJobLog": "/private/tmp/p3f-drag-a2-logs.B41cRb/job.txt",
+      "rawJobSha256": "70c4e2841e9abe105d3ae88454cc35640ecc94e1b38fb49bfca02dfc13fe97eb",
+      "result": "drag-a2-39137361846.json",
+      "dragTrialsMs": [
+        19.1,
+        19.9,
+        20.5
+      ],
+      "dragLoads": [
+        2.75,
+        4.26,
+        4.26
+      ],
+      "startLoad": 2.48,
+      "endLoad": 4.14,
+      "heavyHistory": "verified skipped",
+      "reading": "absolute16ms bound failed below10 load; final comparison awaits B2"
+    },
+    {
+      "order": 4,
+      "name": "drag-b",
+      "runId": 39137918574,
+      "source": "e2b81e967bfb6c98f24fcf97915a3e2d1c0f5fac",
+      "wrapper": "318e8bd835894a9d1b57a20fbbdfdb2448c37a10",
+      "createdAt": "2026-10-18T14:52:09Z",
+      "task": "b1yttnr8i",
+      "log": "/tmp/maws-review/gates/p3f-drag-b2-ci.log",
+      "jobId": 117706153551,
       "status": "running"
     }
   ]

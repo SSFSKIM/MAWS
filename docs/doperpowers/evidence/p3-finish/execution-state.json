@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "DOC-A/DECK implementing; MINI source and rows accepted with count remainders, TS proof in next union; drag B1 running",
+  "phase": "DOC-A and DECK source complete, independent scoped reviews running; final B2 discriminator running",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -39,7 +39,7 @@
     "reviewRounds": 2
   },
   "dependencyInstall": "completed exit 0 under with-slot",
-  "dragDiscriminator": "A1/B1 measured, below10 loads both miss16ms absolute bound; A2 running39137361846 taskbqr3snsr4; comparison awaits all four jobs",
+  "dragDiscriminator": "A1/B1/A2 measured; final B2 running39137918574 taskb1yttnr8i; comparison pending",
   "commitLock": "/private/tmp/maws-p3f-commit.lock",
   "helper": "/private/tmp/p3f-commit-row.py",
   "paidSpendUsd": 0,
@@ -232,8 +232,11 @@
   },
   "W-DOC-A": {
     "executor": "af7fe2d9bf548028a",
-    "status": "claims acknowledged; implementing",
-    "claims": "pair3-claims.json"
+    "status": "five source commits complete; independent review running, not accepted",
+    "claims": "pair3-claims.json",
+    "reviewer": "a69c0ca8f5888e14f",
+    "checkpoint": "waves/W-DOC-A-checkpoint.json",
+    "P4RemainderCommit": "a5b5610d3"
   },
   "W-DECK": {
     "executor": "a00549767dfb02089",
