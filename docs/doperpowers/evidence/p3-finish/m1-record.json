@@ -15,7 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:pending": 123,
+    "defer:committed": 1,
+    "defer:pending": 122,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -253,7 +254,7 @@
       "note": "Clause met by 99dbafeb7 (on master, E2 M3, 'bar hatching pointer-transparent'): src/artifacts/dashboard/render/render.ts:703 draws the hatch with pointer-events='none', so the bar's full path beneath it is the hit target.",
       "triageReason": "Hatch overlay pointer-events none, underlying bar remains hit target. Evidence: 99dbafeb7; src/artifacts/dashboard/render/render.ts:703.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "afce8ab69d6544ca2eead468a10b3997ad6556ed"
     },
     {
       "line": 26,
@@ -263,8 +264,8 @@
       "triageReason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L26; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Design explicit-target routing for closed turns on both live and disk paths, including duplicate/echo result handling, then pin delayed command completion without redirecting it to a different turn. Re-deferred 2026-10-07 (E11 1.6): explicit-target routing for closed turns is a design item. Owner: P2 (the transcript). Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L25): explicit-target routing for closed turns is a design item on both paths; no daily-driver symptom reported. Owner: P3 (the transcript). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L26; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 27,
