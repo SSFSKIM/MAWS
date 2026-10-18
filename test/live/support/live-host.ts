@@ -192,7 +192,7 @@ export async function startDirectSession(userData: string, spec: LaunchSpec, hoo
   const configHome = process.env.CLAUDE_CONFIG_DIR ?? null;
   assertConfigHomeSafe({ configHome, controls: [] });
   const captured = { ...withoutClaudeVariables(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: configHome! }; // E11 W-E: no inherited CLAUDE*
-  const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION }); // W13: the fixtures' engine
+  const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION, spawnerPid: process.pid }); // W13: the fixtures' engine
   const session = new EngineSession({
     spec, plan, hooks, appVersion: '0.0.0-live', store: new FileSessionStateStore(userData),
     spawn: (p) => spawnEngine(p, { maxLineChars: MAX_LINE_CHARS }),

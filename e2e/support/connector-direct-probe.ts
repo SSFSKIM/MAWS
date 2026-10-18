@@ -119,7 +119,7 @@ export async function startProbeEngine(layout: ProbeLayout, options: { cwd: stri
     ...options.launchEnv,
   };
   const spec = { subagentModel: null, gateway: 'direct', effort: null, extraSettings: null } as unknown as LaunchSpec;
-  const env = { ...buildEnvironment(spec, captured, RELAY_URL), ...options.syntheticEnv };
+  const env = { ...buildEnvironment(spec, captured, RELAY_URL, process.pid), ...options.syntheticEnv };
   const flagSettings = mergeFlagSettings(spec);
   const args = [...ENGINE_FLAGS, ...(options.dynamic ? ['--mcp-config', JSON.stringify(options.dynamic)] : []), '--settings', JSON.stringify(flagSettings)];
   const launchId = `PROBE-${launches}`;
