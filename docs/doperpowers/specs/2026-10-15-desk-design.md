@@ -535,7 +535,7 @@ afleet's. Taste-heavy surfaces are reviewed as mockups in the web children.
 | From the web | Plane | Path |
 | --- | --- | --- |
 | Send | log | the owner's `human` event → `deliver_next` → the bridge: idle, `$.prompt.submit({asUser: true})`; while a turn runs, `$.session.append` of a row read at the loop's next request, with one `[sminos bridge]` wake if the turn answers first; refused after an Esc, the session's inbox frame (doperpowers #233). A peer's event never takes this path: it goes to the session's inbox socket as a peer message closed by its reply line (doperpowers #236) |
-| Steer | RPC | bridge `$.session.append` of a user row, read at the loop's next request; refused when no turn is running (the web offers Send instead); a turn that answers before any request read the steer gets one wake prompt, at most once per turn (DX5) |
+| Steer | RPC | bridge `$.session.append` of a user row, read at the loop's next request: the owner's words under the line `[sminos steer from human]` [2026-10-18]; refused when no turn is running (the web offers Send instead); a turn that answers before any request read the steer gets one wake prompt, at most once per turn (DX5) |
 | Interrupt | RPC | bridge `$.turn.abort` (the main loop's turn), then `TaskStop` through `$.tool.call` on each Bash of that turn the abort moved to the background, the main loop's and its foreground subagents' (a background subagent's never), as Esc kills it in the terminal; the result names the tasks stopped and any still running, and a task still running means the interrupt is incomplete |
 | Answer a question | RPC | bridge: `classic.PermissionRequest` returning `updatedInput: {questions, answers}` for a native AskUserQuestion; the ask mod's external-answer path for an async one |
 | Allow / deny | RPC | bridge `classic.PermissionRequest`, racing the terminal's dialog |
@@ -875,7 +875,13 @@ What only the log or the hub knows joins the transcript:
 - **An async question** (the ask mod's, `mcp__doperpowers__AskUserQuestion`)
   draws from its transcript row once classified; the log's `question` and
   `answered` events overlay it, joined by the event's `src`, the call's
-  tool-use id (`stream.ts:7-8`).
+  tool-use id (`stream.ts:7-8`). [2026-10-18, MAWS #49] Its answer draws
+  where it reached the model, as a dim line `answered: <header> →
+  <answer> · …` (`Skipped` for a declined dialog), on each of the ask
+  mod's three routes: the plugin prompt of an idle session, never drawn
+  as the engine's "The doperpowers plugin sent a message" bubble, and the
+  context on a tool result or on the next prompt after a stop. The
+  question's row takes the answer by call id when the log has none.
 - **Lifecycle** stays in the header and the sidebar; the channel keeps an
   ended or retired session's end as one marker row at the tail.
 - **Fallbacks.** An offline machine serves no transcript
@@ -3022,7 +3028,7 @@ M1 left them (with fw1/fw2). Changed rows are marked **[M2]**.
 
 | Op | Built | Arguments | Result |
 | --- | --- | --- | --- |
-| `steer` | M2 **[M2]** **[fw1]** | `{text}` | `{row: <uuid of the appended user row>}`. During the main turn: `$.session.append` of a user row (one text block), read at the main loop's next model request; the running tool goes on; mirrored as the transcript line `steer: <text>` (`$.ui.log`). Refused idle (`ok: false`, "no turn is running to steer: send it instead"). **[fw1]** The steer is bound to the main turn it was given in before the append is awaited. When that turn ends with `answer` and no main-loop request of it began after the row was in (or the turn ended while the append was pending, and the row then lands), the bridge submits **one wake prompt** (`asUser`) that does not repeat the steer. **[fw2]** The wake is owned by the originating turn: it is decided once the turn has ended *and* every append given in it has settled (in, refused, or failed), and is issued at most once per turn: "I added a note to the conversation while you were finishing your answer. Read it and act on it." (`STEER_WAKE`); the next request reads the row. A turn ending `aborted`/`error`/`refusal` wakes nothing. One wake per turn, however many steers |
+| `steer` | M2 **[M2]** **[fw1]** | `{text}` | `{row: <uuid of the appended user row>}`. During the main turn: `$.session.append` of a user row (one text block), read at the main loop's next model request; the running tool goes on; mirrored as the transcript line `steer: <text>` (`$.ui.log`). **[2026-10-18, doperpowers #240, 7.180.0]** The block is the line `[sminos steer from human]`, then `\n` and the text verbatim (`STEER_LINE`): the row names itself a steer, so the desk knows it positively, and no text reads as one of the bridge's other rows; the marker and note refusals #225 and DC10 added are dropped. Refused idle (`ok: false`, "no turn is running to steer: send it instead"). **[fw1]** The steer is bound to the main turn it was given in before the append is awaited. When that turn ends with `answer` and no main-loop request of it began after the row was in (or the turn ended while the append was pending, and the row then lands), the bridge submits **one wake prompt** (`asUser`) that does not repeat the steer. **[fw2]** The wake is owned by the originating turn: it is decided once the turn has ended *and* every append given in it has settled (in, refused, or failed), and is issued at most once per turn: "I added a note to the conversation while you were finishing your answer. Read it and act on it." (`STEER_WAKE`); the next request reads the row. A turn ending `aborted`/`error`/`refusal` wakes nothing. One wake per turn, however many steers |
 | `interrupt` | M2 **[M2]** **[fw1]** | — | `{turnId, stopped: [<task ids>], running: [<task ids>]}`: `$.turn.abort` on the main turn, then `TaskStop` (`$.tool.call`) on each Bash call **attributable to that turn** and running at the abort whose result names the background task the abort moved it to (`running in background with ID: <id>`; their results awaited at most 3 s). **[fw1]** Attributable: a main-loop call made during that turn, or a call of a foreground subagent spawned in it (nested foreground subagents inherit their parent's turn); a background subagent's calls never are. **[fw1]** `running` names each task whose TaskStop failed (an `isError` result or a rejection): the interrupt is incomplete when it is not empty. Idle: `{turnId: null, stopped: [], running: []}` |
 | `model` | M2 **[M2]** | `{model, effort?}` — `model` an id, a family alias, `"default"` or null; `effort` one of `low medium high xhigh max`, or null | `{model, effort}` now in force (null: the session's own). Rewritten on every **main-loop** `turn.step` request, subagents untouched; never `$.config.set`. A family alias (`haiku`, `sonnet`, `opus`, `fable`) is resolved through the session's `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`; one it does not map is refused, naming the id to use. Emits `model`; kept by the child |
 | `compact` | M2 **[M2]** | `{instructions?}` | During the main turn `{queued: true, turnId}`: held, and run inside that turn's `turn.complete` (a second while one is held keeps the first). Idle `{started: true}`: run at once. Either way the outcome follows on the stream as `compact` events carrying this command's `id` |
@@ -3852,7 +3858,7 @@ What it does, as DX2 and DX4 have it:
 
   A claim left without an outcome is answered from its trace. Without one, which happens only for a scripted RPC, it
   is answered `failed: interrupted`. The default effects:
-  - `steer`: appends a user row to the running main turn and answers its uuid (`idle` with no main turn);
+  - `steer`: appends a user row to the running main turn (`[sminos steer from human]\n<text>`, the bridge's shape) and answers its uuid (`idle` with no main turn);
   - `interrupt`: answers `{turnId: <the main turn running, or null>, stopped: [], running: []}`;
   - `model`: answers what is now in force for that session, `"default"` giving null;
   - `compact`: answers `{at: "now"}` with the compaction's `start` and `end` at once, or `{at: "turn-end"}` with them
@@ -4797,6 +4803,30 @@ a hub that connects into machines (§2).
   - Of identical undone inputs, only the last is drawn.
   - Merge order: desk PR deployed, then #238 (7.178.0), then #239 (7.179.0),
     then one Mac roll.
+  2026-10-18, a steer's row names itself (doperpowers #240, 7.180.0; MAWS
+  #49, deployed `hub@b4480ee6 web@master.b4480ee6`, both Macs rolled). The
+  desk knew a steer only by exclusion from the bridge's closed set of
+  rows, so any new kind of appended row would have drawn as the owner's
+  words. `$.session.append` lets the plugin set only text blocks and an
+  `agentId` (2.1.300 `AGt`, `m6r`), so the mark is a first line:
+  `[sminos steer from human]`, the line `sminos steer`'s inbox fallback
+  already opens with. The desk matches the line first and draws the words
+  without it. It falls back to exclusion for unmarked rows, which an older
+  bridge writes, and which exist for the minutes between the deploy and
+  the roll. With the line, no steer's text reads as the interrupt's marker
+  or a note, so #225's and DC10's steer refusals are dropped. The model
+  acts on the framed steer at its next request, in a terminal session and
+  in a `--bg` job (`tests/mods/live-control-check.py` on the merged tree,
+  32 of 32). Rejected:
+  pairing the row with the bridge's mirror line, a separate system row
+  that other rows can land between, and that older bridges also write.
+  The same desk change draws an async answer as the answer (above, the
+  async question), and fixes the phone's top bar: a long project name had
+  widened the whole app past the screen, pushing the status dot, the key
+  state, Menu, "Sign in again" and the composer off it. The bar is
+  `min-w-0`, and the name has an 80px floor. A steer through the inbox
+  fallback (a session with no bridge) still draws as MAWS's peer message,
+  logged as debt.
   2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
   desk-dc8 370662a2, c81b77fc, 578b11b8):
   - DX5's `resync` gains `refused`, so a refusal whose post failed is not
