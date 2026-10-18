@@ -561,6 +561,81 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
   });
 });
 
+// P3-F W-DOC-B (tracker L168): a replica that has not seen a move deletes the old copy whole. The move already took the
+// block: that delete is stale and is not forwarded (forwarding it emptied the moved copy); the replica's other edits are.
+describe('a stale whole-block delete of a moved block', () => {
+  it.each(['p3', 'l1'])('is refused for a block the agent moved (%s): the moved copy keeps everything it holds', (id) => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const person = host.peer(); // has not seen the move
+    const before = textOf(host.live, id);
+    const inner = ids(host.live).filter((other) => other !== id && DocIndex.of(host.live).find(other)?.top.id === id);
+    agentBatch(host, adapter, agent, agent1, [{ op: 'move', id, after: 'c1' }]);
+    transact(person, () => body(person).delete(order(person).indexOf(id), 1));
+    host.send(person, human);
+    host.pull(person);
+    host.pull(agent);
+    expect(textOf(host.live, id)).toBe(before);
+    expect(order(host.live).indexOf(id)).toBe(order(host.live).indexOf('c1') + 1);
+    for (const nested of inner) expect(DocIndex.of(host.live).find(nested)?.top.id).toBe(id);
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(textOf(person, id)).toBe(before);
+    expect(textOf(agent, id)).toBe(before);
+  });
+
+  it('is refused for a block a person dragged: another person’s stale delete of the original leaves the dragged copy whole', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const stale = host.peer(); // has not seen the drag
+    const dragger = host.peer();
+    const before = textOf(host.live, 'p3');
+    const p3 = DocIndex.of(dragger).pm(DocIndex.of(dragger).find('p3')!.top);
+    transact(dragger, () => {
+      body(dragger).delete(order(dragger).indexOf('p3'), 1);
+      body(dragger).insert(order(dragger).indexOf('p4') + 1, [pmnodeToDelta(p3)]);
+    });
+    host.send(dragger, human);
+    transact(stale, () => body(stale).delete(order(stale).indexOf('p3'), 1));
+    host.send(stale, human);
+    host.pull(stale);
+    expect(textOf(host.live, 'p3')).toBe(before);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('p4') + 1);
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(textOf(stale, 'p3')).toBe(before);
+  });
+
+  it('refuses only that delete: the same update’s deletion inside another moved block, its typing and its delete of an unmoved block land', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const person = host.peer(); // has not seen either move
+    const p3 = textOf(host.live, 'p3');
+    agentBatch(host, adapter, agent, agent1, [
+      { op: 'move', id: 'p3', after: 'c1' },
+      { op: 'move', id: 'p4', after: 'h1' },
+    ]);
+    const root = body(person);
+    const [p1, p4] = [nodeOf(person, 'p1'), nodeOf(person, 'p4')];
+    const words = textOf(person, 'p4').indexOf(' of this section');
+    const [at2, at3] = [order(person).indexOf('p2'), order(person).indexOf('p3')];
+    transact(person, () => {
+      root.delete(at3, 1); // the moved block, whole: stale
+      root.delete(at2, 1); // a block nobody moved, whole
+      p4.delete(words, ' of this section'.length); // words inside the other moved block
+      p1.insert(0, 'Note: ', {}); // typing in a block nobody moved
+    });
+    host.send(person, human);
+    host.pull(person);
+    expect(textOf(host.live, 'p3')).toBe(p3);
+    expect(textOf(host.live, 'p4')).toBe('Closing paragraph, with enough words to look like prose that a person wrote.');
+    expect(textOf(host.live, 'p1').startsWith('Note: The quick')).toBe(true);
+    expect(order(host.live)).toEqual(['h1', 'p4', 'p1', 'l1', 'tb1', 'c1', 'p3']);
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(textOf(person, 'p4')).toBe(textOf(host.live, 'p4'));
+  });
+});
+
 describe('restore (revertScope, afterRestore)', () => {
   it('reverts text, marks and a thread’s status, and keeps a thread created after the version and a reply posted after it', () => {
     const adapter = adapterOf();

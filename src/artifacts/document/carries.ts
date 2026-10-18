@@ -72,6 +72,19 @@ export class CarryRegistry {
     return out;
   }
 
+  /**
+   * The carried characters (keys) of active carries whose old node `deletes` holds: a replica that had not seen the move
+   * deleted the old copy whole, a stale delete the move already overtook, so it is not an edit to forward (P3-F, L168).
+   */
+  carriedOfDeletedSources(deletes: { has(client: number, clock: number): boolean }): Set<string> {
+    const out = new Set<string>();
+    for (const entry of this.entries) {
+      const source = entry.carry.source;
+      if (entry.active && source && deletes.has(source[0], source[1])) for (const from of entry.carry.from) out.add(slotKey(from));
+    }
+    return out;
+  }
+
   /** Makes a carry's forwards and copy live (idempotent). */
   activate(carry: Carry): void {
     const entry = this.entries.find((candidate) => candidate.carry === carry);

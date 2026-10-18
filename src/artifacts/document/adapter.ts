@@ -259,8 +259,14 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     const late = performing.map((carry) => lateEdits(live, carry, ds)).filter((entry): entry is Late => entry !== null);
     if (performing.length === 0 && moved.length === 0 && !registry.hasActive) return null;
     // Deletions that are part of a move are not edits: the moves this update performs (registered or a drag), and any
-    // re-insert of a block an earlier carry moved (a stale replica moving the old copy again).
-    const own = new Set([...performing.flatMap((carry) => carry.from.map(slotKey)), ...moved.flatMap((drag) => drag.sourceSlots.map(slotKey)), ...registry.carriedOf(new Set(inserted.keys()))]);
+    // re-insert of a block an earlier carry moved (a stale replica moving the old copy again). Nor is a stale replica's
+    // delete of an old copy whole: the move overtook it, and forwarding it would empty the moved copy (P3-F, L168).
+    const own = new Set([
+      ...performing.flatMap((carry) => carry.from.map(slotKey)),
+      ...moved.flatMap((drag) => drag.sourceSlots.map(slotKey)),
+      ...registry.carriedOf(new Set(inserted.keys())),
+      ...registry.carriedOfDeletedSources(ds),
+    ]);
     return (doc) => {
       // what this edit writes through the actor's replica that someone else typed: reported as carries, so the
       // attribution keeps each run's author and time rather than crediting the actor (D8b; parent Decision Log 34)

@@ -11,7 +11,7 @@ import { carriedBlocks } from '@artifacts/document/history';
 import { fingerprint } from '@artifacts/document/fingerprint';
 import { schemaFor } from '@artifacts/document/schema';
 import { getThread, locate, liveThreadIds } from '@artifacts/document/threads';
-import { body, nodeOf, pmOf, seedDoc, TAB, textOf } from '@artifacts/document/writer.fixture';
+import { body, nodeOf, order, pmOf, seedDoc, TAB, textOf } from '@artifacts/document/writer.fixture';
 import { createAbsolutePositionFromRelativePosition, createRelativePositionFromJSON, createRelativePositionFromTypeIndex, relativePositionToJSON } from '@artifacts/yjs/document';
 import { pmnodeToDelta } from '@artifacts/yjs/prosemirror';
 import { applyV1, diffV1, stateV2, transact } from '@artifacts/yjs';
@@ -233,6 +233,30 @@ describe('artifact_edit', () => {
     const id = await world.seeded();
     const refusal = refusalOf(await edit({ artifact: id, baseRevision: world.store.revision(id), ops: [{ op: 'delete', id: 'p4' }] }));
     expect(refusal.reason).toBe('staleTargets');
+  });
+
+  // P3-F W-DOC-B (tracker L168): the agent's own stale delete of a moved block, through the tool (a regression pin: the
+  // agent writes on a host replica current with the live doc, so the move is seen and the delete refused as stale)
+  it('a delete whose block a person moved since the read is refused naming it where it is now; an unmoved block’s delete at that base lands', async () => {
+    const { id, revision } = await readSeed();
+    const person = world.connect(id, HUMAN);
+    person.edit((doc) =>
+      transact(doc, () => {
+        const p3 = DocIndex.of(doc).pm(DocIndex.of(doc).find('p3')!.top);
+        body(doc).delete(order(doc).indexOf('p3'), 1);
+        body(doc).insert(order(doc).indexOf('p4') + 1, [pmnodeToDelta(p3)]);
+      }),
+    );
+    await world.service.whenCommitted();
+    expect(order(live(id)).slice(-1)).toEqual(['p3']);
+    const before = stateV2(live(id));
+    const refusal = refusalOf(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'delete', id: 'p3' }] }));
+    expect(refusal.reason).toBe('staleTargets');
+    expect(JSON.stringify(refusal.blocks)).toContain('A plain paragraph the human types into.');
+    expect(stateV2(live(id))).toEqual(before);
+    json(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'delete', id: 'p2' }] }));
+    expect(order(live(id))).not.toContain('p2');
+    expect(textOf(live(id), 'p3')).toBe('A plain paragraph the human types into. Words to keep.');
   });
 
   it('answers a repeated tool-use id with the first result and applies the batch once', async () => {
