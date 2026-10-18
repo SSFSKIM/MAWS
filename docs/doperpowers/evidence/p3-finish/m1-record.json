@@ -16,8 +16,8 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 3,
-    "preclosed:pending": 13,
+    "preclosed:committed": 4,
+    "preclosed:pending": 12,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -43,15 +43,15 @@
       "action": "remove",
       "note": "Recorded closure intact: landed 30f493687 (on master), the bridge waits for a sized anchor, five DOM regressions, side 12/12 three times on the mini; 'Closed.'",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "d6bd58258c952c6fd1aa016fbfa9ef309ae75259"
     },
     {
       "line": 221,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: 'Closed 2026-10-16: scripts/ci-gate.sh --evidence (gate-offload Decision Log 48) uploads a green run's artefacts.'",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 223,
