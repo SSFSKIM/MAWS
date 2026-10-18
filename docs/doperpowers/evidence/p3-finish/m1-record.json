@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 20,
-    "defer:pending": 103,
+    "defer:committed": 21,
+    "defer:pending": 102,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -474,7 +474,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L47; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Key both by `rev-parse --git-common-dir`'s realpath, with a per-key admission queue, and a test of the root-plus-subdirectory case. Re-deferred 2026-10-07 (E11 1.6): hypothetical; no corruption. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L49): hypothetical; no corruption. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L47; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "7ca4c87de5706faad205de4825ff2809a41996c2"
     },
     {
       "line": 48,
@@ -484,8 +484,8 @@
       "triageReason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L48; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "remainingClause": "One generic held-diff cache parameterised on key and input builders, used by both stores. Re-deferred 2026-10-07 (E11 1.6): a refactor, no defect. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L50): a refactor, no defect. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L48; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 49,
