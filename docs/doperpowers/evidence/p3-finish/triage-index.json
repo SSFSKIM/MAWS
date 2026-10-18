@@ -1,14 +1,14 @@
 {
   "counts": {
     "defer": 123,
-    "theirs": 44,
     "sitting": 10,
-    "close": 10,
-    "fix": 51
+    "theirs": 42,
+    "fix": 53,
+    "close": 10
   },
   "fixSteps": {
     "M4-count": 3,
-    "W-SHELL": 6,
+    "W-SHELL": 8,
     "W-STORE": 4,
     "W-T": 5,
     "W-DOC-A": 4,
@@ -629,9 +629,9 @@
     },
     {
       "line": 128,
-      "bin": "theirs",
-      "step": "cua session",
-      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+      "bin": "fix",
+      "step": "W-SHELL",
+      "reason": "E4a/F-owned per parent DL106: acknowledge only after the hide settles, with a test; if there is no completion signal, re-defer P4."
     },
     {
       "line": 129,
@@ -1343,9 +1343,9 @@
     },
     {
       "line": 260,
-      "bin": "theirs",
-      "step": "maws-fe lane",
-      "reason": "Named current owner is maws-fe; confirm active ownership at checkpoint 1 rather than collide with its transcript changes."
+      "bin": "fix",
+      "step": "W-SHELL",
+      "reason": "No other active owner per parent DL106: use the found ref\u2019s name in agentMessageCopy, with a test; any larger lookup goes to the transcript\u2019s next change."
     },
     {
       "line": 261,

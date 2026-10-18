@@ -83,10 +83,11 @@ Rulings — 10 minutes
 R.1 Rulings by frozen handle (proposed defaults, rechecked against final code at M4.2):
   L32 catalogue: keep final recorded residue.
   L35 SessionStart floor: keep.
-  L81 Terminal Korean: owner native recurrence/trace if present; otherwise owner: not run, P2 remains open.
+  L81 Terminal Korean: use P2’s MAWS_IME_TRACE flag-gated recorder if the final build still carries it (M4.2 records present/absent explicitly); native recurrence/trace if present, otherwise owner: not run. P2 remains open.
   L140 locale: keep shipped locale behavior unless the owner chooses one locale per surface.
   L142 mirror cap: keep 64 MiB.
   L175 HWP/HWPX: P4.
+  L180 informed deferral (not a decision): retained-version Claude design-system export currently carries current assets; P4 owns the versioned-assets contract repair (DL106).
   L183 DOCX embedding: P4, record the native reader observation.
   L202 embedded PPTX variant: P4 if the three shipped variants serve the task.
   L213 presenter/fonts/SVG: native pass/fail, then keep/fix now/P4 for any gap.
