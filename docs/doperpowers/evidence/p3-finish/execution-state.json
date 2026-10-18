@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "pair3 accepted selected-group union; pair4 two verified fix waves running, W-E/W-PKG read-only preparation",
+  "phase": "pair3 accepted union; SHELL fix e0bb59c87 recheck correct, DOC-B fix named checks pending; pair5 corrected preparation held",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -294,7 +294,7 @@
   },
   "W-DOC-B": {
     "executor": "afe4ec31e37c3925e",
-    "status": "incorrect:2 verified P2; fresh fix wave running",
+    "status": "bounded reader fix wave waiting on own named checks; no handback yet",
     "claims": "pair4-claims.json",
     "rowCommits": [
       "4b6b3ec69",
@@ -305,11 +305,12 @@
       "e63120945"
     ],
     "checkpoint": "waves/W-DOC-B-checkpoint.json",
-    "reviewer": "affe8ead56a9bcb86"
+    "reviewer": "affe8ead56a9bcb86",
+    "fixExecutor": "addfe16856ce9d938"
   },
   "W-SHELL": {
     "executor": "a87de8fe2228592d9",
-    "status": "incorrect:2 verified P2; fresh fix wave running",
+    "status": "fix committed, single independent recheck af5a8d2e5227da2f7 correct, no material findings; gate pending",
     "claims": "pair4-claims.json",
     "rowCommits": [
       "80757a5c6",
@@ -322,7 +323,9 @@
       "1cc84bf04"
     ],
     "checkpoint": "waves/W-SHELL-checkpoint.json",
-    "reviewer": "af5a8d2e5227da2f7"
+    "reviewer": "af5a8d2e5227da2f7",
+    "fixExecutor": "a669c1af09b6dc634",
+    "fixCommit": "e0bb59c878e1525e133af0a8867ad88f1cda8a98"
   },
   "effectiveBins": {
     "fix": 52,
@@ -331,7 +334,7 @@
     "defer": 125,
     "theirs": 42
   },
-  "checkpointAt": "2026-10-18T16:49:22Z",
+  "checkpointAt": "2026-10-18T17:12:00Z",
   "checkpointHead": "e631209455f1439cf29a22ec4292b20dc9d71c27",
   "pair3Retry": {
     "runId": 39145946170,
@@ -367,9 +370,21 @@
     "union": "all13 original selected groups green across39140360292 and this fix-only corrective retry; no full-set credit"
   },
   "W-E": {
-    "status": "read-only preparation dispatched; no edit release"
+    "executor": "a40d9b1903ee4f68d",
+    "status": "corrected preparation accepted, source held for reviewed pair4 pin",
+    "claims": "pair5-claims.json",
+    "assessment": "reviews/W-E-preflight-assessment.txt"
   },
   "W-PKG": {
-    "status": "read-only preparation dispatched; no edit release"
+    "executor": "af1eb156dd5f3f542",
+    "status": "packaged execution+resolution proof preparation accepted, source held for reviewed pair4 pin",
+    "claims": "pair5-claims.json"
+  },
+  "pair4GatePrepared": {
+    "launcher": "/tmp/maws-review/p3f-doc-b-shell-launch.sh",
+    "status": "not launched; reviewed merged full SHA argument required",
+    "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:panel,e2e:side,e2e:to-human,e2e:transcript,e2e:default,e2e:browser,e2e:browser-comment,e2e:deliverables,e2e:library,e2e:available,e2e:terminal,e2e:agents",
+    "reason": "document editor/export/mirror; shell and agent graph; actual C10 replay consumers including sessions via default; c12 empty fixtures does not seed",
+    "upstreamFetched": "3efa6cba7; merge waits clean fix workers; incoming desk app/docs only"
   }
 }

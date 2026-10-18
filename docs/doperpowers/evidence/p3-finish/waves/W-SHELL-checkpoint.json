@@ -80,5 +80,14 @@
   },
   "processDeviation": "SHELL added rollback.test.ts, service-register.test.ts, index.ts and replay-transcript.ts/test before acknowledgment; ipc.ts absent from prior claim, disclosed at handback. Included in exact independent review, not retrospectively compliant.",
   "replayBoundary": "existing C10 seam only; first accepted replay user record, canonical scratch config home under OS tmp, exclusive wx; independent safety review pending",
-  "acceptance": "not accepted; bounded fix/recheck and pair4 gate pending"
+  "acceptance": "not accepted; bounded fix/recheck and pair4 gate pending",
+  "fix": {
+    "executor": "a669c1af09b6dc634",
+    "commit": "e0bb59c878e1525e133af0a8867ad88f1cda8a98",
+    "controllerRead": "48/48 across2 named files exit0; five-path eslint exit0; actual three source diffs inspected",
+    "red": "worker-reported9 failures/39passes; retained red.log",
+    "logs": "/tmp/maws-review/w-shell-fix/",
+    "recheck": "af5a8d2e5227da2f7 correct, no material findings; immutable five-path range only",
+    "remainingModelBoundary": "non-atomic malicious/same-uid concurrent directory substitution not prevented; fresh owned scratch store, ordinary pre-existing symlink redirection is checked; not claimed an observed owner-store write"
+  }
 }
