@@ -194,9 +194,9 @@ describe('the bridge script (E2 Design §10)', () => {
     page('<p>x</p>');
     fromParent({ type: 'maws:locate', id: 1, selector: '#late' });
     expect(posted).toEqual([]);
-    const late = win.document.createElement('h1') as unknown as DomElement & { getBoundingClientRect(): unknown };
+    const late = win.document.createElement('h1');
     late.id = 'late';
-    late.getBoundingClientRect = () => ({ left: 4, top: 6, width: 300, height: 90, right: 304, bottom: 96, x: 4, y: 6 });
+    late.getBoundingClientRect = () => new win.DOMRect(4, 6, 300, 90); // happy-dom's own DOMRect: left 4, top 6, right 304, bottom 96
     win.document.body.appendChild(late);
     await new Promise((resolve) => setTimeout(resolve, 0)); // the mutation's delivery
     expect(posted).toEqual([{ type: 'maws:located', id: 1, selector: '#late', rect: { x: 4, y: 6, width: 300, height: 90 }, origin: '*' }]);

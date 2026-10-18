@@ -264,19 +264,23 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
 
     // P2-E1 (M3): re-pin's locate round trip (P2-E1 document, D8): the page answers where an element is now, by selector,
     // null for one it has not or an invalid selector, each answer carrying its ask's id; a locate starts no picking and
-    // leaves nothing in the page
+    // leaves nothing in the page. The answers are matched by id, not arrival: an invalid selector is answered at once,
+    // an absent one only after the page's wait for it (P3-F L198), so the invalid one's answer comes first.
     await maws.page.evaluate(() => {
       const element = document.getElementById('e2-frame') as HTMLIFrameElement;
       ['#hero', 'body > p:nth-of-type(1)', '#gone', 'h1['].forEach((selector, i) => element.contentWindow!.postMessage({ type: 'maws:locate', id: i + 1, selector }, '*'));
     });
     await expect.poll(posted).toHaveLength(6);
-    expect((await posted()).slice(2)).toEqual([
+    const located = (await posted()).slice(2) as { id: number }[];
+    expect([...located].sort((a, b) => a.id - b.id)).toEqual([
       { type: 'maws:located', id: 1, selector: '#hero', rect: { x: 0, y: 0, width: FRAME.width, height: 200 } },
       { type: 'maws:located', id: 2, selector: 'body > p:nth-of-type(1)', rect: { x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) } },
       { type: 'maws:located', id: 3, selector: '#gone', rect: null },
       { type: 'maws:located', id: 4, selector: 'h1[', rect: null },
     ]);
-    const lead = (await posted())[3] as { rect: { y: number; height: number } };
+    const arrival = (id: number) => located.findIndex((reply) => reply.id === id);
+    expect(arrival(4)).toBeLessThan(arrival(3)); // the invalid selector did not wait behind the absent one
+    const lead = located.find((reply) => reply.id === 2) as unknown as { rect: { y: number; height: number } };
     expect(lead.rect.y).toBeGreaterThanOrEqual(200); // under the heading
     expect(lead.rect.height).toBeGreaterThan(0);
     expect(await frame.locator('[data-maws-pick-overlay]').count()).toBe(0);
