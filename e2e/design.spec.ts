@@ -48,9 +48,14 @@ import {
   seamInstalled,
   surfaceEvidence,
   type SurfaceGeometry,
+  threadsOf,
   viewOf,
   worldAt,
 } from './support/design';
+
+// H's words for an artifact with no session context (src/renderer/src/artifacts/session-context.ts, NO_SESSION_CONTEXT;
+// the renderer module is not imported here, its stores being the window's)
+const NO_SESSION_CONTEXT = 'Put this artifact in a Space linked to a folder to start a session for it';
 
 let launch: MawsLaunch | null = null;
 let repo: ScratchRepo | null = null;
@@ -550,9 +555,11 @@ test('a held board is drawn labelled and never written; Theme restyles every boa
 // M6 (product evidence for the owner's sitting): M4's comments and history surfaces and M5's Export sheet, wide and
 // narrow, a screenshot and the editor's measured geometry kept first, then the bounds every surface keeps (nothing
 // sideways out of the editor, the rails inside it, the card and the sheet on the window). A comment goes to the session
-// the main area shows (B's rule), so while the main area shows the design's own tab the rail lists the threads but no
-// new comment is offered there; the wide comment card is the panel's, maximized beside the chat the main area shows, and
-// the narrow surfaces are the panel at its own width beside that chat.
+// the main area shows (B's rule); while the main area shows the design's own tab, to the design's own context (P3-F,
+// L230; H's owner-start policy as the document's and the deck's): this design, the owner's in no Space and no project,
+// has none, so its new comment shows the card's notice saying why and starts nothing, and Close withdraws the comment.
+// The wide comment card is the panel's, maximized beside the chat the main area shows, and the narrow surfaces are the
+// panel at its own width beside that chat.
 test('the comments, history and Export sheet surfaces, wide and narrow: evidence first, then their bounds', async () => {
   test.setTimeout(300_000);
   const page = await ready();
@@ -616,9 +623,22 @@ test('the comments, history and Export sheet surfaces, wide and narrow: evidence
     await expect(sheet).toHaveCount(0);
   };
 
-  await test.step('wide, the design’s main tab: the comments rail (no new comment offered: no session shown), history, the Export sheet', async () => {
+  await test.step('wide, the design’s main tab: the comments rail, a new comment’s notice (no session shown, no context), history, the Export sheet', async () => {
     await commentsRail('wide', inMain, mainRegion);
-    await expect(toolbarOf(inMain).getByRole('button', { name: 'Comment', exact: true })).toHaveCount(0);
+    // P3-F (L230): the design's own context decides; none here, so the notice in the card's place says why
+    await inMain.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
+    await expect.poll(async () => (await viewOf(page, id, 'main')).frame).toBe('phone');
+    await toolbarOf(inMain).getByRole('button', { name: 'Comment', exact: true }).click();
+    const notice = inMain.locator('[data-comment-context]');
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveAttribute('role', 'dialog');
+    await expect(notice).toHaveAttribute('data-comment-context', 'none');
+    await expect(notice).toContainText(NO_SESSION_CONTEXT);
+    await expect(page.locator('[data-comment-card]'), 'no composing card without a session').toHaveCount(0);
+    await expect.poll(async () => (await threadsOf(page, id)).length, { message: 'the board’s new thread while the notice stands' }).toBe(3);
+    await notice.getByRole('button', { name: 'Close' }).click();
+    await expect(notice).toHaveCount(0);
+    await expect.poll(async () => (await threadsOf(page, id)).map((t) => t.id).sort(), { message: 'the unsent comment withdrawn' }).toEqual(['board', 'box']);
     await history('wide', inMain, mainRegion, 'main');
     await exportSheet('wide', inMain, 'main');
   });
