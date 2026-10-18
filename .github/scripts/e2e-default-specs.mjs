@@ -81,7 +81,7 @@ const pool = async (jobs, width) => {
 
 // What `playwright test --list` collects for one selection: Map(spec path from the root -> Set of its tests, each by its
 // title path and location). Throws when the listing fails or reports an error.
-async function listSelection(root, { env, args }) {
+export async function listSelection(root, { env, args }) {
   const dir = mkdtempSync(join(tmpdir(), 'e2e-default-'));
   const output = join(dir, 'list.json');
   try {

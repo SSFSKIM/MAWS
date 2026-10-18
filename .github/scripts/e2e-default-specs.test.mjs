@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { availableParallelism, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
@@ -14,7 +14,7 @@ import { promisify } from 'node:util';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const script = join(root, '.github/scripts/e2e-default-specs.mjs');
-const { defaultSpecs, readScript } = await import(script);
+const { defaultSpecs, listSelection, readScript } = await import(script);
 const { name: rootName, scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
@@ -39,7 +39,7 @@ function plan(trailers = '') {
 const macosPlan = () => plan().e2e;
 
 // default's derivation step on a plan's outputs, as gate.yml runs it: the specs it prints and the summary it writes.
-async function derive({ e2e, defaultBeside }) {
+async function deriveStep({ e2e, defaultBeside }) {
   const dir = mkdtempSync(join(tmpdir(), 'maws-default-specs-'));
   try {
     const { stdout } = await promisify(execFile)(process.execPath, [script], { cwd: root, encoding: 'utf8', env: { ...process.env, E2E_PLAN: e2e, DEFAULT_BESIDE: defaultBeside, GITHUB_STEP_SUMMARY: join(dir, 'summary') } });
@@ -49,16 +49,27 @@ async function derive({ e2e, defaultBeside }) {
   }
 }
 
-// Started together, since each lists the groups' selections on this tree. The relaunch of default and two groups that
-// ci-gate.sh's refused summary prints, with DefaultBeside naming the whole set, and without it (a hand-written relaunch).
+// The same derivation in this process, the plan's two outputs read as the step reads them, each selection listed once
+// across the derivations that share it: what is compared is the groups each derivation subtracts, not two listings.
+const listings = new Map();
+const listOnce = (selection) => {
+  const key = JSON.stringify(selection);
+  if (!listings.has(key)) listings.set(key, listSelection(root, selection));
+  return listings.get(key);
+};
+const derive = ({ e2e, defaultBeside }) => defaultSpecs({ scripts, rootName, groups: JSON.parse(e2e).map((entry) => entry.group), beside: JSON.parse(defaultBeside), list: listOnce, width: Math.max(2, Math.min(8, availableParallelism())) });
+
+// Started together. The relaunch of default and two groups that ci-gate.sh's refused summary prints, with DefaultBeside
+// naming the whole set, and without it (a hand-written relaunch), the latter through the step itself.
 const relaunchGates = 'Gates: e2e:default,e2e:side,e2e:library\nRunner: macos';
 const whole = derive(plan());
 const relaunch = derive(plan(`${relaunchGates}\nDefaultBeside: ${class1}`));
-const widened = derive(plan(relaunchGates));
+const widened = deriveStep(plan(relaunchGates));
 for (const derivation of [whole, relaunch, widened]) derivation.catch(() => {}); // a failure is the awaiting test's
 
-test("this tree: beside the macOS lane's other groups, default runs its own specs, read from the job's output", async () => {
-  const { specs, summary } = await whole;
+test("this tree: beside the macOS lane's other groups, default runs its own specs", async () => {
+  const { specs, total } = await whole;
+  assert.equal(total, 75);
   assert.deepEqual(specs, [
     'e2e/agent-tools-live.spec.ts',
     'e2e/c11-live.spec.ts',
@@ -101,17 +112,17 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
     'e2e/to-human-live.spec.ts',
     'e2e/voice.spec.ts',
   ]);
-  assert.match(summary, /its own 40 of the bare set's 75 specs/);
 });
 
 test("this tree: a relaunch of default and two groups, DefaultBeside naming the whole class-1 set, runs exactly the whole set's own specs", async () => {
   const [all, part] = await Promise.all([whole, relaunch]);
-  assert.deepEqual(part.specs, all.specs);
-  assert.match(part.summary, /, \d+ of them named by DefaultBeside/);
+  assert.deepEqual([part.specs, part.total], [all.specs, all.total]);
+  assert.ok(part.notes.some((note) => / \(named by DefaultBeside\) collects e2e\//.test(note)));
 });
 
-test('this tree: the same relaunch without DefaultBeside still widens default by the specs of the groups it leaves out', async () => {
+test("this tree: the same relaunch without DefaultBeside still widens default by the specs of the groups it leaves out, read from the job's output", async () => {
   const [all, part] = await Promise.all([whole, widened]);
+  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 75 specs, beside 2 other e2e groups \(/);
   assert.deepEqual(all.specs.filter((spec) => !part.specs.includes(spec)), []);
   assert.ok(part.specs.includes('e2e/artifacts-store.spec.ts'), 'e2e:artifacts, absent from the relaunch, leaves its spec to default');
   assert.ok(!part.specs.includes('e2e/side.spec.ts') && !part.specs.includes('e2e/library.spec.ts'));
