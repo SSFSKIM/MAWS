@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 61,
-    "defer:pending": 62,
+    "defer:committed": 62,
+    "defer:pending": 61,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -925,7 +925,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L97; parent Decision Log 106): Needs an engine-effective fact/probe absent from the current attested interface; each engine bump owns revalidation. Owner: each engine bump.",
       "remainingClause": "The row says \"pinned to the default ref\" or the CLI keeps the empty ref; pinned when the engine's answer is checked on a newer version. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L132): CLI behaviour; checked on a newer engine. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L97; parent Decision Log 106): Needs an engine-effective fact/probe absent from the current attested interface; each engine bump owns revalidation. Owner: each engine bump.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "6181201c18954b59fb407acb82c98c2b668f18e9"
     },
     {
       "line": 107,
@@ -935,8 +935,8 @@
       "triageReason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L107; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Cancel the virtualiser's reconcile when leaving follow mode (its private `scrollState`), or pin the rest if a sitting shows a missed scroll; a gesture produces many events, so none of the three is likely visible. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L157): three accepted interleavings; reopened on a sitting observation. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L107; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 108,
