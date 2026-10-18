@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 73,
-    "defer:pending": 50,
+    "defer:committed": 74,
+    "defer:pending": 49,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1057,7 +1057,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L122; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "The root is made inside the test (or in a `beforeAll`), so only the worker that runs makes one. Owner: P3 (the live harness). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L122; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "9d0658c43925d99527b60c167509173ac77ddb5b"
     },
     {
       "line": 123,
@@ -1067,8 +1067,8 @@
       "triageReason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L123; parent Decision Log 106): Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner. Owner: P4, through the in-app browser's owner lane.",
       "remainingClause": "The preload is told when the card opens and closes (an explicit lifecycle message on the comment channel) and drops the height inference. Owner: P3 (the browser comment). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L123; parent Decision Log 106): Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner. Owner: P4, through the in-app browser's owner lane.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 124,
