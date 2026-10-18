@@ -1,0 +1,43 @@
+{
+  "status": "prepared, not run",
+  "order": [
+    "drag-a",
+    "drag-b",
+    "drag-a",
+    "drag-b"
+  ],
+  "window": "mini idle half 12\u201324Z; no wave gate pending, wave gates have priority",
+  "budgetUsd": 0,
+  "gateScript": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/scripts/ci-gate.sh",
+  "gates": "e2e:presentations-scale",
+  "probes": [
+    {
+      "name": "drag-a",
+      "originalPin": "e50c8c924a1de4c612c3fe4eff9f19f81f6e2271",
+      "probeCommit": "6120130ec712fb3d664df9aac3c008f1b77385a2",
+      "clone": "/private/tmp/maws-p3f-review/drag-a",
+      "changes": [
+        "e2e/presentations-scale.spec.ts",
+        "package.json"
+      ],
+      "flag": "MAWS_PRESENTATIONS_SCALE=1",
+      "heavyHistory": "unset / absent",
+      "trialsPerRun": 3
+    },
+    {
+      "name": "drag-b",
+      "originalPin": "f686e72b31ad15be30f79710a868d4499a81a1e0",
+      "probeCommit": "e2b81e967bfb6c98f24fcf97915a3e2d1c0f5fac",
+      "clone": "/private/tmp/maws-p3f-review/drag-b",
+      "changes": [
+        "e2e/presentations-scale.spec.ts",
+        "package.json"
+      ],
+      "flag": "MAWS_PRESENTATIONS_SCALE=1",
+      "heavyHistory": "unset / absent",
+      "trialsPerRun": 3
+    }
+  ],
+  "readings": "Extract JSON between P3F_DRAG_RESULT_BEGIN and P3F_DRAG_RESULT_END from each completed job log; retain raw job logs and start/end/trial loads.",
+  "rule": "No product gap closes the regression half as a measurement confound; final absolute/preview bounds remain. Product gap triggers at most six additional bisect jobs then P4 carry."
+}

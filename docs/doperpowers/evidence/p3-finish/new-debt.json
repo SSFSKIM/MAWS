@@ -1,0 +1,12 @@
+{
+  "rows": [
+    {
+      "id": "S-DRAG-FIDELITY",
+      "logged": "2026-10-18T08:19:21Z",
+      "bin": "defer",
+      "owner": "presentation test seam / P4",
+      "row": "| 2026-10-18 | The presentation test seam (P3-C; next seam change/P4) | The class-1 drag case\u2019s stand-in agent calls `publishDeck` on the renderer thread (`src/renderer/src/tools/presentation/e2e-seam.ts`, `agentRepublishing`), while product agent publishes run through the host\u2019s `artifact_publish` path; a measured bound on the stand-in path includes renderer loader work, not just the product drag path. | P3-F M0 read and L216 discriminator preparation; the host-faithful comparison is `e2e/presentations-scale.spec.ts` row 2, with probe identities in `docs/doperpowers/evidence/p3-finish/drag-discriminator.json`. | Closes when the class-1 drag case republishes through the host-faithful artifact_publish path with its fidelity regression and raw measurement evidence. Owner: the presentation seam\u2019s next change (P4). P3-F promotes this to a bounded W-DECK fix only if the approved L216 discriminator shows the two paths diverge materially; until then deliberately deferred. |",
+      "promotion": "Only if L216 discriminator materially distinguishes paths and change is bounded; architect ruling."
+    }
+  ]
+}
