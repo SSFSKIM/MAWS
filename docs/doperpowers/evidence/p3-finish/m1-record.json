@@ -16,8 +16,8 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 11,
-    "preclosed:pending": 5,
+    "preclosed:committed": 12,
+    "preclosed:pending": 4,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -115,15 +115,15 @@
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at E2's M6 tick ba05e4680 (on master).",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "ad9195fa1761ead3f03e97a00fd956f928ceb0e6"
     },
     {
       "line": 239,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at E2's M6 tick ba05e4680 (on master), with the bounded causal claim and the controlled pair recorded.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 240,
