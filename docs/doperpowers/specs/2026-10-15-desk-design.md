@@ -4751,6 +4751,17 @@ a hub that connects into machines (§2).
   reads it as a peer's. The desk's Interrupt does not cause it: the mod's
   `$.turn.abort` does not set the engine's stop marker (2.1.300). The fix
   proposed: append the owner's row and send only a wake through the inbox.
+  2026-10-18, the owner: a steer whose turn an Esc undid before the
+  session read it stays undone. It is not added to the next turn, and the
+  desk draws it dimmed, "Not read: the turn was undone", so the owner can
+  send it again as a message. A steer is guidance for the turn it was
+  sent into. Added to a later turn, it could steer different work.
+  Rejected: adding it again at the next turn start, as the bridge does for
+  a delivered message. In the same change the machine marks the rows an
+  Esc-rewind left off the live chain in DX4, and retracts rows already
+  sent. The desk drops them, except that an owner's input no on-chain row
+  repeats is drawn as undone. This retires #42's frame-line dedupe where
+  it becomes a special case.
   2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
   desk-dc8 370662a2, c81b77fc, 578b11b8):
   - DX5's `resync` gains `refused`, so a refusal whose post failed is not
