@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 25,
-    "defer:pending": 98,
+    "defer:committed": 26,
+    "defer:pending": 97,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -529,7 +529,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L52; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "Closes when a refused link leaves the page in place (for artifacts, the bridge script can swallow a click on a link outside the scheme; a delivered file is served byte for byte, so it keeps Reload) and `window.ts`'s top-level refusal writes the seam line the frame guard writes. Re-deferred 2026-10-07 (E11 1.6): accepted (A-34). Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L56): accepted (P1 A-34). Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L52; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "c2115281814a595732a868ac88bb15bbfb1af0df"
     },
     {
       "line": 53,
@@ -539,8 +539,8 @@
       "triageReason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L53; parent Decision Log 106): Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner. Owner: P4, through the in-app browser's owner lane.",
       "remainingClause": "The cap applies only when suspending eligible tabs could bring the sum under it, or its notices coalesce into one per sample. Re-deferred 2026-10-07 (E11 1.6): the spec's rule, and the caps are an open owner item (A-35). Owner: the owner (step A of E11's sitting, E4a's caps). Held 2026-10-10 for P2-F's sitting (`docs/doperpowers/evidence/p2-finish/triage.txt` L57, M2 A-35 (the caps as built)): the caps are the owner item; as built, the notice-coalescing refinement re-defers to P3 (the in-app browser). Owner: the owner, at P2-F's sitting. Narrowed 2026-10-11 (P2-F 4.4; the owner at the sitting, D8: A-35's rules kept as built, the 12-tab and 2 GiB caps included): what remains is the notice coalescing (one notice per sample). Owner: P3 (the in-app browser). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L53; parent Decision Log 106): Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner. Owner: P4, through the in-app browser's owner lane.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 54,
