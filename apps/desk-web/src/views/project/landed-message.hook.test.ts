@@ -80,3 +80,33 @@ describe('a landing on a message paged toward', () => {
     expect(document.activeElement).toBe(s.composer);
   });
 });
+
+// An async question no request waits for (MAWS's own ask, never raised) lands on its call's row, by the call's id.
+describe("a landing on an async question's call", () => {
+  const asking = (id: string, name: string, input: JsonObject): JsonObject => ({
+    ...textRow,
+    uuid: `asked-${id}`,
+    parentUuid: String(prompt.uuid),
+    message: { ...(textRow.message as JsonObject), id: `msg_${id}`, content: [{ type: 'tool_use', id, name, input }] },
+  });
+
+  it.each([
+    ['the ask mod', 'toolu_landed_mod', asking('toolu_landed_mod', 'mcp__doperpowers__AskUserQuestion', { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }, { label: 'No' }] }] }), 'question:toolu_landed_mod'],
+    ["MAWS's ask", 'toolu_landed_maws', asking('toolu_landed_maws', 'mcp__maws__ask', { blocking: false, questions: [{ question: 'Ship it?', modality: 'text' }] }), 'ask:toolu_landed_maws'],
+  ])("jumps to %s's row once it is held", async (_, id, call, row) => {
+    const key = `landing-${Math.random()}`;
+    const store = useTranscriptStore.getState();
+    await store.attach(key, freshSource([prompt, call], 'sess-1', subagentLookupOf([])), { agentId: null as never });
+    opened.push(() => (store.detach(key), store.drop(key)));
+    const root = document.createElement('section');
+    const scroller = document.createElement('div');
+    scroller.setAttribute('data-transcript-scroller', '');
+    root.append(scroller);
+    document.body.append(root);
+    const transcript = { key, heldRows: () => [prompt, call], loadOlder: () => {} };
+    const view = renderHook(() => useLandOnMessage(root, transcript, { phase: 'live', more: false, loadingOlder: false }, id, 'question'));
+    await act(() => frames(2));
+    expect(useTranscriptStore.getState().entries[key].jump?.rowId).toBe(row);
+    expect(view.result.current).toBeNull();
+  });
+});

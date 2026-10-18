@@ -18,7 +18,8 @@ import {
 // W13: the binary probe's answer for a launch (launcher.ts passes it): a real path and its `--version`
 const ENGINE_BIN = '/Users/u/.local/share/claude/versions/2.1.287';
 const ENGINE_VERSION = '2.1.287';
-const OPTS = { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION };
+const SPAWNER_PID = 4242; // the host that would spawn the plan (launcher.ts passes its own pid)
+const OPTS = { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION, spawnerPid: SPAWNER_PID };
 const SETTINGS_FLAG = '--settings';
 
 function spec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
@@ -234,6 +235,15 @@ describe('launch contract builds the X6 command line and environment', () => {
     });
     // E1 end
 
+    // sminos membership (2026-10-18): the mark sminos admits a MAWS session by, whose sdk-ts entrypoint would otherwise
+    // read as another tool's headless run. Its value is the engine's parent, the host that spawns the plan, so a copy a
+    // capture holds (an inherited one) never stands in for it.
+    it("sets SMNS_MEMBER to the spawner's pid under both gateway modes, over any value the capture holds", () => {
+      const captured = { ...CAPTURED, SMNS_MEMBER: '999' };
+      expect(buildLaunch(spec(), captured, OPTS).env.SMNS_MEMBER).toBe(String(SPAWNER_PID));
+      expect(buildLaunch(spec({ gateway: 'direct' }), captured, OPTS).env.SMNS_MEMBER).toBe(String(SPAWNER_PID));
+    });
+
     it('passes the allowlisted shell keys through, by name and by prefix', () => {
       const { env } = buildLaunch(spec(), CAPTURED, OPTS);
       expect(env).toMatchObject({
@@ -337,7 +347,7 @@ describe('binary configuration', () => {
 
   it('puts the probe’s path and version in the plan and the spawn meta row; a built plan keeps its own', () => {
     const before = buildLaunch(spec(), CAPTURED, OPTS);
-    const plan = buildLaunch(spec(), CAPTURED, { relayUrl: RELAY_URL, bin: '/opt/claude/2.1.290', engineVersion: '2.1.290' });
+    const plan = buildLaunch(spec(), CAPTURED, { ...OPTS, bin: '/opt/claude/2.1.290', engineVersion: '2.1.290' });
     expect(plan.bin).toBe('/opt/claude/2.1.290');
     expect(plan.engineVersion).toBe('2.1.290');
     expect(spawnMeta(plan, { appVersion: 'x' })).toMatchObject({ bin: '/opt/claude/2.1.290', engineVersion: '2.1.290' });

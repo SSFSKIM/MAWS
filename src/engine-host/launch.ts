@@ -106,7 +106,8 @@ function isAllowed(key: string): boolean {
   return ALLOWED_KEYS.has(key) || ALLOWED_PREFIXES.some((p) => key.startsWith(p));
 }
 
-export function buildEnvironment(spec: LaunchSpec, captured: Record<string, string>, relayUrl: string): Record<string, string> {
+// `spawnerPid`: the process that spawns the engine, which is the engine's parent (sminos membership, below).
+export function buildEnvironment(spec: LaunchSpec, captured: Record<string, string>, relayUrl: string, spawnerPid: number): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(captured)) if (isAllowed(key)) env[key] = value;
   env.CLAUDE_CODE_ENTRYPOINT = 'sdk-ts'; // the probe's identity; every fixture was recorded under it
@@ -117,6 +118,14 @@ export function buildEnvironment(spec: LaunchSpec, captured: Record<string, stri
   // sandboxed frame and the engine validates before any permission request; set over an owner's export, since nothing
   // on the wire tells the host which format is in effect
   env.CLAUDE_CODE_QUESTION_PREVIEW_FORMAT = 'html';
+  // sminos membership (2026-10-18, the owner's approval): the session is a member of the sminos project it works in, as
+  // a terminal session is, though the `sdk-ts` entrypoint above reads to sminos as another tool's headless run. sminos
+  // reads the mark only inside this session's process tree (its hooks, its bridge child, a verb its tools run), never
+  // from the engine's session registry, and admits the session only while the value names its engine's parent, so the
+  // copy every process under the engine inherits (a tool's own `claude -p`) speaks for nothing. The value must stay the
+  // engine's direct parent: `transport.ts` spawns the binary itself, and a shell or wrapper put between would drop the
+  // membership silently.
+  env.SMNS_MEMBER = String(spawnerPid);
   env.TERM = 'dumb';
   env.DISABLE_AUTOUPDATER = '1'; // W13: MAWS's processes never race the user's own updater; Settings › Engine offers the update
   if (spec.subagentModel !== null) env.CLAUDE_CODE_SUBAGENT_MODEL = spec.subagentModel;
@@ -196,10 +205,12 @@ export function mintLaunchId(): string {
 // `bin` and `engineVersion` are the binary probe's answer for this launch (W13): the real path and its `--version`.
 // P2-C: `declaresSystemPromptSnapshot` is the probe's too; absent or false, the spec's "off" is not passed.
 // P2-C2: `sdkMcpServers` is what this launch's initialize declares (the app's own list unless a test says otherwise).
+// `spawnerPid`: the process that will spawn the plan, the engine's parent (`SMNS_MEMBER`); the launcher's own, since the
+// host that builds a plan spawns it.
 export function buildLaunch(
   spec: LaunchSpec,
   captured: Record<string, string>,
-  opts: { relayUrl: string; bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean; sdkMcpServers?: readonly string[] },
+  opts: { relayUrl: string; bin: string; engineVersion: string; spawnerPid: number; declaresSystemPromptSnapshot?: boolean; sdkMcpServers?: readonly string[] },
 ): LaunchPlan {
   if (spec.resume !== null && !spec.resume.fork && spec.sessionId !== null) {
     throw new LaunchSpecConflict('sessionId', '--session-id never co-occurs with a non-fork --resume; a resumed launch takes the resumed id');
@@ -234,7 +245,7 @@ export function buildLaunch(
   return {
     bin: opts.bin,
     args,
-    env: buildEnvironment(spec, captured, opts.relayUrl),
+    env: buildEnvironment(spec, captured, opts.relayUrl, opts.spawnerPid),
     cwd: spec.cwd,
     flagSettings,
     launchId: mintLaunchId(),

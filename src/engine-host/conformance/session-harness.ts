@@ -21,6 +21,8 @@ const prelude = loadEngineJournal('replay-handshake');
 const responseOf = (seq: number) => (prelude.find((r) => r.seq === seq)!.frame as { response: { response: Record<string, unknown> } }).response.response;
 export const INIT_RESPONSE = responseOf(3); // pass2/auto-routed seq 4
 export const ROUTED_STATUS = responseOf(5); // pass2/auto-routed seq 145
+/** The spawner pid the harness's plans name (`SMNS_MEMBER`): fixed, since nothing here spawns an engine. */
+export const HARNESS_SPAWNER_PID = 4242;
 
 export function launchSpec(overrides: Partial<LaunchSpec> = {}): LaunchSpec {
   return LaunchSpecSchema.parse({
@@ -60,7 +62,7 @@ function observe(session: EngineSession, journal: MemoryJournal, spec: LaunchSpe
 
 export function scriptedSession(opts: { spec?: Partial<LaunchSpec>; responder?: Responder; session?: Partial<EngineSessionOptions>; transport?: Omit<Parameters<typeof scriptedTransport>[0] & object, 'onWrite'> } = {}): Observed & { transport: ScriptedTransport; logs: string[] } {
   const spec = launchSpec(opts.spec);
-  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: FIXTURE_ENGINE_VERSION });
+  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: FIXTURE_ENGINE_VERSION, spawnerPid: HARNESS_SPAWNER_PID });
   const transport = scriptedTransport({ ...opts.transport, onWrite: autoResponder(opts.responder ?? handshakeResponder()) });
   const journal = new MemoryJournal();
   const logs: string[] = [];
@@ -80,7 +82,7 @@ export async function replayedSession(
 ): Promise<Observed & { fixture: JournalRow[]; transport: () => ReplayTransport }> {
   const fixture = (opts.edit ?? ((rows: JournalRow[]) => rows))(loadJournal(pass, name)); // `edit`: a test that extends a recording says so in its name
   const spec = launchSpec({ appSessionId: `replay-${name}` as LaunchSpec['appSessionId'], sessionId: null, model: null, replay: `${pass}/${name}`, ...opts.spec });
-  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: FIXTURE_ENGINE_VERSION });
+  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: FIXTURE_ENGINE_VERSION, spawnerPid: HARNESS_SPAWNER_PID });
   const journal = new MemoryJournal();
   let transport!: ReplayTransport;
   const session: EngineSession = new EngineSession({

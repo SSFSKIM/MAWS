@@ -24,7 +24,7 @@ async function until(check: () => boolean, what: string, ms = 5_000): Promise<vo
 function appReplay(name: string) {
   const fixture = loadJournal('pass3', name);
   const spec = launchSpec({ appSessionId: `replay-${name}` as never, sessionId: null, model: null, replay: `pass3/${name}` });
-  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
+  const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION, spawnerPid: 4242 });
   const journal = new MemoryJournal();
   const logs: string[] = [];
   const session = new EngineSession({ spec, plan, journal, log: (m) => logs.push(m), spawn: () => replayEngine(appReplayHandshake(fixture, spec.trust), { prelude: handshakePrelude(), surfaceReads: true }) });
