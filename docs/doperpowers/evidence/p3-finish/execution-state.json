@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M1 pair2 diagnostic gate completed with token-test and two MINI failures; diagnosis and repair pending",
+  "phase": "M1 pair2 single repair union39133832247 running after clean independent frontier review",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -92,7 +92,7 @@
     ]
   },
   "W-MINI": {
-    "status": "independent native-repair frontier approved; one remaining union gate next",
+    "status": "single remaining repair union running; no further iterative native gate budget",
     "foreground": "package-script activation permitted; lane hold lifted; child DL13",
     "executor": "ab180409652104010",
     "claims": "pair2-claims.json",
@@ -119,7 +119,7 @@
     },
     "repairAssessment": "a788b678f28592255",
     "diagnosticSupplement": "14c3e6fd6",
-    "remainingUnionGateBudget": 1,
+    "remainingUnionGateBudget": 0,
     "nativeRepairCommits": [
       "abdad9d35",
       "63cbc8db7",
@@ -188,11 +188,20 @@
   },
   "pair2RepairPrepared": {
     "launcher": "/tmp/maws-review/p3f-mini-store-repair-launch.sh",
-    "status": "not launched",
+    "status": "launched",
     "groups": "prior13 plus e2e:transcript for shared jump repair",
     "reviewBase": "c237ddc5a9a8aff74dc1a5495c4fccbe222573cb",
     "reviewedHead": "87613c642702f2d27158709321281da2f4664dff",
     "latestMaster": "782bbf83c",
     "merge": "87613c642"
+  },
+  "pair2RepairGate": {
+    "runId": 39133832247,
+    "sourceCommit": "6adae7e4e9d1678068a9bf3e328f17746f592836",
+    "wrapperHead": "478957549398935bb02364b573fea68329bda53e",
+    "completionTask": "bru1fzgmn",
+    "queueThresholdTask": "b1xey6vm4",
+    "log": "/tmp/maws-review/gates/p3f-mini-store-repair-ci.log",
+    "status": "running"
   }
 }

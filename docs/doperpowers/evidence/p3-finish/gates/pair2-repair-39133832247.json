@@ -1,0 +1,47 @@
+{
+  "kind": "single remaining pair2 native-repair union; not final-source evidence",
+  "runId": 39133832247,
+  "sourceCommit": "6adae7e4e9d1678068a9bf3e328f17746f592836",
+  "wrapperHead": "478957549398935bb02364b573fea68329bda53e",
+  "createdAt": "2026-10-18T13:57:34Z",
+  "recordedAt": "2026-10-18T13:59:23Z",
+  "label": "p3f-mini-store-repair",
+  "groups": [
+    "static",
+    "unit",
+    "probes",
+    "unit:darwin",
+    "e2e:default",
+    "e2e:document-app",
+    "e2e:to-human",
+    "e2e:widgets",
+    "e2e:presentations",
+    "e2e:artifacts",
+    "e2e:design-systems",
+    "e2e:document",
+    "e2e:dashboard",
+    "e2e:transcript"
+  ],
+  "status": "running",
+  "attempt": 1,
+  "conclusion": null,
+  "wrapperPid": 39371,
+  "completionTask": "bru1fzgmn",
+  "completionMethod": "kqueue process-exit event; no polling",
+  "queueThresholdTask": "b1xey6vm4",
+  "log": "/tmp/maws-review/gates/p3f-mini-store-repair-ci.log",
+  "review": {
+    "agent": "afefa3ce1540fa23a",
+    "head": "87613c642702f2d27158709321281da2f4664dff",
+    "round": 1,
+    "verdict": "correct; no material findings"
+  },
+  "integration": {
+    "master": "782bbf83c",
+    "merge": "87613c642",
+    "tracker": "ours plus exact two upstream DC9 blocks; folded aliases not resurrected"
+  },
+  "budget": "No further MINI diagnosis gate after this frontier; hold proven work and report exact carries if unresolved",
+  "counterPolicy": "No full-set credit; L2771/10 and L199must-read0/10 before run",
+  "paidSpendUsd": 0
+}
