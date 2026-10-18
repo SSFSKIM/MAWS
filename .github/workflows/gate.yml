@@ -264,6 +264,10 @@ jobs:
           # The one-job Mac builds each out/ variant once per run: scripts/e2e-build.sh restores it from this disk
           # (Decision Log 35); the key is the checked-out commit, whose sha the build stamp carries.
           if [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_BUILD_CACHE=$HOME/Library/Caches/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA; fi
+          # On the Mac the app runs in front, activated with its window key, as an owner's launch shows it, rather than
+          # quiet behind whatever else is frontmost (src/main/window-show.ts; it overrides the job's MAWS_E2E_QUIET). The
+          # Linux e2e jobs and every other job stay quiet.
+          if [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_FOREGROUND=1; fi
           # default's own specs, when the step above derived them (macOS's bash 3.2 has no mapfile).
           specs=()
           if [[ -s $RUNNER_TEMP/e2e-specs ]]; then while IFS= read -r spec; do specs+=("$spec"); done <"$RUNNER_TEMP/e2e-specs"; fi
