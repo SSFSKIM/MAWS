@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 54,
-    "defer:pending": 69,
+    "defer:committed": 55,
+    "defer:pending": 68,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -848,7 +848,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L84; parent Decision Log 106): Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here. Owner: the gate lane.",
       "remainingClause": "The hover-timed steps drive hover through a channel a real pointer cannot disturb (e.g. a synthetic pointer state the window ignores from the OS while under test), or the gate scripts refuse to start with the desktop in use; until then the gate scripts' note to run with the desktop idle is the mitigation. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L105): needs a pointer channel immune to the desktop; the mitigation stands (gates with the desktop idle). Owner: P3 (gate debt). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L84; parent Decision Log 106): Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here. Owner: the gate lane.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "62f50d74c17612df00947ec4eac5c08317cf4e27"
     },
     {
       "line": 91,
@@ -858,8 +858,8 @@
       "triageReason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L91; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Such a launch stays unlisted until its inheritance is resolved (A's executor's proposal), or the waiting list survives a restart; with a test that a reload launch after a restart inherits the older launch's diagnostics until its own init. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L115): rare (a supervisor restart between two cut recovery passes); the next init replaces the diagnostics. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L91; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 92,
