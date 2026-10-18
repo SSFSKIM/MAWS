@@ -41,6 +41,18 @@
    ],
    "ruling": "architect, named closure (2026-10-18)",
    "remaining": null
+  },
+  "217": {
+   "action": "narrowed",
+   "sourceCommits": [
+    "287b45bb1"
+   ],
+   "gates": [
+    "39130559347",
+    "39133832247"
+   ],
+   "remaining": "monitoring in the following sets; a same-line failure on the fixed tree reopens it as a product row with its native trace (no P4 carry)",
+   "closing": "P3-F W-MINI (2026-10-18): the single-arrow, timer-order test fix 287b45bb1 is accepted (one arrow, pressed after a page timer queued after the lift has run, which is after dnd-kit's sensor adds its keydown listener; the press-until-it-moves loop removed); the original assertions (the cover's translate, then the over announcement naming the next slide) passed in gates 39130559347 and 39133832247. No measured product repair is claimed. Remaining: the following sets keep monitoring the case; a failure at the same line on the fixed tree reopens this as a product row with its native trace (step `filmstrip-reorder`). Owner: P3-F. Additional closing record (DL73): Closes with row 217 (P3-F); until then a failure with this exact signature reads against this row like rows 199 to 201. |"
   }
  }
 }
