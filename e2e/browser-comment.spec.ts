@@ -23,7 +23,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { Anchor } from '@shared/anchor/anchor';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { anchoredMessage, parseAnchoredText } from '../src/shared/anchor/message';
 import { COMMENT_COPY } from '../src/renderer/src/tools/browser/comment/copy';
@@ -451,6 +451,34 @@ const THREAD_REPLY = 'The count reads 1 after one click.';
 const THREAD_FIRST_REPLY = 'I see the Increment button; the count reads 0.'; // P2-F W-T: the turn before the card's Reply
 const THREAD_FOLLOW_UP = 'Now click it once and read the count.';
 
+// P3-F L242: a Side thread forks the parent's engine conversation, which exists once the engine has taken the parent's
+// first prompt (main refuses a fork of a blank chat). The parent's direct replay launch is pinned to the session id its
+// journal reports (the spawn row's `--session-id`, as the replay seam pins one, and as an engine reports its pin), so the
+// transcript the replay leaves at that prompt is the one main looks for under the parent's id.
+async function liveParent(s: BrowserScene, parent: AppSessionId, journal: string): Promise<void> {
+  await launchReady(s.page, parent, journal, { cwd: s.repo, gateway: 'direct', sessionId: PARENT as SessionId });
+}
+
+// The parent's recorded turn (its journal's `turn(MAIN_REPLY)`), sent as an ordinary prompt where a case has no Send to
+// main of its own (the parent's one written prompt); done once its result has played and the parent is idle again.
+async function parentTurn(s: BrowserScene, parent: AppSessionId): Promise<void> {
+  value(await invoke(s.page, 'session.send', { appSessionId: parent, content: MAIN_COMMENT }));
+  await expect.poll(() => s.journal(parent).some((r) => r.direction === 'in' && (r.frame as { type?: string }).type === 'result'), { timeout: 20_000 }).toBe(true);
+  await expect.poll(async () => value(await invoke(s.page, 'session.status', { appSessionId: parent })).turn, { timeout: 20_000 }).toBeNull();
+}
+
+// A Side thread's Send taken: the card becomes the thread. A refused send fails here with the card's own words (the
+// form's alert), not as a phase that never came.
+async function untilThread(card: Locator): Promise<void> {
+  await expect(async () => {
+    const phase = await card.getAttribute('data-card-phase');
+    if (phase === 'thread') return;
+    const alert = card.getByRole('alert');
+    expect((await alert.count()) === 0 ? null : await alert.innerText(), 'the Side thread send was refused').toBeNull();
+    expect(phase).toBe('thread');
+  }).toPass({ timeout: 20_000 });
+}
+
 const writtenUsers = (s: BrowserScene, id: string) => s.journal(id).filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user');
 const contentOf = (row: JournalRow) => (row.frame as { message: { content: unknown } }).message.content as ({ type: 'image'; source: { data: string } } | { type: 'text'; text: string })[];
 
@@ -499,8 +527,8 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
     async (s) => {
       const [parent] = s.ids as [AppSessionId];
       // the parent live and idle over its journal, on the direct route (the replay verifies it direct, so its fork is too
-      // and no relay is ever asked)
-      await launchReady(s.page, parent, parentJournal, { cwd: s.repo, gateway: 'direct' });
+      // and no relay is ever asked), pinned to the id its journal reports (P3-F L242: liveParent)
+      await liveParent(s, parent, parentJournal);
       const t = await openCommentPage(s, parent);
 
       // ---- Send to main, the parent idle
@@ -549,7 +577,7 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await expect(card.getByRole('radio', { name: /Side thread/ })).toBeChecked();
       await card.getByRole('textbox', { name: 'Comment' }).fill(THREAD_COMMENT);
       await card.getByRole('button', { name: 'Send' }).click();
-      await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+      await untilThread(card);
       await expect(card.locator('[data-chip="anchor"][data-anchor-kind="browser-element"]')).toHaveText(INCREMENT_LABEL);
       await expect(card.getByText(THREAD_FIRST_REPLY)).toBeVisible({ timeout: 20_000 });
 
@@ -637,7 +665,8 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
     },
     async (s) => {
       const [parent] = s.ids as [AppSessionId];
-      await launchReady(s.page, parent, parentJournal, { cwd: s.repo, gateway: 'direct' });
+      await liveParent(s, parent, parentJournal);
+      await parentTurn(s, parent);
       const opened = await openCommentPage(s, parent);
       // the page in a main tab, so the panel is free for the Side pane
       await overflow(s, opened.panel, 'Open in tab');
@@ -654,7 +683,7 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
       await expect(card.getByRole('radio', { name: /Side thread/ })).toBeChecked();
       await card.getByRole('textbox', { name: 'Comment' }).fill(THREAD_COMMENT);
       await card.getByRole('button', { name: 'Send' }).click();
-      await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+      await untilThread(card);
       await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission', { timeout: 20_000 });
       await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
       await expect(card).toHaveCount(0);
@@ -714,7 +743,8 @@ test('2c. with Browser the panel’s tool, the Side pane taking its place offers
     },
     async (s) => {
       const [parent] = s.ids as [AppSessionId];
-      await launchReady(s.page, parent, parentJournal, { cwd: s.repo, gateway: 'direct' });
+      await liveParent(s, parent, parentJournal);
+      await parentTurn(s, parent);
       const t = await openCommentPage(s, parent); // the page in the panel's Browser
 
       // a Side thread from a pick, handed to the Side pane, which takes the panel from Browser
@@ -724,7 +754,7 @@ test('2c. with Browser the panel’s tool, the Side pane taking its place offers
       await expect(card).toBeVisible();
       await card.getByRole('textbox', { name: 'Comment' }).fill(THREAD_COMMENT);
       await card.getByRole('button', { name: 'Send' }).click();
-      await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+      await untilThread(card);
       await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission', { timeout: 20_000 });
       await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
       await expect(card).toHaveCount(0);
