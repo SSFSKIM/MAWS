@@ -62,7 +62,8 @@ const AUDIT_REPLAY = 100;
 const RESUME_PAGE_FRAMES = 4;
 /** Subscriptions one socket may hold: their numbering rides in its attachment, which holds 2,048 bytes. */
 const MAX_SUBS = 32;
-/** A `<message>` pushes when it is this fresh: a machine's first sync uploads its whole backlog, which must not. */
+/** A `<message>` or a `question` event pushes when it is this fresh: a machine's first sync uploads its whole backlog,
+ * which must not. */
 const PUSH_FRESH_MS = 10 * 60 * 1000;
 const REJECTION_REASONS = new Set<string>(['bad-code', 'seen-nonce', 'bad-shape', 'conflict']);
 const IN_SUB = new Set<string>(SUBSCRIPTION_KINDS);
@@ -380,9 +381,16 @@ export class Project extends DurableObject<Env> {
     this.fanOut(accepted, ctx.machine);
     const now = Date.now();
     for (const { event } of accepted) {
-      if (event.kind !== 'message' || !(now - Date.parse(event.ts) <= PUSH_FRESH_MS)) continue;
+      if ((event.kind !== 'message' && event.kind !== 'question') || !(now - Date.parse(event.ts) <= PUSH_FRESH_MS)) continue;
       const session = event.writer.slice(event.writer.indexOf('/') + 1);
-      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: 'message', event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size);
+      // An async ask (2026-10-18): its `question` event is the one signal of an ask nothing raises (MAWS's own), and a
+      // second report of one a bridge raised as well (`src` its call's id), which pushes once, whichever came first.
+      if (event.kind === 'question' && typeof event.src === 'string' && !this.plane.markAsked(ctx.machine, session, event.src, now)) continue;
+      // The badge counts the session a question waits on, as `pushRaised` does: its presence need not say so yet, and
+      // an async ask's never does (its engine works on), so the count would leave out the question it announces.
+      const waiting = this.waitingSessions();
+      if (event.kind === 'question') waiting.add(`${ctx.machine}/${session}`);
+      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, waiting.size);
     }
   }
 
@@ -902,6 +910,9 @@ export class Project extends DurableObject<Env> {
 
   private pushRaised(machine: string, raised: Raised): void {
     const question = raised.async === true || raised.tool === 'AskUserQuestion' || raised.tool.endsWith('__AskUserQuestion');
+    // A question pushes once per ask: an async one also reaches the log as a `question` event naming its call, which
+    // may have pushed already (`upload`).
+    if (question && !this.plane.markAsked(machine, raised.session, raised.toolUseId ?? raised.request, Date.now())) return;
     const alias = this.log.latestOf(`${machine}/${raised.session}`)?.from;
     // The badge counts the session this request waits on, whether or not its presence says so yet.
     const waiting = this.waitingSessions().add(`${machine}/${raised.session}`);

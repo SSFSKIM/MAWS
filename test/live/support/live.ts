@@ -280,7 +280,7 @@ export async function withRawProcess(ctx: LiveContext, spec: LaunchSpec, fn: (p:
   const configHome = process.env.CLAUDE_CONFIG_DIR ?? null;
   assertConfigHomeSafe({ configHome, controls: [] });
   const captured = { ...withoutClaudeVariables(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: configHome! }; // E11 W-E: no inherited CLAUDE*
-  const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
+  const plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION, spawnerPid: process.pid });
   const journal = new JournalWriter(join(ctx.userData, 'engine-host', 'journal', spec.appSessionId), plan.launchId, { maxBytes: JOURNAL_MAX_BYTES });
   const rows: JournalRow[] = [];
   const stderr: string[] = [];

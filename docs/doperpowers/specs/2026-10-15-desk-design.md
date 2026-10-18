@@ -2630,7 +2630,7 @@ and `streaming` are that agent's own.
 | --- | --- | --- |
 | `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming, usage, jobs, mcp}` (**[2026-10-17]** `subagents` entries widened, `jobs` and `mcp` added, as the `subagents` row below): `usage` is the bridge's last `usage` (DX5) on a main-transcript subscription, null when the session has no bridge or none has come yet, and absent on a subagent's; rows of the sub's transcript newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, one per model request still streaming, `{turnId, agentId, step, model?, upTo, blocks: [{index, kind, text, upTo, id?, name?}]}` holding only its content blocks without a `block-row` yet, below (`step` the model request's ordinal in the turn; `model` what the request was sent with, absent when its start was not seen; the entry's `upTo` the `chunkIndex` of the last chunk applied to the message, -1 for none, and **the watermark**: `chunkIndex` counts across the whole message, so a chunk at or below it is already in the text, whichever block it belongs to; `index` the content block's, the same `index` its chunks and its `block-row` carry; `kind` one of `text`, `thinking` (redacted thinking included), `tool`; `text` the partial text, a tool block's being its argument JSON streamed so far, unparsed until its row; a block's `upTo` informational only; `id` and `name` the call's `tool_use_id` and tool name, on a tool block only). An entry whose `blocks` is empty can remain until its step ends and is skipped. **[2026-10-18]** `offChain: string[]` lists the uuids among `rows` that are off the session's live chain. It is always present and may be empty (the live chain, below) |
 | `row` | yes | `{row, agentId, offChain?, onChain?}`: a transcript row verbatim; `agentId` the subagent whose transcript holds it, or null. **[2026-10-18]** `offChain` lists the rows this row took off the live chain: the rows left behind by a branch it starts, oldest first, plus the row itself when it is written off the chain. `onChain` lists the rows it put back. Each is present only when non-empty |
-| `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0 |
+| `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk, t?}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0. **[2026-10-18, MAWS #57]** `t`, a number, is the bridge's DX5 event stamp in ms since the epoch on the machine's clock: the plane passes it through, and the hub relays it verbatim. The web uses it only for its chunk-to-drawn latency readout, which compares two clocks. Producers older than doperpowers #246 (7.183.3) don't send it, and the web records nothing for those chunks |
 | `block-row` | yes | `{uuid, turnId, agentId, step, index}`: the engine wrote the row `uuid` for content block `index` of that step; sent before the row itself arrives |
 | `step-end` | yes | `{turnId, agentId, step}`: that model request ended — finished, aborted, or cut off by its turn's end — from DX5's `step end` or `turn complete`; sent after every `block-row` of the step, so a block of it still without one never gets one, and the browser drops its partial text |
 | `rows` | yes | `{rows, before, more, offChain}`: older rows of the sub's transcript, newest first, answering a `rows` request; **[2026-10-18]** `offChain` as in the snapshot, for the page's rows |
@@ -3626,19 +3626,25 @@ committed. The endpoints, the signed-in member's own (types `PushKey`, `PushSubs
 | `GET /api/push/subscriptions` | `200 {subscriptions: PushSubscriptionRecord[]}`: the member's own | |
 
 **When the hub pushes.** A `raised` request new to the hub (raised live, or first seen in a republished `pending`
-set), and a `message` log event uploaded by a machine and stored for the first time within ten minutes of its `ts` (so
-a machine's first sync of an old backlog pushes nothing), each push once to every subscribed device of every member
+set), and a `message` (**[2026-10-18]** or `question`) log event uploaded by a machine and stored for the first time
+within ten minutes of its `ts` (so a machine's first sync of an old backlog pushes nothing), each push once to every
+subscribed device of every member
 of the org who has no browser socket showing the project (DX3 `visibility`, kept in the socket's attachment, so a
 hibernated object still holds it) — and to none of a member who has one. The payload, `PushNotice` in `browser.ts`,
 carries only what points to a card, since the service worker holds no org key and could check nothing it drew:
 `{v: 1, project, name, session, alias, kind, request?, event?, waiting}` — `name` the project's name as the grid
 shows it, so a notification says where; `kind` `question` (an `AskUserQuestion`, the ask mod's tool, or an `async`
-request), `permission` (any other request), or `message`; `request` the raised request's id,
-or `event` the message's `{writer, seq}`; `alias` the session's, from its feed's latest event's `from` (null when the
+request, or a `question` event), `permission` (any other request), or `message`; `request` the raised request's id,
+or `event` the log event's `{writer, seq}` (a `message`'s, or a `question`'s); `alias` the session's, from its feed's latest event's `from` (null when the
 hub holds none); `waiting` the org's waiting count once the push's own event is counted, the sum of the grid's
 `ProjectSummary.waiting` over the org's projects, which the service worker sets as the app icon's badge (the app sets
 it again from the grid whenever it is open, so an answered request clears). A push service answering 404 or 410 has dropped the subscription, and the hub deletes it; any other
 failure is passed over (the push is not retried).
+**[2026-10-18]** A question pushes once per ask. A bridge's async ask reaches the hub twice, as a `raised` request and
+as the `question` event its log export writes (`src` the call's id: the request's `toolUseId` where it names one,
+else the request's id), on the uplink's two planes in either order; whichever the hub takes first pushes, and the other is passed over
+(the ask's id kept an hour, `session-store.ts` `asked`). MAWS's async ask (`mcp__maws__ask`) is never raised, so its
+event is its one push. Messages and permission requests are unaffected.
 
 **Wrapped keys** (§6; the hub stores them and never sees the org key). The browser draws the org key at random when the
 org's first method is set up, and for each unlock method derives a wrapping key (a passkey: from its PRF output; a
@@ -4950,6 +4956,21 @@ a hub that connects into machines (§2).
   every measured reconnect needs and a closed machine reading online that
   much longer.
   Date/Author: 2026-10-18, MAWS #57's executor.
+  2026-10-18, the design session: shipped as MAWS #58 (hub), #61 (web) and
+  doperpowers #246 (DX4's chunk `t`), deployed together as `hub@0e6c2d41
+  web@master.0e6c2d41`. With them, Workers Logs went on with per-request
+  logs off (MAWS #60, the owner's choice), so the hub's stream-cause lines
+  are kept. The web's own share, measured in CI against the DX3 double: a
+  session view's first rows 142 ms after subscribe; an owner message's row
+  57 ms; a session's `<message>` drawn 36 ms after it is logged; a raised
+  question 23 ms. The budgets proposed for the deployment, p95 end to end:
+  an owner message reaches its session within 1 s; a session's message or
+  request is drawn within 2 s; first rows within 1.5 s; a streaming chunk
+  within 500 ms. Each is confirmed with the web's latency readout
+  (`?latency`, `window.deskLatency()`). Left for after the org directory
+  lands: fewer uplink restarts on a plugin roll (restart on the uplink's own
+  modules' content, not every script's; or start the new uplink before the
+  old one leaves), and the 60 s restart gaps a 15 s grace cannot hide.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or

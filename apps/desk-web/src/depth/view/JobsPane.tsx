@@ -67,7 +67,8 @@ export function JobsPane({ controller, state, session, scope = 'session' }: { co
     </Group>
   );
 
-  // No jobs before the first snapshot (or since a reset or an end); a served snapshot without them is an older daemon's.
+  // No jobs before the first snapshot (a disruption keeps the last ones); a served snapshot without them is an older
+  // daemon's.
   if (scope === 'agent' && (jobs === null || jobs.length === 0)) return null;
   if (jobs === null) return state.phase === 'live' ? <p className="m-0 p-4 text-ui-sm text-fg-muted">{JOBS_COPY.olderDaemon(machine)}</p> : null;
   const lists = jobLists(jobs);

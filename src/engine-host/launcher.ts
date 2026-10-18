@@ -104,7 +104,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
 
     let plan: LaunchPlan;
     try {
-      plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, ...engine });
+      plan = buildLaunch(spec, captured, { relayUrl: RELAY_URL, spawnerPid: process.pid, ...engine }); // spawned by this host (ipc.ts spawnEngine)
     } catch (error) {
       if (error instanceof LaunchSpecConflict) return refused('settings_conflict', error.message);
       throw error;

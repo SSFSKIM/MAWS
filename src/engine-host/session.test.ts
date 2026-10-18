@@ -67,7 +67,7 @@ const hookFrame = (subtype: 'hook_started' | 'hook_progress' | 'hook_response', 
 });
 function setup(opts: { spec?: Partial<LaunchSpec>; responder?: Responder; session?: Partial<EngineSessionOptions>; transport?: TransportOpts } = {}) {
   const launchSpec = spec(opts.spec);
-  const plan = buildLaunch(launchSpec, { PATH: '/usr/bin', HOME: '/Users/x', ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
+  const plan = buildLaunch(launchSpec, { PATH: '/usr/bin', HOME: '/Users/x', ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION, spawnerPid: 4242 });
   const transport = scriptedTransport({ ...opts.transport, onWrite: autoResponder(opts.responder ?? defaultResponder()) });
   const journal = new MemoryJournal();
   const logs: string[] = [];
@@ -1131,7 +1131,7 @@ describe('EngineSession (M4): the termination ladder, stdout EOF, held frames, t
 describe('EngineSession status: taskListId', () => {
   it('reports the constructed environment\'s CLAUDE_CODE_TASK_LIST_ID when set, not the session id', async () => {
     const launchSpec = spec();
-    const plan = buildLaunch(launchSpec, { PATH: '/usr/bin', HOME: '/Users/x', CLAUDE_CODE_TASK_LIST_ID: 'team-list' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION });
+    const plan = buildLaunch(launchSpec, { PATH: '/usr/bin', HOME: '/Users/x', CLAUDE_CODE_TASK_LIST_ID: 'team-list' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: ENGINE_VERSION, spawnerPid: 4242 });
     const { session } = setup({ session: { plan } });
     expect(session.status().taskListId).toBe('team-list');
     await session.start();

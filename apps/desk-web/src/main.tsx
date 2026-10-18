@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { connectDepth } from './depth/connect';
+import { installLatency } from './latency/latency';
 import { followLandings, registerServiceWorker } from './pwa/service-worker';
 import { installPreviewPolicy } from './views/requests/preview-policy';
 import './styles/app.css';
@@ -14,6 +15,7 @@ void registerServiceWorker(); // the PWA's worker (§4): draws pushes, opens the
 // only sets the route and the landing, which the desk reads when it is drawn.
 followLandings();
 installPreviewPolicy(); // a question preview's frame fetches nothing (the page sets no policy for it to inherit)
+installLatency(); // desk ticket #57: every hop measured always; the readout drawn when `desk.latency` or `?latency` asks
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

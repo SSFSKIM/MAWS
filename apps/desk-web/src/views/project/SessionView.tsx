@@ -14,7 +14,8 @@
 // mod's async question rows carry the log's question and answer, or say the question was withdrawn unanswered. A
 // session whose machine serves no transcript for it (its subscription ended at n 0) draws the channel built from the
 // log instead, saying why (`fallback`). A tapped notification lands on its request's card at the tail, brought into the
-// virtualized list wherever the reader was, or on its `<message>`'s row in the transcript. A send's row draws without
+// virtualized list wherever the reader was, or on its `<message>`'s row in the transcript, or, for an async question
+// with no request waiting (MAWS's own ask), on its call's row. A send's row draws without
 // its delivery frame line, a peer's send labelled with who sent it (`conversation/delivery-frame.ts`).
 //
 // Two decorations of MAWS's view are the desk's own (`styles/app.css`, under `data-session-view`): a gutter that keeps
@@ -58,6 +59,8 @@ type Props = {
   landedRequest?: string | null;
   /** The `src` of the `<message>` a tapped notification landed on (`<row uuid>#<span>`), when this channel is the one it opened. */
   landedMessage?: string | null;
+  /** The call's id of the async question a tapped notification landed on, when no request of it waits at the tail. */
+  landedQuestion?: string | null;
   /** What the view draws when the session's machine serves no transcript for it: the log-built channel, with why. */
   fallback?: (why: string) => ReactNode;
 };
@@ -67,7 +70,7 @@ const NO_EVENTS: ReadonlyArray<{ offset: number; event: LogEvent }> = [];
 /** The session is at rest as its machine reports it: idle, or no process. Not while its presence is unknown. */
 const atRest = (session: DeskSession) => session.machineOnline !== false && session.presence != null && (session.presence.record === null || session.presence.record.status === 'idle');
 
-export default function SessionView({ project, session, plane, events = NO_EVENTS, landedRequest = null, landedMessage = null, fallback }: Props) {
+export default function SessionView({ project, session, plane, events = NO_EVENTS, landedRequest = null, landedMessage = null, landedQuestion = null, fallback }: Props) {
   const owner = useSessionOwner(project, session, plane);
   const state = useKeptTranscript(owner.keeper);
   const list = useRef<TranscriptListHandle>(null);
@@ -92,8 +95,8 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
     [owner, phone],
   );
 
-  // The rows held, as the subscription keeps them: read again whenever the held set changes (a row, a page, a reset),
-  // which its count and its oldest row say.
+  // The rows held, as the subscription keeps them: read again whenever the held set changes (a row, a page, a fresh
+  // snapshot merged in), which its count and its oldest row say.
   const held = owner.main.heldRows();
   const loaded = state.phase === 'live' || held.length > 0;
   const heldCount = held.length;
@@ -139,7 +142,8 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
   const unavailable = useNoTranscript(state, heldCount);
   const landedCard = requests.find((r) => r.request === landedRequest) ?? null;
   useLandOnCard(root, list, rowIndex, landedCard && { request: landedCard.request, row: requestRowId(landedCard.key) });
-  const landing = useLandOnMessage(root, owner.main, state, landedMessage);
+  const landedOn = landedMessage === null && landedQuestion !== null ? 'question' : 'message';
+  const landing = useLandOnMessage(root, owner.main, state, landedMessage ?? landedQuestion, landedOn);
 
   if (unavailable && fallback)
     return fallback(`${session.machine} serves no transcript for this session: its daemon predates the session view, or a /clear left the history under another id. What it sent and was sent stays here, from the project's log.`);
@@ -154,9 +158,9 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
       aria-label={`${sessionName(session)}'s session`}
     >
       {landing !== null && (
-        // The landed message's row is being paged toward, or the history ran out without it.
+        // The landed message's (or question's) row is being paged toward, or the history ran out without it.
         <div className="flex items-center gap-2 border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm" role="status" data-testid="landing" data-landing={landing === 'finding' ? 'checking' : 'missing'}>
-          <span className="text-fg-muted">{landing === 'finding' ? 'Finding the message in the session’s history…' : 'This message’s row is not in the session’s transcript.'}</span>
+          <span className="text-fg-muted">{landing === 'finding' ? `Finding the ${landedOn} in the session’s history…` : `This ${landedOn}’s row is not in the session’s transcript.`}</span>
           {landing === 'missing' && (
             <button type="button" className="ml-auto rounded-sm px-1 text-fg-muted hover:bg-bg-hover hover:text-fg" onClick={() => useLanding.getState().clear()}>
               Dismiss

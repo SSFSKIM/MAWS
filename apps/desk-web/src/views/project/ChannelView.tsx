@@ -8,8 +8,9 @@
 // the owner into another session's channel.
 //
 // A channel a tapped notification opened lands on its card (`useLanding`): the card is marked once it is drawn, and
-// until then, or when it will not be, the channel says why. In the session view a request's card is at the tail and a
-// `<message>`'s is its transcript row (`landed-message.ts`). On a phone (mockups/desk/05-phone.html, 5A) Retire sits
+// until then, or when it will not be, the channel says why. In the session view a request's card is at the tail, a
+// `<message>`'s is its transcript row (`landed-message.ts`), and an async question's is its request's card while a
+// bridge's request for it waits, else its call's row. On a phone (mockups/desk/05-phone.html, 5A) Retire sits
 // behind ⋯ with the note that depth opens on a computer, and an ended session shows Resume in place of the composer.
 //
 // Wherever a session's machine is online, a direct channel's center is its session view (DC9, `SessionView.tsx`):
@@ -24,10 +25,10 @@ import { useStore } from 'zustand';
 import type { LogEvent } from 'desk-hub/protocol';
 import { buildStream, byWhom, placedRequest, type PlacedRequest } from '../../conversation/stream';
 import { capabilities, kindOf, retiredBy } from '../../conversation/capabilities';
-import { landedItem, landingReady, landingStatus } from '../../conversation/landing';
+import { eventLanding, landedItem, landingReady, landingStatus, type EventLanding } from '../../conversation/landing';
 import { refused } from '../../log/project-log';
 import { sessionName } from '../../log/projection';
-import { useLanding } from '../../pwa/service-worker';
+import { useLanding, type Landed } from '../../pwa/service-worker';
 import { useNarrow } from '../../shell/viewport';
 import type { Channel } from '../../shell/layout';
 import type { DeskSession } from '../../shell/sessions';
@@ -67,8 +68,8 @@ export function ChannelView(props: {
   const outbox = Object.values(outboxAll).filter((o) => channel.kind === 'group' || (o.to !== '*' && o.to.some((r) => r.session === channel.session)));
   const sessionView = channel.kind === 'session' && drawsSessionView(session) ? session : null;
   const landed = useLanded(channel, items, sessionView);
-  const landedRequest = useLanding((s) => (s.landed?.landing.kind === 'request' && s.landed.project === connection.project && channel.kind === 'session' && s.landed.session === channel.session ? s.landed.landing.request : null));
-  const landedMessage = useLandedMessage(channel, events);
+  const landedEvent = useLandedEvent(channel, events, sessionView);
+  const landedRequest = useLanding((s) => (s.landed?.landing.kind === 'request' && s.landed.project === connection.project && channel.kind === 'session' && s.landed.session === channel.session ? s.landed.landing.request : null)) ?? landedEvent.request;
   // Keyed by channel, so each opens at its own tail (the composer beside it is keyed by the session alone).
   const stream = (workLabel: string) => (
     <StreamView key={channel.kind === 'group' ? 'stream:group' : `stream:${channel.session}`} items={items} outbox={outbox} landed={landed.item} workLabel={workLabel} />
@@ -134,7 +135,8 @@ export function ChannelView(props: {
               plane={connection.client}
               events={events}
               landedRequest={landedRequest}
-              landedMessage={landedMessage}
+              landedMessage={landedEvent.message}
+              landedQuestion={landedEvent.question}
               fallback={(why) => (
                 <>
                   <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-fg-muted" role="status" data-testid="no-transcript">
@@ -205,17 +207,26 @@ function useLanded(channel: Channel, items: ReturnType<typeof buildStream>, sess
 }
 
 /**
- * The transcript row a tapped notification's `<message>` came from, when this channel is the one it opened: the `src` of
- * the log's `message` event it names (`<row uuid>#<span>`), for the session view to land on.
+ * Where the session view (`sessionView`, null when the channel draws none) lands the log event a tapped notification
+ * named, when this channel is the one it opened (`eventLanding`): a `<message>`'s transcript row; an async question's
+ * request card while a bridge's request for it waits, else its call's row. A landing that reached the card stays on
+ * it: the question answered there settles the request, which must not then send the reader up to the call.
  */
-function useLandedMessage(channel: Channel, events: Array<{ offset: number; event: LogEvent }>): string | null {
+function useLandedEvent(channel: Channel, events: Array<{ offset: number; event: LogEvent }>, sessionView: DeskSession | null): EventLanding {
   const { connection } = useDesk();
-  const landing = useLanding((s) => (s.landed?.landing.kind === 'event' && s.landed.project === connection.project && channel.kind === 'session' && s.landed.session === channel.session ? s.landed.landing : null));
-  return useMemo(() => {
-    if (landing?.kind !== 'event') return null;
+  const landed = useLanding((s) => (s.landed?.landing.kind === 'event' && s.landed.project === connection.project && channel.kind === 'session' && s.landed.session === channel.session ? s.landed : null));
+  const requests = useStore(connection.conversation.store, (s) => s.requests);
+  const checked = useStore(connection.conversation.store, (s) => s.checked);
+  const found = useMemo(() => {
+    const landing = landed?.landing;
+    if (landing?.kind !== 'event' || sessionView === null) return eventLanding(undefined, [], checked);
     const event = events.find((e) => e.event.writer === landing.writer && e.event.seq === landing.seq)?.event;
-    return event?.kind === 'message' && typeof event.src === 'string' ? event.src : null;
-  }, [landing, events]);
+    const pending = Object.values(requests).filter((r) => r.pending && r.machine === sessionView.machine && r.raised.session === sessionView.session);
+    return eventLanding(event, pending, checked);
+  }, [landed, events, requests, checked, sessionView]);
+  const [card, setCard] = useState<{ landed: Landed; request: string } | null>(null);
+  if (landed !== null && found.request !== null && (card?.landed !== landed || card.request !== found.request)) setCard({ landed, request: found.request });
+  return card !== null && card.landed === landed && found.request === null ? { request: card.request, message: null, question: null } : found;
 }
 
 /** "Retired by <who>", from the log's `retired`. */

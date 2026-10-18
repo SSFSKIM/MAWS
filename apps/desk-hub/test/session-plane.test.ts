@@ -996,6 +996,82 @@ describe('Web Push', () => {
     await m.close();
   });
 
+  // 2026-10-18: an async ask reaches the log as a `question` event. MAWS's own is never raised, so the event is its one
+  // signal; a bridge's is reported twice, by its `raised` and by its event (`src` the request's id), in either order.
+  it('a fresh question event pushes a question pointing at it; a stale one pushes nothing; a visible browser holds it back', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const phone = await userAgent(`https://push.test/asked-${project}`);
+    await hub.fetchAs(ADMIN, '/api/push/subscriptions', { method: 'PUT', body: { endpoint: phone.endpoint, keys: phone.keys } });
+    const mine = () => hub.pushes.filter((p) => p.endpoint === phone.endpoint);
+
+    // Older than ten minutes, as a machine's first sync of its backlog uploads it: nothing.
+    await m.postOk([{ t: 'events', project, events: [question(m, project, 1, 'L7f2k9q3-4', new Date(Date.now() - 11 * 60 * 1000))] }]);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(mine()).toEqual([]);
+
+    const fresh = question(m, project, 2, 'L7f2k9q3-5');
+    await m.postOk([{ t: 'events', project, events: [fresh] }]);
+    await waitFor(() => (mine().length === 1 ? true : undefined));
+    expect(JSON.parse(new TextDecoder().decode(await decrypt(phone, mine()[0].body)))).toEqual({
+      v: 1,
+      project,
+      name: 'demo',
+      session: SESSION,
+      alias: 'maws-45',
+      kind: 'question',
+      event: { writer: fresh.writer, seq: 2 },
+      waiting: expect.any(Number),
+    });
+
+    // A visible browser of the member: nothing, as for a message.
+    const shown = await browser(project);
+    shown.send({ t: 'visibility', visible: true });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await m.postOk([{ t: 'events', project, events: [question(m, project, 3, 'L7f2k9q3-6')] }]);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(mine()).toHaveLength(1);
+    shown.close();
+    await m.close();
+  });
+
+  it("a bridge's async question and the log's question event for it push once, whichever arrives first", async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const phone = await userAgent(`https://push.test/once-${project}`);
+    await hub.fetchAs(ADMIN, '/api/push/subscriptions', { method: 'PUT', body: { endpoint: phone.endpoint, keys: phone.keys } });
+    const mine = () => hub.pushes.filter((p) => p.endpoint === phone.endpoint);
+    const notice = async (i: number) => JSON.parse(new TextDecoder().decode(await decrypt(phone, mine()[i].body))) as Record<string, unknown>;
+    const ask = async (request: string) =>
+      envelope(m, project, 'raised', await raised(project, request, { tool: 'mcp__doperpowers__AskUserQuestion', input: { questions: [{ question: 'Ship it?' }] }, async: true }));
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+    // The raise first: it pushes, and its event after it does not.
+    await m.postOk([{ t: 'session', message: await ask('toolu_first_raised') }]);
+    await waitFor(() => (mine().length === 1 ? true : undefined));
+    await m.postOk([{ t: 'events', project, events: [question(m, project, 1, 'toolu_first_raised')] }]);
+    await settle();
+    expect(mine()).toHaveLength(1);
+    expect(await notice(0)).toMatchObject({ kind: 'question', request: 'toolu_first_raised' });
+
+    // The event first: it pushes, and the raise after it does not.
+    const logged = question(m, project, 2, 'toolu_first_logged');
+    await m.postOk([{ t: 'events', project, events: [logged] }]);
+    await waitFor(() => (mine().length === 2 ? true : undefined));
+    await m.postOk([{ t: 'session', message: await ask('toolu_first_logged') }]);
+    await settle();
+    expect(mine()).toHaveLength(2);
+    expect(await notice(1)).toMatchObject({ kind: 'question', event: { writer: logged.writer, seq: 2 } });
+
+    // Another ask is a push of its own, and a permission request pushes as before.
+    await m.postOk([{ t: 'session', message: await ask('toolu_another') }]);
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', await raised(project, 'toolu_bash')) }]);
+    await waitFor(() => (mine().length === 4 ? true : undefined));
+    await settle();
+    expect(mine()).toHaveLength(4);
+    await m.close();
+  });
+
   it("a push service's 404 or 410 deletes the subscription", async () => {
     const project = newProject();
     const m = await machine(project);
@@ -1142,6 +1218,24 @@ function say(m: MachineClient, project: string, seq: number, text: string) {
     from: 'maws-45',
     to: '*',
     text,
+    mac: { nonce: newNonce(), value: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url') },
+  };
+  m.store(project, event);
+  return event;
+}
+
+/** A `question` on `m`'s session feed, from the alias maws-45: an async ask the session exported, `src` its id. */
+function question(m: MachineClient, project: string, seq: number, src: string, at = new Date()) {
+  const event = {
+    ts: at.toISOString(),
+    writer: `${m.name}/${SESSION}`,
+    seq,
+    kind: 'question',
+    from: 'maws-45',
+    to: 'host',
+    text: ['Ship it?'],
+    choices: ['Yes', 'No'],
+    src,
     mac: { nonce: newNonce(), value: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url') },
   };
   m.store(project, event);
