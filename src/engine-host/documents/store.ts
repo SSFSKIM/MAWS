@@ -9,6 +9,7 @@
 // announced before the commit (Decision Log 26).
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, bindingVersion, decodeMap, encodeMap, mergeMaps, newDoc, type Doc } from '@artifacts/yjs';
@@ -59,6 +60,9 @@ export interface ListFilter {
 // A byte kind's content: `html` takes bytes (and a file name, `index.html` by default), `file` a path in place, with its
 // `digest` when the caller hashed it beforehand (`files.describeStreamed`, off the commit path), else hashed at the write.
 export type ByteContent = { bytes: Uint8Array; name?: string } | { path: string; digest?: { sha256: string; size: number } };
+
+// A version row as the store reads it.
+type VersionRow = NonNullable<ReturnType<VersionStore['get']>>;
 
 export interface CreateInput {
   kind: ArtifactKind;
@@ -316,8 +320,21 @@ export class ArtifactStore {
   // write it as an `import` version; Y kinds start with `initial` written in the entity's savepoint, else with their
   // kind adapter's seed (`KindAdapter.initial`, Decision Log 44c), else empty. One `created` announces it: the first
   // content's commit is not also announced as an update.
+  //
+  // F (L139): a file given by its path alone is hashed by a streamed read once the create is checked, before its batch;
+  // the checks run again where it writes (a Space or a system may have gone meanwhile), their refusal released after the
+  // batch they read (`writeCommitted`).
   async create(input: CreateInput, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     this.checkCreate(input, actor);
+    if (!input.content || !('path' in input.content) || input.content.digest) return this.createChecked(input, actor, inFrame);
+    const content = await this.withDigest(input.content);
+    return this.writeCommitted(async () => {
+      this.checkCreate(input, actor);
+      return this.createChecked({ ...input, content }, actor, inFrame);
+    });
+  }
+
+  private async createChecked(input: CreateInput, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     const id = randomUUID();
     const at = this.now();
     const adapter = isDocKind(input.kind) ? this.service.adapterFor(input.kind) : undefined;
@@ -444,12 +461,26 @@ export class ArtifactStore {
   // The copy is one savepoint (Decision Log 37c): the entity row, its link and its assets, then a Y kind's state through
   // the duplicator's host replica (the doc takes its kind's adapter from the entity row written first) with its
   // `import` version, or a byte kind's content write. A copy whose state fails to land leaves nothing, rows or files.
+  //
+  // F (L139): a file's content is hashed by a streamed read before the copy's batch. The source and its version are read
+  // again where the copy is written, so a source or a version gone meanwhile is refused, and the copy takes the source's
+  // placement as it is then (never a system or a Space since deleted); its content stays the one hashed.
   async duplicate(artifactId: string, options: { versionId?: number; title?: string }, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     const source = this.requireLive(artifactId);
     const version = options.versionId === undefined ? undefined : this.requireVersion(artifactId, options.versionId);
+    const content = isDocKind(source.kind) ? null : this.byteContentOf(source, version ? (JSON.parse(version.content!) as ContentRef) : this.contentRef(artifactId).ref);
+    if (!content || !('path' in content)) return this.copyOf(source, version, content, options, actor, inFrame);
+    const hashed = await this.withDigest(content);
+    return this.writeCommitted(async () =>
+      this.copyOf(this.requireLive(artifactId), options.versionId === undefined ? undefined : this.requireVersion(artifactId, options.versionId), hashed, options, actor, inFrame),
+    );
+  }
+
+  // The copy itself, synchronous up to its batch: `content` a byte kind's, null for a Y kind.
+  private async copyOf(source: EntityRow, version: VersionRow | undefined, content: ByteContent | null, options: { title?: string }, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
+    const artifactId = source.id;
     const id = randomUUID();
     const at = this.now();
-    const content = isDocKind(source.kind) ? null : await this.withDigest(this.byteContentOf(source, version ? (JSON.parse(version.content!) as ContentRef) : this.contentRef(artifactId).ref)); // F (L139): hashed before the batch
     const state = !isDocKind(source.kind) ? null : version ? this.versions.state(artifactId, version.id) : this.service.readState(artifactId).state;
     const pinned = version ? (JSON.parse(version.assetRefs) as string[]) : this.assetIds(artifactId);
     const assets = state ? this.retention.copiedAssets(artifactId, pinned, state) : pinned; // E3: never a snapshot its state cannot name
@@ -650,10 +681,12 @@ export class ArtifactStore {
 
   // A file's content with its digest, hashed now by a streamed read (`files.describeStreamed`), so the write's batch only
   // records it and a large file never holds the event loop inside the transaction (the owner's create, copy and restore,
-  // as the agent's `send_file` and `artifact_create` hash first). Bytes, a given digest, or a path that cannot be read
-  // are answered unchanged: the write's own checks refuse what it cannot use.
+  // as the agent's `send_file` and `artifact_create` hash first). Bytes, a given digest, or a path that is not a regular
+  // file or cannot be read are answered unchanged: the write's own checks refuse what it cannot use. Only a regular file
+  // is opened (a FIFO or a device could block the read).
   async withDigest(content: ByteContent): Promise<ByteContent> {
     if (!('path' in content) || content.digest || !isAbsolute(content.path)) return content;
+    if (!(await stat(content.path).catch(() => null))?.isFile()) return content;
     const described = await this.files.describeStreamed(content.path).catch(() => null);
     return described ? { path: content.path, digest: { sha256: described.sha256, size: described.size } } : content;
   }
@@ -1456,13 +1489,13 @@ export class ArtifactStore {
     return this.byteContentOf(row, ref);
   }
 
-  private requireLive(artifactId: string): EntityRow {
+  requireLive(artifactId: string): EntityRow {
     const row = this.entity(artifactId);
     if (!row || row.deletedAt !== null) throw new ArtifactStoreError('notFound', `no artifact ${artifactId}`, { artifactId });
     return row;
   }
 
-  private requireVersion(artifactId: string, versionId: number) {
+  requireVersion(artifactId: string, versionId: number): VersionRow {
     const version = this.versions.get(artifactId, versionId);
     if (!version) throw new ArtifactStoreError('notFound', `no version ${versionId} of ${artifactId}`, { artifactId, versionId });
     return version;

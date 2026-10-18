@@ -127,7 +127,7 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   });
   serve('artifacts.create', async ({ content, ...input }) => {
     const store = storeOf();
-    const byteContent: ByteContent | undefined = content && ('bytes' in content ? { bytes: content.bytes, name: content.name } : await store.withDigest({ path: content.path })); // F (L139): hashed before the batch
+    const byteContent: ByteContent | undefined = content && ('bytes' in content ? { bytes: content.bytes, name: content.name } : { path: content.path }); // F (L139): the store hashes a file once the create is checked
     const artifact = await store.create({ ...input, content: byteContent }, HUMAN);
     return written(store, artifact.id);
   });
