@@ -1,0 +1,26 @@
+{
+  "kind": "preflight (not final-source evidence)",
+  "label": "p3f-final",
+  "gates": [
+    "static",
+    "unit",
+    "probes",
+    "unit:darwin",
+    "e2e:design",
+    "e2e:dashboard",
+    "e2e:connectors",
+    "e2e:terminal",
+    "e2e:connectors-direct",
+    "e2e:connectors-oauth"
+  ],
+  "bundlePolicy": "inspect only; no extraction or paid reruns",
+  "runId": 39119260018,
+  "sourceCommit": "2c45e150fe9bc87c867f76feccaab1548933697f",
+  "wrapperHead": "9f20ae45051fea888c4fe3fd2cfda679bb89a73c",
+  "createdAt": "2026-10-18T10:26:29Z",
+  "previousRun": 39115417793,
+  "attempt": null,
+  "conclusion": null,
+  "manifestCommit": null,
+  "log": "/tmp/maws-review/gates/p3f-union-preflight-retry1-ci.log"
+}
