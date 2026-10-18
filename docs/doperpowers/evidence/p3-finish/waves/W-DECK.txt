@@ -1,0 +1,25 @@
+W-DECK — approved debt wave; dispatch/base supplied by controller
+Read the whole execution document docs/doperpowers/plans/2026-10-18-p3-f-finish.md; parent §5 P3-F and DL104–106 govern. Work only in the controller-specified W. One commit per row, its removal or narrowing included; source beyond the quoted clause needs controller agreement. No new contract/persisted key/version, no engine patch, owner data/credentials/config access, GUI/live/e2e runs, gate-lane files, parent/ledger/charter/sibling documents or new .md. Named-file local vitest/eslint only through /tmp/maws-review/with-slot.sh, export pnpm_config_verify_deps_before_run=false, pnpm -C absolute W. Whole-project typecheck and CI belong to controller. UI work consumes the designer skill, chart work dataviz; retain the approved design/tokens, not a new taste pass.
+Before editing, report the exact product/test paths you claim for the pair. Tracker and staging are serial: /private/tmp/p3f-commit-row.py under lockf /private/tmp/maws-p3f-commit.lock, using a per-row JSON {line,paths,message,replacement}; no tracker write or git add outside that atomic step. A nonempty index or nonmatching original row stops for reconciliation. Do not absorb the other wave’s paths. Commit messages have no attribution lines.
+Return status, exact per-row commits, named test red/green results, changed paths, decisions and remaining clauses via SubagentHandback; no report Markdown. Controller schedules the independent reviewer and named union gate.
+
+Pair with W-DOC-A. Own deck notes, compare oracle, notes-deletion attribution, publish refusal copy, gesture capture and shown-version Export. Keep DOC-A’s document/Design context files untouched. Header Export must use the preview version and be unavailable in Compare, reusing E1’s existing what-you-see policy. The LibreOffice matcher must reject substantive loss while allowing the documented symbol behavior. Do not implement embedded fonts, suggestions, transitions redesign or other P4 features. New S-DRAG-FIDELITY remains deferred unless controller explicitly promotes it after the discriminator.
+
+Verbatim frozen rows and closing clauses:
+L203
+| 2026-10-16 | P3-C (landing) | An over-limit notes draft lives in the body component and is lost on remount. | C's M4 review (Minor). | Hold the draft in the editor's state or the Y.Doc's scratch. Owner: P3-F. |
+
+L210
+| 2026-10-16 | P3-C (landing) | The LibreOffice compare's text matcher excepts punctuation more broadly than symbols only. | C's M9. | Tighten the exception to the symbol classes the compare needs. Owner: P3-F. |
+
+L211
+| 2026-10-16 | P3-C (landing) | On a restored slide, a notes deletion's attribution credit can consume an unrelated transient deletion. | C's M8. | Credit notes deletions by their own leaf, as text is since M8's fix wave 2. Owner: P3-F. |
+
+L214
+| 2026-10-16 | P3-C (landing) | A's generic publish refusal copy still says force overwrites, but a merge that would load held or lose content is refused even under force (the detail names why). | C's `[parent-impact]` (Decision Log 73). | A's refusal copy gains the held-or-lossy case. Owner: P3-F. |
+
+L218
+| 2026-10-16 | P3-C (landing) | The selection overlay has no `lostpointercapture` handler: a lost capture leaves the gesture live and, since 48b00fdd, defers the layout re-measure. | C's final wave (B7's follow-up). | End the gesture on `lostpointercapture` as on pointer up. Owner: P3-F. |
+
+L233
+| 2026-10-16 | P3-C (the deck's header Export), seen by E1's M5 | The deck's header Export always exports the live state, even while a history version is previewed or two versions are compared, so the exported picture can differ from the one on screen; the design's sheet follows a what-you-see rule instead (P3-E's Decision Log 31). | E1's M5 preflight. | P3-F aligns the deck's Export with the design's rule (export the previewed version when one is shown; disabled in Compare); owner P3-F. |

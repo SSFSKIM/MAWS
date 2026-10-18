@@ -7,8 +7,12 @@
     "executor": "a57f5bfb86c7f98b3"
   },
   "W-RD": {
-    "status": "dispatching"
+    "status": "executing",
+    "base": "73f24d2a0",
+    "executor": "a53212fbc596ac2a9"
   },
+  "dependencyInstall": "completed exit 0 under with-slot",
+  "dragDiscriminator": "prepared cce228678; not before 12Z; no wave gate pending",
   "commitLock": "/private/tmp/maws-p3f-commit.lock",
   "helper": "/private/tmp/p3f-commit-row.py",
   "paidSpendUsd": 0
