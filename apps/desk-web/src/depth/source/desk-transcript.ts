@@ -137,13 +137,14 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
  * delivered send is drawn without its frame line, a peer's under a label naming it, and one that entered a running turn
  * as a prompt queued there (`conversation/delivery-frame.ts`); the held row keeps its frame. A steer the bridge appended
  * is drawn as the owner's prompt queued there too (`bridge-rows.ts`), and the bridge's wake as its own line in a turn
- * the session continued (`bridge-wake.ts`).
+ * the session continued (`bridge-wake.ts`), recognized on the held row, before a delivery's drawing strips the frame
+ * a lookalike of the wake's first line would otherwise be read past.
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
   const mapped = steerAsDrawn(deliveryAsDrawn(normalizeInterruptRow(row)));
   const record = TranscriptRecordSchema.safeParse(mapped);
   if (!record.success) return [];
-  const events = withWakeLine(mapped, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx);
+  const events = withWakeLine(row, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx);
   if (!events.some((event) => event.kind === 'subagent.message')) return events;
   return events.map((event) => (event.kind === 'turn.started' && event.origin === 'peer' ? { ...event, origin: 'task-notification' } : event));
 }

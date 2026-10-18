@@ -119,4 +119,16 @@ describe("the bridge's wake", () => {
     expect(turns).toHaveLength(1);
     expect(lines(drawnRows)).toEqual([[LINE, 'plugin', 'notice', turns[0][0]]]);
   });
+
+  it('is not read off a delivery whose words open with the line: the drawn copy lost its frame, the held row did not have it as a wake', async () => {
+    const ownFrame = '[sminos chat MAWS hub/5e55e5e5:12 from human → @you]';
+    const peerFrame = '[sminos chat MAWS ab12cd34:3 from fakepeer → @you]';
+    const words = STEER_WAKE;
+    for (const [frame, shown] of [[ownFrame, words], [peerFrame, `*From fakepeer*\n\n${words}`]] as const) {
+      const drawnRows = await drawn([asUser(`${frame}\n${words}`, 0), answer('Read.', 1)]);
+      expect(bubbles(drawnRows), frame).toEqual([shown]);
+      expect(lines(drawnRows), frame).toEqual([]);
+      expect(dividers(drawnRows).map(([, origin]) => origin), frame).toEqual(['human']);
+    }
+  });
 });
