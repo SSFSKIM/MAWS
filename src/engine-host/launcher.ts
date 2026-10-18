@@ -18,14 +18,13 @@ import type { RelayHealth } from '@shared/engine/relay-health';
 import type { SessionStateStore } from '@shared/engine/session-state-store';
 import type { LaunchResult } from '@shared/ipc/schema/session';
 import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
-import type { StdinFrame } from '@shared/wire/frames'; // P3-F L242
 import type { BinaryCheck } from './binary-info';
 import { JOURNAL_MAX_BYTES, JournalWriter, ownerOnlyJournalDirectory } from './journal'; // P3-HD: ownerOnlyJournalDirectory
 import { TESTED_ENGINE_VERSION } from './engine-compat';
 import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './launch';
 import type { ProcessTable } from './process-table';
 import { replayEngine } from './replay-transport';
-import { seedReplayTranscript } from './replay-transcript'; // P3-F L242
+import { seedOnFirstUser } from './replay-transcript'; // P3-F L242
 import { EngineSession } from './session';
 import type { EngineTransport } from './transport';
 import { unsettledPrompts } from './prompt-history'; // P2-C
@@ -120,10 +119,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     const onFirstUser =
       projects === null
         ? undefined
-        : (first: StdinFrame) =>
-            void seedReplayTranscript(projects, { cwd: plan.cwd, sessionId: plan.sessionId, engineVersion: plan.engineVersion, permissionMode: spec.permissionMode }, first).catch((error: unknown) =>
-              deps.log(`${spec.appSessionId}: the replay's transcript was not written: ${error instanceof Error ? error.message : String(error)}`),
-            );
+        : seedOnFirstUser(projects, { cwd: plan.cwd, sessionId: plan.sessionId, engineVersion: plan.engineVersion, permissionMode: spec.permissionMode }, (message) => deps.log(`${spec.appSessionId}: ${message}`));
     const spawn = replay !== null ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */, onFirstUser }) : deps.spawn;
     const outcome = deps.table.reserve(spec.appSessionId, () => {
       const session = new EngineSession({
