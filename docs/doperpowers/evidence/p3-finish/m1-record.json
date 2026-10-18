@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 47,
-    "defer:pending": 76,
+    "defer:committed": 48,
+    "defer:pending": 75,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -771,7 +771,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L75; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "remainingClause": "Closes when (owner P2) the helper moves into a zod-free shared module that both `anchor.ts` and `describe.ts` import, with the preload bundle test green. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L86): a refactor (a zod-free shared module). Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L75; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "f376fac219eeb343dd48d1a49aa903576d707f48"
     },
     {
       "line": 76,
@@ -781,8 +781,8 @@
       "triageReason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L76; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Closes when (owner P2, C4's disk path) the disk read knows the session's host was lost (a recorded host-loss mark, or main's digest) and closes that turn as stopped, with a disk-state test. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L87): host loss is rare; needs a recorded host-loss mark on the disk path. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L76; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 77,
