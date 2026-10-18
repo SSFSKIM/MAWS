@@ -51,8 +51,8 @@
     "39130559347",
     "39133832247"
    ],
-   "remaining": "monitoring in the following sets; a same-line failure on the fixed tree reopens it as a product row with its native trace (no P4 carry)",
-   "closing": "P3-F W-MINI (2026-10-18): the single-arrow, timer-order test fix 287b45bb1 is accepted (one arrow, pressed after a page timer queued after the lift has run, which is after dnd-kit's sensor adds its keydown listener; the press-until-it-moves loop removed); the original assertions (the cover's translate, then the over announcement naming the next slide) passed in gates 39130559347 and 39133832247. No measured product repair is claimed. Remaining: the following sets keep monitoring the case; a failure at the same line on the fixed tree reopens this as a product row with its native trace (step `filmstrip-reorder`). Owner: P3-F. Additional closing record (DL73): Closes with row 217 (P3-F); until then a failure with this exact signature reads against this row like rows 199 to 201. |"
+   "remaining": "monitoring in the following sets; on the fixed tree a same-line failure is a product recurrence (no baseline allowance), reopening this as a product row with its native trace (no P4 carry)",
+   "closing": "P3-F W-MINI (2026-10-18): the single-arrow, timer-order test fix 287b45bb1 is accepted (one arrow, pressed after a page timer queued after the lift has run, which is after dnd-kit's sensor adds its keydown listener; the press-until-it-moves loop removed); the original assertions (the cover's translate, then the over announcement naming the next slide) passed in gates 39130559347 and 39133832247. No measured product repair is claimed. Remaining: the following sets keep monitoring the case; a failure at the same line on the fixed tree reopens this as a product row with its native trace (step `filmstrip-reorder`). Owner: P3-F. The DL73 baseline allowance ends with that fix: on the fixed tree a failure with this signature is a product recurrence, never read as baseline. |"
   },
   "264": {
    "action": "narrowed",
