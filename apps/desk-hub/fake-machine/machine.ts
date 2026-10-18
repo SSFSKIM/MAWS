@@ -150,9 +150,10 @@ export class FakeMachine {
       for (const step of recording.steps) this.timeline.push({ session: depth, step });
     }
     this.timeline.sort((a, b) => a.step.at - b.step.at);
-    // A steer the machine ran before a crash left its row in the transcript (DX6's trace).
+    // A steer the machine ran before a crash left its row in the transcript, and a stop its TaskStop rows (DX6's trace).
     for (const trace of Object.values(this.memory.trace)) {
       if (trace.rpc === 'steer' && trace.row && trace.session) this.sessions.get(trace.session)?.appendRow(null, trace.row as Row);
+      else if (trace.rpc === 'stop' && trace.session && typeof trace.result.taskId === 'string') this.sessions.get(trace.session)?.restoreStop(trace.result.taskId);
       else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where, true, this.diffBase(trace.session), this.producer));
     }
   }

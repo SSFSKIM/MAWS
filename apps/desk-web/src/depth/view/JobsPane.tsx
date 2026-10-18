@@ -31,7 +31,12 @@ import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transc
 
 type Section = 'shells' | 'monitors' | 'mcp';
 
-export function JobsPane({ controller, state, session }: { controller: DeskTranscript; state: DepthTranscriptState; session: DeskSession }) {
+/**
+ * `agent`: a subagent's own jobs over its own subscription (DC10: a subagent's shells and monitors are stopped as the
+ * main loop's are), drawn above its transcript in the drill-in, a few rows high, and only while it has any: no MCP
+ * names, no note for an empty list or an older daemon.
+ */
+export function JobsPane({ controller, state, session, scope = 'session' }: { controller: DeskTranscript; state: DepthTranscriptState; session: DeskSession; scope?: 'session' | 'agent' }) {
   const { machine } = session;
   // The session's process is gone (its presence says no process), so no job of it will name a file now.
   const ended = session.presence?.record === null;
@@ -63,12 +68,17 @@ export function JobsPane({ controller, state, session }: { controller: DeskTrans
   );
 
   // No jobs before the first snapshot (or since a reset or an end); a served snapshot without them is an older daemon's.
+  if (scope === 'agent' && (jobs === null || jobs.length === 0)) return null;
   if (jobs === null) return state.phase === 'live' ? <p className="m-0 p-4 text-ui-sm text-fg-muted">{JOBS_COPY.olderDaemon(machine)}</p> : null;
   const lists = jobLists(jobs);
   const running = (nodes: TaskNode[]) => nodes.filter((node) => node.status === 'running').length;
   const empty = lists.shells.length === 0 && lists.monitors.length === 0 && (mcp ?? []).length === 0;
+  const showMcp = scope === 'session' && mcp !== null && mcp.length > 0;
   return (
-    <div data-testid="depth-jobs" className="flex min-h-0 flex-1 flex-col overflow-auto">
+    <div
+      data-testid={scope === 'agent' ? 'depth-agent-jobs' : 'depth-jobs'}
+      className={scope === 'agent' ? 'flex max-h-48 shrink-0 flex-col overflow-auto border-b border-border py-1' : 'flex min-h-0 flex-1 flex-col overflow-auto'}
+    >
       {lists.shells.length > 0 &&
         group(
           'shells',
@@ -100,7 +110,7 @@ export function JobsPane({ controller, state, session }: { controller: DeskTrans
             );
           }),
         )}
-      {mcp !== null && mcp.length > 0 && group('mcp', JOBS_COPY.mcp(mcp.length), <McpList servers={mcp} />)}
+      {showMcp && group('mcp', JOBS_COPY.mcp(mcp.length), <McpList servers={mcp} />)}
       {empty && <p className="m-0 flex flex-1 items-center justify-center p-4 text-ui text-fg-muted">{JOBS_COPY.none}</p>}
     </div>
   );

@@ -102,6 +102,8 @@ export class SessionDepth {
   usage: Usage | null = null;
   /** The main loop's turn running now, or null. */
   mainTurn: string | null = null;
+  /** Stops run before a crash whose TaskStop rows the replay has not reached yet (`restoreStop`). */
+  private readonly stopsToRestore = new Set<string>();
 
   constructor(
     readonly id: string,
@@ -293,6 +295,19 @@ export class SessionDepth {
     held.bytes += Buffer.byteLength(JSON.stringify(row)) + 1;
     for (const [sub, s] of this.subs) if (s.agentId === agentId) this.deliver(sub, s, { kind: 'row', body: { row, agentId } });
     this.refresh();
+    for (const taskId of this.stopsToRestore) {
+      if (!this.runningJob(taskId)) continue;
+      this.stopsToRestore.delete(taskId);
+      this.stopJob(taskId);
+    }
+  }
+
+  /**
+   * A stop this machine ran before a crash (its trace): the replay starts again from the recording, so its TaskStop rows
+   * are written again as soon as the job they stopped is running, as a transcript on disk would still hold them.
+   */
+  restoreStop(taskId: string): void {
+    this.stopsToRestore.add(taskId);
   }
 
   /** Folds a chunk into its block, as DX5's child does: a chunk that does not follow its message's watermark (one was

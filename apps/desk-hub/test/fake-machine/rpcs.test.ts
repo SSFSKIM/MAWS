@@ -309,6 +309,10 @@ describe('stop (DC10)', () => {
     b.send({ t: 'rpc', rpc: stop });
     expect((await final(stop, from)).outcome).toEqual({ state: 'done', result: { taskId: 'bsleep001' } });
     expect(again.rpcs).toMatchObject([{ nonce: stop.nonce, executed: false }]);
+    // The machine that came back replays its session with the stop's rows still in it: the job stays stopped, once.
+    await again.play({ speed: 0 });
+    expect(jobsOf(again).find((j) => j.taskId === 'bsleep001')?.status).toBe('stopped');
+    expect(again.sessions.get(JOBS)!.rows.get('main')!.filter((r) => JSON.stringify(r).includes('"name":"TaskStop"'))).toHaveLength(1);
     b.close();
     await again.close();
   });

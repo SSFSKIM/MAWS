@@ -368,3 +368,32 @@ function withInterruptedTurn(recording: Recording): Recording {
     steps: end < 0 ? [...recording.steps, ...steps] : [...recording.steps.slice(0, end), ...steps, ...recording.steps.slice(end)],
   };
 }
+
+test('a subagent’s own shell stands above its transcript in the drill-in, and its Stop stops it the same way', async ({ page, hub }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { fm, depth } = await openSession(page, hub);
+  fm.playThrough((step) => step.k === 'agent' && step.agentId === ALPHA);
+  await depth.getByTestId('depth-tab-subagents').click();
+  await agentRow(depth.getByTestId('depth-subagents'), ALPHA).click();
+  await expect(depth.getByTestId('depth-subagent')).toHaveAttribute('data-agent', ALPHA);
+  await expect.poll(() => fm.subscriptions(ALPHA)).toBe(1);
+  await expect(depth.getByTestId('depth-agent-jobs')).toHaveCount(0); // none yet: nothing is drawn
+
+  // The agent starts a background shell in its own loop.
+  const taskId = 'bagent001';
+  const stamp = new Date().toISOString();
+  const envelope = { sessionId: fm.session, isSidechain: true, agentId: ALPHA, timestamp: stamp };
+  fm.depth.appendRow(ALPHA, { ...envelope, type: 'assistant', uuid: 'a9e10000-0000-4000-8000-000000000001', message: { id: 'msg_agent_bash', type: 'message', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_agent_bash', name: 'Bash', input: { command: 'pnpm dev', description: 'Run the dev server', run_in_background: true } }], usage: { input_tokens: 1, output_tokens: 1 } } });
+  fm.depth.appendRow(ALPHA, { ...envelope, type: 'user', uuid: 'a9e10000-0000-4000-8000-000000000002', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_agent_bash', content: `Command running in background with ID: ${taskId}.` }] }, toolUseResult: { backgroundTaskId: taskId } });
+
+  const jobs = depth.getByTestId('depth-agent-jobs');
+  const row = jobRow(jobs, taskId);
+  await expect(row).toContainText('Run the dev server');
+  await expect(jobs.locator('[data-section="mcp"]')).toHaveCount(0);
+  await shot(page, 'dc10-agent-jobs');
+  await row.getByRole('button', { name: 'Stop' }).click();
+  await expect(row).toContainText('stopped', { timeout: 2000 });
+  expect(stopsSent(hub).at(-1)?.args).toEqual({ session: fm.session, taskId });
+  // Its TaskStop is in the agent's own loop, where the body read it.
+  expect(fm.depth.rows.get(ALPHA)!.some((r) => JSON.stringify(r).includes('"name":"TaskStop"'))).toBe(true);
+});
