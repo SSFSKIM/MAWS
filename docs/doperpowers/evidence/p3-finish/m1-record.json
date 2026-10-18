@@ -16,8 +16,8 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 10,
-    "preclosed:pending": 6,
+    "preclosed:committed": 11,
+    "preclosed:pending": 5,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -107,15 +107,15 @@
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-16 by H3b's fix wave 6b0a3dcd8 (on master), confirmed at H's landing.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "7163ebc747ad441702a653b0915f8cac73a7a631"
     },
     {
       "line": 236,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at E2's M6 tick ba05e4680 (on master).",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 239,
