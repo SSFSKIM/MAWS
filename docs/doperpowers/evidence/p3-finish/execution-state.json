@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "pair4 implementation rechecks complete; exact DOC-B assertion correction verified; latest-master integration and union gate next",
+  "phase": "pair4 union39149994319 running at fixed reviewed/master-integrated pin; W-E/W-PKG released disjoint implementation",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -294,7 +294,7 @@
   },
   "W-DOC-B": {
     "executor": "afe4ec31e37c3925e",
-    "status": "implementation recheck accepted; sole test assertion corrected d62e1aece and controller-verified; local GREEN not obtained, union gate pending",
+    "status": "implementation review and exact assertion correction accepted; local GREEN absent, union gate pending",
     "claims": "pair4-claims.json",
     "rowCommits": [
       "4b6b3ec69",
@@ -312,7 +312,7 @@
   },
   "W-SHELL": {
     "executor": "a87de8fe2228592d9",
-    "status": "fix committed, single independent recheck af5a8d2e5227da2f7 correct, no material findings; gate pending",
+    "status": "source/fix recheck accepted; union gate pending",
     "claims": "pair4-claims.json",
     "rowCommits": [
       "80757a5c6",
@@ -336,7 +336,7 @@
     "defer": 125,
     "theirs": 42
   },
-  "checkpointAt": "2026-10-18T17:29:27Z",
+  "checkpointAt": "2026-10-18T17:35:17Z",
   "checkpointHead": "e631209455f1439cf29a22ec4292b20dc9d71c27",
   "pair3Retry": {
     "runId": 39145946170,
@@ -373,18 +373,20 @@
   },
   "W-E": {
     "executor": "a40d9b1903ee4f68d",
-    "status": "corrected preparation accepted, source held for reviewed pair4 pin",
+    "status": "source edits released after pair4 fixed pin; implementation running",
     "claims": "pair5-claims.json",
-    "assessment": "reviews/W-E-preflight-assessment.txt"
+    "assessment": "reviews/W-E-preflight-assessment.txt",
+    "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a"
   },
   "W-PKG": {
     "executor": "af1eb156dd5f3f542",
-    "status": "packaged execution+resolution proof preparation accepted, source held for reviewed pair4 pin",
-    "claims": "pair5-claims.json"
+    "status": "source edits released after pair4 fixed pin; implementation running",
+    "claims": "pair5-claims.json",
+    "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a"
   },
   "pair4GatePrepared": {
     "launcher": "/tmp/maws-review/p3f-doc-b-shell-launch.sh",
-    "status": "not launched; reviewed merged full SHA argument required",
+    "status": "launched at fixed source fa23cabbb; later pair5 changes excluded",
     "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:panel,e2e:side,e2e:to-human,e2e:transcript,e2e:default,e2e:browser,e2e:browser-comment,e2e:deliverables,e2e:library,e2e:available,e2e:terminal,e2e:agents",
     "reason": "document editor/export/mirror; shell and agent graph; actual C10 replay consumers including sessions via default; c12 empty fixtures does not seed",
     "upstreamFetched": "3efa6cba7; merge waits clean fix workers; incoming desk app/docs only"
@@ -415,5 +417,55 @@
     "L90": "4/20, load readings absent",
     "L264": "0 qualifying post-fix full sets",
     "L265": "0/5 qualifying post-fix full sets"
+  },
+  "pair4Gate": {
+    "runId": 39149994319,
+    "sourceCommit": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+    "wrapperHead": "b9b499efaa70f3b1a68f1e157f8c9d4564e36494",
+    "createdAt": "2026-10-18T17:31:39Z",
+    "recordedAt": "2026-10-18T17:35:17Z",
+    "attempt": 1,
+    "status": "launched; last dispatch metadata queued",
+    "conclusion": null,
+    "groups": [
+      "static",
+      "unit",
+      "probes",
+      "unit:darwin",
+      "e2e:document-app",
+      "e2e:document",
+      "e2e:panel",
+      "e2e:side",
+      "e2e:to-human",
+      "e2e:transcript",
+      "e2e:default",
+      "e2e:browser",
+      "e2e:browser-comment",
+      "e2e:deliverables",
+      "e2e:library",
+      "e2e:available",
+      "e2e:terminal",
+      "e2e:agents"
+    ],
+    "label": "p3f-doc-b-shell",
+    "completionTask": "bi4c75849",
+    "completionMethod": "actual wrapper background Bash, automatic completion notification; no completion poll",
+    "queueThresholdTask": "bxfvwr64z",
+    "queueThreshold": "one independent queue check at run+30min, not a completion waiter",
+    "log": "/tmp/maws-review/gates/p3f-doc-b-shell-ci.log",
+    "integration": {
+      "master": "3efa6cba74e3e14d0977e9a042183a63716fe5ea",
+      "merge": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+      "result": "clean ort merge, incoming desk app/docs preserved, tracker unchanged"
+    },
+    "review": {
+      "W-SHELL": "af5a8d2e5227da2f7 recheck correct at e0bb59c87, both original issues closed within owned scratch model",
+      "W-DOC-B": "affe8ead56a9bcb86 recheck accepted implementation at264697a78; single entity assertion corrected d62e1aece, controller exact-diff verification against retained RED line71; no third review"
+    },
+    "localCheckOmission": "DOC-B local GREEN not obtained (slot wait >10min); retained RED3failed/433passed exit1. Stopped own waiting taskbc4vgnsji/pid7940, never held a lock. No post-fix local lint/typecheck. This union must supply GREEN per architect ruling, no pass yet.",
+    "consumerScope": "C10 nonempty fixture users covered by side,to-human,browser-comment,available,library and sessions through default; shared HTML frame/Document CardHost, browser cover, panel/transcript and agent graph included. c12 has empty fixture list and does not seed.",
+    "notFinalSource": true,
+    "fullSetCounterAdvance": false,
+    "paidSpendUsd": 0
   }
 }

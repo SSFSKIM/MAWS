@@ -1,5 +1,5 @@
 {
-  "status": "prepared with accepted bounded assessment corrections; source edits still held until reviewed pair4 gate pin",
+  "status": "disjoint source edits explicitly released after pair4 immutable gate pin",
   "W-E": {
     "executor": "a40d9b1903ee4f68d",
     "rows": [
@@ -55,5 +55,8 @@
   },
   "intersection": [],
   "process": "exact source claims only; original row plus own paths committed under existing lock/helper; no source edits before explicit release",
-  "localChecksPolicy": "Architect ruling2026-10-18: local named check queued for a slot over10min is stopped, not waited for; preserve existing RED and commit source, reviewer reads diff against RED, union gate supplies GREEN. Record per row: local GREEN not obtained (slot wait); gate <run id> green only after verified result. Never fabricate unavailable checks. Lint/typecheck remote. Gate-only failure gets one bounded worker fix and DL59 relaunch. No slot bypass, lock deletion or other-process stop."
+  "localChecksPolicy": "Architect ruling2026-10-18: local named check queued for a slot over10min is stopped, not waited for; preserve existing RED and commit source, reviewer reads diff against RED, union gate supplies GREEN. Record per row: local GREEN not obtained (slot wait); gate <run id> green only after verified result. Never fabricate unavailable checks. Lint/typecheck remote. Gate-only failure gets one bounded worker fix and DL59 relaunch. No slot bypass, lock deletion or other-process stop.",
+  "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+  "releaseRecordedAt": "2026-10-18T17:35:17Z",
+  "pair4RunExcludedFromLaterSource": 39149994319
 }

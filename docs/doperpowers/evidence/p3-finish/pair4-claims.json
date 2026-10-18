@@ -33,7 +33,12 @@
       "src/artifacts/types/document/format.md",
       "src/engine-host/tool-server/documents.test.ts"
     ],
-    "review": "independent high running; actual reviewer-wave mapping will follow agent introduction/handback, not parallel result order"
+    "review": "implementation correct; sole assertion finding corrected and controller-verified, no third review",
+    "reviewer": "affe8ead56a9bcb86",
+    "reviewRounds": 2,
+    "fixExecutor": "addfe16856ce9d938",
+    "fixCommit": "264697a788a3f99ef73ba7f0ebb602109e7feed6",
+    "mechanicalAssertionFix": "d62e1aece5238ae3e04d8d77992ba83ebc9d8e4b"
   },
   "W-SHELL": {
     "executor": "a87de8fe2228592d9",
@@ -79,11 +84,17 @@
       "src/renderer/src/transcript/model/derive.ts",
       "src/renderer/src/transcript/model/fixtures.test.ts"
     ],
-    "review": "independent high running; actual reviewer-wave mapping will follow agent introduction/handback, not parallel result order"
+    "review": "correct after single fix recheck",
+    "reviewer": "af5a8d2e5227da2f7",
+    "reviewRounds": 2,
+    "fixExecutor": "a669c1af09b6dc634",
+    "fixCommit": "e0bb59c878e1525e133af0a8867ad88f1cda8a98"
   },
   "intersection": [],
   "processDeviations": [
     "DOC-B edited/committed export/markdown.ts,test and export/docx.ts,test before acknowledgment; scope now acknowledged under architect ruling, deviation retained.",
     "SHELL added rollback.test.ts, service-register.test.ts, index.ts and replay-transcript.ts/test before acknowledgment; ipc.ts absent from prior claim, disclosed at handback. Included in exact independent review, not retrospectively compliant."
-  ]
+  ],
+  "gateSource": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+  "gateRun": 39149994319
 }
