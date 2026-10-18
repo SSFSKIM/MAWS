@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 119,
-    "defer:pending": 4,
+    "defer:committed": 120,
+    "defer:pending": 3,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1563,7 +1563,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L250; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "Closes when the barrier releases in a `finally` and settles any pending bind when restore or an assertion throws. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L250; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "f2c03e8c4224e431c19ece523d815b4a3966dfdc"
     },
     {
       "line": 252,
@@ -1573,8 +1573,8 @@
       "triageReason": "Dense expansion needs a dataset cell-count/resource contract or separate scale probe; do not introduce an unapproved acceptance limit.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L252; parent Decision Log 106): Dense expansion needs a dataset cell-count/resource contract or separate scale probe; do not introduce an unapproved acceptance limit. Owner: P4.",
       "remainingClause": "Closes when the parse is row-major or streaming, or the spec adds a cell-count bound, with a test at the bound. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L252; parent Decision Log 106): Dense expansion needs a dataset cell-count/resource contract or separate scale probe; do not introduce an unapproved acceptance limit. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 254,
