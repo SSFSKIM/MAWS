@@ -250,7 +250,15 @@ test('carried dashboard: bind, owner prose and conversation, agent replacement, 
   await expect(thread.getByRole('listitem')).toHaveText(['YouKeep the regional comparison.', /The comparison stays\.$/]);
   expect(await ok(page, 'artifacts.versions', { artifactId: id })).toEqual(history);
   await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Version history' }).click();
-  await expect(record.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Carried baseline/ })).toBeVisible();
+  await record.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Carried baseline/ }).click();
+  const preview = record.getByRole('toolbar', { name: 'Version preview' });
+  await expect(preview).toBeVisible();
+  await expect.poll(() => tipsOf(previewed(record).first())).toEqual(OLD.tips);
+  await expect(previewed(record).nth(1).locator('tbody')).toHaveText('North10South20');
+  await expect(previewed(record).locator('.dash-source-label')).toHaveText(labels);
+  await expect(record.locator('.doc-preview .ProseMirror')).toContainText('Owner: compare with last year.');
+  await preview.getByRole('button', { name: 'Back to document' }).click();
+  await expect(preview).toBeHidden();
 
   // Ordinary library Duplicate, never the version preview's Make a copy.
   await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();

@@ -139,7 +139,7 @@ describe('the whole declared invocation', () => {
   it('ran every declared file at its declared count, no other, every case expected and none skipped, and passed', () => {
     const [first, ...rest] = whole().tests;
     expect(invocationProblems({ ...whole(), tests: rest }).join('; ')).toMatch(new RegExp(`${first!.file.replace('.', '\\.')}: \\d+ cases of the declared \\d+`));
-    expect(invocationProblems({ ...whole(), tests: whole().tests.filter((t) => t.file !== 'dashboard-history.spec.ts') }).join('; ')).toMatch(/dashboard-history\.spec\.ts: 0 cases of the declared 1/);
+    expect(invocationProblems({ ...whole(), tests: whole().tests.filter((t) => t.file !== 'dashboard-history.spec.ts') }).join('; ')).toMatch(/dashboard-history\.spec\.ts: 0 cases of the declared 2/);
     expect(invocationProblems({ ...whole(), tests: [...whole().tests, { file: 'dashboard-scale.spec.ts', title: 'scale', outcome: 'skipped' }] }).join('; ')).toMatch(/a file outside the declared list ran: dashboard-scale\.spec\.ts/);
     const skipped = whole().tests.map((t, k) => (k === 2 ? { ...t, outcome: 'skipped' } : t));
     expect(invocationProblems({ ...whole(), tests: skipped }).join('; ')).toMatch(/a skipped case: dashboard\.spec\.ts › case 2/);

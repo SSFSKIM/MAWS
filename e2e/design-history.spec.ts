@@ -353,18 +353,24 @@ test('carried design survives app relaunch with geometry, in-place text, convers
   const history = await ok<{ versions: { kind: string; label?: string }[] }>(page, 'artifacts.versions', { artifactId: id });
   expect(history.versions).toContainEqual(expect.objectContaining({ kind: 'restore', label: 'Restored from Carried layout' }));
   const carriedFiles = await filesOf(page, id);
+  const restoredNote = plain(await elementOf(page, id, 'desktop', 'note'));
+  expect(restoredNote).toBe('Owner: keep this launch note.');
+  const noteText = (html: string) => page.evaluate((source) => new DOMParser().parseFromString(source, 'text/html').querySelector('#note')?.textContent ?? null, html);
   const conversation = await threadsOf(page, id);
   expect(conversation).toEqual([expect.objectContaining({ id: 'carried-note', live: true, orphan: false, messages: [{ body: 'Keep the launch date.', by: 'human' }, { body: 'The date is confirmed.', by: expect.stringMatching(/^session:/) }] })]);
 
   const mirror = join(channel, 'artifacts', `Carried-design-${id.slice(0, 8)}`);
   const paths = ['canvas.json', 'boards/phone.html', 'boards/tablet.html', 'boards/desktop.html', 'boards/poster.html'];
   await expect.poll(() => paths.every((p) => existsSync(join(mirror, p))), { timeout: 20_000 }).toBe(true);
-  await expect.poll(() => readFileSync(join(mirror, 'boards/desktop.html'), 'utf8')).toContain('Owner: keep this launch note.');
+  await expect.poll(() => noteText(readFileSync(join(mirror, 'boards/desktop.html'), 'utf8'))).toBe(restoredNote);
   await expect.poll(() => JSON.parse(readFileSync(join(mirror, 'canvas.json'), 'utf8')).boards.desktop).toMatchObject({ x: 1500, y: 140, w: 1500, h: 1100 });
   const mirrored = Object.fromEntries(paths.map((p) => [p, readFileSync(join(mirror, p), 'utf8')]));
-  const assertMirror = () => {
+  const assertMirror = async () => {
     expect(readdirSync(join(mirror, 'boards')).sort()).toEqual(['desktop.html', 'phone.html', 'poster.html', 'tablet.html']);
-    expect(JSON.parse(readFileSync(join(mirror, 'canvas.json'), 'utf8')).boards.desktop).toMatchObject({ x: 1500, y: 140, w: 1500, h: 1100 });
+    expect(JSON.parse(readFileSync(join(mirror, 'canvas.json'), 'utf8'))).toEqual(JSON.parse(carriedFiles['project/canvas.json']!));
+    const desktop = readFileSync(join(mirror, 'boards/desktop.html'), 'utf8');
+    expect(await noteText(desktop)).toBe(restoredNote);
+    expect(desktop).not.toContain('Discarded');
     for (const p of paths) {
       const path = join(mirror, p);
       expect(readFileSync(path, 'utf8')).toBe(mirrored[p]);
@@ -373,7 +379,7 @@ test('carried design survives app relaunch with geometry, in-place text, convers
       expect(() => { const fd = openSync(path, constants.O_WRONLY); closeSync(fd); }, `${p} refuses writes`).toThrow(/EACCES|EPERM/);
     }
   };
-  assertMirror();
+  await assertMirror();
   expect(launch!.consoleErrors()).toEqual([]);
   const original = launch!;
   const exited = original.app.waitForEvent('close');
@@ -391,7 +397,7 @@ test('carried design survives app relaunch with geometry, in-place text, convers
   expect(await ok(page, 'artifacts.versions', { artifactId: id })).toEqual(history);
   expect((await ok<{ artifact: { spaceId: string } }>(page, 'artifacts.get', { artifactId: id })).artifact.spaceId).toBe(space.id);
   expect((await ok<{ spaces: { id: string; linkedDir: string }[] }>(page, 'spaces.list')).spaces).toContainEqual(expect.objectContaining({ id: space.id, linkedDir: channel }));
-  assertMirror();
+  await assertMirror();
   // The owner's library identifies the linked Space and the exact directory whose files were inspected above.
   await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
   const library = page.locator('[data-library]');
@@ -409,6 +415,15 @@ test('carried design survives app relaunch with geometry, in-place text, convers
   await expect(thread).toContainText('Keep the launch date.');
   await expect(thread).toContainText('The date is confirmed.');
   await headerAction(page, 'Version history');
-  await expect(tab.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Carried layout/ })).toBeVisible();
+  await tab.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Carried layout/ }).click();
+  const preview = tab.getByRole('toolbar', { name: 'Version preview' });
+  await expect(preview).toBeVisible();
+  await preview.getByRole('checkbox', { name: 'Show changes' }).uncheck();
+  const world = tab.getByRole('region', { name: 'Design in this version' });
+  await expect(world.locator('[data-history-board="phone"]')).toHaveAttribute('style', /left: 70px; top: 90px; width: 420px; height: 900px/);
+  await expect(world.locator('[data-history-board="desktop"]')).toHaveAttribute('style', /left: 1500px; top: 140px; width: 1500px; height: 1100px/);
+  await expect(world.locator('[data-history-board="desktop"] .design-board-canvas [data-eid="note"]')).toHaveText('Owner: keep this launch note.');
+  await preview.getByRole('button', { name: 'Back to design' }).click();
+  await expect(tab.getByRole('toolbar', { name: 'Design' })).toBeVisible();
   expect(restarted.consoleErrors()).toEqual([]);
 });
