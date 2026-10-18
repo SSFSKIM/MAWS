@@ -32,7 +32,7 @@ const ROWS: ConnectorServerRow[] = [
   { kind: 'retiring', connectionId: GONE, server: 'notes', scope: 'user', path: '/Users/me/.claude.json', disconnecting: 'unconfirmed' },
 ];
 
-function setup(answer: Partial<ConnectorServers> = {}) {
+function setup(answer: Partial<ConnectorServers> = {}, declared: unknown[] = [{ server: 'notes', tool: 'search' }]) {
   const owner: ConnectorsOwner = {
     servers: vi.fn(async () => ({ servers: ROWS, saved: 'ok' as const, withdrawnUnattributed: false, ...answer })),
     connect: vi.fn(async () => ({ accepted: true }) as const),
@@ -49,7 +49,7 @@ function setup(answer: Partial<ConnectorServers> = {}) {
   const tab = new ConnectorsTab(ARTIFACT, { host: host as never, startSession: vi.fn(), owner });
   const port: PagePort & { send(data: unknown): void } = { onmessage: null, postMessage: () => {}, close: () => {}, send(data) { this.onmessage?.({ data } as MessageEvent); } };
   tab.attach(port);
-  port.send({ id: 1, op: 'declare', tools: [{ server: 'notes', tool: 'search' }] });
+  port.send({ id: 1, op: 'declare', tools: declared });
   return { tab, owner, port };
 }
 
@@ -112,6 +112,20 @@ describe('the Connectors sheet’s Servers section', () => {
     expect(server('notes').textContent).toContain('Not used by MAWS until you Connect or MAWS relaunches');
     expect(buttons(server('notes'))).toEqual(['Connect']);
     expect(document.querySelector('[data-connectors-withdrawn]')!.textContent).toMatch(/until MAWS relaunches.*works again after a relaunch/);
+  });
+
+  // P3-F: recovery rows stand apart from the tools; a page with none declared (and no grant) still reaches them
+  it('offers Forget and Retry disconnect when no tool is declared or granted', async () => {
+    const { tab, owner } = setup({ servers: [ROWS[5]!, ROWS[6]!] }, []);
+    tab.openSheet();
+    render(<ConnectorsSheet tab={tab} context={{ kind: 'none' }} />);
+    await flush();
+    expect(screen.getByText('This page has asked for no tools.')).toBeTruthy();
+    expect(buttons(server('Unreadable saved MAWS connection'))).toEqual(['Forget']);
+    expect(buttons(server('notes · MAWS connection being disconnected'))).toEqual(['Retry disconnect']);
+    fireEvent.click(screen.getByRole('button', { name: 'Forget the unreadable saved MAWS connection' }));
+    await flush();
+    expect(owner.disconnect).toHaveBeenCalledWith(BAD);
   });
 
   it('says while it reads, and keeps the tools usable', async () => {
