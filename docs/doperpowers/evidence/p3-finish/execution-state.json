@@ -627,6 +627,43 @@
       "fixCommit": "29bb6d09260cfbef7be2f9c84e9a83a458fae389",
       "fixScope": "exact two paths,3insert/1delete; explicit two includes and true omission via entry filter; no product change",
       "focusedReview": "a212cf83b5473e7de correct/no material findings; exact37858708b..29bb6d092, static only, no checks"
+    },
+    "queueThresholdResult": {
+      "at": "2026-10-18T19:26:55Z",
+      "exit": 0,
+      "status": "queued",
+      "queued": [
+        {
+          "id": 117760724566,
+          "name": "packaged"
+        },
+        {
+          "id": 117760724825,
+          "name": "e2e:document-scale"
+        },
+        {
+          "id": 117760724855,
+          "name": "e2e:design"
+        },
+        {
+          "id": 117760724874,
+          "name": "e2e:presentations-scale"
+        },
+        {
+          "id": 117760724885,
+          "name": "e2e:dashboard-scale"
+        },
+        {
+          "id": 117760724896,
+          "name": "e2e:connectors-direct"
+        },
+        {
+          "id": 117760724946,
+          "name": "e2e:artifacts-perf"
+        }
+      ],
+      "reportedToArchitect": true,
+      "method": "single queue-age check, not completion polling"
     }
   },
   "postPartitionIncomingRows": {
