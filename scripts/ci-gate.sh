@@ -21,8 +21,8 @@
 #                      e2e:default is the bare `pnpm e2e` less the specs the run's other e2e groups collect
 #   --runner           the e2e lane, linux or macos (default: $MAWS_GATE_RUNNER, else the repository's variables)
 #   --class1a          class 1a's runner (static, unit, probes): linux, macos or pool, ci-kit's pool (default: the
-#                      repository's variable GATE_RUNNER, else linux). With pool, a Linux lane's POOL_E2E groups
-#                      (desk-web) run on the pool too; --class1a linux keeps them on the hosted runner
+#                      repository's variable GATE_RUNNER, else linux). With pool, the POOL_E2E groups (desk-web)
+#                      run on the pool too, on either lane; otherwise they run on the hosted Linux runner, never a Mac
 #   --default-beside   e2e groups, a comma list (side,library,…), that e2e:default subtracts the specs of as if they ran
 #                      beside it: a relaunch of part of a set names the whole set's other groups, so its default runs the
 #                      specs the whole set's default ran. A name with no script, or a script the derivation cannot read,
@@ -34,8 +34,8 @@
 # Every invocation pushes a fresh empty commit on top of the sha: its message carries a unique nonce (so the push always
 # triggers a run of its own and the run found is this one's) and, when given, the `Gates:`, `Runner:`, `Class1a:`,
 # `DefaultBeside:` and `Evidence:` trailers. The pushed tree is always the tested tree plus that one commit. A Linux
-# lane admits only the e2e groups green there (§3.1); the plan refuses the rest. The pool takes class 1a and a Linux
-# lane's POOL_E2E groups; the plan job, hosted, makes its box. Every gh call names the repository, so the script runs
+# lane admits only the e2e groups green there (§3.1); the plan refuses the rest. The pool takes class 1a and the
+# POOL_E2E groups; the plan job, hosted, makes its box. Every gh call names the repository, so the script runs
 # from any directory.
 #
 # Before the push, a run that puts jobs on a Mac (resolved from the flags and the repository variables as the plan does)

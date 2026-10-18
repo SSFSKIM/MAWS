@@ -8,9 +8,9 @@
 // when not given). Prints its lines on stdout and exits 2 when the run is not to be pushed, else 0. The parsing and the
 // decision are exported for scripts/ci-gate-alerts.test.mjs.
 import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { URL, fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
 const REPO = 'SSFSKIM/MAWS';
@@ -28,11 +28,15 @@ export function parseAlert(title) {
 
 export const alertLine = ({ machine, dialog, since, source }) => `${machine}: ${dialog} since ${since}${source === undefined ? '' : ` (${source})`}`;
 
+// The e2e groups gate.yml's POOL_E2E names, which never take a Mac whatever the lane (Decision Log 72).
+export const poolE2e = (workflow) => words(/^ {2}POOL_E2E: (.*)$/m.exec(workflow)?.[1]);
+
 // The jobs a run puts on a Mac, resolved as .github/scripts/gate-plan.mjs resolves them (the e2e lane, class 1a's runner,
 // the gate set) and as .github/workflows/gate.yml places them (the plan job on the Mac under GATE_RUNNER=macos; unit:darwin
 // and packaged always on the Mac). `runner`, `class1a` and `gates` are ci-gate.sh's flags, which become the run's
-// trailers; `variables` holds the repository's variables. Empty when every job goes to Linux or the pool.
-export function macJobs({ gates = '', runner = '', class1a = '', variables = {} }) {
+// trailers; `variables` holds the repository's variables; `offMac` the POOL_E2E groups. Empty when every job goes to
+// Linux or the pool.
+export function macJobs({ gates = '', runner = '', class1a = '', variables = {}, offMac = [] }) {
   const gateRunner = (variables.GATE_RUNNER ?? '').toLowerCase();
   const class1aRunner = (class1a || gateRunner || 'linux').toLowerCase();
   const lane = (runner || variables.GATE_E2E_RUNNER || (gateRunner === 'pool' ? '' : gateRunner) || 'linux').toLowerCase();
@@ -43,7 +47,7 @@ export function macJobs({ gates = '', runner = '', class1a = '', variables = {} 
     ...set.filter((gate) => {
       if (['static', 'unit', 'probes'].includes(gate)) return class1aRunner === 'macos';
       if (gate === 'unit:darwin' || gate === 'packaged') return true;
-      return lane === 'macos'; // an e2e group
+      return lane === 'macos' && !offMac.includes(gate.slice(4)); // an e2e group
     }),
   ];
 }
@@ -69,7 +73,7 @@ export function decide({ jobs, alerts, runners }) {
 }
 
 // The reads, through `gh` (args to stdout, throwing on failure), and the decision; any failed read goes ahead with a warning.
-export function check({ gates, runner, class1a, gh }) {
+export function check({ gates, runner, class1a, offMac, gh }) {
   const read = (path, jq) =>
     gh(['api', '--paginate', path, '--jq', jq])
       .split('\n')
@@ -78,7 +82,7 @@ export function check({ gates, runner, class1a, gh }) {
   let step = "the repository's variables";
   try {
     const variables = Object.fromEntries(read(`repos/${REPO}/actions/variables?per_page=30`, '.variables[] | [.name, .value]'));
-    const jobs = macJobs({ gates, runner, class1a, variables });
+    const jobs = macJobs({ gates, runner, class1a, variables, offMac });
     if (jobs.length === 0) return { stop: false, lines: [] };
     step = `the open ci-kit alerts (${ALERTS})`;
     const alerts = read(`repos/${ALERTS}/issues?labels=ci-kit-alert&state=open&per_page=100`, '.[] | select(.pull_request == null) | {number, title}')
@@ -101,7 +105,8 @@ export function check({ gates, runner, class1a, gh }) {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { values } = parseArgs({ options: { gates: { type: 'string', default: '' }, runner: { type: 'string', default: '' }, class1a: { type: 'string', default: '' } } });
   const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
-  const { stop, lines } = check({ ...values, gh });
+  const offMac = poolE2e(readFileSync(new URL('../.github/workflows/gate.yml', import.meta.url), 'utf8'));
+  const { stop, lines } = check({ ...values, offMac, gh });
   for (const line of lines) process.stdout.write(`${line}\n`);
   process.exit(stop ? 2 : 0);
 }
