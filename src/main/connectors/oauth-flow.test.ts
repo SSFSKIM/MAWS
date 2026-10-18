@@ -4,7 +4,7 @@
 // listener and browser stand in for the 127.0.0.1 socket and the system browser. Nothing is sent or bound.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LoopbackReply, LoopbackRequest } from './oauth-callback';
-import { CONNECT_CALLBACK_TIMEOUT_MS, createConnectorOAuthFlow, type ConnectorOAuthFlowDeps } from './oauth-flow';
+import { CONNECT_CALLBACK_TIMEOUT_MS, createConnectorOAuthFlow, untilEnded, type ConnectorOAuthFlowDeps } from './oauth-flow';
 import type { ConnectorOAuthGrant } from './oauth-types';
 
 const MCP = 'https://mcp.example.com';
@@ -633,5 +633,24 @@ describe('revoke', () => {
     owner.abort();
     expect(await h.flow.revoke(savedGrant(), owner.signal)).toBe('failed');
     expect(h.fetch).not.toHaveBeenCalled();
+  });
+});
+
+// P3-F L270: the browser opener (and the binding) is called a microtask after the flow decided to call it; an abort
+// queued into that gap must still keep the call from being made.
+describe('untilEnded', () => {
+  it('an abort landing after the decision and before the deferred call never makes the call', async () => {
+    const owner = new AbortController();
+    const opener = vi.fn(async () => {});
+    const pending = untilEnded(opener, owner.signal);
+    owner.abort(); // queued before the deferred call's microtask runs
+    expect(await failureOf(pending)).toMatchObject({ code: 'cancelled' });
+    expect(opener).not.toHaveBeenCalled();
+  });
+
+  it('without an abort the deferred call is made once and answers', async () => {
+    const opener = vi.fn(async () => 'opened');
+    expect(await untilEnded(opener, new AbortController().signal)).toBe('opened');
+    expect(opener).toHaveBeenCalledTimes(1);
   });
 });

@@ -98,10 +98,15 @@ async function step<T>(signal: AbortSignal, code: ConnectorOAuthFailure, run: ()
   return value;
 }
 
-// A wait that is not a request (binding, the browser opener): it ends with the signal even if it never answers.
-function untilEnded<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
+// A wait that is not a request (binding, the browser opener): it ends with the signal even if it never answers. The
+// call itself is deferred a microtask, so it checks the signal once more right before it is made (P3-F L270): an abort
+// queued into that gap never opens a browser. Exported for that regression.
+export function untilEnded<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(ended(signal));
-  const pending = Promise.resolve().then(work);
+  const pending = Promise.resolve().then(() => {
+    if (signal.aborted) throw ended(signal);
+    return work();
+  });
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(ended(signal));
     signal.addEventListener('abort', onAbort, { once: true });
