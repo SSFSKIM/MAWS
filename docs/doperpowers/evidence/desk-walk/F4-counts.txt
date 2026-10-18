@@ -1,0 +1,29 @@
+hub https://desk-hub.opencognita-platform.workers.dev (hub@55224281 web@master.55224281.walk), project d4abe9f5-d1d1-4785-86d6-a0422cc4aeb3, at 2026-10-17T07:06:54.608Z: 8 writers, 1049 events
+  hub/1858fe3c549a424fe314c429383eb453  7/7
+  macbook/083c0c45-5714-4800-856d-3ea53c8bb468  10/10
+  macbook/b24618ae-120e-48ea-9fc2-bc982495bc18  36/36
+  macbook/human  480/480
+  mini/99938f26-5934-4197-99ca-f72aeb2677b5  12/12
+  mini/9b674a63-d0c4-4a64-ad85-73bf99fc70d4  8/8
+  mini/aa6459e7-e9d0-41b2-922c-a2b20459db34  16/16
+  mini/human  480/480
+macbook (machine macbook), read 2026-10-17T07:06:51.020Z: 8 writers, 937 events
+mini (machine mini), read 2026-10-17T07:06:51.596Z: 8 writers, 1049 events
+writer  machine  hub(count/last)  machine(count/last)  verdict
+  hub/1858fe3c549a424fe314c429383eb453  macbook  7/7  7/7  agrees
+  macbook/083c0c45-5714-4800-856d-3ea53c8bb468  macbook  10/10  10/10  agrees
+  macbook/b24618ae-120e-48ea-9fc2-bc982495bc18  macbook  36/36  36/36  agrees
+  macbook/human  macbook  480/480  480/480  agrees
+  mini/99938f26-5934-4197-99ca-f72aeb2677b5  macbook  12/12  12/12  agrees
+  mini/9b674a63-d0c4-4a64-ad85-73bf99fc70d4  macbook  8/8  8/8  agrees
+  mini/aa6459e7-e9d0-41b2-922c-a2b20459db34  macbook  16/16  16/16  agrees
+  mini/human  macbook  480/480  368/368  differs: at the hub, not there: 369-480
+  hub/1858fe3c549a424fe314c429383eb453  mini  7/7  7/7  agrees
+  macbook/083c0c45-5714-4800-856d-3ea53c8bb468  mini  10/10  10/10  agrees
+  macbook/b24618ae-120e-48ea-9fc2-bc982495bc18  mini  36/36  36/36  agrees
+  macbook/human  mini  480/480  480/480  agrees
+  mini/99938f26-5934-4197-99ca-f72aeb2677b5  mini  12/12  12/12  agrees
+  mini/9b674a63-d0c4-4a64-ad85-73bf99fc70d4  mini  8/8  8/8  agrees
+  mini/aa6459e7-e9d0-41b2-922c-a2b20459db34  mini  16/16  16/16  agrees
+  mini/human  mini  480/480  480/480  agrees
+DIFFERS: 1 writer view(s) disagree with the hub (0 explained)

@@ -1,0 +1,5 @@
+hub https://desk-hub.opencognita-platform.workers.dev (hub@55224281 web@master.55224281.walk), project ebb30c31-6f6e-414d-9a40-c7be37616d06, at 2026-10-17T08:32:31.975Z: 0 writers, 0 events
+macbook (machine macbook), read 2026-10-17T08:32:27.663Z: 0 writers, 0 events
+mini (machine mini), read 2026-10-17T08:32:29.062Z: 0 writers, 0 events
+writer  machine  hub(count/last)  machine(count/last)  verdict
+AGREE: every machine matches the hub writer by writer (0 explained by the audit)

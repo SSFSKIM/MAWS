@@ -1,0 +1,10 @@
+hub https://desk-hub.opencognita-platform.workers.dev (hub@55224281 web@master.55224281.walk), project ebb30c31-6f6e-414d-9a40-c7be37616d06, at 2026-10-17T13:09:18.479Z: 1 writers, 4 events
+  macbook/1ea561bc-a60d-4437-a6ac-fa7cd5eda54f  4/4
+macbook (machine macbook), read 2026-10-17T13:09:15.058Z: 3 writers, 7 events
+mini (machine mini), read 2026-10-17T13:09:15.591Z: 1 writers, 4 events
+writer  machine  hub(count/last)  machine(count/last)  verdict
+  SK.local/e3ce7feb-2e31-42ee-b836-829ecb01458b  macbook  -  1/1  explained: local only: under SK.local/, a name macbook wrote under before it enrolled, so the hub never takes it
+  macbook/1ea561bc-a60d-4437-a6ac-fa7cd5eda54f  macbook  4/4  5/5  differs: there, not at the hub: 5
+  macbook/e3ce7feb-2e31-42ee-b836-829ecb01458b  macbook  -  1/1  differs: held there, not at the hub
+  macbook/1ea561bc-a60d-4437-a6ac-fa7cd5eda54f  mini  4/4  4/4  agrees
+DIFFERS: 2 writer view(s) disagree with the hub (1 explained)
