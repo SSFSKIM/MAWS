@@ -29,6 +29,18 @@
    ],
    "ruling": "architect, named closure (2026-10-18)",
    "remaining": null
+  },
+  "201": {
+   "action": "removed",
+   "sourceCommits": [
+    "d26b65149"
+   ],
+   "closingGates": [
+    "39130559347",
+    "39133832247"
+   ],
+   "ruling": "architect, named closure (2026-10-18)",
+   "remaining": null
   }
  }
 }
