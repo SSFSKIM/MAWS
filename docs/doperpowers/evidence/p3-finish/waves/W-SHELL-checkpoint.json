@@ -1,0 +1,68 @@
+{
+  "recordedAt": "2026-10-18T16:44:55Z",
+  "executor": "a87de8fe2228592d9",
+  "commits": [
+    "80757a5c6",
+    "d5f5c5b9e",
+    "be55152f4",
+    "957948cd9",
+    "3c068c7b3",
+    "232035f80",
+    "3bbe7134d",
+    "1cc84bf04"
+  ],
+  "paths": [
+    "e2e/browser.spec.ts",
+    "src/engine-host/index.ts",
+    "src/engine-host/ipc.ts",
+    "src/engine-host/launcher.ts",
+    "src/engine-host/replay-transcript.test.ts",
+    "src/engine-host/replay-transcript.ts",
+    "src/engine-host/replay-transport.test.ts",
+    "src/engine-host/replay-transport.ts",
+    "src/main/artifacts/bridge-script.dom.test.tsx",
+    "src/main/artifacts/bridge-script.test.ts",
+    "src/main/artifacts/bridge-script.ts",
+    "src/main/browser/register.test.ts",
+    "src/main/browser/register.ts",
+    "src/main/sessions/rollback.test.ts",
+    "src/main/sessions/service-register.test.ts",
+    "src/main/sessions/service.ts",
+    "src/main/sessions/side-thread.test.ts",
+    "src/main/sessions/start-guards.ts",
+    "src/renderer/src/panel/PanelHeader.tsx",
+    "src/renderer/src/shell/FloatingCard.test.tsx",
+    "src/renderer/src/shell/FloatingCard.tsx",
+    "src/renderer/src/side/card/CardHost.test.tsx",
+    "src/renderer/src/side/card/CardHost.tsx",
+    "src/renderer/src/statusline/format.test.ts",
+    "src/renderer/src/statusline/format.ts",
+    "src/renderer/src/tools/agents/model/task-graph.test.ts",
+    "src/renderer/src/tools/agents/model/task-graph.ts",
+    "src/renderer/src/transcript/model/derive.test.ts",
+    "src/renderer/src/transcript/model/derive.ts",
+    "src/renderer/src/transcript/model/fixtures.test.ts"
+  ],
+  "review": "independent high running; actual reviewer-wave mapping will follow agent introduction/handback, not parallel result order",
+  "rowMap": {
+    "125": "80757a5c6",
+    "129": "d5f5c5b9e",
+    "132": "be55152f4",
+    "260": "957948cd9",
+    "258": "3c068c7b3",
+    "128": "232035f80",
+    "198": "3bbe7134d",
+    "242": "1cc84bf04"
+  },
+  "checksControllerRead": {
+    "final-named.log": "528/22 files, exit0"
+  },
+  "otherChecks": "worker-reported red/green named logs /tmp/maws-review/w-shell/; reviewer inspecting",
+  "narrowedRows": {
+    "260": "known agent name only; unloaded host lookup P4 next transcript-model change",
+    "258": "generic tool-use-id task mapping, actual Bash linkage only; Monitor wire remains unrecorded/P4 capture recipe"
+  },
+  "processDeviation": "SHELL added rollback.test.ts, service-register.test.ts, index.ts and replay-transcript.ts/test before acknowledgment; ipc.ts absent from prior claim, disclosed at handback. Included in exact independent review, not retrospectively compliant.",
+  "replayBoundary": "existing C10 seam only; first accepted replay user record, canonical scratch config home under OS tmp, exclusive wx; independent safety review pending",
+  "acceptance": "not yet accepted; independent review and expanded actual-consumer union pending"
+}

@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "pair3 union39140360292 running; pair4 read-only preparation resumed, no edits yet",
+  "phase": "pair3 corrective static+design39145946170 running on fix-only pin; pair4 committed, independent reviews running",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -95,7 +95,7 @@
     "notesSceneFixCommit": "f02852e10"
   },
   "W-MINI": {
-    "status": "source frontier and documentary updates accepted; source TS4b0e1f1e3 mechanically verified, next normal union proves typecheck",
+    "status": "native frontier accepted with count clauses; both type-only corrections reviewed, remote static retry running",
     "foreground": "package-script activation permitted; lane hold lifted; child DL13",
     "executor": "ab180409652104010",
     "claims": "pair2-claims.json",
@@ -113,12 +113,14 @@
     "reviewFixCommit": "5f115a09d",
     "nativeReadings": "gates/pair2-diagnostic-39130559347.json",
     "L277SceneStreak": {
-      "passed": 2,
+      "passed": 3,
       "required": 10,
       "runs": [
         39130559347,
-        39133832247
-      ]
+        39133832247,
+        39140360292
+      ],
+      "proof": "document-app restore native=true/pass in pair3 raw log; full gate not required by this scene clause"
     },
     "repairAssessment": "a788b678f28592255",
     "diagnosticSupplement": "14c3e6fd6",
@@ -152,6 +154,16 @@
       "264": "b9beae6ed",
       "277": "0f2d04b9a",
       "217-correction": "e9a818df2"
+    },
+    "traceTypeFix": "dc0247612",
+    "L217PostFixPasses": {
+      "passed": 3,
+      "runs": [
+        39130559347,
+        39133832247,
+        39140360292
+      ],
+      "futureFailure": "product recurrence, never baseline"
     }
   },
   "W-STORE": {
@@ -235,15 +247,16 @@
   },
   "W-DOC-A": {
     "executor": "af7fe2d9bf548028a",
-    "status": "independent review correct/no material findings; native union pending",
+    "status": "source review correct; pair3 design expectation repaired fba70d44e and focused recheck correct; corrective execution pending",
     "claims": "pair3-claims.json",
     "reviewer": "a69c0ca8f5888e14f",
     "checkpoint": "waves/W-DOC-A-checkpoint.json",
-    "P4RemainderCommit": "a5b5610d3"
+    "P4RemainderCommit": "a5b5610d3",
+    "gateFixCommit": "fba70d44e"
   },
   "W-DECK": {
     "executor": "a00549767dfb02089",
-    "status": "round2 source review correct; L211 narrowed P4 carry restored; gate running",
+    "status": "source review correct; all relevant pair3 groups passed; L211 canonical restore partial fix, editor-undo P4 remainder retained",
     "claims": "pair3-claims.json",
     "reviewer": "a042b15ec9aa10fab",
     "checkpoint": "waves/W-DECK-checkpoint.json",
@@ -256,15 +269,14 @@
     "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:design,e2e:side,e2e:presentations,e2e:tools,e2e:artifacts,e2e:design-systems,e2e:dashboard"
   },
   "laneSchedule": {
-    "recordedAt": "2026-10-18T15:13:37Z",
-    "pair3": "launch immediately after DECK recheck and latest-master integration; report completion/result to architect",
-    "holdAfterPair3": {
-      "owner": "maws-3f cua child via CI-opt",
-      "expectedDurationMinutes": "45\u201360",
-      "status": "not started; begins after pair3 gate completes"
+    "recordedAt": "2026-10-18T16:44:55Z",
+    "hold": {
+      "owner": "maws-3f/cua via CI-opt",
+      "startedAt": "2026-10-18T15:40:09Z",
+      "releasedBy": "explicit architect message: mini online/idle16:35Z, launch retry now; pair4 once reviewed",
+      "status": "released"
     },
-    "duringHold": "implement pair4 DOC-B+SHELL",
-    "pair4GateRelease": "explicit architect lane-free message required; elapsed time alone never releases"
+    "furtherHold": "none scheduled tonight; no inference from elapsed time was used"
   },
   "pair3Gate": {
     "runId": 39140360292,
@@ -273,15 +285,42 @@
     "completionTask": "bt15x2m1r",
     "queueThresholdTask": "bcrpvzt6a",
     "log": "/tmp/maws-review/gates/p3f-doc-a-deck-ci.log",
-    "status": "launched; jobs active"
+    "status": "completed",
+    "attempt": 1,
+    "conclusion": "failure",
+    "completedAt": "2026-10-18T15:40:09Z",
+    "failure": "static TS2345 trace log never[]; design obsolete wide-main Comment count expectation",
+    "exit": 1
   },
   "W-DOC-B": {
     "executor": "afe4ec31e37c3925e",
-    "status": "read-only prep resumed once after provider HTTP400; no edit release"
+    "status": "source committed, independently reviewing; gate not yet launched",
+    "claims": "pair4-claims.json",
+    "rowCommits": [
+      "4b6b3ec69",
+      "7e8b60563",
+      "7d1fcec1a",
+      "9adf50241",
+      "796c9323e",
+      "e63120945"
+    ],
+    "checkpoint": "waves/W-DOC-B-checkpoint.json"
   },
   "W-SHELL": {
     "executor": "a87de8fe2228592d9",
-    "status": "read-only prep resumed once after provider HTTP400; no edit release"
+    "status": "source committed, independently reviewing; gate not yet launched",
+    "claims": "pair4-claims.json",
+    "rowCommits": [
+      "80757a5c6",
+      "d5f5c5b9e",
+      "be55152f4",
+      "957948cd9",
+      "3c068c7b3",
+      "232035f80",
+      "3bbe7134d",
+      "1cc84bf04"
+    ],
+    "checkpoint": "waves/W-SHELL-checkpoint.json"
   },
   "effectiveBins": {
     "fix": 52,
@@ -289,5 +328,29 @@
     "close": 9,
     "defer": 125,
     "theirs": 42
+  },
+  "checkpointAt": "2026-10-18T16:44:55Z",
+  "checkpointHead": "e631209455f1439cf29a22ec4292b20dc9d71c27",
+  "pair3Retry": {
+    "runId": 39145946170,
+    "attempt": 1,
+    "sourceCommit": "fba70d44e3e309d0e12ca9c8064b2837cb1f4251",
+    "wrapperHead": "39f3596e90398dfed92f0623360bfb8c67f20e39",
+    "createdAt": "2026-10-18T16:38:48Z",
+    "status": "in_progress",
+    "groups": [
+      "static",
+      "e2e:design"
+    ],
+    "completionTask": "bhjcsmdu8",
+    "log": "/tmp/maws-review/gates/p3f-doc-a-deck-retry-ci.log",
+    "launcher": "/tmp/maws-review/p3f-doc-a-deck-retry-launch.sh",
+    "originalRun": 39140360292,
+    "originalAttempt": 1,
+    "DL59": "original completed: refused0, green11, red static+design; failure-specific fixed-source relaunch only; no full-set credit",
+    "review": "focused two-file recheck a69c0ca8f5888e14f correct/no material findings",
+    "fullSetCounterAdvance": false,
+    "notFinalSource": true,
+    "recordedAt": "2026-10-18T16:44:55Z"
   }
 }

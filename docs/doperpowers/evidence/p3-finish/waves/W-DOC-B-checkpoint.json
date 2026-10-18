@@ -1,0 +1,59 @@
+{
+  "recordedAt": "2026-10-18T16:44:55Z",
+  "executor": "afe4ec31e37c3925e",
+  "commits": [
+    "4b6b3ec69",
+    "7e8b60563",
+    "7d1fcec1a",
+    "9adf50241",
+    "796c9323e",
+    "e63120945"
+  ],
+  "paths": [
+    "src/artifacts/document/adapter.test.ts",
+    "src/artifacts/document/adapter.ts",
+    "src/artifacts/document/carries.ts",
+    "src/artifacts/document/editor/DocumentEditor.dom.test.tsx",
+    "src/artifacts/document/editor/Tabs.tsx",
+    "src/artifacts/document/editor/chrome.css",
+    "src/artifacts/document/export/docx.test.ts",
+    "src/artifacts/document/export/docx.ts",
+    "src/artifacts/document/export/markdown.test.ts",
+    "src/artifacts/document/export/markdown.ts",
+    "src/artifacts/document/markdown-syntax.ts",
+    "src/artifacts/document/markdown.test.ts",
+    "src/artifacts/document/markdown.ts",
+    "src/artifacts/document/tabs.test.ts",
+    "src/artifacts/document/tabs.ts",
+    "src/artifacts/types/document/format.md",
+    "src/engine-host/tool-server/documents.test.ts"
+  ],
+  "review": "independent high running; actual reviewer-wave mapping will follow agent introduction/handback, not parallel result order",
+  "rowMap": {
+    "155": "4b6b3ec69",
+    "168": "7e8b60563",
+    "165": "7d1fcec1a",
+    "166": [
+      "9adf50241",
+      "796c9323e",
+      "e63120945"
+    ]
+  },
+  "checksControllerRead": {
+    "br-pass-2.log": "433/2 files, exit0",
+    "br-green.log": "688/19 files, exit0",
+    "br-green2.log": "25/3 files, exit0",
+    "br-lint.log": "exit0"
+  },
+  "otherChecks": "worker-reported; exact logs /tmp/maws-review/doc-b/; reviewer inspecting",
+  "scope": "L155 local50 tab guard, no cross-replica global arbiter; L168 stale whole-node delete forwarding refusal with unrelated edits retained, agent staleTargets already green; L165 marked-whitespace pins already green, no cause claimed; L166 canonical LF entity and existing backslash-br token only",
+  "ruling": "2026-10-18 architect: reader judged by rendered output, standard backslash break/inline br only; canonical edit roundtrip exact for preserved cases; one bounded hardBreak pass and recheck; exact remaining cases one P4 row",
+  "mirror": "searchable read-only export, not artifact_read/edit-quote authority; unchanged reader path",
+  "pendingP4": [
+    "canonical trailing/list/heading/only-break states and hardBreak own marks; reader hardBreak-cell table structure blocks (one row)",
+    "standalone dash/plus paragraph parsed as empty bullet item",
+    "comment milestone boundary splits line-start/end construct"
+  ],
+  "processDeviation": "DOC-B edited/committed export/markdown.ts,test and export/docx.ts,test before acknowledgment; scope now acknowledged under architect ruling, deviation retained.",
+  "acceptance": "not yet accepted; independent review and pair4 union pending"
+}

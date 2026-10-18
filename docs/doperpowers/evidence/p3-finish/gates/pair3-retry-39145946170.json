@@ -1,0 +1,22 @@
+{
+  "runId": 39145946170,
+  "attempt": 1,
+  "sourceCommit": "fba70d44e3e309d0e12ca9c8064b2837cb1f4251",
+  "wrapperHead": "39f3596e90398dfed92f0623360bfb8c67f20e39",
+  "createdAt": "2026-10-18T16:38:48Z",
+  "status": "in_progress",
+  "groups": [
+    "static",
+    "e2e:design"
+  ],
+  "completionTask": "bhjcsmdu8",
+  "log": "/tmp/maws-review/gates/p3f-doc-a-deck-retry-ci.log",
+  "launcher": "/tmp/maws-review/p3f-doc-a-deck-retry-launch.sh",
+  "originalRun": 39140360292,
+  "originalAttempt": 1,
+  "DL59": "original completed: refused0, green11, red static+design; failure-specific fixed-source relaunch only; no full-set credit",
+  "review": "focused two-file recheck a69c0ca8f5888e14f correct/no material findings",
+  "fullSetCounterAdvance": false,
+  "notFinalSource": true,
+  "recordedAt": "2026-10-18T16:44:55Z"
+}
