@@ -92,7 +92,7 @@
     ]
   },
   "W-MINI": {
-    "status": "native repair committed; preparing independent new-frontier review then one remaining union gate",
+    "status": "independent native-repair frontier approved; one remaining union gate next",
     "foreground": "package-script activation permitted; lane hold lifted; child DL13",
     "executor": "ab180409652104010",
     "claims": "pair2-claims.json",
@@ -124,7 +124,8 @@
       "abdad9d35",
       "63cbc8db7",
       "7a23ef400"
-    ]
+    ],
+    "nativeRepairReviewer": "afefa3ce1540fa23a"
   },
   "W-STORE": {
     "status": "actual restyle e2e passed39130559347; token-test correction05d1f824b verified locally; authoritative rerun pending",
@@ -189,6 +190,9 @@
     "launcher": "/tmp/maws-review/p3f-mini-store-repair-launch.sh",
     "status": "not launched",
     "groups": "prior13 plus e2e:transcript for shared jump repair",
-    "reviewBase": "c237ddc5a9a8aff74dc1a5495c4fccbe222573cb"
+    "reviewBase": "c237ddc5a9a8aff74dc1a5495c4fccbe222573cb",
+    "reviewedHead": "87613c642702f2d27158709321281da2f4664dff",
+    "latestMaster": "782bbf83c",
+    "merge": "87613c642"
   }
 }

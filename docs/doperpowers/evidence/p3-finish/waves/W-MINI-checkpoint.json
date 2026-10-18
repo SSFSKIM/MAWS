@@ -62,7 +62,7 @@
       "63cbc8db7",
       "7a23ef400"
     ],
-    "status": "committed; independent frontier review pending",
+    "status": "independent frontier review approved; authoritative union gate next",
     "product": "Invalidate handledFocus on explicit request; record only actual target focus in frame, including repeated same-target request",
     "paste": "Existing-timeout DOM and model caret readiness plus synchronous paste capture/dispatch; no generic selection hook",
     "activation": "Conditional one-shot own-window activation before Overview, event wait bounded1s; no poll/retry, original assertions retained",
@@ -74,6 +74,12 @@
       "prefix": "pnpm_config_verify_deps_before_run=false /tmp/maws-review/with-slot.sh pnpm -C absolute-W exec",
       "notRun": "local typecheck/e2e/app/GUI"
     },
-    "wording": "63cbc8db7 commit message overstates stale replacement as observed; it remains inferred until synchronous next-gate readings. Commit not amended."
+    "wording": "63cbc8db7 commit message overstates stale replacement as observed; it remains inferred until synchronous next-gate readings. Commit not amended.",
+    "review": {
+      "agent": "afefa3ce1540fa23a",
+      "round": 1,
+      "head": "87613c642702f2d27158709321281da2f4664dff",
+      "verdict": "correct; no material findings"
+    }
   }
 }
