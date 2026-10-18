@@ -1,0 +1,21 @@
+{
+  "run": 39171525104,
+  "attempt": 1,
+  "label": "p3f-mainarea-unit",
+  "source": "070e23f49875006484683d280cb61b52aa17f2dc",
+  "command": "scripts/ci-gate.sh 070e23f49875006484683d280cb61b52aa17f2dc --class1a pool --runner macos --gates unit --evidence --label p3f-mainarea-unit",
+  "conclusion": "success",
+  "wrapperExit": 0,
+  "jobs": {
+    "plan": "success",
+    "unit": "success",
+    "unit:darwin": "skipped",
+    "static": "skipped",
+    "probes": "skipped",
+    "packaged": "skipped",
+    "e2e": "skipped"
+  },
+  "transcript": "/tmp/maws-review/gates/ci-070e23f4.log",
+  "recordedAt": "2026-10-18T22:35:01Z",
+  "meaning": "Pool unit job green at the post-debt source, including the MainArea test change e3f5ce79a (named file 88/88 earlier). Additional evidence only: the macOS-guarded unit files did not run, and the p3f-final hand-back unit job on S stays authoritative."
+}

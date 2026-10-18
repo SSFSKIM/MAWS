@@ -5,7 +5,7 @@
       "logged": "2026-10-18T08:19:21Z",
       "bin": "defer",
       "owner": "presentation test seam / P4",
-      "row": "| 2026-10-18 | The presentation test seam (P3-C; next seam change/P4) | The class-1 drag case\u2019s stand-in agent calls `publishDeck` on the renderer thread (`src/renderer/src/tools/presentation/e2e-seam.ts`, `agentRepublishing`), while product agent publishes run through the host\u2019s `artifact_publish` path; a measured bound on the stand-in path includes renderer loader work, not just the product drag path. | P3-F M0 read and L216 discriminator preparation; the host-faithful comparison is `e2e/presentations-scale.spec.ts` row 2, with probe identities in `docs/doperpowers/evidence/p3-finish/drag-discriminator.json`. | Closes when the class-1 drag case republishes through the host-faithful artifact_publish path with its fidelity regression and raw measurement evidence. Owner: the presentation seam\u2019s next change (P4). P3-F promotes this to a bounded W-DECK fix only if the approved L216 discriminator shows the two paths diverge materially; until then deliberately deferred. |",
+      "row": "| 2026-10-18 | The presentation test seam (P3-C; next seam change/P4) | The class-1 drag case’s stand-in agent calls `publishDeck` on the renderer thread (`src/renderer/src/tools/presentation/e2e-seam.ts`, `agentRepublishing`), while product agent publishes run through the host’s `artifact_publish` path; a measured bound on the stand-in path includes renderer loader work, not just the product drag path. | P3-F M0 read and L216 discriminator preparation; the host-faithful comparison is `e2e/presentations-scale.spec.ts` row 2, with probe identities in `docs/doperpowers/evidence/p3-finish/drag-discriminator.json`. | Closes when the class-1 drag case republishes through the host-faithful artifact_publish path with its fidelity regression and raw measurement evidence. Owner: the presentation seam’s next change (P4). P3-F promotes this to a bounded W-DECK fix only if the approved L216 discriminator shows the two paths diverge materially; until then deliberately deferred. |",
       "promotion": "Only if L216 discriminator materially distinguishes paths and change is bounded; architect ruling."
     },
     {
@@ -13,7 +13,23 @@
       "logged": "2026-10-18T09:23:34Z",
       "bin": "defer",
       "owner": "P4 / compiler-coverage sweep",
-      "row": "| 2026-10-18 | P4 or the compiler-coverage sweep (portable artifact components) | The portable `src/artifacts/**/*.dom.test.tsx` React suites remain in the uncompiled `artifacts-dom` project. P3-F L235 covers every `src/renderer/src` React suite (JSX or not) plus the existing design-system selection, not those portable suites. No compiler-dependent production defect is known in this remainder. | P3-F W-T review fix 412fe9a1f and the architect\u2019s renderer-remit ruling; `vitest.config.ts` separates artifacts-dom and renderer-compiled. | Closes when portable artifact component suites also run under the React Compiler with their CSS-as-text configuration, or a scoped sweep supplies equivalent proof. Owner: P4 or the compiler-coverage sweep. A compiler-dependent defect found in a portable artifact component promotes the relevant coverage immediately. |"
+      "row": "| 2026-10-18 | P4 or the compiler-coverage sweep (portable artifact components) | The portable `src/artifacts/**/*.dom.test.tsx` React suites remain in the uncompiled `artifacts-dom` project. P3-F L235 covers every `src/renderer/src` React suite (JSX or not) plus the existing design-system selection, not those portable suites. No compiler-dependent production defect is known in this remainder. | P3-F W-T review fix 412fe9a1f and the architect’s renderer-remit ruling; `vitest.config.ts` separates artifacts-dom and renderer-compiled. | Closes when portable artifact component suites also run under the React Compiler with their CSS-as-text configuration, or a scoped sweep supplies equivalent proof. Owner: P4 or the compiler-coverage sweep. A compiler-dependent defect found in a portable artifact component promotes the relevant coverage immediately. |"
+    },
+    {
+      "id": "S-SHOWPANE-RECAPTURE",
+      "logged": "2026-10-18T22:35:01Z",
+      "bin": "defer",
+      "owner": "P4 / protocol-probe fixtures",
+      "row": "| 2026-10-18 | P4 protocol-probe fixtures (show_pane recording on the current pane name) | The only show_pane recording, `spikes/protocol-probe/fixtures/pass3/p1-maws-show-pane.jsonl` (engine 2.1.291, 2026-10-06), calls the retired `deliverable` pane. The P3 range had rewritten its arguments, streamed content and responses to `artifact` under the original timestamps and request ids; the composition scale panel found it (scalpel-4#1, P2) and P3-F restored the recorded bytes. The conformance replay now asserts the recorded results literally (terminal opens; `deliverable` and `nope` return their recorded errors), so no live recording shows show_pane against the current `artifact` pane name. | Composition panel wf_5bc93935-4a1 and the architect's routing; P3-F 91d4874fa (fixture blob 2e0e38b22cc8, byte-equal to 5ad08789c); `src/engine-host/conformance/fixtures.test.ts` p1-maws-show-pane. | Closes when show_pane is captured live on the pinned engine through the probe harness on the current pane names and the conformance suite replays that recording. No derived fixture was created, so none remains to delete. Owner: the protocol-probe fixtures (P4). |",
+      "source": "composition panel scalpel-4#1, architect routing 2026-10-18"
+    },
+    {
+      "id": "S-DOC-CARRY-LABELS",
+      "logged": "2026-10-18T22:35:01Z",
+      "bin": "defer",
+      "owner": "P4 / document history preview",
+      "row": "| 2026-10-18 | P4 document history preview (carry labels after compaction) | A compacted attribution row that straddles the comparison start brings carry attrs from earlier moves, and `src/artifacts/document/paint.ts:62-66` labels every carried block without checking that it changed in the diff, so an unchanged block can show 'Moved' in history preview after compaction. Cosmetic, after compaction only, no content effect. | Document-model scale panel wf_ace26740-012 scalpel-4#3 (P3, reproduced by the verifier); the architect's routing logs it without a fix. | Closes when carry labels are restricted to blocks changed within the comparison, with a regression across a compacted boundary. Owner: the document history preview's next change (P4). |",
+      "source": "document-model panel scalpel-4#3, architect routing 2026-10-18 (logged without a fix)"
     }
   ]
 }

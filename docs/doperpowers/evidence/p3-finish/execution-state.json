@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M1 accepted; complete20 post-debt pairs built/verified at070e23f49, ready for architect scale panels; M3 fixes and later hand-back still pending",
+  "phase": "M3 fix waves: seven of twenty areas routed, fix waves running or queued; source not frozen",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -1295,5 +1295,37 @@
       "native count clauses, MainArea final-unit proof, final frozen-S gate/bundle/paid7 and owner sitting remain"
     ],
     "cloneCustody": "20area clones now handed to architect; do not rebuild while reviews run; drag-a/drag-b untouched"
+  },
+  "ownDiffReview": {
+    "recordedAt": "2026-10-18T22:35:01Z",
+    "range": "1c007d713587b482a0329a8d3cce8fd5162054ed..070e23f49875006484683d280cb61b52aa17f2dc",
+    "paths": 180,
+    "rung": "reviewer-high (astra, high)",
+    "verdict": "correct, no material findings, static only",
+    "record": "reviews/own-diff-high-result.txt",
+    "fixWaves": "each fix wave after 070e23f49 gets its own review of its range"
+  },
+  "mainareaUnitProof": {
+    "run": 39171525104,
+    "conclusion": "success",
+    "record": "gates/mainarea-unit-39171525104.json",
+    "status": "additional evidence; unit:darwin skipped; p3f-final unit job authoritative"
+  },
+  "rungSubstitution": {
+    "from": "2026-10-18T22:27Z",
+    "cause": "astra and sol accounts at usage limit until 2026-10-24 13:40 PDT; fresh dispatches fail at their first request",
+    "rule": "architect: reviewer-high on fable (high); reviewer-medium/low and sol-xhigh on opus; astra workers on fable or opus",
+    "affected": "composition medium review died on the sol quota without a verdict; re-dispatched once on opus"
+  },
+  "scaleReviewFixes": {
+    "record": "scale-review/report.txt",
+    "routedAreas": 7,
+    "remainingAreas": 13,
+    "findings": 46,
+    "trackerRows": [
+      "S-SHOWPANE-RECAPTURE",
+      "S-DOC-CARRY-LABELS"
+    ],
+    "compositionFix": "91d4874fa2f799261fffe8208c8fc3b3d88f773d"
   }
 }

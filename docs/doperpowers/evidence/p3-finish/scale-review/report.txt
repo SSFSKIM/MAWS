@@ -1,0 +1,13 @@
+P3-F M3 scale review: routing and accounting. In progress; regenerated at the freeze as the final record.
+Reviewed source: 070e23f49875006484683d280cb61b52aa17f2dc (twenty pairs, pairs.json). Fixes land on the branch after it; each fix wave gets one review of its own range.
+Updated: 2026-10-18T22:35:01Z
+
+composition | wf_5bc93935-4a1 max | incorrect | 1 P2 | 1 FIX + 1 P4 tracker row (S-SHOWPANE-RECAPTURE) | controller-directed fix 91d4874fa (fixture bytes restored, truthful replay assertions, no derived fixture) | medium review: first dispatch died at its first request on the sol quota with no verdict; re-dispatch on opus pending | open
+connectors-main | wf_57d353ce-f1b max | incorrect | 1 P1, 8 P2 | 9 FIX, order 1, 5, 6, 2, 4, 7, 8, 9, 3 | F-connectors main worker (opus), claims under src/main/connectors approved | combined connectors high review (fable) pending | in progress
+connectors-host | wf_d361571f-bcd max | incorrect | 4 P2 | 4 FIX | F-connectors host worker (opus), claims approved (direct-client, calls, direct-stdio, direct-test-fakes, ConnectorsSheet) | combined connectors high review (fable) pending | in progress
+artifact-protocol | wf_4751f50b-b80 max | incorrect | 1 P1, 7 P2 | 8 FIX, order 1, 4, 6, 8, 2, 3, 7, 5 | F-artifact-protocol worker (opus) | high review (fable) pending | in progress
+dashboard-model | wf_8808ae43-24e max | incorrect | 5 P2 | 5 FIX | F-dashboard-model worker (opus) | high review (fable) pending | in progress
+design-systems | wf_23344226-0de max | incorrect | 2 P2, 4 P3 | 6 FIX (item 6 has a stated fallback: header correction plus tracker row) | queued for a worker slot | high review (fable) | queued
+document-model | wf_ace26740-012 max | incorrect | 1 P1, 5 P2, 7 P3 | 12 FIX, 1 P4 tracker row (S-DOC-CARRY-LABELS), 1 dismissal (item 9's no-id case: format.md binds identity to a copied ^id) | queued as two workers (move-carry; edit-plan) | high review (fable) | queued
+
+Routed so far: 7 of 20 areas, 46 confirmed findings; 45 FIX items, 2 tracker rows, 1 dismissal (document-model item 9 is split between a fix and a dismissal). Remaining 13 areas: panels at the architect.
