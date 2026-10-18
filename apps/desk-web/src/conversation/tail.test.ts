@@ -2,8 +2,9 @@
 // a `human` addressed to it, a steer this tab issued — that no row of the transcript is yet known to be, with the state
 // of its delivery. A send gives way only to its own row, matched by identity alone: a delivered prompt whose whole first
 // line is the frame sminos writes for the send's event (`[sminos chat <project> <writer_short>:<seq> from <from> →
-// @you]`, or `[sminos message from … id=<msg_id>]` for an event that carries one), or the row a steer's result names.
-// No text is compared.
+// @you]`, or `[sminos message from … id=<msg_id>]` for an event that carries one) on a row that marks a delivery's
+// provenance (the bridge's prompt as the user, its row appended into a running turn, a peer's or plugin's queued
+// command), or the row a steer's result names. No text is compared.
 import { describe, expect, it } from 'vitest';
 import type { Delivery, JsonObject, LogEvent, Rpc } from 'desk-hub/protocol';
 import { deliveryKey, type OutboxItem, type RpcEntry } from '../project/conversation';
@@ -28,6 +29,8 @@ let uuid = 0;
 const userRow = (content: unknown, ts = '2026-10-15T09:00:05.000Z', origin: JsonObject | null = { kind: 'plugin', name: 'doperpowers', asUser: true }): JsonObject =>
   ({ type: 'user', uuid: `u${++uuid}`, timestamp: ts, message: { role: 'user', content }, ...(origin && { origin }) }) as JsonObject;
 const typedRow = (content: string, ts?: string) => userRow(content, ts, { kind: 'human' });
+/** A row the bridge appended into the running turn (`$.session.append`), as the engine keeps it: meta, the plugin's origin. */
+const appendedRow = (text: string, origin: JsonObject = { kind: 'plugin', name: 'doperpowers' }): JsonObject => ({ ...userRow([{ type: 'text', text }], undefined, origin), isMeta: true }) as JsonObject;
 const assistantRow = (text: string, ts = '2026-10-15T08:59:00.000Z'): JsonObject => ({ type: 'assistant', uuid: `a${++uuid}`, timestamp: ts, message: { role: 'assistant', content: [{ type: 'text', text }] } }) as JsonObject;
 /** The frame the bridge submits for a web send: its first line names the event, then the text. */
 const framed = (seq: number, text: string, writer = WEB) => `[sminos chat MAWS ${writer}:${seq} from human → @you]\n${text}`;
@@ -169,13 +172,44 @@ describe("a send at the session view's tail", () => {
     for (const row of delivered('[sminos message from human id=5e551e17]\nr')) expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
   });
 
-  it("is never taken by the bridge's steer row, even one carrying the send's frame: a steer matches only the row its result names", () => {
+  it("takes a frame from the bridge's row appended into a running turn (doperpowers #233), in either form", () => {
+    // While the main turn runs, the bridge appends a delivery (`$.session.append`, one text block), which the engine keeps
+    // meta with the plugin's origin and no `asUser`: its frame is the only word that it is a delivery.
     const send = human(1, 'x');
-    // The bridge's steer appends a user row (`$.session.append`, a text block) that is no submission as the user: it
-    // marks no origin, or a plugin's without `asUser`.
-    const appended = (origin: JsonObject | null) => ({ ...userRow([{ type: 'text', text: framed(1, 'x') }], undefined, origin), uuid: 'steer-row', session_id: S }) as JsonObject;
-    for (const row of [appended(null), appended({ kind: 'plugin', name: 'doperpowers' })])
-      expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } })).map((s) => s.key), JSON.stringify(row.origin)).toEqual([`chat:${WEB}:1`]);
+    const machineHuman = { offset: ++offset, event: { ts: '2026-10-15T09:00:00.000Z', writer: 'mini/human', seq: 1, kind: 'human', from: 'human', to: [{ session: S, alias: 'maws-45' }], text: 'r', msg_id: '5e551e17', mac: { nonce: 'h5', value: 'v' } } as LogEvent };
+    expect(tailSends(base({ entries: [send], deliveries: delivery(1, 'delivered'), transcript: { rows: [assistantRow('x'), appendedRow(framed(1, 'x'))], complete: false } }))).toEqual([]);
+    expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), appendedRow('[sminos message from human id=5e551e17]\nr')], complete: false } }))).toEqual([]);
+    // Two identical sends, each taken by its own appended row only.
+    const sends = [human(2, 'continue'), human(3, 'continue')];
+    expect(tailSends(base({ entries: sends, transcript: { rows: [assistantRow('x'), appendedRow(framed(3, 'continue'))], complete: false } })).map((s) => s.key)).toEqual([`chat:${WEB}:2`]);
+  });
+
+  it("is never taken by a steer's row, the bridge's other rows, nor a frame on a plugin's row the engine did not keep as the bridge's append", () => {
+    const send = human(1, 'x');
+    for (const row of [
+      appendedRow('x'), // a steer with the send's words
+      appendedRow(`continue\n${framed(1, 'x')}`), // a steer quoting the frame past its first line
+      appendedRow('[Request interrupted by user]'),
+      appendedRow('The interrupt came from the desk.'),
+      appendedRow('Task bk3x9a1, a background task, was stopped from the desk: it is not running.'),
+      appendedRow(framed(1, 'x'), { kind: 'plugin', name: 'another' }), // another plugin's meta row
+      { ...appendedRow(framed(1, 'x')), isMeta: false } as JsonObject, // the bridge's origin, not kept as its append
+      userRow([{ type: 'text', text: framed(1, 'x') }], undefined, null), // an append with no origin
+    ])
+      expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } })).map((s) => s.key), JSON.stringify(row)).toEqual([`chat:${WEB}:1`]);
+  });
+
+  it("matches a steer by the row its result names, never by the bridge's row carrying its words", () => {
+    const rpc: RpcEntry = {
+      nonce: 'st',
+      state: 'done',
+      outcome: { state: 'done', result: { row: 'u-steered' } },
+      rpc: { rpc: 'steer', project: 'p', machine: 'mini', member: M, created: '2026-10-15T09:00:00.000Z', nonce: 'st', args: { session: S, text: 'use the split store' }, mac: 'm' } as Rpc,
+    };
+    const lookalike = appendedRow('use the split store'); // its words, another row
+    expect(tailSends(base({ rpcs: [rpc], transcript: { rows: [assistantRow('x'), lookalike], complete: false } })).map((s) => s.key)).toEqual(['steer:st']);
+    const own = { ...appendedRow('use the split store'), uuid: 'u-steered' } as JsonObject;
+    expect(tailSends(base({ rpcs: [rpc], transcript: { rows: [assistantRow('x'), own], complete: false } }))).toEqual([]);
   });
 
   it("matches a frame however the engine carries the prompt: the row's text, a text block, a queued command", () => {

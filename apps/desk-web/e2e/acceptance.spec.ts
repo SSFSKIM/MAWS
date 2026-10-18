@@ -375,6 +375,22 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   await expect(queuedBubble).not.toContainText('[sminos');
   await expect(queuedBubble.locator('em').first()).toHaveText('From fakepeer');
   await expect(view.locator('[data-row-id="user:5e55a11d-0000-4000-8000-0000000000c4"]')).toHaveCount(1); // the queued message's own identity
+
+  // A send to the busy session, which the bridge appends into the running turn (doperpowers #233: `$.session.append`,
+  // kept meta with the plugin's origin and no `asUser`): it waits at the tail until that row, then is a bubble in the
+  // turn, as MAWS draws a prompt queued there, without its frame line, under the appended row's own uuid.
+  const midTurn = await send('Count the markdown files too.');
+  await deliver(midTurn, 'delivered');
+  await expect(sendOf('Count the markdown files too.')).toHaveAttribute('data-state', 'delivered');
+  const appendedUuid = '5e55a11d-0000-4000-8000-0000000000c5';
+  land({ type: 'user', uuid: appendedUuid, parentUuid: queuedDelivery.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' }, message: { role: 'user', content: [{ type: 'text', text: `${frame(midTurn)}\nCount the markdown files too.` }] } });
+  await expect(sendOf('Count the markdown files too.')).toHaveCount(0);
+  const appendedBubble = view.locator(`[data-row-id="user:${appendedUuid}"]`);
+  await expect(appendedBubble).toHaveCount(1);
+  await expect(appendedBubble).toContainText('Count the markdown files too.');
+  await expect(appendedBubble).toContainText('Sent during this turn');
+  await expect(appendedBubble).not.toContainText('[sminos');
+  await expect(appendedBubble.locator('em')).toHaveCount(0); // the owner's own: no label
   await shot(page, 'tail-framed-rows');
 
   // A submission delayed, then refused: it stays, saying so.

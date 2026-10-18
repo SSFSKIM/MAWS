@@ -30,10 +30,10 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { JsonObject } from 'desk-hub/protocol';
 import { eventBase, type BackfillContext } from '../../../../../src/engine-host/fs/backfill';
+import { isBridgeRow } from '../../conversation/delivery-frame';
 
 const ENGINE_MARKERS = new Set(['[Request interrupted by user]', '[Request interrupted by user for tool use]']);
 const BRIDGE_MARKERS = new Set(['[Request interrupted by user from the desk]', '[Request interrupted by user from outside the terminal]']);
-const BRIDGE_PLUGIN = 'doperpowers';
 /** The bridge's line for each Bash call the interrupt moved to the background, stopped or not (`interruptText`). */
 const BRIDGE_TASK_LINE =
   /^Task [A-Za-z0-9_-]+, the Bash command the interrupt moved to the background, (?:was then stopped: it is not running, and no notification will come for it\.|could not be stopped: it may still be running\.)$/;
@@ -51,12 +51,6 @@ function singleText(row: JsonObject): string | null {
 }
 
 const isUserRow = (row: JsonObject) => row.type === 'user';
-
-/** The bridge's own appended row: meta, with the plugin's origin. */
-function isBridgeRow(row: JsonObject): boolean {
-  const origin = row.origin as { kind?: unknown; name?: unknown } | null | undefined;
-  return isUserRow(row) && row.isMeta === true && origin?.kind === 'plugin' && origin.name === BRIDGE_PLUGIN;
-}
 
 /** The engine's marker text, written by the engine (Esc) or by the bridge. */
 function isEngineMarker(row: JsonObject): boolean {
