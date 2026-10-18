@@ -4,7 +4,8 @@
 // status lines can be set from two machines, and the later `ts` wins, as smns §3 has it. Presence (DX4) is live and not
 // in the log: a session's group reads it while its machine is online, and the last `state` event while the machine is
 // offline or its presence is not known yet. A session holding an open async question waits on you as one holding a
-// pending request does (owner, 2026-10-18), whatever its presence says.
+// pending request does (owner, 2026-10-18), though its presence says busy, while its process lives: a session whose
+// presence says no process is stays under ended, its log question uncounted until it runs again.
 import type { LogEvent, SessionPresence } from 'desk-hub/protocol';
 import { questionEffect, writerMachine } from 'desk-hub/protocol';
 
@@ -180,10 +181,12 @@ function fromState(word: string | undefined): SessionGroup {
 export function groupOf(session: ProjectedSession, live: Liveness): SessionGroup {
   if (!session.member) return 'ended';
   if (live.machineOnline === false || live.presence === undefined) return fromState(session.state?.word);
-  // An async question too: its session works on, so its presence says busy, and that stays its state word.
-  if (live.pending > 0 || live.questions > 0) return 'waiting';
-  const status = live.presence.record === null ? null : live.presence.record.status;
+  if (live.pending > 0) return 'waiting';
   if (live.presence.record === null) return 'ended';
+  // An open log question, while its session's process lives (a stopped seat never retires, so its ask stays open in the
+  // log): its session works on, so its presence says busy, and that stays its state word. The hub counts it alike.
+  if (live.questions > 0) return 'waiting';
+  const status = live.presence.record.status;
   if (status === 'waiting') return 'waiting';
   if (status === 'idle') return 'idle';
   return 'working'; // busy, shell, or anything newer: sminos's `peer_state` reads them as busy

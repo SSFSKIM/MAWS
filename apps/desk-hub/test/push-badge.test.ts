@@ -277,4 +277,30 @@ describe('an open async question', () => {
     grid.close();
     await m.close();
   });
+
+  // A stopped seat never retires, so the log holds its ask open; a bridge's ask is withdrawn when its process ends, and a
+  // log-only one stops counting alike while no process of its session runs.
+  it("a log question counts while its session's process lives: not while its presence says none does, and again once it runs", async () => {
+    const p = await phone('open-stopped');
+    const grid = await GridClient.open(hub, ADMIN);
+    const m = await machine('open-s', A);
+    const feed = feeder(m, A);
+    await m.postOk([{ t: 'session', message: envelope(m, A, 'presence', presence('busy')) }]);
+    await m.postOk([feed(SESSION, 'question', asked('toolu_stopped'))]);
+    expect(await p.notice(1)).toMatchObject({ kind: 'question', session: SESSION, waiting: 1 });
+    await summary(grid, A, { working: 1, waiting: 1 }, 'the question counted');
+
+    // The session stops without retiring: no process holds its ask.
+    await m.postOk([{ t: 'session', message: envelope(m, A, 'presence', { record: null, bridge: false }) }]);
+    await summary(grid, A, { working: 0, waiting: 0 }, 'the stopped session');
+    await m.postOk([feed(OTHER, 'message', said('meanwhile'))]);
+    expect(await p.notice(2)).toMatchObject({ kind: 'message', session: OTHER, waiting: 0 });
+
+    // Resumed: the ask, still unanswered, counts again.
+    await m.postOk([{ t: 'session', message: envelope(m, A, 'presence', presence('busy')) }]);
+    await summary(grid, A, { working: 1, waiting: 1 }, 'the resumed session');
+
+    grid.close();
+    await m.close();
+  });
 });

@@ -904,18 +904,24 @@ export class Project extends DurableObject<Env> {
    * `waiting`. A session waits when its presence says so, and (owner, 2026-10-18) while it holds an open async question,
    * though its presence says busy, as it does: its engine works on. A question is open while a bridge holds it raised
    * (`async`), and while the log holds it open (`questionEffect`) unless the plane settled it (a bridge's ask is its
-   * call's request); one ask the hub learned both ways is still its one session.
+   * call's request); one ask the hub learned both ways is still its one session. A log question counts only while its
+   * session's process lives, not while the session's kept presence says no process is (`record: null`: a stopped seat
+   * never retires), as a bridge's ask is withdrawn when its process ends; it counts again once the session runs. A
+   * session with no kept presence still counts.
    */
   private waitingSessions(): Set<string> {
     const waiting = new Set<string>();
+    const stopped = new Set<string>();
     for (const { machine, message } of this.plane.presence()) {
+      if (message.body.record === null) stopped.add(`${machine}/${message.session}`);
       if (this.holds(machine) && message.body.record?.status === 'waiting') waiting.add(`${machine}/${message.session}`);
     }
     for (const { machine, raised } of this.plane.pending()) {
       if (raised.async === true && this.holds(machine)) waiting.add(`${machine}/${raised.session}`);
     }
     for (const { machine, session, ask } of this.log.openQuestions()) {
-      if (this.holds(machine) && !this.plane.isSettled(machine, session, ask)) waiting.add(`${machine}/${session}`);
+      const key = `${machine}/${session}`;
+      if (this.holds(machine) && !stopped.has(key) && !this.plane.isSettled(machine, session, ask)) waiting.add(key);
     }
     return waiting;
   }

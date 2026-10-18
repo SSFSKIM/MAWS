@@ -110,6 +110,16 @@ describe('groupOf', () => {
     expect(groupOf({ ...base, state: { word: 'busy', ts: 't' } }, { ...busy, machineOnline: false, pending: 1 })).toBe('working');
   });
 
+  // A stopped seat never retires, so its log question stays open: it counts only while the session's process lives, as
+  // a bridge's ask is withdrawn when its process ends. A pending request is read as before.
+  it('leaves a session whose presence says no process is under ended, its open question uncounted; a pending request still waits', () => {
+    const stopped = { presence: { record: null, bridge: false }, machineOnline: true, pending: 0, questions: 1 };
+    expect(groupOf(base, stopped)).toBe('ended');
+    expect(groupOf(base, { ...stopped, pending: 1 })).toBe('waiting');
+    // Resumed: it counts again.
+    expect(groupOf(base, { ...stopped, presence: { record: { status: 'busy' }, bridge: true } })).toBe('waiting');
+  });
+
   it('reads the last state event while the machine is offline or presence is not known yet', () => {
     const at = (word: string | null, machineOnline: boolean | undefined) =>
       groupOf({ ...base, state: word ? { word, ts: 't' } : null }, { presence: { record: { status: 'idle' }, bridge: true }, machineOnline, pending: 0, questions: 0 });
