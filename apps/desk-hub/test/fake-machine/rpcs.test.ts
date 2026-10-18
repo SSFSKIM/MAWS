@@ -4,7 +4,7 @@
 // claim, and an effect or a script that throws ends as a recorded `failed` outcome rather than a claim left open.
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { emptyMemory, FakeMachine, type Memory, type Recording, type Row, type RpcScript } from '../../fake-machine';
-import { indexOf, loopJobs } from '../../fake-machine/jobs';
+import { indexOf, loopJobs, stopNote } from '../../fake-machine/jobs';
 import type { ProjectDown } from '../../src/protocol/browser';
 import { inputSha256, newNonce, sealRpc, importOrgKey } from '../../src/protocol/codes';
 import type { JsonObject } from '../../src/protocol/json';
@@ -276,15 +276,16 @@ const jobs: Recording = (() => {
 describe('stop (DC10)', () => {
   const jobsOf = (fm: FakeMachine) => loopJobs(indexOf(fm.sessions.get(JOBS)!.rows.get('main')!), true).jobs;
 
-  it('stops a running shell and a running monitor: done with the task, and the job stopped by the TaskStop its rows now hold', async () => {
+  it("stops a running shell and a running monitor: done with the task, and the job stopped by the bridge's note its rows now hold", async () => {
     const { fm, b, call, final } = await setUp({ recordings: [jobs] });
     for (const taskId of ['bsleep001', 'bmon00001']) {
       const stop = await call('stop', { session: JOBS, taskId });
       expect((await final(stop)).outcome).toEqual({ state: 'done', result: { taskId } });
-      expect(jobsOf(fm).find((j) => j.taskId === taskId)).toMatchObject({ status: 'stopped', summary: expect.stringContaining(`Successfully stopped task: ${taskId}`) });
+      expect(jobsOf(fm).find((j) => j.taskId === taskId)).toMatchObject({ status: 'stopped', summary: stopNote(taskId) });
     }
-    const stops = fm.sessions.get(JOBS)!.rows.get('main')!.filter((r) => JSON.stringify(r).includes('"name":"TaskStop"'));
-    expect(stops).toHaveLength(2);
+    const notes = fm.sessions.get(JOBS)!.rows.get('main')!.filter((r) => r.isMeta === true && JSON.stringify(r).includes('was stopped from the desk'));
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toMatchObject({ type: 'user', origin: { kind: 'plugin', name: 'doperpowers' } });
     b.close();
     await fm.close();
   });
@@ -312,7 +313,7 @@ describe('stop (DC10)', () => {
     // The machine that came back replays its session with the stop's rows still in it: the job stays stopped, once.
     await again.play({ speed: 0 });
     expect(jobsOf(again).find((j) => j.taskId === 'bsleep001')?.status).toBe('stopped');
-    expect(again.sessions.get(JOBS)!.rows.get('main')!.filter((r) => JSON.stringify(r).includes('"name":"TaskStop"'))).toHaveLength(1);
+    expect(again.sessions.get(JOBS)!.rows.get('main')!.filter((r) => JSON.stringify(r).includes(stopNote('bsleep001')))).toHaveLength(1);
     b.close();
     await again.close();
   });

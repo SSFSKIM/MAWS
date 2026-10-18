@@ -657,9 +657,12 @@ export class FakeMachine {
       const misfit = held && decisionMisfit(rpc as Rpc<'decide' | 'answer'>, held.raised);
       if (misfit) return answer(misfit);
     }
-    // A stop names a job the session's own jobs index holds as running, or it is refused before the claim (DC10).
-    if (rpc.rpc === 'stop' && !this.sessions.get(rpc.args.session)!.runningJob(rpc.args.taskId)) {
-      return answer(fail('unknown-task', `${rpc.args.taskId} is not a running job of ${rpc.args.session}`));
+    // A stop needs the bridge and a running session, then names a job the session's own jobs index holds as running,
+    // or it is refused before the claim, in that order (DC10, the machine half's DX6).
+    if (rpc.rpc === 'stop') {
+      const depth = this.sessions.get(rpc.args.session)!;
+      if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'the session has no bridge, or has ended'));
+      if (!depth.runningJob(rpc.args.taskId)) return answer(fail('unknown-task', `${rpc.args.taskId} is not a running job of ${rpc.args.session}`));
     }
     this.memory.ledger[rpc.nonce] = { rpc: rpc.rpc, session: session ?? null, claimed: Date.now(), outcome: null };
     this.remember();
@@ -698,7 +701,7 @@ export class FakeMachine {
     const member = rpc.member;
     if (this.options.bridge === false) {
       if (rpc.rpc === 'steer') return this.traced(rpc, record, rpc.args.session, { row: null });
-      if (['interrupt', 'decide', 'answer', 'model', 'compact', 'stop'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
+      if (['interrupt', 'decide', 'answer', 'model', 'compact'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
     }
     switch (rpc.rpc) {
       case 'steer': {
@@ -784,9 +787,9 @@ export class FakeMachine {
         return this.traced(rpc, record, depth.id, { session: depth.id });
       }
       case 'stop': {
-        // TaskStop through the bridge: its call and result land in the job's loop, and the job reads stopped from them.
+        // TaskStop through the bridge, then its note in the transcript, from which the job reads stopped.
         const depth = this.sessions.get(rpc.args.session)!;
-        if (!depth.stopJob(rpc.args.taskId)) return fail('failed', `Task ${rpc.args.taskId} is not running`);
+        if (!depth.stopJob(rpc.args.taskId)) return fail('failed', `Task ${rpc.args.taskId} is not running (status: killed)`);
         await this.flush();
         return this.traced(rpc, record, depth.id, { taskId: rpc.args.taskId });
       }

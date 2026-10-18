@@ -7,7 +7,8 @@
 // once the engine's marker row is in.
 //
 // DC10's web half: Stop on a running shell and a running monitor sends DX6 `stop`, reads `stopping…` while it is on its
-// way, and the row reads `stopped` from the session's own body (the TaskStop row the fake machine writes) within 2 s
+// way, and the row reads `stopped` from the session's own body (the bridge's note the fake machine writes, which the
+// session view does not draw) within 2 s
 // (G1); Stop stays disabled with §5's reason on a session without the bridge, on a machine read-only or offline, and is
 // not drawn on a job that has ended (G2); a stop the engine refuses shows its message under the row, which keeps its
 // status (G4), as does a stop of a job the machine no longer holds as running; and a stop whose fate is unknown offers
@@ -254,8 +255,17 @@ test('G1: Stop on a running shell and a running monitor sends stop, reads stoppi
     await expect(row).toContainText('stopped', { timeout: 2000 });
     await expect(row.getByRole('button', { name: STOP_BUTTON })).toHaveCount(0);
   }
-  // Each stop answered done; the rows read stopped from the TaskStop rows the machine wrote, as the body derives any.
+  // Each stop answered done; the rows read stopped from the bridge's notes the machine wrote (DX4's case 16).
   for (const rpc of stopsSent(hub)) expect(hub.rpcState(PROJECT, rpc.nonce)).toBe('done');
+  const notes = fm.depth.rows.get('main')!.filter((r) => r.isMeta === true && JSON.stringify(r).includes('was stopped from the desk'));
+  expect(notes).toHaveLength(2);
+  // The note is the model's, not a message: neither the report nor the full transcript draws it.
+  const view = page.getByTestId('session-view');
+  await expect(view).not.toContainText('was stopped from the desk');
+  await view.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript' }).click();
+  await expect(view.locator('[data-transcript-scroller]').first()).toBeVisible();
+  await expect(view).not.toContainText('was stopped from the desk');
+  await shot(page, 'dc10-transcript-after-stop');
   await expect(page.getByTestId('depth-tab-jobs')).toHaveText('Jobs · 2 running');
   await expect(jobRow(jobs, SUITE).getByRole('button', { name: 'Stop' })).toBeEnabled();
   await shot(page, 'dc10-stopped');
@@ -302,8 +312,8 @@ test('a stop whose machine dropped before answering offers Retry, and the retry,
   await expect.poll(() => fm.stopsHeld).toBe(2);
   expect(fm.releaseStops()).toBe(2); // the first answers it; the retry is answered from the ledger
   await expect(row).toContainText('stopped', { timeout: 2000 });
-  const taskStops = fm.depth.rows.get('main')!.filter((r) => JSON.stringify(r).includes('"name":"TaskStop"') && JSON.stringify(r).includes(`"task_id":"${WATCH}"`));
-  expect(taskStops).toHaveLength(1);
+  const notes = fm.depth.rows.get('main')!.filter((r) => JSON.stringify(r).includes(`Task ${WATCH}, a background task, was stopped from the desk`));
+  expect(notes).toHaveLength(1);
 });
 
 test('G2: Stop stays disabled with §5’s reason without the bridge, on a read-only machine and an offline one, and is not drawn on an ended job', async ({ page, hub }) => {
@@ -396,6 +406,7 @@ test('a subagent’s own shell stands above its transcript in the drill-in, and 
   await row.getByRole('button', { name: 'Stop' }).click();
   await expect(row).toContainText('stopped', { timeout: 2000 });
   expect(stopsSent(hub).at(-1)?.args).toEqual({ session: fm.session, taskId });
-  // Its TaskStop is in the agent's own loop, where the body read it.
-  expect(fm.depth.rows.get(ALPHA)!.some((r) => JSON.stringify(r).includes('"name":"TaskStop"'))).toBe(true);
+  // The bridge's note is in the main transcript; the agent's own loop, which decides its job, has the engine's killed.
+  expect(fm.depth.rows.get('main')!.some((r) => JSON.stringify(r).includes(`Task ${taskId}, a background task, was stopped from the desk`))).toBe(true);
+  expect(fm.depth.rows.get(ALPHA)!.some((r) => JSON.stringify(r).includes('<status>killed</status>'))).toBe(true);
 });
