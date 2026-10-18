@@ -4827,6 +4827,13 @@ a hub that connects into machines (§2).
   `min-w-0`, and the name has an 80px floor. A steer through the inbox
   fallback (a session with no bridge) still draws as MAWS's peer message,
   logged as debt.
+  2026-10-18, the owner: the phone's top bar says the hub link's state
+  in a word only when it needs them ("Reconnecting", "Signed out"); Live
+  stays a bare dot (MAWS #51, deployed `hub@df318ba8 web@master.df318ba8`).
+  While the word shows, the project name's floor drops to 56px, and the
+  key state truncates first. Rejected: the word in every state, which
+  costs about 60px of name on every screen; the bare dot alone, which
+  left the owner reading a red dot without knowing it meant signed out.
   2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
   desk-dc8 370662a2, c81b77fc, 578b11b8):
   - DX5's `resync` gains `refused`, so a refusal whose post failed is not
