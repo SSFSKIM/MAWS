@@ -8,9 +8,9 @@
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
 # /tmp/maws-review/gates/ci-<short>/, keeps the whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the
 # ref (unless --keep) and exits with the run's status (0 green, 1 anything else). A job GCE preempted on ci-kit's pool
-# is rerun alone, once per job per run, and the script reports the run's final attempt: its status line is
-# `ci-gate: run <id> attempt <n> <conclusion>`, and a line before it names each preempted job and how its rerun ended,
-# one preempted again staying red (Decision Log 70). When the mini refused jobs (ci-kit's
+# is rerun alone, once per job per run, and the script reports the run's final attempt: the line before the run's status,
+# `ci-gate: run <id> <conclusion>`, is `ci-gate: run <id> attempt <n>`, and a line before those names each preempted job
+# and how its rerun ended, one preempted again staying red (Decision Log 70). When the mini refused jobs (ci-kit's
 # job-started check: a dialog or the wrong app in front), the last line before the run's status names the refused, the
 # green and the red, and the --gates that relaunches the refused and the red on the same tree (Decision Log 58(c), 59(1)),
 # with --default-beside naming the run's other e2e groups when the relaunch takes e2e:default (Decision Log 66).
@@ -213,6 +213,8 @@ if [[ $conclusion != success ]]; then
 fi
 [[ -z $preemptions ]] || printf '%s\n' "$preemptions"
 [[ $conclusion == success ]] || refusals "$jobs" "$failed_log"
-echo "ci-gate: run $run_id attempt $run_attempt $conclusion"
+# The attempt on a line of its own, so the status line stays what every waiter matches (^ci-gate: run [0-9]+ [a-z_]+$).
+echo "ci-gate: run $run_id attempt $run_attempt"
+echo "ci-gate: run $run_id $conclusion"
 [[ $conclusion == success ]] && finish 0
 finish 1

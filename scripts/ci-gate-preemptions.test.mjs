@@ -227,9 +227,9 @@ test('an attempt the run API shows running, or whose jobs failed to read, is rea
   settledTwoPreempted(settle({ ...twoPreempted, lag: 2, unreadJobs: { 2: 1 } }));
 });
 
-// The whole script, against a local origin and the fake gh: the transcript's last lines carry the summary and the run's
-// final attempt, and the exit status is the final attempt's.
-test("ci-gate.sh's status line carries the final attempt", () => {
+// The whole script, against a local origin and the fake gh: the transcript's last lines carry the summary, the run's
+// final attempt and its status, which the briefs' waiters still match, and the exit status is the final attempt's.
+test("ci-gate.sh names the final attempt on the line before the run's status, which stays as it was", () => {
   const dir = mkdtempSync(join(tmpdir(), 'ci-gate-preemptions-'));
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, MAWS_GATE_IGNORE_ALERTS: '1', MAWS_GATE_RUNNER: '' };
   for (const role of ['AUTHOR', 'COMMITTER']) Object.assign(env, { [`GIT_${role}_NAME`]: 'ci-gate test', [`GIT_${role}_EMAIL`]: 'ci-gate@test.invalid' });
@@ -259,12 +259,15 @@ esac
     const gate = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, '--gates', 'static,unit,probes', '--class1a', 'pool'], { encoding: 'utf8', env });
     const lines = gate.stdout.trimEnd().split('\n');
     assert.equal(gate.status, 0, gate.stdout + gate.stderr);
-    assert.deepEqual(lines.slice(-4), [
+    assert.deepEqual(lines.slice(-5), [
       'ci-gate: preempted by GCE (1): unit; green on its rerun: unit',
-      `ci-gate: run ${run} attempt 2 success`,
+      `ci-gate: run ${run} attempt 2`,
+      `ci-gate: run ${run} success`,
       `ci-gate: removed ci/preempt-${short}`,
       `ci-gate: transcript in /tmp/maws-review/gates/ci-${short}.log`,
     ]);
+    // The waiters' pattern finds the status line and no line before it, the attempt's included.
+    assert.deepEqual(lines.filter((line) => /^ci-gate: run [0-9]+ [a-z_]+$/.test(line)), [`ci-gate: run ${run} success`]);
     assert.ok(lines.includes('ci-gate: unit preempted in attempt 1'));
     assert.ok(lines.includes('ci-gate: rerunning unit alone as attempt 2'));
   } finally {
