@@ -11,5 +11,8 @@
     "| 2026-10-18 | P4 document editor (mini keystroke-to-frame gap; parent Decision Log109) | The200-page/two-agent typing workload reads p95 16.8 then17.2ms on the mini versus the unchanged one-frame16ms product target; the designated-mini gate calibration is20ms. No product regression was attributed by these host comparisons. | Union39156492025 and quiet39165341280; quiet300/300 keystrokes acknowledged, no missing transactions or long tasks, steady loads2.54-4.39; parent DL109. | Profile the input-to-frame path on the mini and close the gap to the one-frame target with the same workload and raw measurement; keep the target rather than treating20ms calibration as product repair. Owner: P4 document editor. |",
     "| 2026-10-18 | P4 document history preview (enter at its bound; parent Decision Log109) | Preview enter2 measured1126.8 then1016.9ms on the mini, while other quiet enters were934.9 and890.8ms; the product target remains1000ms per preview, with a1200ms designated-mini gate calibration. Leave timings and all other bounds are unchanged. | Union39156492025 and quiet39165341280, e2e/document-scale.spec.ts row7 enter; parent DL109; quiet enter2 recording load4.55. | Profile and bring each preview enter within its1000ms product target, retaining the established200-page history workload and per-preview raw measurements rather than best-of-three substitution. Owner: P4 document history preview. |"
   ],
-  "checks": "no local checks; focused source review then single document-only relaunch under new architect quiet relay; final frozen-source p3f-measure remains"
+  "checks": "no local checks; focused source review then single document-only relaunch under new architect quiet relay; final frozen-source p3f-measure remains",
+  "commit": "b9bf74237db6de51ed81c3bc56f51a31280a3b80",
+  "review": "a18977fda743d3513 correct/no material findings, no execution",
+  "gate": 39169679475
 }

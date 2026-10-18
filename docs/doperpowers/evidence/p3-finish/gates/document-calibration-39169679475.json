@@ -1,0 +1,30 @@
+{
+  "runId": 39169679475,
+  "sourceCommit": "b9bf74237db6de51ed81c3bc56f51a31280a3b80",
+  "wrapperHead": "6fa1502ed09d166bcd2dd22255b610de2c6a26a6",
+  "createdAt": "2026-10-18T21:51:35Z",
+  "statusAtIdentityRead": "in_progress",
+  "conclusion": null,
+  "groups": [
+    "e2e:document-scale"
+  ],
+  "completionTask": "bx8cm88nc",
+  "quietRelay": {
+    "quietSince": "2026-10-18T21:27:56Z",
+    "loads": [
+      4.72,
+      3.78
+    ],
+    "recheckedApproximately": "21:29Z",
+    "recheckLoads": [
+      3.39,
+      3.69
+    ],
+    "noScenes": true,
+    "launcherHeld": true,
+    "release": "architect notified at completion"
+  },
+  "review": "a18977fda743d3513 correct/no material findings on62f780871..b9bf74237, static only",
+  "calibration": "parentDL109 corrected843275754, exact20/1200/600 rows only; original product targets and three P4 rows retained",
+  "remaining": "one document-only DL59 result needed; no full-set credit"
+}
