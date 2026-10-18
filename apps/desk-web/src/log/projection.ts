@@ -33,8 +33,13 @@ export type ProjectedSession = {
   status: string | null;
   /** The last `state` the daemon published: the record for a machine that is offline. */
   state: { word: string; ts: string } | null;
-  /** The offset of the latest `joined`: the sidebar lists the newest member first. */
+  /** The offset of the membership's `joined`: the sidebar lists the newest member first. */
   joinedAt: number;
+  /**
+   * The `ts` of the membership's `joined`: the org view orders sessions of several projects by it, where an offset in
+   * one project's log means nothing.
+   */
+  joinedTs: string;
 };
 
 /**
@@ -71,6 +76,7 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
         status: null,
         state: null,
         joinedAt: offset,
+        joinedTs: event.ts,
         chargeTs: '',
         statusTs: '',
       };
@@ -80,6 +86,13 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
     switch (event.kind) {
       case 'joined': {
         const d = draft();
+        // A relocated `joined` (the engine moved the session within the project: EnterWorktree, a `/cd`) refreshes where
+        // it works and starts no membership: its join time and place stay the membership's first `joined`'s.
+        if (event.relocated === true && d.member) {
+          d.cwd = str(event.cwd);
+          d.worktree = str(event.worktree) || null;
+          break;
+        }
         d.alias = str(event.alias) ?? d.alias;
         d.machine = str(event.machine) ?? d.machine;
         d.cwd = str(event.cwd);
@@ -88,6 +101,7 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
         d.member = true;
         d.ended = null;
         d.joinedAt = offset;
+        d.joinedTs = event.ts;
         break;
       }
       case 'retired': {
@@ -129,8 +143,8 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
   }
   const sessions = new Map<string, ProjectedSession>();
   for (const [id, d] of drafts) {
-    const { session, alias, machine, cwd, worktree, seat, title, member, ended, charge, status, state, joinedAt } = d;
-    sessions.set(id, { session, alias, machine, cwd, worktree, seat, title, member, ended, charge, status, state, joinedAt });
+    const { session, alias, machine, cwd, worktree, seat, title, member, ended, charge, status, state, joinedAt, joinedTs } = d;
+    sessions.set(id, { session, alias, machine, cwd, worktree, seat, title, member, ended, charge, status, state, joinedAt, joinedTs });
   }
   return sessions;
 }

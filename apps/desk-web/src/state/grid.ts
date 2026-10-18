@@ -1,5 +1,6 @@
 // The grid of the org's projects, as the registry socket streams it (DX3's `GridDown`): held for the tab's life, so
 // the grid, the project view's title, and the phone all read one copy.
+import { useCallback } from 'react';
 import { create } from 'zustand';
 import type { ProjectSummary } from 'desk-hub/protocol';
 import { GridClient } from '../hub/grid-client';
@@ -31,4 +32,10 @@ export function startGrid(base: string): () => void {
 export function sortForGrid(projects: readonly ProjectSummary[]): ProjectSummary[] {
   const offline = (p: ProjectSummary) => (p.machines_online === 0 ? 1 : 0);
   return [...projects].sort((a, b) => offline(a) - offline(b) || b.waiting - a.waiting || b.working - a.working || a.name.localeCompare(b.name));
+}
+
+/** A project's name as the grid shows it, by its id; a project the grid does not list, by the id's first eight characters. */
+export function useProjectName(): (id: string) => string {
+  const projects = useGrid((s) => s.projects);
+  return useCallback((id: string) => projects.find((p) => p.id === id)?.name ?? id.slice(0, 8), [projects]);
 }

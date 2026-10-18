@@ -1,5 +1,5 @@
 // The desk's frame: sign-in (Access admits the person; `/api/me` names the member), the device's org key, the grid's
-// socket, the route — the grid, or a project — and the PWA's part: the service worker, this device's notifications
+// socket, the route — the grid, every session of the org, or a project — and the PWA's part: the service worker, this device's notifications
 // handed to the hub again at start, and the card a tapped notification opens. A phone draws a compact top bar.
 //
 // The first load is the grid's: the project view (with MAWS's Markdown and request cards) and the dialogs load as
@@ -25,6 +25,7 @@ import { useSecondMethodPrompt } from './views/key/second-method';
 import { latency } from './latency/latency';
 
 const ProjectView = lazy(() => import('./views/project/ProjectView').then((m) => ({ default: m.ProjectView })));
+const OrgView = lazy(() => import('./views/org/OrgView').then((m) => ({ default: m.OrgView })));
 const LatencyOverlay = lazy(() => import('./latency/LatencyOverlay').then((m) => ({ default: m.LatencyOverlay })));
 const KeyDialog = lazy(() => import('./views/key/KeyDialog').then((m) => ({ default: m.KeyDialog })));
 const MachinesDialog = lazy(() => import('./views/machines/MachinesDialog').then((m) => ({ default: m.MachinesDialog })));
@@ -101,6 +102,10 @@ function Desk({ me }: { me: Me }) {
       <TopBar me={me} open={setPanel} />
       {route.view === 'grid' ? (
         <GridView onEnroll={() => setPanel('machines')} />
+      ) : route.view === 'org' ? (
+        <Suspense fallback={null}>
+          <OrgView me={me} />
+        </Suspense>
       ) : (
         <Suspense fallback={<Opening />}>
           <ProjectView key={route.project} me={me} project={route.project} channel={route.channel} />
@@ -129,7 +134,7 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
   const navigate = useDeskLayout((s) => s.navigate);
   const narrow = useNarrow();
   const name = useGrid((s) => (route.view === 'project' ? s.projects.find((p) => p.id === route.project)?.name : undefined));
-  const title = route.view === 'project' ? (name ?? route.project.slice(0, 8)) : null;
+  const title = route.view === 'project' ? (name ?? route.project.slice(0, 8)) : route.view === 'org' ? 'All sessions' : null;
   const groupChatOpen = usePhoneProject((s) => s.groupChatOpen);
   const hubHealthy = useHubState().healthy;
   if (narrow) {
