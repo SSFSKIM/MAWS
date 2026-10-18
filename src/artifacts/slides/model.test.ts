@@ -30,6 +30,7 @@ import {
   zOrder,
   deleteSlide,
 } from './model';
+import { FLOW_LAYER } from './order';
 import { loadSlide } from './parse';
 import { serializeSlide } from './serialize';
 
@@ -183,6 +184,22 @@ describe('the model: the editor’s writers', () => {
     zOrder(doc, 's1', 'bg', 'backward');
     expect(order()).toBe('bg,e2,title,body,g1,t,e1');
     expect(() => zOrder(doc, 's1', 'title', 'front')).toThrow(/pinned/);
+  });
+
+  it('keeps the stack inside the over layer when the host has no flow child: nothing to be under (P3-F slide-model scalpel-3#1)', () => {
+    const pin = (id: string, left: number) => `<div id="${id}" style="position:absolute; left:${left}px; top:0px; width:10px; height:10px"></div>`;
+    const doc = deckOf(`<section id="s1">${pin('a', 0)}${pin('b', 10)}${pin('c', 20)}</section>`);
+    const z = (id: string) => readFlat(doc, 's1', false).find((e) => e.id === id)!.z!;
+    zOrder(doc, 's1', 'c', 'back');
+    expect(ids(doc)).toEqual(['c', 'a', 'b']);
+    zOrder(doc, 's1', 'b', 'backward');
+    expect(ids(doc)).toEqual(['c', 'b', 'a']);
+    zOrder(doc, 's1', 'b', 'backward');
+    expect(ids(doc)).toEqual(['b', 'c', 'a']);
+    zOrder(doc, 's1', 'b', 'backward'); // the bottom: no flow layer to cross
+    expect(ids(doc)).toEqual(['b', 'c', 'a']);
+    for (const id of ['a', 'b', 'c']) expect(z(id) > FLOW_LAYER, `${id} over the flow layer`).toBe(true);
+    expect(loadSlide(deckFiles(doc)['project/slides/s1.html']!)).toMatchObject({ ok: true, slide: { children: [{ id: 'b' }, { id: 'c' }, { id: 'a' }] } });
   });
 
   it('re-orders a flow child with one key, and detaches one to pinned at its box', () => {

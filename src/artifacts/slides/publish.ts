@@ -20,7 +20,7 @@ import * as Y from '../yjs/slides';
 import { DECK_LIMITS, DECK_PATH, parseDeckJson, serializeDeckJson, slideIdOf, slidePath, type DeckJson } from './deck';
 import { parseHtml } from './html';
 import { CONTAINER_TAGS, MARK_ORDER, TEXT_TAGS, isPinned, type Attrs, type ElementIR, type Marks, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
-import { cellMinter, childLists, groupOf, GROUP_BOUNDS, GROUPS, groupKey, heldOf, readDeckJson, readFlat, resolveParents, ROOT, slideFile, slideOrder, slideScalarsOf, toScalars, type Group } from './model';
+import { cellMinter, childLists, groupsOf, GROUP_BOUNDS, GROUPS, groupKey, heldOf, readDeckJson, readFlat, resolveParents, ROOT, slideFile, slideOrder, slideScalarsOf, toScalars, type Group } from './model';
 import { ANY, rekey, within } from './order';
 import { loadSlide } from './parse';
 import { partition } from './serialize';
@@ -102,6 +102,7 @@ function liveViewOf(doc: Doc, slideId: string): LiveView {
   const byId = new Map(flat.map((e) => [e.id, e]));
   const keyOf = new Map<string, string>();
   const lists = childLists(flat, eff);
+  const groups = groupsOf(flat, eff); // a layer as the file carries it: over for every pinned child of a host with no flow child
   for (const [parent, kids] of lists) {
     const row = byId.get(parent)?.tag === 'tr';
     kids.forEach((e, i) => keyOf.set(e.id, row ? cellKey(parent, i) : e.id));
@@ -111,14 +112,14 @@ function liveViewOf(doc: Doc, slideId: string): LiveView {
   for (const e of flat) {
     const key = keyOf.get(e.id)!;
     const parent = eff.get(e.id)!;
-    const group = groupOf(e);
+    const group = groups.get(e.id)!;
     view.els.set(key, { key, tag: e.tag, parent: parent === ROOT ? ROOT : keyOf.get(parent)!, group, style: e.style, attrs: e.attrs, ...(e.text && { text: e.text }), ...(e.raw !== undefined && { raw: e.raw }) });
     view.ids.set(key, e.id);
     view.place.set(key, { ...(e.order !== undefined && { order: e.order }), ...(e.z !== undefined && { z: e.z }) });
   }
   for (const [parent, kids] of lists)
     for (const g of GROUPS) {
-      const keys = kids.filter((e) => groupOf(e) === g).map((e) => keyOf.get(e.id)!);
+      const keys = kids.filter((e) => groups.get(e.id) === g).map((e) => keyOf.get(e.id)!);
       if (keys.length) view.lists.set(listKey(parent === ROOT ? ROOT : keyOf.get(parent)!, g), keys);
     }
   return view;

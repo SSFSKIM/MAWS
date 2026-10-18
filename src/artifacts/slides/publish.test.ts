@@ -681,3 +681,60 @@ describe('publishDeck: the final review', () => {
     expect(textOf(doc, 's1', 't')).toContain('Owner');
   });
 });
+
+// The P3-F slide-model panel's reproducers (fix wave F-slide-model), each a regression.
+describe('publishDeck: the P3-F slide-model panel', () => {
+  const S = P('s1');
+  const small = (html: string): Doc => created({ [DECK_PATH]: JSON.stringify({ v: 4, order: ['s1'] }), [S]: html });
+  const kids = (doc: Doc, parent?: string) => {
+    const children = readSlide(doc, 's1').children;
+    return (parent === undefined ? children : children.find((c) => c.id === parent)!.children).map((c) => c.id);
+  };
+  const pin = (id: string, left: number) => `<div id="${id}" style="position:absolute; left:${left}px; top:0px; width:100px; height:100px"></div>`;
+  const without = (file: string, id: string) => file.replace(new RegExp(`\\n\\s*<div id="${id}"[^\\n]*`), '');
+
+  it('scalpel-3#1: send-to-back in an all-pinned section stays in the one list the file carries, so a fresh read deletes and re-orders without conflict', () => {
+    const html = `<section id="s1">${pin('a', 0)}${pin('b', 10)}</section>`;
+    const doc = small(html);
+    zOrder(doc, 's1', 'b', 'back', 'human');
+    expect(kids(doc)).toEqual(['b', 'a']);
+    const read = deckFiles(doc);
+    expect(publish(doc, read, { [S]: without(read[S]!, 'b') }).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['a']);
+    // the agent's re-order of what it read lands
+    const other = small(html);
+    zOrder(other, 's1', 'b', 'back', 'human');
+    const base = deckFiles(other);
+    expect(publish(other, base, { [S]: html })).toMatchObject({ conflicts: [], changed: [S] });
+    expect(kids(other)).toEqual(['a', 'b']);
+    expect(publish(other, deckFiles(other), { [S]: html })).toMatchObject({ conflicts: [], changed: [], updates: 0 });
+  });
+
+  it('scalpel-3#1: format.md’s relative host of absolute cards: send-to-back, then a fresh read deletes and swaps the cards without conflict', () => {
+    const host = (inner: string) => `<section id="s1"><p id="t">T</p><div id="host" style="position:relative; width:1664px; height:600px">${inner}</div></section>`;
+    const doc = small(host(pin('c1', 0) + pin('c2', 400)));
+    zOrder(doc, 's1', 'c2', 'back', 'human');
+    expect(kids(doc, 'host')).toEqual(['c2', 'c1']);
+    const read = deckFiles(doc);
+    expect(publish(doc, read, { [S]: without(read[S]!, 'c2') }).conflicts).toEqual([]);
+    expect(kids(doc, 'host')).toEqual(['c1']);
+    const other = small(host(pin('c1', 0) + pin('c2', 400)));
+    zOrder(other, 's1', 'c2', 'back', 'human');
+    const base = deckFiles(other);
+    expect(publish(other, base, { [S]: host(pin('c1', 0) + pin('c2', 400)) })).toMatchObject({ conflicts: [], changed: [S] });
+    expect(kids(other, 'host')).toEqual(['c1', 'c2']);
+    expect(deckFiles(other)[S]).not.toBe(base[S]);
+  });
+
+  it('scalpel-3#1: a z under the flow layer in a host with no flow child (a document written before the fix) reads as over and publishes consistently', () => {
+    const doc = small(`<section id="s1">${pin('a', 0)}${pin('b', 10)}</section>`);
+    transact(doc, () => Y.setElementKey(doc, 's1', 'b', 'z', 'Zz')); // what send-to-back wrote: a key in the under range
+    const b = el(doc, 's1', 'b')!;
+    expect(groupOf(b)).toBe('under'); // by its key alone
+    expect(groupOf(b, false)).toBe('over'); // in a host with no flow content
+    expect(kids(doc)).toEqual(['b', 'a']);
+    const read = deckFiles(doc);
+    expect(publish(doc, read, { [S]: without(read[S]!, 'b') }).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['a']);
+  });
+});
