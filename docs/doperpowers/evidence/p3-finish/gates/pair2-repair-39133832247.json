@@ -148,5 +148,10 @@
   },
   "store": "Token guard and full unit now pass; actual doc/deck live restyle and retained pinned look passed again; holds5/5 in1305ms.",
   "architectRuling": "Paste observational caret-readiness pin accepted; close L200/L201. L217 test-timing branch accepted, following-set monitoring remains; same-line failure reopens as product row/native trace, not a P4 carry. L264 full-set remainder. Lane-wide foreground not F prerequisite: CI-opt decides after landing/counts; per-group opt-ins stay. TS callback fix proved next DOC-A+DECK union, no third MINI gate.",
-  "next": "Mechanical void callback fix dispatched; documentary row update running, next pair orienting before disjoint path acknowledgment."
+  "next": "Mechanical void callback fix dispatched; documentary row update running, next pair orienting before disjoint path acknowledgment.",
+  "queueThresholdResult": {
+    "task": "b1xey6vm4",
+    "exit": 0,
+    "stillQueuedAfter1800Seconds": []
+  }
 }

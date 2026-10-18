@@ -1,5 +1,5 @@
 {
-  "status": "prepared, not run",
+  "status": "A1 running; no result yet",
   "order": [
     "drag-a",
     "drag-b",
@@ -39,5 +39,20 @@
     }
   ],
   "readings": "Extract JSON between P3F_DRAG_RESULT_BEGIN and P3F_DRAG_RESULT_END from each completed job log; retain raw job logs and start/end/trial loads.",
-  "rule": "No product gap closes the regression half as a measurement confound; final absolute/preview bounds remain. Product gap triggers at most six additional bisect jobs then P4 carry."
+  "rule": "No product gap closes the regression half as a measurement confound; final absolute/preview bounds remain. Product gap triggers at most six additional bisect jobs then P4 carry.",
+  "runs": [
+    {
+      "order": 1,
+      "name": "drag-a",
+      "runId": 39136242401,
+      "source": "6120130ec712fb3d664df9aac3c008f1b77385a2",
+      "wrapper": "94a93a85bc404fc23f5cdb1fcf486dba83a02c51",
+      "createdAt": "2026-10-18T14:29:48Z",
+      "task": "bffxxll3y",
+      "log": "/tmp/maws-review/gates/p3f-drag-a1-ci.log",
+      "status": "running",
+      "trialCountPlanned": 3,
+      "heavyHistory": "absent"
+    }
+  ]
 }
