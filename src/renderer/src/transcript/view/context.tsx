@@ -41,6 +41,9 @@ export interface TranscriptActions {
   // P2-F L121: a mark under a user row that its mount knows of (the comment card's "Sent to Claude" on a reply the engine
   // took); none when omitted
   userRowMark?(row: Extract<Row, { kind: 'user' }>): string | null;
+  // Why a dropped prompt never ran, when its mount knows (the desk: its turn was undone before the session read it), said
+  // in place of Not sent; Not sent when omitted or null
+  droppedRowMark?(row: Extract<Row, { kind: 'user' }>): string | null;
 }
 
 // E7 start: who a Reply or a Message goes to, and what became of the last one to that address (E7 execution document,

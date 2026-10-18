@@ -6,7 +6,7 @@ import { applyEvents, createState } from '../../model/reduce';
 import { rowsOf } from '../../model/derive';
 import { builder, uuid } from '../../model/test-events';
 import { Disclosures } from '../context';
-import { renderRow, rowOf } from './test-support';
+import { renderRow, rowOf, spyActions } from './test-support';
 
 afterEach(cleanup);
 
@@ -136,8 +136,20 @@ describe('user row', () => {
 
   it('marks a dropped prompt Not sent', () => {
     const row = { ...userRow('later'), dropped: true };
-    renderRow(row);
+    const { container } = renderRow(row);
     expect(screen.getByText('Not sent')).toBeDefined();
+    expect(container.querySelector('[data-dropped]')).not.toBeNull();
+  });
+
+  it('says why a dropped prompt never ran when its mount knows, in place of Not sent; other rows keep their captions', () => {
+    const actions = { ...spyActions(), droppedRowMark: () => 'Not read: the turn was undone' };
+    const { container } = renderRow({ ...userRow('later'), dropped: true }, { actions });
+    expect(container.querySelector('.transcript-user-meta')?.textContent).toBe('Not read: the turn was undone');
+    cleanup();
+    const steered = renderRow({ ...userRow('look at b too'), steer: true }, { actions });
+    expect(steered.container.textContent).toContain('Sent during this turn');
+    expect(steered.container.textContent).not.toContain('Not read');
+    expect(steered.container.querySelector('[data-dropped]')).toBeNull();
   });
 });
 

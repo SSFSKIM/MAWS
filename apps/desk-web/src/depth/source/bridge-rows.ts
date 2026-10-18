@@ -24,7 +24,8 @@
 // bridge would remove the exclusion). A new kind of appended row would read as a steer and draw as the owner's words, so
 // `bridge-rows.test.ts` pins the kind of every such row in the doperpowers fixtures MAWS vendors. A steer is drawn as
 // the owner's prompt queued into the running turn ("Sent during this turn"), as a delivery appended there is, under its
-// row's own uuid; the held row stays verbatim.
+// row's own uuid; the held row stays verbatim. One appended while no turn ran is taken by the turn that starts next
+// (`appended-turn.ts`). The bridge's mirror of a steer or a delivery, a system notice for the terminal, is not drawn.
 import type { JsonObject } from 'desk-hub/protocol';
 import { asQueuedPrompt, deliveryFrame, isBridgeRow } from '../../conversation/delivery-frame';
 import { BRIDGE_TASK_LINE, bridgeRecordLines, isEngineMarker, singleText } from './interrupt';
@@ -52,6 +53,18 @@ export function bridgeRowKind(row: JsonObject): BridgeRowKind | null {
   if (text !== null && SECRET_NOTE.test(text)) return 'secret-note';
   return 'steer';
 }
+
+/**
+ * The bridge's mirror of a row it appended for the owner: after a steer's or a delivery's append it logs the words
+ * (`$.ui.log`: `steer: <text>`, `delivered: <text>`, a delivery's frame line still in it), which the engine keeps as a
+ * system notice under the plugin's name for the terminal to draw. The session view draws the appended row itself, as
+ * the owner's prompt, so it draws no mirror: in a turn the mirror repeated the words, frame and all, and after a turn's
+ * end it was a notice in a turn of its own that never ended.
+ */
+export function isMirrorLine(row: JsonObject): boolean {
+  return row.type === 'system' && row.subtype === 'informational' && typeof row.content === 'string' && MIRRORS.some((prefix) => (row.content as string).startsWith(prefix));
+}
+const MIRRORS = ['doperpowers: steer: ', 'doperpowers: delivered: '];
 
 /** The row as the session view draws it: a steer as the owner's prompt queued into the running turn; any other as it is. */
 export function steerAsDrawn(row: JsonObject): JsonObject {
