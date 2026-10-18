@@ -152,6 +152,46 @@ describe('a query refresh at the host boundary', () => {
     }
   });
 
+  // P3-F dashboard-model wave (scalpel-4#1): every failure after the admission writes the validation-error state and ends
+  // the scope: a text result with one cell nested 10,000 deep (which no serializer can write), and a result whose very
+  // reading throws, in the host's closed words
+  it('records a cell nested too deep to serialize, and a result whose reading throws, as the validation error, ending the scope', async () => {
+    const id = await board();
+    await (await admitted(id)).publish({ kind: 'result', result: envelope(rowsOf(1, 2)) }, HELD);
+    const good = live(id)!;
+    const assets = assetsOf(id);
+    now += 60_000;
+    const nested = { content: `[{"t":0,"v":${'['.repeat(10_000)}1${']'.repeat(10_000)}}]` };
+    const throwing = {
+      content: '',
+      structuredContent: {
+        rows: [
+          {
+            get v(): number {
+              throw new Error('boom');
+            },
+          },
+        ],
+      },
+    };
+    for (const [result, message] of [
+      [nested, 'the last refresh was refused: record 1 holds a nested value in "v"'],
+      [throwing, 'the last refresh was refused: its rows could not be read'],
+    ] as const) {
+      const ends: unknown[] = [];
+      const admission = await refresher().admit(start(id), { ...page(), ended: (end) => ends.push(end) });
+      if (!admission.ok) throw new Error(admission.refusal);
+      const publication = await admission.publish({ kind: 'result', result }, HELD);
+      const after = live(id)!;
+      expect(after.source).toEqual(good.source);
+      expect({ columns: after.columns, rows: after.rows }).toEqual({ columns: good.columns, rows: good.rows });
+      expect(after.state).toEqual({ status: 'error', message, at: now });
+      expect(assetsOf(id)).toEqual(assets);
+      expect(publication).toMatchObject({ published: { revision: store().revision(id), columns: good.columns, rows: 2, state: { status: 'error', message } }, failed: 'validation' });
+      expect(ends).toEqual([publication]);
+    }
+  });
+
   it('records a tool failure, a result too large and a row key the rows break as the error state, a query never fetched staying unfetched', async () => {
     const id = await board(unfetched({ rowKey: 't' }));
     for (const [reason, failed] of [['toolError', 'toolError'], ['tooLarge', 'validation'], ['timeout', 'timeout']] as const) {

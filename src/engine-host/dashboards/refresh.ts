@@ -79,6 +79,8 @@ const FAILED = {
   timeout: 'the last refresh failed: the tool did not answer in time',
 } as const;
 const FAILURE_OF: Record<keyof typeof FAILED, RefreshFailure> = { toolError: 'toolError', tooLarge: 'validation', timeout: 'timeout' };
+// P3-F: a result whose reading threw past every closed rule, said in the host's words, never the thrown error's
+const UNREADABLE = 'its rows could not be read';
 const bounded = (message: string) => message.slice(0, MESSAGE_MAX);
 
 class Discard extends Error {
@@ -132,17 +134,23 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
   }
 
   // The candidate, validated before the frame: the parsed rows and their bytes, or the error state's words and failure.
+  // It never throws (P3-F): a reading that throws is refused like any invalid result, so every failure after the
+  // admission writes the error state and ends the scope.
   function candidate(prior: DatasetDescriptor, raw: RefreshRaw): { table: ParsedDataset; bytes: Uint8Array } | { problem: string; failure: RefreshFailure } {
     if (raw.kind === 'failed') return { problem: FAILED[raw.reason], failure: FAILURE_OF[raw.reason] };
     const refused = (problem: string, failure: RefreshFailure = 'validation') => ({ problem: bounded(`the last refresh was refused: ${problem}`), failure });
-    const rows = queryRowsOf(raw.result);
-    if (!rows.ok) return refused(rows.problem, rows.problem === QUERY_RESULT_PROBLEMS.toolError ? 'toolError' : 'validation');
-    const bytes = new TextEncoder().encode(JSON.stringify(rows.rows));
-    const table = parseDataset(bytes, 'json');
-    if (table instanceof DatasetError) return refused(table.reason);
-    const keyProblem = prior.rowKey === undefined ? null : rowKeyProblem(table, prior.rowKey);
-    if (keyProblem) return refused(keyProblem);
-    return { table, bytes };
+    try {
+      const rows = queryRowsOf(raw.result);
+      if (!rows.ok) return refused(rows.problem, rows.problem === QUERY_RESULT_PROBLEMS.toolError ? 'toolError' : 'validation');
+      const bytes = new TextEncoder().encode(JSON.stringify(rows.rows));
+      const table = parseDataset(bytes, 'json');
+      if (table instanceof DatasetError) return refused(table.reason);
+      const keyProblem = prior.rowKey === undefined ? null : rowKeyProblem(table, prior.rowKey);
+      if (keyProblem) return refused(keyProblem);
+      return { table, bytes };
+    } catch {
+      return refused(UNREADABLE);
+    }
   }
 
   async function publish(start: RefreshStart, scope: RefreshScope, prior: DatasetDescriptor & { source: QuerySource }, identity: number, raw: RefreshRaw, guard: RefreshGuard, admitted?: () => void): Promise<RefreshPublication> {
