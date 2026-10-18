@@ -23,10 +23,9 @@ export async function traceForeground(app: ElectronApplication, page: Page, opti
   await page.evaluate((editorSelector) => {
     type Entry = Record<string, unknown>;
     type EditorElement = Element & { editor?: { state: { doc: { descendants(f: (node: { isText: boolean; text?: string; marks: Array<{ type: { name: string }; attrs: { threadId?: unknown } }> }) => void): void }; selection: { from: number; to: number } } } };
-    const w = window as unknown as {
-      __mawsTrace?: { log: Entry[]; t0: number; editors: WeakSet<object>; editorSelector: string | null; selections(): Entry; editorReading(): Entry | null };
-    };
-    const trace = (w.__mawsTrace ??= {
+    type TraceState = { log: Entry[]; t0: number; editors: WeakSet<object>; editorSelector: string | null; selections(): Entry; editorReading(): Entry | null };
+    const w = window as unknown as { __mawsTrace?: TraceState };
+    const trace: TraceState = (w.__mawsTrace ??= {
       log: [],
       t0: performance.now(),
       editors: new WeakSet(),
