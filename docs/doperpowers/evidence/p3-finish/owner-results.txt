@@ -1,0 +1,63 @@
+P3-F owner results — blank template, no sitting step has been run
+Script: docs/doperpowers/evidence/p3-finish/owner-script.txt
+Owner appointment: 2026-10-20 evening KST, one approximately three-hour sitting.
+Date/start/end:
+Landed master build commit / Diagnostics identity:
+Identifier / Authority / TeamIdentifier:
+Engine version / locale / displays / theme order:
+Project, OAuth server and harmless tool (no secrets):
+Write-capable Drive/Notion connectors and destinations (no secrets):
+Final-source agent run summary supplied by architect:
+
+step | surface/clause | pass | fail | note | owner: not run | what was seen | screenshot
+PRE.1 | all items: development-signed landed build | [ ] | [ ] | [ ] | [ ] | |
+PRE.2 | all items: evidence provenance | [ ] | [ ] | [ ] | [ ] | |
+1.1 | item 1: organiser and search | [ ] | [ ] | [ ] | [ ] | |
+1.2 | item 1: Space and creation | [ ] | [ ] | [ ] | [ ] | |
+1.3 | item 1: row actions | [ ] | [ ] | [ ] | [ ] | |
+1.4 | item 1: detached persistence | [ ] | [ ] | [ ] | [ ] | |
+2.1 | item 2: create and open | [ ] | [ ] | [ ] | [ ] | |
+2.2 | item 2: editor coverage | [ ] | [ ] | [ ] | [ ] | |
+2.3 | item 2: concurrent targeted edit and awareness | [ ] | [ ] | [ ] | [ ] | |
+2.4 | item 2: one state | [ ] | [ ] | [ ] | [ ] | |
+3.1 | item 3: passage and route | [ ] | [ ] | [ ] | [ ] | |
+3.2 | item 3: anchor survival | [ ] | [ ] | [ ] | [ ] | |
+3.3 | item 3: statuses and standalone context | [ ] | [ ] | [ ] | [ ] | |
+3.4 | item 3: object anchor | [ ] | [ ] | [ ] | [ ] | |
+4.1 | item 4: versions | [ ] | [ ] | [ ] | [ ] | |
+4.2 | item 4: read-only diff and appearance | [ ] | [ ] | [ ] | [ ] | |
+4.3 | item 4: artifact-wide restore | [ ] | [ ] | [ ] | [ ] | |
+4.4 | item 4: new-change comparison and attribution | [ ] | [ ] | [ ] | [ ] | |
+5.1 | item 5: dialect and editor | [ ] | [ ] | [ ] | [ ] | |
+5.2 | item 5: stale conflict and atomic publish | [ ] | [ ] | [ ] | [ ] | |
+5.3 | item 5: history and comments | [ ] | [ ] | [ ] | [ ] | |
+5.4 | item 5: export choices | [ ] | [ ] | [ ] | [ ] | |
+6.1 | item 6: defaults and authoring | [ ] | [ ] | [ ] | [ ] | |
+6.2 | item 6: live restyle | [ ] | [ ] | [ ] | [ ] | |
+6.3 | item 6: default authority and ask | [ ] | [ ] | [ ] | [ ] | |
+7.1 | item 7: artboards | [ ] | [ ] | [ ] | [ ] | |
+7.2 | item 7: file-backed data | [ ] | [ ] | [ ] | [ ] | |
+7.3 | item 7: chart taste | [ ] | [ ] | [ ] | [ ] | |
+7.4 | item 7: granted connector data | [ ] | [ ] | [ ] | [ ] | |
+8.1 | item 8: floating session | [ ] | [ ] | [ ] | [ ] | |
+8.2 | item 8: meaningful header | [ ] | [ ] | [ ] | [ ] | |
+8.3 | item 8: Mark-up | [ ] | [ ] | [ ] | [ ] | |
+N.1 | item 2; item 5; item 7: Korean composition | [ ] | [ ] | [ ] | [ ] | |
+N.2 | item 1 last clause; item 3 restart | [ ] | [ ] | [ ] | [ ] | |
+N.3 | native platform | [ ] | [ ] | [ ] | [ ] | |
+X.1 | item 5: PPTX fidelity | [ ] | [ ] | [ ] | [ ] | |
+X.2 | item 2; item 6: document export | [ ] | [ ] | [ ] | [ ] | |
+X.3 | item 7: design/dashboard exports | [ ] | [ ] | [ ] | [ ] | |
+P.1 | item 5: native presentation | [ ] | [ ] | [ ] | [ ] | |
+A.1 | item 7; route D native custody | [ ] | [ ] | [ ] | [ ] | |
+A.2 | item 1 Export; H Send-to | [ ] | [ ] | [ ] | [ ] | |
+R.1 | Rulings by frozen handle (proposed defaults, rechecked against final code at M4.2): | [ ] | [ ] | [ ] | [ ] | |
+R.2 | Carry the explicit taste checklist: L DL8 panel model and DL13 creation cards; G pill/tab-row and be | [ ] | [ ] | [ ] | [ ] | |
+R.3 | Capture any irritation in the owner's own words. Each later gets one route: wave S, tracker, P4, dis | [ ] | [ ] | [ ] | [ ] | |
+M.1 | What artifact work still sends you to Claude Desktop or a terminal? Name the concrete task and why.  | [ ] | [ ] | [ ] | [ ] | |
+
+Rulings: handle | proposal | keep / fix now / P4 | owner words | route after sitting
+Irritations: observation | owner words | screenshot | route
+Measure: concrete work still requiring Desktop or terminal | reason
+Daily-use declaration: pending; a positive sitting is not the week-later declaration.
+Provenance: only owner-entered observations count as owner results. Agent evidence is named separately.

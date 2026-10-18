@@ -1,0 +1,102 @@
+P3-F owner sitting — DRAFT at M0; not an instruction for an agent to operate the app
+Execution document: docs/doperpowers/plans/2026-10-18-p3-f-finish.md
+Authority: P3 §2 items 1–8, Decision Logs 104–105. Owner: Tuesday 2026-10-20 evening KST.
+One sitting, about three hours (170 minutes plus 10 minutes slack). Item boundaries are rest marks, not separate appointments.
+Finalise at M4.2 after source fixes and live reruns: replace the draft build/run block with the landed master identity, actual run ids, engine version, costs and artifact ids. The architect supplies the landing commit after hand-back. Do not mistake a branch hash for Diagnostics' master build identity.
+Results: docs/doperpowers/evidence/p3-finish/owner-results.txt. Each step is pass / fail / note / owner: not run, with observation and screenshot if useful. A note or skipped step is not a pass. Only the owner answers taste, native hands, account permissions and the measure.
+
+Preparation — the owner, before the appointment
+Have PowerPoint and Keynote, Word or Pages, Preview and Safari available; a second display; Korean input enabled; the owner's Apple Development signing identity. Sign in to the owner's Drive and Notion accounts and identify a write-capable connector for each that can accept a local file (signed-in accounts alone are not proof of upload capability). Choose one OAuth-protected HTTP MCP server registered in the owner's Claude Code configuration for the artifact's project. It must support the current MAWS route (dynamic client registration and a literal attested entry); do not change configuration merely to make a false pass. Use a literal user/local-scope source with no ${…} references in a normal non-worktree project directory; MAWS must have observed that server in the project’s launch before direct-route use. Name the chosen project, server, harmless read tool, Drive destination and Notion destination in the results; do not copy credentials. Missing preparation has the explicit fallback 'owner: not run'. All accounts and data remain the owner's.
+
+Build and baseline — 10 minutes
+PRE.1 [all items: development-signed landed build] In the owner's master checkout, after the architect lands F:
+  pnpm install --frozen-lockfile
+  MAWS_SIGN_IDENTITY="Apple Development: …" pnpm build:app
+  codesign -dv --verbose=2 dist/mac-arm64/MAWS.app 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier)'
+Record Identifier, Authority and TeamIdentifier. Open dist/mac-arm64/MAWS.app. In Diagnostics record build identity and engine version; match the architect's supplied master commit. If any identity differs, stop and resolve the build mismatch rather than attribute results to the wrong source.
+PRE.2 [all items: evidence provenance] Record start time, locale, display widths, theme, selected project and app version. Read the final-source agents' run summary inserted here at M4.2. These runs stand only for the clauses they actually observe. Create a temporary 'P3 sitting' Space and use harmless sample content, not irreplaceable documents.
+
+1. Library — 10 minutes; rest mark after 1.4
+1.1 [item 1: organiser and search] Open Artifacts in the main area. Inspect All, Pinned and By Space; each kind's count; Today, Yesterday, recent days, month and Older groups. Search a title and a word found only in content. Check title, kind, Space, project, last editor/time and linked sessions on a row. For groups without sample data record the agent evidence instead of inventing observed rows.
+1.2 [item 1: Space and creation] Create and rename a Space; link it to a temporary project directory. Use Make something new: Blank, Ask Claude and Add a file… . Check the session panel's list-and-record model versus several main artifact tabs. This observes L Decision Logs 8 and 13; the proposed default is keep.
+1.3 [item 1: row actions] Pin/unpin, rename, move, duplicate, export and delete a disposable copy. Confirm Duplicate is independent and the original is intact. Inspect a read-only linked mirror in Finder; do not edit it expecting import. Inspect the imported pre-P3 File and HTML example named in the final evidence.
+1.4 [item 1: detached persistence] Read the agents' detached/host-restart evidence. The native keep-quit and relaunch scene is N.2 below; its result is also item 1's last clause.
+
+2. Document — 16 minutes; rest mark after 2.4
+2.1 [item 2: create and open] In a session ask: 'Create a document titled P3 sitting note, with a short introduction, a Next steps heading, three tasks and a two-column table of owner and due date. Use the Space default design system.' Open it in the panel, then as a main tab. Record artifact/session ids.
+2.2 [item 2: editor coverage] Click and type. Exercise heading, list, task list, table row and cell edit, highlighted code, image, divider, math, diagram, date and mention chips; add a document tab and use Find. Confirm design-system appearance. Use the final-source rich document fixture for blocks the prompt did not create.
+2.3 [item 2: concurrent targeted edit and awareness] Keep typing a separate paragraph while asking: 'Replace the exact sentence <owner-selected sentence> with <replacement>; insert a short section after Next steps; change only the due-date cell in the first data row. Leave the rest alone.' Observe the agent cursor/editing blocks, targeted changes and the owner's uninterrupted text. Korean input is separately checked at N.1.
+2.4 [item 2: one state] Switch panel and main-tab views. Change text in each and see the same state and saved status, not two independently saved documents.
+
+3. Comments — 12 minutes; rest mark after 3.4
+3.1 [item 3: passage and route] Select a passage, Comment, type a note and Send to side thread; try Send to main on another disposable thread. The existing card opens with the quoted passage and intended destination. Reply as the agent, then inspect its reply in the thread.
+3.2 [item 3: anchor survival] Type before and after the passage, ask the agent to rewrite its sentence, and change the paragraph's type. The pin follows retained text, not a neighbouring block. Keep this thread for the restart at N.2.
+3.3 [item 3: statuses and standalone context] Resolve, check that the mark disappears, list resolved threads and reopen. In a narrow panel inspect the drawer and toolbar; in a standalone artifact tab start a new comment without a chat. Confirm the destination and refusal guidance for a blank session rather than assuming a side thread was created.
+3.4 [item 3: object anchor] In the deck created in step 5, select an element, comment, move it, then delete a disposable copy of the element. The pin follows the move; the deleted target's thread is explicitly orphaned. Return here when the deck exists; this is one cross-reference, not an omitted step.
+
+4. History — 12 minutes; rest mark after 4.4
+4.1 [item 4: versions] Save a named version with a what-changed note. Observe automatic/turn versions, day grouping, folded runs, named-only filtering and author chips. Agent evidence supplies the idle/activity interval checks that cannot fit in this sitting.
+4.2 [item 4: read-only diff and appearance] Compare two versions. With Show changes on, inspect coloured insertions, struck deletions, N changes and up/down navigation. Try typing: preview stays read-only. Inspect the historical design system and assets after changing the live ones.
+4.3 [item 4: artifact-wide restore] Add a tab and a later conversation reply; resolve a thread, then restore the earlier named version. Content/tabs/thread status/properties return as a new version, the later reply survives, and a missing passage's thread is orphaned. The pre-restore live state remains in history.
+4.4 [item 4: new-change comparison and attribution] Leave the artifact, let the agent edit, then return. Open See N new changes and right-click a selection to Show editors. The agents' compacted-history case supplies the older-than-compaction proof; record it distinctly from the owner's observation.
+
+5. Presentation — 15 minutes; rest mark after 5.4
+5.1 [item 5: dialect and editor] Ask: 'Create a three-slide P3 sitting deck from the note: overview, plan, next steps. Use editable text and shapes and the Space design system.' Inspect filmstrip, fixed 16:9 canvas/zoom, text in place, move/resize/restyle, snapping, z-order, grouping, add/delete/reorder, speaker notes. Use the imported Claude skill example from final evidence; no slide is held.
+5.2 [item 5: stale conflict and atomic publish] Move a box and retitle a slide while asking the agent for a deck-wide font change. Read the exact stale-slide refusal and successful re-read from the agent's final-source run; if performing the race here, record the slide name and retry. A multi-file refusal must not partially alter the deck.
+5.3 [item 5: history and comments] Change a slide, inspect per-slide history: filmstrip marker, element outline and notes change. Complete 3.4's object-comment scene now.
+5.4 [item 5: export choices] Export deck-face, basic-face and picture PPTX variants plus PDF, standalone HTML and Claude-compatible deck. Note any embedded-font variant that the final code does not implement; do not equate naming a face with embedding it. Reader verification is X.1 and presenter use is P.1.
+
+6. Design system — 10 minutes; rest mark after 6.3
+6.1 [item 6: defaults and authoring] Pick one of the three defaults. Ask the agent to derive or adopt a system from the named sample codebase/deck/site. Inspect palette/type/spacing/components/logos/fonts and the preview page, DESIGN.md and tokens as the governing law/values.
+6.2 [item 6: live restyle] Edit one colour. Confirm preview, the document and deck restyle; old versions keep old tokens. Inspect the law editor and a hard-don'ts check. A richer default set is P4, not a new polish gate.
+6.3 [item 6: default authority and ask] Set owner and Space defaults, create an artifact without explicitly choosing a system and confirm the intended precedence. Open an ask sheet offering design systems; select one and inspect the submitted answer.
+
+7. Design and dashboard — 15 minutes; rest mark after 7.4
+7.1 [item 7: artboards] Create/open the final-source design example. Pan and zoom mixed-size boards, select/move/resize/restyle and edit text. Check the narrow-panel toolbar without wrapping into an unusable column; export PNG and PDF. Native Korean text entry is N.1. Confirm history/comments and standalone-tab destination alongside the deck semantics.
+7.2 [item 7: file-backed data] Create/open the final-source dashboard. Inspect each chart/table's named source. Have the agent change a data file, then observe the updated marks/table and source revision. Open captured history; its rows, styling and source time stay historical until Show latest.
+7.3 [item 7: chart taste] Inspect repeated unaggregated bar categories and their visible warning. Default: keep the shipped layout/warning; record keep / fix now / P4. Do not silently aggregate or reinterpret the source data.
+7.4 [item 7: granted connector data] Inspect final-source route E and no-engine route D fixture evidence (US$0), including schedule/stale, revoke, zero hidden calls and host-only publication. The real owner-account flow is A.1; these are different proofs.
+
+8. Shell — 10 minutes; rest mark after 8.3
+8.1 [item 8: floating session] Drag divider beyond maximum; toggle by chord and header button. Inspect transcript, composer, expand/close and remembered size; close to the unread pill. Over Browser, confirm a reserved live column rather than a covering card. Default: keep pill in the chrome's tab row and column below chrome; record taste at R.
+8.2 [item 8: meaningful header] Across document, deck, design and dashboard, inspect title/breadcrumb, saved/reconnecting/readonly state, unresolved count, history, Export, Open in tab and close guard. Header Export must name the selected historical version when previewing it.
+8.3 [item 8: Mark-up] Draw pen, box, arrow and text over browser/document/slide; Done attaches a labelled marked screenshot to the composer. Escape discards. Original artifact content is unchanged; main-tab entry not implemented is recorded rather than inferred from the panel.
+
+Native hands — 10 minutes
+N.1 [item 2; item 5; item 7: Korean composition] In document, slide text editor and design workbench, compose Korean while the agent updates another block/element. Check partial syllables, candidate commit, caret and retained text. Record each editor separately. This cannot be substituted by synthetic DOM composition.
+N.2 [item 1 last clause; item 3 restart] Leave an artifact open and its comment visible. Choose keep-running quit so the host detaches, close every app window, let the already-authorised agent finish an edit, then relaunch. Check library, saved content and comment anchor/thread status. Distinguish keep-quit from ordinary quit, which must not leave unintended work running.
+N.3 [native platform] Test Command-click on the relevant link/chip and editor selection path. Record the actual destination/focus rather than merely a click registering.
+
+Exports in the owner's readers — 12 minutes
+X.1 [item 5: PPTX fidelity] Open all three font variants in PowerPoint and Keynote. For editable variants verify editable text/shapes and placement; inspect SVG :where() pictures and the chosen faces. For picture export expect flattened slides. Save any rendering discrepancy with reader/version and variant.
+X.2 [item 2; item 6: document export] Open DOCX in Word or Pages; inspect headings/table/comments, named styles and fonts. Open PDF in Preview and standalone HTML in Safari; check fonts/assets work without the app serving them.
+X.3 [item 7: design/dashboard exports] Open PNG/PDF in Preview, inspect dimensions and board/page selection. Open exported dashboard HTML in Safari and confirm captured rows/source notes, not an undeclared live network refresh.
+
+Presenter — 8 minutes
+P.1 [item 5: native presentation] Use two displays and full screen. Inspect current/next slide, notes and timer; advance builds/transitions, skip hidden slides, exit and reopen. Record screen assignment, keyboard focus, font and animation problems. This is the C sitting clause, not the CI single-display substitute.
+
+Owner accounts — 15 minutes; ordinary steps (DL105), never agent-operated
+A.1 [item 7; route D native custody] On the packaged, development-signed app, use the chosen OAuth HTTP MCP server in the artifact's project. Open Connectors and Connect; the owner completes the browser/Keychain permissions themselves. Grant the harmless read tool. Refresh, close/relaunch the app and refresh again; verify no unnecessary second authorisation, then Reconnect/Disconnect as appropriate. Record the server and observable results, not tokens. This proves native custody, not the unattended mock-keychain case. If preparation is absent or the source is unsupported: owner: not run, with the precise reason. No engine is pointed at an auth-advertising test fixture.
+A.2 [item 1 Export; H Send-to] From the library export action, Send to Drive (DOCX default) and Notion (Markdown default), confirm intended account/destination and allowed changes, then open each real delivered artifact in the owner's account. Record the remote link without credentials and whether content arrived once. Inspect whether editor-header Send-to is present and acceptable; absence is not closed by library delivery. If preparation is absent: owner: not run.
+
+Rulings — 10 minutes
+R.1 Rulings by frozen handle (proposed defaults, rechecked against final code at M4.2):
+  L32 catalogue: keep final recorded residue.
+  L35 SessionStart floor: keep.
+  L81 Terminal Korean: owner native recurrence/trace if present; otherwise owner: not run, P2 remains open.
+  L140 locale: keep shipped locale behavior unless the owner chooses one locale per surface.
+  L142 mirror cap: keep 64 MiB.
+  L175 HWP/HWPX: P4.
+  L183 DOCX embedding: P4, record the native reader observation.
+  L202 embedded PPTX variant: P4 if the three shipped variants serve the task.
+  L213 presenter/fonts/SVG: native pass/fail, then keep/fix now/P4 for any gap.
+  L267 mini ClaudeUsage polling: owner decides; F never operates its credentials.
+  S-NATIVE-OAUTH (HD acceptance 4): A.1. S-REAL-SEND (P3 DL95/97): A.2. S-HEADER-SEND (DL95/97/105): currently library-only, keep/library-only or fix now or P4.
+  S-DESIGN-TOOLBAR: keep E1’s shipped wrap/density unless the owner requests regrouping.
+  S-REPEATED-BARS: keep current warning/layout after the deterministic warning fix, or fix now/P4.
+  Each answer: [ ] keep [ ] fix now [ ] P4; owner words and result row. No row closes solely because this sheet exists.
+R.2 Carry the explicit taste checklist: L DL8 panel model and DL13 creation cards; G pill/tab-row and below-chrome column; C presenter and font variants; E1 narrow toolbar and standalone comment destination; E2 repeated-bar layout; HD native custody; H actual delivery and editor-header Send-to. Where DL97 or E DL41 already settled a proposal, 'keep' confirms the built result, not a demand to reopen that decision.
+R.3 Capture any irritation in the owner's own words. Each later gets one route: wave S, tracker, P4, dismissed against a binding design, or architect ruling. Nothing speculative is fixed from a vague symptom.
+
+Measure — 5 minutes
+M.1 What artifact work still sends you to Claude Desktop or a terminal? Name the concrete task and why. Is the co-work layer fit for the week's daily use? This answer is not the final declaration: P3 §2 requires the owner to declare the measure met after a week of daily use.

@@ -1,0 +1,1453 @@
+{
+  "counts": {
+    "defer": 123,
+    "theirs": 44,
+    "sitting": 10,
+    "close": 10,
+    "fix": 51
+  },
+  "fixSteps": {
+    "M4-count": 3,
+    "W-SHELL": 6,
+    "W-STORE": 4,
+    "W-T": 5,
+    "W-DOC-A": 4,
+    "W-DOC-B": 4,
+    "W-E": 5,
+    "W-MINI": 6,
+    "W-DECK": 6,
+    "M4-measure": 1,
+    "W-RD": 6,
+    "W-PKG": 1
+  },
+  "rows": [
+    {
+      "line": 26,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 27,
+      "bin": "defer",
+      "step": "P4 / each Electron bump",
+      "reason": "No supported native API/proven mechanism yet; preserve the case for a native capability pass."
+    },
+    {
+      "line": 28,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 29,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 30,
+      "bin": "defer",
+      "step": "P4 / next highlighting re-pin",
+      "reason": "Compatibility override removal belongs to the dependency bump after its range moves."
+    },
+    {
+      "line": 31,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 32,
+      "bin": "sitting",
+      "step": "R-catalogue",
+      "reason": "Keep the recorded catalogue residue; owner may ask for P4."
+    },
+    {
+      "line": 33,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 34,
+      "bin": "defer",
+      "step": "gate lane",
+      "reason": "Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here."
+    },
+    {
+      "line": 35,
+      "bin": "sitting",
+      "step": "R-sessionstart",
+      "reason": "Keep the SessionStart floor; only owner judges broader behavior."
+    },
+    {
+      "line": 36,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 37,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave."
+    },
+    {
+      "line": 38,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave."
+    },
+    {
+      "line": 39,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave."
+    },
+    {
+      "line": 40,
+      "bin": "defer",
+      "step": "next settings-version author",
+      "reason": "Requires a settings bump explicitly excluded from P3-F; preserve the next-bump closing clause."
+    },
+    {
+      "line": 41,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 42,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 43,
+      "bin": "defer",
+      "step": "P4 / voice lane",
+      "reason": "Voice feature residue needs its own change and verification, not the co-work finish."
+    },
+    {
+      "line": 44,
+      "bin": "defer",
+      "step": "P4 / voice lane",
+      "reason": "Voice feature residue needs its own change and verification, not the co-work finish."
+    },
+    {
+      "line": 45,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 46,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 47,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 48,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals."
+    },
+    {
+      "line": 49,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 50,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 51,
+      "bin": "defer",
+      "step": "each Electron bump",
+      "reason": "Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change."
+    },
+    {
+      "line": 52,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 53,
+      "bin": "defer",
+      "step": "P4 / browser lane",
+      "reason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner."
+    },
+    {
+      "line": 54,
+      "bin": "defer",
+      "step": "P4 / browser lane",
+      "reason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner."
+    },
+    {
+      "line": 55,
+      "bin": "defer",
+      "step": "P4 / browser lane",
+      "reason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner."
+    },
+    {
+      "line": 57,
+      "bin": "defer",
+      "step": "each Electron bump",
+      "reason": "Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change."
+    },
+    {
+      "line": 58,
+      "bin": "defer",
+      "step": "P4 / browser lane",
+      "reason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner."
+    },
+    {
+      "line": 59,
+      "bin": "defer",
+      "step": "P4 / browser lane",
+      "reason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner."
+    },
+    {
+      "line": 60,
+      "bin": "defer",
+      "step": "P4 / browser lane",
+      "reason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner."
+    },
+    {
+      "line": 61,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 62,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave."
+    },
+    {
+      "line": 63,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 64,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 65,
+      "bin": "defer",
+      "step": "P4 / browser lane",
+      "reason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner."
+    },
+    {
+      "line": 66,
+      "bin": "defer",
+      "step": "P4 / browser lane",
+      "reason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner."
+    },
+    {
+      "line": 67,
+      "bin": "defer",
+      "step": "each Electron bump",
+      "reason": "Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change."
+    },
+    {
+      "line": 68,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 69,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals."
+    },
+    {
+      "line": 70,
+      "bin": "defer",
+      "step": "P4 / browser lane",
+      "reason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner."
+    },
+    {
+      "line": 71,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 72,
+      "bin": "defer",
+      "step": "P4 / each Electron bump",
+      "reason": "No supported native API/proven mechanism yet; preserve the case for a native capability pass."
+    },
+    {
+      "line": 73,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 74,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 75,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals."
+    },
+    {
+      "line": 76,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 77,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 78,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave."
+    },
+    {
+      "line": 79,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 80,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 81,
+      "bin": "sitting",
+      "step": "N-terminal",
+      "reason": "P2 native Korean Terminal recurrence/trace requires owner hands; do not claim document IME covers it."
+    },
+    {
+      "line": 82,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 83,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 84,
+      "bin": "defer",
+      "step": "gate lane",
+      "reason": "Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here."
+    },
+    {
+      "line": 85,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 86,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 87,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 88,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 89,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 90,
+      "bin": "fix",
+      "step": "M4-count",
+      "reason": "Accumulate only documented qualifying runs across gates; no invented historical count and no repeated full sets just to exhaust the clause. Residue owner: gate lane."
+    },
+    {
+      "line": 91,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 92,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 93,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 94,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4."
+    },
+    {
+      "line": 95,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 96,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 97,
+      "bin": "defer",
+      "step": "each engine bump",
+      "reason": "Needs an engine-effective fact/probe absent from the current attested interface; each engine bump owns revalidation."
+    },
+    {
+      "line": 98,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 99,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 100,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 101,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 102,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 103,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 104,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 105,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 106,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 107,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4."
+    },
+    {
+      "line": 108,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave."
+    },
+    {
+      "line": 109,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 110,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 111,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 112,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4."
+    },
+    {
+      "line": 113,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 114,
+      "bin": "defer",
+      "step": "each Electron bump",
+      "reason": "Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change."
+    },
+    {
+      "line": 115,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 116,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 117,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 118,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4."
+    },
+    {
+      "line": 119,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4."
+    },
+    {
+      "line": 120,
+      "bin": "defer",
+      "step": "P4 / each Electron bump",
+      "reason": "No supported native API/proven mechanism yet; preserve the case for a native capability pass."
+    },
+    {
+      "line": 121,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 122,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 123,
+      "bin": "defer",
+      "step": "P4 / browser lane",
+      "reason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner."
+    },
+    {
+      "line": 124,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4."
+    },
+    {
+      "line": 125,
+      "bin": "fix",
+      "step": "W-SHELL",
+      "reason": "Owner-visible shell/card behavior: locale copy, pill action, overflow, late anchors, blank-thread guard and Monitor presentation."
+    },
+    {
+      "line": 126,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4."
+    },
+    {
+      "line": 127,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 128,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 129,
+      "bin": "fix",
+      "step": "W-SHELL",
+      "reason": "Owner-visible shell/card behavior: locale copy, pill action, overflow, late anchors, blank-thread guard and Monitor presentation."
+    },
+    {
+      "line": 130,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4."
+    },
+    {
+      "line": 131,
+      "bin": "close",
+      "step": "M1-record",
+      "reason": "Accept the existing pre-paint measurement: closing clause expressly permits acceptance; architect rules at checkpoint 1. Evidence: P3-G final record; PanelHeader.tsx."
+    },
+    {
+      "line": 132,
+      "bin": "fix",
+      "step": "W-SHELL",
+      "reason": "Owner-visible shell/card behavior: locale copy, pill action, overflow, late anchors, blank-thread guard and Monitor presentation."
+    },
+    {
+      "line": 133,
+      "bin": "defer",
+      "step": "P4 / each Yjs re-pin",
+      "reason": "Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin."
+    },
+    {
+      "line": 134,
+      "bin": "defer",
+      "step": "P4 / each Yjs re-pin",
+      "reason": "Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin."
+    },
+    {
+      "line": 135,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 136,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4."
+    },
+    {
+      "line": 137,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4."
+    },
+    {
+      "line": 138,
+      "bin": "defer",
+      "step": "P4 / each Yjs re-pin",
+      "reason": "Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin."
+    },
+    {
+      "line": 139,
+      "bin": "fix",
+      "step": "W-STORE",
+      "reason": "Durable/store/export behavior and defaults: streamed owner file digest, carry attribution, self-contained document faces, stale design-system choice."
+    },
+    {
+      "line": 140,
+      "bin": "sitting",
+      "step": "R-locale",
+      "reason": "Confirm mixed English chrome/system-locale ages against P2 D2; any surface-wide locale choice is the owner's."
+    },
+    {
+      "line": 141,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Virtualising the library list is a feature/performance pass; no recorded failing bound justifies redesigning it in Finish."
+    },
+    {
+      "line": 142,
+      "bin": "sitting",
+      "step": "R-mirror",
+      "reason": "Keep the 64 MiB read-only mirror cap unless owner needs larger files."
+    },
+    {
+      "line": 143,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 144,
+      "bin": "close",
+      "step": "M1-record",
+      "reason": "Accept the pre-cutover numbering artifact under the explicit accept branch; architect rules at checkpoint 1. Evidence: P3-L DL40g."
+    },
+    {
+      "line": 145,
+      "bin": "fix",
+      "step": "W-T",
+      "reason": "Gate truthfulness: conservative live spend, complete/final-source bundle reporting, compiled consumer coverage and diagnostic fixture hygiene."
+    },
+    {
+      "line": 146,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4."
+    },
+    {
+      "line": 147,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 148,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 149,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave."
+    },
+    {
+      "line": 150,
+      "bin": "defer",
+      "step": "P4 / each binding re-pin",
+      "reason": "Binding implementation limitation; no untested dependency upgrade in Finish."
+    },
+    {
+      "line": 151,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 152,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4."
+    },
+    {
+      "line": 153,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4."
+    },
+    {
+      "line": 154,
+      "bin": "fix",
+      "step": "W-DOC-A",
+      "reason": "X26/X10/X21 document behavior: thread replies, promised limits, dialect fidelity, stale moved targets, link safety, restore history and drawer focus."
+    },
+    {
+      "line": 155,
+      "bin": "fix",
+      "step": "W-DOC-B",
+      "reason": "X26/X10/X21 document behavior: thread replies, promised limits, dialect fidelity, stale moved targets, link safety, restore history and drawer focus."
+    },
+    {
+      "line": 156,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 157,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4."
+    },
+    {
+      "line": 158,
+      "bin": "fix",
+      "step": "W-E",
+      "reason": "Truthful bounds and dashboard behavior: loop-delay sampling, common export scale, announcement identity, late-sample settle exclusion and opposite-sign warning; retain all raw readings."
+    },
+    {
+      "line": 159,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4."
+    },
+    {
+      "line": 160,
+      "bin": "fix",
+      "step": "W-STORE",
+      "reason": "Durable/store/export behavior and defaults: streamed owner file digest, carry attribution, self-contained document faces, stale design-system choice."
+    },
+    {
+      "line": 161,
+      "bin": "defer",
+      "step": "P4 / each Yjs re-pin",
+      "reason": "Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin."
+    },
+    {
+      "line": 162,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Loaded-only suggestion attribution is a cross-lifetime contract question; documentation alone cannot prove stored provenance correctness."
+    },
+    {
+      "line": 163,
+      "bin": "defer",
+      "step": "P4 / each Yjs re-pin",
+      "reason": "Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin."
+    },
+    {
+      "line": 164,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Existing measured mitigation/bound stands; a new performance architecture or proposal signal needs its own pass."
+    },
+    {
+      "line": 165,
+      "bin": "fix",
+      "step": "W-DOC-B",
+      "reason": "X26/X10/X21 document behavior: thread replies, promised limits, dialect fidelity, stale moved targets, link safety, restore history and drawer focus."
+    },
+    {
+      "line": 166,
+      "bin": "fix",
+      "step": "W-DOC-B",
+      "reason": "X26/X10/X21 document behavior: thread replies, promised limits, dialect fidelity, stale moved targets, link safety, restore history and drawer focus."
+    },
+    {
+      "line": 167,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Closing clause requires extending a shared adapter/assets-version contract; no silent new contract in F. Architect may explicitly promote after ruling."
+    },
+    {
+      "line": 168,
+      "bin": "fix",
+      "step": "W-DOC-B",
+      "reason": "X26/X10/X21 document behavior: thread replies, promised limits, dialect fidelity, stale moved targets, link safety, restore history and drawer focus."
+    },
+    {
+      "line": 169,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 170,
+      "bin": "fix",
+      "step": "W-DOC-A",
+      "reason": "X26/X10/X21 document behavior: thread replies, promised limits, dialect fidelity, stale moved targets, link safety, restore history and drawer focus."
+    },
+    {
+      "line": 171,
+      "bin": "close",
+      "step": "M1-record",
+      "reason": "Exact KaTeX warning filtered in B artifact suites; renderer residue is separate L238. Evidence: test/support/artifacts-dom-setup.ts."
+    },
+    {
+      "line": 172,
+      "bin": "close",
+      "step": "M1-record",
+      "reason": "Comment already describes the built tool behavior. Evidence: 349dee0ed; src/shared/maws/tools.ts:209\u2013213."
+    },
+    {
+      "line": 173,
+      "bin": "close",
+      "step": "M1-record",
+      "reason": "Bounded-head budget uses the measured/load-aware seam, not an unconditional Linux wall limit. Evidence: e2e/support/latency.ts; e2e/code-tools.spec.ts."
+    },
+    {
+      "line": 174,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 175,
+      "bin": "sitting",
+      "step": "R-hwp",
+      "reason": "Default P4 for HWP/HWPX; new export format is the owner's product choice."
+    },
+    {
+      "line": 176,
+      "bin": "fix",
+      "step": "W-STORE",
+      "reason": "Durable/store/export behavior and defaults: streamed owner file digest, carry attribution, self-contained document faces, stale design-system choice."
+    },
+    {
+      "line": 177,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely."
+    },
+    {
+      "line": 178,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals."
+    },
+    {
+      "line": 179,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals."
+    },
+    {
+      "line": 180,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Closing clause requires extending a shared adapter/assets-version contract; no silent new contract in F. Architect may explicitly promote after ruling."
+    },
+    {
+      "line": 181,
+      "bin": "close",
+      "step": "M1-record",
+      "reason": "Premise obsolete: production uses the fallback tokens; deleting them would break the landed fallback. Architect ratifies obsolete-row closure. Evidence: src/artifacts/dashboard/render/svg.ts:113; dashboard/export.ts."
+    },
+    {
+      "line": 182,
+      "bin": "fix",
+      "step": "W-STORE",
+      "reason": "Durable/store/export behavior and defaults: streamed owner file digest, carry attribution, self-contained document faces, stale design-system choice."
+    },
+    {
+      "line": 183,
+      "bin": "sitting",
+      "step": "X-docx-fonts",
+      "reason": "Default P4 for embedding DOCX faces; verify actual Word/Pages fallback before ruling."
+    },
+    {
+      "line": 185,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 186,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 187,
+      "bin": "fix",
+      "step": "W-DOC-A",
+      "reason": "X26/X10/X21 document behavior: thread replies, promised limits, dialect fidelity, stale moved targets, link safety, restore history and drawer focus."
+    },
+    {
+      "line": 189,
+      "bin": "close",
+      "step": "M1-record",
+      "reason": "Injected clock pins the date grouping. Evidence: d6b58a91a; document/editor/history/rail.dom.test.ts:112\u2013128."
+    },
+    {
+      "line": 190,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 191,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 192,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 193,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 194,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 195,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 196,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 197,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 198,
+      "bin": "fix",
+      "step": "W-SHELL",
+      "reason": "Owner-visible shell/card behavior: locale copy, pill action, overflow, late anchors, blank-thread guard and Monitor presentation."
+    },
+    {
+      "line": 199,
+      "bin": "fix",
+      "step": "W-MINI",
+      "reason": "One event-driven baseline wave: wait on app state/focus/readiness; never close by timeout increase alone; preserve any run-count remainder."
+    },
+    {
+      "line": 200,
+      "bin": "fix",
+      "step": "W-MINI",
+      "reason": "One event-driven baseline wave: wait on app state/focus/readiness; never close by timeout increase alone; preserve any run-count remainder."
+    },
+    {
+      "line": 201,
+      "bin": "fix",
+      "step": "W-MINI",
+      "reason": "One event-driven baseline wave: wait on app state/focus/readiness; never close by timeout increase alone; preserve any run-count remainder."
+    },
+    {
+      "line": 202,
+      "bin": "sitting",
+      "step": "X-pptx-embedded",
+      "reason": "Default P4 for fourth embedded-font variant; judge the three shipped choices first."
+    },
+    {
+      "line": 203,
+      "bin": "fix",
+      "step": "W-DECK",
+      "reason": "X27/X29/X31 deck correctness: draft survival, comparison oracle, attribution, honest refusal, cancelled gestures and shown-version export."
+    },
+    {
+      "line": 204,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 205,
+      "bin": "defer",
+      "step": "P4 / each parse5 re-pin",
+      "reason": "Internal parser-hook dependency is a re-pin regression obligation, not a current defect."
+    },
+    {
+      "line": 206,
+      "bin": "close",
+      "step": "M1-record",
+      "reason": "Absent LibreOffice reports an explicit skip; mini supplies it. Evidence: test/artifacts/document-docx-libreoffice.test.ts:19\u201321; e2e/presentations-export.spec.ts:517."
+    },
+    {
+      "line": 207,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 208,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 209,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 210,
+      "bin": "fix",
+      "step": "W-DECK",
+      "reason": "X27/X29/X31 deck correctness: draft survival, comparison oracle, attribution, honest refusal, cancelled gestures and shown-version export."
+    },
+    {
+      "line": 211,
+      "bin": "fix",
+      "step": "W-DECK",
+      "reason": "X27/X29/X31 deck correctness: draft survival, comparison oracle, attribution, honest refusal, cancelled gestures and shown-version export."
+    },
+    {
+      "line": 212,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 213,
+      "bin": "sitting",
+      "step": "P-presenter",
+      "reason": "Native full-screen/two-display presenter and PowerPoint/Keynote font/SVG reading require the owner."
+    },
+    {
+      "line": 214,
+      "bin": "fix",
+      "step": "W-DECK",
+      "reason": "X27/X29/X31 deck correctness: draft survival, comparison oracle, attribution, honest refusal, cancelled gestures and shown-version export."
+    },
+    {
+      "line": 215,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals."
+    },
+    {
+      "line": 216,
+      "bin": "fix",
+      "step": "M4-measure",
+      "reason": "Run the recorded drag bisection and absolute/preview bounds below load 10 on mini; retain raw loads and re-defer only if no qualifying queue window."
+    },
+    {
+      "line": 217,
+      "bin": "fix",
+      "step": "W-MINI",
+      "reason": "One event-driven baseline wave: wait on app state/focus/readiness; never close by timeout increase alone; preserve any run-count remainder."
+    },
+    {
+      "line": 218,
+      "bin": "fix",
+      "step": "W-DECK",
+      "reason": "X27/X29/X31 deck correctness: draft survival, comparison oracle, attribution, honest refusal, cancelled gestures and shown-version export."
+    },
+    {
+      "line": 219,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 220,
+      "bin": "close",
+      "step": "M1-record",
+      "reason": "Experimental typecheck advisory removed and node:sqlite warning disabled. Evidence: 4f4939b5a; package test flags."
+    },
+    {
+      "line": 222,
+      "bin": "close",
+      "step": "M1-record",
+      "reason": "Hatch overlay pointer-events none, underlying bar remains hit target. Evidence: 99dbafeb7; src/artifacts/dashboard/render/render.ts:703."
+    },
+    {
+      "line": 227,
+      "bin": "fix",
+      "step": "W-E",
+      "reason": "Truthful bounds and dashboard behavior: loop-delay sampling, common export scale, announcement identity, late-sample settle exclusion and opposite-sign warning; retain all raw readings."
+    },
+    {
+      "line": 229,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 231,
+      "bin": "fix",
+      "step": "W-T",
+      "reason": "Gate truthfulness: conservative live spend, complete/final-source bundle reporting, compiled consumer coverage and diagnostic fixture hygiene."
+    },
+    {
+      "line": 232,
+      "bin": "theirs",
+      "step": "cua session",
+      "reason": "Browser-view/cua ownership boundary; route through architect, no F edit. L128 ownership is an explicit checkpoint question."
+    },
+    {
+      "line": 233,
+      "bin": "fix",
+      "step": "W-DECK",
+      "reason": "X27/X29/X31 deck correctness: draft survival, comparison oracle, attribution, honest refusal, cancelled gestures and shown-version export."
+    },
+    {
+      "line": 235,
+      "bin": "fix",
+      "step": "W-T",
+      "reason": "Gate truthfulness: conservative live spend, complete/final-source bundle reporting, compiled consumer coverage and diagnostic fixture hygiene."
+    },
+    {
+      "line": 237,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Existing measured mitigation/bound stands; a new performance architecture or proposal signal needs its own pass."
+    },
+    {
+      "line": 238,
+      "bin": "fix",
+      "step": "W-T",
+      "reason": "Gate truthfulness: conservative live spend, complete/final-source bundle reporting, compiled consumer coverage and diagnostic fixture hygiene."
+    },
+    {
+      "line": 241,
+      "bin": "fix",
+      "step": "W-DOC-A",
+      "reason": "X26/X10/X21 document behavior: thread replies, promised limits, dialect fidelity, stale moved targets, link safety, restore history and drawer focus."
+    },
+    {
+      "line": 242,
+      "bin": "fix",
+      "step": "W-SHELL",
+      "reason": "Owner-visible shell/card behavior: locale copy, pill action, overflow, late anchors, blank-thread guard and Monitor presentation."
+    },
+    {
+      "line": 243,
+      "bin": "defer",
+      "step": "each engine bump",
+      "reason": "Needs an engine-effective fact/probe absent from the current attested interface; each engine bump owns revalidation."
+    },
+    {
+      "line": 244,
+      "bin": "fix",
+      "step": "W-RD",
+      "reason": "Route D availability and authority: canonical paths/keys, scoped hints, abort fence, literal loopback admission and phase-safe fixture guard."
+    },
+    {
+      "line": 245,
+      "bin": "fix",
+      "step": "W-RD",
+      "reason": "Route D availability and authority: canonical paths/keys, scoped hints, abort fence, literal loopback admission and phase-safe fixture guard."
+    },
+    {
+      "line": 246,
+      "bin": "fix",
+      "step": "M4-count",
+      "reason": "Accumulate only documented qualifying runs across gates; no invented historical count and no repeated full sets just to exhaust the clause. Residue owner: gate lane."
+    },
+    {
+      "line": 247,
+      "bin": "fix",
+      "step": "W-E",
+      "reason": "Truthful bounds and dashboard behavior: loop-delay sampling, common export scale, announcement identity, late-sample settle exclusion and opposite-sign warning; retain all raw readings."
+    },
+    {
+      "line": 248,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 249,
+      "bin": "fix",
+      "step": "W-E",
+      "reason": "Truthful bounds and dashboard behavior: loop-delay sampling, common export scale, announcement identity, late-sample settle exclusion and opposite-sign warning; retain all raw readings."
+    },
+    {
+      "line": 250,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass."
+    },
+    {
+      "line": 251,
+      "bin": "fix",
+      "step": "W-E",
+      "reason": "Truthful bounds and dashboard behavior: loop-delay sampling, common export scale, announcement identity, late-sample settle exclusion and opposite-sign warning; retain all raw readings."
+    },
+    {
+      "line": 252,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Dense expansion needs a dataset cell-count/resource contract or separate scale probe; do not introduce an unapproved acceptance limit."
+    },
+    {
+      "line": 253,
+      "bin": "fix",
+      "step": "M4-count",
+      "reason": "Accumulate only documented qualifying runs across gates; no invented historical count and no repeated full sets just to exhaust the clause. Residue owner: gate lane."
+    },
+    {
+      "line": 254,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely."
+    },
+    {
+      "line": 255,
+      "bin": "fix",
+      "step": "W-PKG",
+      "reason": "Exercise the production MCP SDK from the packaged app using existing packaged harness/gate; native Keychain remains a separate sitting proof."
+    },
+    {
+      "line": 256,
+      "bin": "fix",
+      "step": "W-RD",
+      "reason": "Route D availability and authority: canonical paths/keys, scoped hints, abort fence, literal loopback admission and phase-safe fixture guard."
+    },
+    {
+      "line": 257,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 258,
+      "bin": "fix",
+      "step": "W-SHELL",
+      "reason": "Owner-visible shell/card behavior: locale copy, pill action, overflow, late anchors, blank-thread guard and Monitor presentation."
+    },
+    {
+      "line": 259,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 260,
+      "bin": "theirs",
+      "step": "maws-fe lane",
+      "reason": "Named current owner is maws-fe; confirm active ownership at checkpoint 1 rather than collide with its transcript changes."
+    },
+    {
+      "line": 261,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 262,
+      "bin": "theirs",
+      "step": "gate lane",
+      "reason": "CI-opt actively owns this gate-lane work; row untouched."
+    },
+    {
+      "line": 263,
+      "bin": "defer",
+      "step": "gate lane",
+      "reason": "Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here."
+    },
+    {
+      "line": 264,
+      "bin": "fix",
+      "step": "W-MINI",
+      "reason": "One event-driven baseline wave: wait on app state/focus/readiness; never close by timeout increase alone; preserve any run-count remainder."
+    },
+    {
+      "line": 265,
+      "bin": "fix",
+      "step": "W-T",
+      "reason": "Gate truthfulness: conservative live spend, complete/final-source bundle reporting, compiled consumer coverage and diagnostic fixture hygiene."
+    },
+    {
+      "line": 266,
+      "bin": "theirs",
+      "step": "gate lane",
+      "reason": "CI-opt actively owns this gate-lane work; row untouched."
+    },
+    {
+      "line": 267,
+      "bin": "sitting",
+      "step": "R-mini-runner",
+      "reason": "Only the owner can retire or reconfigure their mini app/keychain polling; no agent credential/GUI action."
+    },
+    {
+      "line": 268,
+      "bin": "theirs",
+      "step": "gate lane",
+      "reason": "CI-opt actively owns this gate-lane work; row untouched."
+    },
+    {
+      "line": 269,
+      "bin": "fix",
+      "step": "W-RD",
+      "reason": "Route D availability and authority: canonical paths/keys, scoped hints, abort fence, literal loopback admission and phase-safe fixture guard."
+    },
+    {
+      "line": 270,
+      "bin": "fix",
+      "step": "W-RD",
+      "reason": "Route D availability and authority: canonical paths/keys, scoped hints, abort fence, literal loopback admission and phase-safe fixture guard."
+    },
+    {
+      "line": 271,
+      "bin": "fix",
+      "step": "W-RD",
+      "reason": "Route D availability and authority: canonical paths/keys, scoped hints, abort fence, literal loopback admission and phase-safe fixture guard."
+    },
+    {
+      "line": 272,
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof."
+    },
+    {
+      "line": 275,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 276,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 277,
+      "bin": "fix",
+      "step": "W-MINI",
+      "reason": "One event-driven baseline wave: wait on app state/focus/readiness; never close by timeout increase alone; preserve any run-count remainder."
+    },
+    {
+      "line": 279,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    },
+    {
+      "line": 280,
+      "bin": "theirs",
+      "step": "desk / sminos-hub lane",
+      "reason": "Active desk/hub lane owns the path and its closure; row untouched."
+    }
+  ]
+}

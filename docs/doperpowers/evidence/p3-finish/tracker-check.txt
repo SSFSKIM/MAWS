@@ -1,0 +1,6 @@
+M0 validation
+255 table rows = 17 preclosed + 238 open.
+Every M0 open row has exactly one bin; missing=0; duplicate=0.
+Full original texts retained in tracker-m0.json; supplemental obligations excluded from M0 counts.
+Counts: {'defer': 123, 'theirs': 44, 'sitting': 10, 'close': 10, 'fix': 51}
+RESULT: pass (inventory only; checkpoint 1 and closures still pending)
