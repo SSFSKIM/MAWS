@@ -10,6 +10,7 @@ import { useTranscriptStore } from '../../../../../src/renderer/src/stores/trans
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import { Transcript, type TranscriptListHandle, type TranscriptProps } from '../../../../../src/renderer/src/transcript/view/Transcript';
+import { useAccess } from '../../hub/access';
 import type { DeskSession } from '../../shell/sessions';
 import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
 import { reachable, TranscriptKeeper } from '../source/keeper';
@@ -89,6 +90,7 @@ export type RowIndex = (id: string) => number;
 /** The transcript's rows and stream, and what its subscription's disruptions say. */
 export function TranscriptPane({ controller, state, variant, actions, list, ownerLane, extraTail = NO_ROWS, renderRequest, rowIndex }: PaneProps) {
   const rows = useTranscriptStore((s) => s.entries[controller.key]?.rows ?? NO_ROWS);
+  const lapsed = useAccess((s) => s.lapsed);
   const since = useSince();
   const turn = ownerLane ? latestTurn(rows) : null;
   const streaming = useMemo(() => streamingRows(state.streaming, since, { turn }), [state.streaming, since, turn]);
@@ -113,7 +115,7 @@ export function TranscriptPane({ controller, state, variant, actions, list, owne
       {state.phase === 'reconnecting' && rows.length === 0 && (
         // A transcript between a reset and its fresh snapshot (or one the hub ended before its first) is not empty.
         <p className="m-0 px-4 py-3 text-ui-sm text-fg-muted" role="status" data-testid="depth-reconnecting">
-          Reconnecting to the session…
+          {lapsed !== null ? 'Signed out: the session reconnects once you sign in again.' : 'Reconnecting to the session…'}
         </p>
       )}
       {state.ended && (

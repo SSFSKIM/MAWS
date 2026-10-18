@@ -14,7 +14,10 @@
 // socket gets on connect, presence withheld while its machine is offline, the audit record (`refused`, `rejected`,
 // `decided`) replayed after every `caught-up`, the hub's at-once RPC failures sent to the sender and never recorded, an
 // unknown frame refused `bad-shape`, the subscription limits (32 a socket, `rows` 1 to 1000, `output`'s task id and
-// tail), and a resumed backlog paged, each page but the last ended by `more`.
+// tail), and a resumed backlog paged, each page but the last ended by `more`. In front of it all, a stand-in for
+// Access (`admit`): with no session it answers every request, the page and each socket's upgrade included, with a 302
+// to a sign-in page on another origin (`signIn`), which sends the browser back through `/cdn-cgi/access/authorized` to
+// the path it asked for, admitted; a network that drops every request is `unreachable`.
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -97,9 +100,15 @@ export type DoubleOptions = {
   frameLimit?: number;
   /** A built app to serve, with the single-page fallback. */
   staticDir?: string;
-  /** Who `/api/me` admits: the member, or nobody (403 not-a-member). */
-  admit?: 'member' | 'not-a-member';
+  admit?: Admit;
 };
+
+/**
+ * Who is let in: the member; a person the org does not hold (the Worker's `403 not-a-member`, a socket's upgrade refused);
+ * nobody, Access's session having expired (a 302 to its sign-in, for every request); or nothing at all, the network
+ * dropping every connection to `/api/*`.
+ */
+export type Admit = 'member' | 'not-a-member' | 'signed-out' | 'unreachable';
 
 export class HubDouble {
   readonly url: string;
@@ -110,7 +119,9 @@ export class HubDouble {
   beforePage?: (after: number) => Promise<void>;
   /** Answer each `human` with `human-ack` (true), or hold the acknowledgement as a hub that dropped mid-write would. */
   ackHumans = true;
-  admit: 'member' | 'not-a-member';
+  admit: Admit;
+  /** Access's sign-in, on an origin of its own: `${signIn}/cdn-cgi/access/login/<host>?redirect_url=<path>`. */
+  readonly signIn: string;
   /** The signed-in member's role in the org, as `/api/me` answers it and the endpoints judge it: an admin by default. */
   role: Role = 'admin';
   /** DX7's machine records (`/api/machines`): listed, and revoked by an admin. */
@@ -126,10 +137,12 @@ export class HubDouble {
 
   private constructor(
     private readonly server: Server,
+    private readonly access: Server,
     private readonly key: OrgKey,
     private readonly options: DoubleOptions,
   ) {
     this.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    this.signIn = `http://127.0.0.1:${(access.address() as AddressInfo).port}`;
     this.admit = options.admit ?? 'member';
   }
 
@@ -137,7 +150,9 @@ export class HubDouble {
     const key = await importOrgKey(options.orgKey);
     const server = createServer();
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const double = new HubDouble(server, key, options);
+    const access = createServer((req, res) => double.accessSignIn(req, res));
+    await new Promise<void>((resolve) => access.listen(0, '127.0.0.1', resolve));
+    const double = new HubDouble(server, access, key, options);
     server.on('request', (req, res) => void double.http(req, res));
     server.on('upgrade', (req, socket, head) => double.upgrade(req, socket as never, head));
     return double;
@@ -146,6 +161,8 @@ export class HubDouble {
   async close(): Promise<void> {
     for (const socket of this.allSockets()) socket.terminate();
     this.wss.close();
+    this.access.closeAllConnections();
+    await new Promise<void>((resolve) => this.access.close(() => resolve()));
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
   }
 
@@ -454,6 +471,15 @@ export class HubDouble {
   private upgrade(req: IncomingMessage, socket: import('node:stream').Duplex, head: Buffer): void {
     const path = new URL(req.url ?? '/', this.url).pathname;
     const projectMatch = /^\/api\/projects\/([^/]+)\/socket$/.exec(path);
+    if (this.admit === 'signed-out') {
+      socket.write(`HTTP/1.1 302 Found\r\nLocation: ${this.signInUrl(req)}\r\nConnection: close\r\n\r\n`);
+      socket.destroy();
+      return;
+    }
+    if (this.admit === 'unreachable') {
+      socket.destroy();
+      return;
+    }
     if (this.admit !== 'member' || (!projectMatch && path !== '/api/registry/socket')) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
@@ -611,7 +637,24 @@ export class HubDouble {
   }
 
   private async http(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const path = new URL(req.url ?? '/', this.url).pathname;
+    const url = new URL(req.url ?? '/', this.url);
+    const path = url.pathname;
+    if (path === '/cdn-cgi/access/authorized') {
+      // Access's return leg: it sets its session cookie and sends the browser on to the path it first asked for.
+      this.admit = 'member';
+      res.writeHead(302, { Location: url.searchParams.get('redirect_url') ?? '/' });
+      res.end();
+      return;
+    }
+    if (this.admit === 'signed-out') {
+      res.writeHead(302, { Location: this.signInUrl(req) });
+      res.end();
+      return;
+    }
+    if (path.startsWith('/api/') && this.admit === 'unreachable') {
+      req.socket.destroy();
+      return;
+    }
     if (path.startsWith('/api/') && this.admit !== 'member') {
       json(res, 403, { error: 'not-a-member' });
       return;
@@ -633,6 +676,18 @@ export class HubDouble {
       return;
     }
     this.serveStatic(this.options.staticDir, path, req, res);
+  }
+
+  private signInUrl(req: IncomingMessage): string {
+    return `${this.signIn}/cdn-cgi/access/login/${new URL(this.url).host}?redirect_url=${encodeURIComponent(req.url ?? '/')}`;
+  }
+
+  /** Access's sign-in page: one button, which returns the browser to the hub's origin through Access's return leg. */
+  private accessSignIn(req: IncomingMessage, res: ServerResponse): void {
+    const back = new URL(req.url ?? '/', this.signIn).searchParams.get('redirect_url') ?? '/';
+    const authorized = `${this.url}/cdn-cgi/access/authorized?redirect_url=${encodeURIComponent(back)}`;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(`<!doctype html><title>Sign in · Cloudflare Access</title><a href="${authorized.replaceAll('"', '&quot;')}">Sign in</a>`);
   }
 
   /** The built app, compressed as the Worker's static assets are when the browser accepts it (gzip here). */

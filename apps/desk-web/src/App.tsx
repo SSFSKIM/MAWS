@@ -7,6 +7,7 @@
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { fetchMe, SignInError, type Me } from './hub/me';
+import { useAccess, watchAccess } from './hub/access';
 import { loadDeviceKey, useKeyHolder } from './key/holder';
 import { hubBase } from './hub/base';
 import { recordPushOutcome } from './push/outcome';
@@ -17,6 +18,7 @@ import { followHistory, useDeskLayout } from './shell/layout';
 import { usePhoneProject } from './shell/phone';
 import { useNarrow } from './shell/viewport';
 import { startGrid, useGrid } from './state/grid';
+import { SignInAgainButton } from './views/access/SignInAgain';
 import { GridView } from './views/grid/GridView';
 import { useSecondMethodPrompt } from './views/key/second-method';
 
@@ -37,7 +39,7 @@ export function App() {
 
 const SIGN_IN_TEXT: Record<SignInError['reason'], string> = {
   'not-a-member': 'You are signed in, but the org does not hold you as a member.',
-  'signed-out': 'Your sign-in has lapsed. Reload the page to sign in again.',
+  'signed-out': 'Your sign-in has expired.',
   unavailable: 'The hub cannot be reached. Reload the page to try again.',
 };
 
@@ -48,7 +50,10 @@ function SignedIn() {
     const reason = me.error instanceof SignInError ? me.error.reason : 'unavailable';
     return (
       <div className="flex h-full items-center justify-center p-6" data-testid="sign-in">
-        <p className="max-w-[420px] text-center text-ui text-fg-muted">{SIGN_IN_TEXT[reason]}</p>
+        <div className="flex max-w-[420px] flex-col items-center gap-3">
+          <p className="m-0 text-center text-ui text-fg-muted">{SIGN_IN_TEXT[reason]}</p>
+          {reason === 'signed-out' && <SignInAgainButton />}
+        </div>
       </div>
     );
   }
@@ -67,6 +72,8 @@ function Desk({ me }: { me: Me }) {
     useSecondMethodPrompt.setState({ due: false });
   }, []);
   useEffect(() => followHistory(), []);
+  // Before the sockets start: their failed connects are what set it probing.
+  useEffect(() => watchAccess(), []);
   useEffect(() => startGrid(hubBase()), []);
   useEffect(() => void loadDeviceKey(me.org.id), [me.org.id]);
   // A device already subscribed hands its subscription to the hub again; what came of it is kept for the
@@ -195,10 +202,11 @@ function KeyButton({ open }: { open: (panel: Panel) => void }) {
 
 function GridStatus({ compact = false }: { compact?: boolean }) {
   const status = useGrid((s) => s.status);
-  const label = status === 'open' ? 'Live' : 'Reconnecting';
+  const lapsed = useAccess((s) => s.lapsed);
+  const label = lapsed !== null ? 'Signed out' : status === 'open' ? 'Live' : 'Reconnecting';
   return (
     <span className="flex items-center gap-1.5 text-ui-sm text-fg-muted" data-testid="grid-status" title={compact ? label : undefined}>
-      <span className={['h-1.5 w-1.5 rounded-full', status === 'open' ? 'bg-success' : 'bg-warning'].join(' ')} aria-hidden />
+      <span className={['h-1.5 w-1.5 rounded-full', lapsed !== null ? 'bg-danger' : status === 'open' ? 'bg-success' : 'bg-warning'].join(' ')} aria-hidden />
       {compact ? <span className="sr-only">{label}</span> : label}
     </span>
   );
