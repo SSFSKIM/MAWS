@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 70,
-    "defer:pending": 53,
+    "defer:committed": 71,
+    "defer:pending": 52,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1024,7 +1024,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L119; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
       "remainingClause": "The in-flight answer is held outside the card (as F-C2's unreported-answer store holds its recovery record) and the card reads it on mount, with a remount-during-send test. Owner: P3 (the report view). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L119; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "04295b56eeca7b35d7499d9d41a530ca201ce125"
     },
     {
       "line": 120,
@@ -1034,8 +1034,8 @@
       "triageReason": "No supported native API/proven mechanism yet; preserve the case for a native capability pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L120; parent Decision Log 106): No supported native API/proven mechanism yet; preserve the case for a native capability pass. Owner: P4's native capability pass; revalidated at each Electron bump.",
       "remainingClause": "Descriptor-relative listing (a native helper or a later Node API) closes the window. Owner: P3 (the manifest reader). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L120; parent Decision Log 106): No supported native API/proven mechanism yet; preserve the case for a native capability pass. Owner: P4's native capability pass; revalidated at each Electron bump.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 121,
