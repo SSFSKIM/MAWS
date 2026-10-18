@@ -1,9 +1,9 @@
 {
   "counts": {
-    "defer": 124,
+    "defer": 125,
     "sitting": 10,
     "theirs": 42,
-    "fix": 53,
+    "fix": 52,
     "close": 9
   },
   "fixSteps": {
@@ -15,7 +15,7 @@
     "W-DOC-B": 4,
     "W-E": 5,
     "W-MINI": 6,
-    "W-DECK": 6,
+    "W-DECK": 5,
     "M4-measure": 1,
     "W-RD": 6,
     "W-PKG": 1
@@ -1115,9 +1115,9 @@
     },
     {
       "line": 211,
-      "bin": "fix",
-      "step": "W-DECK",
-      "reason": "X27/X29/X31 deck correctness: draft survival, comparison oracle, attribution, honest refusal, cancelled gestures and shown-version export."
+      "bin": "defer",
+      "step": "P4",
+      "reason": "Architect2026-10-18: canonical restore fixed28f9eecb7; reused-client same-actor/minute editor-undo remainder needs transaction/provenance identity (contract/persistence), explicitly P4."
     },
     {
       "line": 212,
@@ -1451,8 +1451,15 @@
     }
   ],
   "latestRuling": {
-    "parentDecision": 107,
-    "recordedAt": "2026-10-18T10:35:45Z",
-    "change": "L173 close to defer; prior checkpoint106 close citation did not establish its clause"
-  }
+    "authority": "architect message2026-10-18",
+    "recordedAt": "2026-10-18T15:29:51Z",
+    "change": "L211 fix to defer after exact canonical-restore repair; editor-undo remainder needs contract change"
+  },
+  "rulingHistory": [
+    {
+      "parentDecision": 107,
+      "recordedAt": "2026-10-18T10:35:45Z",
+      "change": "L173 close to defer; prior checkpoint106 close citation did not establish its clause"
+    }
+  ]
 }

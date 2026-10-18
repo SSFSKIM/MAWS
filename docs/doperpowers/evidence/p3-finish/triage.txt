@@ -1,10 +1,10 @@
-P3-F M0 triage — checkpoint1 DL106 at master2af6b6f76; L173 corrected by parent DL107
+P3-F M0 triage — checkpoint1 DL106 at master2af6b6f76; L173 corrected by parent DL107; L211 narrowed P4 carry2026-10-18
 Parent dispatch: bb7f321e89e6db40ccd5cb75cdde9d4a11d1941c at 713eb5b3b; M0 re-pin a0a042346 at b54afedc8 (merge 607ad9b9b).
 Tracker blob: 8c3b0f4779cd5224ec03cb0d6ddb41cfb909afb4. Full original row text/closing clauses: tracker-m0.json.
 255 table rows; 17 explicitly preclosed; 238 M0 open rows. L230 retains F1’s document/deck closure but is narrowed to Design: supplemental correction S-DESIGN-COMMENT below, not silently counted as an originally open row.
 Bins: fix (bounded daily-use/contract/gate repair), sitting (owner direction/hands), close (cited master evidence or explicit accept branch for checkpoint ruling), defer (named next owner), theirs (active lane, untouched).
-Counts: fix=53, sitting=10, close=9, defer=124, theirs=42 (DL107; frozen238 unchanged).
-Fix steps: W-T=5, W-MINI=6, W-DOC-A=4, W-DOC-B=4, W-STORE=4, W-DECK=6, W-SHELL=8, W-RD=6, W-E=5, W-PKG=1, M4-measure=1, M4-count=3.
+Counts: fix=52, sitting=10, close=9, defer=125, theirs=42 (DL107 plus L211 partial-fix carry; frozen238 unchanged).
+Fix steps: W-T=5, W-MINI=6, W-DOC-A=4, W-DOC-B=4, W-STORE=4, W-DECK=5, W-SHELL=8, W-RD=6, W-E=5, W-PKG=1, M4-measure=1, M4-count=3.
 Line handles are frozen at M0. Nothing here authorises starting before checkpoint 1.
 
 L26 | 2026-10-04 | C6 | Deferred: a closed local-command turn cannot receive a delayed `turn.ended` naming it; the reducer accepts only open named turns, then falls b… | defer | P4 — Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4.
@@ -189,7 +189,7 @@ L207 | 2026-10-16 | P3-C (landing) | Google Fonts faces are named, never fetched
 L208 | 2026-10-16 | P3-C (landing) | No native PPTX charts (the dialect has no chart element; svg charts export as pictures) and magic move is not mapped to PowerPoint's Morph. | defer | P4 — Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.
 L209 | 2026-10-16 | P3-C (landing) | The magic-move fade is a fade-in, not a crossfade with the old copy, and a moving descendant shares its faded parent's opacity. | defer | P4 — Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.
 L210 | 2026-10-16 | P3-C (landing) | The LibreOffice compare's text matcher excepts punctuation more broadly than symbols only. | fix | W-DECK — X27/X29/X31 deck correctness: draft survival, comparison oracle, attribution, honest refusal, cancelled gestures and shown-version export.
-L211 | 2026-10-16 | P3-C (landing) | On a restored slide, a notes deletion's attribution credit can consume an unrelated transient deletion. | fix | W-DECK — X27/X29/X31 deck correctness: draft survival, comparison oracle, attribution, honest refusal, cancelled gestures and shown-version export.
+L211 | 2026-10-16 | P3-C (landing) | On a restored slide, a notes deletion's attribution credit can consume an unrelated transient deletion. | defer | P4 — Architect2026-10-18: canonical restore fixed28f9eecb7; reused-client same-actor/minute editor-undo remainder needs transaction/provenance identity (contract/persistence), explicitly P4.
 L212 | 2026-10-16 | P3-C (landing) | An uploaded family named only in an unresolved custom font-token fallback is not aliased in the preview. | defer | P4 — Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.
 L213 | 2026-10-16 | P3-C (landing) | The owner's sitting: the presenter in full screen and on two displays; PowerPoint and Keynote opening the three font variants; the contained s… | sitting | P-presenter — Native full-screen/two-display presenter and PowerPoint/Keynote font/SVG reading require the owner.
 L214 | 2026-10-16 | P3-C (landing) | A's generic publish refusal copy still says force overwrites, but a merge that would load held or lose content is refused even under force (th… | fix | W-DECK — X27/X29/X31 deck correctness: draft survival, comparison oracle, attribution, honest refusal, cancelled gestures and shown-version export.

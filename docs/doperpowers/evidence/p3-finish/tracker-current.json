@@ -119,6 +119,12 @@
       "currentAtCommit": "a5e3d7323",
       "currentReview": "architect accepted four-run confound; final parent-bound half retained",
       "reconciledAt": "2026-10-18T15:05:42Z"
+    },
+    "211": {
+      "original": "| 2026-10-16 | P3-C (landing) | On a restored slide, a notes deletion's attribution credit can consume an unrelated transient deletion. | C's M8. | Credit notes deletions by their own leaf, as text is since M8's fix wave 2. Owner: P3-F. |",
+      "current": "| 2026-10-16 | P3-C (landing) | On a restored slide, a notes deletion's attribution credit can consume an unrelated transient deletion. | C's M8. | P3-F W-DECK partial fix, 2026-10-18: canonical artifact restore is exact at28f9eecb7. The restored notes node carries the fresh revertUpdate scratch clientID, so later same-human/same-minute typing cannot absorb deletion credit (GC-on production-route regression, independent recheck). Remaining: a slide re-created by an editor undo, whose clientID writes notes again in the same actor/minute, still cannot distinguish a transient leaf from re-created text because transaction identity is not retained. No agent re-import case is claimed verified. Re-deferred to P4 by architect ruling2026-10-18: exact handling of that retained-client remainder needs transaction/provenance identity, a contract or persistence change, not another heuristic. Preserve the existing attribution contract until that P4 change; partial fix, not closure. Owner: P4. |",
+      "currentReview": "Architect-approved partial fix and explicit P4 remainder; first four cells preserved",
+      "reconciledAt": "2026-10-18T15:29:51Z"
     }
   }
 }

@@ -1,5 +1,5 @@
 {
-  "status": "two verified review findings under fresh bounded fix wave; source removals not accepted",
+  "status": "bounded source correction independently approved; L211 restored as narrowed P4 remainder; pair3 gate running",
   "executor": "a00549767dfb02089",
   "reviewer": "a042b15ec9aa10fab",
   "reviewBase": "f6bf5d21d1c15843bd29211158fa1a8bcd8aee0e",
@@ -44,6 +44,19 @@
       "rebased valid notes draft appears saved while unwritten",
       "same-actor same-minute transient not distinguishable by coarse attribution filter"
     ],
-    "rule": "exact existing-data repair or explicit narrowed carry, no new persisted contract; one recheck"
+    "rule": "exact existing-data repair or explicit narrowed carry, no new persisted contract; one recheck",
+    "commits": [
+      "a5359afa8",
+      "28f9eecb7"
+    ],
+    "reviewRound2": "correct; no material findings",
+    "L211Carry": "| 2026-10-16 | P3-C (landing) | On a restored slide, a notes deletion's attribution credit can consume an unrelated transient deletion. | C's M8. | P3-F W-DECK partial fix, 2026-10-18: canonical artifact restore is exact at28f9eecb7. The restored notes node carries the fresh revertUpdate scratch clientID, so later same-human/same-minute typing cannot absorb deletion credit (GC-on production-route regression, independent recheck). Remaining: a slide re-created by an editor undo, whose clientID writes notes again in the same actor/minute, still cannot distinguish a transient leaf from re-created text because transaction identity is not retained. No agent re-import case is claimed verified. Re-deferred to P4 by architect ruling2026-10-18: exact handling of that retained-client remainder needs transaction/provenance identity, a contract or persistence change, not another heuristic. Preserve the existing attribution contract until that P4 change; partial fix, not closure. Owner: P4. |",
+    "verifiedLogs": {
+      "red1": "4fail/37pass exit1",
+      "redClose": "1fail/9pass exit1",
+      "history": "22pass exit0",
+      "combined": "53pass/4files exit0",
+      "lint": "exit0"
+    }
   }
 }
