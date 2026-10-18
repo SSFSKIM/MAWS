@@ -112,6 +112,12 @@
   color: var(--danger);
 }
 
+/* An owner input whose turn was undone before the session read it (MAWS's dropped prompt, `source/off-chain.ts`): dimmed
+   in place, as a send still on its way is, its caption saying it was not read. */
+.transcript-user[data-dropped] .transcript-user-content {
+  opacity: 0.6;
+}
+
 /* An ended or retired session's end marker: MAWS's boundary row with the session named under it and, when it can be,
    Resume (mockups/desk/09-session-view.html, 3A and 3B). */
 .desk-end-marker {
