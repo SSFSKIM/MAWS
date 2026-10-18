@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 7,
-    "defer:pending": 116,
+    "defer:committed": 8,
+    "defer:pending": 115,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -331,7 +331,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L33; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Nested repositories detected generally (submodules still counted), `modules/<name>/HEAD` counted for the parent, `reftable/` counted as refs. Re-deferred 2026-10-07 (E11 1.6): hypothetical layouts. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L33): hypothetical layouts for the owner. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L33; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "40dca3255e4d283aa7f79265413649c239da6df4"
     },
     {
       "line": 34,
@@ -341,8 +341,8 @@
       "triageReason": "Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L34; parent Decision Log 106): Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here. Owner: the gate lane.",
       "remainingClause": "A chained verify or a c7 run while the owner uses the desktop passes its keyboard cases; if one fails, the inference was wrong and this row takes that log. E11's M5 (2026-10-08, final head 06ca330d, `lsappinfo front` \"Google Chrome\", the owner at the desktop): the chained `e2e:c7` failed one keyboard case, `e2e/requests.spec.ts:283`, whose `page.keyboard.press('Escape')` after `auto.focus()` never reached the dialog (a lost key rather than stray characters), then passed 29/29 retried alone with the desktop still in use (`docs/doperpowers/evidence/p1-e11/gates/final-retries-06ca330d.txt`); so a desktop in use still costs keyboard cases now and then, and the row stays. Closes when the c7 keyboard cases pass three chained runs with the owner at the desktop, or the lost-key cause is found (e.g. a window that is not key under `showInactive()` while another app holds focus). Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L34): needs three chained c7 runs with the owner at the desktop; F gate headers record `lsappinfo front` and the row takes any such run as evidence. Owner: P3 (gate debt). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L34; parent Decision Log 106): Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here. Owner: the gate lane.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 36,
