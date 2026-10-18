@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { withNativeClipboard } from './support/clipboard';
+import { traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 import { join } from 'node:path';
@@ -292,6 +293,14 @@ async function openBesideSession(page: Page, title: string, lines: string[]): Pr
   return { id: artifact.id, record, text };
 }
 
+// The editor element's Tiptap editor, as `durable` reads it: its document, its selection and its edits not yet acknowledged.
+type EditorRoot = HTMLElement & {
+  editor?: {
+    state: { doc: { descendants(f: (node: { type: { name: string }; textContent: string }) => boolean | void): void; textBetween(from: number, to: number, separator: string): string }; selection: { from: number; to: number } };
+    extensionManager: { extensions: Array<{ name: string; options: { hold?: { base: { state(): { unsaved: number } } } } }> };
+  };
+};
+
 // Selects `quote` inside the editor's paragraph `index` (a DOM selection the editor reads, as a person's drag would set).
 async function selectIn(text: Locator, index: number, quote: string): Promise<void> {
   await text.evaluate(
@@ -440,6 +449,9 @@ test('commented text through the Mac’s pasteboard: a copy pasted in the same d
   const QUOTE = 'launch plan';
   const threadId = await commentOn(page, record, text, 0, QUOTE);
   const app = launch!.app;
+  // P3-F (tracker row 199, the paste): a dropped paste reports the editor's paste path (its transformPasted and
+  // handlePaste props, the paste's transaction and any filter that refused it) beside the page's focus and selection
+  const trace = await traceForeground(app, page, { editor: '[data-region="panel"] .ds-doc .ProseMirror' });
 
   await withNativeClipboard(app, [QUOTE], async () => {
     // a copy: the pasteboard's HTML carries the thread (the mark's data-thread), the paste is plain text
@@ -452,8 +464,23 @@ test('commented text through the Mac’s pasteboard: a copy pasted in the same d
     });
     expect(html, 'the pasteboard’s text/html carries the thread id').toContain(`data-thread="${threadId}"`);
     await caretAtEndOf(page, text, 1);
-    await edit('paste');
-    await expect(text.locator('p').nth(1)).toHaveText(`A second paragraph waits here.${QUOTE}`);
+    await trace.step(
+      'commented-paste',
+      async () => {
+        await edit('paste');
+        await expect(text.locator('p').nth(1)).toHaveText(`A second paragraph waits here.${QUOTE}`);
+      },
+      () =>
+        text.evaluate((root) => {
+          const editor = (root as EditorRoot).editor!;
+          const { from, to } = editor.state.selection;
+          const paragraphs: string[] = [];
+          editor.state.doc.descendants((node) => {
+            if (node.type.name === 'paragraph') paragraphs.push(node.textContent);
+          });
+          return { editorSelection: [from, to], editorParagraphs: paragraphs, page: Array.from(root.querySelectorAll('p')).map((p) => p.textContent) };
+        }),
+    );
     expect(await markedText(text), 'the copy carries no second comment').toEqual({ [threadId]: QUOTE });
     await expect(text.locator('p').nth(0).locator(`[data-thread="${threadId}"]`)).toHaveText(QUOTE);
 
