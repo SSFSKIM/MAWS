@@ -42,7 +42,7 @@ OAuth token carries no Access scopes, which is why the setup token exists.
      - `desk-hub machines`: Service Auth, any Access service token;
      - `desk-hub public paths`: Bypass, everyone;
    - two self-hosted applications:
-     - `desk-hub`: the whole workers.dev host, with owner and machines, a 24 h session, and 401 for a failed service token in place of a redirect;
+     - `desk-hub`: the whole workers.dev host, with owner and machines, a 30-day session (`720h`, the owner's choice of 2026-10-18: a 24 h session left the phone signed out each day), and 401 for a failed service token in place of a redirect;
      - `desk-hub public paths`: `/machine/enroll`, `/manifest.webmanifest`, and `/icons/*` on the same host, Bypass. It is more specific, so it takes precedence.
 
    A hostname-level application is used, not the Worker's own Access toggle, which refuses WebSocket upgrades. Access admits any service token of the account; the hub's Registry refuses a client id it never enrolled (`403 not-enrolled`).
