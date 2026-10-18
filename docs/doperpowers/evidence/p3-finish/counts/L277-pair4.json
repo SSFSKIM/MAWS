@@ -1,0 +1,8 @@
+{
+  "recordedAt": "2026-10-18T19:00:47Z",
+  "originalLine": 277,
+  "gate": 39149994319,
+  "gateRecord": "gates/pair4-39149994319.json",
+  "proof": "restore scene entry native=true at18:03:55.542Z and scene passed; four of ten, no full-set credit",
+  "scope": "Only this native scene streak advances; overall pair4 failed; unrelated standalone selection does not reset the restore scene count."
+}
