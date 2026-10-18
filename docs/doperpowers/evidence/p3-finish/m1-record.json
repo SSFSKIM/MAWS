@@ -16,8 +16,8 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 1,
-    "preclosed:pending": 15,
+    "preclosed:committed": 2,
+    "preclosed:pending": 14,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -27,15 +27,15 @@
       "action": "remove",
       "note": "Recorded closure intact: 'Closed 2026-10-10 (cua board #102)' (757adbdee, on master). Re-verified because P2-F 1.6 (ad89b5809) appended a later 'Re-deferred ... Owner: the cua_repl session' after that closure: src/main/open-external.ts:21-25 writes the openExternal seam line under MAWS_E2E with the open log set, and e2e/browser.spec.ts:53-54 clicks 'Open in external browser' and polls for the line. The clause is met; the trailing re-deferral is stale.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "f396605d8dbe69ccea1629601e083166e4feb6f0"
     },
     {
       "line": 184,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: ruled a Linux pty fact, both flood cases guarded per gate-offload Decision Log 20 and §6, the Mac lane keeps them; 'Closed.'",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 188,
