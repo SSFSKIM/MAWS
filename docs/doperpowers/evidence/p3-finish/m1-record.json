@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 120,
-    "defer:pending": 3,
+    "defer:committed": 121,
+    "defer:pending": 2,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1574,7 +1574,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L252; parent Decision Log 106): Dense expansion needs a dataset cell-count/resource contract or separate scale probe; do not introduce an unapproved acceptance limit. Owner: P4.",
       "remainingClause": "Closes when the parse is row-major or streaming, or the spec adds a cell-count bound, with a test at the bound. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L252; parent Decision Log 106): Dense expansion needs a dataset cell-count/resource contract or separate scale probe; do not introduce an unapproved acceptance limit. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "250c62f8e2f21ffd7d4969cefd9c8cc7341e3a9f"
     },
     {
       "line": 254,
@@ -1584,8 +1584,8 @@
       "triageReason": "Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L254; parent Decision Log 106): Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely. Owner: P4.",
       "remainingClause": "Closes when one spawn carries the lifeline (the server started by the lifeline process itself, or an equivalent single spawn) with a hard-death test across the startup window; no native guardian or packaging change. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L254; parent Decision Log 106): Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 263,
