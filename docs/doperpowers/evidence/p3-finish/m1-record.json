@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 100,
-    "defer:pending": 23,
+    "defer:committed": 101,
+    "defer:pending": 22,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1354,7 +1354,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L164; parent Decision Log 106): Existing measured mitigation/bound stands; a new performance architecture or proposal signal needs its own pass. Owner: P4.",
       "remainingClause": "A host-side signal of which structs are real proposals. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L164; parent Decision Log 106): Existing measured mitigation/bound stands; a new performance architecture or proposal signal needs its own pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "80280da6b299b6278f017e63eb9363999f01611d"
     },
     {
       "line": 167,
@@ -1364,8 +1364,8 @@
       "triageReason": "Closing clause requires extending a shared adapter/assets-version contract; no silent new contract in F. Architect may explicitly promote after ruling.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L167; parent Decision Log 106): Closing clause requires extending a shared adapter/assets-version contract; no silent new contract in F. Ruled P4 at checkpoint 1 (parent Decision Log 106 (5)). Owner: P4.",
       "remainingClause": "The hook gains the restored version's provenance. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L167; parent Decision Log 106): Closing clause requires extending a shared adapter/assets-version contract; no silent new contract in F. Ruled P4 at checkpoint 1 (parent Decision Log 106 (5)). Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 169,
