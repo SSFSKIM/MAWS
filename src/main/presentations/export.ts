@@ -112,7 +112,7 @@ export async function deckSystem(request: Pick<ExportRequest, 'artifactId' | 've
 const dataUrl = (bytes: Uint8Array, mime: string) => `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`;
 
 /** The system's faces, their files inlined, read at the system's revision (a face whose file cannot be read is left out). */
-export async function systemFacesCss(system: DeckSystem, deps: PresentationExportDeps): Promise<string> {
+export async function systemFacesCss(system: DeckSystem, deps: Pick<PresentationExportDeps, 'call'>): Promise<string> { // F (L182): B's document pages too
   if (!system.id || !system.documentCss) return '';
   const urls = new Map<string, string>();
   for (const ref of new Set(systemFaces(system.documentCss, system.tokens).flatMap((face) => face.refs))) {
