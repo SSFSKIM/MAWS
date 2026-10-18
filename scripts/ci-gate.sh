@@ -7,7 +7,10 @@
 # Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
 # /tmp/maws-review/gates/ci-<short>/, keeps the whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the
-# ref (unless --keep) and exits with the run's status (0 green, 1 anything else). When the mini refused jobs (ci-kit's
+# ref (unless --keep) and exits with the run's status (0 green, 1 anything else). A job GCE preempted on ci-kit's pool
+# is rerun alone, once per job per run, and the script reports the run's final attempt: the line before the run's status,
+# `ci-gate: run <id> <conclusion>`, is `ci-gate: run <id> attempt <n>`, and a line before those names each preempted job
+# and how its rerun ended, one preempted again staying red (Decision Log 70). When the mini refused jobs (ci-kit's
 # job-started check: a dialog or the wrong app in front), the last line before the run's status names the refused, the
 # green and the red, and the --gates that relaunches the refused and the red on the same tree (Decision Log 58(c), 59(1)),
 # with --default-beside naming the run's other e2e groups when the relaunch takes e2e:default (Decision Log 66).
@@ -48,6 +51,9 @@ REPO=SSFSKIM/MAWS
 # refusals: the refused against the finished, and the relaunch line, when the mini refused jobs (Decision Log 58(c), 66).
 # shellcheck source=scripts/ci-gate-refusals.sh
 source "$(dirname "$0")/ci-gate-refusals.sh" || exit 2
+# settle_run: the run's final attempt, a job a spot preemption ended rerun alone, once (Decision Log 70).
+# shellcheck source=scripts/ci-gate-preemptions.sh
+source "$(dirname "$0")/ci-gate-preemptions.sh" || exit 2
 usage() {
   awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0" >&2
   exit 2
@@ -174,27 +180,28 @@ echo "ci-gate: https://github.com/$REPO/actions/runs/$run_id"
 
 # A failed watch (an API error mid-poll) is not the end of the run: only the status `completed` is.
 # A run that can no longer be read (credentials revoked, run deleted) would be retried forever, so consecutive read failures are bounded.
-unreadable=0
-view_err=$out/ci-$short.err
-while :; do
-  gh -R "$REPO" run watch "$run_id" --compact --interval 30 >/dev/null 2>&1
-  if run_status=$(gh -R "$REPO" run view "$run_id" --json status --jq .status 2>"$view_err"); then
-    unreadable=0
-    [[ $run_status == completed ]] && break
-  else
-    unreadable=$((unreadable + 1))
-    if ((unreadable >= 20)); then
-      echo "ci-gate: run $run_id cannot be read (the last gh error follows)" >&2
-      cat "$view_err" >&2
-      rm -f "$view_err"
-      finish 1
+await_run() {
+  local unreadable=0 view_err=$out/ci-$short.err run_status
+  while :; do
+    gh -R "$REPO" run watch "$run_id" --compact --interval 30 >/dev/null 2>&1
+    if run_status=$(gh -R "$REPO" run view "$run_id" --json status --jq .status 2>"$view_err"); then
+      unreadable=0
+      [[ $run_status == completed ]] && break
+    else
+      unreadable=$((unreadable + 1))
+      if ((unreadable >= 20)); then
+        echo "ci-gate: run $run_id cannot be read (the last gh error follows)" >&2
+        cat "$view_err" >&2
+        rm -f "$view_err"
+        finish 1
+      fi
     fi
-  fi
-  sleep 15
-done
-rm -f "$view_err"
-conclusion=$(gh -R "$REPO" run view "$run_id" --json conclusion --jq .conclusion)
-jobs=$(gh -R "$REPO" run view "$run_id" --json jobs --jq '.jobs[] | "\(.conclusion // .status)\t\(.name)"' | sort -k2)
+    sleep 15
+  done
+  rm -f "$view_err"
+}
+# The run's final attempt: a job a spot preemption ended is rerun alone, once (Decision Log 70).
+settle_run
 printf '%s\n' "$jobs"
 
 if [[ $conclusion != success ]]; then
@@ -203,8 +210,11 @@ if [[ $conclusion != success ]]; then
   failed_log=$(gh -R "$REPO" run view "$run_id" --log-failed | perl -pe 's/(\e|\^\[)\[[0-9;]*[A-Za-z]//g')
   # The failed steps' last lines, each under its job's name, colours and timestamps stripped.
   printf '%s\n' "$failed_log" | perl -pe 's/^([^\t]*)\t[^\t]*\t\S+ /$1  /' | tail -80
-  refusals "$jobs" "$failed_log"
 fi
+[[ -z $preemptions ]] || printf '%s\n' "$preemptions"
+[[ $conclusion == success ]] || refusals "$jobs" "$failed_log"
+# The attempt on a line of its own, so the status line stays what every waiter matches (^ci-gate: run [0-9]+ [a-z_]+$).
+echo "ci-gate: run $run_id attempt $run_attempt"
 echo "ci-gate: run $run_id $conclusion"
 [[ $conclusion == success ]] && finish 0
 finish 1
