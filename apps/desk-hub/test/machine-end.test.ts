@@ -20,7 +20,8 @@ function machineObject() {
   const kv = new Map<string, unknown>();
   const ctx = { storage: { kv: { get: (k: string) => kv.get(k), put: (k: string, v: unknown) => kv.set(k, v), delete: (k: string) => kv.delete(k) } } };
   const project = { closed: async () => {}, renew: async () => {} };
-  const env = { PROJECT: { idFromName: (name: string) => name, get: () => project } };
+  const registry = { orgFrame: async () => ({ frame: { t: 'org', projects: [], machines: [] }, version: 0 }) };
+  const env = { PROJECT: { idFromName: (name: string) => name, get: () => project }, REGISTRY: { idFromName: (name: string) => name, get: () => registry } };
   return new Machine(ctx as never, env as never);
 }
 

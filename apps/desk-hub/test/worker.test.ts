@@ -114,9 +114,10 @@ describe("a machine's stream, held by its Machine object", () => {
     return { stub, next, cancel: () => reader.cancel() };
   }
 
-  it('opens with a welcome naming the machine and its connection generation, and a newer stream ends the older', async () => {
+  it("opens with a welcome naming the machine and its connection generation, then the org's directory, and a newer stream ends the older", async () => {
     const first = await open('mini');
     expect(await first.next()).toEqual({ event: 'welcome', frame: { t: 'welcome', org: ORG, machine: 'mini', generation: 1, heartbeat_ms: 15_000 } });
+    expect(await first.next()).toMatchObject({ event: 'org', frame: { t: 'org', projects: expect.any(Array), machines: expect.any(Array) } });
     const second = await open('mini');
     expect(await second.next()).toMatchObject({ frame: { t: 'welcome', generation: 2 } });
     expect(await first.next()).toBe('ended');
@@ -129,7 +130,8 @@ describe("a machine's stream, held by its Machine object", () => {
     expect(await (idle as unknown as { send(frame: DownFrame): Promise<string> }).send({ t: 'hb', at: 'x' })).toBe('offline');
 
     const stream = await open('SK.local');
-    await stream.next();
+    await stream.next(); // welcome
+    await stream.next(); // the org's directory
     const send = (stream.stub as unknown as { send(frame: DownFrame): Promise<string> }).send.bind(stream.stub);
     const frame: DownFrame = { t: 'rpc-ack', project: PROJECT, nonce: 'AQEBAQEBAQEBAQEBAQEBAQ' };
     expect(await send(frame)).toBe('written');

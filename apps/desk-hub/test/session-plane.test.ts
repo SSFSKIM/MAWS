@@ -5,12 +5,12 @@
 // reference workerd will not evict, so its termination is `ctx.abort()` through a suite seam.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { GridDown, ProjectDown, ProjectSummary, ProjectUp } from '../src/protocol/browser';
-import { FRAME_LIMIT, PartAssembler } from '../src/protocol/parts';
+import { FRAME_LIMIT } from '../src/protocol/parts';
 import { importOrgKey, newNonce, seal, sealRpc, verify } from '../src/protocol/codes';
 import type { DownFrame } from '../src/protocol/machine';
 import type { Rpc, RpcDraft } from '../src/protocol/rpc';
 import type { Delivery, Raised, SessionMessage, Settled } from '../src/protocol/session';
-import { BrowserClient, enroll, MachineClient, type Credentials } from './support/clients';
+import { BrowserClient, enroll, GridClient, MachineClient, waitFor, type Credentials } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 import { decrypt, userAgent, vapidClaims } from './support/push';
 
@@ -1155,48 +1155,4 @@ async function gridReached(grid: GridClient, project: string, from: number, coun
   await waitFor(() => (grid.frames.slice(from).some(carries) ? true : undefined)).catch(() => {
     throw new Error(`no ${what}; got ${JSON.stringify(grid.frames.slice(from))}`);
   });
-}
-
-async function waitFor<T>(probe: () => T | undefined | Promise<T | undefined>, ms = 5000): Promise<T> {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    const value = await probe();
-    if (value !== undefined) return value;
-    if (Date.now() > deadline) throw new Error('timed out');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
-class GridClient {
-  readonly frames: GridDown[] = [];
-  /** The size in bytes of every message the socket carried, parts included. */
-  readonly wire: number[] = [];
-  private readonly parts = new PartAssembler();
-  private socket!: WebSocket;
-  static async open(hub: LocalHub, who: string): Promise<GridClient> {
-    const client = new GridClient();
-    client.socket = new WebSocket(`${hub.url.replace('http', 'ws')}/api/registry/socket`, { headers: { 'x-desk-standin-user': who } } as unknown as string[]);
-    client.socket.addEventListener('message', (event) => {
-      const text = String(event.data);
-      client.wire.push(Buffer.byteLength(text));
-      const frame = JSON.parse(text) as GridDown;
-      if (frame.t !== 'part') return void client.frames.push(frame);
-      const whole = client.parts.add(frame);
-      if (whole !== undefined) client.frames.push(whole as GridDown);
-    });
-    await new Promise<void>((resolve, reject) => {
-      client.socket.addEventListener('open', () => resolve());
-      client.socket.addEventListener('error', () => reject(new Error('grid socket refused')));
-    });
-    await waitFor(() => (client.frames.length > 0 ? true : undefined), 15_000);
-    return client;
-  }
-  next(predicate: (frame: GridClient['frames'][number]) => boolean, what: string) {
-    return waitFor(() => this.frames.find(predicate), 5000).catch(() => {
-      throw new Error(`no ${what}; got ${JSON.stringify(this.frames.slice(-5))}`);
-    });
-  }
-  close() {
-    this.socket.close(1000, 'done');
-  }
 }

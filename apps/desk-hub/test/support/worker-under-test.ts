@@ -16,7 +16,8 @@
 //   - a `Project` that holds its archive lookups, lists its send queues, and queues a frame for any generation;
 //   - a `Project` armed to fail its next `forget`, as a failed RPC from the Registry would;
 //   - a `Registry` whose org record can be rewritten, as an object still on a deploy's previous version would make it;
-//   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand.
+//   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand;
+//   - a `Registry` that drops a project's row, as a hub from before machine projects lacks a machine's.
 import { Machine as DeployedMachine, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
 import { Registry as DeployedRegistry } from '../../src/objects/registry';
@@ -47,6 +48,7 @@ import {
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   TIMING_PATH,
+  UNREGISTER_PATH,
 } from './send-fault';
 
 export { default } from '../../src/worker';
@@ -65,6 +67,11 @@ export class Registry extends DeployedRegistry {
         }
       });
       return new Response('added');
+    }
+    if (url.pathname === UNREGISTER_PATH) {
+      const { id } = (await request.json()) as { id: string };
+      this.ctx.storage.sql.exec('DELETE FROM projects WHERE id = ?', id);
+      return new Response('unregistered');
     }
     if (url.pathname === ORG_ROW_PATH) {
       const { id, name } = (await request.json()) as { id: string; name: string };

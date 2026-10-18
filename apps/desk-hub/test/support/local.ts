@@ -35,6 +35,7 @@ import {
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   TIMING_PATH,
+  UNREGISTER_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -287,6 +288,10 @@ export async function startLocalHub() {
     /** Shortens how long a socket's `visibility` holds a project's pushes back (90 s deployed). */
     async visibleWindow(project: string, ms: number) {
       await seam('PROJECT', project, PROJECT_VISIBLE_PATH, { ms });
+    },
+    /** Drops a project's row from the Registry, as a hub from before machine projects never held one. */
+    async unregister(id: string) {
+      await seam('REGISTRY', ORG, UNREGISTER_PATH, { id });
     },
     /** Puts `count` projects straight into the Registry, with long names. */
     async addProjects(count: number, prefix: string) {

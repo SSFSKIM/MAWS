@@ -8,13 +8,17 @@
 // them too, so the lease ends at once. Neither is relied on alone: an object can restart without running any of this,
 // and the projects then find the lease lapsed (Project's alarm).
 //
+// The org's directory (`org`) is second on every stream: the object asks the org's `Registry` for it as the stream
+// opens and writes nothing else after `welcome` until it is written. The `Registry` sends it again on every change
+// (`directory`), each carrying its version, so one that arrives behind a later one, or behind the snapshot, is passed by.
+//
 // A revocation is a fence: the revoked credential's client id is kept, and a request carrying it is refused here, so
 // one the Worker admitted before the revocation and delivered after it opens nothing, and the name enrolled again (a
 // new credential) is served.
 import { DurableObject } from 'cloudflare:workers';
 import { readLimited } from '../drain';
 import { CLIENT_HEADER, heartbeatMs, MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
-import { GENERATION_HEADER, LEASE_PERIODS, POST_LIMIT, type DownFrame, type UpFrame } from '../protocol/machine';
+import { GENERATION_HEADER, LEASE_PERIODS, POST_LIMIT, type DownFrame, type OrgFrame, type UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
 import { PROJECT_ID, type MachineContext } from './project';
 
@@ -30,6 +34,10 @@ type Stream = {
   parts: PartAssembler;
   /** The projects this stream opened with `hello`: those its lease is renewed and ended in. */
   projects: Set<string>;
+  /** Settles once the org's directory is written after `welcome` (or could not be had): every other write waits on it. */
+  ready: Promise<void>;
+  /** The version of the directory written on this stream; 0 before the first. */
+  directoryVersion: number;
 };
 
 /** How often the stream's heartbeat goes and how long a renewal keeps the machine online. */
@@ -75,6 +83,18 @@ export class Machine extends DurableObject<Env> {
     return (await this.write(stream, frame)) ? 'written' : 'offline';
   }
 
+  /** Writes the org's directory to the machine's current stream, unless it wrote that version or a later one already;
+   * "offline" when it has no stream. */
+  async directory(frame: OrgFrame, version: number): Promise<'written' | 'offline'> {
+    const stream = this.stream;
+    if (!stream) return 'offline';
+    await stream.ready;
+    if (this.stream !== stream) return 'offline';
+    if (version <= stream.directoryVersion) return 'written';
+    stream.directoryVersion = version;
+    return (await this.write(stream, frame, false)) ? 'written' : 'offline';
+  }
+
   /** Ends the stream of this generation, if it is still the current one (a project could not deliver to it). */
   close(generation: number): void {
     if (this.stream?.generation === generation) this.end(this.stream);
@@ -115,11 +135,22 @@ export class Machine extends DurableObject<Env> {
       heartbeat: setInterval(() => void this.write(stream, { t: 'hb', at: new Date().toISOString() }), heartbeatMs),
       parts: new PartAssembler(),
       projects: new Set(),
+      ready: Promise.resolve(),
+      directoryVersion: 0,
     };
     this.stream = stream;
     // The client's close reaches the object as the request's abort (compatibility flag enable_request_signal).
     request.signal.addEventListener('abort', () => this.end(stream));
-    void this.write(stream, { t: 'welcome', org, machine, generation, heartbeat_ms: heartbeatMs });
+    void this.write(stream, { t: 'welcome', org, machine, generation, heartbeat_ms: heartbeatMs }, false);
+    // A directory the Registry cannot give now comes with its next change.
+    stream.ready = this.env.REGISTRY.get(this.env.REGISTRY.idFromName(org))
+      .orgFrame()
+      .then(async ({ frame, version }) => {
+        if (version < stream.directoryVersion) return;
+        stream.directoryVersion = version;
+        await this.write(stream, frame, false);
+      })
+      .catch(() => {});
     return new Response(readable, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' } });
   }
 
@@ -235,7 +266,9 @@ export class Machine extends DurableObject<Env> {
     return json(200, { ok: true, frames: applied + carry });
   }
 
-  private async write(stream: Stream, frame: DownFrame): Promise<boolean> {
+  /** Writes a frame to the stream, after the directory unless `ordered` is false (the frames that open it). */
+  private async write(stream: Stream, frame: DownFrame, ordered = true): Promise<boolean> {
+    if (ordered) await stream.ready;
     try {
       await stream.writer.write(sse(frame));
       return true;

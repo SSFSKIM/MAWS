@@ -8,7 +8,7 @@ import { PROJECT, S, stageProject, summary } from './scene';
 import { VECTOR_KEY } from '../test/vectors';
 
 test('the grid lists the org\'s projects and follows each change within 2 seconds', async ({ page, hub }) => {
-  hub.setGrid([summary({ waiting: 0, working: 2 }), { id: 'arkho', name: 'arkho', machines: 1, machines_online: 0, working: 0, waiting: 0 }]);
+  hub.setGrid([summary({ waiting: 0, working: 2 }), { id: 'arkho', name: 'arkho', kind: 'hub', machines: 1, machines_online: 0, working: 0, waiting: 0 }]);
   await page.goto(hub.url);
   const card = page.locator(`[data-project="${PROJECT}"]`);
   await expect(card).toContainText('MAWS');
