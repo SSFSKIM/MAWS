@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 87,
-    "defer:pending": 36,
+    "defer:committed": 88,
+    "defer:pending": 35,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1211,7 +1211,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L147; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "Tracked changes derived from the attribution diff at export. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L147; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "ed09585db31c4c86a1f3cf04f9e0512360591be3"
     },
     {
       "line": 148,
@@ -1221,8 +1221,8 @@
       "triageReason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L148; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "A block-scoped hold. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L148; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 149,
