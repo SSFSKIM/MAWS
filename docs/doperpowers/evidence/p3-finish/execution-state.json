@@ -78,17 +78,21 @@
   },
   "M2-preparation": {
     "executor": "adeb9c47ffd6b1bc0",
-    "status": "draft plus side-by-side procedure prepared; final-source and exact Space-default labels recheck pending; no owner steps run",
+    "status": "draft source-grounded through exact Settings > Artifacts labels and design-system Duplicate; final-source recheck and owner execution pending",
     "commit": "b9551cab8",
     "reviewer": "adcc38ef2eb777453",
     "fixCommit": "0a64bcb47",
     "reviewRounds": 2,
     "comparisonEditor": "adeb9c47ffd6b1bc0",
     "comparisonSource": "25b29e64f; independent panel/main history controllers confirmed read-only",
-    "comparisonCommit": "b34c32786"
+    "comparisonCommit": "b34c32786",
+    "exactLabelsCommits": [
+      "6d18c529a",
+      "c73e78e8c"
+    ]
   },
   "W-MINI": {
-    "status": "native diagnosis run failed paste and must-read; other native readings and source repairs pending",
+    "status": "assessment complete; model-aware readiness and regression-first minimal must-read repair implementing",
     "foreground": "package-script activation permitted; lane hold lifted; child DL13",
     "executor": "ab180409652104010",
     "claims": "pair2-claims.json",
@@ -112,7 +116,10 @@
         39130559347
       ],
       "basis": "scene pass after1235d4a77; native target entry true; other scene failure does not erase case-specific streak"
-    }
+    },
+    "repairAssessment": "a788b678f28592255",
+    "diagnosticSupplement": "14c3e6fd6",
+    "remainingUnionGateBudget": 1
   },
   "W-STORE": {
     "status": "actual restyle e2e passed39130559347; token-test correction05d1f824b verified locally; authoritative rerun pending",

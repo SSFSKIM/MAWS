@@ -1,6 +1,6 @@
 {
   "status": "intermediate diagnostic candidate; all six rows remain open/narrowed, not wave completion",
-  "recordedAt": "2026-10-18T12:06:59Z",
+  "recordedAt": "2026-10-18T13:40:53Z",
   "executor": "ab180409652104010",
   "base": "344d7131c",
   "commits": {
@@ -24,16 +24,16 @@
     "notRun": "local typecheck, e2e, app, engine"
   },
   "diagnoses": {
-    "L199": "paste and must-read instrumented only; native traces and resulting fixes/pinning still required",
-    "L200": "deferred close-tab focus restore can steal a subsequently opened Overview; deterministic source regression proven, mini ordering pending",
+    "L199": "Paste applied an unfiltered transaction, final selection34/34 with unchanged text strongly suggests replacing stale copy selection; pre-paste PM state not sampled. Must-read source candidate: handledFocus recorded before frame, attach rehydration reissues and cancels frame, reissue guard drops never-applied focus. Native ordering unobserved; bounded assessment pending.",
+    "L200": "deferred close-tab focus restore can steal a subsequently opened Overview; deterministic source regression proven, mini ordering pending;39130559347 shell passed but target native entry false, no foreground proof",
     "L264": "palette now waits actual combobox focus; full-set default green remains",
-    "L201": "await aria-enabled after async selector write (fast-mode write, not model set as old suspicion); native pass pending",
-    "L217": "one queued page timer orders the single arrow after sensor listener; preserved over/order/replica checks; native root cause unconfirmed",
+    "L201": "await aria-enabled after async selector write (fast-mode write, not model set as old suspicion); native pass pending;39130559347 named widgets case passed",
+    "L217": "one queued page timer orders the single arrow after sensor listener; preserved over/order/replica checks; native root cause unconfirmed;39130559347 scene passed native false, no foreground claim",
     "L277": "selection follows matching editor/DOM paragraph and zero unacknowledged edits; original failure occurred before restore"
   },
   "remainingCounts": {
-    "L199-must-read": "0/10 qualifying Mac runs after candidate; no run yet",
-    "L277": "0/10 qualifying Mac runs after candidate; no run yet"
+    "L199-must-read": "0/10; current scene failed, actual repair pending",
+    "L277": "1/10 case-based consecutive Mac scene passes after1235d4a77:39130559347 native entry true; group fails other scene"
   },
   "review": {
     "reviewer": "aef4b40cb8d4b7d76",
@@ -42,5 +42,17 @@
     "finding": "Native state was sampled only after failure and a1s frame count; store timestamped native state immediately before each targeted action, without clipboard/poll/focus side effects. Initial unconditional approval was superseded by this clarified finding.",
     "fixCommit": "5f115a09d"
   },
-  "next": "Reviewed union gate after STORE fixes/re-review; retain each scene native entry state, obtain native diagnosis, then actual fix/pinning where needed."
+  "next": "Independent new product-frontier review1 plus at most one fix recheck, then one further union gate; unresolved MINI obligations carried explicitly rather than open-ended diagnosis.",
+  "nativeGate": {
+    "runId": 39130559347,
+    "source": "3cc3f0286",
+    "record": "gates/pair2-diagnostic-39130559347.json",
+    "conclusion": "failure"
+  },
+  "assessment": {
+    "agent": "a788b678f28592255",
+    "status": "complete; accepted boundaries in reviews/W-MINI-native-assessment.txt",
+    "scope": "adversarial bounded paste/virtualizer repair recommendation; no code edits"
+  },
+  "mutationScope": "Diagnostics14c3e6fd6 committed; generic paste-selection hook rejected. Model-aware caret readiness and regression-first minimal handledFocus repair plus repeated-target edge authorized; one-time conditional L200 harness activation authorized."
 }
