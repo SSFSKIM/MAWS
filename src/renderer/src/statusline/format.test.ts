@@ -11,7 +11,7 @@ describe('status line time copy', () => {
     expect(resetsIn(5 * DAY + 21 * HOUR + 12 * MIN, 'en-US')).toBe('5d 21h');
     expect(resetsIn(2 * HOUR + 37 * MIN + 59_000, 'en-US')).toBe('2h 37m');
     expect(resetsIn(16 * MIN + 5_000, 'en-US')).toBe('16m');
-    expect(resetsIn(20_000, 'en-US')).toBe('under a minute');
+    expect(resetsIn(20_000, 'en-US')).toBe('<1m');
     expect(resetsInCompact(5 * DAY + 21 * HOUR, 'en-US')).toBe('5d21h');
     expect(resetsInCompact(2 * HOUR + 37 * MIN, 'en-US')).toBe('2h37m');
     expect(resetsInCompact(16 * MIN, 'en-US')).toBe('16m');
@@ -19,12 +19,13 @@ describe('status line time copy', () => {
   });
 
   // D2 widened (the review of S-locale): the countdown's numbers and units follow the system locale, compact as before;
-  // the words around them ("resets in", "under a minute") stay English, as all UI copy does.
+  // the words around them ("resets in") stay English, as all UI copy does. Under a minute it is the locale's own
+  // sub-minute form, as the compact countdown's and Scheduled's are (P3-F L125), never English words.
   it('writes the countdown’s numbers and units in the locale', () => {
     expect(resetsIn(5 * DAY + 21 * HOUR + 12 * MIN, 'ko-KR')).toBe('5일 21시간');
     expect(resetsIn(2 * HOUR + 37 * MIN, 'ko-KR')).toBe('2시간 37분');
     expect(resetsIn(16 * MIN, 'ko-KR')).toBe('16분');
-    expect(resetsIn(20_000, 'ko-KR')).toBe('under a minute');
+    expect(resetsIn(20_000, 'ko-KR')).toBe('<1분');
     expect(resetsInCompact(2 * HOUR + 37 * MIN, 'ko-KR')).toBe('2시간37분');
     expect(resetsInCompact(20_000, 'ko-KR')).toBe('<1분');
   });
