@@ -365,7 +365,11 @@ export class Project extends DurableObject<Env> {
       // An async ask (2026-10-18): its `question` event is the one signal of an ask nothing raises (MAWS's own), and a
       // second report of one a bridge raised as well (`src` its call's id), which pushes once, whichever came first.
       if (event.kind === 'question' && typeof event.src === 'string' && !this.plane.markAsked(ctx.machine, session, event.src, now)) continue;
-      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size);
+      // The badge counts the session a question waits on, as `pushRaised` does: its presence need not say so yet, and
+      // an async ask's never does (its engine works on), so the count would leave out the question it announces.
+      const waiting = this.waitingSessions();
+      if (event.kind === 'question') waiting.add(`${ctx.machine}/${session}`);
+      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, waiting.size);
     }
   }
 
