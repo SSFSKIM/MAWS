@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 51,
-    "defer:pending": 72,
+    "defer:committed": 52,
+    "defer:pending": 71,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -815,7 +815,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L79; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "Closes when (owner P2) the settlement counts a `next` prompt written while a turn was open as covered by that turn's result, with a unit over a steered-turn journal. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L93): harness only and over-conservative, which is safe under caps. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L79; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "4475ba9323ba5d7d9b653bd44bc5f3c8e6e41da3"
     },
     {
       "line": 80,
@@ -825,8 +825,8 @@
       "triageReason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L80; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Closes when (owner P2, E7's disk path) the backfill reads a `<teammate-message>` envelope record as the teammate's message (a peer- or teammate-origin row, no owner prompt and no prompt turn), pinned over the `e7-team-terminal` fixture. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L94): only a terminal team session read from disk; MAWS forms no team. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L80; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 82,
