@@ -2,7 +2,7 @@
 // / ended), read from presence while the machine is online and from the last `state` event while it is not.
 import { describe, expect, it } from 'vitest';
 import type { LogEvent } from 'desk-hub/protocol';
-import { groupOf, groupSessions, projectSessions, sessionName, type ProjectedSession } from './projection';
+import { groupOf, groupSessions, openQuestions, projectSessions, sessionName, type ProjectedSession } from './projection';
 
 const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
 const S2 = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a';
@@ -83,11 +83,11 @@ describe('groupOf', () => {
   const base: ProjectedSession = { session: S1, alias: 'a', machine: 'mini', cwd: null, worktree: null, seat: '', title: null, member: true, ended: null, charge: null, status: null, state: null, joinedAt: 1 };
 
   it('puts a retired session under ended, whatever its presence says', () => {
-    expect(groupOf({ ...base, member: false, ended: { by: '', reason: 'ended' } }, { presence: { record: { status: 'busy' }, bridge: true }, machineOnline: true, pending: 0 })).toBe('ended');
+    expect(groupOf({ ...base, member: false, ended: { by: '', reason: 'ended' } }, { presence: { record: { status: 'busy' }, bridge: true }, machineOnline: true, pending: 0, questions: 0 })).toBe('ended');
   });
 
   it('reads presence on an online machine: waiting, idle, busy or shell, and no live process', () => {
-    const on = (status: string | null) => groupOf(base, { presence: { record: status === null ? null : { status }, bridge: true }, machineOnline: true, pending: 0 });
+    const on = (status: string | null) => groupOf(base, { presence: { record: status === null ? null : { status }, bridge: true }, machineOnline: true, pending: 0, questions: 0 });
     expect(on('waiting')).toBe('waiting');
     expect(on('idle')).toBe('idle');
     expect(on('busy')).toBe('working');
@@ -96,26 +96,95 @@ describe('groupOf', () => {
   });
 
   it('counts a pending request as waiting on you', () => {
-    expect(groupOf(base, { presence: { record: { status: 'busy' }, bridge: true }, machineOnline: true, pending: 1 })).toBe('waiting');
+    expect(groupOf(base, { presence: { record: { status: 'busy' }, bridge: true }, machineOnline: true, pending: 1, questions: 0 })).toBe('waiting');
+  });
+
+  // 2026-10-18 (owner): an open async question waits on you as a pending request does, its presence still busy.
+  it('counts an open async question as waiting on you, as a pending request, and only where presence is read', () => {
+    const busy = { presence: { record: { status: 'busy' }, bridge: true }, machineOnline: true, pending: 0, questions: 1 };
+    expect(groupOf(base, busy)).toBe('waiting');
+    expect(groupOf(base, { ...busy, presence: { record: { status: 'idle' }, bridge: false } })).toBe('waiting');
+    expect(groupOf({ ...base, member: false, ended: { by: '', reason: 'retire' } }, busy)).toBe('ended');
+    // An offline machine's session reads its last state, a pending request's alike.
+    expect(groupOf({ ...base, state: { word: 'busy', ts: 't' } }, { ...busy, machineOnline: false })).toBe('working');
+    expect(groupOf({ ...base, state: { word: 'busy', ts: 't' } }, { ...busy, machineOnline: false, pending: 1 })).toBe('working');
   });
 
   it('reads the last state event while the machine is offline or presence is not known yet', () => {
     const at = (word: string | null, machineOnline: boolean | undefined) =>
-      groupOf({ ...base, state: word ? { word, ts: 't' } : null }, { presence: { record: { status: 'idle' }, bridge: true }, machineOnline, pending: 0 });
+      groupOf({ ...base, state: word ? { word, ts: 't' } : null }, { presence: { record: { status: 'idle' }, bridge: true }, machineOnline, pending: 0, questions: 0 });
     expect(at('busy', false)).toBe('working');
     expect(at('waiting', false)).toBe('waiting');
     expect(at('stopped', false)).toBe('ended');
     expect(at('gone', false)).toBe('ended');
     expect(at(null, false)).toBe('idle');
-    expect(groupOf({ ...base, state: { word: 'busy', ts: 't' } }, { machineOnline: true, pending: 0 })).toBe('working');
+    expect(groupOf({ ...base, state: { word: 'busy', ts: 't' } }, { machineOnline: true, pending: 0, questions: 0 })).toBe('working');
   });
 });
 
 describe('groupSessions', () => {
   it('orders each group newest member first', () => {
     const sessions = projectSessions([joined(S1, 'older', 'mini'), joined(S2, 'newer', 'mini')]);
-    const groups = groupSessions(sessions, () => ({ presence: { record: { status: 'idle' }, bridge: true }, machineOnline: true, pending: 0 }));
+    const groups = groupSessions(sessions, () => ({ presence: { record: { status: 'idle' }, bridge: true }, machineOnline: true, pending: 0, questions: 0 }));
     expect(groups.idle.map((s) => s.alias)).toEqual(['newer', 'older']);
     expect(groups.waiting).toEqual([]);
+  });
+
+  it("puts a busy session holding an open log question under waiting, as a bridge's raised ask puts it", () => {
+    const entries = [joined(S1, 'asker', 'mini'), joined(S2, 'raiser', 'mini'), ev(`mini/${S1}`, 'question', asked('ask-1'))];
+    const asking = openQuestions(entries);
+    const groups = groupSessions(projectSessions(entries), (s) => ({
+      presence: { record: { status: 'busy' }, bridge: true },
+      machineOnline: true,
+      pending: s.session === S2 ? 1 : 0,
+      questions: asking.get(s.session)?.length ?? 0,
+    }));
+    expect(groups.waiting.map((s) => s.alias)).toEqual(['raiser', 'asker']);
+    expect(groups.working).toEqual([]);
+  });
+});
+
+/** A `question` event's own fields: an async ask the session exported, `src` its id. */
+function asked(src: string): Record<string, unknown> {
+  return { from: 'maws-45', to: 'host', text: ['Ship it?'], choices: ['Yes', 'No'], src };
+}
+
+describe('openQuestions', () => {
+  it('opens an ask with its question and closes it with the same session’s answered of the same id', () => {
+    const open = openQuestions([
+      joined(S1, 'maws-45', 'mini'),
+      ev(`mini/${S1}`, 'question', asked('toolu_1')),
+      ev(`mini/${S1}`, 'question', asked('toolu_2')),
+      ev(`mini/${S1}`, 'answered', { from: 'maws-45', src: 'toolu_1', text: 'Yes' }),
+      // Another session's answer of the same id is not this ask's.
+      ev(`mini/${S2}`, 'answered', { from: 'other', src: 'toolu_2', text: 'No' }),
+    ]);
+    expect(open.get(S1)).toEqual([{ machine: 'mini', ask: 'toolu_2' }]);
+    expect(open.has(S2)).toBe(false);
+  });
+
+  it("closes every ask of a session at its retired, and opens a question asked after it rejoined anew", () => {
+    const open = openQuestions([
+      joined(S1, 'maws-45', 'mini'),
+      ev(`mini/${S1}`, 'question', asked('toolu_1')),
+      ev(`mini/${S1}`, 'question', asked('toolu_2')),
+      ev(`mini/${S1}`, 'retired', { session: S1, by: '', reason: 'ended' }),
+      joined(S1, 'maws-45', 'mini'),
+      ev(`mini/${S1}`, 'question', asked('toolu_3')),
+    ]);
+    expect(open.get(S1)).toEqual([{ machine: 'mini', ask: 'toolu_3' }]);
+    expect(openQuestions([ev(`mini/${S1}`, 'question', asked('toolu_1')), ev(`mini/${S1}`, 'retired', { session: S1, by: '', reason: 'retire' })]).size).toBe(0);
+  });
+
+  it('reads only session feeds, and a retired only from the session’s own feed', () => {
+    const open = openQuestions([
+      ev(`mini/${S1}`, 'question', asked('toolu_1')),
+      ev('mini/human', 'question', asked('toolu_human')),
+      ev('hub/0123456789abcdef0123456789abcdef', 'question', asked('toolu_hub')),
+      ev(`mini/${S2}`, 'retired', { session: S1, by: '', reason: 'ended' }),
+      ev(`mini/${S1}`, 'question', { from: 'maws-45', text: ['No id'] }),
+    ]);
+    expect([...open.keys()]).toEqual([S1]);
+    expect(open.get(S1)).toEqual([{ machine: 'mini', ask: 'toolu_1' }]);
   });
 });
