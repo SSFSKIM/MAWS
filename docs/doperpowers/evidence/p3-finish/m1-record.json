@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 33,
-    "defer:pending": 90,
+    "defer:committed": 34,
+    "defer:pending": 89,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -617,7 +617,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L61; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "A top-layer shield (popover shield where no modal is open) or a frame-aware preload, with an e2e case. Re-deferred 2026-10-07 (E11 1.6): feature-sized (a top-layer shield or a frame-aware preload with an e2e case). Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L68): feature-sized (a top-layer shield). Owner: P3 (the in-app browser). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L61; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "510224790cf9bf812a20cec5d134efd7cf912b17"
     },
     {
       "line": 62,
@@ -627,8 +627,8 @@
       "triageReason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L62; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "remainingClause": "X10 gains the tab's `appSessionId` (or the chip resolves the tab by URL in both sessions) and the chip opens where the tab lives. Re-deferred 2026-10-07 (E11 1.6): an X10 contract change (a tab session field). Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L69): an X10 contract change (a tab session field). Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L62; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 63,
