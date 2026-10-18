@@ -426,6 +426,22 @@ describe('tools/list', () => {
     const lease = await leaseOf(pool, httpSpec());
     expect(await lease.listTools(new AbortController().signal)).toEqual({ ok: true, tools: [{ name: 'rows', readOnly: true, taskRequired: true }, { name: 'maybe', readOnly: false }, { name: 'plain', readOnly: false }] });
   });
+
+  // P3-F: each tools/list replaces the SDK's own output validators, so its last page alone would be checked
+  it('checks a tool’s structured output against its own schema when a later page listed other tools', async () => {
+    const { pool, server } = httpPool();
+    server.toolPages = [[{ name: 'rows', annotations: { readOnlyHint: true }, outputSchema: { type: 'object', properties: { rows: { type: 'array' } }, required: ['rows'] } }], [{ name: 'write' }]];
+    const lease = await leaseOf(pool, httpSpec());
+    expect(await lease.listTools(new AbortController().signal)).toEqual({ ok: true, tools: [{ name: 'rows', readOnly: true }, { name: 'write', readOnly: false }] });
+    const answered = async (result: unknown) => {
+      server.result = () => result;
+      return lease.callTool(call, { admit: () => true, signal: new AbortController().signal });
+    };
+    expect(await answered({ content: [], structuredContent: { other: 107 } })).toMatchObject({ ok: false, failure: 'failed', admitted: true });
+    expect(await answered({ content: [{ type: 'text', text: 'rows 107' }] })).toMatchObject({ ok: false, failure: 'failed', admitted: true });
+    expect(await answered({ content: [], structuredContent: { rows: [107] } })).toEqual({ ok: true, result: { content: [], structuredContent: { rows: [107] } } });
+    expect(await answered({ content: [{ type: 'text', text: 'no rows' }], isError: true })).toMatchObject({ ok: true }); // an error result carries none
+  });
 });
 
 describe('a tools/call over stdio', () => {

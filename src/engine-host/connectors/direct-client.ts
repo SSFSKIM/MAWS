@@ -16,11 +16,16 @@
 // - A tools/call is written at most once and never retried; a request that was written may have taken effect. An abort
 //   cancels on the wire only a request actually written and not yet answered.
 // - Failure messages are fixed words: never a server's own error text, a configured value or a credential.
+// - P3-F: a tool's structured output is checked against the output schema its listing declared, whichever page listed
+//   it. The SDK checks only against the last tools/list page it received (each listing replaces its cache), so the
+//   connection keeps its latest complete listing's schemas and checks each call as the SDK does.
 import type { spawn as nodeSpawn } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv-provider.js';
+import type { JsonSchemaType } from '@modelcontextprotocol/sdk/validation/types.js';
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 import type { VerifiedConnectorSource } from './provenance';
 import type { ConnectorLaunchEntry } from './source-entry';
@@ -120,6 +125,8 @@ class Connection {
   private readonly transport: WireTransport;
   private readonly http: StreamableHTTPClientTransport | null;
   private readonly client: Client;
+  private readonly validator = new AjvJsonSchemaValidator(); // P3-F: the SDK's own, shared with its Client
+  private outputSchemas = new Map<string, JsonSchemaType>(); // P3-F: by tool, from the latest complete listing
 
   constructor(
     readonly key: DirectConnectionKey,
@@ -137,7 +144,7 @@ class Connection {
     this.http = spec.entry.transport === 'http' ? directHttpTransport(spec.entry, this.wire, { maxMessageBytes, fetch: options.fetch, bearer: () => this.bearer }) : null;
     const inner = spec.entry.transport === 'stdio' ? new OwnedStdioTransport(spec.entry, this.wire, { maxMessageBytes, spawn: options.spawn, kill: options.kill }) : this.http!;
     this.transport = new WireTransport(inner, this.wire);
-    this.client = new Client({ name: 'maws', version: '1.0.0' }, { capabilities: {} });
+    this.client = new Client({ name: 'maws', version: '1.0.0' }, { capabilities: {}, jsonSchemaValidator: this.validator });
     this.client.onclose = () => this.close(); // the server went (its exit, a framing overflow)
     this.startup = this.start();
   }
@@ -204,6 +211,7 @@ class Connection {
 
   async listTools(signal: AbortSignal): Promise<{ ok: true; tools: DirectTool[] } | DirectFailure> {
     const tools: DirectTool[] = [];
+    const schemas = new Map<string, JsonSchemaType>(); // P3-F: as the SDK keeps them, but for every page
     let cursor: string | undefined;
     for (let page = 0; page < this.bounds.toolPages; page += 1) {
       const answer = await this.issue(null, signal, this.bounds.startupMs, (options) => this.client.listTools(cursor === undefined ? undefined : { cursor }, options));
@@ -211,16 +219,36 @@ class Connection {
       for (const tool of answer.value.tools) {
         if (tools.length >= this.bounds.tools) return failure('unavailable', true, 'the server lists more tools than the bound');
         tools.push({ name: tool.name, readOnly: tool.annotations?.readOnlyHint === true, ...(tool.execution?.taskSupport === 'required' && { taskRequired: true as const }) });
+        if (tool.outputSchema) schemas.set(tool.name, tool.outputSchema as JsonSchemaType);
+        else schemas.delete(tool.name);
       }
       cursor = answer.value.nextCursor;
-      if (cursor === undefined) return { ok: true, tools };
+      if (cursor === undefined) {
+        this.outputSchemas = schemas;
+        return { ok: true, tools };
+      }
     }
     return failure('unavailable', true, 'the server lists more pages of tools than the bound');
   }
 
   async callTool(call: { name: string; arguments: Record<string, unknown> }, options: DirectCallOptions): Promise<{ ok: true; result: unknown } | DirectFailure> {
+    const schema = this.outputSchemas.get(call.name); // P3-F: the listing the call was authorized against
     const answer = await this.issue(options.admit, options.signal, options.timeoutMs ?? this.bounds.callTimeoutMs, (request) => this.client.callTool({ name: call.name, arguments: call.arguments }, undefined, request));
-    return answer.ok ? { ok: true, result: answer.value } : answer;
+    if (!answer.ok) return answer;
+    return this.conforms(schema, answer.value) ? { ok: true, result: answer.value } : failure('failed', true, 'the server answered something the client could not accept');
+  }
+
+  // P3-F: the SDK's own rule for a tool with an output schema: structured content matching it, unless an error result
+  // carries none.
+  private conforms(schema: JsonSchemaType | undefined, result: unknown): boolean {
+    if (!schema) return true;
+    const { structuredContent, isError } = result as { structuredContent?: unknown; isError?: unknown };
+    if (!structuredContent) return Boolean(isError);
+    try {
+      return this.validator.getValidator(schema)(structuredContent).valid;
+    } catch {
+      return false;
+    }
   }
 
   // One SDK request, bound to its admission on the wire. The SDK's own signal is aborted only while the request is

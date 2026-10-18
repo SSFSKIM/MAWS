@@ -9,10 +9,12 @@ import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
 import type { VerifiedConnectorSource } from './provenance';
 
 type Message = Record<string, unknown>;
+type FakeTool = { name: string; annotations?: Record<string, unknown>; execution?: Record<string, unknown>; outputSchema?: Record<string, unknown> };
 
 export class FakeMcpServer {
   readonly received: Message[] = [];
-  tools: Array<{ name: string; annotations?: Record<string, unknown>; execution?: Record<string, unknown> }> = [{ name: 'rows', annotations: { readOnlyHint: true } }, { name: 'write' }];
+  tools: FakeTool[] = [{ name: 'rows', annotations: { readOnlyHint: true } }, { name: 'write' }];
+  toolPages: FakeTool[][] | null = null; // P3-F: tools/list answered page by page instead, the cursor a page's index
   holdCalls = false; // tools/call answers wait for `release`
   sessionId: string | undefined; // HTTP: the session initialize opens
   result: (params: Message) => unknown = (params) => ({ content: [{ type: 'text', text: `called ${String(params.name)}` }] });
@@ -55,8 +57,12 @@ export class FakeMcpServer {
     switch (message.method) {
       case 'initialize':
         return { protocolVersion: LATEST_PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: 'fake', version: '0' } };
-      case 'tools/list':
-        return { tools: this.tools.map((tool) => ({ inputSchema: { type: 'object' }, ...tool })) };
+      case 'tools/list': {
+        const listed = (tools: FakeTool[]) => tools.map((tool) => ({ inputSchema: { type: 'object' }, ...tool }));
+        if (!this.toolPages) return { tools: listed(this.tools) };
+        const page = Number(params.cursor ?? 0);
+        return { tools: listed(this.toolPages[page]!), ...(page + 1 < this.toolPages.length && { nextCursor: String(page + 1) }) };
+      }
       case 'tools/call':
         return this.result(params);
       default:
