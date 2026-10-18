@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 91,
-    "defer:pending": 32,
+    "defer:committed": 92,
+    "defer:pending": 31,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1255,7 +1255,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L151; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "A thinning pass at version retention. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L151; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "37efdf2beb3ba60c4bda81f106b1e0f95e267690"
     },
     {
       "line": 152,
@@ -1265,8 +1265,8 @@
       "triageReason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L152; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
       "remainingClause": "A disambiguating marker on singleton lists. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L152; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 153,
