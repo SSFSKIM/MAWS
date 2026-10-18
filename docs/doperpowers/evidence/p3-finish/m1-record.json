@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 103,
-    "defer:pending": 20,
+    "defer:committed": 104,
+    "defer:pending": 19,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1387,7 +1387,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L174; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "Each silenced at its source (the vitest config, `.npmrc`, the Markdown module's import shape). Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L174; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "9565a803802886b350d233fde9c54d109cef3394"
     },
     {
       "line": 177,
@@ -1397,8 +1397,8 @@
       "triageReason": "Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L177; parent Decision Log 106): Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely. Owner: P4.",
       "remainingClause": "C's parse5 pin reused on the host once C lands, or a lighter structural check. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L177; parent Decision Log 106): Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 178,
