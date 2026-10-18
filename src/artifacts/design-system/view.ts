@@ -38,8 +38,9 @@ export interface SystemSnapshot {
 }
 
 const OVERRIDE_NAME = /^--ds-[A-Za-z0-9_-]+$/;
-// A value that could end the declaration, the rule or the element, or fetch anything, is not an override.
-const UNSAFE_VALUE = /[;{}<>\\\n\r]|\/\*|\b(?:url|image|image-set|cross-fade|element|src)\s*\(|@import/i;
+// A value that could end the declaration, the rule or the element, fetch anything, or carry a priority (`!important`,
+// which a scope reads as the declaration's and an export would write into the property's value), is not an override.
+const UNSAFE_VALUE = /[;{}<>\\!\n\r]|\/\*|\b(?:url|image|image-set|cross-fade|element|src)\s*\(|@import/i;
 const balancedQuotes = (value: string) => (value.match(/"/g)?.length ?? 0) % 2 === 0 && (value.match(/'/g)?.length ?? 0) % 2 === 0;
 
 /** The overrides a scope may set: `--ds-*` names with plain values, in name order (byte-stable). */

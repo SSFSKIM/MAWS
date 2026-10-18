@@ -24,7 +24,7 @@ import {
 import complete from './fixtures/complete.tokens.json';
 import { setToken, writeSystem } from './model';
 import { holdScopeStyle, scopeIdOf } from './scope-style';
-import { liveView } from './view';
+import { liveView, snapshotCss, type SystemSnapshot } from './view';
 import { parseTokens, serializeTokens, type Token } from './tokens';
 
 const AT = Date.UTC(2026, 9, 13);
@@ -451,6 +451,27 @@ describe('resolveDsVars (the export helper)', () => {
     expect(resolveDsVars('p { color: var(--ds-x); }', withInherited, 'document', { '--ds-x': 'var(--ds-adopted-link)' })).toBe('p { color: #c9663f; }');
     const chain = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`--ds-c${i}`, i === 199 ? 'var(--ds-color-text)' : `var(--ds-c${i + 1})`]));
     expect(resolveDsVars('p { color: var(--ds-c0); }', tokens, 'document', chain)).toBe('p { color: #1f1e1b; }');
+  });
+});
+
+// P3-F design-systems wave: a scope and an export take a consumer's overrides through one filter, so what the scope
+// draws is what the export writes.
+describe('a scope’s overrides and the export’s', () => {
+  const tokens = parseTokens(complete).tokens!;
+  const snapshot: SystemSnapshot = { tokens, law: '', name: 'T', files: {}, origin: null };
+  const scope = (overrides?: Record<string, string>) => snapshotCss(snapshot, null, '.s', 'document', overrides);
+  /** The value the scope's stylesheet sets last for `name`. */
+  const declared = (css: string, name: string) => [...css.matchAll(new RegExp(`${name}: ([^;]*);`, 'g'))].at(-1)?.[1];
+
+  // scalpel-1#2: a priority is not a value; inside a property it makes the declaration invalid
+  it('drops an override that carries a priority, in the scope and in the export', () => {
+    const css = 'p { padding: var(--ds-space-1) var(--ds-space-2); }';
+    for (const value of ['8px !important', '8px!important', '8px ! important']) {
+      const overrides = { '--ds-space-1': value };
+      expect(resolveDsVars(css, tokens, 'document', overrides)).toBe(resolveDsVars(css, tokens, 'document'));
+      expect(scope(overrides)).toBe(scope());
+      expect(declared(scope(overrides), '--ds-space-1')).toBe(resolveDsVars('var(--ds-space-1)', tokens, 'document', overrides));
+    }
   });
 });
 
