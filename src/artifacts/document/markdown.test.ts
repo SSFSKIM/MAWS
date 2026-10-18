@@ -352,6 +352,19 @@ describe('every stored state, one at a time', () => {
     // the escape beside text that spells it, and beside the content's own copy of its sentinel character
     newlineLiteralEntity: p(t('&#10;\n&#10;')),
     newlineLiteralSentinel: p(t('a\nb'), t('\n', [{ type: 'bold' }])),
+    // P3-F W-DOC-B (the architect's ruling on L166's hardBreak boundary): a hardBreak is written as CommonMark's
+    // backslash break, so two in a row, one leading and one before indented text read back as they were, in every
+    // container that holds a paragraph
+    breakDouble: p(t('a'), { type: 'hardBreak' }, { type: 'hardBreak' }, t('b')),
+    breakLeading: p({ type: 'hardBreak' }, t('b')),
+    breakLeadingDouble: p({ type: 'hardBreak' }, { type: 'hardBreak' }, t('b')),
+    breakIndented: p(t('a'), { type: 'hardBreak' }, t('    b')),
+    breakBeforeMarkup: p(t('a'), { type: 'hardBreak' }, t('# b'), { type: 'hardBreak' }, t('1. c'), { type: 'hardBreak' }, t('---')),
+    breakBold: p(t('a', [{ type: 'bold' }]), { type: 'hardBreak' }, t('b', [{ type: 'bold' }])),
+    breakInItem: { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('a'), { type: 'hardBreak' }, { type: 'hardBreak' }, t('- b'))] }] },
+    breakInQuote: { type: 'blockquote', content: [p({ type: 'hardBreak' }, t('a'), { type: 'hardBreak' }, { type: 'hardBreak' }, t('> b'))] },
+    breakInCallout: { type: 'callout', attrs: { tone: 'note' }, content: [p(t('a'), { type: 'hardBreak' }, { type: 'hardBreak' }, t(':::'))] },
+    breakInCell: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t('a'), { type: 'hardBreak' }, { type: 'hardBreak' }, t('b')))] }] },
     rowBoldOnlySpace: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t('H')))] }, { type: 'tableRow', content: [cell('tableCell', {}, p(t('a'), t(' ', [{ type: 'bold' }]), t('b')))] }] },
     literalInCode: { type: 'codeBlock', attrs: { language: null }, content: [t(SENTINEL_ALPHABET.join('1'))] },
     literalInInlineCode: p(t(`x ${SENTINEL_ALPHABET.join('')}`, [{ type: 'code' }])),
@@ -567,12 +580,35 @@ describe('a line ending inside text', () => {
     expect(md.serialize(docOf([para('p1', schema.text('a\nb'))]), { ids: false })).toBe('a&#10;b');
   });
 
-  it('reads back alike from an agent’s soft break and from &#10;; a literal &#10; and a hardBreak read as before', () => {
+  it('reads back alike from an agent’s soft break and from &#10;; a literal &#10; as before, a hardBreak as a backslash break', () => {
     const inline = (markdown: string) => md.parse(markdown)[0].toJSON().content;
     expect(inline('one\ntwo ^p1')).toEqual([{ type: 'text', text: 'one\ntwo' }]);
     expect(inline('one&#10;two ^p1')).toEqual([{ type: 'text', text: 'one\ntwo' }]);
     expect(inline('one &amp;#10; two ^p1')).toEqual([{ type: 'text', text: 'one &#10; two' }]);
-    expect(md.serialize(docOf([para('p1', schema.text('a'), hardBreak(), schema.text('b'))]))).toBe('a  \nb ^p1');
+    expect(md.serialize(docOf([para('p1', schema.text('a'), hardBreak(), schema.text('b'))]))).toBe('a\\\nb ^p1');
+  });
+
+  // The architect's ruling on L166's hardBreak boundary: a hardBreak with no line after it to break onto (a block's end, a
+  // heading) has no form in the dialect's one break syntax; it keeps Tiptap's form as before and does not read back as it
+  // was. Pinned here as it reads back, never as preserved; the tracker's P4 row lists each case.
+  it('pins the hardBreaks with no exact form: at a block’s end, in a heading, alone, and a break’s own marks', () => {
+    const bold = [{ type: 'bold' }];
+    const t = (text: string, marks?: JSONContent['marks']): JSONContent => ({ type: 'text', text, ...(marks ? { marks } : {}) });
+    const hb = (marks?: JSONContent['marks']): JSONContent => ({ type: 'hardBreak', ...(marks ? { marks } : {}) });
+    const p = (id: string, ...content: JSONContent[]): JSONContent => ({ type: 'paragraph', attrs: { id }, content });
+    const item = (...content: JSONContent[]): JSONContent => ({ type: 'bulletList', attrs: { id: 'l1' }, content: [{ type: 'listItem', attrs: { id: 'i1' }, content: [p('p1', ...content)] }] });
+    const heading = (...content: JSONContent[]): JSONContent => ({ type: 'heading', attrs: { id: 'h1', level: 2 }, content });
+    const readBack = (json: JSONContent, ids: boolean) => md.parse(md.serialize(docOf([schema.nodeFromJSON(json)]), { ids }), { generateID: counter() });
+    const as = (...json: JSONContent[]) => stored(docOf(json.map((block) => schema.nodeFromJSON(block))));
+    for (const ids of [true, false]) {
+      expect(stored(docOf(readBack(p('p1', t('a'), hb()), ids)))).toEqual(as(p('p1', t('a  '))));
+      expect(stored(docOf(readBack(item(t('a'), hb()), ids)))).toEqual(as(item(t('a'))));
+      expect(stored(docOf(readBack(heading(t('a'), hb(), t('b')), ids)))).toEqual(as(heading(t('a')), p('p2', t('b'))));
+      expect(readBack(p('p1', hb()), ids).map((block) => block.toJSON())).toEqual(ids ? [{ type: 'paragraph', attrs: { id: 'p1' } }] : []);
+      expect(stored(docOf(readBack(p('p1', t('a', bold), hb(bold), t('b', bold)), ids)))).toEqual(as(p('p1', t('a', bold), hb(), t('b', bold))));
+    }
+    expect(readBack(item(t('a'), hb()), true)[0].firstChild!.attrs.id).not.toBe('i1'); // the item's id is re-minted
+    expect(readBack(heading(t('a'), hb(), t('b')), true).map((block) => block.attrs.id)).toEqual(['new1', 'h1']); // the heading's id goes to the paragraph
   });
 
   // the reader's form is not lossless through the dialect's import: a backslash break reads back as a hardBreak and
@@ -625,6 +661,10 @@ describe('a line ending inside text', () => {
     expect(back.content![2].content).toEqual(broken('e', 'f', [{ type: 'bold' }]));
     const ending = md.serialize(docOf([para('p4', schema.text('g\n', [schema.marks.bold.create()]))]), { ids: false, forReaders: true });
     expect(ending).toBe('**g**<br>');
+    // a hardBreak, too: a backslash break where a line follows, `<br>` in a heading and at a block's end
+    const heading = schema.nodes.heading.create({ id: 'h1', level: 2 }, [schema.text('c'), hardBreak(), schema.text('d')]);
+    expect(md.serialize(docOf([heading]), { ids: false, forReaders: true })).toBe('## c<br>d');
+    expect(md.serialize(docOf([para('p5', schema.text('e'), hardBreak(), schema.text('f'), hardBreak())]), { ids: false, forReaders: true })).toBe('e\\\nf<br>');
   });
 });
 

@@ -258,12 +258,15 @@ const rawFenced = (name: string, attrs: Record<string, string | null>, source: s
 
 // ── tables: GFM when GFM can say all of it, else structure blocks ──
 const ALIGNS = new Set(['left', 'center', 'right']);
-/** Text a GFM cell keeps as written: no hard break, no whitespace a cell would trim or collapse. */
-const gfmText = (child: Json): boolean =>
-  child.type === 'hardBreak' ? false : child.type !== 'text' || (!/[^\S ]/.test(child.text ?? '') && !/^ | $| {2}/.test(child.text ?? ''));
+/**
+ * Text a GFM cell keeps as written: no hard break, no whitespace a cell would trim or collapse; with `lineEndings` (a
+ * reader's Markdown, which writes a line ending inside text as `<br>`; P3-F, tracker L166), line endings too.
+ */
+const gfmText = (child: Json, lineEndings = false): boolean =>
+  child.type === 'hardBreak' ? false : child.type !== 'text' || (!(lineEndings ? /[^\S \n]/ : /[^\S ]/).test(child.text ?? '') && !/^ | $| {2}/.test(child.text ?? ''));
 
 /** True when a pipe table holds every attribute and the content of `table` (header row first, plain cells). */
-export function gfmTable(table: Json): boolean {
+export function gfmTable(table: Json, { lineEndings = false }: { lineEndings?: boolean } = {}): boolean {
   const rows = (table.content ?? []) as Json[];
   if (rows.length === 0) return false;
   const width = rows[0].content?.length ?? 0;
@@ -279,7 +282,7 @@ export function gfmTable(table: Json): boolean {
       if (r === 0) aligns[c] = a.align ?? null;
       else if ((a.align ?? null) !== aligns[c]) return false;
       const blocks = (cell.content ?? []) as Json[];
-      return blocks.length === 1 && blocks[0].type === 'paragraph' && ((blocks[0].content ?? []) as Json[]).every(gfmText);
+      return blocks.length === 1 && blocks[0].type === 'paragraph' && ((blocks[0].content ?? []) as Json[]).every((child) => gfmText(child, lineEndings));
     });
   });
 }

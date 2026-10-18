@@ -32,6 +32,9 @@
 //                 spaces one more than it has; a line ending inside text (not a hardBreak) is `&#10;`, so what follows
 //                 it never starts a line (P3-F, tracker L166). A reader's Markdown (`forReaders`, an export) writes it
 //                 as Markdown's own line break instead (see `SerializeOptions.forReaders`)
+//   line breaks   a hardBreak is CommonMark's backslash break, a backslash ending the line (Tiptap's two trailing
+//                 spaces left a blank line between two breaks); one with no line after it in its block (a block's
+//                 end, a heading) keeps Tiptap's form and does not read back as it was (P3-F, the tracker's P4 row)
 //   comments      `<c:ID>` where an open thread's text starts and `</c:ID>` where it ends (each closing tag names its
 //                 thread, so overlapping comments need no nesting; S5's read format), inside code too; ignored on
 //                 parse. A literal `<c:x>` in code is written `<\c:x>` (one more backslash) and read back as written.
@@ -58,11 +61,12 @@ export interface SerializeOptions {
    * (nested where the block is) instead of the dialect's `:::chart`; an export's only, absent for the lossless dialect. */
   charts?: ReadonlyMap<string, string>;
   /**
-   * P3-F (tracker L166): Markdown for people to read (an export; ids and milestones off): a line ending inside text is
-   * rendered as a line break, never as the canonical `&#10;`: CommonMark's hard line break (a backslash ending the line,
-   * the next line's start escaped) where the text goes on, and an inline `<br>` where Markdown cannot break a line (in a
-   * heading, and at a block's end, where a backslash would read literally). Code keeps its line ends either way. Not
-   * lossless: the dialect reads a backslash break back as a hardBreak and `<br>` as literal text.
+   * P3-F (tracker L166; the parent's ruling of 2026-10-18): Markdown for people to read (an export; ids and milestones
+   * off): a line ending inside text, and a hardBreak, is rendered as a line break, never as the canonical `&#10;`:
+   * CommonMark's hard line break (a backslash ending the line, the next line's start escaped) where the text goes on,
+   * and an inline `<br>` where Markdown cannot break a line (in a heading, in a table cell, and at a block's end, where
+   * a backslash would read literally). Code keeps its line ends either way. Judged by how a reader renders it, not by an
+   * exact read-back: the dialect reads a backslash break back as a hardBreak and `<br>` as literal text.
    */
   forReaders?: boolean;
 }
@@ -155,8 +159,11 @@ function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: b
   if (lineEnd) out = out.replace(new RegExp(`([ \\t])\\^(${ID})$`), `$1${ESC}^$2`);
   return out;
 }
-/** A reader's hard line break (`forReaders`): a backslash ending the line, unmarked so the marks close around it. */
-const READER_BREAK = `${ESC}\n`;
+/**
+ * CommonMark's hard line break, a backslash ending the line (P3-F, tracker L166): a hardBreak's form (Tiptap's two
+ * trailing spaces leave a blank line between two breaks), and a reader's line ending. Unmarked, so marks close around it.
+ */
+const LINE_BREAK = `${ESC}\n`;
 const edges = (text: string): string =>
   text.replace(/^[ \t]+|[ \t]+$/g, (run) => run.replace(/ /g, EDGE_SPACE).replace(/\t/g, EDGE_TAB));
 
@@ -194,6 +201,15 @@ function prepareInline(content: Json[], parent: Json, show: ReadonlySet<string>,
     }
     for (const id of now.filter((id) => !active.includes(id))) pushSentinel(OPEN, id, marks);
     active = now;
+    if (node.type === 'hardBreak') {
+      // a heading, a reader's table cell and a block's end have no line to break onto: a reader's Markdown writes `<br>`;
+      // the canonical form keeps the hardBreak as it was written, which does not read back exactly (the tracker's P4 row)
+      const trailing = content.slice(i + 1).every((next) => next.type === 'hardBreak');
+      const unbreakable = parent.type === 'heading' || (tables.forReaders && cell);
+      if (tables.forReaders && (trailing || unbreakable)) out.push({ type: 'text', text: NEWLINE });
+      else out.push(trailing || unbreakable ? node : { type: 'text', text: LINE_BREAK });
+      return;
+    }
     if (node.type !== 'text') {
       out.push(node);
       return;
@@ -213,10 +229,11 @@ function prepareInline(content: Json[], parent: Json, show: ReadonlySet<string>,
         text = escapeText(raw.replace(/\n/g, NEWLINE), { lineStart, lineEnd, inCell: cell });
         if (marks.length > 0) text = edges(text);
       } else {
-        // a reader's line break: each line escaped where it starts; a heading cannot break a line, so it keeps `<br>`
-        const lines = parent.type === 'heading' ? [raw.replace(/\n/g, NEWLINE)] : raw.split('\n');
+        // a reader's line break: each line escaped where it starts; a heading or a table cell cannot break a line, so it
+        // keeps `<br>`
+        const lines = parent.type === 'heading' || cell ? [raw.replace(/\n/g, NEWLINE)] : raw.split('\n');
         lines.forEach((line, k) => {
-          if (k > 0) out.push({ type: 'text', text: READER_BREAK });
+          if (k > 0) out.push({ type: 'text', text: LINE_BREAK });
           let piece = escapeText(line, { lineStart: lineStart || k > 0, lineEnd: lineEnd || k < lines.length - 1, inCell: cell });
           if (marks.length > 0) piece = edges(piece);
           if (piece) out.push({ ...node, text: piece, marks: marks.length ? marks : undefined });
@@ -227,7 +244,7 @@ function prepareInline(content: Json[], parent: Json, show: ReadonlySet<string>,
     out.push({ ...node, text, marks: marks.length ? marks : undefined });
   });
   // a hard line break ending a block would read as a literal backslash: a reader's block ends its lines with `<br>`
-  for (let k = out.length - 1; tables.forReaders && k >= 0 && out[k].text === READER_BREAK; k--) out[k] = { type: 'text', text: NEWLINE };
+  for (let k = out.length - 1; tables.forReaders && k >= 0 && out[k].text === LINE_BREAK; k--) out[k] = { type: 'text', text: NEWLINE };
   for (const id of active.reverse()) pushSentinel(CLOSE, id, restMarks(content[content.length - 1]));
   return code ? out : separate(out);
 }
@@ -290,7 +307,7 @@ function prepare(node: Json, parent: Json, show: ReadonlySet<string>, tables: Ta
     return { ...node, content };
   }
   if (node.type === 'codeBlock') return { ...node, content: prepareInline(children, node, show, tables, cell) };
-  if (node.type === 'table' && !gfmTable(node)) {
+  if (node.type === 'table' && !gfmTable(node, { lineEndings: tables.forReaders })) {
     // structure blocks: a row's id goes on its `:::row` line; cells hold markdown, not a pipe row
     const rows = children.map((row) => ({
       ...row,

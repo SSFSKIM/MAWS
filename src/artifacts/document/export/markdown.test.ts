@@ -1,5 +1,8 @@
 // The Markdown export (M6 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D12): the lossless dialect with ids
-// and comment milestones off, so a file read back gives the content it was written from.
+// and comment milestones off, so a file read back gives the content it was written from; a line ending inside text and
+// a line break, written for a reader, are judged by how a CommonMark reader renders them (the parent's ruling of
+// 2026-10-18, P3-F tracker L166).
+import { Marked } from 'marked';
 import { describe, expect, it } from 'vitest';
 import { comparable, everyKindSource, sourceOf } from '../convert.fixture';
 import { importMarkdown } from '../import/markdown';
@@ -65,6 +68,31 @@ describe('exportMarkdown', () => {
     expect(back.child(1).textContent).toBe('One<br>Two');
     expect(back.child(2).textContent).toBe('Ends with a line ending<br>');
     expect(back.child(3).textContent).toBe('x\n# y');
+  });
+
+  // the parent's ruling of 2026-10-18: a reader's export is judged by its rendering. Rendered by marked, the GFM reader
+  // the dialect itself parses with: a heading's, a table cell's and a block's last line ending each render as <br>
+  it('renders each line ending as a line break in a reader: in a heading, in a table cell and at a block’s end', () => {
+    const md = exportMarkdown(
+      sourceOf([
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'One\nTwo' }] },
+        {
+          type: 'table',
+          content: [
+            { type: 'tableRow', content: [{ type: 'tableHeader', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Name' }] }] }] },
+            { type: 'tableRow', content: [{ type: 'tableCell', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first\nsecond' }] }] }] },
+          ],
+        },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Ends here\n' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Goes\non' }, { type: 'hardBreak' }, { type: 'text', text: 'and on' }, { type: 'hardBreak' }] },
+      ]),
+    );
+    const html = new Marked({ gfm: true }).parse(md) as string;
+    expect(html).toContain('<h2>One<br>Two</h2>');
+    expect(html).toMatch(/<td>first<br>second<\/td>/);
+    expect(html).toContain('<p>Ends here<br></p>');
+    expect(html).toMatch(/<p>Goes<br>\s*on<br>\s*and on<br><\/p>/);
+    expect(html).not.toMatch(/&amp;#10;|:::/);
   });
 
   it('refuses a tab the document does not have', () => {
