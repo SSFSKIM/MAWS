@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 24,
-    "defer:pending": 99,
+    "defer:committed": 25,
+    "defer:pending": 98,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -518,7 +518,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L51; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
       "remainingClause": "Closes when Electron offers a per-session or per-frame switch that disables WebRTC (or a TCP-relay policy) and the frame guard sets it, with the e2e's ICE probe extended to a TURN-over-TCP server. Re-deferred 2026-10-07 (E11 1.6): an Electron limit. Owner: P2 (re-checked on each Electron bump). Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L55): an Electron limit. Owner: each Electron bump. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L51; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "4fa39ea680684fc741979b401327dbe0e77b4760"
     },
     {
       "line": 52,
@@ -528,8 +528,8 @@
       "triageReason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L52; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "Closes when a refused link leaves the page in place (for artifacts, the bridge script can swallow a click on a link outside the scheme; a delivered file is served byte for byte, so it keeps Reload) and `window.ts`'s top-level refusal writes the seam line the frame guard writes. Re-deferred 2026-10-07 (E11 1.6): accepted (A-34). Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L56): accepted (P1 A-34). Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L52; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 53,
