@@ -1637,8 +1637,12 @@ predates the module has no evidence while it runs.
   - **G1 (stop):** on a bridged session with a running background shell
     and a running monitor, Stop on each row sends DX6 `stop`. The bridge
     runs `TaskStop` through `$.tool.call`, the RPC answers `done`, and the
-    row reads `stopped` from the session's own DX4 body (the `TaskStop`
-    row the derivation already reads) within 2 s. This is proved against
+    row reads `stopped` from the session's own DX4 body within 2 s. The
+    body learns it from the bridge's stop note: `$.tool.call` writes no
+    row, so on success the bridge appends a meta row whose whole text is
+    `Task <id>, a background task, was stopped from the desk: it is not
+    running.` The derivation reads that row as `stopped` (amended at the
+    machine half, 2026-10-18). This is proved against
     a real bridge on the machine side (the bridge's tests and one live
     check) and against the fake machine on the web side.
   - **G2 (what cannot):** on a session without a bridge, on a machine
@@ -2656,7 +2660,11 @@ whose `origin.kind` is `task-notification` and whose text starts with `<task-not
 transcript, with the engine's fixed `[SYSTEM NOTIFICATION - NOT USER INPUT]` preamble and the notification after the
 blank line (the shared fixture's `about`; a typed prompt or a peer message never carries that origin), carrying
 `<task-id>`, `<tool-use-id>`, `<output-file>`, `<status>` and `<summary>`; a user row's `task_status` attachment `{taskId, taskType, description, status, deltaSummary,
-outputFilePath}`; a Bash result whose `toolUseResult.backgroundTaskId` is set, its text naming the file after
+outputFilePath}`; the bridge's notes that a task was stopped, each a doperpowers plugin meta row matched on its whole
+text — `Task <id>, a background task, was stopped from the desk: it is not running.` (DC10's Stop) and the interrupt
+note's `Task <id>, the Bash command the interrupt moved to the background, was then stopped: …` line — read as
+`stopped`, since `TaskStop` through `$.tool.call` writes no row and, for a main-loop task, queues no notification
+(DC10, 2026-10-18; fixture case 16); a Bash result whose `toolUseResult.backgroundTaskId` is set, its text naming the file after
 "Output is being written to:"; a Monitor result's `toolUseResult {taskId, timeoutMs, persistent}`; a `TaskStop` call
 (`input.task_id`) with a result that is not an error; `mcp_instructions_delta` (`addedNames`, `removedNames`). A
 nested agent's result row and notification are in its parent agent's transcript, not the loop's: the producer reads
@@ -3402,7 +3410,8 @@ fit its request: a deny on an async question, an `answer` to a permission prompt
 answers, answers keyed by anything but the request's own questions; caught with the digest check, from the pending
 request the bridge reports, and the bridge's own 400 for the same misfit, should one get past, is `bad-shape` too, after
 the claim), `digest-mismatch`, `not-pending` (the request is no longer pending), `unknown-checkout`,
-`above-ceiling`, `no-session`, `unsupported` (the session's kind cannot, per §5's table), `session-live` (a Resume of
+`above-ceiling`, `no-session`, `unknown-task` (a `stop` whose task the session's jobs index does not hold as a running
+shell or monitor; DC10), `unsupported` (the session's kind cannot, per §5's table), `session-live` (a Resume of
 a session live on its machine: a session's transcript lives on the machine that ran it, so "live anywhere" means any
 process of this machine holding the session, terminal or `--bg`), `idle` (a steer while no turn is running: the web offers Send instead). After a claim: `copy-started` (a Resume raced the owner reopening the session; the copy is
 stopped), `interrupted` (below), `failed` (execution failed; `message` says how).
@@ -4207,7 +4216,7 @@ a hub that connects into machines (§2).
 | DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`; four P2 fixed after the final review, the presence watermark among them); PR https://github.com/SSFSKIM/doperpowers/pull/196 (branch `dc7-controls`), merge `af3a5573`, 7.157.0; sminos 1740/1742 (the two load-timing assertions in TECH-DEBT), mods 298/298; Resume live 5/5 on 2.1.301; report `docs/doperpowers/plans/2026-10-15-desk-dc7-report.md` |
 | DC8 machine: history and jobs | plan: `docs/doperpowers/plans/2026-10-17-desk-dc8-machine.md` (doperpowers, branch `desk-dc8`) | **merged 2026-10-17**: M1–M4 reviewed clean; the xhigh whole-branch panel (`b8f7d197..d5a54a13`, 3 P2: a refusal lost across a resync, legacy background launches derived `completed` cold, the clear-time retry hiding a new fork) fixed in one wave, reviewer-high on the delta found one more P2 (launch text over an explicit `toolUseResult`), fixed and re-reviewed `correct`; PR https://github.com/SSFSKIM/doperpowers/pull/219, merge `13b6033c` at head `20d3e283`, 7.168.0; CI green on 8 gates (run 39065772977); shared fixture `tests/sminos/dx4-jobs.json` at `48f254aa` (80 cases, 36 planted bugs caught); rolled out to `macbook` and `mini` 2026-10-17 20:23Z, both uplinks reconnected; residue `delivered.uuid` to the web, MAWS backfill's preamble form and origin gate (S2), adopted shells' output; report `docs/doperpowers/plans/2026-10-17-desk-dc8-report.md` |
 | DC9 web: the session view | plan: `docs/doperpowers/plans/2026-10-17-desk-dc9-session-view.md` (MAWS, branch `desk-dc9`) | **merged and deployed 2026-10-18**: T0 mockups with the owner's verdicts (and the owner's look at M3–M5's shots); M1–M6 each reviewed clean; the xhigh whole-branch panel (`d94663760..79a8c812f`, 4 P2: a request notification not reaching a virtualized card, a withdrawn async question left waiting, keep-place restoring by raw index in report mode, paging stalling in report mode) fixed in one wave, reviewer-high on the delta found one more P2, fixed and re-reviewed clean; PR https://github.com/SSFSKIM/MAWS/pull/30, merge `f248aae6` at head `af6d5b8c2`; gates `static,unit` 39086239342 and `e2e:desk-web` 39086762891 on the head's tree; deployed `hub@f248aae6 web@master.f248aae6` (Worker version `0a030034`), both machines online after; S1 merged as https://github.com/SSFSKIM/MAWS/pull/26 (`67710dddd`); S2 parked on `desk-backfill-jobs` (§9.5, Decision Log); the bridge's interrupt row fixed in doperpowers #225 (7.170.0); residue in the report; report `docs/doperpowers/plans/2026-10-17-desk-dc9-report.md`, the SDE workspace and shots kept under this worktree's `.doperpowers/sde/` |
-| DC10 stop a job from the web | this document's DC10 section (machine half in doperpowers, web half in MAWS) | **cut 2026-10-18** (the owner's approval of 2026-10-17): building |
+| DC10 stop a job from the web | this document's DC10 section (machine half in doperpowers, web half in MAWS) | **cut 2026-10-18** (the owner's approval of 2026-10-17): machine half merged, https://github.com/SSFSKIM/doperpowers/pull/232, merge `717c5b0b` at head `2972de35`, 7.172.0 (reviewer-high's 2 P2 fixed, reviewer-medium on the fix `correct`; ci-gate 39099630158 on the head's tree; live stop check 16/16 on 2.1.302), rolled out to `macbook` and `mini` 2026-10-18 05:21Z; web half building |
 
 ## Surprises & Discoveries
 
@@ -4659,6 +4668,19 @@ a hub that connects into machines (§2).
   phone, which would make its report worse to meet a measuring line
   that overreached. A follow-up loads shiki and KaTeX only when a
   message holds code or math.
+  2026-10-18, DC10's machine half (doperpowers #232, 7.172.0): a stopped
+  job learns it from a note. `TaskStop` through `$.tool.call` writes no
+  transcript row, and for a main-loop task the engine queues no
+  notification. So a job stopped from the desk, or by DC8's interrupt,
+  would have read `running` until the session ended. On success the
+  bridge now appends `Task <id>, a background task, was stopped from the
+  desk: it is not running.`, and DX4's derivation reads that note, and
+  the interrupt note's "was then stopped" line, as `stopped`, each on
+  its whole text. A steer that would read as either note is refused, as
+  for the interrupt marker. The bridge refuses a stop that names an
+  agent (`TaskStop` would kill it), so agents stay out of DC10.
+  Rejected: waiting for the engine's notification, which never comes for
+  a main-loop task.
   2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
   desk-dc8 370662a2, c81b77fc, 578b11b8):
   - DX5's `resync` gains `refused`, so a refusal whose post failed is not
