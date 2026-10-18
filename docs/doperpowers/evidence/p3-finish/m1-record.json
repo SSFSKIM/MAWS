@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 67,
-    "defer:pending": 56,
+    "defer:committed": 68,
+    "defer:pending": 55,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -991,7 +991,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L113; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "Spend is aggregated per engine session by its cumulative peak (with `/clear` segments), as `test/live/support/live.ts` does, with a two-launch resumed-session test. Owner: P3 (the live harness). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L113; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "11f2533dccefe83a22d59acd4f7d8b765ff25a3a"
     },
     {
       "line": 114,
@@ -1001,8 +1001,8 @@
       "triageReason": "Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L114; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
       "remainingClause": "A native shim tells `before-quit` the quit came from the alternate (a Node-API addon on `native/peer-auth/`'s pattern: `terminate:`'s sender, or the current event's Option flag) and the quit guard takes its keep path for it, verified by the owner's hands; or Electron exposes the quit's sender or menu alternates. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L114; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 118,
