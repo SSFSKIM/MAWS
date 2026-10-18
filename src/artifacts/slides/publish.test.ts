@@ -9,6 +9,7 @@ import * as Y from '../yjs/slides';
 import { DECK_PATH, slidePath } from './deck';
 import { claudeExamples } from './fixtures/s6';
 import { deckFiles, deleteElementTree, groupOf, moveInto, moveSlide, readDeckJson, readFlat, readSlide, reorderFlow, resolveAnchor, setNotes, setStyle, setText, slideOrder, zOrder } from './model';
+import { loadSlide } from './parse';
 import { GOOGLE_FONTS_WARNING, publishDeck, type DeckPublishOutcome } from './publish';
 
 const P = (id: string) => slidePath(id);
@@ -736,5 +737,36 @@ describe('publishDeck: the P3-F slide-model panel', () => {
     const read = deckFiles(doc);
     expect(publish(doc, read, { [S]: without(read[S]!, 'b') }).conflicts).toEqual([]);
     expect(kids(doc)).toEqual(['a']);
+  });
+
+  it('scalpel-3#2: notes and text stored with a trailing newline or space: a fresh read appends without conflict, and the file is a fixed point', () => {
+    const doc = small('<section id="s1"><h2 id="t">Title</h2><aside>Say this</aside></section>');
+    setNotes(doc, 's1', 'Say this\n', 'human');
+    setText(doc, 's1', 't', [{ type: 'p', inline: [{ text: 'Title ', marks: {} }] }], 'human');
+    const read = deckFiles(doc);
+    const sent = read[S]!.replace(/Say this\s*<\/aside>/, 'Say this and more</aside>').replace(/>Title\s*<\/h2>/, '>Title of it</h2>');
+    expect(publish(doc, read, { [S]: sent }).conflicts).toEqual([]);
+    expect(Y.readNotes(doc, 's1')).toBe('Say this and more');
+    expect(Y.readText(doc, 's1', 't')).toEqual([{ type: 'p', inline: [{ text: 'Title of it', marks: {} }] }]);
+    // the writers store what the loader reads back, so the file round-trips byte for byte
+    expect(read[S]).toContain('<aside>Say this</aside>');
+    expect(read[S]).toContain('<h2 id="t">Title</h2>');
+    setText(doc, 's1', 't', [{ type: 'p', inline: [{ text: ' Title\n', marks: {} }, { text: ' of  it ', marks: {} }, { br: true }, { text: ' x', marks: { b: {} } }] }], 'human');
+    expect(Y.readText(doc, 's1', 't')).toEqual([{ type: 'p', inline: [{ text: 'Title of it', marks: {} }, { br: true }, { text: 'x', marks: { b: {} } }] }]);
+    expect(loadSlide(deckFiles(doc)[S]!)).toMatchObject({ ok: true, slide: { children: [{ id: 't', text: Y.readText(doc, 's1', 't') }] } });
+  });
+
+  it('scalpel-3#2: the live view is compared as the loader reads the file: raw bytes another writer left do not refuse an append', () => {
+    const doc = small('<section id="s1"><h2 id="t">Title</h2><aside>Say this</aside></section>');
+    transact(doc, () => {
+      Y.patchNotes(doc, 's1', '  Say this\n');
+      Y.patchText(doc, 's1', 't', [{ type: 'p', inline: [{ text: 'Title\t', marks: {} }] }]);
+    });
+    const read = deckFiles(doc);
+    const sent = read[S]!.replace('Say this', 'Say this and more').replace('Title\t', 'Title of it');
+    expect(sent).not.toBe(read[S]);
+    expect(publish(doc, read, { [S]: sent }).conflicts).toEqual([]);
+    expect(Y.readNotes(doc, 's1')).toBe('Say this and more');
+    expect(Y.readText(doc, 's1', 't')).toEqual([{ type: 'p', inline: [{ text: 'Title of it', marks: {} }] }]);
   });
 });

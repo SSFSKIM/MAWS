@@ -22,7 +22,7 @@ import { parseHtml } from './html';
 import { CONTAINER_TAGS, MARK_ORDER, TEXT_TAGS, isPinned, type Attrs, type ElementIR, type Marks, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
 import { cellMinter, childLists, groupsOf, GROUP_BOUNDS, GROUPS, groupKey, heldOf, readDeckJson, readFlat, resolveParents, ROOT, slideFile, slideOrder, slideScalarsOf, toScalars, type Group } from './model';
 import { ANY, rekey, within } from './order';
-import { loadSlide } from './parse';
+import { loadSlide, normalizeNotes, normalizeText } from './parse';
 import { partition } from './serialize';
 
 /** A loader warning, or the publish's own, for the agent's answer (X25's deck part). `slide` is absent for the index. */
@@ -107,13 +107,15 @@ function liveViewOf(doc: Doc, slideId: string): LiveView {
     const row = byId.get(parent)?.tag === 'tr';
     kids.forEach((e, i) => keyOf.set(e.id, row ? cellKey(parent, i) : e.id));
   }
-  const view: LiveView = { scalars: {}, notes: Y.readNotes(doc, slideId), els: new Map(), lists: new Map(), ids: new Map(), place: new Map() };
+  // notes and text as the loader reads the file (whitespace the serializer writes verbatim and the loader trims), so the
+  // live view compares as the agent's base and sent files do (P3-F slide-model scalpel-3#2); the writes still diff from the raw
+  const view: LiveView = { scalars: {}, notes: normalizeNotes(Y.readNotes(doc, slideId)), els: new Map(), lists: new Map(), ids: new Map(), place: new Map() };
   for (const [k, v] of Object.entries(Y.slideScalars(doc, slideId))) if (k.startsWith('style:') || k.startsWith('attr:')) view.scalars[k] = v;
   for (const e of flat) {
     const key = keyOf.get(e.id)!;
     const parent = eff.get(e.id)!;
     const group = groups.get(e.id)!;
-    view.els.set(key, { key, tag: e.tag, parent: parent === ROOT ? ROOT : keyOf.get(parent)!, group, style: e.style, attrs: e.attrs, ...(e.text && { text: e.text }), ...(e.raw !== undefined && { raw: e.raw }) });
+    view.els.set(key, { key, tag: e.tag, parent: parent === ROOT ? ROOT : keyOf.get(parent)!, group, style: e.style, attrs: e.attrs, ...(e.text && { text: normalizeText(e.text) }), ...(e.raw !== undefined && { raw: e.raw }) });
     view.ids.set(key, e.id);
     view.place.set(key, { ...(e.order !== undefined && { order: e.order }), ...(e.z !== undefined && { z: e.z }) });
   }

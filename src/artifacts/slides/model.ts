@@ -8,7 +8,7 @@ import * as Y from '../yjs/slides';
 import { DECK_PATH, serializeDeckJson, slidePath, type DeckFace, type DeckJson, type DeckSection } from './deck';
 import { CELL_TAGS, CONTAINER_TAGS, TEXT_TAGS, isPinned, type Attrs, type ElementIR, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
 import { ANY, FLOW_LAYER, OVER, UNDER, byKey, keyAfter, rekey, repairCollisions, type Bounds } from './order';
-import { hash4, ID_RE } from './parse';
+import { hash4, ID_RE, normalizeNotes, normalizeText } from './parse';
 import { boardQuote, storeRemovedQuotes } from './quote'; // P3-C M7 fix wave 1; P3-E: boardQuote
 import { partition, serializeSlide } from './serialize';
 
@@ -301,14 +301,17 @@ function setKeys(doc: Doc, slideId: string, id: string, prefix: string, values: 
   );
 }
 
-/** The speaker notes, by character diff (S6's `patchNotes`). */
+/**
+ * The speaker notes, by character diff (S6's `patchNotes`), stored as the loader reads them back (trimmed), so the file
+ * is a parse/serialize fixed point and an agent's base equals the live notes (P3-F slide-model scalpel-3#2).
+ */
 export function setNotes(doc: Doc, slideId: string, text: string, origin?: unknown): void {
-  transact(doc, () => void Y.patchNotes(doc, slideId, text), origin);
+  transact(doc, () => void Y.patchNotes(doc, slideId, normalizeNotes(text)), origin);
 }
 
-/** A text element's blocks, by character diff where the block kinds match (S6's `patchText`). */
+/** A text element's blocks, by character diff where the block kinds match (S6's `patchText`), stored as the loader reads them back (likewise). */
 export function setText(doc: Doc, slideId: string, id: string, blocks: TextBlock[], origin?: unknown): void {
-  transact(doc, () => void Y.patchText(doc, slideId, id, blocks), origin);
+  transact(doc, () => void Y.patchText(doc, slideId, id, normalizeText(blocks)), origin);
 }
 
 /** The pinned siblings of an element in paint order, under and over the flow layer (every one over in a host with no flow child), as the editor stacks them. */
