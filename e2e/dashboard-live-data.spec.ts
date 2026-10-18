@@ -468,10 +468,10 @@ test('granted live dataset: the ownerâ€™s grant, Start and controls, the agentâ€
         await expect(block.getByRole('button', { name: 'Start session', exact: true })).toBeVisible();
         await shot(run, 'soak-paused');
         await closeSheet(sheet);
-        // Route D (P3-HD) is on this tree; its absence is proved on its own evidence, never inferred from the engine's: the
-        // owner's trusted server rows name no verified direct source for the tool, before and after, and the server hears
-        // no request of any kind (no MAWS-own connection's initialize or listing, no call) in the ten minutes. Its dataset
-        // path is refused closed in this landing besides (src/main/connectors/direct-route.ts).
+        // Route D (P3-HD) is on this tree and publishes dataset refreshes over a verified direct source (the route D test
+        // below); here the tool has none, proved on its own evidence, never inferred from the engine's: the owner's trusted
+        // server rows hold no `source` row for the tool, before and after, and the server hears no request of any kind (no
+        // MAWS-own connection's initialize or listing, no call) in the ten minutes.
         const directRows = async () => value(await invoke(page, 'connectors.servers', { artifactId: id, tools: [{ server: SERVER, tool: TOOL }] })).servers;
         const direct = await directRows();
         expect(direct.filter((row) => row.kind === 'source'), 'no verified direct source: route D cannot serve the tool').toEqual([]);
