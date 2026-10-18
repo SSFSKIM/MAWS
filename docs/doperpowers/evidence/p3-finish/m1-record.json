@@ -16,8 +16,7 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 15,
-    "preclosed:pending": 1,
+    "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -147,15 +146,15 @@
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-18 at E3's landing d5ef013b6 (on master), regression 8256d02ac (on master).",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "8187eb2f7195b681cd8096375be9725aa8924e96"
     },
     {
       "line": 278,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-18 at E3c's landing a79fe986a (on master), hand-back gate 39101656520.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 131,
