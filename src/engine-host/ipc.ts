@@ -162,6 +162,9 @@ export interface EngineIpcDeps {
   hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready
   observedStore?: ObservedFactsStore; // P2-A (X17): default the file beside each state file under userData
   afterShutdown?: () => void; // P3-A: runs at the end of engine.shutdown's body (closes the artifact store)
+  // P3-HD M2: started with the sessions' stop and awaited with it, so route D's owned MCP processes are gone (within their
+  // pool's own bound, beside the sessions' ladder rather than after it) before engine.shutdown answers
+  duringShutdown?: () => Promise<void>;
   artifacts?: () => ArtifactStore | null; // P3-A (M6): the artifact store each session's tools write through
   datasetRefresh?: DatasetRefreshRequests; // E3: the host's registry of agents' dataset refreshes (absent: none is ever pending)
 }
@@ -304,7 +307,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // E8: a plugin CLI outlives nothing it should not (X13): answered only once every CLI's process group is gone, its
   // SIGKILL sooner than a cancel's so the stop fits main's quit bound
   const shutdown = async (graceMs: number) => {
-    const [result] = await Promise.all([table.shutdown({ graceMs }), plugins.stop(SHUTDOWN_KILL_GRACE_MS)]);
+    const [result] = await Promise.all([table.shutdown({ graceMs }), plugins.stop(SHUTDOWN_KILL_GRACE_MS), deps.duringShutdown?.() /* P3-HD M2 */]);
     deps.afterShutdown?.(); // P3-A: the artifact store, once the sessions writing to it are gone
     return result;
   };

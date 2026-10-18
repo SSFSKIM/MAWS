@@ -139,6 +139,8 @@ import { holdAsset, registerDatasetHolds } from './dashboard/holds'; // E3
 import { registerDashboardExporters } from './dashboard/export'; // E2 M5
 // P3-E end
 import { startConnectors } from './connectors'; // P3-H H3b
+import { createDirectRoute } from './connectors/direct-route'; // P3-HD: route D, MAWS's own MCP connections
+import { productionConnectorOAuth } from './connectors/oauth-root'; // P3-HD M3c2: MAWS's own OAuth beside route D
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -597,7 +599,9 @@ void startWithProfileLock(app, () => {
   // engine host's main-only commands). Its stop runs before the hosts' (steps run in the order added): every lease,
   // watch and pending operation ends, each operation withdrawn from the host, while the host can still hear it.
   // P3-H H4: a page's owner window, read by main, vetoes its pages while hidden or minimized (P3 Decision Log 89)
-  const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents) });
+  // P3-HD (Decision Log 14): the root supplies route D, which the service composes after route E; the engine stays preferred.
+  // P3-HD M3c2: with it, MAWS's own OAuth provider (sealed under userData, safeStorage asked only on demand)
+  const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents), direct: createDirectRoute, oauth: productionConnectorOAuth });
   shutdown.add('connectors', connectors.stop);
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D

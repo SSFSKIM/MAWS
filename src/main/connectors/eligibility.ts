@@ -25,14 +25,18 @@ export interface LiveSession {
   lastUsedAt: string;
 }
 
-export interface EligibilityFacts {
+// P3-HD M2c: the facts the directory decision reads, shared by route E (here) and route D (./direct-route.ts).
+export interface DirectoryFacts {
   artifact: { createdBy: Actor; projectId?: string };
   links: readonly { appSessionId: string; role: ArtifactSessionLink['role'] }[];
   space: { linkedDir?: string } | null; // the artifact's Space, when it is in one
   creator: { projectId: string | null; directory: string } | null; // main's index record of the own session, when there is one
   project: { directory: string } | null; // the indexed project the artifact row names, hidden ones included
-  live: readonly LiveSession[]; // the engine host's sessions
   realpath(path: string): string | null; // null: the path does not exist
+}
+
+export interface EligibilityFacts extends DirectoryFacts {
+  live: readonly LiveSession[]; // the engine host's sessions
 }
 
 // The session `cwd` main found eligible, with its launch: the host refuses another launch or a moved cwd at the call.
@@ -48,18 +52,27 @@ export function ownSessionOf(artifact: { createdBy: Actor }, links: EligibilityF
   return links.find((link) => link.role === 'created')?.appSessionId ?? null;
 }
 
-export function eligibleSessions(facts: EligibilityFacts): EligibleSession[] {
+// P3-HD M2c: the canonical directories an artifact's connector calls may run in, the decision route E's eligibility and
+// route D share. `hasContext`: a valid own-session context stands (E prefers its session first), even when its directory
+// has since vanished (the project fallback is then not taken: a context decides, as for E).
+export function artifactDirectories(facts: DirectoryFacts): { directories: ReadonlySet<string>; hasContext: boolean } {
   const own = ownSessionOf(facts.artifact, facts.links);
   const context = own !== null && facts.creator !== null && (facts.artifact.projectId === undefined || facts.creator.projectId === facts.artifact.projectId) ? facts.creator.directory : null;
   const named = [context, facts.space?.linkedDir ?? null, context === null && facts.artifact.projectId !== undefined ? (facts.project?.directory ?? null) : null];
   const directories = new Set(named.flatMap((path) => (path === null ? [] : [facts.realpath(path)])).filter((path): path is string => path !== null));
+  return { directories, hasContext: context !== null };
+}
+
+export function eligibleSessions(facts: EligibilityFacts): EligibleSession[] {
+  const own = ownSessionOf(facts.artifact, facts.links);
+  const { directories, hasContext } = artifactDirectories(facts);
   if (directories.size === 0) return [];
   const eligible = facts.live.filter((session) => {
     if (session.process !== 'ready') return false;
     const cwd = facts.realpath(session.cwd);
     return cwd !== null && directories.has(cwd);
   });
-  const isOwn = (session: LiveSession) => context !== null && session.appSessionId === own;
+  const isOwn = (session: LiveSession) => hasContext && session.appSessionId === own;
   return eligible
     .sort((a, b) => Number(isOwn(b)) - Number(isOwn(a)) || b.lastUsedAt.localeCompare(a.lastUsedAt))
     .map((session) => ({ appSessionId: session.appSessionId, launchId: session.launchId, cwd: session.cwd, own: isOwn(session) }));

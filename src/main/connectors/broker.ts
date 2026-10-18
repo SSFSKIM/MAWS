@@ -380,6 +380,8 @@ export class ConnectorBroker {
     const ref = { server, tool };
     const found = await this.target(artifactId, ref, new AbortController().signal);
     if ('ok' in found) return found;
+    // P3-HD M3b (Decision Log 18): no grant of either mode from grant-backed metadata alone; the owner's discovery first
+    if (found.target.grantBacked) return refusal('paused', 'noRoute');
     if (mode === 'read' && !found.target.readOnly) return invalid('notReadOnly');
     const grant = await this.authority.grant(artifactId, { server, tool, fingerprint: found.target.fingerprint, mode });
     this.granted(artifactId, ref);
@@ -489,7 +491,7 @@ export class ConnectorBroker {
   // read-only tool feeds.
   private async callTarget(artifactId: string, route: ConnectorRouteName, target: ConnectorRouteTarget, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, signal: AbortSignal, owner: string | null, dataset?: { sink: ConnectorDatasetSink & { requestId?: string }; publishable: () => boolean }): Promise<ConnectorCallOutcome> {
     const named = `${artifactId}'s ${tool.server} · ${tool.tool}`;
-    if ((use === 'watch' || dataset) && !target.readOnly) return invalid('notReadOnly');
+    if ((use === 'watch' || dataset) && !target.readOnly && !target.grantBacked) return invalid('notReadOnly'); // P3-HD M3b: the grant decides below
     let authorization;
     try {
       authorization = await unlessAborted(this.authority.check(artifactId, { ...tool, fingerprint: target.fingerprint }), signal);
@@ -498,7 +500,7 @@ export class ConnectorBroker {
     }
     if (authorization === ABORTED || signal.aborted) return signal.reason as ConnectorRefusal;
     if (!authorization.granted) return refusal('revoked', authorization.refusal);
-    if (!admits(authorization.mode, target.readOnly, dataset ? 'watch' : use)) return refusal('revoked', 'wrongMode'); // E3: a dataset, as a watch
+    if (!admits(authorization.mode, target, dataset ? 'watch' : use)) return refusal('revoked', 'wrongMode'); // E3: a dataset, as a watch
     let answer;
     try {
       // The backend's door (P3-H H4): the window re-read in the same turn as the call, so a hide no event announced while
@@ -761,8 +763,11 @@ function sinkOf(options: unknown): ConnectorDatasetSink | null | false {
 }
 
 // Whether a grant in `mode` admits this use of a tool: a watch only a read grant of a read-only tool; a call of a
-// read-only tool either grant; a call of a tool that may write only an Allow once.
-function admits(mode: ConnectorGrantMode, readOnly: boolean, use: Use): boolean {
+// read-only tool either grant; a call of a tool that may write only an Allow once. P3-HD M3b: a grant-backed target's
+// tool is of unknown annotation, so the existing grant's mode decides (a watch a read grant, a call either), the route
+// proving the live tool against that mode before the write.
+function admits(mode: ConnectorGrantMode, target: Pick<ConnectorRouteTarget, 'readOnly' | 'grantBacked'>, use: Use): boolean {
+  const readOnly = target.readOnly || target.grantBacked === true;
   if (use === 'watch') return readOnly && mode === 'read';
   return readOnly || mode === 'once';
 }

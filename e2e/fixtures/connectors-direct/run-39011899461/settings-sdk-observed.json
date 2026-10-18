@@ -1,0 +1,22 @@
+{
+  "engineServer": {
+    "HOME": "<scratch>/home",
+    "LOGNAME": "new",
+    "PATH": "<scratch>/settings-bin:<scratch>/bin:<runner-work>/node_modules/.bin:~/.cache/node/corepack/v1/pnpm/11.23.0/dist/node-gyp-bin:<runner-work>/node_modules/.bin:~/actions-runner-maws/_work/_temp/bin:~/actions-runner-maws/_work/_tool/node/22.23.3/arm64/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    "SHELL": "/bin/sh",
+    "TERM": "dumb",
+    "USER": "new"
+  },
+  "routeD": {
+    "HOME": "<scratch>/home",
+    "LOGNAME": "new",
+    "PATH": "<scratch>/bin:<runner-work>/node_modules/.bin:~/.cache/node/corepack/v1/pnpm/11.23.0/dist/node-gyp-bin:<runner-work>/node_modules/.bin:~/actions-runner-maws/_work/_temp/bin:~/actions-runner-maws/_work/_tool/node/22.23.3/arm64/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    "SHELL": "/bin/zsh",
+    "TERM": "dumb",
+    "USER": "new"
+  },
+  "settings": {
+    "PATH": "<scratch>/settings-bin:<scratch>/bin:<runner-work>/node_modules/.bin:~/.cache/node/corepack/v1/pnpm/11.23.0/dist/node-gyp-bin:<runner-work>/node_modules/.bin:~/actions-runner-maws/_work/_temp/bin:~/actions-runner-maws/_work/_tool/node/22.23.3/arm64/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    "SHELL": "/bin/sh"
+  }
+}

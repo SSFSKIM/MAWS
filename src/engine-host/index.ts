@@ -97,7 +97,7 @@ const register: HostRegister = (on, emit, client) => {
   const dashboards = registerDashboards({ documents }); // P3-E (E2 M2): the dashboard kind's adapter and its derived change index
   if (documents && dashboardE2eSeamRequested(process.env)) startDashboardE2eSeam(documents.store, join(userData, 'dashboard-e2e'), undefined, datasetRefresh); // P3-E (E2 M6): the agent's tools for the dashboard e2e groups, MAWS_E2E=1 and MAWS_DASHBOARD_E2E=1 only; E3 M4: with the host's refresh registry
   const designs = registerDesigns({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-E (E1's M2): the design's adapter (its legacy migration among its hooks) and its mirror writer, kept fresh under its governing system
-  let connectors: { close(): void } | null = null; // P3-H H3b: below, over the process table
+  let connectors: { close(): void; closeDirect(): Promise<void> } | null = null; // P3-H H3b: below, over the process table
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
@@ -110,6 +110,7 @@ const register: HostRegister = (on, emit, client) => {
       designs.close(); // P3-E
       documents?.close(); // P3-A
     },
+    duringShutdown: async () => connectors?.closeDirect(), // P3-HD M2: route D's owned processes, ended beside the sessions
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
     replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,

@@ -46,12 +46,14 @@ import { ControlError, type ControlClient } from '../rpc';
 import { connectorToolState } from './status';
 import type { ConnectorDatasetSink } from './dataset-sink'; // E3
 import type { RefreshPublication, RefreshPublish, RefreshRaw } from '../dashboards/refresh'; // E3
+import type { ConnectorLaunchContext, ConnectorStatusCache } from './provenance'; // P3-HD
 
 // The host's view of a session (an EngineSession is one).
 export interface ConnectorSessionView {
   readonly lifecycle: string;
   readonly control: ControlClient | null;
   status(): { launchId: string; cwd: string };
+  connectorLaunchContext?(): ConnectorLaunchContext; // P3-HD: the launch's facts, for route D's observations
 }
 
 // The store's grant authority as the host's last check uses it (an ArtifactStore is one).
@@ -71,6 +73,8 @@ export interface ConnectorCallsOptions {
   maxResultBytes?: number;
   log?: (line: string) => void;
   datasets?: ConnectorDatasetSink; // E3: where a start's `dataset` sink publishes (absent: such a start is refused)
+  // P3-HD: route D's observation cache; each mcp_status answer read here is observed before it is discarded
+  statusCache?: ConnectorStatusCache;
 }
 
 // main's input, as the IPC validated it
@@ -396,14 +400,42 @@ export class ConnectorCalls {
     return null;
   }
 
-  private async toolState(client: ControlClient, input: { server: string; tool: string }, signal: AbortSignal) {
+  private async toolState(client: ControlClient, input: ConnectorSessionTool, signal: AbortSignal) {
+    const ticket = this.observing(client, input); // P3-HD
     try {
-      return connectorToolState(await mcpStatus(client, {}, { signal }), input.server, input.tool);
+      const answer = await mcpStatus(client, {}, { signal });
+      if (ticket && this.stillObserving(client, input, ticket.context)) this.options.statusCache?.observe(ticket, answer); // P3-HD
+      return connectorToolState(answer, input.server, input.tool);
     } catch (error) {
+      if (ticket && error instanceof ControlError && error.code === 'invalid_response' && this.stillObserving(client, input, ticket.context)) this.options.statusCache?.reject(ticket); // P3-HD
       if (error instanceof ControlError) return null;
       throw error;
     }
   }
+
+  // P3-HD start: an observation is taken only for the session's live launch, still in the directory it was launched in
+  // (a set_cwd since then makes its report another directory's), its place in that launch's order taken before the
+  // request is written; and (panel correction) its answer lands only if that still holds once it arrives, so a
+  // set_cwd or a relaunch while the request was pending discards it.
+  private observing(client: ControlClient, input: ConnectorSessionTool) {
+    const cache = this.options.statusCache;
+    const context = this.observedContext(client, input);
+    return cache && context ? cache.begin(context) : null;
+  }
+
+  private stillObserving(client: ControlClient, input: ConnectorSessionTool, begun: ConnectorLaunchContext): boolean {
+    const context = this.observedContext(client, input);
+    return context !== null && context.appSessionId === begun.appSessionId && context.launchId === begun.launchId && context.cwd === begun.cwd;
+  }
+
+  private observedContext(client: ControlClient, input: ConnectorSessionTool): ConnectorLaunchContext | null {
+    const session = this.options.session(input.appSessionId);
+    const context = session?.connectorLaunchContext?.();
+    if (!session || !context || session.control !== client) return null;
+    const status = session.status();
+    return status.launchId === context.launchId && status.cwd === context.cwd ? context : null;
+  }
+  // P3-HD end
 
   private supportOf(client: ControlClient, signal: AbortSignal): Promise<McpCallSupport> {
     let known = this.support.get(client);

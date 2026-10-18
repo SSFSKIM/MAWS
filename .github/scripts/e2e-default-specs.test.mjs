@@ -78,7 +78,7 @@ test("this tree: beside the macOS lane's other groups, default runs its own spec
       'e2e/to-human-live.spec.ts',
       'e2e/voice.spec.ts',
     ]);
-    assert.match(readFileSync(join(dir, 'summary'), 'utf8'), /its own 40 of the bare set's 73 specs/);
+    assert.match(readFileSync(join(dir, 'summary'), 'utf8'), /its own 40 of the bare set's 75 specs/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

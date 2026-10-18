@@ -1,0 +1,24 @@
+[
+  {
+    "name": "rootkey",
+    "status": "connected",
+    "scope": "local",
+    "source": "local",
+    "configFields": [
+      "args",
+      "command",
+      "type"
+    ],
+    "cache": {
+      "ok": true,
+      "scope": "local",
+      "transport": "stdio",
+      "entryPath": [
+        "projects",
+        "<scratch>/repo",
+        "mcpServers",
+        "rootkey"
+      ]
+    }
+  }
+]

@@ -32,6 +32,11 @@ export interface ConnectorRouteTarget {
   // The route's annotations (route E's `readOnly`, route D's `readOnlyHint`): only a read-only tool is watched or held
   // under a persistent grant.
   readOnly: boolean;
+  // P3-HD M3b (route D, Decision Log 18): no tool metadata is known, but the artifact's existing grant matches the
+  // identified entry's fingerprint. `readOnly` is then false (never a fabricated read-only fact); the broker's own fresh
+  // check's mode decides what the existing grant admits, a new grant is never made from it, and the route's live
+  // listing proves the tool again before anything is consumed or written.
+  grantBacked?: true;
   sessionId?: string; // route E: the session whose engine would run the call
   // Runs the tool. `fingerprint` and `mode` are what main's check admitted, for the route's own last check just before
   // it writes the call (the host's `authorizeConnectorCall`, which takes an Allow once's use); `signal` aborts it.
@@ -69,12 +74,15 @@ export type ConnectorRouteAnswer =
 export const CONNECTOR_RESULT_MAX_BYTES = ARTIFACT_MAX_BYTES;
 const MESSAGE_MAX_LENGTH = 1_000;
 
-const TargetSchema = z.object({
-  fingerprint: ConnectorGrantRequestSchema.shape.fingerprint,
-  readOnly: z.boolean(),
-  sessionId: z.string().min(1).max(256).optional(),
-  call: z.custom<ConnectorRouteTarget['call']>((value) => typeof value === 'function'),
-});
+const TargetSchema = z
+  .object({
+    fingerprint: ConnectorGrantRequestSchema.shape.fingerprint,
+    readOnly: z.boolean(),
+    grantBacked: z.literal(true).optional(), // P3-HD M3b
+    sessionId: z.string().min(1).max(256).optional(),
+    call: z.custom<ConnectorRouteTarget['call']>((value) => typeof value === 'function'),
+  })
+  .refine((target) => !(target.grantBacked && target.readOnly)); // P3-HD M3b: a grant-backed target claims no read-only
 
 const AnswerSchema = z.union([
   z.object({ ok: z.literal(true), result: JsonValueSchema }),

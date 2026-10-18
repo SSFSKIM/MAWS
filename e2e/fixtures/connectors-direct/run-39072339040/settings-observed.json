@@ -1,0 +1,27 @@
+{
+  "env": {
+    "MAWS_PROBE_OVERRIDDEN": "from-settings",
+    "MAWS_PROBE_TOKEN_SHAPED": "benign-token-shaped-not-a-credential",
+    "MAWS_PROBE_ABSENT": "from-settings",
+    "MAWS_PROBE_ABSENT_FALLBACK": "from-settings",
+    "MAWS_PROBE_PLAIN": "plain-envtoy",
+    "MAWS_PROBE_WITHHELD": "",
+    "MAWS_PROBE_NOWHERE_FALLBACK": "fallback",
+    "MAWS_PROBE_LAUNCH": "probe-value-from-launch"
+  },
+  "sdk": {
+    "HOME": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-direct-5PHRdH/home",
+    "LOGNAME": "new",
+    "PATH": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-direct-5PHRdH/bin:/Users/new/actions-runner-maws/_work/MAWS/MAWS/node_modules/.bin:/Users/new/.cache/node/corepack/v1/pnpm/11.23.0/dist/node-gyp-bin:/Users/new/actions-runner-maws/_work/MAWS/MAWS/node_modules/.bin:/Users/new/actions-runner-maws/_work/_temp/bin:/Users/new/actions-runner-maws/_work/_tool/node/22.23.3/arm64/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    "SHELL": "/bin/zsh",
+    "TERM": "dumb",
+    "USER": "new"
+  },
+  "reportedArgs": [
+    "--overridden",
+    "from-settings",
+    "--setting",
+    "from-settings"
+  ],
+  "launchPath": "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-direct-5PHRdH/bin:/Users/new/actions-runner-maws/_work/MAWS/MAWS/node_modules/.bin:/Users/new/.cache/node/corepack/v1/pnpm/11.23.0/dist/node-gyp-bin:/Users/new/actions-runner-maws/_work/MAWS/MAWS/node_modules/.bin:/Users/new/actions-runner-maws/_work/_temp/bin:/Users/new/actions-runner-maws/_work/_tool/node/22.23.3/arm64/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+}

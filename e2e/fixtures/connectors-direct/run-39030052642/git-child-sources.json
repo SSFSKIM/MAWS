@@ -1,0 +1,24 @@
+[
+  {
+    "name": "rootkey",
+    "status": "connected",
+    "scope": "local",
+    "source": "local",
+    "configFields": [
+      "args",
+      "command",
+      "type"
+    ],
+    "cache": {
+      "ok": true,
+      "scope": "local",
+      "transport": "stdio",
+      "entryPath": [
+        "projects",
+        "/private/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-direct-UzHumT/repo",
+        "mcpServers",
+        "rootkey"
+      ]
+    }
+  }
+]

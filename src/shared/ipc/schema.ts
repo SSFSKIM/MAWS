@@ -232,6 +232,7 @@ export const HOST_EVENTS = [
   'host.supervisorStatus', // the supervisor's own facts (host.status is main's)
   'artifacts.changed', 'spaces.changed', // P3-A M4: the store's change feed
   'connectors.operation', 'connectors.grantChanged', // P3-H H3b: an operation's end (its id alone) and a committed grant change
+  'connectors.directOperation', // P3-HD: a direct operation's end, its id alone
 ] as const satisfies readonly EventName[];
 // E10 end
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;

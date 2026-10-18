@@ -29,7 +29,10 @@
 //  12. allowed again, then a scheduled refresh; an ordinary quit stops the engine
 //  13. relaunched: the grant held, the schedule on, the dashboard on screen in the active tab, no eligible engine; ten real
 //      minutes with no call, no new session and no new launch
-// Route D (P3-HD's direct connector route) is its own named case, skipped while that runtime is absent (Decision Log 14).
+// Route D (P3-HD's direct connector route) is on this tree but carries no dataset sink in this landing: it refuses
+// dataset work closed and sends nothing (the architect's merge ruling; src/main/connectors/direct-route.ts). Its dataset
+// path is a named post-landing corrective, its own case skipped below (Decision Log 14). Step 13 proves both routes
+// absent, each on its own evidence: no engine live, and no verified direct source and no request of any kind at the server.
 import { mkdirSync } from 'node:fs';
 import { test, expect, type Locator } from '@playwright/test';
 import { DATASET_STATES, utcTime } from '../src/artifacts/dashboard/states';
@@ -465,9 +468,15 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         await expect(block.getByRole('button', { name: 'Start session', exact: true })).toBeVisible();
         await shot(run, 'soak-paused');
         await closeSheet(sheet);
-        // Route D: no direct connector route exists on this branch (P3-HD has not landed; Decision Log 14). With it
-        // present, this scene must prove that route absent independently of the engine's absence.
-        test.info().annotations.push({ type: 'route D', description: 'absent: P3-HD’s direct connector runtime is not on this branch' });
+        // Route D (P3-HD) is on this tree; its absence is proved on its own evidence, never inferred from the engine's: the
+        // owner's trusted server rows name no verified direct source for the tool, before and after, and the server hears
+        // no request of any kind (no MAWS-own connection's initialize or listing, no call) in the ten minutes. Its dataset
+        // path is refused closed in this landing besides (src/main/connectors/direct-route.ts).
+        const directRows = async () => value(await invoke(page, 'connectors.servers', { artifactId: id, tools: [{ server: SERVER, tool: TOOL }] })).servers;
+        const direct = await directRows();
+        expect(direct.filter((row) => row.kind === 'source'), 'no verified direct source: route D cannot serve the tool').toEqual([]);
+        expect(direct, 'the server is an engine’s alone').toContainEqual(expect.objectContaining({ kind: 'engineOnly', server: SERVER }));
+        test.info().annotations.push({ type: 'route D', description: `absent: ${JSON.stringify(direct)}` });
 
         const baseline = await census(scene, page);
         expect(baseline.live, 'no eligible engine: none live').toBe(0);
@@ -486,7 +495,10 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         }
         const to = Date.now();
         expect(scene.toolCallsBetween(from, to), 'no call in ten minutes').toEqual([]);
-        scene.note('soak', { from: new Date(from).toISOString(), to: new Date(to).toISOString(), baseline });
+        const heard = scene.calls().filter((entry) => Date.parse(entry.at) >= from && Date.parse(entry.at) <= to);
+        expect(heard, 'no request of any kind reached the server: neither an engine nor MAWS’s own connection').toEqual([]);
+        expect((await directRows()).filter((row) => row.kind === 'source'), 'still no verified direct source').toEqual([]);
+        scene.note('soak', { from: new Date(from).toISOString(), to: new Date(to).toISOString(), baseline, direct });
         await test.info().attach('soak-samples.json', { body: JSON.stringify(samples, null, 2), contentType: 'application/json' });
       });
     },
@@ -495,7 +507,8 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
 });
 
 test('route D: with no engine holding the server, the same dashboard refreshes over the direct route (P3-HD)', () => {
-  // A named dependency (E3 Decision Log 14): P3-HD's direct connector route is not on this branch, so there is nothing
-  // to drive and no as-built name to drive it by. Once HD lands, its corrective writes this case into the scene above.
-  test.skip(true, 'P3-HD’s direct connector route has not landed on this branch (E3 Decision Log 14)');
+  // A named omission (E3 Decision Log 14; the architect's merge ruling): P3-HD's direct route is on this tree, but its
+  // dataset sink is not, so route D refuses dataset work closed. The post-landing corrective builds that sink and writes
+  // this case into the scene above.
+  test.skip(true, 'route D carries no dataset sink in this landing: a named post-landing corrective (E3 Decision Log 14)');
 });
