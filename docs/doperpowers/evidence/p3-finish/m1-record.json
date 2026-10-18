@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 43,
-    "defer:pending": 80,
+    "defer:committed": 44,
+    "defer:pending": 79,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -727,7 +727,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L71; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Reproduce with a docked card and a short transcript; keep the rows above a docking card mounted. Re-deferred 2026-10-07 (E11 1.6): unverified whether visible; needs a reproduction first. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L81): unverified whether visible; the reproduction must be rebuilt first. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L71; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "dc1aa0f84d5b6aa1899c15945db6d5018ea05c58"
     },
     {
       "line": 72,
@@ -737,8 +737,8 @@
       "triageReason": "No supported native API/proven mechanism yet; preserve the case for a native capability pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L72; parent Decision Log 106): No supported native API/proven mechanism yet; preserve the case for a native capability pass. Owner: P4's native capability pass; revalidated at each Electron bump.",
       "remainingClause": "Closes when (owner P2) the break is serialised by a primitive the kernel releases with its holder (an `flock` through a native helper, or a lock directory per stale lock's generation), with a test interleaving three candidates after a dead breaker. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L83): needs a kernel-released primitive (native flock). Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L72; parent Decision Log 106): No supported native API/proven mechanism yet; preserve the case for a native capability pass. Owner: P4's native capability pass; revalidated at each Electron bump.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 73,
