@@ -779,4 +779,35 @@ describe('publishDeck: the P3-F slide-model panel', () => {
     expect(publish(doc, base, { [S]: sent }, true).conflicts).toEqual([]);
     expect(kids(doc)).toEqual(['a', 'b', 'c', 'd']);
   });
+
+  it('scalpel-2#2: an element’s place is its neighbour relation: deleting one whose predecessor did not move is no conflict; one that moved still is', () => {
+    const four = '<section id="s1"><p id="a">A</p><p id="b">B</p><p id="c">C</p><p id="d">D</p></section>';
+    const three = '<section id="s1"><p id="a">A</p><p id="b">B</p><p id="c">C</p></section>';
+    const doc = small(four);
+    const base = deckFiles(doc);
+    reorderFlow(doc, 's1', 'a', null, 'human'); // the owner moves a to the end; d still follows c
+    expect(kids(doc)).toEqual(['b', 'c', 'd', 'a']);
+    expect(publish(doc, base, { [S]: three }).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['b', 'c', 'a']);
+    const other = small(four);
+    const read = deckFiles(other);
+    reorderFlow(other, 's1', 'd', 'a', 'human'); // the owner moves d itself
+    expect(kids(other)).toEqual(['d', 'a', 'b', 'c']);
+    expect(publish(other, read, { [S]: three }).conflicts).toEqual([{ path: S, detail: 'element d: changed since your read' }]);
+  });
+
+  it('scalpel-2#2: both sides re-parent x to the same place after a, the owner also re-ordering the rest: no conflict, the owner’s order kept', () => {
+    const doc = small('<section id="s1"><p id="a">A</p><p id="b">B</p><p id="c">C</p><div id="g"><p id="x">X</p></div></section>');
+    const base = deckFiles(doc);
+    expect(publish(doc, deckFiles(doc), { [S]: '<section id="s1"><p id="c">C</p><p id="a">A</p><p id="x">X</p><p id="b">B</p><div id="g"></div></section>' }).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['c', 'a', 'x', 'b', 'g']);
+    expect(publish(doc, base, { [S]: '<section id="s1"><p id="a">A</p><p id="x">X</p><p id="b">B</p><p id="c">C</p><div id="g"></div></section>' }).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['c', 'a', 'x', 'b', 'g']);
+    // a different place for x still conflicts
+    const other = small('<section id="s1"><p id="a">A</p><p id="b">B</p><p id="c">C</p><div id="g"><p id="x">X</p></div></section>');
+    const read = deckFiles(other);
+    moveInto(other, 's1', 'x', '', 'human'); // the owner: x last in the section
+    expect(kids(other)).toEqual(['a', 'b', 'c', 'g', 'x']);
+    expect(publish(other, read, { [S]: '<section id="s1"><p id="a">A</p><p id="x">X</p><p id="b">B</p><p id="c">C</p><div id="g"></div></section>' }).conflicts).toEqual([{ path: S, detail: 'order: changed since your read' }]);
+  });
 });

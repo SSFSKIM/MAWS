@@ -144,8 +144,9 @@ function keysChanged(x: El, y: El): boolean {
   return px.size !== py.size || [...px].some(([k, v]) => py.get(k) !== v) || !sameText(x.text, y.text);
 }
 /**
- * An element's place differs between two views by meaning: its parent, its layer (flow, under or over), or its position
- * among the siblings both views share in that list; not the bytes of a fractional key.
+ * An element's place differs between two views by meaning: its parent, its layer (flow, under or over), or the sibling
+ * before it among the siblings both views share in that list (its neighbour relation: a move elsewhere in the list,
+ * before or after it, is not its change); not its index, nor the bytes of a fractional key (P3-F slide-model scalpel-2#2).
  */
 function placeChanged(key: string, x: View, y: View): boolean {
   const [ex, ey] = [x.els.get(key)!, y.els.get(key)!];
@@ -154,7 +155,12 @@ function placeChanged(key: string, x: View, y: View): boolean {
   const [lx, ly] = [x.lists.get(lk) ?? [], y.lists.get(lk) ?? []];
   const inY = new Set(ly);
   const common = new Set(lx.filter((k) => inY.has(k)));
-  return restrict(lx, common).indexOf(key) !== restrict(ly, common).indexOf(key);
+  return predecessor(restrict(lx, common), key) !== predecessor(restrict(ly, common), key);
+}
+/** The member before `key` in `seq`, null when it is first (and when `seq` lacks it). */
+function predecessor(seq: string[], key: string): string | null {
+  const at = seq.indexOf(key);
+  return at > 0 ? seq[at - 1]! : null;
 }
 /** Two views of one slide mean the same: its keys, notes, elements, their keys, text and places. */
 function sameSlide(x: View, y: View): boolean {
@@ -336,10 +342,11 @@ function mergeSequence(members: Set<string>, seqB: string[], seqA: string[], seq
   const reordered = !sameSeq(restrict(a, ab), restrict(b, ab));
   let conflict = false;
   // a member the agent brought into this list that someone else brought in too (by another route: both re-parented it
-  // here): its place is the agent's change, and a different place since is a conflict like any order
+  // here): its place is the agent's change, and a different place since (by its predecessor among the members both
+  // hold, the neighbour relation) is a conflict like any order
   const both = new Set(a.filter((k) => inL.has(k)));
   const [aBoth, lBoth] = [restrict(a, both), restrict(l, both)];
-  const misplaced = new Set(a.filter((k) => !inB.has(k) && inL.has(k) && aBoth.indexOf(k) !== lBoth.indexOf(k)));
+  const misplaced = new Set(a.filter((k) => !inB.has(k) && inL.has(k) && predecessor(aBoth, k) !== predecessor(lBoth, k)));
   if (misplaced.size > 0 && !force) conflict = true;
   let desired: string[];
   if (!reordered) {
