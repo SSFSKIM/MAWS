@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 46,
-    "defer:pending": 77,
+    "defer:committed": 47,
+    "defer:pending": 76,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -760,7 +760,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L74; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Closes when (owner P2) recovery waits for the row's ready before it sends (a launch watch) or C3 accepts a send before ready, and a rewinding fork runs its rewind and then sends, each with a recovery test. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L85): rare (quit while initializing; a rewinding fork). Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L74; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "3277953ce0a607eaf1cafee5542096cd704bbb60"
     },
     {
       "line": 75,
@@ -770,8 +770,8 @@
       "triageReason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L75; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "remainingClause": "Closes when (owner P2) the helper moves into a zod-free shared module that both `anchor.ts` and `describe.ts` import, with the preload bundle test green. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L86): a refactor (a zod-free shared module). Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L75; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 76,
