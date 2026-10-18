@@ -303,9 +303,11 @@ export class ArtifactStore {
   }
 
   // An artifact named by its UUID or by a handle its asking session's lineage created (itself first, then its
-  // ancestors nearest first; Decision Log 3). Null when nothing live matches.
+  // ancestors nearest first; Decision Log 3). Null when nothing live matches. P3-F (artifact-protocol finding 7): a
+  // handle may be shaped like a UUID (E2's ids were names an agent chose), so a UUID that names no live artifact is
+  // looked up as a handle: it resolves, and collides at a create, as any handle does.
   resolve(ref: string, lineage: readonly string[] = []): string | null {
-    if (UUID.test(ref)) return this.get(ref) ? ref : null;
+    if (UUID.test(ref) && this.get(ref)) return ref;
     const find = this.storage.db.prepare(
       "SELECT a.id FROM artifacts a JOIN artifact_sessions s ON s.artifactId = a.id AND s.role = 'created' WHERE s.appSessionId = ? AND a.handle = ? AND a.deletedAt IS NULL ORDER BY a.createdAt DESC LIMIT 1",
     );

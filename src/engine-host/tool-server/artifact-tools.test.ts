@@ -52,6 +52,17 @@ describe('artifact_create', () => {
     expect(existsSync(join(w.userData, 'deliverables'))).toBe(false);
   });
 
+  // P3-F (artifact-protocol finding 7): a handle shaped like a UUID names the artifact it was given to, as E2's id did
+  it('resolves a UUID-shaped handle as the handle it is, and refuses it to a second create', async () => {
+    const handle = '11111111-1111-4111-8111-111111111111';
+    const created = jsonOf<{ artifactId: string }>(await create({ handle, content: '<p>one</p>', title: 'One' }));
+    expect(created).toMatchObject({ handle, id: handle });
+    expect(created.artifactId).not.toBe(handle);
+    expect(jsonOf(await read({ artifact: handle }))).toMatchObject({ artifactId: created.artifactId, handle });
+    expect(textOf(await create({ handle, content: '<p>two</p>', title: 'Two' }))).toBe(TOOL_ERRORS.artifactExists(handle));
+    expect(jsonOf(await read({ artifact: created.artifactId }))).toMatchObject({ artifactId: created.artifactId }); // its id still names it
+  });
+
   it('attaches the kind’s guide once per session, and an inline page needs no file', async () => {
     const first = ArtifactCreateResultSchema.parse(jsonOf(await create({ content: '<p>one</p>', title: 'One' })));
     expect(first.guide).toEqual(KIND_GUIDES.html);
