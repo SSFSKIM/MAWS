@@ -79,6 +79,40 @@ export class StreamingLayer {
     }
   }
 
+  /**
+   * A fresh snapshot's `streaming` after a disruption, over what was drawn before it. What the snapshot streams replaces
+   * what was drawn, as `load` does, a block drawn before keeping its identity (its live label's clock goes on). A block
+   * drawn before that the snapshot no longer streams had its row written, or its step ended, while the subscription was
+   * down: it stays drawn, taking no more chunks, until the row its `block-row` named lands, or, when none was named in
+   * time, until `landing` does (the newest row the snapshot brought, in the store once the transcript rebuilt from the
+   * snapshot is installed), so a block never leaves before its row is drawn. With neither, its step ended, and it goes.
+   * `held` says whether a named row is among the rows held now.
+   */
+  resume(streaming: readonly Streaming[], landing: string | null, held: (uuid: string) => boolean): void {
+    const before = this.requests;
+    this.load(streaming);
+    const loaded = this.requests;
+    this.requests = new Map();
+    // The requests in the order they first appeared: those drawn before, then those the gap started.
+    for (const [key, old] of before) {
+      const request = loaded.get(key);
+      for (const [index, block] of old.blocks) {
+        const fresh = request?.blocks.get(index);
+        if (fresh) {
+          request!.blocks.set(index, Object.assign(block, { kind: fresh.kind, text: fresh.text, toolName: fresh.toolName, settledBy: null }));
+          continue;
+        }
+        const settledBy = block.settledBy !== null && held(block.settledBy) ? block.settledBy : landing;
+        if (settledBy === null) continue;
+        const into = request ?? this.request(old.turnId, old.agentId, old.step);
+        into.named.add(index);
+        into.blocks.set(index, Object.assign(block, { settledBy }));
+      }
+      if (request) this.requests.set(key, request);
+    }
+    for (const [key, request] of loaded) if (!this.requests.has(key)) this.requests.set(key, request);
+  }
+
   /** Applies one live chunk; true when it changed what is drawn. */
   chunk(body: SessionBodies['chunk']): boolean {
     const request = this.request(body.turnId, body.agentId, body.step);
@@ -165,10 +199,6 @@ export class StreamingLayer {
       out.push(...[...request.blocks.values()].sort((a, b) => a.index - b.index));
     }
     return out;
-  }
-
-  clear(): void {
-    this.requests = new Map();
   }
 
   private request(turnId: string, agentId: string | null, step: number): Request {

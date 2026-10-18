@@ -1,6 +1,6 @@
 // DX8 — the session plane as the shell hands it to the depth panel (DC6): one DX4 subscription per transcript, kept
 // whole by the hub client. A consumer never sees a gap in `n`, a frame of a subscription it gave up, or a dropped
-// socket: the client turns each discontinuity into `reset` and subscribes again, and a fresh snapshot follows.
+// socket: the client turns each discontinuity into `interrupted` and subscribes again, and a fresh snapshot follows.
 import type { SessionBodies, SessionMessage, SubscriptionKind } from 'desk-hub/protocol';
 
 /** One transcript: a session's main thread (`agentId` null) or one of its subagents. */
@@ -17,10 +17,13 @@ export interface SubscriptionListener {
   /** In order: `snapshot` (n 0) first, then n = 1, 2, … with no gap. */
   message(message: SubscriptionMessage): void;
   /**
-   * A discontinuity the client recovers from (a gap in `n`, a dropped socket, a hub restart): drop everything this
-   * subscription delivered; the client subscribes again, and a fresh snapshot follows once the hub answers.
+   * A discontinuity the client recovers from (a gap in `n`, a dropped socket, a hub restart, the bridge's own
+   * `end {discontinuity}`): nothing more follows on the subscription as it was, and what it delivered stays valid as far
+   * as it went — rows are never taken back, so a consumer may keep drawing them. The client subscribes again, and a
+   * fresh snapshot (n 0) follows once the hub answers; the consumer merges it into what it holds. Until it does, nothing
+   * asked of the subscription (`rows`, `diff`, `output`) is answered: ask again once the fresh snapshot is in.
    */
-  reset(): void;
+  interrupted(): void;
   /** The hub ended the subscription, or the client cannot serve it; nothing follows. Subscribe again to resume. */
   end(body: SessionBodies['end']): void;
 }

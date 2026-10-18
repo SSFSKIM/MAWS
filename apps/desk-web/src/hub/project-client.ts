@@ -228,7 +228,7 @@ export class ProjectClient implements SessionPlane {
       open.retry = null;
       if (open.sub === null) continue;
       open.sub = null;
-      open.listener.reset();
+      open.listener.interrupted();
     }
   }
 
@@ -323,7 +323,7 @@ export class ProjectClient implements SessionPlane {
     if (message.n !== open.next) {
       // A gap: give this sub up and take a fresh snapshot under a new one.
       this.socket.send({ t: 'unsubscribe', sub: open.sub! });
-      open.listener.reset();
+      open.listener.interrupted();
       this.sendSubscribe(open);
       return;
     }
@@ -336,7 +336,7 @@ export class ProjectClient implements SessionPlane {
         // The bridge's stream lost events (DX4): the live part no longer follows the snapshot. Take a fresh one — at
         // once after a snapshot, and after a growing wait when none could be taken, so a bridge still starting is not
         // asked again and again.
-        open.listener.reset();
+        open.listener.interrupted();
         if (message.n !== 0) {
           this.sendSubscribe(open);
           return;

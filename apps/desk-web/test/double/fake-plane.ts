@@ -1,6 +1,6 @@
 // DX8's session plane faked in-process for the depth unit suites: every `subscribe` is held with its own `n`, so a suite
 // plays each transcript's script to its own subscription (the main thread's and each subagent's are apart, as DX3
-// scopes them), resets or ends one without touching another, and sees what each asked for. Beside it, what MAWS's view
+// scopes them), interrupts or ends one without touching another, and sees what each asked for. Beside it, what MAWS's view
 // does with a controller's source: keeps it attached to the store under its key.
 import type { SessionBodies, SubagentMeta } from 'desk-hub/protocol';
 import type { createTranscriptStore } from '../../../../src/renderer/src/stores/transcript';

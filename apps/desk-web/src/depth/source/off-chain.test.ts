@@ -503,7 +503,7 @@ describe('the marks as the subscription carries them', () => {
     view.close();
   });
 
-  it('a snapshot after an end replaces the held rows: a held turn a /rewind undid in the gap is not drawn, and pages back in off', async () => {
+  it('a snapshot after an end whose marks disagree with the held ones replaces the held rows: a held turn a /rewind undid in the gap is not drawn, and pages back in off', async () => {
     const c = new Chain();
     c.prompt('Plan the migration.');
     c.answer('Three steps.');
@@ -537,6 +537,38 @@ describe('the marks as the subscription carries them', () => {
     await settled();
     expect(bubbles(view.drawnRows())).toEqual(['Plan the migration.', 'Do step one, carefully.']);
     expect(view.drawnRows()).toEqual(await view.fresh(c.rows, undone));
+    view.close();
+  });
+
+  it('a snapshot after an interruption whose marks agree with the held ones is merged: the held older rows stay, their marks with them', async () => {
+    const c = new Chain();
+    c.prompt('Plan the migration.');
+    c.answer('Three steps.');
+    const point = c.end();
+    const from = c.rows.length;
+    c.prompt('Do step one.');
+    c.answer('Step one done.');
+    c.end();
+    const undone = c.rows.slice(from);
+    c.prompt('Do step one, carefully.', point); // a /rewind before the view opened: the turn above is off the chain
+    c.answer('Carefully done.');
+    const turnEnd = c.end();
+    const view = open();
+    view.plane.send('snapshot', snapshot(c.rows, undone.map((row) => row.uuid as string)));
+    await settled();
+    expect(bubbles(view.drawnRows())).toEqual(['Plan the migration.', 'Do step one, carefully.']);
+    view.plane.current.listener.interrupted();
+    c.prompt('Now step two.');
+    c.answer('Step two done.');
+    c.end();
+    // The fresh snapshot's newest rows overlap the held ones at the turn's last row, which both mark on the chain.
+    view.plane.send('snapshot', snapshot(c.rows.slice(c.rows.indexOf(turnEnd)), [], true));
+    await settled();
+    expect(bubbles(view.drawnRows())).toEqual(['Plan the migration.', 'Do step one, carefully.', 'Now step two.']);
+    expect(view.drawnRows()).toEqual(await view.fresh(c.rows, undone));
+    expect(view.controller.state.getState().more).toBe(false); // as held: nothing older to page back in
+    view.controller.loadOlder();
+    expect(view.plane.current.asked).toEqual([]);
     view.close();
   });
 

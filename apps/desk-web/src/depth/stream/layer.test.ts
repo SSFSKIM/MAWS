@@ -146,12 +146,48 @@ describe('the streaming layer', () => {
     expect(drawn(layer)).toEqual([['text', 'Next.']]);
   });
 
-  it('clears everything', () => {
+  it('resumes from a fresh snapshot over what it drew: the snapshot’s text, each block the same one, drawn once', () => {
     const layer = new StreamingLayer();
-    layer.chunk(text(0, 0, 0, 'a'));
-    layer.blockRow(blockRow(0, 1, 'r1'));
-    layer.clear();
-    expect(drawn(layer)).toEqual([]);
-    expect([...layer.awaited()]).toEqual([]);
+    layer.chunk(text(0, 0, 0, 'Hel'));
+    const block = layer.blocks(null)[0];
+    // The gap: chunks 1 and 2 were lost; the fresh snapshot holds them, its watermark 2.
+    layer.resume([{ turnId: 't1', agentId: null, step: 0, upTo: 2, blocks: [{ index: 0, kind: 'text', text: 'Hello, wo', upTo: 2 }] }], null, () => false);
+    expect(drawn(layer)).toEqual([['text', 'Hello, wo']]);
+    expect(layer.blocks(null)[0]).toBe(block);
+    expect(layer.chunk(text(0, 2, 0, 'lo, wo'))).toBe(false); // sent again after the snapshot: at its watermark
+    layer.chunk(text(0, 3, 0, 'rld.'));
+    expect(drawn(layer)).toEqual([['text', 'Hello, world.']]);
+  });
+
+  it('keeps a block the fresh snapshot no longer streams until the row that settles it lands, and drops one whose step ended', () => {
+    const layer = new StreamingLayer();
+    layer.chunk(text(0, 0, 0, 'Done in the gap'));
+    layer.chunk(text(1, 0, 0, 'Named before it'));
+    layer.blockRow(blockRow(1, 0, 'r-named'));
+    layer.chunk(text(2, 0, 0, 'Aborted in the gap'));
+    // Step 0's block was written in the gap (the snapshot brought `r-new` as its newest row); step 1's row was named and
+    // is held; a new step streams.
+    layer.resume([{ turnId: 't1', agentId: null, step: 3, upTo: 0, blocks: [{ index: 0, kind: 'text', text: 'New', upTo: 0 }] }], 'r-new', (uuid) => uuid === 'r-named');
+    expect(drawn(layer)).toEqual([
+      ['text', 'Done in the gap'],
+      ['text', 'Named before it'],
+      ['text', 'Aborted in the gap'],
+      ['text', 'New'],
+    ]);
+    expect(layer.chunk(text(0, 1, 0, ' more'))).toBe(false); // a kept block takes no more chunks
+    expect([...layer.awaited()].sort()).toEqual(['r-named', 'r-new']);
+    layer.settle('r-new');
+    expect(drawn(layer)).toEqual([
+      ['text', 'Named before it'],
+      ['text', 'New'],
+    ]);
+    layer.settle('r-named');
+    expect(drawn(layer)).toEqual([['text', 'New']]);
+
+    // With no row brought, a block the snapshot no longer streams ended with its step, and goes at once.
+    const quiet = new StreamingLayer();
+    quiet.chunk(text(0, 0, 0, 'Cut off'));
+    quiet.resume([], null, () => false);
+    expect(drawn(quiet)).toEqual([]);
   });
 });

@@ -129,20 +129,27 @@ describe('the main transcript through the session plane', () => {
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rows));
   });
 
-  it('a reconnect in the middle of a response drops what was drawn and ends with no gap and no duplicated text', async () => {
+  it('a reconnect in the middle of a response keeps what was drawn, merges the fresh snapshot, and ends with no gap and no duplicated text', async () => {
     const script = scriptOf(recording.session, null);
     const lastText = script.findLastIndex((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text');
     const middle = lastText - 3;
     plane.snapshot(script, 0);
     await settle();
     await step(script.slice(0, middle));
-    expect(drawnText().join('')).not.toBe('');
-    plane.current.listener.reset();
+    const drawn = drawnText();
+    const drawnRows = store.getState().entries[controller.key].rows;
+    const block = controller.state.getState().streaming.at(-1);
+    expect(drawn.join('')).not.toBe('');
+    plane.current.listener.interrupted();
     await settle();
-    expect(drawnText()).toEqual([]);
-    expect(store.getState().entries[controller.key].rows).toEqual([]);
+    expect(controller.state.getState().phase).toBe('reconnecting');
+    expect(drawnText()).toEqual(drawn);
+    expect(store.getState().entries[controller.key].rows).toBe(drawnRows); // nothing in the store moved
     plane.snapshot(script, middle + 1); // the fresh snapshot, one chunk further on
+    expect(store.getState().entries[controller.key].rows).toBe(drawnRows); // staged: the old rows stay until the new state is whole
     await settle();
+    expect(store.getState().entries[controller.key].rows.map((row) => row.id)).toEqual(drawnRows.map((row) => row.id));
+    expect(controller.state.getState().streaming.at(-1)).toBe(block); // the same block, one chunk further on
     await step(script.slice(middle + 1));
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
     expect(textOfRows(store.getState().entries[controller.key].rows).filter((t) => t.includes('Both subagents reported back'))).toHaveLength(1);
@@ -155,7 +162,7 @@ describe('the main transcript through the session plane', () => {
     await settle();
     const dropped = firstChunk + 6;
     await step(script.slice(firstChunk, dropped));
-    plane.current.listener.reset(); // the socket dropped with the hub; items up to `lost` never arrive
+    plane.current.listener.interrupted(); // the socket dropped with the hub; items up to `lost` never arrive
     const lost = dropped + 5;
     plane.snapshot(script, lost);
     await settle();
@@ -272,7 +279,7 @@ describe('the main transcript through the session plane', () => {
   });
 
   it('a subscription that ends before its snapshot, and is taken up again, reads as reconnecting until the snapshot', async () => {
-    plane.current.listener.reset(); // the shell's answer to an `end {discontinuity}` at n 0: reset, then subscribe again
+    plane.current.listener.interrupted(); // the shell's answer to an `end {discontinuity}` at n 0: interrupted, then subscribed again
     expect(controller.state.getState().phase).toBe('reconnecting');
     const script = scriptOf(recording.session, null);
     plane.snapshot(script, script.length);
@@ -303,24 +310,112 @@ describe('the main transcript through the session plane', () => {
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
   });
 
-  it('a reset between an older page and the attachment of its rebuilt source drops what was drawn', async () => {
+  it('an interruption between an older page and the attachment of its rebuilt source keeps what was drawn, the page included', async () => {
     const script = scriptOf(recording.session, null);
     const cut = script.length - 4;
     plane.snapshot(script, cut, 6);
     await settle();
-    expect(store.getState().entries[controller.key].rows.length).toBeGreaterThan(0);
+    const before = store.getState().entries[controller.key].rows;
+    expect(before.length).toBeGreaterThan(0);
     controller.loadOlder();
     plane.send('rows', rowsBefore(script, cut, String(plane.current.asked[0].before), 100)); // a new source, not yet attached
-    plane.current.listener.reset(); // before the view's effect attaches it
-    expect(store.getState().entries[controller.key].rows).toEqual([]);
+    plane.current.listener.interrupted(); // before the view's effect attaches it
+    expect(store.getState().entries[controller.key].rows).toBe(before);
     await settle();
     await settle();
-    expect(store.getState().entries[controller.key].rows).toEqual([]); // still nothing stale once the new source attaches
-    expect(controller.state.getState().phase).toBe('reconnecting');
-    plane.snapshot(script, cut);
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script, cut))); // the page drawn
+    expect(controller.state.getState()).toMatchObject({ phase: 'reconnecting', more: false });
+    plane.snapshot(script, cut, 6); // the newest rows again: merged, the page kept
     await settle();
     await settle();
+    expect(controller.state.getState()).toMatchObject({ phase: 'live', more: false });
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script, cut)));
     await step(script.slice(cut));
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
+  it('asks for an older page only once the fresh snapshot is in, again for one the interruption lost', async () => {
+    const script = scriptOf(recording.session, null);
+    const cut = script.length - 4;
+    plane.snapshot(script, cut, 6);
+    await settle();
+    controller.loadOlder();
+    expect(plane.current.asked).toHaveLength(1);
+    expect(controller.state.getState().loadingOlder).toBe(true);
+    plane.current.listener.interrupted(); // the page goes down with the subscription
+    expect(controller.state.getState().loadingOlder).toBe(false);
+    controller.loadOlder(); // the hub would drop it on a subscription it has not served
+    expect(plane.current.asked).toHaveLength(1);
+    expect(controller.state.getState().loadingOlder).toBe(false);
+    plane.snapshot(script, cut, 6);
+    await settle();
+    controller.loadOlder();
+    expect(plane.current.asked).toHaveLength(2);
+    plane.send('rows', rowsBefore(script, cut, String(plane.current.asked[1].before), 100));
+    await settle();
+    await settle();
+    expect(controller.state.getState()).toMatchObject({ more: false, loadingOlder: false });
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script, cut)));
+  });
+
+  it('keeps a held row newer than the fresh snapshot’s newest; the live part sends it again, and it is drawn once', async () => {
+    const script = scriptOf(recording.session, null);
+    const rowAt = (n: number) => script.findIndex((item) => item.kind === 'row' && item.body.row.uuid === rowsOf(script)[n].uuid);
+    const held = rowAt(20) + 1;
+    plane.snapshot(script, 0);
+    await settle();
+    await step(script.slice(0, held));
+    const drawnRows = store.getState().entries[controller.key].rows;
+    plane.current.listener.interrupted();
+    const cut = rowAt(18); // the new subscription's cut is older than what the old one delivered
+    plane.snapshot(script, cut, 5);
+    await settle();
+    await settle();
+    expect(controller.state.getState().more).toBe(false); // as held: the rows reach the start
+    expect(store.getState().entries[controller.key].rows.map((row) => row.id)).toEqual(drawnRows.map((row) => row.id));
+    await step(script.slice(cut, held).filter((item) => item.kind === 'row')); // rows 18 to 20 again
+    expect(store.getState().entries[controller.key].rows.map((row) => row.id)).toEqual(drawnRows.map((row) => row.id));
+    await step(script.slice(held));
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
+  it('a fresh snapshot that overlaps nothing held replaces the held rows, staged: the store never draws none', async () => {
+    const script = scriptOf(recording.session, null);
+    const early = script.findIndex((item) => item.kind === 'row' && item.body.row.uuid === rowsOf(script)[8].uuid) + 1;
+    plane.snapshot(script, early);
+    await settle();
+    const counts: number[] = [];
+    const off = store.subscribe((s) => counts.push(s.entries[controller.key]?.rows.length ?? 0));
+    plane.current.listener.interrupted();
+    plane.snapshot(script, script.length, 4); // much later: its oldest row is newer than every held one
+    await settle();
+    await settle();
+    off();
+    expect(counts.length).toBeGreaterThan(0);
+    expect(Math.min(...counts)).toBeGreaterThan(0);
+    expect(controller.state.getState().more).toBe(true);
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script).slice(-4)));
+  });
+
+  it('a block written while the subscription was down stays drawn until its row lands: no gap, drawn once', async () => {
+    const script = scriptOf(recording.session, null);
+    const named = script.findLastIndex((item) => item.kind === 'block-row');
+    const { uuid } = script[named].body as { uuid: string };
+    const landed = script.findIndex((item) => item.kind === 'row' && item.body.row.uuid === uuid);
+    plane.snapshot(script, 0);
+    await settle();
+    await step(script.slice(0, named)); // the block's text has streamed; its block-row and row come in the gap
+    const partial = controller.state.getState().streaming.find((b) => b.settledBy === null && b.text !== '')!;
+    expect(partial).toBeDefined();
+    plane.current.listener.interrupted();
+    plane.snapshot(script, landed + 1);
+    expect(seen(uuid)).toBe(false);
+    expect(controller.state.getState().streaming).toContain(partial); // still drawn: its row is not in the store yet
+    await settle();
+    await settle();
+    expect(seen(uuid)).toBe(true);
+    expect(controller.state.getState().streaming).not.toContain(partial);
+    await step(script.slice(landed + 1));
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
   });
 
