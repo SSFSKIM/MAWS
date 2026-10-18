@@ -49,6 +49,25 @@
 [data-session-view] .transcript-jump {
   right: 12px;
 }
+/* On a phone the rows take the whole width: a 56 px gutter is a sixth of a 320 px screen. The control floats over the
+   rows' end there, as MAWS draws it in any narrow pane, and only while the reader is away from the tail. */
+@media (max-width: 767px) {
+  [data-session-view] [data-transcript-scroller] {
+    padding-inline-end: 0;
+  }
+  /* An opened shell call's command takes the detail's whole width, its Copy command under it, rather than a column
+     a few words wide beside the button. */
+  [data-session-view] .transcript-shell-heading {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  [data-session-view] .transcript-shell-heading > code {
+    flex: 1 1 100%;
+  }
+  [data-session-view] .transcript-shell-heading > button {
+    margin-inline-start: auto;
+  }
+}
 /* While the session is at rest (presence idle, or no process), the control draws its arrow, not its working dots: the
    transcript keeps the turn its rows left open (DX4's rows carry no SDK result to end it), and only this drawing
    follows the session's presence. The arrow is MAWS's own path, drawn by mask. */

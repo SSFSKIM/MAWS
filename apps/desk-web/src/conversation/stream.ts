@@ -4,7 +4,7 @@
 // between them. A direct channel is one session's exchange with the human — its messages and questions, what humans
 // sent it, its own lifecycle — with the agent traffic it took part in folded the same way, and its working record
 // folded before each of its messages, as a label (a direct channel is drawn from the log only where its transcript is
-// not: the phone, an offline machine, a machine that serves none; the composite's §9.1). A request (a permission prompt
+// not: an offline machine, a machine that serves none; the composite's §9.1). A request (a permission prompt
 // or a question that is not a log event) sits after the log entry the browser held when it first saw it; an async
 // question's request is drawn on its `question` event, whose `src` is the call's id.
 //

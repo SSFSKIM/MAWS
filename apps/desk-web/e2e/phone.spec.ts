@@ -6,11 +6,14 @@
 // The layout cases (tagged @layout) also run in WebKit on the Linux lane (playwright.config.ts); the service worker's
 // cases need Chromium's DevTools protocol to deliver a push, so they run there alone. Installing to an iPhone's home
 // screen, Access, the passkey, and a real push service are the owner's walk (the plan's M4).
-import { inputSha256, seal, verifyRpc, importOrgKey, type PushNotice, type Raised } from 'desk-hub/protocol';
+import { loadRecording, SESSION_VIEW, type Recording } from 'desk-hub/fake-machine';
+import { inputSha256, seal, verifyRpc, importOrgKey, type JsonObject, type PushNotice, type Raised } from 'desk-hub/protocol';
 import type { BrowserContext, Locator, Page } from '@playwright/test';
 import { DOUBLE_MEMBER, type HubDouble } from '../test/double/hub-double';
 import { VECTOR_KEY } from '../test/vectors';
+import { FakeMachineReplay } from './fake-machine';
 import { expect, seedKey, test } from './fixtures';
+import { LONG_ANSWER, LONG_COMMAND, withLongInputs } from './long-inputs';
 import { PROJECT, S, stageProject, summary } from './scene';
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 });
@@ -20,13 +23,50 @@ const QUESTIONS = [{ question: 'Which column do we keep?', header: 'Column', opt
 const raiseQuestion = (hub: HubDouble, request = 'toolu_q1') => hub.raise(PROJECT, 'mini', { request, session: S.asks, tool: 'AskUserQuestion', input: { questions: QUESTIONS } });
 const notice = (request: string, waiting = 1): PushNotice => ({ v: 1, project: PROJECT, name: 'MAWS', session: S.asks, alias: 'maws-45', kind: 'question', request, waiting });
 
-/** Nothing on the page is wider than the phone: no sideways scrolling anywhere. */
+/** The machines of `stageProject`, `mini` offline: its sessions' channels are the log's. */
+const miniOffline = (hub: HubDouble) =>
+  hub.setMachines(PROJECT, [
+    { machine: 'mini', online: false, policy: { read_only: false, ceiling: 'default' }, checkouts: [] },
+    { machine: 'SK.local', online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [] },
+  ]);
+/** A session's subscription answered with an empty transcript, as a machine whose session has written nothing yet. */
+async function emptyTranscript(hub: HubDouble, session: string, status: string | null) {
+  await expect.poll(() => hub.subscriptions(PROJECT).some((s) => s.session === session)).toBe(true);
+  const { sub } = hub.subscriptions(PROJECT).find((s) => s.session === session)!;
+  hub.sendSub(PROJECT, sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: status === null ? null : { status }, bridge: true }, streaming: [] });
+}
+
+/** What may scroll sideways inside its own box: code and command output, whose lines are not wrapped. */
+const SIDEWAYS = 'pre, code, .transcript-output, .transcript-diff, table';
+/**
+ * Nothing on the page is wider than the phone: nothing drawn past its edge, and nothing inside it scrolling sideways.
+ * Only truncated text may run past the edge: an element whose nearest clipping ancestor is a truncating box (clipped,
+ * `text-overflow: ellipsis`) that ends inside the screen. Any other clipping box (a bordered panel, a header row)
+ * would hide a control that ran off the screen, so it excuses nothing. A scroller holds what is past its own edge, and
+ * only code and output blocks (`SIDEWAYS`) may scroll sideways, as they do on a desktop.
+ */
 async function fitsTheWidth(page: Page) {
-  const overflow = await page.evaluate(() => {
+  const overflow = await page.evaluate((sideways) => {
     const width = document.documentElement.clientWidth;
-    return [...document.querySelectorAll<HTMLElement>('body *')].filter((el) => el.getBoundingClientRect().right > width + 1 && getComputedStyle(el).position !== 'fixed').map((el) => `${el.tagName}.${el.className}`.slice(0, 80));
-  });
-  expect(overflow).toEqual([]);
+    const root = document.getElementById('root');
+    const style = (el: Element) => getComputedStyle(el).overflowX;
+    const truncates = (el: Element) => ['hidden', 'clip'].includes(style(el)) && getComputedStyle(el).textOverflow === 'ellipsis';
+    // The nearest ancestor below the app's root that clips or scrolls `el`, if any (the root itself clips everything).
+    const container = (el: HTMLElement) => {
+      for (let up = el.parentElement; up && up !== root && up !== document.body; up = up.parentElement) if (style(up) !== 'visible') return up;
+      return null;
+    };
+    const wide = [...document.querySelectorAll<HTMLElement>('body *')].filter((el) => {
+      if (el.getBoundingClientRect().right <= width + 1 || getComputedStyle(el).position === 'fixed') return false;
+      const box = container(el);
+      if (box === null) return true;
+      if (['auto', 'scroll'].includes(style(box))) return false; // a scroller holds what is past its edge; `scrolling` checks it
+      return !truncates(box) || box.getBoundingClientRect().right > width + 1;
+    });
+    const scrolling = [...document.querySelectorAll<HTMLElement>('body *')].filter((el) => ['auto', 'scroll'].includes(style(el)) && el.scrollWidth > el.clientWidth + 1 && !el.closest(sideways));
+    return { wide: wide.map((el) => `${el.tagName}.${el.className}`.slice(0, 80)), scrolling: scrolling.map((el) => `${el.tagName}.${el.className}`.slice(0, 80)) };
+  }, SIDEWAYS);
+  expect(overflow).toEqual({ wide: [], scrolling: [] });
 }
 
 test('@layout the grid in two columns; a project opens on its channel list, a channel is pushed over it, and back returns', async ({ page, hub }) => {
@@ -61,17 +101,18 @@ test('@layout the grid in two columns; a project opens on its channel list, a ch
   await page.getByRole('button', { name: 'Back to MAWS' }).click();
   await expect(list.locator(`[data-session="${S.asks}"]`)).toBeVisible();
 
-  // A session's channel, pushed over the list.
+  // A session's channel, pushed over the list: its session view, as a desktop draws it (the owner, 2026-10-18), its
+  // status word in the header beside ⋯, and still no depth column.
   await list.locator(`[data-session="${S.asks}"]`).click();
   await expect(page).toHaveURL(new RegExp(`/p/${PROJECT}/s/${S.asks}$`));
   await expect(page.getByTestId('channel-header')).toContainText('maws-45');
-  // The working record is a quiet line: the transcript is desktop-only, so nothing there opens.
-  await expect(center(page).getByTestId('working-record').first()).toContainText('Working record · on a computer');
-  await expect(center(page).getByRole('button', { name: '[ working record ]' })).toHaveCount(0);
+  await expect(center(page).getByTestId('session-view')).toHaveAttribute('data-session', S.asks);
+  await expect(page.getByTestId('channel-header').getByTestId('session-status')).toHaveText('Loading…');
+  await expect(page.getByRole('complementary', { name: 'Session depth' })).toHaveCount(0);
   // Retire sits behind ⋯, with where depth opens.
   await expect(page.getByRole('button', { name: 'Retire…' })).toHaveCount(0);
   await page.getByRole('button', { name: 'maws-45: Retire, and what opens on a computer' }).click();
-  await expect(page.getByTestId('channel-header')).toContainText("maws-45's transcript, subagents and diff open on a computer.");
+  await expect(page.getByTestId('channel-header')).toContainText("maws-45's subagents, jobs and diff open on a computer.");
   await expect(page.getByRole('button', { name: 'Retire…' })).toBeVisible();
   // The verbs that move a turn keep the row; model and compact sit behind More.
   await expect(page.locator('[data-verb="send"]')).toBeVisible();
@@ -182,6 +223,8 @@ test('@layout an ended session shows Resume in place of the composer, and a reti
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.rests}`);
   await expect(page.getByTestId('resume-bar').getByRole('button', { name: 'Resume cua_repl' })).toBeVisible();
   await expect(page.getByTestId('composer')).toHaveCount(0);
+  await emptyTranscript(hub, S.rests, null);
+  await expect(center(page).getByTestId('session-view').getByTestId('end-marker')).toBeVisible(); // its history stays readable above
   await fitsTheWidth(page);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.gone}`);
   await expect(page.getByTestId('retired-by')).toHaveText('Retired by human');
@@ -189,26 +232,243 @@ test('@layout an ended session shows Resume in place of the composer, and a reti
   await expect(page.getByTestId('composer')).toHaveCount(0);
 });
 
-test('@layout request cards fit the phone: a question answerable in place, a permission prompt with Allow and Deny', async ({ page, hub }) => {
+test('@layout request cards fit the phone at the session view’s tail and are answered there: a question, a permission prompt with Allow and Deny', async ({ page, hub }) => {
   await stageProject(hub);
   await seedKey(page, hub);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
   await expect(page.getByTestId('composer')).toBeVisible();
+  await emptyTranscript(hub, S.asks, 'waiting');
   await raiseQuestion(hub);
-  await hub.raise(PROJECT, 'mini', { request: 'toolu_b1', session: S.asks, tool: 'Bash', input: { command: 'pnpm --filter desk-web e2e -- --grep "a very long argument that wraps on a phone"', description: 'Run the browser suites' } });
-  const question = center(page).locator('[data-request="toolu_q1"]');
+  const BASH = { command: 'pnpm --filter desk-web e2e -- --grep "a very long argument that wraps on a phone"', description: 'Run the browser suites' };
+  await hub.raise(PROJECT, 'mini', { request: 'toolu_b1', session: S.asks, tool: 'Bash', input: BASH });
+  const view = center(page).getByTestId('session-view');
+  const question = view.locator('[data-tail-request="toolu_q1"] [data-request="toolu_q1"]');
   await expect(question).toContainText('Which column do we keep?');
   await expect(question.getByRole('radio', { name: 'user_id' })).toBeVisible();
-  const permission = center(page).locator('[data-request="toolu_b1"]');
+  const permission = view.locator('[data-tail-request="toolu_b1"] [data-request="toolu_b1"]');
   await expect(permission.getByRole('button', { name: 'Allow' })).toBeVisible();
   await expect(permission.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await permission.scrollIntoViewIfNeeded();
+    await fitsTheWidth(page);
+  }
+
+  // Answered from the phone, each with the digest of what its card drew.
+  const key = await importOrgKey(VECTOR_KEY);
+  await question.scrollIntoViewIfNeeded();
+  await question.getByRole('radio', { name: 'user_id' }).click();
+  await question.getByRole('button', { name: 'Submit' }).click();
+  await expect.poll(() => hub.rpcs(PROJECT).length).toBe(1);
+  const answer = hub.rpcs(PROJECT)[0];
+  expect(await verifyRpc(key, answer, PROJECT)).toBe(true);
+  expect(answer.args).toEqual({ session: S.asks, answers: { 'Which column do we keep?': 'user_id' }, digest: { session: S.asks, request: 'toolu_q1', tool: 'AskUserQuestion', input_sha256: await inputSha256({ questions: QUESTIONS }) } });
+  await permission.scrollIntoViewIfNeeded();
+  await permission.getByRole('button', { name: 'Deny', exact: true }).click();
+  await expect.poll(() => hub.rpcs(PROJECT).length).toBe(2);
+  const decision = hub.rpcs(PROJECT)[1];
+  expect(await verifyRpc(key, decision, PROJECT)).toBe(true);
+  expect(decision.args).toMatchObject({ session: S.asks, decision: 'deny', digest: { session: S.asks, request: 'toolu_b1', tool: 'Bash', input_sha256: await inputSha256(BASH) } });
+  hub.answerRpc(PROJECT, answer.nonce, { state: 'done', result: {} });
+  hub.answerRpc(PROJECT, decision.nonce, { state: 'done', result: {} });
+  await hub.settle(PROJECT, 'mini', S.asks, { request: 'toolu_q1', winner: 'web', outcome: 'answered', by: DOUBLE_MEMBER.id });
+  await hub.settle(PROJECT, 'mini', S.asks, { request: 'toolu_b1', winner: 'web', outcome: 'deny', by: DOUBLE_MEMBER.id });
+  await expect(question).toHaveCount(0);
+  await expect(permission).toHaveCount(0);
+});
+
+// The session view on the phone (the owner, 2026-10-18): the same view a desktop draws, against DC3's fake machine
+// replaying the `session-view` recording as a DC8 producer, with a turn added whose tool calls carry inputs far wider
+// than the phone (`long-inputs.ts`).
+const MACHINE = 'fake';
+let fm: FakeMachineReplay | null = null;
+test.afterEach(() => {
+  fm?.stop();
+  fm = null;
+});
+
+/** The fake machine replaying `recording`, its session joined, and the phone on its channel. */
+async function openReplay(page: Page, hub: HubDouble, recording: Recording): Promise<{ fm: FakeMachineReplay; view: Locator }> {
+  await stageProject(hub);
+  const replay = (fm = new FakeMachineReplay(hub, { project: PROJECT, machine: MACHINE }, { recording, producer: 'dc8' }));
+  const policy = { read_only: false, ceiling: 'default' };
+  hub.setMachines(PROJECT, [
+    { machine: 'mini', online: true, policy, checkouts: [] },
+    { machine: 'SK.local', online: true, policy, checkouts: [] },
+    { machine: MACHINE, online: true, policy, checkouts: [{ path: replay.recording.cwd, branch: 'main' }] },
+  ]);
+  await hub.append(PROJECT, { writer: `${MACHINE}/${replay.session}`, kind: 'joined', session: replay.session, alias: 'fakerec', name_source: 'user', machine: MACHINE, cwd: replay.recording.cwd, worktree: '', role: '', seat: '', by: '' });
+  replay.sendPresence();
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${replay.session}`);
+  const view = center(page).getByTestId('session-view');
+  await expect(view).toHaveAttribute('data-session', replay.session);
+  await expect.poll(() => replay.subscriptions()).toBe(1);
+  return { fm: replay, view };
+}
+/** The session's end on the recording's timeline: its presence going to no process. */
+const endOf = (recording: Recording) => recording.steps.findIndex((s) => s.k === 'presence' && s.record === null);
+const scroller = (view: Locator) => view.locator('[data-transcript-scroller]');
+const toBottom = (view: Locator) => scroller(view).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+
+test("@layout a session's channel on the phone is its session view: its working record unfolds in place, each tool call one line that opens on a tap, long inputs truncated, and at 390 and 320 nothing wider than the screen", async ({ page, hub }) => {
+  const { fm, view } = await openReplay(page, hub, withLongInputs(loadRecording(SESSION_VIEW)));
+  fm.step(endOf(fm.recording)); // every row in, the session idle and still running
+  const answer = view.locator('[data-owner-card="to-human"]').filter({ hasText: LONG_ANSWER });
+  await expect(answer).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Session view' })).toBeVisible(); // Report · Transcript, as on a desktop
+  await expect(page.getByRole('complementary', { name: 'Session depth' })).toHaveCount(0);
+
+  // The recorded subagents' row, in the turn that launched them, is a plain row here: their tree is the depth column's,
+  // which stays on a computer, so nothing in it opens one.
+  const launched = view.locator('[data-row-id^="user:"]').filter({ hasText: 'Do these four steps' });
+  for (let i = 0; i < 80 && (await launched.count()) === 0; i++) {
+    await scroller(view).evaluate((el) => el.scrollBy({ top: -el.clientHeight * 0.6 }));
+    await page.waitForTimeout(60);
+  }
+  const launchTurn = await launched.locator('[data-turn-id]').first().getAttribute('data-turn-id');
+  const launchDivider = view.locator(`[data-row-id="divider:${launchTurn}"] button.transcript-disclosure`);
+  for (let i = 0; i < 40 && (await launchDivider.count()) === 0; i++) {
+    await scroller(view).evaluate((el) => el.scrollBy({ top: el.clientHeight * 0.4 }));
+    await page.waitForTimeout(60);
+  }
+  await launchDivider.click();
+  const subagents = view.locator(`[data-turn-id="${launchTurn}"] .transcript-subagent`);
+  await expect(subagents).toHaveCount(1);
+  await expect(subagents.locator('button')).toHaveCount(0);
+  await launchDivider.click();
+
+  // The added turn: its prompt, one closed record, its message.
+  await toBottom(view);
+  const turn = 'turn:10a91e55-0000-4000-8000-000000000001';
+  const record = view.locator(`[data-row-id="owner-record:${turn}"]`);
+  await expect(record).toContainText('Working record · 3 tool calls');
+  await expect(view).not.toContainText('Ran pnpm');
   await fitsTheWidth(page);
+
+  // Unfolded in place: the turn as the transcript draws it, as on a desktop — its work behind MAWS's "Worked for"
+  // divider, its calls under one group line, and each call a line of its own.
+  await record.getByRole('button').click();
+  await expect(record).toContainText('Fold to report');
+  const divider = view.locator(`[data-row-id="divider:${turn}"]`);
+  await divider.getByRole('button', { name: /Worked for/ }).click();
+  const group = view.locator(`[data-turn-id="${turn}"] .transcript-group-header`);
+  await group.click();
+  await expect(group).toHaveAttribute('aria-expanded', 'true');
+  const lines = view.locator(`[data-turn-id="${turn}"] .transcript-cell-line`);
+  await expect(lines).toHaveCount(3);
+  const bash = lines.filter({ hasText: 'Ran pnpm --filter desk-web' });
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await bash.scrollIntoViewIfNeeded();
+    await expect(bash).toBeVisible();
+    // The group and each call are one line, inside the screen; the long command, path and pattern end in an ellipsis
+    // rather than widening it.
+    for (const line of [group, ...(await lines.all())]) {
+      const box = (await line.boundingBox())!;
+      expect(box.height).toBeLessThan(40);
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+      const label = line.locator('.transcript-cell-label, .transcript-group-label');
+      expect(await label.evaluate((el) => el.scrollWidth > el.clientWidth && getComputedStyle(el).textOverflow === 'ellipsis')).toBe(true);
+    }
+    await fitsTheWidth(page);
+  }
+
+  // A tap opens a call's input and output in place; their long lines wrap or scroll inside it.
+  await bash.click();
+  await expect(bash).toHaveAttribute('aria-expanded', 'true');
+  const detail = view.locator(`[data-turn-id="${turn}"] .transcript-cell[data-expanded]`);
+  await expect(detail).toContainText(LONG_COMMAND);
+  await expect(detail).toContainText('2 passed');
+  await fitsTheWidth(page);
+  const copy = await detail.getByRole('button', { name: 'Copy command' }).boundingBox(); // the heading wraps the command, not the button
+  expect(copy!.x + copy!.width).toBeLessThanOrEqual(320);
+  await bash.click();
+  await expect(bash).toHaveAttribute('aria-expanded', 'false');
+
+  // Folded again to the report.
+  await record.getByRole('button', { name: 'Fold to report' }).click();
+  await expect(record).toContainText('Working record · 3 tool calls');
+  await expect(view).not.toContainText('Ran pnpm');
+});
+
+test('@layout the running turn streams on the phone: the answer draws as it is written, its folded record working', async ({ page, hub }) => {
+  const { fm, view } = await openReplay(page, hub, loadRecording(SESSION_VIEW));
+  const recording = fm.recording;
+  const uuid = recording.rows.main.find((row) => JSON.stringify(row.message ?? {}).includes('<message>You chose'))!.uuid;
+  const named = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid);
+  if (named?.k !== 'block-row') throw new Error('no block-row');
+  const first = recording.steps.findIndex((s) => s.k === 'chunk' && s.turnId === named.body.turnId && s.agentId === null && s.step === named.body.step && s.chunk.index === named.body.index);
+  fm.step(first - fm.played); // up to the answer's first chunk
+  const streaming = view.locator('[data-row-id^="desk-stream:"]');
+  for (let i = 0; i < 40 && !(await streaming.allTextContents()).join('').includes('You chose blue'); i++) {
+    fm.step(1);
+    await page.waitForTimeout(20);
+  }
+  await toBottom(view);
+  await expect(streaming.last().locator('[data-owner-card="to-human"]')).toContainText('You chose blue');
+  expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // its row is not written yet
+  await expect(view.locator('[data-row-id^="owner-record:"] .transcript-working-dots')).toHaveCount(1);
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await fitsTheWidth(page);
+  }
+  await expect(page.getByTestId('composer').locator('[data-verb="steer"]')).toBeVisible(); // while it works, Steer
+});
+
+test('@layout the phone steers the running turn and sends to an idle session from the session view', async ({ page, hub }) => {
+  const { fm, view } = await openReplay(page, hub, loadRecording(SESSION_VIEW));
+  fm.step(1);
+  hub.sendSession(PROJECT, { project: PROJECT, machine: MACHINE, session: fm.session, kind: 'presence', sub: null, n: null, body: { record: { status: 'busy' }, bridge: true } });
+  const box = page.getByRole('textbox', { name: 'Message fakerec' });
+  const composer = page.getByTestId('composer');
+  await box.fill('the failing case first');
+  await composer.locator('[data-verb="steer"]').click();
+  await expect.poll(() => hub.rpcs(PROJECT).length).toBe(1);
+  const steer = hub.rpcs(PROJECT)[0];
+  expect(await verifyRpc(await importOrgKey(VECTOR_KEY), steer, PROJECT)).toBe(true);
+  expect(steer).toMatchObject({ rpc: 'steer', machine: MACHINE, args: { session: fm.session, text: 'the failing case first' } });
+  await expect(view.getByTestId('tail-send')).toContainText('the failing case first'); // at the tail until its row is in
+  hub.answerRpc(PROJECT, steer.nonce, { state: 'done', result: { row: 'u1' } });
+  await expect(composer).toContainText('Steered: read at the next model request');
+
+  hub.sendSession(PROJECT, { project: PROJECT, machine: MACHINE, session: fm.session, kind: 'presence', sub: null, n: null, body: { record: { status: 'idle' }, bridge: true } });
+  await expect(composer.locator('[data-verb="steer"]')).toHaveCount(0);
+  await box.fill('and then the rest');
+  await composer.locator('[data-verb="send"]').click();
+  const humans = () => hub.up.filter((u) => u.frame.t === 'human').map((u) => (u.frame as { event: { to: unknown; text: string } }).event);
+  await expect.poll(() => humans().map((h) => h.text)).toEqual(['and then the rest']);
+  await expect(view.getByTestId('tail-send').filter({ hasText: 'and then the rest' })).toBeVisible();
+  await fitsTheWidth(page);
+});
+
+test("@layout with the session's machine offline the phone draws the log's channel, saying why, its working record a label", async ({ page, hub }) => {
+  const { fm, view } = await openReplay(page, hub, loadRecording(SESSION_VIEW));
+  fm.step(endOf(fm.recording));
+  const [message] = fm.recordedMessages();
+  const draft: JsonObject = { ...message, writer: `${MACHINE}/${fm.session}` };
+  delete draft.ts;
+  delete draft.seq;
+  await hub.append(PROJECT, draft as never);
+  await expect(view.locator('[data-owner-card="to-human"]').filter({ hasText: 'You chose blue' })).toBeVisible();
+  hub.dropMachine(PROJECT, MACHINE);
+  await expect(page.getByTestId('machine-offline')).toContainText('fake is offline');
+  await expect(center(page).getByTestId('session-view')).toHaveCount(0);
+  await expect(center(page)).toContainText('You chose blue'); // the log's `message`
+  await expect(center(page).getByTestId('working-record').first()).toHaveText(`Working record · ${MACHINE} is offline`);
+  await expect(center(page).getByRole('button', { name: /working record/i })).toHaveCount(0);
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await fitsTheWidth(page);
+  }
 });
 
 test('@layout a channel opens at its tail and follows it; a reader scrolled back keeps their row as a message arrives below', async ({ browserName, page, hub }) => {
   // Holding a reader in place against a row arriving below them is the engine's scroll anchoring, where it has any; an
-  // engine with none (Safari before 27) takes the channel's fallback, which the next case proves.
+  // engine with none (Safari before 27) takes the channel's fallback, which the next case proves. The session's machine
+  // is offline, where a direct channel is the log's.
   await stageProject(hub);
+  miniOffline(hub);
   const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rw${n}#0` });
   for (let n = 1; n <= 30; n++) await message(n);
   await seedKey(page, hub);
@@ -419,6 +679,19 @@ test('a card the push named says why it is not drawn: settled before the tap, or
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?request=toolu_settled_hours_ago`);
   await expect(page.getByTestId('landing')).toHaveText(/This request is no longer waiting: it was answered or withdrawn before you opened it\./);
 
+  // A request settled before the tap is in the conversation's store (the audit record's `decided`, replayed after
+  // caught-up, carries its `raised`), yet the session view draws only pending cards at its tail: the tap says why.
+  // The group chat draws it settled once the store holds it, and the tap then lands in place, so the store keeps it.
+  await hub.raise(PROJECT, 'mini', { request: 'toolu_settled_before', session: S.asks, tool: 'Bash', input: { command: 'pnpm e2e', description: 'Run the e2e suite' } });
+  await hub.settle(PROJECT, 'mini', S.asks, { request: 'toolu_settled_before', winner: 'web', outcome: 'allow', by: DOUBLE_MEMBER.id });
+  await page.goto(`${hub.url}/p/${PROJECT}`);
+  await page.getByRole('navigation', { name: 'Channels' }).getByRole('button', { name: /MAWS/ }).click();
+  await expect(center(page).locator('[data-request="toolu_settled_before"]').getByTestId('settled')).toHaveText('Allowed from the web by you');
+  await page.evaluate((url) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'desk-open', url } })), `/p/${PROJECT}/s/${S.asks}?request=toolu_settled_before`);
+  await expect(center(page).getByTestId('session-view')).toHaveAttribute('data-session', S.asks);
+  await expect(page.getByTestId('landing')).toHaveText(/This request is no longer waiting: it was answered or withdrawn before you opened it\./);
+  await expect(center(page).locator('[data-request="toolu_settled_before"]')).toHaveCount(0);
+
   const forged: Raised = { ...(await seal(await importOrgKey(VECTOR_KEY), 'raised', PROJECT, { request: 'toolu_forged', session: S.asks, tool: 'AskUserQuestion', input: { questions: QUESTIONS } })) };
   hub.raiseRaw(PROJECT, 'mini', { ...forged, input: { questions: [{ ...QUESTIONS[0], question: 'Delete the database?' }] } });
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?request=toolu_forged`);
@@ -436,7 +709,7 @@ test("a project holds back its member's pushes only while the owner can read it:
 
   await seedKey(page, hub);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
-  await expect(center(page)).toContainText('the migration is merged');
+  await expect(center(page).getByTestId('session-view')).toHaveAttribute('data-session', S.asks);
   await expect.poll(() => visibility().at(-1)).toBe(true);
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
