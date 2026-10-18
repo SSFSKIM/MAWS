@@ -10,7 +10,9 @@
 // repository root and in its child directory (e2e/fixtures/connectors-direct/run-39007800364). Only those are captured;
 // everything else is unidentified, so local scope stays engine-only there: a `.git` file or link (the folding is not
 // yet proven), a cwd reached through a symlink (which spelling the engine keys is not proven), and any probe that
-// failed or ran out of time (never read as "no repository").
+// failed or ran out of time (never read as "no repository"). P3-F L244: APFS answers a realpath in the Unicode form it
+// stored, so a composed (NFC) cwd can come back decomposed (NFD) for the very same directory; that is the cwd itself
+// when no component of it is a link, and a link anywhere stays refused whatever its target's spelling.
 import { lstat, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
 
@@ -24,6 +26,7 @@ export const LOCAL_KEY_TIMEOUT_MS = 1_500;
 export interface LocalKeyFiles {
   gitEntry(path: string): Promise<'directory' | 'other' | 'absent'>; // `<dir>/.git`, not followed; throws when unreadable
   realpath(path: string): Promise<string>;
+  isLink(path: string): Promise<boolean>; // the entry itself, not followed; throws when unreadable
 }
 
 export const nodeLocalKeyFiles: LocalKeyFiles = {
@@ -37,6 +40,7 @@ export const nodeLocalKeyFiles: LocalKeyFiles = {
     }
   },
   realpath: (path) => realpath(path),
+  isLink: async (path) => (await lstat(path)).isSymbolicLink(),
 };
 
 export async function captureLocalKey(cwd: string, options: { files?: LocalKeyFiles; timeoutMs?: number } = {}): Promise<ConnectorLocalKey> {
@@ -52,8 +56,8 @@ export async function captureLocalKey(cwd: string, options: { files?: LocalKeyFi
 
 async function derive(cwd: string, files: LocalKeyFiles): Promise<ConnectorLocalKey> {
   try {
-    if ((await files.realpath(cwd)) !== cwd) return { kind: 'unidentified', why: 'symlinkedCwd' };
     const top = parse(cwd).root;
+    if (!(await reachedDirectly(cwd, top, files))) return { kind: 'unidentified', why: 'symlinkedCwd' };
     for (let at = cwd; ; at = dirname(at)) {
       const entry = await files.gitEntry(join(at, '.git'));
       if (entry === 'directory') return { kind: 'repository', key: at.normalize('NFC') };
@@ -63,4 +67,14 @@ async function derive(cwd: string, files: LocalKeyFiles): Promise<ConnectorLocal
   } catch {
     return { kind: 'unidentified', why: 'unreadable' };
   }
+}
+
+// Whether the cwd is its own realpath: identical, or equal under NFC with no link from the cwd up to the root. A
+// normalization-sensitive filesystem can hold the other spelling as another directory, which only a link would reach.
+async function reachedDirectly(cwd: string, top: string, files: LocalKeyFiles): Promise<boolean> {
+  const real = await files.realpath(cwd);
+  if (real === cwd) return true;
+  if (real.normalize('NFC') !== cwd.normalize('NFC')) return false;
+  for (let at = cwd; at !== top; at = dirname(at)) if (await files.isLink(at)) return false;
+  return true;
 }
