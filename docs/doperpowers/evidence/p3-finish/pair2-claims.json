@@ -1,0 +1,67 @@
+{
+  "status": "candidate path claims approved before editing; final changed-path lists come in worker hand-backs",
+  "base": "344d7131c",
+  "approvedAt": "2026-10-18T11:25:25Z",
+  "W-MINI": {
+    "executor": "ab180409652104010",
+    "paths": [
+      "e2e/document.spec.ts",
+      "e2e/to-human.spec.ts",
+      "e2e/shell.spec.ts",
+      "e2e/widgets.spec.ts",
+      "e2e/presentations.spec.ts",
+      "e2e/support/menu.ts",
+      "e2e/support/foreground-trace.ts",
+      "package.json",
+      "src/artifacts/document/editor/comments/plugins.ts",
+      "src/artifacts/document/editor/comments/paste.dom.test.ts",
+      "src/renderer/src/transcript/view/Transcript.tsx",
+      "src/renderer/src/transcript/view/Transcript.test.tsx",
+      "src/renderer/src/overview/OverviewPanel.tsx",
+      "src/renderer/src/overview/OverviewPanel.test.tsx",
+      "src/renderer/src/app/shell-actions.ts",
+      "src/renderer/src/palette/CommandPalette.tsx",
+      "src/renderer/src/palette/CommandPalette.test.tsx",
+      "src/renderer/src/widgets/ModelSelector.tsx",
+      "src/renderer/src/widgets/model.ts",
+      "src/renderer/src/widgets/ModelSelector.test.tsx",
+      "src/artifacts/slides/editor/Filmstrip.tsx",
+      "src/artifacts/slides/editor/DeckEditor.dom.test.tsx"
+    ],
+    "foregroundScripts": [
+      "e2e",
+      "e2e:document-app",
+      "e2e:to-human",
+      "e2e:widgets"
+    ]
+  },
+  "W-STORE": {
+    "executor": "a53b2ea8e3417bc02",
+    "paths": [
+      "src/engine-host/documents/store.ts",
+      "src/engine-host/documents/restore.ts",
+      "src/engine-host/documents/register.ts",
+      "src/engine-host/documents/register.test.ts",
+      "src/artifacts/document/history.ts",
+      "src/artifacts/document/history.test.ts",
+      "src/engine-host/tool-server/documents.test.ts",
+      "src/artifacts/document/editor/history/paint.ts",
+      "src/renderer/src/tools/maws/ask/store.ts",
+      "src/renderer/src/tools/maws/ask/store.test.ts",
+      "src/renderer/src/tools/maws/ask/copy.ts",
+      "src/renderer/src/tools/maws/ask/design-system.test.tsx",
+      "src/main/design-systems/documents.ts",
+      "src/main/design-systems/documents.test.ts",
+      "src/main/artifacts/export-document.ts",
+      "src/main/artifacts/export-document.test.ts",
+      "src/main/presentations/export.ts",
+      "e2e/design-systems.spec.ts",
+      "e2e/support/design-restyle.ts"
+    ],
+    "conditions": "history/paint.ts comment wording only; presentations/export.ts only necessary shared-face reuse; AskSheetTool.tsx needs a new claim before edit"
+  },
+  "intersection": [],
+  "commitLock": "/private/tmp/maws-p3f-commit.lock",
+  "helper": "/private/tmp/p3f-commit-row.py",
+  "currentRowLedger": "docs/doperpowers/evidence/p3-finish/tracker-current.json"
+}

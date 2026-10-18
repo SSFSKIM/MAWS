@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M1 pair1 accepted; latest-master merge and duplicate baseline fold before MINI+STORE",
+  "phase": "M1 pair2 implementation active on disjoint approved paths",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -85,10 +85,25 @@
     "reviewRounds": 2
   },
   "W-MINI": {
-    "status": "next: master merge, inherited baseline fold, then dispatch",
-    "foreground": "package-script activation permitted; lane hold lifted; child DL13"
+    "status": "file claim acknowledged; implementing/diagnosing",
+    "foreground": "package-script activation permitted; lane hold lifted; child DL13",
+    "executor": "ab180409652104010",
+    "claims": "pair2-claims.json"
   },
   "W-STORE": {
-    "status": "next: disjoint pair with W-MINI"
+    "status": "file claim acknowledged; implementing",
+    "executor": "a53b2ea8e3417bc02",
+    "claims": "pair2-claims.json"
+  },
+  "baselineFold": {
+    "merge": "25eb0e6a8",
+    "master": "7c4ebaac7",
+    "commits": [
+      "dfa75d831",
+      "344d7131c"
+    ],
+    "currentRows": "docs/doperpowers/evidence/p3-finish/tracker-current.json",
+    "reviewer": "a1e3175e07d93770d",
+    "status": "independent medium review approved; exact original/current guards retained"
   }
 }
