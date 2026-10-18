@@ -203,6 +203,30 @@ describe('artifact_publish of a file kind (the generic file model)', () => {
     expect(jsonOf(await publish({ artifact: created.artifactId, baseRevision: fresh.revision, files: { 'b.css': 'B mine' } }))).toMatchObject({ changed: ['b.css'] });
   });
 
+  // P3-F (artifact-protocol panel, finding 1): a read of some files rebases the session on those files alone
+  it('a read of some files rebases only those: a file the user changed that the read did not return still conflicts, after a publish too', async () => {
+    const created = await design();
+    await read(created.artifactId);
+    await human(created.artifactId, (f) => f.setAttr('a.html', 'A by the user'));
+    const readSome = (session = SELF, deps: Parameters<World['deps']>[0] = {}) => artifactReadTool(w.deps(deps)).call({ artifact: created.artifactId, paths: ['b.css', 'gone.txt'] }, w.ctx({ appSessionId: session }));
+    const partial = jsonOf<{ revision: number; files: Record<string, string>; missing: string[] }>(await readSome());
+    expect(partial).toMatchObject({ files: { 'b.css': 'B' }, missing: ['gone.txt'] });
+    const blind = await publish({ artifact: created.artifactId, baseRevision: partial.revision, files: { 'a.html': 'A mine' } });
+    expect(artifactRefusalOf(textOf(blind))).toMatchObject({ reason: 'conflict', conflicts: [{ path: 'a.html', detail: 'changed since your read' }] });
+    // a file it was shown publishes, and the new base still holds a.html as the session last read it
+    const shown = jsonOf<{ revision: number }>(await publish({ artifact: created.artifactId, baseRevision: partial.revision, files: { 'b.css': 'B mine', 'gone.txt': 'G' } }));
+    expect(shown).toMatchObject({ changed: ['b.css', 'gone.txt'] });
+    expect(artifactRefusalOf(textOf(await publish({ artifact: created.artifactId, baseRevision: shown.revision, files: { 'a.html': 'A mine' } })))).toMatchObject({ reason: 'conflict', paths: ['a.html'] });
+    expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A by the user', 'b.css': 'B mine', 'gone.txt': 'G' });
+    // a session that never read a.html at all knows nothing of it after reading only b.css
+    const OTHER = 'app-other' as AppSessionId;
+    const other = { session: new ArtifactSession() };
+    const theirs = jsonOf<{ revision: number }>(await readSome(OTHER, other));
+    const unseen = await publish({ artifact: created.artifactId, baseRevision: theirs.revision, files: { 'a.html': 'A theirs' } }, { appSessionId: OTHER }, other);
+    expect(artifactRefusalOf(textOf(unseen))).toMatchObject({ reason: 'conflict', conflicts: [{ path: 'a.html', detail: 'created since your read' }] });
+    expect(liveFiles(created.artifactId)['a.html']).toBe('A by the user');
+  });
+
   it('names a file a restore removed since the read as "removed by restore"', async () => {
     const created = await create({ kind: 'design', title: 'Site', files: { 'a.html': 'A' } });
     const named = await w.store.createVersion(created.artifactId, { kind: 'named', actor: HUMAN, label: 'only a' });

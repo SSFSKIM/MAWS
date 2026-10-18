@@ -235,12 +235,20 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
     ),
   );
   // What the session now knows: the files it read with its own changes, at the revision it wrote (a later publish
-  // still conflicts on a file someone else changed that it never saw); none when that view cannot be built.
+  // still conflicts on a file someone else changed that it never saw); none when that view cannot be built. P3-F
+  // (artifact-protocol finding 1): only the files its publish changed move, so a file a read of some files did not
+  // return keeps the text the session knew of it, however its base's state holds it (still one read of the files).
   if (outcome.result) {
     try {
       replica.base = withDoc(base!.state, (doc) => {
-        publish(doc, baseFiles, input.files, true);
-        return { revision: recorded.revision, state: stateV2(doc), files: filesOf(store, artifact.kind, doc) /* P3-C: kept for the next publish */ };
+        const { changed } = publish(doc, baseFiles, input.files, true);
+        const after = filesOf(store, artifact.kind, doc);
+        const files = { ...baseFiles }; // P3-C: kept for the next publish
+        for (const path of changed) {
+          if (path in after) files[path] = after[path]!;
+          else delete files[path];
+        }
+        return { revision: recorded.revision, state: stateV2(doc), files };
       });
     } catch {
       replica.base = null;
