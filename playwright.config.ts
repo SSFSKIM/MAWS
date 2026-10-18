@@ -8,6 +8,8 @@ import { finalBundleOption } from './e2e/support/final-bundle-reporter';
 // Korean; on a Korean MacBook both wrote Korean).
 process.env.LC_ALL = 'en_US.UTF-8';
 
+const FINAL_REPORTER = finalBundleReporter();
+
 // The Electron end-to-end smoke (charter §12 C1 *Test runners*). Playwright drives Electron through `_electron` only;
 // no browser is installed. One worker: every test launches its own app, and the app owns real processes on this Mac.
 export default defineConfig({
@@ -38,8 +40,10 @@ export default defineConfig({
   timeout: 60_000,
   // Gate-offload Decision Log 50: a child's acceptance script names its reserved final label and the variant its live
   // spec needs (MAWS_E2E_FINAL_BUNDLE=<label>:<variant>); the final reporter then writes that build into the evidence
-  // when the whole invocation passed on that final gate (e2e/support/final-bundle-reporter.ts). Unset: as before.
-  reporter: [['list'], ['html', { open: 'never' }], ...finalBundleReporter()],
+  // when the whole invocation passed on that final gate (e2e/support/final-bundle-reporter.ts). Such a group forbids
+  // `test.only`, which would narrow it unseen by its command line (P3-F). Unset: as before.
+  reporter: [['list'], ['html', { open: 'never' }], ...FINAL_REPORTER],
+  forbidOnly: FINAL_REPORTER.length > 0,
 });
 
 function finalBundleReporter(): ReporterDescription[] {
