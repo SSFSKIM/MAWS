@@ -707,7 +707,8 @@ export class FakeMachine {
       case 'steer': {
         const depth = this.sessions.get(rpc.args.session)!;
         if (depth.mainTurn === null) return fail('idle', 'no turn is running to steer: send it instead');
-        const row = userRow(depth.id, rpc.args.text);
+        // The bridge appends a steer (`$.session.append`), which the engine keeps meta with the plugin's origin.
+        const row = { ...userRow(depth.id, rpc.args.text), isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' } } as Row;
         const outcome = this.traced(rpc, record, depth.id, { row: row.uuid }, row);
         depth.appendRow(null, row);
         return outcome;
@@ -893,7 +894,7 @@ export class FakeMachine {
   }
 }
 
-/** A user row with the human's text, as the engine writes a prompt the bridge submitted or a steer it appended. */
+/** A user row with the human's text: a delivered prompt, kept without its frame or origin (the fake's simplification). */
 function userRow(session: string, text: string): Row {
   return { type: 'user', uuid: randomUUID(), sessionId: session, timestamp: new Date().toISOString(), isSidechain: false, message: { role: 'user', content: [{ type: 'text', text }] } } as Row;
 }

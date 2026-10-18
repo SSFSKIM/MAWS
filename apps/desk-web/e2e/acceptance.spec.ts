@@ -364,17 +364,52 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   await expect(peer).not.toContainText('[sminos');
   await expect(peer.locator('em').first()).toHaveText('From fakepeer');
 
-  // A peer's send queued into the running turn (the engine's `queued_command`, under its own `source_uuid`): a bubble in
-  // that turn, as MAWS draws a prompt queued there, labelled with who sent it.
+  // A peer's send through sminos's inbox, queued into the running turn (the engine's `queued_command`, its prompt the
+  // bare envelope, under its own `source_uuid`): a message between agents, as MAWS draws one, naming its sender, its
+  // body without sminos's frame line or reply line.
   const call = { type: 'assistant', uuid: '5e55a11d-0000-4000-8000-0000000000c1', parentUuid: last.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, message: { id: 'msg_queued1', role: 'assistant', model: 'claude-haiku-5-5', type: 'message', content: [{ type: 'tool_use', id: 'toolu_queued1', name: 'Bash', input: { command: 'ls', description: 'List files' } }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } } };
   const result = { type: 'user', uuid: '5e55a11d-0000-4000-8000-0000000000c2', parentUuid: call.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_queued1', content: 'notes.md', is_error: false }] }, toolUseResult: { stdout: 'notes.md', stderr: '', interrupted: false, isImage: false } };
-  const queuedDelivery = { type: 'attachment', uuid: '5e55a11d-0000-4000-8000-0000000000c3', parentUuid: result.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, attachment: { type: 'queued_command', prompt: '[sminos chat MAWS 5e0c1f2a:3 from fakepeer → @you]\nPing me when the count is done.', source_uuid: '5e55a11d-0000-4000-8000-0000000000c4', commandMode: 'prompt', origin: { kind: 'peer' }, isMeta: true } };
+  const INBOX = { kind: 'peer', from: 'unknown', verifiedPeerPid: 4242, name: 'fakepeer' };
+  const envelope = (body: string) => `<cross-session-message from-name="fakepeer">\n${body}\n</cross-session-message>`;
+  const reply = '[To reply, run in Bash: /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.175.0/skills/sminos/scripts/sminos say "@MAWS/5e0c1f2a <your reply>"]';
+  const queuedDelivery = { type: 'attachment', uuid: '5e55a11d-0000-4000-8000-0000000000c3', parentUuid: result.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, attachment: { type: 'queued_command', prompt: envelope(`[sminos chat MAWS 5e0c1f2a:3 from fakepeer → @you]\nPing me when the count is done.\n${reply}`), source_uuid: '5e55a11d-0000-4000-8000-0000000000c4', commandMode: 'prompt', origin: INBOX, isMeta: true } };
   for (const row of [call, result, queuedDelivery]) land(row);
-  const queuedBubble = bubbles('Ping me when the count is done.');
-  await expect(queuedBubble).toHaveCount(1);
-  await expect(queuedBubble).not.toContainText('[sminos');
-  await expect(queuedBubble.locator('em').first()).toHaveText('From fakepeer');
-  await expect(view.locator('[data-row-id="user:5e55a11d-0000-4000-8000-0000000000c4"]')).toHaveCount(1); // the queued message's own identity
+  const peerMessage = view.locator('[data-kind="agent_message"]').filter({ hasText: 'Ping me when the count is done.' });
+  await expect(peerMessage).toHaveCount(1);
+  await expect(peerMessage).toContainText('fakepeer');
+  await expect(peerMessage).not.toContainText('[sminos');
+  await expect(peerMessage).not.toContainText('To reply');
+  await expect(bubbles('Ping me when the count is done.')).toHaveCount(0);
+
+  // A send to the busy session, which the bridge appends into the running turn (doperpowers #233: `$.session.append`,
+  // kept meta with the plugin's origin and no `asUser`): it waits at the tail until that row, then is a bubble in the
+  // turn, as MAWS draws a prompt queued there, without its frame line, under the appended row's own uuid.
+  const midTurn = await send('Count the markdown files too.');
+  await deliver(midTurn, 'delivered');
+  await expect(sendOf('Count the markdown files too.')).toHaveAttribute('data-state', 'delivered');
+  const appendedUuid = '5e55a11d-0000-4000-8000-0000000000c5';
+  land({ type: 'user', uuid: appendedUuid, parentUuid: queuedDelivery.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' }, message: { role: 'user', content: [{ type: 'text', text: `${frame(midTurn)}\nCount the markdown files too.` }] } });
+  await expect(sendOf('Count the markdown files too.')).toHaveCount(0);
+  const appendedBubble = view.locator(`[data-row-id="user:${appendedUuid}"]`);
+  await expect(appendedBubble).toHaveCount(1);
+  await expect(appendedBubble).toContainText('Count the markdown files too.');
+  await expect(appendedBubble).toContainText('Sent during this turn');
+  await expect(appendedBubble).not.toContainText('[sminos');
+  await expect(appendedBubble.locator('em')).toHaveCount(0); // the owner's own: no label
+
+  // A send that went through sminos's inbox (doperpowers #233's way after an Esc, or a session without the bridge), which
+  // the engine keeps as a peer message: it leaves the tail at its row, drawn as the owner's own prompt, without its frame.
+  const inboxed = await send('Check the docs build.');
+  await deliver(inboxed, 'delivered');
+  const inboxedUuid = '5e55a11d-0000-4000-8000-0000000000c6';
+  const trailer = "This came from another Claude session — not typed by your user, but very likely working on their behalf.";
+  land({ type: 'user', uuid: inboxedUuid, parentUuid: appendedUuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, isMeta: true, origin: { ...INBOX, name: 'human' }, promptSource: 'system', turnOrigin: 'peer', message: { role: 'user', content: `Another Claude session sent a message:\n${envelope(`${frame(inboxed)}\nCheck the docs build.`)}\n\n${trailer}` } });
+  await expect(sendOf('Check the docs build.')).toHaveCount(0);
+  const inboxedBubble = view.locator(`[data-row-id="user:${inboxedUuid}"]`);
+  await expect(inboxedBubble).toHaveCount(1);
+  await expect(inboxedBubble).toContainText('Check the docs build.');
+  await expect(inboxedBubble).not.toContainText('[sminos');
+  await expect(view.locator('[data-kind="agent_message"]').filter({ hasText: 'Check the docs build.' })).toHaveCount(0);
   await shot(page, 'tail-framed-rows');
 
   // A submission delayed, then refused: it stays, saying so.
@@ -397,6 +432,39 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   const index = (selector: string) => view.locator(`[data-row-id]:has(${selector})`).last().getAttribute('data-index').then(Number);
   expect(await index('[data-testid="tail-send"]')).toBeLessThan(await index('[data-testid="end-marker"]'));
   await expect(sendOf('Refuse this one.')).toHaveAttribute('data-state', 'failed'); // still there too
+});
+
+test("a desk Steer waits at the tail until the row its result names, then is the owner's words in the running turn, sent during it", async ({ page, hub }) => {
+  const { fm, view } = await openSession(page, hub);
+  const idle = fm.recording.steps.findIndex((s, i) => i > 0 && s.k === 'presence' && s.at > 18_000 && (s.record as { status?: string } | null)?.status === 'idle');
+  fm.step(idle + 1);
+  const envelope = (uuid: string, parentUuid: string) => ({ uuid, parentUuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session });
+  const land = (row: JsonObject) => fm.depth.apply({ at: 0, k: 'row', agentId: null, row: row as never });
+  // A turn at work: a prompt typed at the terminal, a Bash call and its result.
+  const prompt = { ...envelope('5e55a11d-0000-4000-8000-0000000000d1', fm.recording.rows.main.at(-1)!.uuid), type: 'user', origin: { kind: 'human' }, promptId: 'p-steer', message: { role: 'user', content: 'Count the files.' } };
+  const call = { ...envelope('5e55a11d-0000-4000-8000-0000000000d2', prompt.uuid), type: 'assistant', message: { id: 'msg_steer1', role: 'assistant', model: 'claude-haiku-5-5', type: 'message', content: [{ type: 'tool_use', id: 'toolu_steer1', name: 'Bash', input: { command: 'ls', description: 'List files' } }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } } };
+  const result = { ...envelope('5e55a11d-0000-4000-8000-0000000000d3', call.uuid), type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_steer1', content: 'notes.md', is_error: false }] }, toolUseResult: { stdout: 'notes.md', stderr: '', interrupted: false, isImage: false } };
+  for (const row of [prompt, call, result]) land(row);
+  presence(hub, fm.session, { status: 'busy' });
+
+  const box = page.getByRole('textbox', { name: `Message ${ALIAS}` });
+  await box.fill('Use the split store.');
+  await box.press('Enter'); // while it works, Enter steers
+  await expect.poll(() => hub.rpcs(PROJECT).filter((r) => r.rpc === 'steer').length).toBe(1);
+  const steer = hub.rpcs(PROJECT).find((r) => r.rpc === 'steer')!;
+  const waiting = tailSends(view).filter({ hasText: 'Use the split store.' });
+  await expect(waiting).toHaveCount(1);
+  // The bridge's row for it (`$.session.append`, kept meta with the plugin's origin), named by the steer's result.
+  const steered = '5e55a11d-0000-4000-8000-0000000000d4';
+  hub.answerRpc(PROJECT, steer.nonce, { state: 'done', result: { row: steered } });
+  await expect(waiting.getByTestId('delivery-foot')).toHaveText('✓Steer · read at the next model request');
+  land({ ...envelope(steered, result.uuid), type: 'user', isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' }, message: { role: 'user', content: [{ type: 'text', text: 'Use the split store.' }] } });
+  await expect(waiting).toHaveCount(0);
+  const bubble = view.locator(`[data-row-id="user:${steered}"]`);
+  await expect(bubble).toHaveCount(1);
+  await expect(bubble).toContainText('Use the split store.');
+  await expect(bubble).toContainText('Sent during this turn');
+  await expect(view.locator('[data-kind="user"]').filter({ hasText: 'Use the split store.' })).toHaveCount(1);
 });
 
 /** The recording with one more turn before the session's end: a prompt, a Bash call and its result, then `interrupt`. */
