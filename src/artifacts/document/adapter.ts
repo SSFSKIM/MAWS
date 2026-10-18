@@ -169,15 +169,29 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     return { tops, inserted, threads, tabDeleted };
   }
 
-  /** The thread scope of a set of changed blocks: their threads, and per tab the blocks carrying any of them. */
-  function threadScope(doc: Doc, changed: Set<TopBlock>) {
+  /** The thread scope of a set of changed blocks (and of `more` threads): their threads, and per tab the blocks carrying any of them. */
+  function threadScope(doc: Doc, changed: Set<TopBlock>, more: Iterable<string> = []) {
     const index = DocIndex.of(doc);
-    const threads = new Set<string>();
+    const threads = new Set<string>(more);
     for (const top of changed) for (const id of index.threads(top)) threads.add(id);
     return {
       threads,
       blocks: (tabId: string) => (threads.size === 0 ? [] : index.tops(tabId).filter((top) => carriesAny(index.threads(top), threads)).map((top) => top.node)),
     };
+  }
+
+  /**
+   * The threads whose recorded block is no longer in the document (deleted, with the text their anchor named): a mark
+   * they still have in another block re-anchors them, which the scope of the changed blocks alone never reaches.
+   */
+  function unplacedThreads(doc: Doc): string[] {
+    const index = DocIndex.of(doc);
+    const out: string[] = [];
+    for (const [id, node] of doc.get(THREADS).attrEntries()) {
+      const blockId: unknown = node instanceof YNode ? node.getAttr('blockId') : null;
+      if (typeof blockId === 'string' && !index.find(blockId)) out.push(String(id));
+    }
+    return out;
   }
 
   function mirrorRows(doc: Doc, threadIds: Iterable<string>): ThreadChange | undefined {
@@ -427,13 +441,12 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     if (tabDeleted) ensureTab(doc, generateID);
     const plan = planRepair(doc, inserted, registry, (node) => !!node._item && ids.inserts.has(node._item.id.client, node._item.id.clock));
     if (repairNeeded(plan)) provenance.push(...applyRepair(doc, plan, registry, generateID).carries);
-    if (tops.size > 0) {
-      const live = [...tops].filter((top) => DocIndex.of(doc).position(top) >= 0);
-      const byTab = (tabId: string) => live.filter((top) => top.tabId === tabId).map((top) => top.node);
-      stripMarklessComments(doc, undefined, byTab);
-      const scope = threadScope(doc, new Set(live));
-      if (scope.threads.size > 0) refreshAnchors(doc, undefined, scope);
-    }
+    const live = [...tops].filter((top) => DocIndex.of(doc).position(top) >= 0);
+    if (live.length > 0) stripMarklessComments(doc, undefined, (tabId) => live.filter((top) => top.tabId === tabId).map((top) => top.node));
+    // the threads of the changed blocks, and, on a deletion, those whose recorded block it took (P3-F document-model
+    // scalpel-3#2): a surviving mark elsewhere re-anchors such a thread, else it stays where it was
+    const scope = threadScope(doc, new Set(live), ids.deletes.isEmpty() ? [] : unplacedThreads(doc));
+    if (scope.threads.size > 0) refreshAnchors(doc, undefined, scope);
     // P3-E (E2 M4): a block thread carries no mark, so the scope above never names it; a block (re)inserted under its id
     // (a move, between tabs too) refreshes the threads on it. A document without block threads reads its map and stops.
     const insertedIds = new Set([...inserted].map((node) => node.getAttr('id')).filter((id): id is string => typeof id === 'string'));

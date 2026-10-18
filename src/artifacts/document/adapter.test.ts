@@ -37,7 +37,7 @@ import { applyEdit } from './patch-writer';
 import { readDocument } from './read';
 import { schemaFor } from './schema';
 import { addTab, deleteTab, listTabs } from './tabs';
-import { addThread, anchorOfMark, getThread, listThreads, reply, resolve } from './threads';
+import { addThread, anchorOfMark, getThread, listThreads, locate, reply, resolve } from './threads';
 import { body, coveredIn, dupes, ids, marksOf, nodeOf, now, order, replica, seedDoc, sequence, textOf, TAB } from './writer.fixture';
 
 const human: Actor = { kind: 'human' };
@@ -830,5 +830,27 @@ describe('concurrent deletions of the last two tabs', () => {
     host.pull(b);
     expect(listTabs(a)).toEqual(listTabs(host.live));
     expect(listTabs(b)).toEqual(listTabs(host.live));
+  });
+});
+
+// P3-F document-model scalpel-3#2 (P3): a thread marked in a deleted top-level block and in a surviving one is refreshed
+// by the update that deleted the block, so it locates to its surviving text rather than to the gap the block left.
+describe('a thread marked in a deleted block', () => {
+  it('locates to its surviving text once the block holding its anchor is deleted', () => {
+    const adapter = adapterOf();
+    const seed = seedDoc();
+    const key = 'comment--t9mark00';
+    transact(seed, () => {
+      nodeOf(seed, 'p1').format(0, 3, { [key]: { threadId: 't9' } });
+      nodeOf(seed, 'p2').format(0, 3, { [key]: { threadId: 't9' } });
+    });
+    addThread(seed, { threadId: 't9', tabId: TAB, blockId: 'p1', quote: 'The', anchor: anchorOfMark(body(seed), 't9')!, by: human, at: now(), body: 'Both.' });
+    const host = new Host(seed, adapter);
+    const person = host.peer();
+    transact(person, () => body(person).delete(order(person).indexOf('p1'), 1));
+    host.send(person, human);
+    const thread = getThread(host.live, 't9')!;
+    expect(locate(host.live, thread)).toEqual(expect.objectContaining({ how: 'text', blockId: 'p2', index: 0 }));
+    expect(thread.blockId).toBe('p2');
   });
 });
