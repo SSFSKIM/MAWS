@@ -604,36 +604,40 @@ describe('the marks as the subscription carries them', () => {
     view.close();
   });
 
-  it('a snapshot after an interruption that a branch from before its window wrote under replaces the held rows, though its marks agree: an append the branch left draws as not read', async () => {
-    const c = new Chain();
-    c.prompt('Check both services.');
-    const tool = (id: string) => ({ type: 'tool_use', id, name: 'Bash', input: { command: 'sleep 12', description: 'Wait' } });
-    const call = c.assistant([tool('toolu_g1'), tool('toolu_g2')]);
-    const first = c.delivery('5e551e17', 'Use the staging database.', call);
-    const mirror = c.mirror('delivered', '[sminos message from human id=5e551e17]\nUse the staging database.');
-    const result = c.result('toolu_g1', call);
-    const view = open();
-    view.plane.send('snapshot', snapshot(c.rows, []));
-    await settled();
-    expect(user(view.drawnRows(), 'Use the staging database.')).toMatchObject({ dropped: false, messageUuid: first.uuid });
-    view.plane.current.listener.interrupted();
-    // In the gap the bridge appends again under the call while the second tool runs: the first append leaves the chain,
-    // and the first result, whose call stays on it, stays. The fresh snapshot's window begins at that result, which both
-    // mark on the chain, so the marks agree; only the second append's parent, the call, says the chain forked before it.
-    c.delivery('6f662f28', 'Skip the cache.', call);
-    c.mirror('delivered', '[sminos message from human id=6f662f28]\nSkip the cache.');
-    c.result('toolu_g2', call);
-    const split = c.rows.indexOf(result);
-    view.plane.send('snapshot', snapshot(c.rows.slice(split), [], true));
-    await settled();
-    expect(user(view.drawnRows(), 'Use the staging database.')).toBeUndefined();
-    expect(view.controller.state.getState().more).toBe(true);
-    view.controller.loadOlder();
-    view.plane.send('rows', { rows: c.rows.slice(0, split).reverse(), before: result.uuid as string, more: false, offChain: [first.uuid as string, mirror.uuid as string] });
-    await settled();
-    expect(user(view.drawnRows(), 'Use the staging database.')).toMatchObject({ dropped: true, messageUuid: first.uuid });
-    expect(view.drawnRows()).toEqual(await view.fresh(c.rows, [first, mirror]));
-    view.close();
+  it('a snapshot after an interruption that a branch from outside its window wrote under replaces the held rows, though its marks agree, the branch point held or older than every held row: an append the branch left draws as not read', async () => {
+    for (const history of ['whole', 'paged'] as const) {
+      const c = new Chain();
+      c.prompt('Check both services.');
+      const tool = (id: string) => ({ type: 'tool_use', id, name: 'Bash', input: { command: 'sleep 12', description: 'Wait' } });
+      const call = c.assistant([tool('toolu_g1'), tool('toolu_g2')]);
+      const first = c.delivery('5e551e17', 'Use the staging database.', call);
+      const mirror = c.mirror('delivered', '[sminos message from human id=5e551e17]\nUse the staging database.');
+      const result = c.result('toolu_g1', call);
+      const view = open();
+      // Paged, the first snapshot begins at the first append: the call is older than every held row.
+      view.plane.send('snapshot', history === 'whole' ? snapshot(c.rows, []) : snapshot(c.rows.slice(c.rows.indexOf(first)), [], true));
+      await settled();
+      expect(user(view.drawnRows(), 'Use the staging database.'), history).toMatchObject({ dropped: false, messageUuid: first.uuid });
+      view.plane.current.listener.interrupted();
+      // In the gap the bridge appends again under the call while the second tool runs: the first append leaves the
+      // chain, and the first result, whose call stays on it, stays. The fresh snapshot's window begins at that result,
+      // which both mark on the chain, so the marks agree; only the second append's parent, the call, says the chain
+      // forked outside it.
+      c.delivery('6f662f28', 'Skip the cache.', call);
+      c.mirror('delivered', '[sminos message from human id=6f662f28]\nSkip the cache.');
+      c.result('toolu_g2', call);
+      const split = c.rows.indexOf(result);
+      view.plane.send('snapshot', snapshot(c.rows.slice(split), [], true));
+      await settled();
+      expect(user(view.drawnRows(), 'Use the staging database.'), history).toBeUndefined();
+      expect(view.controller.state.getState().more, history).toBe(true);
+      view.controller.loadOlder();
+      view.plane.send('rows', { rows: c.rows.slice(0, split).reverse(), before: result.uuid as string, more: false, offChain: [first.uuid as string, mirror.uuid as string] });
+      await settled();
+      expect(user(view.drawnRows(), 'Use the staging database.'), history).toMatchObject({ dropped: true, messageUuid: first.uuid });
+      expect(view.drawnRows(), history).toEqual(await view.fresh(c.rows, [first, mirror]));
+      view.close();
+    }
   });
 
   it('an older producer’s snapshot after an end continues the held rows where it overlaps them', async () => {

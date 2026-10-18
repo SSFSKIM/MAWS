@@ -54,16 +54,18 @@
 // subscription delivered past the new snapshot's cut, which arrives again live and is one row by its uuid), and `more`
 // stays as held — the older pages the reader loaded stay drawn. A snapshot that marks (`offChain`) is merged only where
 // its marks agree with the held ones on every row both hold, both hold one of them on the chain (not a progress row,
-// which the machine never marks), and no row it brings was written under a held row it does not hold: a branch in the
-// gap (a /rewind, a second append under a tool call) can leave held rows older than the snapshot off the chain with
-// nothing but their own page to say so, and the overlap disagreeing, holding no row on the chain to vouch for them, or
-// a row branching from before the snapshot's window, is how it shows; then, as when the snapshot overlaps nothing held,
-// it replaces the held rows, the older ones paging back in with their own marks. An older producer's, which marks
-// nothing, is merged wherever it overlaps. Either way the transcript is rebuilt under a new source, which MAWS's store
-// installs staged, so the old rows stay drawn until the new state is whole; a block the snapshot no longer streams (its
-// row written, or its step ended, in the gap) stays drawn until the rows the snapshot brought have landed, and one a
-// `block-row` named before the disruption until its own row has, wherever that row is sure to come, so no block leaves
-// before its row is drawn.
+// which the machine never marks), and no row it brings that was not held was written under a row outside it: a branch
+// in the gap (a /rewind, a second append under a tool call) can leave held rows older than the snapshot off the chain
+// with nothing but their own page to say so, and the overlap disagreeing, holding no row on the chain to vouch for them,
+// or a row branching from outside the snapshot's window (from a held row, or from one older than every held row), is
+// how it shows; then, as when the snapshot overlaps nothing held, it replaces the held rows, the older ones paging back
+// in with their own marks. An older producer's, which marks nothing, is merged wherever it overlaps. Either way the
+// transcript is rebuilt under a new source, which MAWS's store installs staged, so the old rows stay drawn until the new
+// state is whole; a block the snapshot no longer streams (its row written, or its step ended, in the gap) stays drawn
+// until the rows the snapshot brought have landed, and one a `block-row` named before the disruption until its own row
+// has, wherever that row is sure to come, so no block leaves before its row is drawn. A request the snapshot holds less
+// of than was drawn (a producer that went back) is kept as drawn, and the live part after the snapshot's cut goes on
+// from there.
 //
 // Latency (desk ticket #57). The hops this transcript sees are timed for `latency/latency.ts`: a main thread's first rows
 // (subscribe, snapshot, drawn), each live row that draws and each of its own chunks from the machine's stamp until
@@ -633,7 +635,7 @@ export class DeskTranscript {
   /**
    * The held rows with a fresh snapshot's (oldest first) merged in, or null when it replaces them: it overlaps nothing
    * held, or it marks a row both hold otherwise than the held marks do, or none of the rows both hold is one the chain
-   * carries on it, or a row it brings was written under a held row it does not hold.
+   * carries on it, or a row it brings was written under a row it does not hold.
    */
   private merged(fresh: readonly Row[], offChain: readonly string[] | undefined): Row[] | null {
     const at = fresh.length === 0 ? -1 : this.rows.findIndex((row) => row.uuid === fresh[0].uuid);
@@ -647,13 +649,15 @@ export class DeskTranscript {
       // those the held marks put on the chain is that row's ancestor, so on it still, and each they put off is no ancestor
       // of it, so off it still. A row the producer never marks (a progress row) vouches for nothing.
       if (!overlap.some((row) => CHAIN_TYPES.has(row.type as string) && !off.has(row.uuid))) return null;
-      // That holds only while the chain has not forked before the snapshot's window. A row the gap wrote under a held row
-      // the snapshot does not hold is such a fork, and it can take older held rows off the chain while every row the
-      // window holds stays on (a second append under a tool call leaves the first, while the call's result stays), so
-      // the overlap cannot vouch for them. A fork inside the window is the snapshot's own marks to say. A row under no
-      // parent (a compaction's boundary) continues the chain; a tool result written under its call is not told from a
-      // branch here, and costs only a staged replace.
-      const forked = (row: Row) => !this.uuids.has(row.uuid) && typeof row.parentUuid === 'string' && this.uuids.has(row.parentUuid) && !inSnapshot.has(row.parentUuid);
+      // That holds only while the chain has not forked before the snapshot's window. A row the gap wrote under a row the
+      // snapshot does not hold is such a fork, its point outside the window whether held or older than every held row
+      // (paged history can hold a call's appends and result without the call), and it can take held rows older than
+      // the window off the chain while every row the window holds stays on (a second append under a tool call leaves
+      // the first, while the call's result stays), so the overlap cannot vouch for them. A fork inside the window is the
+      // snapshot's own marks to say. A row under no parent (a compaction's boundary) continues the chain; a tool result
+      // written in the gap under a call outside the window is not told from a branch here, and costs only a staged
+      // replace.
+      const forked = (row: Row) => !this.uuids.has(row.uuid) && typeof row.parentUuid === 'string' && row.parentUuid !== '' && !inSnapshot.has(row.parentUuid);
       if (fresh.some(forked)) return null;
     }
     return [...this.rows.slice(0, at), ...fresh, ...this.rows.slice(at).filter((row) => !inSnapshot.has(row.uuid))];

@@ -213,7 +213,7 @@ describe('the streaming layer', () => {
     expect(drawn(layer)).toEqual([]);
   });
 
-  it('a snapshot older than what it drew truncates nothing: the request keeps the drawn text and the higher watermark', () => {
+  it('a snapshot older than what it drew of a request truncates nothing: the request is kept as drawn, its watermark with it', () => {
     const layer = new StreamingLayer();
     layer.chunk(text(0, 0, 0, 'Hel'));
     layer.chunk(text(0, 1, 0, 'lo, '));
@@ -227,6 +227,24 @@ describe('the streaming layer', () => {
     expect(layer.chunk(text(0, 2, 0, 'wor'))).toBe(false);
     expect(layer.chunk(text(0, 3, 0, 'ld.'))).toBe(true);
     expect(drawn(layer)).toEqual([['text', 'Hello, world.']]);
+  });
+
+  it('a snapshot older than a whole block it drew changes nothing of the request: the block stays, and the replayed live part draws it once', () => {
+    const layer = new StreamingLayer();
+    layer.chunk(chunk(0, 0, { kind: 'thinking', index: 0, text: 'Hm.' }));
+    layer.blockRow(blockRow(0, 0, 'r-thinking'));
+    layer.settle('r-thinking');
+    layer.chunk(text(0, 1, 1, 'Hel'));
+    const block = layer.blocks(null)[0];
+    // A producer that went back: its snapshot was cut before the thinking block's block-row and before the text block began.
+    layer.resume([{ turnId: 't1', agentId: null, step: 0, upTo: 0, blocks: [{ index: 0, kind: 'thinking', text: 'Hm.', upTo: 0 }] }], null, () => true);
+    expect(drawn(layer)).toEqual([['text', 'Hel']]);
+    expect(layer.blocks(null)[0]).toBe(block);
+    // The live part after the snapshot's cut, sent again.
+    layer.blockRow(blockRow(0, 0, 'r-thinking'));
+    expect(layer.chunk(text(0, 1, 1, 'Hel'))).toBe(false);
+    expect(layer.chunk(text(0, 2, 1, 'lo'))).toBe(true);
+    expect(drawn(layer)).toEqual([['text', 'Hello']]);
   });
 
   it('an ended request stays ended through a snapshot older than its step-end: what the step-end dropped is not drawn again, and its chunks are not taken', () => {

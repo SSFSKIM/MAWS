@@ -91,11 +91,12 @@ export class StreamingLayer {
    * `lands` says whether a named row will land without a page (one held now, or one still to come live); a block whose
    * named row will not waits for `landing` instead, so it is never left drawn for a row that may never come.
    *
-   * A snapshot older than what was drawn (a producer that went back) undoes none of it: each request keeps the higher
-   * of the two watermarks, so a chunk the drawing holds is not applied again, and a block both hold keeps the drawn text
-   * where the drawing's watermark is at or past the snapshot's. An ended request stays ended, whether or not the snapshot
-   * still streams it: the blocks its `step-end` dropped are not drawn again from the snapshot's copy, and it takes no
-   * more chunks.
+   * A snapshot whose watermark for a request is below the drawn one (a producer that went back) is older than what was
+   * drawn of it, and changes nothing of that request, which keeps its blocks, the blocks named, its end and its watermark
+   * whole; the live part after the snapshot's cut replays the rest, the chunks the drawing holds dropped at the
+   * watermark, the later ones appended, `block-row` and `step-end` arriving as they do live. Otherwise too an ended
+   * request stays ended, whether or not the snapshot still streams it: the blocks its `step-end` dropped are not drawn
+   * again from the snapshot's copy, and it takes no more chunks.
    */
   resume(streaming: readonly Streaming[], landing: string | null, lands: (uuid: string) => boolean): void {
     const before = this.requests;
@@ -104,9 +105,13 @@ export class StreamingLayer {
     this.requests = new Map();
     // The requests in the order they first appeared: those drawn before, then those the gap started.
     for (const [key, old] of before) {
+      const snapshot = loaded.get(key);
+      if (snapshot && old.upTo > snapshot.upTo) {
+        this.requests.set(key, old);
+        continue;
+      }
       // An ended request is kept where the snapshot no longer streams it, so it still takes no chunk.
-      const request = loaded.get(key) ?? (old.ended ? this.request(old.turnId, old.agentId, old.step) : undefined);
-      let keepDrawn = false;
+      const request = snapshot ?? (old.ended ? this.request(old.turnId, old.agentId, old.step) : undefined);
       if (request) {
         for (const index of old.named) {
           request.blocks.delete(index);
@@ -116,13 +121,11 @@ export class StreamingLayer {
           request.ended = true;
           request.blocks.clear(); // the snapshot's copies of the blocks the step-end dropped
         }
-        keepDrawn = old.upTo >= request.upTo;
-        request.upTo = Math.max(request.upTo, old.upTo);
       }
       for (const [index, block] of old.blocks) {
         const fresh = request?.blocks.get(index);
         if (fresh) {
-          request!.blocks.set(index, keepDrawn ? block : Object.assign(block, { kind: fresh.kind, text: fresh.text, toolName: fresh.toolName, settledBy: null }));
+          request!.blocks.set(index, Object.assign(block, { kind: fresh.kind, text: fresh.text, toolName: fresh.toolName, settledBy: null }));
           continue;
         }
         const settledBy = block.settledBy !== null && lands(block.settledBy) ? block.settledBy : landing;
