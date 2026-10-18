@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 16,
-    "defer:pending": 107,
+    "defer:committed": 17,
+    "defer:pending": 106,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -430,7 +430,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L43; parent Decision Log 106): Voice feature residue needs its own change and verification, not the co-work finish. Owner: P4 (the voice lane).",
       "remainingClause": "A SwiftPM test target under `native/voice-helper` exercises those cases; `pnpm build:helper` or `pnpm test` runs it. Re-deferred 2026-10-07 (E11 1.6): a SwiftPM target when the helper next changes. Owner: P2 (voice). Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L45): a SwiftPM target when the helper next changes. Owner: P3 (voice). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L43; parent Decision Log 106): Voice feature residue needs its own change and verification, not the co-work finish. Owner: P4 (the voice lane).",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "20dedc2b6c6c86a41ed786c8016486f25233b4be"
     },
     {
       "line": 44,
@@ -440,8 +440,8 @@
       "triageReason": "Voice feature residue needs its own change and verification, not the co-work finish.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L44; parent Decision Log 106): Voice feature residue needs its own change and verification, not the co-work finish. Owner: P4 (the voice lane).",
       "remainingClause": "`probe` returns the on-device locale list (helper, `protocol.ts` mirror, `VoiceStatusSchema`), and the select marks every language without a model. Re-deferred 2026-10-07 (E11 1.6): a helper protocol change. Owner: P2 (voice). Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L46): a helper protocol change. Owner: P3 (voice). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L44; parent Decision Log 106): Voice feature residue needs its own change and verification, not the co-work finish. Owner: P4 (the voice lane).",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 45,
