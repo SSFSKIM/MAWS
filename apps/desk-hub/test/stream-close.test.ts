@@ -1,5 +1,6 @@
-// A machine that drops its stream goes offline, and its forwarded RPC becomes `uncertain`, within a stated bound on the
-// local runtime, where the web (DC5) sees it: the project view's `machines`, the grid's summary, and the RPC's state.
+// A machine that drops its stream has its forwarded RPC become `uncertain` at once, and goes offline once the closed
+// stream's grace (one heartbeat, held for the machine's next stream) runs out, within a stated bound on the local
+// runtime, where the web (DC5) sees it: the project view's `machines`, the grid's summary, and the RPC's state.
 // Two hosts, each behind the stand-in for Access:
 //   - the suites' Miniflare, with the deployed heartbeat and lease (15 s, 45 s), so neither can be what ends it: the
 //     stand-in resets the hub's connection when its client leaves, and the close reaches the object at once, as it
@@ -119,10 +120,15 @@ describe("a dropped machine's stream, on the suites' runtime with the deployed h
   });
   afterAll(() => hub?.close());
 
-  it('puts the machine offline and its forwarded RPC uncertain at once, in the view and in the grid', { timeout: 120_000 }, async () => {
+  it('makes its forwarded RPC uncertain at once, and puts the machine offline in the view and in the grid once the grace runs out', { timeout: 120_000 }, async () => {
     const measured = await dropAndMeasure(hub.url);
     expect(measured.heartbeatMs).toBe(15_000);
-    for (const ms of [measured.offline, measured.uncertain, measured.gridOffline]) expect(ms, JSON.stringify(measured)).toBeLessThan(MARGIN_MS);
+    expect(measured.uncertain, JSON.stringify(measured)).toBeLessThan(MARGIN_MS);
+    // Held online through the grace, for a reconnect that never came, then offline at its end.
+    for (const ms of [measured.offline, measured.gridOffline]) {
+      expect(ms, JSON.stringify(measured)).toBeGreaterThanOrEqual(measured.heartbeatMs - MARGIN_MS);
+      expect(ms, JSON.stringify(measured)).toBeLessThan(measured.heartbeatMs + MARGIN_MS);
+    }
   });
 });
 
@@ -218,9 +224,11 @@ describe("a dropped machine's stream, on the local command, as DC4 and DC5 run i
     if (state) rmSync(state, { recursive: true, force: true });
   }, 60_000);
 
-  it('puts the machine offline and its forwarded RPC uncertain within one of the command’s short heartbeats', { timeout: 120_000 }, async () => {
+  it('makes its forwarded RPC uncertain within one of the command’s short heartbeats, and the machine offline a grace later', { timeout: 120_000 }, async () => {
     const measured = await dropAndMeasure(url);
-    for (const ms of [measured.offline, measured.uncertain, measured.gridOffline]) expect(ms, JSON.stringify(measured)).toBeLessThan(measured.heartbeatMs + MARGIN_MS);
+    // The close is noticed within a heartbeat; the machine is offline a grace (one heartbeat) after that.
+    expect(measured.uncertain, JSON.stringify(measured)).toBeLessThan(measured.heartbeatMs + MARGIN_MS);
+    for (const ms of [measured.offline, measured.gridOffline]) expect(ms, JSON.stringify(measured)).toBeLessThan(2 * measured.heartbeatMs + MARGIN_MS);
     expect(measured.heartbeatMs, 'the local command beats more often than the deployment').toBeLessThanOrEqual(2000);
   });
 });

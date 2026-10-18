@@ -67,9 +67,28 @@ function forward(request: Request, url: string, identity: Record<string, string>
 declare const DESK_BUILD: string | undefined;
 const BUILD = typeof DESK_BUILD === 'string' ? DESK_BUILD : 'dev';
 
+/**
+ * An exception out of an object call (Cloudflare's own when it resets or replaces an object, overloads it, or loses the
+ * connection to it: "Durable Object reset because its code was updated", "Network connection lost", …), answered as
+ * JSON rather than left to the runtime's bare 1101 page: 503 when the error says a retry may succeed, 500 otherwise. A
+ * machine reconnects on either, as on any answer but 200; the line is the hub's record of it.
+ */
+function failure(error: unknown): Response {
+  const e = error as { message?: unknown; retryable?: unknown; overloaded?: unknown } | null;
+  const retryable = e?.retryable === true || e?.overloaded === true;
+  const message = typeof e?.message === 'string' ? e.message : String(error);
+  console.error(JSON.stringify({ desk: 'worker-exception', message, retryable, overloaded: e?.overloaded === true }));
+  return json(retryable ? 503 : 500, { error: retryable ? 'hub-unavailable' : 'hub-error', message });
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
-    const response = await route(request, env);
+    let response: Response;
+    try {
+      response = await route(request, env);
+    } catch (error) {
+      response = failure(error);
+    }
     if (request.body && !request.bodyUsed) await drain(request.body);
     // A WebSocket's upgrade (its socket rides on the answer) and a machine's stream are passed on untouched, as before
     // the build was named: re-wrapping the stream's body would put a pipe of the Worker's between the client and the

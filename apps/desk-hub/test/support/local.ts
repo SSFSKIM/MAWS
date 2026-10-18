@@ -16,6 +16,9 @@ import { generateVapidKey } from '../../src/push/web-push';
 import {
   ABORT_REASON,
   MACHINE_ABORT_PATH,
+  MACHINE_FETCH_FAULT_PATH,
+  MACHINE_PROBE_PATH,
+  MACHINE_REPLACE_PATH,
   MEMBER_PATH,
   ORG_ROW_PATH,
   PROJECT_ARCHIVE_HOLD_PATH,
@@ -95,9 +98,10 @@ export async function startLocalHub() {
   };
 
   // workerd's own log lines. A line a suite said it expects (`expectRuntimeLog`) is kept for it to assert and not
-  // printed; every other goes out as Miniflare's default handler would print it, so an unexpected error stays visible.
+  // printed, as is the hub's own record of a machine's stream (`{"desk":"machine-stream",…}`, a few per test); every
+  // other goes out as Miniflare's default handler would print it, so an unexpected error stays visible.
   const runtimeLogs: Array<{ level: string; message: string }> = [];
-  const expectedLogs: RegExp[] = [];
+  const expectedLogs: RegExp[] = [/^\{"desk":"machine-stream"/];
   const handleStructuredLogs = ({ level, message }: { level: string; message: string }) => {
     if (expectedLogs.some((pattern) => pattern.test(message))) return void runtimeLogs.push({ level, message });
     if (level === 'error' || level === 'warn') console.error(message);
@@ -189,9 +193,23 @@ export async function startLocalHub() {
       await response.body?.cancel();
       return status;
     },
-    /** Shortens a machine's heartbeat and lease; set before its stream opens (the suites' Worker only). */
-    async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number }) {
-      await seam('MACHINE', machine, `${TIMING_PATH}?heartbeatMs=${timing.heartbeatMs}&leaseMs=${timing.leaseMs}`);
+    /** Shortens a machine's heartbeat and lease (and its grace, the heartbeat's unless given, and its probe); set before
+     * its stream opens (the suites' Worker only). */
+    async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number; graceMs?: number; probeMs?: number }) {
+      const query = new URLSearchParams(Object.entries(timing).map(([name, value]) => [name, String(value)]));
+      await seam('MACHINE', machine, `${TIMING_PATH}?${query}`);
+    },
+    /** Arms a machine's object to find itself replaced at its next probe, as one Cloudflare replaced under its stream. */
+    async replace(machine: string) {
+      await seam('MACHINE', machine, MACHINE_REPLACE_PATH);
+    },
+    /** Arms a machine's object to throw from its next request to `path` (`/frames` or `/stream`). */
+    async failFetch(machine: string, path: '/frames' | '/stream') {
+      await seam('MACHINE', machine, `${MACHINE_FETCH_FAULT_PATH}?path=${path}`);
+    },
+    /** Probes a machine's object once: its own instance, and the one its probe reached. */
+    async probe(machine: string): Promise<{ life: string; current: string | null }> {
+      return JSON.parse(await seam('MACHINE', machine, MACHINE_PROBE_PATH)) as { life: string; current: string | null };
     },
     /** Adds a member to the org (the suites' Worker only: the hub has no such endpoint before the org phase). */
     async addMember(email: string, role: 'admin' | 'member') {
