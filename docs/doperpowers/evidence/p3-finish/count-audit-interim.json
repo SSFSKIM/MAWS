@@ -1,0 +1,150 @@
+{
+  "status": "INTERIM M4 count audit; no tracker row closed by this file",
+  "auditedAt": "2026-10-18",
+  "controller": "af4cd2993bc56e015",
+  "clausesRead": {
+    "source": "E/tracker-m0.json (frozen M0 rows) and docs/tech-debt-tracker.md current lines 89, 193, 200, 210, 211; E/count-audit.txt for carried counts",
+    "L90": "20 consecutive e2e:c7 runs at load under 20 pass, counted across P2-F's gate runs; owner then P3. Unit = one e2e:c7 job (requests.spec.ts + composer.spec.ts, MAWS_ENGINE_REPLAY=1, 29/29) with a per-run load reading below 20. Carried 4/20.",
+    "L246": "e2e/deliverables.spec.ts:1061 (case 10) stays green across the next five whole-set runs after 39012865379, then row dropped as a one-off (or closes on a failure with trace read). Unit = one whole-set run (run+relaunch union counts once) whose e2e:deliverables job is green incl. case 10. No foreground/native/day qualifier. Carried 4/5.",
+    "L253": "engine-host pid stall at teardown (38994386747, job 117283602755; signature: 'the host restarts' 30 s poll timeout after SIGKILL in restartHost) stays absent across the next ten whole-set runs. Unit = one whole-set run after the stall event with no refused/cancelled job uncovered and no stall signature in any non-refused red job log (the audit's method). Architect-ratified start = the stall event: carried 9/10 (alternate logging-date reading 4/10 retained)."
+  },
+  "fSpanRunsAreNotQualifying": {
+    "reason": "none of F's completed runs is a whole set; none ran e2e:c7 or e2e:deliverables; none gives a load reading",
+    "runs": [
+      {
+        "run": 39115417793,
+        "status": "cancelled",
+        "e2eJobs": "connectors/design/dashboard success; connectors-direct failure (desktop-check refusal); connectors-oauth, terminal cancelled",
+        "L90": "no c7 job",
+        "L246": "no deliverables job",
+        "L253": "not a whole set"
+      },
+      {
+        "run": 39119260018,
+        "status": "success",
+        "e2eJobs": "design, dashboard, connectors, connectors-direct, connectors-oauth, terminal (6, all success)",
+        "L90": "no c7 job",
+        "L246": "no deliverables job",
+        "L253": "named union, not a whole set"
+      },
+      {
+        "run": 39130559347,
+        "status": "failure",
+        "e2eJobs": "default, document-app, to-human, widgets, presentations, artifacts, design-systems, document, dashboard",
+        "L90": "no e2e:c7 job; its e2e:default collected requests.spec.ts but the L90 case requests.spec.ts:317 'the two declared dialogs...' is listed skipped (-), only :384 and :420 ran (log e2edefault/8_Run display, lines 182-185)",
+        "L246": "deliverables.spec.ts is not in default's 59 own specs and no e2e:deliverables job",
+        "L253": "not a whole set"
+      },
+      {
+        "run": 39133832247,
+        "status": "failure (static TS2322 only)",
+        "e2eJobs": "same 9 + transcript, all success",
+        "L90": "no c7 job; default again lists :317 skipped",
+        "L246": "none",
+        "L253": "not a whole set"
+      },
+      {
+        "run": "39136242401, 39136925852, 39137361846, 39137918574",
+        "status": "failure x4",
+        "e2eJobs": "e2e:presentations-scale only, on probe clones",
+        "L90/L246/L253": "none"
+      },
+      {
+        "run": 39140360292,
+        "status": "failure (static, design)",
+        "e2eJobs": "document-app, document, design, side, presentations, tools, artifacts, design-systems, dashboard",
+        "L90/L246": "no c7, no deliverables",
+        "L253": "not a whole set"
+      },
+      {
+        "run": 39145946170,
+        "status": "success",
+        "e2eJobs": "design only (+static)",
+        "L90/L246/L253": "none"
+      }
+    ],
+    "supportingOnly": "Named-group jobs that exercise host kill/restart scenes (document, dashboard) are green in the F span; the L253 clause counts whole sets, so this does not advance it."
+  },
+  "foundOutsideFList": {
+    "note": "Enumerated all gate.yml runs since the earlier audit's data cutoff (09:14Z 2026-10-18; read-only gh api, per-job conclusions). Exactly one completed whole set exists in or after the window: a desk-lane run, not an F gate, which the earlier audit could not include because it was still running at the cutoff.",
+    "run": 39109740879,
+    "label": "ci/desk-access-30d-4287e099-020dda",
+    "createdAt": "2026-10-18T07:59:57Z",
+    "completedAt": "2026-10-18T10:45:53Z",
+    "attempt": 1,
+    "conclusion": "failure",
+    "source": "4287e099fa6aba0bee0d1f221972ee09ee75e58f (desk-hub: Access session 30 days; ancestor of master and of this worktree's HEAD); wrapper f1b898a46, no Gates: trailer (the default full set)",
+    "shape": "all 34 CLASS1_E2E groups present; 30 success, 4 failure, 0 refused, 0 cancelled, 0 skipped; static, unit, probes, unit:darwin success; packaged skipped (not requested)",
+    "reds": {
+      "e2e:document-app": "job 117623134829: document.spec.ts:436 paste (row 199)",
+      "e2e:to-human": "job 117623134650: to-human.spec.ts:29 (row 199)",
+      "e2e:widgets": "job 117623134760: widgets.spec.ts:406 (row 201)",
+      "e2e:library": "job 117623134554: library.spec.ts:394 HTML artifact in the Artifacts tool (toHaveAttribute / element(s) not found); unrelated to L246/L253/L90"
+    },
+    "L246": "e2e:deliverables job 117623134611 success, 12 passed (57.4 s); case 10 deliverables.spec.ts:1061:5 is a check mark at log line 1372. Same evidence form as the audit's 12/12 per counted set.",
+    "L253": "no stall signature in any of the 4 non-refused red job logs (searched 'host restarts', SIGKILL, stalled, ENOTEMPTY, did not exit; only hit is the passing library title 'is right after the host restarts'); no refused or cancelled job needs relaunch cover.",
+    "L90": "e2e:c7 job 117623134786 success, 29 passed (1.2 m), started 09:53:24Z; no load reading anywhere in the job log, so it is a load-unknown green like the thirteen the earlier audit declined to add.",
+    "L264Context": "e2e:default job 117623134626 passed (38 passed, 81 skipped) but the tree predates W-MINI's openPalette fix (93b9e35bf is not an ancestor of 4287e099); L264 counts only full sets after that change, so it does not count.",
+    "L265Context": "e2e:terminal job 117623134774 passed 15/15 but the tree predates W-T's repair (3dff5766f is not an ancestor of 4287e099); L265 counts only trees carrying the repair, so it does not count.",
+    "rawLogs": "/private/tmp/m4-count-audit-39109740879-logs/<job id>.log (8 jobs: the 4 reds, deliverables, c7, terminal, default; ANSI stripped; downloaded with gh api, read with python -I)"
+  },
+  "otherWholeSetShapedRunsNotCounted": [
+    {
+      "run": 39109919711,
+      "status": "cancelled",
+      "shape": "34 e2e jobs: 14 success, 3 failure, 17 cancelled (c7, deliverables cancelled)",
+      "reading": "no verdict for c7 or deliverables"
+    },
+    {
+      "run": 39112807111,
+      "status": "cancelled",
+      "shape": "34 e2e jobs: 6 success, 3 failure, 25 cancelled; c7 job 117632350995 success (10:08:49Z), deliverables cancelled",
+      "reading": "not a whole set; its green c7 is another load-unknown green"
+    },
+    {
+      "run": 39146496172,
+      "status": "cancelled",
+      "shape": "34 e2e jobs: 8 success, 1 failure, 25 cancelled; c7 and deliverables cancelled",
+      "reading": "not a whole set"
+    },
+    {
+      "run": 39147992011,
+      "status": "in_progress at 17:06Z",
+      "shape": "class 1a only (e2e matrix skipped)",
+      "reading": "not a whole set"
+    }
+  ],
+  "countsDefensible": {
+    "L90": {
+      "carried": "4/20",
+      "afterF": "4/20 from F gates (no c7 job ran); 4/20 stands on the load-reading rule",
+      "ifArchitectAcceptsLoadUnknownGreens": "the earlier audit's thirteen + 39109740879 + 39112807111's job would give 4+13+2 = 19/20, a ruling not made; the 20th would still need a c7 job. 'counted across P2-F's gate runs' is also a literal limit on which runs count."
+    },
+    "L246": {
+      "carried": "4/5",
+      "afterF": "4/5 from F gates (none ran deliverables)",
+      "withDeskLaneWholeSet39109740879": "5/5 -> the clause's condition (five whole-set runs green) is met; row droppable as a one-off"
+    },
+    "L253": {
+      "carried": "9/10 stall-event reading (4/10 alternate)",
+      "afterF": "9/10 from F gates (none is a whole set)",
+      "withDeskLaneWholeSet39109740879": "10/10 stall-event reading (5/10 alternate) -> tenth clean whole set closes the row on the ratified reading"
+    },
+    "L264": "0 qualifying full sets (no full set after 93b9e35bf)",
+    "L265": "0/5 (no full set on a tree carrying 3dff5766f)"
+  },
+  "unresolvedInterpretation": [
+    "Lane scope: 39109740879 is a desk-lane whole set. The clauses of L246 and L253 say 'whole-set runs' without a lane or source limit, and the earlier audit's nine counted sets were also other lanes' final/landing gates, so counting it is consistent; if the architect limits counted sets to MAWS-app lanes or to F-owned trees, L246 stays 4/5 and L253 stays 9/10.",
+    "Red whole sets: the audit counted sets with 3-6 unrelated reds (e.g. e3-final 5 reds) for L246/L253 (the clause is about the one case / the one stall signature), and did not require the reds to be relaunched green. 39109740879 follows that precedent exactly.",
+    "Source-change reset: the L253 row names teardown surfaces (launch.ts closeOrKill, processes.ts, shutdown/quit-guard). W-T's L265 commit 3dff5766f edits launch.ts cleanup() and processes.ts after closeOrKill, not closeOrKill; 39109740879's source predates it. The L253 clause has no reset rule (the 'any corrective source change restarts the streak' sentence in the plan is scoped to the MINI baseline wave); whether F's own teardown edit should make the tenth count come from the frozen-source p3f-final whole set is the architect's call. If so, the p3f-final gate is the 10th for L253 and the 5th for L246 with this audit's method.",
+    "L90 needs a per-run load reading below 20; CI job logs carry none (no load line in the c7 job). The mini's own recorded loads in F-span measurement runs were 2.5-6.4, which suggests the lane is far below 20 but is not a reading for any c7 run.",
+    "L253's stall-signature check follows the earlier audit (red job logs only). Green jobs cannot contain the stall because the poll timeout fails the test."
+  ],
+  "evidenceRequiredForAnyFutureCount": {
+    "L90": "run id + e2e:c7 job id + success + 29/29 summary line + a load reading taken at the job (none retained by CI), consecutive with no c7 failure",
+    "L246": "run id (union with relaunch counted once) + e2e:deliverables job id + success + 12 passed incl. :1061 check mark",
+    "L253": "run id + all-groups conclusions (no refused/cancelled left uncovered) + grep of every non-refused red job log for the 'host restarts' timeout / pid-stall signature, absent"
+  },
+  "controllerVerification": "Read raw deliverables log1372 case10 at1061 pass and12/12 summary; gh reports all34 e2e jobs completed30success/4failure; four red raw logs contain no teardown-stall signature. Recommend count lane-neutral whole set39109740879 for L2465/5 and L25310/10 stall-event reading; final disposition at M4, source/reset caveat retained. L90 unchanged4/20; L264/L265 zero qualifying post-fix full sets.",
+  "architectRuling": "Conditional: count39109740879 for L246 fifth and L253 tenth stall-event (alternate5/10) only if each actual repair commit is an ancestor of source4287e099; ancestry prerequisite investigation resumed, not assumed. Finalize at M4 with source/reset caveat. No new lane restriction. L90 stays4/20; L264/L265 zero post-fix full sets."
+}
