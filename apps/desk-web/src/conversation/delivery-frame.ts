@@ -37,7 +37,9 @@
 // and the prompt sent next goes in under the same parent: a row the bridge appended after the first one is left on a
 // branch no request reads, and the bridge appends it again (doperpowers #233, `recheckDeliveries`), the same text. Its
 // frame line names its event (`id=<msg_id>`, or the chat frame's `<writer_short>:<seq>`), so the session view draws one
-// row per frame line, the last held: the copy the engine read (`supersededDeliveries`).
+// row per frame line, the last held: the copy the engine read (`supersededDeliveries`). A producer that marks the rows
+// off the live chain says so of the first copy itself (`depth/source/off-chain.ts`); this dedupe stays for the rows it
+// does not mark.
 //
 // The bridge's wake is no delivery: when a turn ends with a steer or a delivered row unread, the bridge sends a prompt
 // of its own pointing the session at it, as the user or, after an Esc, through the inbox, its first line the bridge's

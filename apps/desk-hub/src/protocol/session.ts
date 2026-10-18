@@ -165,16 +165,26 @@ export type SessionBodies = {
     jobs?: Job[];
     /** The loop's MCP servers by name, as `subagents` carries them; absent from a producer older than DC8. */
     mcp?: McpServer[];
+    /**
+     * The uuids among `rows` off the transcript's live chain: rows a branch left behind (an Esc's, a `/rewind`'s, a
+     * response the engine dropped), which the engine no longer reads. Absent from an older producer, which marks none.
+     */
+    offChain?: string[];
   };
-  /** A transcript row verbatim; `agentId` names the subagent whose transcript it is in. */
-  row: { row: JsonObject; agentId: string | null };
+  /**
+   * A transcript row verbatim; `agentId` names the subagent whose transcript it is in. `offChain`: the rows of the
+   * sub's transcript its write took off the live chain (those a branch it starts left behind, oldest first, and itself
+   * when it was written off the chain), held by the browser or not yet; `onChain`: the rows it put back on. Each present
+   * only when not empty, and from a producer that marks. The latest message about a row says.
+   */
+  row: { row: JsonObject; agentId: string | null; offChain?: string[]; onChain?: string[] };
   /** A `turn.step` chunk object verbatim under `chunk`, nested beside its message's identity and its index in that
    * message from 0 (DX5's chunk event). */
   chunk: { turnId: string; agentId: string | null; step: number; chunkIndex: number; chunk: JsonObject };
   'block-row': BlockRow;
   'step-end': StepEnd;
-  /** Older rows of the sub's transcript, newest first, answering a browser's `rows` request. */
-  rows: { rows: JsonObject[]; before: string; more: boolean };
+  /** Older rows of the sub's transcript, newest first, answering a browser's `rows` request; `offChain` as the snapshot's. */
+  rows: { rows: JsonObject[]; before: string; more: boolean; offChain?: string[] };
   /**
    * The subagent tree with each agent's status, the loop's background jobs, and its MCP servers' names: in the snapshot
    * and again whenever any of it changes. A producer older than DC8 sends `subagents` with each agent's id and meta

@@ -11,9 +11,13 @@
 // new state is whole, and keep their ids — so an older page never lands after newer turns and a page boundary between
 // a tool call and its result attributes nothing wrongly (the DC6 plan's M1 decision on older rows). Subagent metadata
 // arriving live does the same when it names an agent call a held row was mapped without, so the rows are attributed
-// as a fresh load with that metadata attributes them, and so does a live delivered row that repeats a held one's frame
-// line: a delivery appended again after an Esc left its first copy on a dead branch, and only the last copy is mapped
-// (`supersededDeliveries`).
+// as a fresh load with that metadata attributes them.
+//
+// The conversation the engine holds (`off-chain.ts`). The machine marks the rows off the session's live chain — on the
+// snapshot and each page for their rows, on a `row` for the rows its write took off or put back — and the latest message
+// about a row says. A row off the chain is not mapped, but an owner input the session never read draws as undone
+// (`drawingOf`). When the marks, a repeat of an undone input's words, or a delivery's later copy change what is drawn
+// of the rows already mapped, the transcript is rebuilt from the held rows, as for an older page.
 //
 // The stream. Chunks never reach MAWS's reducer, which pairs a streaming block with its row only by an API message id
 // that DX4's chunks lack: they go to the streaming layer (`stream/layer.ts`), and a block's text is dropped from it
@@ -57,10 +61,12 @@ import { noteModel } from '../../state/models';
 import { taskGraphOf, withEvents, withMetas, withStatuses } from '../agents/task-feed';
 import { OutputRequests } from '../jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
-import { deliveryAsDrawn, deliveryFrame, supersededDeliveries } from '../../conversation/delivery-frame';
-import { steerAsDrawn } from './bridge-rows';
+import { deliveryAsDrawn, deliveryFrame } from '../../conversation/delivery-frame';
+import { withAppendedTurn } from './appended-turn';
+import { isMirrorLine, steerAsDrawn } from './bridge-rows';
 import { withWakeLine } from './bridge-wake';
 import { normalizeInterruptRow, withInterruptEnd } from './interrupt';
+import { drawingOf, drawingsDiffer, NONE_OFF, ownerInput, undoneEvents, type Drawing } from './off-chain';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
 export type TranscriptStoreApi = Pick<ReturnType<typeof createTranscriptStore>, 'getState' | 'subscribe'>;
@@ -136,30 +142,45 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
  * marker ends the turn it interrupted, the bridge's record of one read as its marker line alone (`interrupt.ts`). A
  * delivered send is drawn without its frame line, a peer's under a label naming it, and one that entered a running turn
  * as a prompt queued there (`conversation/delivery-frame.ts`); the held row keeps its frame. A steer the bridge appended
- * is drawn as the owner's prompt queued there too (`bridge-rows.ts`), and the bridge's wake as its own line in a turn
- * the session continued (`bridge-wake.ts`), read off the held row: a delivery whose words open with the wake's line is
- * no wake, and its drawn copy has lost the frame that says so.
+ * is drawn as the owner's prompt queued there too (`bridge-rows.ts`), one appended while no turn ran taken by the turn
+ * that starts next (`appended-turn.ts`), the bridge's mirror of either not at all, and the bridge's wake as its own line
+ * in a turn the session continued (`bridge-wake.ts`), read off the held row: a delivery whose words open with the
+ * wake's line is no wake, and its drawn copy has lost the frame that says so.
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
+  if (isMirrorLine(row)) return [];
   const mapped = steerAsDrawn(deliveryAsDrawn(normalizeInterruptRow(row)));
   const record = TranscriptRecordSchema.safeParse(mapped);
   if (!record.success) return [];
-  const events = withWakeLine(row, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx);
-  if (!events.some((event) => event.kind === 'subagent.message')) return events;
-  return events.map((event) => (event.kind === 'turn.started' && event.origin === 'peer' ? { ...event, origin: 'task-notification' } : event));
+  let events = withWakeLine(row, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx);
+  if (events.some((event) => event.kind === 'subagent.message')) {
+    events = events.map((event) => (event.kind === 'turn.started' && event.origin === 'peer' ? { ...event, origin: 'task-notification' } : event));
+  }
+  return withAppendedTurn(row, events, ctx);
+}
+
+/** A held row's events as the drawing has it (`off-chain.ts`): none for a row it leaves out, an undone input's for one it draws so. */
+function drawnEvents(row: JsonObject, drawing: Drawing, ctx: BackfillContext): SessionEvent[] {
+  const uuid = row.uuid as string;
+  if (drawing.hidden.has(uuid)) return [];
+  const owner = drawing.undone.has(uuid) ? ownerInput(row) : null;
+  return owner !== null ? undoneEvents(row, owner, ctx) : eventsOf(row, ctx);
 }
 
 const contextFor = (target: SessionTarget, subagents: SubagentLookup): BackfillContext =>
   createBackfillContext({ sessionId: target.session as SessionId, agent: target.agentId === null ? null : { agentId: target.agentId as AgentId, parentToolUseId: null }, subagents });
 
-/** A source over a fixed list of one transcript's rows, oldest first, as a fresh load of them draws: the suites' reference. */
-export function freshSource(rows: readonly JsonObject[], session: string, subagents: SubagentLookup, agentId: string | null = null): TranscriptSource {
+/**
+ * A source over a fixed list of one transcript's rows, oldest first, as a fresh load of them draws, `off` the rows the
+ * machine marks off the chain: the suites' reference.
+ */
+export function freshSource(rows: readonly JsonObject[], session: string, subagents: SubagentLookup, agentId: string | null = null, off: ReadonlySet<string> = NONE_OFF): TranscriptSource {
   return {
     subscribe: () => () => {},
     snapshot: async () => {
       const ctx = contextFor({ machine: '', session, agentId }, subagents);
-      const superseded = supersededDeliveries(rows);
-      return rows.flatMap((row) => (superseded.has(row.uuid as string) ? [] : eventsOf(row, ctx)));
+      const drawing = drawingOf(rows, off);
+      return rows.flatMap((row) => drawnEvents(row, drawing, ctx));
     },
   };
 }
@@ -231,8 +252,10 @@ export class DeskTranscript {
   private subscription: Subscription | null = null;
   private rows: Row[] = [];
   private readonly uuids = new Set<string>();
-  /** Held delivered rows a later held row repeats: never mapped (`supersededDeliveries`). */
-  private superseded = new Set<string>();
+  /** The rows the machine marks off the session's live chain, held or not yet: the latest message about each says. */
+  private readonly off = new Set<string>();
+  /** What the drawing leaves out of the held rows, and what it draws as undone (`off-chain.ts`). */
+  private drawing: Drawing = drawingOf([], NONE_OFF);
   /** Held rows whose mapping gave no event under the row's own uuid: in the store as soon as they are mapped. */
   private readonly silent = new Set<string>();
   private metas: readonly SubagentMeta[] = [];
@@ -367,7 +390,7 @@ export class DeskTranscript {
   }
 
   private drawnEventsOf(row: Row, ctx: BackfillContext): SessionEvent[] {
-    return this.superseded.has(row.uuid) ? [] : eventsOf(row, ctx);
+    return drawnEvents(row, this.drawing, ctx);
   }
 
   // The subscription.
@@ -394,9 +417,13 @@ export class DeskTranscript {
       // A snapshot after an end: it continues the held rows where it overlaps them, else it replaces them.
       const at = fresh.length > 0 ? this.rows.findIndex((row) => row.uuid === fresh[0].uuid) : -1;
       if (at >= 0) more = this.state.getState().more;
+      else this.off.clear();
+      this.mark(fresh, body.offChain);
       this.setRows(at >= 0 ? [...this.rows.slice(0, at), ...fresh] : fresh);
       this.rebuild();
     } else {
+      this.off.clear();
+      this.mark(fresh, body.offChain);
       this.setRows(fresh);
       this.retree();
     }
@@ -413,7 +440,7 @@ export class DeskTranscript {
   private receive(message: Exclude<SubscriptionMessage, { kind: 'snapshot' }>): void {
     switch (message.kind) {
       case 'row':
-        return this.row(message.body.row);
+        return this.row(message.body);
       case 'chunk':
         if (this.layer.chunk(message.body)) this.publish();
         return;
@@ -441,25 +468,37 @@ export class DeskTranscript {
     }
   }
 
-  private row(row: JsonObject): void {
-    if (!hasUuid(row) || this.uuids.has(row.uuid)) return;
-    this.uuids.add(row.uuid);
-    this.rows.push(row);
-    const model = modelOf(row);
-    if (model !== null && model !== this.state.getState().model) this.setModel(model);
-    // A delivery the bridge appended again after an Esc: the copy already drawn leaves the drawing, rebuilt without it.
-    if (deliveryFrame(row) !== null) {
-      const superseded = supersededDeliveries(this.rows);
-      if (superseded.size > this.superseded.size) {
-        this.superseded = superseded;
-        if (this.served) {
-          this.rebuild();
-          return this.publish();
-        }
+  private row({ row, offChain = [], onChain = [] }: SessionBodies['row']): void {
+    // What the row's write did to the chain, whether or not the row is new: the latest message about a row says.
+    let marked = false;
+    for (const uuid of offChain) {
+      if (this.off.has(uuid)) continue;
+      this.off.add(uuid);
+      marked = true;
+    }
+    for (const uuid of onChain) marked = this.off.delete(uuid) || marked;
+    const fresh = hasUuid(row) && !this.uuids.has(row.uuid);
+    if (fresh) {
+      this.uuids.add(row.uuid);
+      this.rows.push(row);
+      const model = modelOf(row);
+      if (model !== null && model !== this.state.getState().model) this.setModel(model);
+    }
+    // What is drawn of the rows already mapped changes only with the marks, an owner input (it may repeat an undone one's
+    // words), or a delivery (a later copy of a held one): then the drawing is read again, and the transcript rebuilt
+    // when it changed for any of them.
+    if (marked || (fresh && (ownerInput(row) !== null || deliveryFrame(row) !== null))) {
+      const drawing = drawingOf(this.rows, this.off);
+      const changed = drawingsDiffer(this.drawing, drawing, fresh ? row.uuid : null);
+      this.drawing = drawing;
+      if (changed && this.served) {
+        this.rebuild();
+        return this.publish();
       }
     }
+    if (!fresh) return;
     this.source.live(row);
-    if (this.treeContext !== null) this.setTree(withEvents(this.heldTasks, eventsOf(row, this.treeContext)));
+    if (this.treeContext !== null) this.setTree(withEvents(this.heldTasks, this.drawnEventsOf(row, this.treeContext)));
     this.publish();
   }
 
@@ -482,6 +521,7 @@ export class DeskTranscript {
     const older = [...body.rows].reverse().filter((row): row is Row => hasUuid(row) && !this.uuids.has(row.uuid));
     // The rebuilt source first: whoever reads the page answered (loadingOlder false) reads the source that holds it.
     if (older.length > 0) {
+      this.mark(older, body.offChain);
       this.setRows([...older, ...this.rows]);
       this.rebuild();
     }
@@ -489,6 +529,7 @@ export class DeskTranscript {
   }
 
   private reset(): void {
+    this.off.clear();
     this.setRows([]);
     this.layer.clear();
     this.served = false;
@@ -529,11 +570,17 @@ export class DeskTranscript {
     noteModel(this.project, model);
   }
 
+  /** A snapshot's or a page's marks: each of its rows off the chain when it names it, on it otherwise. */
+  private mark(rows: readonly Row[], offChain: readonly string[] = []): void {
+    for (const row of rows) this.off.delete(row.uuid);
+    for (const uuid of offChain) this.off.add(uuid);
+  }
+
   private setRows(rows: Row[]): void {
     this.rows = rows;
     this.uuids.clear();
     this.silent.clear();
-    this.superseded = supersededDeliveries(rows);
+    this.drawing = drawingOf(rows, this.off);
     for (const row of rows) this.uuids.add(row.uuid);
     const latest = rows.findLast((row) => modelOf(row) !== null);
     if (latest) this.setModel(modelOf(latest)!);
