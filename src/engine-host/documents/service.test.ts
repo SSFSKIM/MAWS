@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { isDeepStrictEqual } from 'node:util';
+import * as awarenessProtocol from '@y/protocols/awareness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
@@ -1106,6 +1107,32 @@ describe('DocumentService: agent replicas (Decision Log 9)', () => {
     await r.whenSaved();
     expect(service.loaded('a1')?.get('t').toString()).toBe('one two!');
     expect(rowCount()).toBe(2);
+  });
+
+  // P3-F (artifact-protocol finding 5): a replica that reconnects is taken back with the presence it already had
+  it('takes a reconnecting replica’s unchanged presence: a departed connection’s clocks are forgotten with its states', () => {
+    make();
+    const r = raw('a1', agent);
+    const presence = new awarenessProtocol.Awareness(r.doc);
+    presence.setLocalState({ name: 'Fix the build', color: '--author-3' });
+    const update = awarenessProtocol.encodeAwarenessUpdate(presence, [r.doc.clientID]);
+    const shown = () => {
+      const late = raw('a1', human);
+      tick();
+      const seen = new awarenessProtocol.Awareness(newDoc());
+      for (const frame of late.take()) if (frame.type === 'awareness') awarenessProtocol.applyAwarenessUpdate(seen, frame.update, 'host');
+      const state = seen.getStates().get(r.doc.clientID) ?? null;
+      seen.destroy();
+      late.hangUp();
+      return state;
+    };
+    r.send({ type: 'awareness', update });
+    expect(shown()).toEqual({ name: 'Fix the build', color: '--author-3' });
+    r.hangUp();
+    expect(shown()).toBeNull();
+    raw('a1', agent).send({ type: 'awareness', update }); // the same presence at the same clock, as a replica re-sends it unchanged
+    expect(shown()).toEqual({ name: 'Fix the build', color: '--author-3' });
+    presence.destroy();
   });
 
   it('relays the agent’s presence to other replicas and clears it at the turn’s end and when the replica closes (Decision Log 23d)', async () => {

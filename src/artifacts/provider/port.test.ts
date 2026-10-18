@@ -1,4 +1,4 @@
-import { encodeAwarenessUpdate } from '@y/protocols/awareness';
+import { applyAwarenessUpdate, Awareness, encodeAwarenessUpdate, removeAwarenessStates } from '@y/protocols/awareness';
 import { describe, expect, it, vi } from 'vitest';
 import { applyV1, checkUpdate, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../yjs';
 import { decodeFrame, encodeFrame, type Frame } from './frames';
@@ -582,6 +582,47 @@ describe('PortProvider', () => {
     replicaEnd.close();
     expect(a.awareness.getStates().has(b.doc.clientID)).toBe(false);
     expect(a.awareness.getLocalState()).toEqual({ user: { name: 'You' } });
+  });
+
+  // P3-F (artifact-protocol finding 5): presence comes back with a reconnect, without anyone moving a cursor
+  it('takes the other side’s unchanged presence again after a reconnect', () => {
+    const a = new PortProvider(newDoc(), { log: quiet });
+    const b = new PortProvider(newDoc(), { log: quiet });
+    a.awareness.setLocalState({ user: { name: 'You' } });
+    b.awareness.setLocalState({ user: { name: 'Claude' } });
+    const [aEnd, bEnd] = MemoryPort.pair();
+    a.connect(aEnd);
+    b.connect(bEnd);
+    pump(aEnd, bEnd);
+    aEnd.close();
+    expect(a.awareness.getStates().has(b.doc.clientID)).toBe(false);
+    const [aEnd2, bEnd2] = MemoryPort.pair();
+    a.connect(aEnd2);
+    b.connect(bEnd2);
+    pump(aEnd2, bEnd2);
+    expect(a.awareness.getStates().get(b.doc.clientID)).toEqual({ user: { name: 'Claude' } });
+    expect(b.awareness.getStates().get(a.doc.clientID)).toEqual({ user: { name: 'You' } });
+    a.destroy();
+    b.destroy();
+  });
+
+  it('sends its own presence at a newer clock on every connect, so a peer that saw it removed takes it back', () => {
+    const provider = new PortProvider(newDoc(), { log: quiet });
+    provider.awareness.setLocalState({ user: { name: 'You' } });
+    const peer = new Awareness(newDoc());
+    const relay = (end: MemoryPort) => end.frames().forEach((frame) => frame.type === 'awareness' && applyAwarenessUpdate(peer, frame.update, 'host'));
+    const [first, host1] = MemoryPort.pair();
+    provider.connect(first);
+    relay(host1);
+    expect(peer.getStates().get(provider.doc.clientID)).toEqual({ user: { name: 'You' } });
+    host1.close();
+    removeAwarenessStates(peer, [provider.doc.clientID], 'host'); // the host's removal as relayed: at the client's last clock
+    const [second, host2] = MemoryPort.pair();
+    provider.connect(second);
+    relay(host2);
+    expect(peer.getStates().get(provider.doc.clientID)).toEqual({ user: { name: 'You' } });
+    peer.destroy();
+    provider.destroy();
   });
 
   // M4 (Decision Log 31c, parent 37's advisory): a renderer replica's cursor awareness goes out at most once per ~50 ms,

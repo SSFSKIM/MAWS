@@ -32,6 +32,8 @@
 // 50 ms), outbound awareness goes out at most once per window: the first change at once, the rest of the window as one
 // trailing frame encoding the current state of every client that changed in it, so the last state wins. A disconnect
 // drops what is pending (the next connect sends the local state itself). Without the option every change goes at once.
+// P3-F: a disconnect forgets the other side's clocks with their states, and a connect sends the local state at a newer
+// clock, so presence returns on a reconnect without anyone changing it.
 //
 // A broken peer is one whose frame does not decode or whose payload fails to apply: the provider logs, disconnects and
 // keeps its accounting. An exception from an application listener (`subscribe`, `onRestored`) is the application's:
@@ -127,6 +129,11 @@ export class PortProvider {
     port.start?.();
     this.send({ type: 'step1', sv: stateVector(this.doc) });
     if (this.awareness.getLocalState() !== null) {
+      // P3-F (artifact-protocol finding 5): at a newer clock than any it sent, since a peer that saw it removed with the
+      // last connection keeps that clock and takes the state back only at a newer one. The awareness's own first state
+      // (clock 0, which no peer takes) is left as it is: the application never set it.
+      const meta = this.awareness.meta.get(this.doc.clientID);
+      if (meta && meta.clock > 0) this.awareness.meta.set(this.doc.clientID, { clock: meta.clock + 1, lastUpdated: Date.now() });
       this.send({ type: 'awareness', update: awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID]) });
     }
     this.emit();
@@ -154,6 +161,9 @@ export class PortProvider {
     this.endAwarenessWindow();
     const others = [...this.awareness.getStates().keys()].filter((id) => id !== this.doc.clientID);
     awarenessProtocol.removeAwarenessStates(this.awareness, others, this);
+    // P3-F (artifact-protocol finding 5): their clocks too, so the next connection's replay of an unchanged state (at
+    // the clock this side already knew) is taken again
+    for (const id of [...this.awareness.meta.keys()]) if (id !== this.doc.clientID) this.awareness.meta.delete(id);
     this.emit();
   }
 
