@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 74,
-    "defer:pending": 49,
+    "defer:committed": 75,
+    "defer:pending": 48,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1068,7 +1068,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L123; parent Decision Log 106): Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner. Owner: P4, through the in-app browser's owner lane.",
       "remainingClause": "The preload is told when the card opens and closes (an explicit lifecycle message on the comment channel) and drops the height inference. Owner: P3 (the browser comment). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L123; parent Decision Log 106): Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner. Owner: P4, through the in-app browser's owner lane.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "a8494d222ad78503c75baab1ee8d31070b8b68e0"
     },
     {
       "line": 124,
@@ -1078,8 +1078,8 @@
       "triageReason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L124; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
       "remainingClause": "`modelAsk` takes the request's starting phase and stays pending through acquisition whatever the cached report says; an interaction case selecting the cached model with acquisition held. Owner: P3 (the composer chip). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L124; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 126,
