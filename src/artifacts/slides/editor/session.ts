@@ -12,6 +12,8 @@
 //
 // P3-F (L203): speaker notes the dialect refused (over its limit) are the tab's too, kept here per slide until written or
 // replaced, so the notes field shows them again when it mounts again; they are never written to the doc.
+// P3-F (L233): what the editor shows in place of the live deck (`shown`), so the header's Export, which outlives the body,
+// exports what is on screen (the design's what-you-see rule, P3-E's Decision Log 31).
 import type { Awareness } from '@y/protocols/awareness';
 import { transact, type Doc } from '../../yjs';
 import { createDeckUndo, type DeckUndo } from '../../yjs/slides-undo';
@@ -36,6 +38,8 @@ export interface DeckSessionState {
   rail: DeckRail | null;
   /** Final fix wave (B4): edits waiting on their work (an upload, an asset copy) before their write. */
   pending: number;
+  /** P3-F (L233): what the editor shows in place of the live deck, if anything. */
+  shown: DeckShown;
 }
 
 export interface DeckSessionOptions {
@@ -58,6 +62,12 @@ export interface DeckPresence {
 }
 
 const NONE: readonly string[] = Object.freeze([]);
+
+/**
+ * P3-F (L233): what the editor shows: one retained version its history previews, two versions compared, or (null) the
+ * live deck, its changes since the last view included.
+ */
+export type DeckShown = { versionId: number } | 'compare' | null;
 
 /** P3-F (L203): notes the dialect refused on a slide: the owner's text, and the slide's notes it was typed over. */
 export interface NotesDraft {
@@ -94,7 +104,7 @@ export class DeckSession {
     private readonly options: DeckSessionOptions = {},
   ) {
     this.undo = createDeckUndo(doc, { editor: 'deck' });
-    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null, pending: 0 };
+    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null, pending: 0, shown: null };
     this.timings = { openedAt };
     this.stopUndo = this.undo.subscribe(() => this.set({ canUndo: this.undo.canUndo(), canRedo: this.undo.canRedo() }));
     this.publish();
@@ -260,6 +270,12 @@ export class DeckSession {
   }
   setZoom(zoom: Zoom): void {
     this.set({ zoom });
+  }
+  /** L233: the editor shows a retained version, two compared, or (null) the live deck. */
+  showVersion(shown: DeckShown): void {
+    const now = this.state.shown;
+    const same = shown === null || shown === 'compare' ? now === shown : now !== null && now !== 'compare' && now.versionId === shown.versionId;
+    if (!same) this.set({ shown });
   }
   /** M6: opens a panel beside the stage, or closes it when it is the one open. */
   toggleRail(rail: DeckRail): void {

@@ -1,9 +1,11 @@
 // P3-C M4 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8): the deck editor over a replica, under happy-dom:
 // the filmstrip's thumbnails, sections, hidden and held slides; the slide gestures as one undo step each; the notes
 // bound by character diff in both directions. Drag reorder, zoom by fit and paint are the e2e's.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyV1, diffV1, newDoc, stateVector, transact, type Doc } from '../../yjs';
+import type { ArtifactVersion } from '@shared/artifacts/version';
+import type { HistoryApi } from '../../document/editor/history/api';
+import { applyV1, diffV1, encodeMap, mergeMaps, newDoc, stateV2, stateVector, transact, type Doc } from '../../yjs';
 import * as Y from '../../yjs/slides';
 import { flushLayout } from '../canvas';
 import { importSlide, readSlide, setNotes, slideOrder, writeDeckKeys } from '../model';
@@ -248,5 +250,37 @@ describe('final fix wave B4: an awaited edit writes only while the deck takes wr
     session.holdWrites(false);
     await expect(session.later(Promise.resolve('y'), write)).resolves.toBe(true);
     expect(write).toHaveBeenCalledWith('y');
+  });
+});
+
+// ---- P3-F (L233) ---------------------------------------------------------------------------------------------------
+
+describe('what the editor shows, for the header’s Export (L233)', () => {
+  it('tells its session the one version its history previews, two compared, and the live deck once the rail closes', async () => {
+    const doc = deck();
+    const states = [stateV2(doc)];
+    setNotes(doc, 'a', 'Notes a, revised');
+    states.push(stateV2(doc));
+    const versions: ArtifactVersion[] = states.map((_, i) => ({ id: i + 1, seq: i + 1, at: Date.UTC(2026, 9, 18, 9, i), actor: { kind: 'human' as const }, kind: 'named' as const, label: `Draft ${i + 1}`, assetRefs: [] }));
+    const api: HistoryApi = {
+      versions: async () => versions,
+      lastViewedAt: async () => null,
+      versionState: async (id) => states[id - 1]!,
+      attributions: async () => encodeMap(mergeMaps([])),
+      saveVersion: async () => ({ versionId: 3 }),
+      restore: async () => ({ revision: 3, versionId: 3 }),
+      duplicate: async () => ({ artifactId: 'copy' }),
+      markViewed: async () => {},
+    };
+    const session = new DeckSession(doc);
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} history={{ api, handle: { doc, onRestored: () => () => {} } }} />);
+    act(() => session.toggleRail('history'));
+    const row = (label: string) => screen.findByRole('button', { name: new RegExp(`^Version ${label} by`) });
+    fireEvent.click(await row('Draft 2'));
+    await waitFor(() => expect(session.snapshot().shown).toEqual({ versionId: 2 }));
+    fireEvent.click(await row('Draft 1'), { shiftKey: true });
+    await waitFor(() => expect(session.snapshot().shown).toBe('compare'));
+    act(() => session.toggleRail('history'));
+    await waitFor(() => expect(session.snapshot().shown).toBeNull());
   });
 });

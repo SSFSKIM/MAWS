@@ -8,6 +8,7 @@
 // comment surface (P2's card with B's artifact target and anchor), the replica held by the tab while the card's overlay
 // writes; the header counts the open threads.
 // M8: the header's Version history and the editor's history (the tab's history api over the tab's replica).
+// P3-F (L233): the header's Export exports what the editor shows (the session's `shown`), read when an entry is chosen.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ArtifactHost } from '@artifacts/host';
 import { DeckEditor } from '@artifacts/slides/editor/DeckEditor';
@@ -19,7 +20,7 @@ import { useEditorHost } from '../../panel/editor-host';
 import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F1
 import { useDocumentComments } from '../document/comments'; // M7: B's surface
 import { chooseDeckSystem, presentDeck } from './commands';
-import { deckExports } from './exports';
+import { deckExports, exportDeck } from './exports';
 import { useDeckSystem } from './governing';
 import { deckHeader, type DeckHeaderCommands } from './header';
 import type { DeckTabState } from './tab-state';
@@ -39,16 +40,22 @@ const NO_TARGET = { context: { kind: 'none' } } as const; // P3-F1: unused while
 function useRail(session: DeckSession | null) {
   return useSyncExternalStore(session?.subscribe ?? NO_SESSION, () => session?.snapshot().rail ?? null);
 }
+/** P3-F (L233): what the editor shows in place of the live deck (Export's subject); null before the deck opens. */
+function useShown(session: DeckSession | null) {
+  return useSyncExternalStore(session?.subscribe ?? NO_SESSION, () => session?.snapshot().shown ?? null);
+}
 
 function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckEditorBodyProps & { compact: boolean }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
   const row = useLibraryRow(artifactId).value;
   const title = row?.title ?? 'Presentation';
   useEffect(() => state.setTitle(title), [state, title]);
-  const exports = useMemo(() => deckExports(artifactId), [artifactId]); // M9
   // M6: the actions drive the tab's own session (X32's lifetime rule), Present from the slide it shows
   const opened = snapshot.session;
   const rail = useRail(opened);
+  // M9; P3-F (L233): each entry exports what the editor shows when it is chosen
+  const shown = useShown(opened);
+  const exports = useMemo(() => deckExports(artifactId, shown, (entry) => void exportDeck(artifactId, entry, opened?.snapshot().shown ?? null)), [artifactId, shown, opened]);
   const commands = useMemo<DeckHeaderCommands | undefined>(
     () => (opened ? { present: () => void presentDeck(artifactId, opened.snapshot().currentSlide), toggleRail: (r) => opened.toggleRail(r) } : undefined),
     [opened, artifactId],
