@@ -124,6 +124,21 @@ describe('the floating card in the Shell', () => {
     expect(composers()).toEqual([A]);
   });
 
+  // P3-F L129: the panel header's Float names what a click does: over a card closed to its pill it brings the card back
+  it('the header’s Float reads "Open session card" while the card is a pill and brings it back; over the open card it reads "Dock session"', async () => {
+    const user = userEvent.setup();
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    const header = () => region('panel').querySelector<HTMLElement>('[data-editor-header]')!;
+    expect(within(header()).getByRole('button', { name: 'Dock session', pressed: true })).toBeTruthy();
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    expect(within(header()).queryByRole('button', { name: 'Dock session' })).toBeNull();
+    await user.click(within(header()).getByRole('button', { name: 'Open session card', pressed: true }));
+    expect(card()).not.toBeNull();
+    expect(composers()).toEqual([A]);
+    expect(within(header()).getByRole('button', { name: 'Dock session', pressed: true })).toBeTruthy();
+  });
+
   it('Dock restores the column at its width and the main pane’s composer takes the keyboard', async () => {
     const user = userEvent.setup();
     useLayout.getState().setPanel({ width: 444 });
