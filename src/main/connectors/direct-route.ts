@@ -97,6 +97,8 @@ const lost = (lostWord: string, failure: Lost['failure'] = 'unavailable'): Lost 
 
 interface Pending {
   readonly kind: Kind;
+  publishable?: () => boolean; // E3c: native visibility/request recheck before every publication take
+  stopping?: boolean;
   settle(result: DirectOperationOutcome | Lost): void;
   sent: boolean; // P3-HD M3b: its command was sent (until then, preparing its credential: the host knows nothing of it)
   taking: boolean; // a `directTake` is in flight
@@ -144,13 +146,21 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
       operation.again = { whenNone: whenNone ?? operation.again?.whenNone ?? null }; // an in-flight take may have answered before this end
       return;
     }
+    if (operation.publishable && !operation.stopping && !operation.publishable()) return stopDataset(operationId, lost('the work may no longer publish'));
     operation.taking = true;
     void deps.call('connectors.directTake', { operationId }).then(
       (taken) => {
         operation.taking = false;
         if (!pending.has(operationId)) return;
         if (!taken.ok) return withdraw(operationId, lost(`directTake failed: ${taken.error.code}`)); // the host may still run it
-        const { outcome } = taken.value;
+        const { outcome, dataset } = taken.value;
+        if (dataset && operation.publishable) {
+          if (dataset.status !== 'publishing') return operation.settle({ kind: 'call', outcome: dataset.status === 'failed' && dataset.reason === 'revoked' ? { ok: false, failure: 'refused', refusal: 'revoked', reason: 'grant' } : { ok: true, result: dataset } });
+          const next = operation.again;
+          operation.again = undefined;
+          if (next) fetch(operationId, next.whenNone);
+          return;
+        }
         if (outcome !== null) return operation.settle(outcome.kind === operation.kind ? outcome : lost('the host answered another kind of operation'));
         const next = operation.again;
         operation.again = undefined;
@@ -162,6 +172,20 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
         withdraw(operationId, lost('directTake failed'));
       },
     );
+  }
+
+  // E3c: cancellation before admission wins; after admission only the durable host end may settle the call.
+  function stopDataset(operationId: string, result: Lost): void {
+    const operation = pending.get(operationId);
+    if (!operation || operation.stopping) return;
+    if (!operation.sent) return withdraw(operationId, result);
+    operation.stopping = true;
+    void deps.call('connectors.directCancel', { operationId }).then((answer) => {
+      if (pending.get(operationId) !== operation) return;
+      if (answer.ok && !answer.value.cancelled) return fetch(operationId, lost('the host kept no outcome for the operation', 'failed'));
+      if (answer.ok) void deps.call('connectors.directTake', { operationId }).catch(() => {});
+      operation.settle(result);
+    }, () => operation.settle(result));
   }
 
   // Answers the operation now and withdraws it from the host (which may still run it, or never have heard of it).
@@ -188,6 +212,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     deadlineMs: number,
     signal: AbortSignal,
     prepare?: (signal: AbortSignal) => Promise<DirectCredentialPrepared>,
+    context?: ConnectorRouteCallContext, // E3c
   ): Promise<{ result: OutcomeOf<K> | Lost; credential: DirectCredential | null }> {
     const refused = refusal(signal);
     if (refused) return Promise.resolve({ result: refused, credential: null });
@@ -195,10 +220,11 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     let credential: DirectCredential | null = null;
     return new Promise((resolve) => {
       const preparation = new AbortController();
-      const deadline = setTimeout(() => fetch(operationId, lost('the operation outlived its deadline')), deadlineMs);
-      const cancel = () => withdraw(operationId, lost('cancelled'));
+      const deadline = setTimeout(() => context?.dataset ? stopDataset(operationId, lost('the operation outlived its deadline')) : fetch(operationId, lost('the operation outlived its deadline')), deadlineMs);
+      const cancel = () => context?.dataset ? stopDataset(operationId, lost('cancelled')) : withdraw(operationId, lost('cancelled'));
       const operation: Pending = {
         kind,
+        ...(context?.dataset && { publishable: context.publishable ?? (() => false) }),
         taking: false,
         sent: false,
         settle: (result) => {
@@ -266,13 +292,9 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
 
   function targetOf(source: DirectSource, tool: ConnectorToolRef, artifactId: string, metadata: DirectToolMetadata): ConnectorRouteTarget {
     const call = async (args: Record<string, unknown>, context: ConnectorRouteCallContext): Promise<ConnectorRouteAnswer> => {
-      // E3 x P3-HD integration (the architect's merge ruling): route D carries no dataset sink in this landing, so dataset
-      // work (a page's or an agent's) is unavailable here and nothing is started. A plain call would bring the tool's raw
-      // result back to main, the page or the agent's answer, where E3 keeps it in the host and publishes it there.
-      if (context.dataset) return { ok: false, failure: 'unavailable', message: 'direct: route D publishes no dataset' };
-      const sent = { artifactId, directory: source.directory, sourceId: source.sourceId, generation: source.generation, server: source.server, tool: tool.tool, arguments: args, fingerprint: context.fingerprint, mode: context.mode };
+      const sent = { artifactId, directory: source.directory, sourceId: source.sourceId, generation: source.generation, server: source.server, tool: tool.tool, arguments: args, fingerprint: context.fingerprint, mode: context.mode, ...(context.dataset && { dataset: context.dataset, ...(context.appSessionId && { appSessionId: context.appSessionId }) }) };
       const prepare = preparationOf(source, 'call'); // P3-HD M3b: after the broker's check, inside the operation
-      const { result, credential } = await run('call', (operationId, prepared) => deps.call('connectors.directStart', { operationId, ...sent, ...(prepared && { credential: prepared }) }), DIRECT_OPERATION_DEADLINE_MS, context.signal, prepare);
+      const { result, credential } = await run('call', (operationId, prepared) => deps.call('connectors.directStart', { operationId, ...sent, ...(prepared && { credential: prepared }) }), DIRECT_OPERATION_DEADLINE_MS, context.signal, prepare, context);
       if ('lost' in result) return { ok: false, failure: result.failure, message: result.lost };
       if (prepare && !result.outcome.ok && result.outcome.reason === 'unauthorized') unauthorized(source, 'call', credential);
       return answerOf(result.outcome);

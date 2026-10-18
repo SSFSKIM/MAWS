@@ -188,6 +188,8 @@ export const DirectStartSchema = z.strictObject({
   fingerprint: ConnectorGrantRequestSchema.shape.fingerprint,
   mode: z.enum(CONNECTOR_GRANT_MODES),
   credential: DirectCredentialSchema.optional(),
+  dataset: ConnectorStartSchema.shape.dataset, // E3c: the same host-only publication contract
+  appSessionId: ConnectorSessionToolSchema.shape.appSessionId.optional(), // E3c: the asking agent, never an engine invented for route D
 });
 // The owner's discovery (Connect's bootstrap): initialize and tools/list on the source, never tools/call.
 export const DirectDiscoverSchema = z.strictObject({ operationId: OperationId, ...DirectSourceRef, credential: DirectCredentialSchema.optional() });
@@ -347,7 +349,7 @@ export const commands = {
   'connectors.directStart': host(DirectStartSchema, Started),
   'connectors.directDiscover': host(DirectDiscoverSchema, Started),
   // null: no such operation (taken, cancelled, expired, or still running)
-  'connectors.directTake': host(z.strictObject({ operationId: OperationId }), z.strictObject({ outcome: DirectOperationOutcomeSchema.nullable() })),
+  'connectors.directTake': host(z.strictObject({ operationId: OperationId }), z.strictObject({ outcome: DirectOperationOutcomeSchema.nullable(), dataset: ConnectorDatasetTakeSchema.optional() }).refine((taken) => taken.dataset === undefined || taken.outcome === null, 'a dataset phase comes with a null outcome')),
   'connectors.directCancel': host(z.strictObject({ operationId: OperationId }), z.strictObject({ cancelled: z.boolean() })),
   // A credential withdrawn (its `credentialEpoch`, absent every epoch seen, and every earlier one of `connectionId`, for
   // main's attachment), or with no `connectionId` all direct work: its operations end unannounced and its connections

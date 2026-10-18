@@ -29,10 +29,8 @@
 //  12. allowed again, then a scheduled refresh; an ordinary quit stops the engine
 //  13. relaunched: the grant held, the schedule on, the dashboard on screen in the active tab, no eligible engine; ten real
 //      minutes with no call, no new session and no new launch
-// Route D (P3-HD's direct connector route) is on this tree but carries no dataset sink in this landing: it refuses
-// dataset work closed and sends nothing (the architect's merge ruling; src/main/connectors/direct-route.ts). Its dataset
-// path is a named post-landing corrective, its own case skipped below (Decision Log 14). Step 13 proves both routes
-// absent, each on its own evidence: no engine live, and no verified direct source and no request of any kind at the server.
+// E3c adds a separate direct scene: a verified source remains in the host after the owner stops its engine.
+// Step 13 above is unchanged: after relaunch neither route exists, and every request remains absent.
 import { mkdirSync } from 'node:fs';
 import { test, expect, type Locator } from '@playwright/test';
 import { DATASET_STATES, utcTime } from '../src/artifacts/dashboard/states';
@@ -77,6 +75,8 @@ import {
   windowGeometry,
   windowSize,
 } from './support/live-data';
+import { stopEngine } from './support/connector-direct-acceptance';
+import { ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 
 test.skip(process.env.MAWS_DASHBOARD_LIVE_DATA !== '1', 'the live dataset acceptance runs under pnpm e2e:dashboard-live-data (MAWS_DASHBOARD_LIVE_DATA=1)');
@@ -506,9 +506,69 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
   );
 });
 
-test('route D: with no engine holding the server, the same dashboard refreshes over the direct route (P3-HD)', () => {
-  // A named omission (E3 Decision Log 14; the architect's merge ruling): P3-HD's direct route is on this tree, but its
-  // dataset sink is not, so route D refuses dataset work closed. The post-landing corrective builds that sink and writes
-  // this case into the scene above.
-  test.skip(true, 'route D carries no dataset sink in this landing: a named post-landing corrective (E3 Decision Log 14)');
+test('route D: with no engine holding the server, the same dashboard refreshes over the direct route (P3-HD)', async () => {
+  test.setTimeout(180_000);
+  await withScene('live-data-direct', test.info(), async (scene) => {
+    scene.fixtureReply({ reply: 'rows', rows: rows(...FIRST) });
+    const run = await scene.launch();
+    const { page } = run;
+    const agent = agentOf(scene);
+    const id = await createBoard(scene, page, agent);
+    const views = liveViews(await openInMain(page, id));
+    let sheet = await openSheet(views);
+    const engine = await startFromSheet(scene, page, liveBlock(sheet));
+    expect(userMessages(scene, engine.appSessionId)).toBe(0);
+    await liveBlock(sheet).getByRole('button', { name: `Allow ${TOOL_NAME} to read` }).click();
+    await closeSheet(sheet);
+    await drawsRows(views, FIRST, 'the initial engine fetch');
+    const engineServer = scene.toolCalls().at(-1)!.pid;
+    const sources = value(await invoke(page, 'connectors.servers', { artifactId: id, tools: [{ server: SERVER, tool: TOOL }] })).servers;
+    expect(sources, 'the host has a verified direct source before the engine stops').toContainEqual(expect.objectContaining({ kind: 'source', server: SERVER }));
+    await stopEngine(scene, run, engine);
+    const baseline = await census(scene, page);
+    expect(baseline.live).toBe(0);
+
+    // The next scheduled refresh uses D, not an engine restarted for the dashboard.
+    scene.fixtureReply({ reply: 'rows', rows: rows(...OWNERS) });
+    const scheduled = await nextCall(scene, Date.now(), 45_000);
+    expect(scheduled.pid).not.toBe(engineServer);
+    expect(ps(scheduled.pid, 'ppid')).not.toBe(String(engine.pid));
+    await drawsRows(views, OWNERS, 'the scheduled direct refresh');
+    let read = await readDataset(agent, AUTHOR, id);
+    expect(read.updated).toEqual({ at: expect.any(String), by: 'user' });
+    await expect(labelOf(views)).toHaveText(fetched(read.at!, 'You'));
+    sheet = await openSheet(views);
+    await expect(sheet).toContainText(`${HEAD} · updated ${utcTime(read.at!)} by You`);
+    await expect(liveBlock(sheet)).toContainText('Allowed to read');
+    await expect(liveBlock(sheet).getByRole('button', { name: 'Start session', exact: true })).toHaveCount(0);
+    await shot(run, 'direct-scheduled');
+
+    // Owner Refresh follows that same host sink while the source sheet retains its captured rows.
+    scene.fixtureReply({ reply: 'rows', rows: rows(...AGENTS) });
+    const before = Date.now();
+    await liveBlock(sheet).getByRole('button', { name: `Refresh ${TITLE}` }).click();
+    await nextCall(scene, before);
+    await drawsRows(views, AGENTS, 'the owner direct refresh');
+    await expect(liveBlock(sheet)).toContainText('Newer rows were fetched at');
+    await liveBlock(sheet).getByRole('button', { name: 'Show latest' }).click();
+    read = await readDataset(agent, AUTHOR, id);
+    expect(read.updated).toEqual({ at: expect.any(String), by: 'user' });
+    await expect(sheet).toContainText(`${HEAD} · updated ${utcTime(read.at!)} by You`);
+    await closeSheet(sheet);
+
+    // The agent seam asks as the stopped session: the registry, not a live engine, supplies its attribution.
+    scene.fixtureReply({ reply: 'rows', rows: rows(...TRIALS) });
+    const asked = await agentDataset<{ status: string; rows: number }>(page, agent, engine.appSessionId, id, { refresh: true });
+    expect(asked.isError, asked.text).toBe(false);
+    expect(asked.result).toMatchObject({ status: 'dataset', rows: TRIALS.length });
+    expect(asked.result).not.toHaveProperty('structuredContent');
+    await drawsRows(views, TRIALS, 'the agent direct refresh');
+    read = await readDataset(agent, AUTHOR, id);
+    expect(read.updated).toEqual({ at: expect.any(String), by: 'another session', appSessionId: engine.appSessionId });
+    await expect(labelOf(views)).toHaveText(fetched(read.at!, 'session'));
+    expect(await census(scene, page), 'no engine or launch was acquired by any refresh').toEqual(baseline);
+    expect(scene.launches(engine.appSessionId)).toEqual({ spawns: 1, exits: 1 });
+    scene.note('direct dataset refreshes', { sources, baseline, scheduled, updated: read.updated });
+    await shot(run, 'direct-agent');
+  }, { liveData: true });
 });

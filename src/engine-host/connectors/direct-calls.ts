@@ -20,7 +20,8 @@
 // - Decision Log 91, as route E: the fence is held past the call until the operation is taken, cancelled, expired or
 //   dropped with main; a revoke, delete or replacing grant while the outcome waits turns it into the revoke's refusal.
 // - `withdraw` (main's `connectors.directClose`) sets an epoch floor for a credential's connection before it answers:
-//   its operations end unannounced, its connections close, and a later start at or below the floor is refused.
+//   a dataset publication admitted into the store keeps its terminal ownership until taken or expired; other
+//   operations end unannounced. Its connections close, and a later start at or below the floor is refused.
 // - `close` (main gone): every operation and outcome goes synchronously, the credential floors with the attachment, and
 //   every connection is invalidated (its processes' end follows within the pool's bound); `shutdown` also awaits that.
 // - P3-HD M3b (Decision Log 15, 18 and 21): a resolution naming a tool ranks main's directories by the artifact's
@@ -35,10 +36,12 @@ import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrantMode } from '@shared/artifacts/connectors';
 import type { CommandInput } from '@shared/ipc/schema';
-import type { DirectCallOutcome, DirectDiscoverAnswer, DirectOperationOutcome, DirectReason, DirectResolveAnswer, DirectSource } from '@shared/ipc/schema/connectors';
+import type { ConnectorDatasetTake, DirectCallOutcome, DirectDiscoverAnswer, DirectOperationOutcome, DirectReason, DirectResolveAnswer, DirectSource } from '@shared/ipc/schema/connectors';
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import type { DirectConnectionPool, DirectFailure, DirectLease, DirectTool } from './direct-client';
+import type { ConnectorDatasetSink } from './dataset-sink';
+import type { RefreshRaw, RefreshPublish, RefreshPublication } from '../dashboards/refresh';
 import { DirectToolHints } from './direct-hints'; // P3-HD M3b
 import type { ConnectorSourceRefusal, ConnectorStatusCache, VerifiedConnectorSource } from './provenance';
 
@@ -64,6 +67,7 @@ export interface DirectGrantStore {
 type DirectFence = object; // the store's own (documents/store.ts ConnectorFence), opaque here
 
 export interface DirectCallsOptions {
+  datasets?: ConnectorDatasetSink; // E3c: the shared host-only refresh sink
   cache: Pick<ConnectorStatusCache, 'resolve' | 'resolveSource' | 'readEntryForWrite'>;
   pool: Pick<DirectConnectionPool, 'acquire' | 'invalidate' | 'close'>;
   store(): DirectGrantStore | null;
@@ -101,12 +105,20 @@ interface Operation {
   readonly deadlineAt: number;
   readonly admittedAt: number; // P3-HD M3b: its hint publication's order
   outcome?: DirectOperationOutcome;
+  sink?: true; // E3c: dataset terminal ownership follows route E
+  dataset?: DatasetPhase;
+  publicationAdmitted?: true; // the savepoint owns its end, including rollback; retained until take or expiry
+  cancelled?: true;
   stop?: 'timeout'; // why its signal aborted, when it was not withdrawn
   revoked?: boolean; // its fence broke: a revoke, delete or replacing grant asked for while it ran or its outcome waited
   deadline?: unknown;
   expiry?: unknown;
   release?: () => void; // lets go of its fence (Decision Log 91: with the operation, not the call)
 }
+
+type DatasetEnd = Exclude<ConnectorDatasetTake, { status: 'publishing' }>;
+type DatasetPhase = { publish?: () => Promise<DatasetEnd | Failure>; publishing?: boolean; take?: DatasetEnd };
+type DatasetExecution = { publish: () => Promise<DatasetEnd | Failure> } | { take: DatasetEnd };
 
 type Failure = Exclude<DirectCallOutcome, { ok: true }>;
 const unavailable = (reason: DirectReason, sourceRefusal?: ConnectorSourceRefusal): Failure => ({ ok: false, failure: 'unavailable', reason, ...(sourceRefusal && { sourceRefusal }) });
@@ -162,7 +174,14 @@ export class DirectCalls {
 
   start(input: DirectStartInput): { operationId: string } {
     const operation = this.admit(input.operationId, 'call', this.callDeadlineMs, unavailable('timeout'), input.credential);
-    this.run(operation, () => this.call(operation, input), failed('transport'));
+    if (input.dataset) operation.sink = true;
+    void this.call(operation, input).then(
+      (answer) => {
+        if ('ok' in answer) this.finish(operation, answer);
+        else this.keep(operation, answer);
+      },
+      () => this.finish(operation, failed('transport')),
+    );
     return { operationId: operation.id };
   }
 
@@ -180,22 +199,62 @@ export class DirectCalls {
     return operation.outcome;
   }
 
+  // E3c: first take starts the publication; joining takes see the phase, never the raw result.
+  takeOperation(operationId: string): { outcome: DirectOperationOutcome | null; dataset?: ConnectorDatasetTake } {
+    const operation = this.operations.get(operationId);
+    const phase = operation?.outcome === undefined ? operation?.dataset : undefined;
+    if (!operation || !phase) return { outcome: this.take(operationId) };
+    if (phase.take) {
+      this.drop(operation);
+      return { outcome: null, dataset: phase.take };
+    }
+    if (!phase.publishing) {
+      phase.publishing = true;
+      this.clock.clearTimeout(operation.expiry);
+      void phase.publish!().then((end) => {
+        if ('ok' in end) return this.finish(operation, end);
+        if (this.operations.get(operation.id) !== operation || operation.cancelled) return;
+        phase.take = end;
+        this.announce(operation);
+      }, () => {
+        this.finish(operation, failed('store'));
+      });
+    }
+    return { outcome: null, dataset: { status: 'publishing', operationId } };
+  }
+
   // Main withdrew it: it stops, before its write or (once written) with the SDK's cancellation, and is never announced.
   cancel(operationId: string): boolean {
     const operation = this.operations.get(operationId);
     if (!operation) return false;
+    if (operation.sink && operation.outcome === undefined) {
+      if (operation.publicationAdmitted || operation.dataset?.take) return false;
+      operation.cancelled = true;
+      operation.controller.abort();
+      this.clock.clearTimeout(operation.deadline);
+      operation.dataset = { take: { status: 'failed', reason: 'timeout' } };
+      this.clock.clearTimeout(operation.expiry);
+      operation.expiry = this.clock.setTimeout(() => this.drop(operation), this.ttlMs);
+      return true;
+    }
     this.end(operation);
     return true;
   }
 
   // `connectors.directClose`. With `connectionId`: its epoch `credentialEpoch` (absent: every epoch seen) and every
-  // earlier one withdrawn for good; otherwise all direct work. Synchronous: when this returns, no withdrawn operation
-  // remains and no connection under a withdrawn credential admits another write; their processes end after.
+  // earlier one withdrawn for good; otherwise all direct work. Synchronous: when this returns, no connection under a
+  // withdrawn credential admits another write; their processes end after. Admitted dataset publications keep their
+  // end until taken or expired; other withdrawn operations end unannounced.
   withdraw(connectionId?: string, credentialEpoch?: number): number {
     if (connectionId === undefined) {
       for (const [id, seen] of this.epochs) this.floors.set(id, Math.max(this.floors.get(id) ?? -1, seen));
       this.hints.clear(); // P3-HD M3b
-      const ended = this.endAll();
+      let ended = 0;
+      for (const operation of [...this.operations.values()]) {
+        if (operation.publicationAdmitted) continue;
+        this.end(operation);
+        ended += 1;
+      }
       void this.options.pool.invalidate(() => true);
       return ended;
     }
@@ -204,7 +263,7 @@ export class DirectCalls {
     this.hints.withdraw(connectionId, floor); // P3-HD M3b
     let ended = 0;
     for (const operation of [...this.operations.values()]) {
-      if (operation.credential?.connectionId !== connectionId || operation.credential.credentialEpoch > floor) continue;
+      if (operation.credential?.connectionId !== connectionId || operation.credential.credentialEpoch > floor || operation.publicationAdmitted) continue;
       this.end(operation);
       ended += 1;
     }
@@ -254,15 +313,30 @@ export class DirectCalls {
   }
 
   private finish(operation: Operation, answer: unknown): void {
-    if (this.operations.get(operation.id) !== operation || operation.outcome) return; // withdrawn, or already ended
+    if (this.operations.get(operation.id) !== operation || operation.outcome || operation.cancelled) return; // withdrawn, or already ended
     this.clock.clearTimeout(operation.deadline);
+    delete operation.dataset;
     // a break between the answer's arrival and here (its callback found no outcome to replace) is the revoke's refusal
     operation.outcome = operation.revoked && operation.kind === 'call' ? { kind: 'call', outcome: REVOKED } : this.outcomeOf(operation.kind, answer);
+    this.announce(operation);
+  }
+
+  private announce(operation: Operation): void {
+    this.clock.clearTimeout(operation.expiry);
     operation.expiry = this.clock.setTimeout(() => this.drop(operation), this.ttlMs);
     // a macrotask later, so the end never overtakes the start's answer on the wire (route E's rule)
     setTimeout(() => {
       if (this.operations.get(operation.id) === operation) this.options.completed(operation.id);
     }, 0);
+  }
+
+  private keep(operation: Operation, execution: DatasetExecution): void {
+    if (this.operations.get(operation.id) !== operation || operation.cancelled || operation.outcome) return;
+    if (operation.revoked) return this.finish(operation, REVOKED);
+    if (operation.controller.signal.aborted) return this.finish(operation, this.stopped(operation));
+    this.clock.clearTimeout(operation.deadline);
+    operation.dataset = 'take' in execution ? { take: execution.take } : { publish: execution.publish };
+    this.announce(operation);
   }
 
   private outcomeOf(kind: Kind, answer: unknown): DirectOperationOutcome {
@@ -368,12 +442,25 @@ export class DirectCalls {
     }
   }
 
-  private async call(operation: Operation, input: DirectStartInput): Promise<DirectCallOutcome> {
+  private async call(operation: Operation, input: DirectStartInput): Promise<DirectCallOutcome | DatasetExecution> {
     const { cache, pool } = this.options;
     const { signal } = operation.controller;
     const attachment = this.attachment;
     const store = this.options.store();
     if (!store) return failed('store');
+    let sink: { publish: RefreshPublish } | null = null;
+    if (input.dataset) {
+      if (input.mode !== 'read') return refused('wrongMode', 'grant');
+      if (!this.options.datasets) return failed('store');
+      const admission = await this.options.datasets.admit({ ...input, dataset: input.dataset }, () => {
+        if (this.operations.get(operation.id) !== operation) return;
+        operation.controller.abort();
+        if (operation.dataset?.publish && !operation.dataset.publishing) this.finish(operation, unavailable('cancelled'));
+      });
+      if ('refusal' in admission) return admission.stale ? { take: { status: 'failed', reason: 'stale' } } : failed('store');
+      if (!this.registered(operation)) return this.stopped(operation);
+      sink = admission;
+    }
     if (!this.credentialValid(input.credential)) return unavailable('credential');
     // the source main resolved, exactly: never another found now
     const resolved = await cache.resolve(input.directory, input.server, input.tool);
@@ -392,6 +479,10 @@ export class DirectCalls {
       operation.revoked = true;
       operation.controller.abort();
       if (operation.outcome?.kind === 'call') operation.outcome = { kind: 'call', outcome: REVOKED };
+      else if (operation.dataset?.publish && !operation.dataset.publishing && this.operations.get(operation.id) === operation) {
+        operation.dataset = { take: { status: 'failed', reason: 'revoked' } };
+        this.announce(operation);
+      }
     });
     operation.release = () => store.releaseConnectorFence(fence);
     const connection = this.connectionCheck(read.stillValid, input.credential, attachment);
@@ -412,7 +503,22 @@ export class DirectCalls {
     if (!acquired.ok) return check() ?? fromTransport(acquired, 'connection');
     const { lease } = acquired;
     try {
-      return await this.callOn(lease, operation, input, read.source, store, call, check);
+      const answer = await this.callOn(lease, operation, input, read.source, store, call, check);
+      if (!sink) return answer;
+      let raw: RefreshRaw;
+      if (answer.ok) raw = { kind: 'result', result: answer.result };
+      else if (answer.failure === 'tooLarge') raw = { kind: 'failed', reason: 'tooLarge' };
+      else if (answer.failure === 'failed' && (answer.reason === 'transport' || answer.reason === 'notJson')) raw = { kind: 'failed', reason: 'toolError' };
+      else if (answer.reason === 'timeout' && !signal.aborted) raw = { kind: 'failed', reason: 'timeout' };
+      else return answer;
+      const publishing = sink;
+      return { publish: async () => {
+        const publication = await publishing.publish(raw, () => {
+          const failure = check();
+          return failure === null ? 'held' : failure.failure === 'refused' ? 'revoked' : 'cancelled';
+        }, () => (operation.publicationAdmitted = true));
+        return takeOf(publication);
+      } };
     } finally {
       lease.release();
     }
@@ -547,3 +653,10 @@ function jsonBytes(value: unknown): number | null {
   }
 }
 
+// E3c: route E's compact publication contract with route D's closed failure vocabulary.
+function takeOf(publication: RefreshPublication): DatasetEnd | Failure {
+  if ('discarded' in publication) return publication.discarded === 'cancelled' ? unavailable('cancelled') : { status: 'failed', reason: publication.discarded };
+  if (publication.failed) return { status: 'failed', reason: publication.failed };
+  const { artifactId, id, revision, columns = [], rows = 0, warnings } = publication.published;
+  return { status: 'dataset', artifactId, id, revision, columns, rows, ...(warnings && { warnings }) };
+}

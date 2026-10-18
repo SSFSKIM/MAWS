@@ -52,7 +52,7 @@ export type DatasetRefreshSettlement =
 
 /** The connector start that may carry a request (what `connectors.start` received). */
 export interface DatasetRefreshStart {
-  appSessionId: string;
+  appSessionId?: string; // E3c: page direct refreshes have no session; claim still exact-matches an agent
   artifactId: string;
   server: string;
   tool: string;
