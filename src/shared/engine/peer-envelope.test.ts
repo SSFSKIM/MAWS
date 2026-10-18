@@ -70,6 +70,27 @@ describe('parsePeerMessage', () => {
     expect(parsePeerMessage('<cross-session-message>\nhi\n</cross-session-message>')).toMatchObject({ from: '', body: 'hi' });
   });
 
+  it("drops sminos's reply line, the body's whole last line, and keeps any line that only resembles it or stands elsewhere", () => {
+    const SMINOS = '/Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.175.0/skills/sminos/scripts/sminos';
+    const reply = (address: string, path = SMINOS) => `[To reply, run in Bash: ${path} say "@${address} <your reply>"]`;
+    for (const address of ['0b9e3a52-5d1e-4c55-9c3f-2f0e6c1a7d44/maws-fe', 'MAWS/5e0c1f2a']) {
+      expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', `Rebase on main.\n\nThen tell me.\n${reply(address)}`))).toMatchObject({ body: 'Rebase on main.\n\nThen tell me.' });
+    }
+    expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', reply('MAWS/maws-fe')))).toMatchObject({ body: '' });
+    for (const body of [
+      `${reply('MAWS/maws-fe')}\nRebase on main.`, // not the last line
+      `Rebase on main.\n${reply('MAWS/maws-fe')} thanks`, // more on its line
+      `Rebase on main.\n${reply('MAWS/maws-fe', 'skills/sminos/scripts/sminos')}`, // no absolute path
+      `Rebase on main.\n${reply('MAWS/maws-fe', '/usr/local/bin/other')}`, // not sminos
+      `Rebase on main.\n[To reply, run in Bash: ${SMINOS} say "@MAWS/maws-fe on it"]`, // a reply written out
+      `Rebase on main.\n[To reply, run in Bash: ${SMINOS} say "@maws-fe <your reply>"]`, // no project
+      `Rebase on main. ${reply('MAWS/maws-fe')}`, // mid-line
+    ])
+      expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', body)), body).toMatchObject({ body });
+    // An in-process agent's message is not sminos's: its body is left whole.
+    expect(parsePeerMessage(`<agent-message from="a1b2">\nhi\n${reply('MAWS/maws-fe')}\n</agent-message>`)).toMatchObject({ body: `hi\n${reply('MAWS/maws-fe')}` });
+  });
+
   it('reads an in-process agent\'s <agent-message> wrapper, a hand-back among them', () => {
     const parsed = parsePeerMessage(HANDBACK.message.content);
     expect(parsed).toMatchObject({ kind: 'agent', fromAgentId: 'a6a89722837fede78', handback: true });

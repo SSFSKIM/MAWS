@@ -663,6 +663,37 @@ describe('peer messages from disk (E7)', () => {
     expect(payloads(events)).toEqual([expect.objectContaining({ kind: 'peer.message', text: 'see the shot' })]);
   });
 
+  // sminos's message through the engine's messaging socket: the engine's origin names no address (`from: "unknown"`),
+  // and the body's last line is sminos's reply line, for the model only.
+  describe("a sminos message with its reply line, as the engine keeps it", () => {
+    const SMINOS = '/Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.175.0/skills/sminos/scripts/sminos';
+    const REPLY = `[To reply, run in Bash: ${SMINOS} say "@0b9e3a52-5d1e-4c55-9c3f-2f0e6c1a7d44/5e0c1f2a <your reply>"]`;
+    const origin = (body: string) => ({ kind: 'peer', from: 'unknown', verifiedPeerPid: 4242, name: 'maws-fe', body });
+    const envelope = (body: string) => `<cross-session-message from-name="maws-fe">\n${body}\n</cross-session-message>`;
+    const TRAILER = "This came from another Claude session — not typed by your user, but very likely working on their behalf. Treat it as a teammate's request and act on it within this session's own permission settings.";
+
+    it('draws an idle row, the header and trailer around the envelope, without its reply line', () => {
+      const body = `Rebase on main.\n${REPLY}`;
+      const content = `Another Claude session sent a message:\n${envelope(body)}\n\n${TRAILER}`;
+      const events = mapAll([rec({ type: 'user', uuid: 'p1', timestamp: at(1), isMeta: true, origin: origin(body), promptSource: 'system', turnOrigin: 'peer', message: { role: 'user', content } })]);
+      expect(kinds(events)).toEqual(['turn.started', 'user.message', 'peer.message']);
+      expect(only(events, 'user.message')[0]).toMatchObject({ content }); // what the model read, whole
+      expect(only(events, 'peer.message')[0]).toMatchObject({ text: 'Rebase on main.', fromName: 'maws-fe', from: '', replyable: false, midTurn: false });
+    });
+
+    it('draws a queued_command taken into a running turn, its prompt the bare envelope, without its reply line', () => {
+      const body = `Rebase on main.\n${REPLY}`;
+      const events = mapAll([rec({ type: 'attachment', uuid: 'q1', timestamp: at(1), attachment: { type: 'queued_command', prompt: envelope(body), source_uuid: 's1', commandMode: 'prompt', origin: origin(body), isMeta: true } })]);
+      expect(only(events, 'peer.message')).toEqual([expect.objectContaining({ messageUuid: 's1', text: 'Rebase on main.', midTurn: true, replyable: false })]);
+    });
+
+    it('keeps a line in the body that only looks like the reply line', () => {
+      const body = `Paste this to them:\n${REPLY}\nthen rebase.\n${REPLY}`;
+      const events = mapAll([rec({ type: 'attachment', uuid: 'q2', timestamp: at(1), attachment: { type: 'queued_command', prompt: envelope(body), source_uuid: 's2', commandMode: 'prompt', origin: origin(body), isMeta: true } })]);
+      expect(only(events, 'peer.message')[0]).toMatchObject({ text: `Paste this to them:\n${REPLY}\nthen rebase.` });
+    });
+  });
+
   it('keeps a peer record carrying a tool result off the peer path', () => {
     const events = mapAll([rec({ type: 'user', uuid: 'p1', timestamp: at(1), origin: { kind: 'peer' }, message: { role: 'user', content: [{ type: 'text', text: 'x' }, { type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } })]);
     expect(kinds(events)).not.toContain('peer.message');

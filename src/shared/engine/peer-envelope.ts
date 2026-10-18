@@ -19,7 +19,7 @@ export interface PeerEnvelope {
   fromMode: string | null;
   fromPlugin: string | null;
   hopChain: string[];
-  body: string;
+  body: string; // what lies inside the tags, as drawn: sminos's reply line, its last line when it carries one, dropped
   midTurn: boolean; // the header says "while you were working", or there is none (the bare envelope)
   lineage: 'peer' | 'descendant'; // descendant: the trailer says the sender is an agent inside this same session
   replyable: boolean; // false when the suffix says SendMessage cannot reach the sender (the host-injected lane)
@@ -44,6 +44,11 @@ const DESCENDANT_TRAILER = 'That "other Claude session" is an agent working insi
 const HOST_INJECTED = 'is a host session id that SendMessage cannot reach';
 const HANDBACK_FRAME = /^\[Subagent hand-back\][^\n]*The report follows:\n/;
 const UNKNOWN_SENDER = 'unknown';
+// sminos's reply line, the fixed last line of the body of a message it sends through the engine's messaging socket:
+// `[To reply, run in Bash: <absolute path to sminos> say "@<project id>/<sender short> <your reply>"]`, literal but for
+// the sending machine's path and the address. It tells a model with no sminos context how to answer; no reader is shown
+// it, so the body drawn ends before it. Matched whole, as the body's last line only.
+const SMINOS_REPLY_LINE = /(?:^|\n)\[To reply, run in Bash: \/[^\n"]*\/sminos say "@[^\s"/]+\/[^\s"/]+ <your reply>"\]$/;
 
 export function parsePeerMessage(text: string): PeerEnvelope | AgentMessage | null {
   let rest = text.trim();
@@ -68,7 +73,7 @@ export function parsePeerMessage(text: string): PeerEnvelope | AgentMessage | nu
   return {
     kind: 'cross-session', from, fromSession: attributes.get('from-session') ?? null, fromName: attributes.get('from-name') ?? null,
     fromMode: attributes.get('from-mode') ?? null, fromPlugin: attributes.get('from-plugin') ?? null,
-    hopChain: attributes.get('hop-chain')?.split(',').filter((hop) => hop.length > 0) ?? [], body,
+    hopChain: attributes.get('hop-chain')?.split(',').filter((hop) => hop.length > 0) ?? [], body: body.replace(SMINOS_REPLY_LINE, ''),
     midTurn: header === null || header[0].includes('while you were working'),
     lineage: trailer.includes(DESCENDANT_TRAILER) ? 'descendant' : 'peer',
     replyable: !trailer.includes(HOST_INJECTED),
