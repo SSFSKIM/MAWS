@@ -13,7 +13,9 @@
 //   the end. The operation is registered here before its command is sent, so an end announced before the command's
 //   acknowledgment is not lost; events reach main only once its connection streams (X13), so an operation starts only
 //   then and a streaming connection reconciles every pending one by `take`; each has a deadline past the host's own,
-//   at which main takes or withdraws it.
+//   at which main takes or withdraws it. P3-F F-connectors 5: a dataset operation's cancel the host never answered
+//   proves neither outcome, so it settles nothing and nothing is taken; the cancel is asked again on the operation's
+//   next end or reconciliation, or after DIRECT_CANCEL_RETRY_MS, until the host answers it.
 // - A call is bound to the target main selected: one `directStart` per call, never retried or moved to another route,
 //   even when an eligible engine appears meanwhile (the next resolution picks route E). Only fixed words reach the broker
 //   and the log: the host's answers are closed enums, and no SDK, server, file or token text exists to leak.
@@ -85,6 +87,8 @@ export const DIRECT_RESOLVE_DEADLINE_MS = 8_000;
 export const DIRECT_OPERATION_DEADLINE_MS = 180_000;
 // The operations main keeps pending at once (E keeps no bound; the host's own is 256).
 export const DIRECT_PENDING_LIMIT = 64;
+// P3-F F-connectors 5: how long after an unanswered dataset cancel main asks it again, when no end came first.
+export const DIRECT_CANCEL_RETRY_MS = 1_000;
 
 type Kind = DirectOperationOutcome['kind'];
 type OutcomeOf<K extends Kind> = Extract<DirectOperationOutcome, { kind: K }>;
@@ -99,6 +103,8 @@ interface Pending {
   readonly kind: Kind;
   publishable?: () => boolean; // E3c: native visibility/request recheck before every publication take
   stopping?: boolean;
+  unconfirmed?: Lost; // P3-F F-connectors 5: its cancel went unanswered: asked again before anything is taken
+  retry?: ReturnType<typeof setTimeout>; // P3-F F-connectors 5: that ask, should no end come first
   settle(result: DirectOperationOutcome | Lost): void;
   sent: boolean; // P3-HD M3b: its command was sent (until then, preparing its credential: the host knows nothing of it)
   taking: boolean; // a `directTake` is in flight
@@ -142,6 +148,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
       if (whenNone !== null) withdraw(operationId, whenNone); // P3-HD M3b: nothing in the host to take
       return;
     }
+    if (operation.unconfirmed) return stopDataset(operationId, operation.unconfirmed); // P3-F F-connectors 5: no take before the cancel's answer
     if (operation.taking) {
       operation.again = { whenNone: whenNone ?? operation.again?.whenNone ?? null }; // an in-flight take may have answered before this end
       return;
@@ -180,12 +187,22 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     if (!operation || operation.stopping) return;
     if (!operation.sent) return withdraw(operationId, result);
     operation.stopping = true;
+    operation.unconfirmed = undefined;
+    clearTimeout(operation.retry);
+    // P3-F F-connectors 5: unanswered, the cancel may or may not have won: the operation stays, to be asked again
+    const unanswered = () => {
+      if (pending.get(operationId) !== operation) return;
+      operation.stopping = false;
+      operation.unconfirmed = result;
+      operation.retry = setTimeout(() => stopDataset(operationId, result), DIRECT_CANCEL_RETRY_MS);
+    };
     void deps.call('connectors.directCancel', { operationId }).then((answer) => {
       if (pending.get(operationId) !== operation) return;
-      if (answer.ok && !answer.value.cancelled) return fetch(operationId, lost('the host kept no outcome for the operation', 'failed'));
-      if (answer.ok) void deps.call('connectors.directTake', { operationId }).catch(() => {});
+      if (!answer.ok) return unanswered();
+      if (!answer.value.cancelled) return fetch(operationId, lost('the host kept no outcome for the operation', 'failed'));
+      void deps.call('connectors.directTake', { operationId }).catch(() => {});
       operation.settle(result);
-    }, () => operation.settle(result));
+    }, unanswered);
   }
 
   // Answers the operation now and withdraws it from the host (which may still run it, or never have heard of it).
@@ -230,6 +247,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
         settle: (result) => {
           if (!pending.delete(operationId)) return;
           clearTimeout(deadline);
+          clearTimeout(operation.retry); // P3-F F-connectors 5
           signal.removeEventListener('abort', cancel);
           preparation.abort(); // P3-HD M3b: a preparation still running is told; its answer is dropped
           resolve({ result: result as OutcomeOf<K> | Lost, credential });

@@ -26,6 +26,7 @@ let route: DirectRoute;
 let phases: Map<string, ConnectorDatasetTake>;
 let holdPublication: boolean;
 let cancelled: boolean;
+let cancelUnanswered: boolean; // P3-F F-connectors 5: `connectors.directCancel` fails (the dispatch timed out)
 const PUBLISHED = { status: 'dataset' as const, artifactId: ART, id: DATASET.id, revision: 5, columns: [{ name: 'day', type: 'string' as const }, { name: 'signups', type: 'number' as const }], rows: 1 };
 
 // The scripted host: a resolution ends at once with READY; a start ends only when the test finishes it.
@@ -41,7 +42,10 @@ const call: DirectRouteDeps['call'] = async (name, input) => {
     if (dataset?.status === 'publishing' && !holdPublication) setTimeout(() => { phases.set(operationId, PUBLISHED); route.operationEnded(operationId); }, 0);
     phases.delete(operationId);
     outcomes.delete(operationId);
-  } else if (name === 'connectors.directCancel') value = { cancelled };
+  } else if (name === 'connectors.directCancel') {
+    if (cancelUnanswered) return { ok: false, error: { code: 'timeout', message: 'no answer' } } as never;
+    value = { cancelled };
+  }
   else {
     value = { operationId };
     if (name === 'connectors.directResolve') finishLater(operationId, READY);
@@ -68,6 +72,7 @@ beforeEach(() => {
   phases = new Map();
   holdPublication = false;
   cancelled = true;
+  cancelUnanswered = false;
   route = createDirectRoute({ call, sessions: { get: () => ({ projectId: 'proj', directory: '/repo' }) }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] }, realpath: (path) => path, streaming: () => true, log: () => {} });
 });
 afterEach(() => {
@@ -125,6 +130,28 @@ describe('route D’s target and a dataset sink', () => {
     phases.set(id, PUBLISHED);
     route.operationEnded(id);
     expect(await settled(answer)).toEqual({ ok: true, result: PUBLISHED });
+  });
+
+  // P3-F F-connectors 5: an unanswered cancel settles nothing; the operation's next end asks the cancel again before any
+  // take, and the host's durable end answers the call
+  it('keeps an operation whose cancel went unanswered and asks the cancel again before taking its end', async () => {
+    const found = await target();
+    holdPublication = true;
+    cancelUnanswered = true;
+    const controller = new AbortController();
+    let ended = false;
+    const answer = found.call({}, { signal: controller.signal, fingerprint: FP, mode: 'read', dataset: DATASET, publishable: () => !controller.signal.aborted }).then((end) => { ended = true; return end; });
+    await vi.advanceTimersByTimeAsync(2);
+    const id = started()[0]!.input.operationId as string;
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ended).toBe(false);
+    cancelUnanswered = false;
+    cancelled = false; // the host had admitted the commit
+    phases.set(id, PUBLISHED);
+    route.operationEnded(id);
+    expect(await settled(answer)).toEqual({ ok: true, result: PUBLISHED });
+    expect(dispatched.filter((entry) => entry.input.operationId === id).map((entry) => entry.name).slice(-3)).toEqual(['connectors.directCancel', 'connectors.directCancel', 'connectors.directTake']);
   });
 
   it('a plain call (no dataset) still starts and answers as P3-HD built it', async () => {

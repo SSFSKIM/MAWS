@@ -7,13 +7,14 @@
 // agent's refresh resolves the asking session alone.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
-import { createEngineRoute, CONNECTOR_OPERATION_DEADLINE_MS, type EngineRoute } from './engine-route';
+import { createEngineRoute, CONNECTOR_OPERATION_DEADLINE_MS, DATASET_CANCEL_RETRY_MS, type EngineRoute } from './engine-route';
 
 type Sent = { name: string; input: Record<string, unknown> };
 let sent: Sent[];
 let takes: Record<string, unknown>[]; // what each `connectors.take` answers, in order (none left: H's `{outcome: null}`)
 let gate: Promise<void> | null; // while set, each take's answer waits for it
 let cancelled: boolean; // what `connectors.cancel` answers (E3 M2 residual: false once the host admitted the commit)
+let cancelUnanswered: boolean; // P3-F F-connectors 5: `connectors.cancel` fails (the dispatch timed out): unconfirmed
 let route: EngineRoute;
 let order: string[];
 const LIVE = [
@@ -29,6 +30,7 @@ beforeEach(() => {
   takes = [];
   gate = null;
   cancelled = true;
+  cancelUnanswered = false;
   order = [];
   route = createEngineRoute({
     call: (async (name: string, input: CommandInput<never>) => {
@@ -46,7 +48,7 @@ beforeEach(() => {
           return ok(takes.shift() ?? { outcome: null });
         }
         case 'connectors.cancel':
-          return ok({ cancelled });
+          return cancelUnanswered ? ({ ok: false, error: { code: 'timeout', message: 'no answer' } } as unknown as CommandResult<never>) : ok({ cancelled });
         default:
           throw new Error(`unexpected ${name}`);
       }
@@ -213,6 +215,29 @@ describe('route E with a dataset sink', () => {
     route.operationEnded(operationId());
     await settle();
     expect(await admitted.answer).toMatchObject({ ok: false, failure: 'failed' }); // rolled back: nothing published
+  });
+
+  // P3-F F-connectors 5: a cancel the host never answered proves nothing either way: nothing is settled or taken (a take
+  // could start the publication); the cancel is asked again, on a retry or the operation's next end, and only the
+  // host's answer, then its durable end, settles the operation
+  it('keeps an operation whose cancel went unanswered, asks again before any take, and settles with the host’s durable end', async () => {
+    const { answer, work } = await started(() => true);
+    cancelUnanswered = true;
+    work.abort();
+    await settle();
+    let done = false;
+    void answer.then(() => (done = true));
+    await vi.advanceTimersByTimeAsync(DATASET_CANCEL_RETRY_MS);
+    expect(done).toBe(false);
+    expect(sentNames().filter((name) => name === 'connectors.cancel')).toHaveLength(2);
+    expect(takesSent()).toBe(0);
+    cancelUnanswered = false;
+    cancelled = false; // the host had admitted the commit
+    takes.push(ended(META));
+    route.operationEnded(operationId());
+    await settle();
+    expect(order.slice(-2)).toEqual(['connectors.cancel', 'connectors.take']);
+    expect(await answer).toEqual({ ok: true, result: META });
   });
 
   it('fails an operation the host no longer holds when an end is heard: no outcome and no phase', async () => {

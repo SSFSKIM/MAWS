@@ -27,7 +27,10 @@
 // its work's abort and a failed recheck send the host's `connectors.cancel`: a cancel that won (before the commit's
 // admission) is answered as nothing published, the host's retained end collected; one answered false (the commit
 // admitted, or its end decided) is followed by takes, without the recheck, until the host's durable end, its rollback
-// included, answers it. `resolveSession` is an agent's: the asking session alone, never another eligible one.
+// included, answers it. P3-F F-connectors 5: a cancel the host never answered (its dispatch failed) proves neither, so
+// nothing is settled and nothing taken (a take could start the publication); the cancel is asked again on the
+// operation's next end or reconciliation, or after DATASET_CANCEL_RETRY_MS, until the host answers it. `resolveSession`
+// is an agent's: the asking session alone, never another eligible one.
 import { randomUUID } from 'node:crypto';
 import { CONNECTOR_OPERATION_DEADLINE_MS, type ConnectorToolRef } from '@shared/artifacts/connectors'; // E3: the deadline
 import type { CommandInput, CommandOutput, CommandResult } from '@shared/ipc/schema';
@@ -62,6 +65,8 @@ interface Pending {
   taking?: boolean; // E3: a take of it is out
   again?: DatasetFetch; // E3: the fetch asked while it was, the most final of them
   stopping?: boolean; // E3 M2 residual: its host cancel sent: only the host's end settles it now
+  unconfirmed?: ConnectorRouteAnswer; // P3-F F-connectors 5: its cancel went unanswered: asked again before anything is taken
+  retry?: ReturnType<typeof setTimeout>; // P3-F F-connectors 5: that ask, should no end come first
 }
 
 // E3: why a dataset operation's outcome is fetched, least final first: reconciliation (still calling is fine), its end
@@ -71,6 +76,8 @@ type DatasetFetch = (typeof DATASET_FETCHES)[number];
 const finalOf = (a: DatasetFetch | undefined, b: DatasetFetch): DatasetFetch => (a !== undefined && DATASET_FETCHES.indexOf(a) > DATASET_FETCHES.indexOf(b) ? a : b);
 const LOST: ConnectorRouteAnswer = { ok: false, failure: 'failed', message: 'the host kept no outcome for the operation' };
 const DEADLINE: ConnectorRouteAnswer = { ok: false, failure: 'unavailable', message: 'the operation outlived its deadline' };
+// P3-F F-connectors 5: how long after an unanswered cancel main asks it again, when no end of the operation came first.
+export const DATASET_CANCEL_RETRY_MS = 1_000;
 
 // E3: a dataset publication's end as the route answers it: a revoke as the route's own refusal; the metadata and every
 // other failure in the result's slot, typed (the descriptor the host wrote, or kept, is what is drawn).
@@ -127,6 +134,7 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
   function fetchDataset(operationId: string, why: DatasetFetch): void {
     const asked = pending.get(operationId);
     if (!asked) return;
+    if (asked.unconfirmed) return stopDataset(operationId, asked.unconfirmed); // P3-F F-connectors 5: no take before the cancel's answer
     if (asked.taking) {
       asked.again = finalOf(asked.again, why);
       return;
@@ -158,15 +166,22 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
     const operation = pending.get(operationId);
     if (!operation || operation.stopping) return;
     operation.stopping = true;
-    void deps.call('connectors.cancel', { operationId }).then(
-      (cancelled) => {
-        if (!pending.has(operationId)) return;
-        if (cancelled.ok && !cancelled.value.cancelled) return fetchDataset(operationId, 'ended');
-        if (cancelled.ok) void deps.call('connectors.take', { operationId }).catch(() => {});
-        pending.get(operationId)!.settle(answer);
-      },
-      () => pending.get(operationId)?.settle(answer),
-    );
+    delete operation.unconfirmed;
+    clearTimeout(operation.retry);
+    // P3-F F-connectors 5: unanswered, the cancel may or may not have won: the operation stays, to be asked again
+    const unanswered = () => {
+      if (pending.get(operationId) !== operation) return;
+      operation.stopping = false;
+      operation.unconfirmed = answer;
+      operation.retry = setTimeout(() => stopDataset(operationId, answer), DATASET_CANCEL_RETRY_MS);
+    };
+    void deps.call('connectors.cancel', { operationId }).then((cancelled) => {
+      if (pending.get(operationId) !== operation) return;
+      if (!cancelled.ok) return unanswered();
+      if (!cancelled.value.cancelled) return fetchDataset(operationId, 'ended');
+      void deps.call('connectors.take', { operationId }).catch(() => {});
+      operation.settle(answer);
+    }, unanswered);
   }
 
   // Answers the operation now and withdraws it from the host (which may still run it, or never have heard of it).
@@ -185,16 +200,18 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
     return new Promise<ConnectorRouteAnswer>((resolve) => {
       const deadline = setTimeout(() => (context.dataset ? stopDataset(operationId, DEADLINE) : fetch(operationId, DEADLINE)), CONNECTOR_OPERATION_DEADLINE_MS);
       const cancel = () => (context.dataset ? stopDataset(operationId, unavailable('cancelled')) : withdraw(operationId, unavailable('cancelled')));
-      pending.set(operationId, {
+      const operation: Pending = {
         settle: (answer) => {
           if (!pending.delete(operationId)) return;
           clearTimeout(deadline);
+          clearTimeout(operation.retry); // P3-F F-connectors 5
           signal.removeEventListener('abort', cancel);
           resolve(answer);
         },
         // E3: a dataset operation is rechecked before every take (a sink without a recheck is never publishable)
         ...(context.dataset && { publishable: context.publishable ?? (() => false) }),
-      });
+      };
+      pending.set(operationId, operation);
       if (signal.aborted) return withdraw(operationId, unavailable('cancelled')); // nothing started yet
       signal.addEventListener('abort', cancel, { once: true });
       const start = { operationId, artifactId, appSessionId: session.appSessionId, launchId: session.launchId, cwd: session.cwd, ...tool, arguments: args, fingerprint: context.fingerprint, mode: context.mode, ...(context.dataset && { dataset: context.dataset }) /* E3 */ };
