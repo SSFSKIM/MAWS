@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 77,
-    "defer:pending": 46,
+    "defer:committed": 78,
+    "defer:pending": 45,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1101,7 +1101,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L130; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
       "remainingClause": "The reader's drop is written back once, or the warning is deduplicated per launch. Owner: P3-F or P3-L's cutover. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L130; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "11b6c2266628bc05f96413043651e683cb71938c"
     },
     {
       "line": 133,
@@ -1111,8 +1111,8 @@
       "triageReason": "Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L133; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
       "remainingClause": "The re-pin that fixes it upstream; the shim deleted and `skipLibCheck: false` still holding. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L133; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 134,
