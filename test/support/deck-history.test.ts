@@ -39,7 +39,7 @@ describe('the heavy deck export’s check', () => {
     const check = checkDeckHistory(exported, { generated: true });
     expect(check).toMatchObject({ ok: true, meta: { kind: 'auto', soak: DECK_HISTORY_SOAK, filesView: { prev: 'a1' } }, files: { 'prev.bin': { bytes: 14, sha256: expect.stringMatching(/^[0-9a-f]{64}$/) } } });
     // a named export (M8's, before the soak descriptor) is read without one
-    const { soak: _soak, workload: _workload, filesView: _filesView, ...older } = META;
+    const older = Object.fromEntries(Object.entries(META).filter(([key]) => !['soak', 'workload', 'filesView'].includes(key)));
     exportWith(older);
     expect(checkDeckHistory(exported, { generated: false })).toMatchObject({ ok: true });
     expect(checkDeckHistory(exported, { generated: true })).toMatchObject({ ok: false, reason: expect.stringMatching(/soak/) });
