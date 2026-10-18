@@ -18,7 +18,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function reloadedFrame(initial: { width: number; height: number }) {
+function reloadedFrame(initial: { width: number; height: number }, { late = false }: { late?: boolean } = {}) {
   const { resize } = installResizeObserver();
   let handle: FrameHandle | null = null;
   const view = render(<HtmlFrame url="maws-artifact://record/v1/index.html" title="Dashboard" onFrame={(frame) => void (handle = frame)} />);
@@ -27,8 +27,9 @@ function reloadedFrame(initial: { width: number; height: number }) {
   // Vitest's global window is a proxy, not happy-dom's raw parent window. Match the boundary's source identity.
   Object.defineProperty(page, 'parent', { configurable: true, get: () => window });
   const doc = frame.contentDocument!;
-  doc.body.innerHTML = '<h1 id="hero">Sales overview</h1>';
-  const hero = doc.querySelector('h1')!;
+  // `late`: the page's own script adds the anchor after the load (`add`), as an app-style page renders its content
+  doc.body.innerHTML = late ? '<p>Loading…</p>' : '<h1 id="hero">Sales overview</h1>';
+  const hero = late ? Object.assign(doc.createElement('h1'), { id: 'hero', textContent: 'Sales overview' }) : doc.querySelector('h1')!;
   const measure = vi.spyOn(hero, 'getBoundingClientRect').mockReturnValue(new DOMRect(1061, 153, initial.width, initial.height));
   Object.defineProperty(page, 'ResizeObserver', { configurable: true, value: globalThis.ResizeObserver });
   // The iframe's postMessage boundary, preserving the source windows HtmlFrame and the bridge authenticate.
@@ -42,6 +43,7 @@ function reloadedFrame(initial: { width: number; height: number }) {
   fireEvent.load(frame);
   return {
     locate: () => handle!.locate('#hero'),
+    add: () => doc.body.append(hero),
     replies,
     layout: (width: number, height: number) => {
       measure.mockReturnValue(new DOMRect(1061, 153, width, height));
@@ -75,6 +77,30 @@ describe('the HTML frame bridge’s re-pin after a Reload', () => {
     frame.layout(379, 102);
     expect(frame.replies).toHaveBeenCalledTimes(1);
     expect(frame.replies.mock.calls[0]![0]).toMatchObject({ type: 'maws:located', selector: '#hero', rect: null });
+  });
+
+  // P3-F L198: the re-docked card's first pin after "Show in artifact" raced a page that adds its anchor late
+  it('pins the anchor the page adds after the locate, once it exists and has size', async () => {
+    const frame = reloadedFrame({ width: 0, height: 0 }, { late: true });
+    const located = frame.locate();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(frame.replies).not.toHaveBeenCalled(); // no null at once: the anchor may still come
+    frame.add(); // in the page before layout gives it size
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(frame.replies).not.toHaveBeenCalled();
+    frame.layout(379, 102);
+    expect(await located).toEqual({ x: 1061, y: 153, width: 379, height: 102 });
+    expect(frame.replies).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up with null when the anchor never comes, and stops watching the page', async () => {
+    const frame = reloadedFrame({ width: 379, height: 102 }, { late: true });
+    expect(await frame.locate()).toBeNull();
+    expect(frame.replies).toHaveBeenCalledTimes(1);
+    expect(frame.replies.mock.calls[0]![0]).toMatchObject({ type: 'maws:located', selector: '#hero', rect: null });
+    frame.add();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(frame.replies).toHaveBeenCalledTimes(1);
   });
 
   it('answers immediately when the first rect already has size', async () => {

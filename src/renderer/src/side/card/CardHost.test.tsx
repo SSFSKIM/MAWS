@@ -93,6 +93,29 @@ describe('re-pin', () => {
     expect(card()!.style).toMatchObject({ left: `${600 - 300 - 8}px`, top: '8px' });
   });
 
+  // P3-F L198: a re-docked card's first locate can race a page that adds its anchor late; it has no rect to stand at
+  it('a re-docked card whose locate answers null asks once more and pins where the second ask finds the element', async () => {
+    const locate = vi.fn(async (): Promise<CardRect | null> => HERO).mockResolvedValueOnce(null);
+    render(<Host frame={frameOf('k1', locate)} />);
+    redock();
+    await settle();
+    expect(locate).toHaveBeenCalledTimes(2);
+    expect(card()!.style).toMatchObject({ left: '24px', top: '94px' });
+  });
+
+  it('asks once more only: two nulls leave a re-docked card at the corner; a picked card, which has its rect, is not asked again', async () => {
+    const locate = vi.fn(async (): Promise<CardRect | null> => null);
+    render(<Host frame={frameOf('k1', locate)} />);
+    redock();
+    await settle();
+    expect(locate).toHaveBeenCalledTimes(2);
+    expect(card()!.style).toMatchObject({ left: `${600 - 300 - 8}px`, top: '8px' });
+    pick(HERO);
+    await settle();
+    expect(locate).toHaveBeenCalledTimes(3);
+    expect(card()!.style).toMatchObject({ left: '24px', top: '94px' });
+  });
+
   it('a new frame (a version switch, a Reload) locates again and re-pins the card, which stays open', async () => {
     const locate = vi.fn(async () => HERO);
     const view = render(<Host frame={frameOf('v1#0', locate)} />);

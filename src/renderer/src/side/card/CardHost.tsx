@@ -20,7 +20,7 @@
 // with the view's box: it measures that column, draws the card in flow (`stripCard`), so the strip grows with the card
 // and the view's box shrinks by as much, and draws the pin as a caret on the strip's top edge under the element. The strip
 // never takes more than half the column (`stripMax`), clipping a card whose floor is taller than that.
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
@@ -141,19 +141,26 @@ function Caret({ x }: { x: number }) {
 
 // The card's element as the frame last located it, else the card's own rect (the pick's; none for a re-dock). Asked
 // when the card shows, when the frame is replaced or its locate arrives (a viewer whose frame mounts after the card was
-// claimed), and when the host's box resizes; a null answer keeps what was. `locate` is one function per frame.
+// claimed), and when the host's box resizes; a null answer keeps what was. `locate` is one function per frame. A card
+// with no rect to stand at (a re-dock nothing has located yet) asks once more after a null (P3-F L198): its first ask
+// can race the page it re-docks into.
 function useLocated(card: OpenCard | null, frame: CardFrame, box: { width: number; height: number }, layout: 'anchored' | 'docked'): CardRect | null {
   const [located, setLocated] = useState<{ serial: number; rect: CardRect } | null>(null);
   const serial = card?.serial ?? null;
   const selector = card?.anchor.locator ?? null;
   const { key, locate } = frame;
   const { width, height } = box;
+  const unplaced = useEffectEvent((at: number) => card?.serial === at && card.rect === null && located?.serial !== at);
   useEffect(() => {
     if (serial === null || selector === null || layout === 'docked' || locate === undefined) return;
     let latest = true;
-    void locate(selector).then((rect) => {
-      if (latest && rect !== null) setLocated({ serial, rect });
-    });
+    const ask = (again: boolean) =>
+      void locate(selector).then((rect) => {
+        if (!latest) return;
+        if (rect !== null) setLocated({ serial, rect });
+        else if (again && unplaced(serial)) ask(false);
+      });
+    ask(true);
     return () => {
       latest = false;
     };
