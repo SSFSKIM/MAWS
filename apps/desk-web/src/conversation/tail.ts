@@ -14,8 +14,9 @@
 // the peer message the engine made of a send through sminos's inbox (its frame the first line of the envelope's body),
 // or a peer's or plugin's queued command; never a prompt typed at the terminal, another plugin's row, nor one that marks
 // none. A steer's row has the bridge's appended shape too, but no frame: its result names the row it appended, and the
-// steer is matched by that uuid. Nothing is matched by text: a typed prompt is never a web send's row, however equal its
-// words, and a send whose row never comes (the session ended first) stays, its state saying so.
+// steer is matched by that uuid. The bridge's wake (`isBridgeWake`) points at a row already there and matches nothing.
+// Nothing is matched by text: a typed prompt is never a web send's row, however equal its words, and a send whose row
+// never comes (the session ended first) stays, its state saying so.
 //
 // The log holds every send since the session joined while the view holds the transcript's newest rows until it pages
 // further. A send whose row may yet exist (queued, delivered, possibly delivered) is placed only once the transcript is

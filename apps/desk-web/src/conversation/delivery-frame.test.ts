@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../../../src/renderer/src/stores/transcript';
 import type { Row } from '../../../../src/renderer/src/transcript/model/rows';
 import { freshSource, subagentLookupOf } from '../depth/source/desk-transcript';
-import { deliveredLines, deliveryAsDrawn, deliveryFrame } from './delivery-frame';
+import { deliveredLines, deliveryAsDrawn, deliveryFrame, supersededDeliveries } from './delivery-frame';
 
 const SESSION = 'sess-1';
 const BRIDGE = { kind: 'plugin', name: 'doperpowers', asUser: true };
@@ -247,6 +247,43 @@ describe('a delivered send’s frame line', () => {
       expect(users(drawnRows).map((u) => u.text), marker).toEqual(['List the files.', `${OWN}\n${marker}`, 'Next.']);
       expect(drawnRows.flatMap((r) => (r.kind === 'divider' ? [r.state] : [])), marker).not.toContain('stopped');
     }
+  });
+
+  it('is drawn once when the bridge appended it again after an Esc: the later copy, the one the engine read, in the turn that read it', async () => {
+    // An Esc before the model answered handed the owner's prompt back; the prompt sent next went in under the same parent,
+    // leaving the first copy on a branch no request reads, and the bridge appended the delivery again (doperpowers #233).
+    const at = (second: number) => `2026-10-17T10:00:${String(second).padStart(2, '0')}.000Z`;
+    for (const [frame, words, text] of [
+      [OWN, 'Run the suites.', 'Run the suites.'],
+      [PEER, 'I read it.', '*From fakepeer*\n\nI read it.'],
+      [MESSAGE, 'Re-run the suites.', 'Re-run the suites.'],
+    ]) {
+      const first = row('List the files.', { kind: 'human' }, { promptId: 'p1', timestamp: at(0) });
+      const answer = { uuid: uuid(), parentUuid: first.uuid, timestamp: at(1), sessionId: SESSION, isSidechain: false, type: 'assistant', message: { id: `msg_${n}a`, role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'text', text: 'Two files.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } };
+      const prompt = row('Now the tests.', { kind: 'human' }, { promptId: 'p2', parentUuid: answer.uuid, timestamp: at(2) });
+      const dead: JsonObject = { ...appended(`${frame}\n${words}`), parentUuid: prompt.uuid, timestamp: at(3) };
+      const marker = row([{ type: 'text', text: '[Request interrupted by user]' }], null, { parentUuid: dead.uuid, timestamp: at(4) });
+      const again = row('Now the tests.', { kind: 'human' }, { promptId: 'p3', parentUuid: answer.uuid, timestamp: at(5) });
+      const read: JsonObject = { ...appended(`${frame}\n${words}`), parentUuid: again.uuid, timestamp: at(6) };
+      const reply = { uuid: uuid(), parentUuid: read.uuid, timestamp: at(7), sessionId: SESSION, isSidechain: false, type: 'assistant', message: { id: `msg_${n}b`, role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'text', text: 'Running them.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } };
+      const rows = [first, answer, prompt, dead, marker, again, read, reply];
+      expect(supersededDeliveries(rows), frame).toEqual(new Set([dead.uuid]));
+      const bubbles = users(await drawn(rows));
+      // The owner's own prompt sent again is on disk twice too, and drawn twice (tech debt: the dead branch in general).
+      expect(bubbles.map((u) => u.text), frame).toEqual(['List the files.', 'Now the tests.', 'Now the tests.', text]);
+      expect(bubbles[3], frame).toMatchObject({ messageUuid: read.uuid, steer: true });
+      expect(bubbles[3].turnId, frame).toBe(bubbles[2].turnId);
+    }
+  });
+
+  it('draws every delivery whose frame line no later row repeats: two sends of the same words are two rows', () => {
+    const one = appended(`${OWN}\ncontinue`);
+    const two = appended('[sminos chat MAWS hub/5e55e5e5:13 from human → @you]\ncontinue');
+    const typed = row(`${OWN}\ncontinue`, { kind: 'human' }); // a frame typed at the terminal marks no delivery
+    expect(supersededDeliveries([one, two, typed])).toEqual(new Set());
+    // The same frame through another door (the inbox, after the bridge's prompt was refused) is the same delivery.
+    const inbox = inboxRow(`${OWN}\ncontinue`);
+    expect(supersededDeliveries([one, two, inbox])).toEqual(new Set([one.uuid]));
   });
 
   it("keeps the frame on any words MAWS's backfill reads as a marker, idle through the inbox or as the user, so the owner's message stays drawn", async () => {
