@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 53,
-    "defer:pending": 70,
+    "defer:committed": 54,
+    "defer:pending": 69,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -837,7 +837,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L82; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "The Files route opens the kinds the deliverables viewer renders (PDF, image, video, audio) in that viewer, or a ruling records why a file outside a delivery opens externally. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L100): opening undelivered files in the deliverable frames needs a serving route beside `maws-deliverable:` (an admission boundary); feature-sized. Owner: P3 (the co-work layer). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L82; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "d77b9812257cc82d149f1a36aadca454be4be0f4"
     },
     {
       "line": 84,
@@ -847,8 +847,8 @@
       "triageReason": "Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L84; parent Decision Log 106): Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here. Owner: the gate lane.",
       "remainingClause": "The hover-timed steps drive hover through a channel a real pointer cannot disturb (e.g. a synthetic pointer state the window ignores from the OS while under test), or the gate scripts refuse to start with the desktop in use; until then the gate scripts' note to run with the desktop idle is the mitigation. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L105): needs a pointer channel immune to the desktop; the mitigation stands (gates with the desktop idle). Owner: P3 (gate debt). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L84; parent Decision Log 106): Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here. Owner: the gate lane.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 91,
