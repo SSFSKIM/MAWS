@@ -380,9 +380,12 @@
   },
   "W-PKG": {
     "executor": "af1eb156dd5f3f542",
-    "status": "source edits released after pair4 fixed pin; implementation running",
+    "status": "source f58b9736b committed, row narrowed; independent high review running; packaged proof pending",
     "claims": "pair5-claims.json",
-    "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a"
+    "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+    "rowCommit": "f58b9736b7512a097c86a7dbf48cbcd8913d1c9d",
+    "reviewer": "a28c0a091cef6f3c5",
+    "checkpoint": "waves/W-PKG-checkpoint.json"
   },
   "pair4GatePrepared": {
     "launcher": "/tmp/maws-review/p3f-doc-b-shell-launch.sh",

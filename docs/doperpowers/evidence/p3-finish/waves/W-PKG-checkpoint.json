@@ -1,0 +1,26 @@
+{
+  "executor": "af1eb156dd5f3f542",
+  "sourceCommit": "f58b9736b7512a097c86a7dbf48cbcd8913d1c9d",
+  "base": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+  "row": 255,
+  "rowStatus": "narrowed, not closed; actual packaged transition/host/resolution/smoke proof pending",
+  "paths": [
+    "e2e/connectors-direct.spec.ts",
+    "e2e/support/packaged-resolution.ts",
+    "test/support/packaged-resolution.test.ts"
+  ],
+  "diff": "315 insertions,4 deletions including tracker",
+  "localChecks": {
+    "red": "module absent, no tests executed; /tmp/wpkg/red-kept.log",
+    "green": "5/5 named node-project tests,381ms, retained /tmp/wpkg/green.log inspected by controller",
+    "entryRed": "2026-10-18T17:35:30Z",
+    "entryGreen": "2026-10-18T17:36:32Z",
+    "exit": "runner script execs pnpm directly, preserving actual exit; retained stdout does not print numeric exit",
+    "notRun": "packaged scene, lint, typecheck; remote gate required"
+  },
+  "reviewer": "a28c0a091cef6f3c5",
+  "review": "independent high running on immutable three-path range; no verdict yet",
+  "gate": "combined pair5 must include packaged and connectors-direct plus shared static/unit/probes/Darwin and W-E named/measured groups",
+  "claim": "actual packaged supervisor route D plus packaged-binary RunAsNode dependency resolution inside Resources; no model turn,OAuth or native custody claim",
+  "paidSpendUsd": 0
+}
