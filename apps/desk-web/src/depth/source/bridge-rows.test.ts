@@ -86,6 +86,11 @@ describe("the plugin's appended rows", () => {
     expect(bridgeRowKind({ ...appended('use the split store'), origin: { kind: 'plugin', name: 'another' } })).toBeNull();
     expect(bridgeRowKind({ ...appended('use the split store'), isMeta: false })).toBeNull();
     expect(bridgeRowKind({ ...appended('use the split store'), origin: { kind: 'human' } })).toBeNull();
+    // The engine's companion beside a turn: a plugin skill's body, loaded for a command the plugin ran, with the plugin's
+    // origin (local transcripts, 2.1.272–2.1.277). Never a steer, never drawn.
+    const skill = { ...appended('Base directory for this skill: /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.120.0/skills/kairos\n\nYou are in kairos mode.'), turnCompanion: true, queuePriority: 'later' };
+    expect(bridgeRowKind(skill)).toBeNull();
+    expect(steerAsDrawn(skill)).toBe(skill);
   });
 
   it('draws a steer as the owner’s prompt queued into the running turn, under its row’s uuid; the others as they are', () => {

@@ -40,10 +40,14 @@ const object = (value: unknown): JsonObject | null => (typeof value === 'object'
 
 const BRIDGE_PLUGIN = 'doperpowers';
 
-/** A row the bridge appended (`$.session.append`), as the engine keeps it: a meta user row with the plugin's origin. */
+/**
+ * A row the bridge appended (`$.session.append`), as the engine keeps it: a meta user row with the plugin's origin. A
+ * companion the engine writes beside a turn (`turnCompanion`: a plugin skill's body, loaded for a command the plugin
+ * ran, carries the plugin's origin too; local transcripts, 2.1.272–2.1.277) is the engine's, not an append.
+ */
 export function isBridgeRow(row: JsonObject): boolean {
   const origin = object(row.origin);
-  return row.type === 'user' && row.isMeta === true && origin?.kind === 'plugin' && origin.name === BRIDGE_PLUGIN;
+  return row.type === 'user' && row.isMeta === true && row.turnCompanion !== true && origin?.kind === 'plugin' && origin.name === BRIDGE_PLUGIN;
 }
 
 /**
