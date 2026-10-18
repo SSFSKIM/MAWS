@@ -3,13 +3,16 @@
 // `traceForeground` adds passive page listeners (focus and window focus, visibility, selection, the clipboard events,
 // keys) and, given an editor, logs its paste path: each `transformPasted` and `handlePaste` prop with its plugin, each
 // transaction a paste or another UI event dispatches with whether it changed the document, and every document change a
-// plugin's `filterTransaction` refused. Nothing is printed unless a traced step fails; then the timeline, the window's
-// native state (read without any clipboard call, which broke the triage's first probe), the page's frame rate over one
-// second and the step's own snapshot go to the run's output and to the test's attachments, and the failure is rethrown.
+// plugin's `filterTransaction` refused. Each traced step prints one entry line, passing or not: the time and the window's
+// native focus as the step begins, with the page's focus, visibility and focused element, so a run shows the foreground
+// state each scene actually ran in. Native state is always read without any clipboard call (which broke the triage's
+// first probe). Only when the step fails is the rest reported, to the run's output and the test's attachments: the same
+// reading taken at the failure, the step's own snapshot, then the page's frames over the second after it (stamped with
+// that second's start and end) and the timeline; the failure is then rethrown unchanged.
 import { test, type ElectronApplication, type Page } from '@playwright/test';
 
 export interface ForegroundTrace {
-  /** Runs `run`; when it throws, reports the timeline under `label` (with `snapshot()`'s value) and rethrows. */
+  /** Runs `run` after printing its entry reading; when it throws, reports the failure under `label` (with `snapshot()`'s value) and rethrows. */
   step<T>(label: string, run: () => Promise<T>, snapshot?: () => Promise<unknown>): Promise<T>;
 }
 
@@ -107,19 +110,44 @@ export async function traceForeground(app: ElectronApplication, page: Page, opti
 
   return {
     async step<T>(label: string, run: () => Promise<T>, snapshot?: () => Promise<unknown>): Promise<T> {
+      const entry = await reading(app, page);
+      console.log(`[trace ${label}] entry ${JSON.stringify({ foreground: process.env.MAWS_E2E_FOREGROUND === '1', ...entry })}`);
       try {
         return await run();
       } catch (error) {
-        await report(app, page, label, snapshot).catch((reason: unknown) => console.log(`[trace ${label}] no report: ${String(reason)}`));
+        await report(app, page, label, entry, snapshot).catch((reason: unknown) => console.log(`[trace ${label}] no report: ${String(reason)}`));
         throw error;
       }
     },
   };
 }
 
-async function report(app: ElectronApplication, page: Page, label: string, snapshot?: () => Promise<unknown>): Promise<void> {
+// One reading, taken at once with no sampling: the wall-clock time, each window's native focus and visibility, and the
+// page's focus, visibility and focused element. A reading that cannot be taken says why rather than throwing.
+async function reading(app: ElectronApplication, page: Page): Promise<{ at: string; native: unknown; page: unknown }> {
+  const at = new Date().toISOString();
+  const native = await app
+    .evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()
+        .filter((win) => !win.isDestroyed())
+        .map((win) => ({ focused: win.isFocused(), contentsFocused: win.webContents.isFocused(), visible: win.isVisible(), minimized: win.isMinimized(), opacity: win.getOpacity() })),
+    )
+    .catch((reason: unknown) => ({ error: String(reason) }));
+  const pageState = await page
+    .evaluate(() => {
+      const el = document.activeElement;
+      const label = el?.getAttribute('aria-label') ?? el?.getAttribute('role') ?? '';
+      return { hasFocus: document.hasFocus(), visibility: document.visibilityState, active: el ? `${el.tagName.toLowerCase()}${label ? ` ${label.slice(0, 40)}` : ''}` : null };
+    })
+    .catch((reason: unknown) => ({ error: String(reason) }));
+  return { at, native, page: pageState };
+}
+
+async function report(app: ElectronApplication, page: Page, label: string, entry: Awaited<ReturnType<typeof reading>>, snapshot?: () => Promise<unknown>): Promise<void> {
+  const atFailure = await reading(app, page);
   const own = snapshot ? await snapshot().catch((reason: unknown) => ({ error: String(reason) })) : null;
-  const pageState = await page.evaluate(async () => {
+  const afterFailure = await page.evaluate(async () => {
+    const from = new Date().toISOString();
     let frames = 0;
     let counting = true;
     const tick = () => {
@@ -131,24 +159,16 @@ async function report(app: ElectronApplication, page: Page, label: string, snaps
     counting = false;
     const el = document.activeElement;
     return {
-      framesInOneSecond: frames,
-      hasFocus: document.hasFocus(),
-      visibility: document.visibilityState,
-      active: el ? `${el.tagName.toLowerCase()} ${(el.outerHTML ?? '').slice(0, 160)}` : null,
+      frameSample: { from, to: new Date().toISOString(), frames },
+      activeAfterSample: el ? `${el.tagName.toLowerCase()} ${(el.outerHTML ?? '').slice(0, 160)}` : null,
       log: (window as unknown as { __mawsTrace?: { log: unknown[] } }).__mawsTrace?.log ?? [],
     };
   });
-  const native = await app
-    .evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()
-        .filter((win) => !win.isDestroyed())
-        .map((win) => ({ focused: win.isFocused(), contentsFocused: win.webContents.isFocused(), visible: win.isVisible(), minimized: win.isMinimized(), opacity: win.getOpacity(), bounds: win.getBounds() })),
-    )
-    .catch((reason: unknown) => ({ error: String(reason) }));
-  const { log, ...state } = pageState;
-  const body = { label, foreground: process.env.MAWS_E2E_FOREGROUND === '1', state, native, snapshot: own, log };
-  console.log(`[trace ${label}] state ${JSON.stringify({ foreground: body.foreground, ...state, native })}`);
+  const { log, ...sampled } = afterFailure;
+  const body = { label, foreground: process.env.MAWS_E2E_FOREGROUND === '1', entry, atFailure, snapshot: own, afterFailure: sampled, log };
+  console.log(`[trace ${label}] at failure ${JSON.stringify(atFailure)}`);
   if (own !== null) console.log(`[trace ${label}] snapshot ${JSON.stringify(own)}`);
-  for (const entry of log) console.log(`[trace ${label}] ${JSON.stringify(entry)}`);
+  console.log(`[trace ${label}] after failure ${JSON.stringify(sampled)}`);
+  for (const line of log) console.log(`[trace ${label}] ${JSON.stringify(line)}`);
   await test.info().attach(`foreground-trace-${label}.json`, { body: JSON.stringify(body, null, 2), contentType: 'application/json' });
 }
