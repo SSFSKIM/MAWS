@@ -468,15 +468,21 @@ export function elementHistory(diff: Pick<DeckDiff, 'prevDoc' | 'nextDoc' | 'ren
  * restore, or a later writer); earlier text the new node lacks is a deletion by whoever deleted the new node's
  * characters at that place (the renderer draws none of them: inserted and deleted within the window), and, beyond
  * those, by the node's writer (the text went with the earlier node). Touching changes are one run.
+ *
+ * P3-F (L211): each deletion is credited by its own leaf, as a restored node's text is since fix wave 2: only a deleted
+ * character the new node re-created (inserted with it, by its writer) stands for earlier text there. A character someone
+ * typed into the new node and took back within the window (no change between the two states) credits nothing.
  */
 function rediffNotes(earlier: string, notes: YType | null, attributions: ContentMap, node: Touch): { runs: NotesRun[]; pieces: NotesPiece[] } {
   const alive: { ch: string; by: string | null; at: number | null }[] = [];
-  const gaps = new Map<number, Touch[]>(); // alive characters before → the deleted characters there, one touch each
+  const gaps = new Map<number, Touch[]>(); // alive characters before → the re-created characters deleted there, one touch each
   for (let item = notes?._start ?? null; item !== null; item = item.right) {
     if (item.content instanceof ContentType) continue;
     for (let i = 0; i < item.length; i++) {
       const id = { client: item.id.client, clock: item.id.clock + i };
       if (item.deleted) {
+        const made = insertedBy(attributions, id);
+        if (made && (made.actor !== node.by || made.at !== node.at)) continue; // L211: not re-created with the node
         const who = deletedBy(attributions, id);
         const list = gaps.get(alive.length) ?? [];
         list.push({ by: who?.actor ?? node.by, at: who?.at ?? node.at });

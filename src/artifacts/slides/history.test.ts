@@ -377,6 +377,35 @@ describe('fix wave 2 (R1’s leftovers): text edits after a restore (the re-revi
   });
 });
 
+describe('P3-F (L211): a restored slide’s notes deletions, each credited by its own leaf', () => {
+  // The version's notes, the slide deleted after it, then brought back by a restore; someone types at a place in the
+  // restored notes and takes it back (inserted and deleted within the window: no change between the two states).
+  function restoredWithTransient(w: ReturnType<typeof world>, restoredNotes: string) {
+    w.land('human', (doc) => setNotes(doc, 'a', 'Keep these notes.')); // + 2 min: the version's notes
+    const v = w.mark();
+    w.land('human', (doc) => Y.deleteSlide(doc, 'a')); // + 3 min
+    w.land('human:restore', (doc) => transact(doc, () => importSlide(doc, { ...slideIR('a'), notes: restoredNotes }, 'a0'))); // + 4 min
+    w.land('session:y', (doc) => setNotes(doc, 'a', `Keep ZZ${restoredNotes.slice('Keep '.length)}`)); // + 5 min
+    w.land('session:y', (doc) => setNotes(doc, 'a', restoredNotes)); // + 6 min
+    return v;
+  }
+
+  it('credits a deletion of the restored text to its deleter, never to a transient deletion at the same place', () => {
+    const w = world(['a']);
+    const v = restoredWithTransient(w, 'Keep these notes.');
+    w.land('session:x', (doc) => setNotes(doc, 'a', 'Keep notes.')); // + 7 min
+    const parts = changesOf(w, v).slides[0]!.notes.flatMap((r) => r.parts);
+    expect(parts.map((p) => [p.kind, p.text, p.by, p.at])).toEqual([['del', 'these ', 'session:x', T0 + 7 * MIN]]);
+  });
+
+  it('credits earlier text the restored node never held to the node’s writer, not to a transient deletion there', () => {
+    const w = world(['a']);
+    const v = restoredWithTransient(w, 'Keep notes.');
+    const parts = changesOf(w, v).slides[0]!.notes.flatMap((r) => r.parts);
+    expect(parts.map((p) => [p.kind, p.text, p.by, p.at])).toEqual([['del', 'these ', 'human:restore', T0 + 4 * MIN]]);
+  });
+});
+
 describe('fix wave 3: a restore and an edit in the same minute', () => {
   it('credits a text edit made in the restore’s own minute to its writer, not the restorer', () => {
     const w = world(['a']);
