@@ -1,69 +1,60 @@
-// The depth column (DX8's `depth` slot): the selected direct channel's session in depth. Its tabs are DC6's state:
-// **Transcript** (M1), the session's main transcript drawn by MAWS's transcript view over the session plane, streaming
-// per content block, older rows paged in at the top; and **Subagents** (M2), the session's subagent tree from the main
-// subscription, where opening an agent subscribes to that agent's own transcript; **Diff** (M3), the working tree against
-// its base branch, asked for on the main subscription when the tab opens and on Refresh; and **Info** (M3), where the
-// session runs, its model, and its context use and cost. The main subscription lives with the column whichever tab
-// shows — the tree, the diff, and the usage are its — and its view stays mounted beneath the other tabs, so the
-// reader's place in it is kept. Loaded as a chunk of its own the first time a session is selected.
-import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
+// The depth column (DX8's `depth` slot): the selected direct channel's session in depth. Its tabs are the desk's state:
+// **Subagents**, the session's subagent tree, where opening an agent subscribes to that agent's own transcript;
+// **Jobs**, the session's background shells and monitors, a shell's output opened under its row, and its MCP servers
+// (DC9, `JobsPane.tsx`); **Diff**, the working tree against its base branch, asked for when the tab opens and on
+// Refresh; and **Info**, where the session runs, its model, and its context use and cost. They read the session's main
+// transcript through its per-session owner (`owner/session-owner.ts`), which the center's session view holds too, so
+// the tree, the jobs, the diff and the usage come over the one subscription that draws the transcript there (DC9: the
+// Transcript tab moved to the center, and the status word with it). An `Agent` row in the center opens its agent here, through the owner's
+// open-agent request. Loaded as a chunk of its own the first time a session is selected.
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useStore } from 'zustand';
 import { agentTree } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import type { SubagentRef } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
-import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
 import { sessionName } from '../../log/projection';
 import type { DepthSlotProps } from '../../shell/slots';
 import { SessionLabel } from '../../shell/SessionLabel';
 import type { DeskSession } from '../../shell/sessions';
-import { DeskTranscript } from '../source/desk-transcript';
+import { jobsTabLabel } from '../jobs/jobs-copy';
+import { useSessionOwner, type SessionOwner } from '../owner/session-owner';
 import { DESK_ACTIONS } from './actions';
 import { createDiffView, DiffPane } from './DiffPane';
+import { JobsPane } from './JobsPane';
 import { SessionInfo } from './SessionInfo';
 import { SubagentDetail } from './SubagentDetail';
 import { INITIAL_TREE_VIEW, SubagentTree, type TreeView } from './SubagentTree';
-import { TranscriptPane, transcriptStatus, useDeskTranscript } from './TranscriptPane';
+import { useKeptTranscript } from './TranscriptPane';
 
 export default function DepthColumn({ project, session, plane }: DepthSlotProps) {
   if (!session) {
     return (
       <div className="flex h-full flex-col gap-2 p-4 text-ui-sm text-fg-muted" data-slot="depth">
         <div className="text-ui font-medium text-fg">Session depth</div>
-        <p className="m-0 leading-5">Open a session to see its transcript here.</p>
+        <p className="m-0 leading-5">Open a session to see its subagents, diff and details here.</p>
       </div>
     );
   }
   return <SessionDepth key={`${session.machine}\u0000${session.session}`} project={project} session={session} plane={plane} />;
 }
 
-type Tab = 'transcript' | 'subagents' | 'diff' | 'info';
+type Tab = 'subagents' | 'jobs' | 'diff' | 'info';
 
 function SessionDepth({ project, session, plane }: { project: string; session: DeskSession; plane: DepthSlotProps['plane'] }) {
-  const [main] = useState(() => new DeskTranscript({ plane, project, target: { machine: session.machine, session: session.session, agentId: null }, store: useTranscriptStore }));
-  const state = useDeskTranscript(main, session);
-  const list = useRef<TranscriptListHandle>(null);
-  const [tab, setTab] = useState<Tab>('transcript');
+  const owner = useSessionOwner(project, session, plane);
+  const main = owner.main;
+  const state = useKeptTranscript(owner.keeper);
+  const [tab, setTab] = useState<Tab>('subagents');
   const [agent, setAgent] = useState<string | null>(null);
   const [treeView, setTreeView] = useState<TreeView>(INITIAL_TREE_VIEW);
   const [diffView] = useState(createDiffView);
+  useAgentRequests(owner, (agentId) => {
+    setTab('subagents');
+    setAgent(agentId);
+  });
 
-  // An `Agent` call's row in the main transcript opens that agent here, as MAWS's opens its Subagents tool on it. Before
-  // the tree names the agent the row's ref holds the call's id, which the tree resolves once it does; until then the
-  // tree is shown. Read at the click, so the actions stay one object for the view.
-  const actions = useMemo<Partial<TranscriptActions>>(
-    () => ({
-      ...DESK_ACTIONS,
-      openSubagent: (ref: SubagentRef) => {
-        if (ref.kind === 'workflow') return;
-        const id = String(ref.agentId ?? ref.taskId);
-        const pending = ref.toolUseId !== null && id === String(ref.toolUseId);
-        const resolved = pending ? main.state.getState().tasks.byToolUse.get(ref.toolUseId!) : id;
-        setTab('subagents');
-        setAgent(resolved === undefined ? null : String(resolved));
-      },
-    }),
-    [main],
-  );
+  // An `Agent` call's row in a subagent's transcript opens that agent here, as one in the center does.
+  const actions = useMemo<Partial<TranscriptActions>>(() => ({ ...DESK_ACTIONS, openSubagent: (ref: SubagentRef) => owner.openSubagent(ref) }), [owner]);
 
   const { tasks } = state;
   const running = agentTree(tasks).running;
@@ -71,16 +62,13 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
     <section className="flex h-full min-h-0 flex-col" data-slot="depth" data-testid="depth" data-session={session.session} aria-label={`${sessionName(session)} in depth`}>
       <header className="flex items-baseline gap-2 border-b border-border px-4 py-2">
         <SessionLabel session={session} name="text-ui font-medium text-fg" muted="text-ui-sm text-fg-muted" />
-        <span className="ml-auto shrink-0 text-ui-sm text-fg-muted" data-testid="depth-status">
-          {transcriptStatus(state)}
-        </span>
       </header>
       <div role="tablist" aria-label="Session depth" className="flex shrink-0 gap-1 border-b border-border px-2">
-        <TabButton tab="transcript" current={tab} onSelect={setTab}>
-          Transcript
-        </TabButton>
         <TabButton tab="subagents" current={tab} onSelect={setTab}>
           Subagents{tasks.order.length > 0 ? ` · ${running > 0 ? `${running} running` : tasks.order.length}` : ''}
+        </TabButton>
+        <TabButton tab="jobs" current={tab} onSelect={setTab}>
+          {jobsTabLabel(state.jobs)}
         </TabButton>
         <TabButton tab="diff" current={tab} onSelect={setTab}>
           Diff
@@ -90,16 +78,18 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
         </TabButton>
       </div>
       <div className="relative min-h-0 flex-1">
-        <div role="tabpanel" aria-label="Transcript" inert={tab !== 'transcript'} className={`absolute inset-0 flex flex-col ${tab === 'transcript' ? '' : 'invisible'}`}>
-          <TranscriptPane controller={main} state={state} variant="session" actions={actions} list={list} />
-        </div>
         {tab === 'subagents' && (
           <div role="tabpanel" aria-label="Subagents" className="absolute inset-0 flex flex-col">
             {agent === null ? (
-              <SubagentTree tasks={tasks} view={treeView} onView={setTreeView} onOpen={setAgent} />
+              <SubagentTree tasks={tasks} view={treeView} onView={setTreeView} onOpen={setAgent} statusesKnown={state.jobs !== null} />
             ) : (
               <SubagentDetail key={agent} project={project} session={session} plane={plane} agentId={agent} node={tasks.tasks.get(agent as never)} actions={actions} onBack={() => setAgent(null)} />
             )}
+          </div>
+        )}
+        {tab === 'jobs' && (
+          <div role="tabpanel" aria-label="Jobs" className="absolute inset-0 flex flex-col">
+            <JobsPane controller={main} state={state} machine={session.machine} ended={session.presence?.record === null} />
           </div>
         )}
         {tab === 'diff' && (
@@ -115,6 +105,16 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
       </div>
     </section>
   );
+}
+
+/** Takes each open-agent request the owner holds — one made while the column was closed, then each later one. */
+function useAgentRequests(owner: SessionOwner, open: (agentId: string | null) => void): void {
+  const pending = useStore(owner.agentRequest, (s) => s.request);
+  useEffect(() => {
+    if (pending === null) return;
+    const request = owner.takeAgentRequest();
+    if (request) open(request.agentId);
+  });
 }
 
 function TabButton({ tab, current, onSelect, children }: { tab: Tab; current: Tab; onSelect: (tab: Tab) => void; children: ReactNode }) {

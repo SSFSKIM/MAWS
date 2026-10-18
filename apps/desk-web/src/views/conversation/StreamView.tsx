@@ -1,9 +1,11 @@
 // A channel's stream as rows (§4): a session's message (its text through MAWS's Markdown), what a human posted with
 // each recipient's delivery outcome (DX4), a question with its choices — answerable in place while its request is
 // pending — and its answer, lifecycle as system lines, agent-to-agent traffic folded into one row per run (a run of one
-// drawn whole on one line), a direct channel's working record folded (unfolded, DC6's transcript slot), the requests
-// in place, and this tab's sends on their way to the log. The item a tapped notification landed on is marked and
-// scrolled to once it is drawn. On a phone the working record stays folded: the transcript is desktop-only (§4).
+// drawn whole on one line), a direct channel's working record as a label saying where it is (`workLabel`), the
+// requests in place, and this tab's sends on their way to the log. The item a tapped notification landed on is marked
+// and scrolled to once it is drawn. A direct channel is drawn here only where the session view is not: on the phone
+// (the transcript is desktop-only, §4), for a machine that is offline, and for a session whose machine serves no
+// transcript (the composite's §9.1).
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import { writerMachine, type LogEvent, type Recipient } from 'desk-hub/protocol';
@@ -11,9 +13,7 @@ import { TranscriptActionsProvider, type TranscriptActions } from '../../../../.
 import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdown/Markdown';
 import { byWhom, type StreamItem } from '../../conversation/stream';
 import { deliveryKey, type OutboxItem } from '../../project/conversation';
-import { useSlot } from '../../shell/slots';
 import { DELIVERY_TEXT } from '../../conversation/words';
-import { useNarrow } from '../../shell/viewport';
 import { RequestCard } from '../requests/RequestCard';
 import { useDesk } from './desk-context';
 
@@ -32,13 +32,16 @@ const time = (ts: string) => {
  * because the origin is the tail, and a landing scrolls its card into view. The scroll position reads 0 at the bottom
  * and negative upward (Chrome, Safari, Firefox).
  */
-export function StreamView({ items, outbox, landed = null }: { items: StreamItem[]; outbox: OutboxItem[]; landed?: string | null }) {
+export function StreamView({ items, outbox, landed = null, workLabel = 'on a computer' }: { items: StreamItem[]; outbox: OutboxItem[]; landed?: string | null; workLabel?: string }) {
   const landedRow = useRef<HTMLLIElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLOListElement>(null);
   useAnchoringFallback(scroller, list);
   // A landing decides where the reader is: scrolled to its card.
-  useEffect(() => landedRow.current?.scrollIntoView({ block: 'center' }), [landed]);
+  useEffect(() => {
+    // Braced: Chrome's scrollIntoView returns a promise, which an effect must not return as its cleanup.
+    landedRow.current?.scrollIntoView({ block: 'center' });
+  }, [landed]);
   return (
     <div ref={scroller} className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto" data-testid="channel-events">
       <ol ref={list} className="m-0 list-none px-4 py-3">
@@ -51,7 +54,7 @@ export function StreamView({ items, outbox, landed = null }: { items: StreamItem
             {...('offset' in item && item.kind !== 'work' ? { 'data-offset': item.offset } : {})}
             {...(item.key === landed ? { 'data-landed': '', className: '-mx-2 rounded-md bg-bg-waiting px-2 outline-1 outline-warning outline-solid' } : {})}
           >
-            <Item item={item} />
+            <Item item={item} workLabel={workLabel} />
           </li>
         ))}
         {outbox.map((sent) => (
@@ -112,7 +115,7 @@ function humanWho(event: LogEvent, member: string): { who: string; machine?: str
   return { who: 'A human', machine: writerMachine(event.writer) ?? undefined };
 }
 
-function Item({ item }: { item: StreamItem }) {
+function Item({ item, workLabel }: { item: StreamItem; workLabel: string }) {
   const { sessions, member } = useDesk();
   switch (item.kind) {
     case 'message': {
@@ -139,7 +142,7 @@ function Item({ item }: { item: StreamItem }) {
     case 'agents':
       return <AgentRun says={item.says} />;
     case 'work':
-      return <WorkingRecord session={item.session} range={item.range} />;
+      return <WorkingRecord label={workLabel} />;
     case 'request':
       return <RequestItem request={item.ref} />;
   }
@@ -294,26 +297,15 @@ function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }
   );
 }
 
-/** A direct channel's working record, folded as the to-human mod folds it; unfolded, DC6's live transcript. */
-function WorkingRecord({ session, range }: { session: string; range: { from: string | null; to: string | null } }) {
-  const { connection, sessions } = useDesk();
-  const [open, setOpen] = useState(false);
-  const Transcript = useSlot('transcript');
-  const desk = sessions.get(session);
-  const narrow = useNarrow();
-  if (narrow)
-    return (
-      <p className="m-0 py-1 text-ui-sm text-fg-faint" data-testid="working-record">
-        Working record · on a computer
-      </p>
-    );
+/**
+ * A direct channel's working record where this stream is drawn — the phone, a machine that is offline, a session whose
+ * machine serves no transcript — as a label, never a button: on a desktop whose machine serves the transcript the
+ * channel is the session view, where the working record is MAWS's own per turn (the composite's §9.1).
+ */
+function WorkingRecord({ label }: { label: string }) {
   return (
-    <div className="py-1 text-ui-sm text-fg-muted">
-      <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="rounded-sm border border-border px-2 py-0.5 hover:bg-bg-hover hover:text-fg" data-testid="working-record" data-from={range.from ?? ''} data-to={range.to ?? ''}>
-        [ working record ]
-      </button>
-      {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
-      {open && desk && <div className="mt-2"><Transcript project={connection.project} session={desk} plane={connection.client} range={range} /></div>}
-    </div>
+    <p className="m-0 py-1 text-ui-sm text-fg-faint" data-testid="working-record">
+      Working record · {label}
+    </p>
   );
 }

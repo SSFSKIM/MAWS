@@ -10,16 +10,25 @@
 // (accepted by the composite's writer; recomposition's walk covers DX2). The double answers a `diff` request itself, numbered
 // on the subscription, so the producer's subscription messages are renumbered by the double (`sendSub`) and the
 // double is handed the recording's diff to answer with, as the producer's `diff` would.
+//
+// DC9 replays `SESSION_VIEW` with `producer: 'dc8'`: the widened `subagents` body, `jobs` and `mcp` in the snapshot and
+// as they change, and `output` answered on a subscription from the recording's `tasks/`; the subscription stays open after
+// the replayed session ends, answering `rows` and `output`. The defaults (`TWO_SUBAGENTS`, `dc3`) are DC6's.
 import type { SessionMessage } from 'desk-hub/protocol';
-import { loadRecording, SessionDepth, TWO_SUBAGENTS, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
-import type { JsonObject, Raised } from 'desk-hub/protocol';
+import { loadRecording, SessionDepth, TWO_SUBAGENTS, type Producer, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
+import type { JsonObject, Raised, TaskOutput } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
 
 export class FakeMachineReplay {
-  readonly recording: Recording = loadRecording(TWO_SUBAGENTS);
+  readonly recording: Recording;
   readonly depth: SessionDepth;
   /** How many steps of the timeline have been applied. */
   played = 0;
+  /** Holds each `rows` request until `releaseRows`, so a suite can look at the view while a page is on its way. */
+  holdRows = false;
+  private readonly heldRows: Array<{ sub: string; before: string; limit: number }> = [];
+  /** An `output` answer a suite puts in the machine's place for a task (a race the recording cannot stage); else none. */
+  answerOutput: ((taskId: string) => TaskOutput | null) | null = null;
   /** The next subscription's snapshot hooks (`raceNextSnapshot`'s `advance` and `overlap`) and its scope, used once. */
   private nextSnapshot: { agentId: string | null; options: SnapshotOptions } | null = null;
   private cursor = 0;
@@ -28,8 +37,11 @@ export class FakeMachineReplay {
   constructor(
     private readonly hub: HubDouble,
     readonly where: { project: string; machine: string },
+    options: { recording?: string | Recording; producer?: Producer } = {},
   ) {
-    this.depth = new SessionDepth(this.recording.session, this.recording, (message) => this.relay(message), where);
+    // A recording by its directory, or one a suite built in memory (a recorded one with rows of its own appended).
+    this.recording = typeof options.recording === 'object' ? options.recording : loadRecording(options.recording ?? TWO_SUBAGENTS);
+    this.depth = new SessionDepth(this.recording.session, this.recording, (message) => this.relay(message), where, true, 'main', options.producer ?? 'dc3');
     this.hub.diffs.set(this.recording.session, { base: 'main', text: this.depth.diffText });
     this.timer = setInterval(() => this.poll(), 5);
   }
@@ -75,6 +87,13 @@ export class FakeMachineReplay {
     return null;
   }
 
+  /** Answers the `rows` requests held so far; how many there were. */
+  releaseRows(): number {
+    const held = this.heldRows.splice(0);
+    for (const { sub, before, limit } of held) this.depth.page(sub, before, limit);
+    return held.length;
+  }
+
   /** The browser's socket drops: the hub forgets its subscriptions, and so does the machine. */
   drop(): void {
     this.hub.dropConnections();
@@ -114,10 +133,7 @@ export class FakeMachineReplay {
 
   private apply(step: Step): void {
     this.depth.apply(step);
-    if (step.k === 'presence') {
-      this.depth.presence = step.record;
-      this.sendPresence();
-    }
+    if (step.k === 'presence') this.sendPresence();
   }
 
   private poll(): void {
@@ -129,7 +145,15 @@ export class FakeMachineReplay {
         if (raced) this.nextSnapshot = null;
         void this.depth.subscribe(frame.sub, frame.agentId, raced?.options ?? {});
       } else if (frame.t === 'unsubscribe') this.depth.end(frame.sub, 'unsubscribed');
-      else if (frame.t === 'rows') this.depth.page(frame.sub, frame.before, frame.limit);
+      else if (frame.t === 'rows') {
+        if (this.holdRows) this.heldRows.push({ sub: frame.sub, before: frame.before, limit: frame.limit });
+        else this.depth.page(frame.sub, frame.before, frame.limit);
+      }
+      else if (frame.t === 'output') {
+        const forced = this.answerOutput?.(frame.taskId);
+        if (forced) this.hub.sendSub(this.where.project, frame.sub, 'output', forced);
+        else this.depth.output(frame.sub, frame.taskId, frame.tail);
+      }
     }
   }
 }

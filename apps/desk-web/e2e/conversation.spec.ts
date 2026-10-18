@@ -24,6 +24,19 @@ async function open(page: Page, hub: HubDouble, session?: string) {
   await expect(page.getByTestId('composer')).toBeVisible();
 }
 
+/** The machines of `stageProject`, `mini` offline: its sessions' channels are the log's. */
+const miniOffline = (hub: HubDouble) =>
+  hub.setMachines(PROJECT, [
+    { machine: 'mini', online: false, policy: { read_only: false, ceiling: 'default' }, checkouts: [] },
+    { machine: 'SK.local', online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [] },
+  ]);
+/** A session's subscription answered with an empty transcript, as a machine whose session has written nothing yet. */
+async function emptyTranscript(hub: HubDouble, session: string) {
+  await expect.poll(() => hub.subscriptions(PROJECT).some((s) => s.session === session)).toBe(true);
+  const { sub } = hub.subscriptions(PROJECT).find((s) => s.session === session)!;
+  hub.sendSub(PROJECT, sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: false }, streaming: [] });
+}
+
 /** The web `human`s the browser sent, as it sealed them. */
 const humans = (hub: HubDouble): HumanEvent[] => hub.up.filter((u) => u.frame.t === 'human').map((u) => (u.frame as { event: HumanEvent }).event);
 /** The newest RPC, once it arrived, checked under the org key. */
@@ -39,6 +52,12 @@ const presence = (hub: HubDouble, machine: string, session: string, status: stri
 const say = (hub: HubDouble, from: [string, string, string], to: Array<[string, string]> | '*', text: string) =>
   hub.append(PROJECT, { writer: `${from[2]}/${from[0]}`, kind: 'say', from: from[1], to: to === '*' ? '*' : to.map(([session, alias]) => ({ session, alias })), text });
 const FE: [string, string, string] = [S.works, 'maws-fe', 'SK.local'];
+
+// DC9 draws a direct channel's center on a desktop whose machine is online as its session view (MAWS's report over the
+// session's own transcript, which this double serves only where a test hands a subscription its snapshot): the sends
+// not yet in the transcript, the pending requests and the end marker at its tail. Where a test reads the channel built
+// from the log (its scrolling, a landing on a message), the session's machine is offline, as the log's channel is
+// drawn then (and on the phone).
 const M45: [string, string, string] = [S.asks, 'maws-45', 'mini'];
 
 test('the group chat draws the log as §4 says: messages, humans, lifecycle lines, and agent traffic folded per run', async ({ page, hub }) => {
@@ -123,16 +142,11 @@ test("posting follows sminos say's grammar, sealed by the member, and each recip
   await expect(deliveriesOf(allEvent)).toContainText('maws-fe: not delivered: the machine is read-only');
 });
 
-test('a direct channel: the exchange with the working record folded, and Send, Steer, Interrupt, model, and compact issuing sealed RPCs whose results render', async ({ page, hub }) => {
+test('a direct channel: its session view, a steer waiting at its tail for its row, and Send, Steer, Interrupt, model, and compact issuing sealed RPCs whose results render', async ({ page, hub }) => {
   await stageProject(hub);
-  await hub.append(PROJECT, { writer: `SK.local/${S.works}`, kind: 'message', from: 'maws-fe', to: 'host', text: 'the store is split', src: 'r5#0' });
   await open(page, hub);
   await nav(page).locator(`[data-session="${S.works}"]`).click();
-  await expect(center(page)).toContainText('the store is split');
-  await expect(center(page)).not.toContainText('the migration is merged');
-  await expect(center(page).getByTestId('working-record')).toHaveCount(2); // before its message, and open-ended after it while it runs
-  await center(page).getByTestId('working-record').first().click();
-  await expect(center(page).locator('[data-slot="transcript"]')).toBeVisible(); // DC6's slot, its fallback until DC6 registers it
+  await expect(center(page).getByTestId('session-view')).toHaveAttribute('data-session', S.works);
 
   const composer = page.getByTestId('composer');
   const box = page.getByRole('textbox', { name: 'Message maws-fe' });
@@ -141,8 +155,12 @@ test('a direct channel: the exchange with the working record folded, and Send, S
   const steer = await lastRpc(hub, 1);
   expect(steer).toMatchObject({ rpc: 'steer', machine: 'SK.local', args: { session: S.works, text: 'use the split store' } });
   await expect(composer).toContainText('Sent to SK.local; waiting for its answer');
+  const tail = center(page).getByTestId('tail-send');
+  await expect(tail).toContainText('use the split store');
+  await expect(tail.getByTestId('delivery-foot')).toHaveText('Steer · sending');
   hub.answerRpc(PROJECT, steer.nonce, { state: 'done', result: { row: 'u1' } });
   await expect(composer).toContainText('Steered: read at the next model request');
+  await expect(tail.getByTestId('delivery-foot')).toHaveText('✓Steer · read at the next model request'); // until row u1 is in its transcript
 
   await box.fill('and queue this');
   await composer.getByRole('button', { name: 'Send' }).click();
@@ -213,7 +231,7 @@ test("controls a session cannot use are drawn disabled with §5's reason, by kin
   await expect(composer.getByTestId('composer-note')).toHaveText('starts a turn');
 });
 
-test('a retired session keeps its history with no Resume; an ended one offers Resume, a send to it shows as recorded, and retire and spawn go out as RPCs', async ({ page, hub }) => {
+test('a retired session ends with who retired it and no Resume; an ended one offers Resume, a send to it waits at the tail as recorded, and retire and spawn go out as RPCs', async ({ page, hub }) => {
   await stageProject(hub);
   hub.setMachines(PROJECT, [
     { machine: 'mini', online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [{ path: '/Users/new/MAWS', branch: 'main' }] },
@@ -222,8 +240,11 @@ test('a retired session keeps its history with no Resume; an ended one offers Re
   // Retired: taken out of the project by the owner, which its machine refuses to Resume.
   await open(page, hub, S.gone);
   const header = page.getByTestId('channel-header');
-  await expect(center(page)).toContainText('doperpowers-1e joined on SK.local');
-  await expect(center(page)).toContainText('doperpowers-1e retired by human');
+  const marker = center(page).getByTestId('end-marker');
+  await expect(marker).toHaveAttribute('data-end', 'retired');
+  await expect(marker).toContainText('Retired by human');
+  await expect(marker).toContainText('it cannot be resumed');
+  await expect(marker.getByRole('button')).toHaveCount(0);
   await expect(header.getByTestId('retired-by')).toHaveText('Retired by human');
   await expect(header.getByRole('button', { name: 'Resume' })).toHaveCount(0);
 
@@ -231,13 +252,17 @@ test('a retired session keeps its history with no Resume; an ended one offers Re
   presence(hub, 'mini', S.rests, null);
   await nav(page).locator(`[data-session="${S.rests}"]`).click();
   await expect(page.getByTestId('composer-note')).toHaveText('recorded, not delivered: a closed terminal session is reopened only by Resume');
+  await expect(center(page).getByTestId('end-marker').getByRole('button', { name: 'Resume' })).toBeEnabled();
+  await emptyTranscript(hub, S.rests); // its transcript is in: what it was sent and never saw waits at its tail
   const box = page.getByRole('textbox', { name: 'Message cua_repl' });
   await box.fill('a note for when you are back');
   await box.press('Enter');
   await expect.poll(() => hub.logOf(PROJECT).some((e) => e.event.text === 'a note for when you are back')).toBe(true);
   const note = hub.logOf(PROJECT).find((e) => e.event.text === 'a note for when you are back')!.event;
   await hub.deliver(PROJECT, 'mini', { event: { writer: note.writer, seq: note.seq }, session: S.rests, outcome: 'recorded', reason: 'not live' });
-  await expect(center(page).getByTestId('deliveries')).toContainText('cua_repl: recorded, not delivered');
+  const sent = center(page).getByTestId('tail-send');
+  await expect(sent).toHaveAttribute('data-state', 'recorded');
+  await expect(sent.getByTestId('delivery-foot')).toHaveText('◇Recorded, not delivered · Resume delivers it');
 
   await header.getByRole('button', { name: 'Resume' }).click();
   const resume = await lastRpc(hub, 1);
@@ -246,7 +271,7 @@ test('a retired session keeps its history with no Resume; an ended one offers Re
   await expect(header).toContainText('Resumed; it rejoins in a moment');
   // The message stayed owed: Resume brought the session back, and the newer outcome replaces the recorded one.
   await hub.deliver(PROJECT, 'mini', { event: { writer: note.writer, seq: note.seq }, session: S.rests, outcome: 'delivered', reason: '' });
-  await expect(center(page).getByTestId('deliveries')).toContainText('cua_repl: delivered');
+  await expect(sent).toHaveAttribute('data-state', 'delivered');
 
   await nav(page).locator(`[data-session="${S.works}"]`).click();
   await header.getByRole('button', { name: 'Retire…' }).click();
@@ -320,7 +345,7 @@ test('a permission prompt is decided in place with the digest of exactly what it
   await expect(bg.getByRole('button', { name: 'Deny', exact: true })).toHaveCount(0);
 });
 
-test('a question is answered in place, a native one may be denied, an async one is answer-only', async ({ page, hub }) => {
+test('a question is answered in place at the tail and leaves once settled, a native one may be denied, an async one is answer-only', async ({ page, hub }) => {
   await stageProject(hub);
   await open(page, hub, S.asks);
   const questions = [{ question: 'Which column do we keep?', header: 'Column', options: [{ label: 'user_id', description: 'what the API reads' }, { label: 'owner_id', description: 'the new name' }], multiSelect: false }];
@@ -334,9 +359,9 @@ test('a question is answered in place, a native one may be denied, an async one 
   expect(answer.args).toEqual({ session: S.asks, answers: { 'Which column do we keep?': 'user_id' }, digest: { session: S.asks, request: 'toolu_q1', tool: 'AskUserQuestion', input_sha256: await inputSha256({ questions }) } });
   hub.answerRpc(PROJECT, answer.nonce, { state: 'done', result: {} });
   await hub.settle(PROJECT, 'mini', S.asks, { request: 'toolu_q1', winner: 'web', outcome: 'answered', by: M });
-  await expect(card.getByTestId('settled')).toHaveText('Answered from the web by you');
+  await expect(card).toHaveCount(0);
 
-  // An async question: its `question` log event carries the card while the request is pending.
+  // An async question: its card waits at the tail while its request is pending.
   const ask = 'toolu_plugin_q2';
   // sminos records the questions an ask put as a list.
   await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'question', from: 'maws-45', to: 'host', text: ['Ship it tonight?'], choices: ['yes', 'no'], src: ask });
@@ -349,9 +374,7 @@ test('a question is answered in place, a native one may be denied, an async one 
   expect((await lastRpc(hub, 2)).args).toMatchObject({ answers: { 'Ship it tonight?': 'no' } });
   await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'answered', from: 'maws-45', src: ask, text: 'no' });
   await hub.settle(PROJECT, 'mini', S.asks, { request: ask, winner: 'web', outcome: 'answered', by: M });
-  await expect(center(page).getByTestId('answered')).toHaveText('Answered: no');
-  // Answered, the question is drawn from its event: its text with its answer.
-  await expect(center(page).locator('[data-item="question"]').getByTestId('prose')).toHaveText('Ship it tonight?');
+  await expect(asyncCard).toHaveCount(0);
 });
 
 test('an uncertain RPC is drawn as such and its Retry sends the same sealed RPC, nonce and all', async ({ page, hub }) => {
@@ -455,7 +478,9 @@ test('a channel opens at its tail and follows it while the reader is at the bott
   await message(63);
   await expect(line(63)).toBeInViewport();
 
-  // A notification's landing on an early message keeps the reader there as the conversation goes on.
+  // A notification's landing on an early message keeps the reader there as the conversation goes on (in the log's
+  // channel, its machine offline).
+  miniOffline(hub);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?writer=${encodeURIComponent(first.event.writer)}&seq=${first.event.seq}`);
   await expect(center(page).locator('[data-landed]')).toContainText('line 1');
   await expect(line(1)).toBeInViewport();
@@ -595,8 +620,9 @@ test('a new message arriving below a reader scrolled back leaves the row they re
   expect(Math.abs(moved)).toBeLessThanOrEqual(1);
 });
 
-test('after a notification lands on its card, an earlier row that grows leaves the card where it was', async ({ page, hub }) => {
+test("after a notification lands on its card in the log's channel, an earlier row that grows leaves the card where it was", async ({ page, hub }) => {
   await stageProject(hub);
+  miniOffline(hub);
   await stageGrowingRun(hub, 25);
   let landing = { writer: '', seq: 0 };
   for (let n = 1; n <= 40; n++) {

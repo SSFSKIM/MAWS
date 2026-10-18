@@ -2,9 +2,9 @@
 // mobile network profile through Chromium's DevTools protocol — 150 ms round trip, 1.6 Mbps down, 750 kbps up — with
 // the cache off, against the double serving the build gzip-compressed (the Worker's static assets are compressed
 // too, with brotli where the browser takes it, so these bytes are an upper bound). Each case prints one `DESK-LOAD`
-// line: time from navigation until its screen is drawn, and the bytes and requests it took. Only the first load's
-// make-up is asserted — the grid fetches nothing of the project view's Markdown stack, and stays under a byte budget —
-// since timings move with the runner.
+// line: time from navigation until its screen is drawn, and the bytes and requests it took. Only the loads' make-up is
+// asserted — the grid fetches nothing of the project view's Markdown stack, and stays under a byte budget; a direct
+// channel fetches no chunk of MAWS's transcript (DC9) — since timings move with the runner.
 import type { CDPSession, Page } from '@playwright/test';
 import { expect, seedKey, test } from './fixtures';
 import { PROJECT, S, stageProject } from './scene';
@@ -62,6 +62,8 @@ function report(name: string, ms: number, load: Load): void {
 }
 
 const MARKDOWN_STACK = /\/assets\/(ProjectView|markdown|katex|shiki|lang-)/;
+/** The chunks of the session view and the depth column, which carry MAWS's transcript (`Transcript`, its rows, its store). */
+const TRANSCRIPT_CHUNKS = /\/assets\/(SessionView|TranscriptPane|DepthColumn|ReviewView)-/;
 
 test.describe('on a phone', () => {
   test.use(PHONE);
@@ -84,6 +86,27 @@ test.describe('on a phone', () => {
     await expect(page.getByRole('navigation', { name: 'Channels' }).locator(`[data-session="${S.asks}"]`)).toBeVisible({ timeout: 60_000 });
     const after = net.load();
     report('phone: then open a project (its channel list)', Date.now() - opened, { requests: after.requests - before.requests, bytes: after.bytes - before.bytes, urls: [] });
+  });
+
+  test("a direct channel, cold, on an online machine: the log's channel, and no chunk of MAWS's transcript", async ({ page, hub }) => {
+    // The phone never mounts the transcript (§4 [binding — owner, 2026-10-17]): the narrow layout draws the log-built
+    // channel, so neither the session view's chunk nor the transcript's is fetched, whatever the session's machine.
+    await stageProject(hub);
+    await seedKey(page, hub);
+    const net = await throttle(page);
+    const ms = await timeTo(page, `${hub.url}/p/${PROJECT}/s/${S.asks}`, '[data-testid="composer"]');
+    await expect(page.getByRole('region', { name: 'Channel' }).getByText('the migration is merged')).toBeVisible();
+    await page.waitForTimeout(1000); // nothing fetched late
+    const load = net.load();
+    report('phone: a direct channel, cold', ms, load);
+    await expect(page.getByTestId('session-view')).toHaveCount(0);
+    expect(load.urls.filter((u) => TRANSCRIPT_CHUNKS.test(u))).toEqual([]);
+    // Nor does any chunk it fetched carry MAWS's transcript view (its list's jump control is that view's alone).
+    const scripts = load.urls.filter((u) => u.endsWith('.js'));
+    for (const url of scripts) expect(await (await page.request.get(`${hub.url}${url}`)).text(), url).not.toContain('transcript-jump');
+    const chunks = scripts.map((u) => u.replace(/^\/assets\//, '')).join(' ');
+    console.log(`DESK-LOAD-CHUNKS ${chunks}`);
+    test.info().annotations.push({ type: 'DESK-LOAD chunks', description: chunks });
   });
 
   test("a push's tap, cold: from the notification's URL to its card drawn and verified", async ({ page, hub }) => {

@@ -6,9 +6,18 @@ import { fileURLToPath } from 'node:url';
 export { FakeMachine, type FakeMachineOptions, type RpcRecord, type RpcScript } from './machine';
 export { emptyMemory, type LedgerEntry, type Memory } from './memory';
 export { loadRecording, type LoadOptions, type Recording, type Row, type Step } from './recording';
-export { SessionDepth, SNAPSHOT_ROW_BUDGET, type SnapshotOptions } from './session';
+export { ENGINE_TMP, SessionDepth, SNAPSHOT_ROW_BUDGET, type Producer, type SnapshotOptions } from './session';
+export { derive, deriveFromRows, LoopIndex, TABLE, type Body, type BridgeAgent } from './jobs';
+export { answerOutput } from './output';
 export type { Credentials } from './link';
 
 /** The recording committed beside the tool: a haiku session with two subagents, a permission prompt and a question
  * answered from the web, a `<message>`, and a turn interrupted mid-response (record.py made it). */
 export const TWO_SUBAGENTS = fileURLToPath(new URL('./recordings/two-subagents', import.meta.url));
+
+/** DC9's acceptance recording: `two-subagents` extended with rows synthesized in engine 2.1.300's shapes by
+ * `session-view.py` (its recorded.json names where each shape came from) — older history past one snapshot, a nested
+ * agent, background shells and a monitor with their notifications, a `task_status` and a `TaskStop`, an async question
+ * of the ask mod answered from the web, MCP servers added and removed, the session's end, and a send recorded
+ * undelivered. Replay it with `producer: 'dc8'`. */
+export const SESSION_VIEW = fileURLToPath(new URL('./recordings/session-view', import.meta.url));

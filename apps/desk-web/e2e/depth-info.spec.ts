@@ -2,8 +2,9 @@
 // depth column's Diff tab asks for the session's diff when it opens and on Refresh, never otherwise, and draws it
 // through MAWS's review view; its Info tab says where the session runs, its model (from the transcript), and its
 // context use and cost from DX4 `usage` — unavailable with no bridge, then the first one, an update after a turn, and
-// the same after a reconnect. And the main transcript's `<message>` marks draw as MAWS's to-human span while they
-// stream and once settled, and the turn a subagent's hand-back opens reads as the session's own.
+// the same after a reconnect. And the main transcript's `<message>` marks — drawn in the center's session view since
+// DC9's M3, as MAWS's report draws them — are its message cards while they stream and once settled, and the turn a
+// subagent's hand-back opens reads as the session's own.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Locator, Page } from '@playwright/test';
@@ -46,7 +47,7 @@ test("the diff is asked for when its tab opens and on Refresh, never otherwise, 
     p.skip(p.script.length);
     p.diff = { base: 'main', text: DIFF };
   });
-  await expect(depth).toContainText('Both subagents reported back.');
+  await expect(page.getByTestId('session-view')).toContainText('Both subagents reported back.'); // drawn in the center
   await page.waitForTimeout(300);
   expect(player.diffsAsked).toBe(0); // never polled, never asked before the tab opens
 
@@ -97,31 +98,32 @@ test('session info: where it runs, its model, and context and cost from usage �
 
   hub.dropConnections(); // the fresh snapshot carries the last usage
   await expect.poll(() => player.subscriptions()).toBe(2);
-  await expect(depth.getByTestId('depth-status')).toHaveText('');
+  await expect(page.getByTestId('session-status')).toHaveText('');
   await expect(info('context')).toHaveText('38.7K of 1M (4%)');
   await expect(info('cost')).toHaveText('$0.0053');
 });
 
-test("a <message> draws as MAWS's to-human span while it streams and once settled; a hand-back's turn reads Continued", async ({ page, hub }) => {
-  const { player, depth } = await openDepth(page, hub);
+test("a <message> draws as the report's message card while it streams and once settled; a hand-back's turn reads Continued", async ({ page, hub }) => {
+  const { player } = await openDepth(page, hub);
+  const view = page.getByTestId('session-view');
   player.advanceTo((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text' && String(item.body.chunk.text).startsWith('<message>'));
   player.advance(1);
-  const stream = depth.locator('[data-row-id^="desk-stream:"]');
+  const stream = view.locator('[data-row-id^="desk-stream:"]');
   while (!(await stream.last().textContent())?.includes('Both subagents rep')) {
     player.advance(1);
     await page.waitForTimeout(20);
   }
-  const live = stream.last().locator('[data-owner-span="to-human"]');
+  const live = stream.last().locator('[data-owner-card="to-human"]');
   await expect(live).toContainText('Both subagents rep');
   await expect(stream.last()).not.toContainText('<message>');
 
   player.advance(player.script.length);
   await expect(stream).toHaveCount(0);
-  const settled = depth.locator('[data-owner-span="to-human"]');
+  const settled = view.locator('[data-owner-card="to-human"]');
   await expect(settled).toHaveCount(1);
   await expect(settled).toContainText('Both subagents reported back.');
-  await expect(settled.locator('.owner-report-label')).toHaveText('to human');
-  expect(await depth.evaluate((el) => el.textContent?.includes('<message>'))).toBe(false);
-  await expect(depth).not.toContainText('Peer session worked');
-  await expect(depth).toContainText('Continued for');
+  await expect(settled.locator('.owner-card-label')).toHaveText('Message');
+  expect(await view.evaluate((el) => el.textContent?.includes('<message>'))).toBe(false);
+  await expect(view).not.toContainText('Peer session worked');
+  await expect(view).toContainText('Continued for');
 });

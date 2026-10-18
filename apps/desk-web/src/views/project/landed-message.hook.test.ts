@@ -1,0 +1,82 @@
+// @vitest-environment happy-dom
+// A landing on a `<message>` whose row is in history not yet held (`landed-message.ts`): it pages toward the row and,
+// once the page has drawn it, jumps there — unless the reader moved while the page was out. Their wheel on the list,
+// or focus taken elsewhere, leave them where they went, and the landing says nothing more. MAWS's real store holds the
+// row; the transcript the landing reads holds it only once the page is answered.
+import { act, cleanup, renderHook } from '@testing-library/react';
+import type { JsonObject } from 'desk-hub/protocol';
+import { afterEach, describe, expect, it } from 'vitest';
+import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
+import { readRecording } from '../../../test/double/session-stream';
+import { freshSource, subagentLookupOf } from '../../depth/source/desk-transcript';
+import { useLandOnMessage } from './landed-message';
+
+const frames = async (n: number) => {
+  for (let i = 0; i < n; i++) await new Promise((resolve) => requestAnimationFrame(resolve));
+};
+
+const recorded = readRecording().session;
+const prompt = recorded[0];
+const textRow = recorded.find((r) => r.type === 'assistant' && JSON.stringify(r.message).includes('"type":"text"'))!;
+const answer: JsonObject = { ...textRow, uuid: 'landed-answer', parentUuid: String(prompt.uuid), message: { ...(textRow.message as JsonObject), id: 'msg_landed', content: [{ type: 'text', text: '<message>The migration is merged.</message>' }] } };
+const SRC = 'landed-answer#0';
+
+const opened: Array<() => void> = [];
+afterEach(() => {
+  opened.splice(0).forEach((close) => close());
+  cleanup();
+  document.body.replaceChildren();
+});
+
+async function scene() {
+  const key = `landing-${Math.random()}`;
+  const store = useTranscriptStore.getState();
+  await store.attach(key, freshSource([prompt, answer], 'sess-1', subagentLookupOf([])), { agentId: null as never });
+  opened.push(() => (store.detach(key), store.drop(key)));
+  const root = document.createElement('section');
+  const scroller = document.createElement('div');
+  scroller.setAttribute('data-transcript-scroller', '');
+  const composer = document.createElement('textarea');
+  root.append(scroller, composer);
+  document.body.append(root);
+  let held: JsonObject[] = [];
+  let asked = 0;
+  const transcript = { key, heldRows: () => held, loadOlder: () => void (asked += 1) };
+  const view = renderHook(({ loadingOlder }: { loadingOlder: boolean }) => useLandOnMessage(root, transcript, { phase: 'live', more: true, loadingOlder }, SRC), { initialProps: { loadingOlder: false } });
+  expect(asked).toBeGreaterThan(0); // the row is not held: a page toward it (asked again until the page is out)
+  expect(view.result.current).toBe('finding');
+  view.rerender({ loadingOlder: true }); // the page is out
+  /** The page is answered: the row is held now. */
+  const answerPage = async () => {
+    held = [prompt, answer];
+    view.rerender({ loadingOlder: false });
+    await act(() => frames(4));
+  };
+  const jumped = () => useTranscriptStore.getState().entries[key].jump !== null;
+  return { view, scroller, composer, answerPage, jumped };
+}
+
+describe('a landing on a message paged toward', () => {
+  it('jumps to the row once its page is drawn', async () => {
+    const s = await scene();
+    await s.answerPage();
+    expect(s.jumped()).toBe(true);
+    expect(s.view.result.current).toBeNull();
+  });
+
+  it('a reader who wheels while the page is out stays where they went, the landing saying nothing more', async () => {
+    const s = await scene();
+    await act(async () => void s.scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -120 })));
+    await s.answerPage();
+    expect(s.jumped()).toBe(false);
+    expect(s.view.result.current).toBeNull();
+  });
+
+  it('a reader who moves focus elsewhere while the page is out keeps it there', async () => {
+    const s = await scene();
+    await act(async () => s.composer.focus());
+    await s.answerPage();
+    expect(s.jumped()).toBe(false);
+    expect(document.activeElement).toBe(s.composer);
+  });
+});

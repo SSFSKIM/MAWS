@@ -10,10 +10,34 @@
 // - `step-end` follows every `block-row` of its step, since the timeline keeps the bridge's order; a step still open
 //   when its turn ends gets one then;
 // - a main-scope subscription carries every agent's chunks, `block-row`s, and `step-end`s, the tree, and `usage`, and
-//   its own transcript's rows; an agent-scope one carries that agent's alone.
+//   its own transcript's rows; an agent-scope one carries that agent's alone;
+// - as a DC8 producer (`producer: 'dc8'`), the tree is DX4's widened `subagents` body — each agent's status and what it
+//   rests on, the loop's jobs, its MCP names (jobs.ts) — derived again whenever a row, the bridge's agent state, or the
+//   session's presence changes, and sent whenever it changed (an agent-scope subscription carries that agent's own
+//   loop's jobs and MCP names); an agent joins the tree at its spawn, a seed naming it, or its first row, whichever
+//   comes first; and `output` is answered from the recording's `tasks/`;
+// - a subscription outlives the replayed session: it stays open, idle, answering `rows` and `output` (DX4, "History and
+//   ended sessions").
+import { join, posix } from 'node:path';
+import { isOutputTail, isTaskId } from '../src/protocol/browser';
 import type { JsonObject } from '../src/protocol/json';
 import type { SessionBodies, SessionMessage, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
+import { derive, fileFacts, LoopIndex, loopJobs, type Body, type BridgeAgent, type Derivation } from './jobs';
+import { answerOutput, type Locate } from './output';
 import type { Recording, Row, Step } from './recording';
+
+/**
+ * Which daemon the fake machine stands for. `dc8` carries DX4's widened `subagents` body (status, evidence, the bridge's
+ * spawn, the rows' outcome, file facts), `jobs` and `mcp`, and answers `output`; `dc3`, as DC3 built it, sends each
+ * agent's id and meta alone and passes `output` by, as a daemon older than DC8 does.
+ */
+export type Producer = 'dc3' | 'dc8';
+
+/** The per-uid temporary root the recordings' engine wrote task outputs under (macOS, uid 501): `<resolved tmp>/claude-<uid>`. */
+export const ENGINE_TMP = '/private/tmp/claude-501';
+
+/** The engine's project slug of a path (SPEC §35.2.1): every character but a letter or a digit becomes `-`. */
+const slugOf = (path: string) => path.replace(/[^A-Za-z0-9]/g, '-');
 
 type Live = {
   turnId: string;
@@ -64,8 +88,17 @@ export class SessionDepth {
   private readonly ended = new Set<string>();
   private readonly tree = new Map<string, JsonObject>();
   private readonly subs = new Map<string, Sub>();
+  /** Each transcript's index (`main` and each agent), fed as its rows reach the disk, and its bytes so far. */
+  private readonly indexes = new Map<string, { index: LoopIndex; bytes: number }>();
+  /** The bridge's agent state: its snapshot's or a resync's `agents`, each `agent` spawn and stop applied. */
+  private readonly bridgeAgents = new Map<string, BridgeAgent>();
+  /** The widened body as last derived (a DC8 producer's), and its JSON, to send only what changed. */
+  private body: Body | null = null;
+  private bodyJson = '';
+  /** Each subscribed agent's own jobs and MCP names as last sent, as JSON. */
+  private readonly agentBodies = new Map<string, string>();
+  private record: JsonObject | null = { status: 'idle', waitingFor: null, needs: null };
   usage: Usage | null = null;
-  presence: JsonObject | null = { status: 'idle', waitingFor: null, needs: null };
   /** The main loop's turn running now, or null. */
   mainTurn: string | null = null;
 
@@ -77,8 +110,20 @@ export class SessionDepth {
     readonly bridge = true,
     /** The branch its working-tree diff is taken against (DX4 `diff`'s `base`). */
     readonly diffBase = 'main',
+    readonly producer: Producer = 'dc3',
   ) {
     this.rows.set('main', []);
+  }
+
+  /** The session record's `status`, `waitingFor` and `needs`, or null once its process is gone: from then on its
+   * agents and jobs without a terminal word are `exited`. */
+  get presence(): JsonObject | null {
+    return this.record;
+  }
+
+  set presence(record: JsonObject | null) {
+    this.record = record;
+    this.refresh();
   }
 
   get cwd(): string | null {
@@ -89,9 +134,73 @@ export class SessionDepth {
     return this.recording?.diff ?? '';
   }
 
-  /** The session's subagent tree: each started subagent's `meta.json`. */
+  /** The session's subagent tree: each started subagent's `meta.json`, with its status as a DC8 producer. */
   subagents(): SubagentMeta[] {
+    if (this.producer === 'dc8') return this.current().subagents;
     return [...this.tree].map(([agentId, meta]) => ({ agentId, meta }));
+  }
+
+  /** DX4's widened body over what the session holds now. */
+  private derived(): Body {
+    const agents: Derivation['agents'] = {};
+    for (const [key, { index, bytes }] of this.indexes) {
+      const rows = this.rows.get(key) ?? [];
+      if (key === 'main' || !rows.length) continue;
+      // The fake keeps no files: the facts are its rows' bytes and its last row's time, the same on every run.
+      agents[key] = { index, file: fileFacts(rows, bytes, Date.parse(String(rows.at(-1)!.timestamp)) || 0) };
+    }
+    return derive({
+      session: { id: this.id, running: this.record !== null },
+      main: this.indexes.get('main')?.index ?? new LoopIndex(),
+      metas: [...this.tree].map(([agentId, meta]) => ({ agentId, meta })),
+      agents,
+      bridge: this.bridge ? { agents: [...this.bridgeAgents.values()] } : null,
+    });
+  }
+
+  private current(): Body {
+    if (!this.body) {
+      this.body = this.derived();
+      this.bodyJson = JSON.stringify(this.body);
+    }
+    return this.body;
+  }
+
+  /** What an agent-scope subscription carries of the body: no tree (as before DC8), that agent's own loop's jobs and
+   * MCP names. */
+  private agentBody(agentId: string): { subagents: SubagentMeta[] } & Pick<Body, 'jobs' | 'mcp'> {
+    const loop = this.indexes.get(agentId)?.index ?? new LoopIndex();
+    return { subagents: [], ...loopJobs(loop, this.record !== null) };
+  }
+
+  /**
+   * A DC8 producer derives the body again, and sends `subagents` where it changed: the session's to the main-scope
+   * subscriptions, each subscribed agent's own jobs and MCP names to that agent's.
+   */
+  private refresh(): void {
+    if (this.producer !== 'dc8') return;
+    const body = this.derived();
+    const json = JSON.stringify(body);
+    if (json !== this.bodyJson) {
+      this.body = body;
+      this.bodyJson = json;
+      this.fanOut(null, { kind: 'subagents', body }, false);
+    }
+    for (const agentId of new Set([...this.subs.values()].map((s) => s.agentId))) {
+      if (agentId === null) continue;
+      const scoped = this.agentBody(agentId);
+      const scopedJson = JSON.stringify(scoped);
+      if (scopedJson === this.agentBodies.get(agentId)) continue;
+      this.agentBodies.set(agentId, scopedJson);
+      this.fanOut(agentId, { kind: 'subagents', body: scoped }, false);
+    }
+  }
+
+  /** The agent's `meta.json` joins the session's tree: at its spawn, a seed naming it, or its first row on disk, whichever
+   * the machine sees first (the plane reads the metas from disk, whatever the bridge saw). */
+  private joinTree(agentId: string): void {
+    if (!this.tree.has(agentId)) this.tree.set(agentId, this.recording?.meta[agentId] ?? { agentType: 'general-purpose' });
+    if (!this.rows.has(agentId)) this.rows.set(agentId, []);
   }
 
   hasAgent(agentId: string): boolean {
@@ -136,14 +245,33 @@ export class SessionDepth {
         this.appendRow(step.agentId, step.row);
         return;
       case 'agent': {
-        this.tree.set(step.agentId, this.recording?.meta[step.agentId] ?? { agentType: 'general-purpose' });
-        if (!this.rows.has(step.agentId)) this.rows.set(step.agentId, []);
-        this.fanOut(null, { kind: 'subagents', body: { subagents: this.subagents() } }, false);
+        this.joinTree(step.agentId);
+        if (step.spawn) this.bridgeAgents.set(step.agentId, { agentId: step.agentId, ...step.spawn, running: true });
+        if (this.producer === 'dc8') this.refresh();
+        else this.fanOut(null, { kind: 'subagents', body: { subagents: this.subagents() } }, false);
         return;
       }
+      case 'agent-stop': {
+        const held = this.bridgeAgents.get(step.agentId);
+        if (held) this.bridgeAgents.set(step.agentId, { ...held, running: false });
+        this.refresh();
+        return;
+      }
+      case 'agents':
+        this.bridgeAgents.clear();
+        for (const a of step.agents) {
+          this.bridgeAgents.set(a.agentId, a);
+          if (this.producer === 'dc8') this.joinTree(a.agentId);
+        }
+        this.refresh();
+        return;
       case 'usage':
         this.usage = step.body;
         this.fanOut(null, { kind: 'usage', body: step.body }, false);
+        return;
+      case 'presence':
+        // The machine publishes it (DX4 `presence`, outside any subscription); here it ends or revives the process.
+        this.presence = step.record;
         return;
       default:
         return;
@@ -153,11 +281,17 @@ export class SessionDepth {
   /** A row reaches the disk: its transcript's subscribers receive it. */
   appendRow(agentId: string | null, row: Row): void {
     const key = agentId ?? 'main';
+    if (agentId !== null && this.producer === 'dc8') this.joinTree(agentId);
     let list = this.rows.get(key);
     if (!list) this.rows.set(key, (list = []));
     if (list.some((r) => r.uuid === row.uuid)) return;
     list.push(row);
+    let held = this.indexes.get(key);
+    if (!held) this.indexes.set(key, (held = { index: new LoopIndex(), bytes: 0 }));
+    held.index.feed(row);
+    held.bytes += Buffer.byteLength(JSON.stringify(row)) + 1;
     for (const [sub, s] of this.subs) if (s.agentId === agentId) this.deliver(sub, s, { kind: 'row', body: { row, agentId } });
+    this.refresh();
   }
 
   /** Folds a chunk into its block, as DX5's child does: a chunk that does not follow its message's watermark (one was
@@ -267,6 +401,13 @@ export class SessionDepth {
     }
     for (const r of scope.slice(0, cut)) s.held.add(r.uuid);
     for (const m of streaming) s.marks.set(keyOf(m), m.upTo);
+    // A DC8 producer's snapshot carries the subscribed loop's jobs and MCP names: the session's, or the agent's own.
+    let widened: Pick<Body, 'jobs' | 'mcp'> | null = null;
+    if (this.producer === 'dc8' && agentId === null) widened = this.current();
+    else if (this.producer === 'dc8' && agentId !== null) {
+      widened = this.agentBody(agentId);
+      this.agentBodies.set(agentId, JSON.stringify(widened));
+    }
     const body: SessionBodies['snapshot'] = {
       rows,
       more: rows.length < cut,
@@ -274,6 +415,7 @@ export class SessionDepth {
       presence: { record: this.presence, bridge: this.bridge },
       streaming,
       ...(agentId === null && { usage: this.bridge ? this.usage : null }),
+      ...(widened && { jobs: widened.jobs, mcp: widened.mcp }),
     };
     this.send({ project: this.where.project, machine: this.where.machine, session: this.id, kind: 'snapshot', sub, n: 0, body });
     s.ready = true;
@@ -311,6 +453,39 @@ export class SessionDepth {
     const older = at < 0 ? [] : scope.slice(0, at);
     const rows = older.slice(-limit).reverse();
     this.deliver(sub, s, { kind: 'rows', body: { rows, before, more: older.length > rows.length } });
+  }
+
+  /**
+   * A background task's output tail, answering `output` on the subscription from its own loop's index (a DC8 producer;
+   * an older one passes it by). The session's canonical tasks roots — `<ENGINE_TMP>/<slug>/<session>/tasks/` for the
+   * slug of each working directory the recording knows (DX4's set: the recorded cwd, the rows' cwd, the cwd it joined
+   * the log with) — are this machine's view of the recording's `tasks/` directory: a path the rows named under one of
+   * them is read there, and any other path lies outside every root.
+   */
+  output(sub: string, taskId: string, tail: number): void {
+    const s = this.subs.get(sub);
+    if (!s || this.producer !== 'dc8' || !isTaskId(taskId) || !isOutputTail(tail)) return;
+    const index = this.indexes.get(s.agentId ?? 'main')?.index ?? new LoopIndex();
+    const { roots, locate } = this.tasks();
+    this.deliver(sub, s, { kind: 'output', body: answerOutput({ taskId, tail }, index, this.id, roots, locate) });
+  }
+
+  private tasks(): { roots: string[]; locate: Locate } {
+    if (!this.recording?.dir) return { roots: [], locate: () => null };
+    const dir = join(this.recording.dir, 'tasks');
+    const cwds = new Set<string>([this.recording.cwd]);
+    const rowCwd = this.recording.rows.main.find((r) => typeof r.cwd === 'string')?.cwd;
+    if (typeof rowCwd === 'string') cwds.add(rowCwd);
+    for (const step of this.recording.steps) {
+      if (step.k === 'log' && step.event.kind === 'joined' && step.event.session === this.id && typeof step.event.cwd === 'string') cwds.add(step.event.cwd);
+    }
+    const canonical = [...cwds].map((cwd) => `${ENGINE_TMP}/${slugOf(cwd)}/${this.id}/tasks/`);
+    const locate: Locate = (named) => {
+      const path = posix.normalize(named);
+      const root = canonical.find((r) => path.startsWith(r));
+      return root === undefined ? null : join(dir, path.slice(root.length));
+    };
+    return { roots: [dir], locate };
   }
 
   /** The working tree's diff, on a main-scope subscription. */

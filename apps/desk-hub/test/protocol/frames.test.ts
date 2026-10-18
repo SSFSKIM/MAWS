@@ -38,6 +38,11 @@ export const down: DownFrame[] = [
   { t: 'diff', project, session: 's', sub: 'x' },
   // @ts-expect-error the machine is told which session's tree to diff
   { t: 'diff', project, sub: 'x' },
+  // A task's output tail, on a main or an agent sub: the machine is told the sub's whole scope.
+  { t: 'output', project, session: 's', agentId: null, sub: 'x', taskId: 'b7k2m9q4x', tail: 65536 },
+  { t: 'output', project, session: 's', agentId: 'a1', sub: 'y', taskId: 'b7k2m9q4x', tail: 1 },
+  // @ts-expect-error output names the sub's scope, agentId included
+  { t: 'output', project, session: 's', sub: 'x', taskId: 'b7k2m9q4x', tail: 1 },
 ];
 
 export const browserUp: ProjectUp[] = [
@@ -45,6 +50,11 @@ export const browserUp: ProjectUp[] = [
   // @ts-expect-error the browser names the scope too
   { t: 'subscribe', machine: 'mini', session: 's', sub: 'x' },
   { t: 'diff', sub: 'x' },
+  { t: 'output', sub: 'x', taskId: 'b7k2m9q4x', tail: 524288 },
+  // @ts-expect-error output asks for a number of bytes
+  { t: 'output', sub: 'x', taskId: 'b7k2m9q4x', tail: '64k' },
+  // @ts-expect-error output names its task
+  { t: 'output', sub: 'x', tail: 1024 },
 ];
 
 export const results: { [N in keyof RpcResults]: RpcResults[N] } = {
@@ -90,7 +100,7 @@ export const browserDown: ProjectDown[] = [
 
 describe("DX2's and DX3's frames", () => {
   it('are pinned by their types', () => {
-    expect(up.length + down.length + browserUp.length + browserDown.length).toBe(23);
+    expect(up.length + down.length + browserUp.length + browserDown.length).toBe(29);
     expect(Object.keys(results)).toHaveLength(9);
     expect(outcomes).toHaveLength(8);
   });

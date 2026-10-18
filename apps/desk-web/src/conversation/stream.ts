@@ -3,18 +3,17 @@
 // system lines; traffic between agents (`say`) folds into one row per run, a run being the says with no other row
 // between them. A direct channel is one session's exchange with the human — its messages and questions, what humans
 // sent it, its own lifecycle — with the agent traffic it took part in folded the same way, and its working record
-// folded before each of its messages (the unfolded transcript is DC6's slot). A request (a permission prompt or a
-// question that is not a log event) sits after the log entry the browser held when it first saw it; an async question's
-// request is drawn on its `question` event, whose `src` is the call's id.
+// folded before each of its messages, as a label (a direct channel is drawn from the log only where its transcript is
+// not: the phone, an offline machine, a machine that serves none; the composite's §9.1). A request (a permission prompt
+// or a question that is not a log event) sits after the log entry the browser held when it first saw it; an async
+// question's request is drawn on its `question` event, whose `src` is the call's id.
 //
 // `status` lines are drawn as set. `state` events are the daemon's record of a session's liveness and recur as it
 // moves between busy, idle, and waiting, so only a change between running (busy, idle, waiting) and not running
 // (stopped, gone, vacant, retired) is drawn — a session that stopped, or runs again — and the sidebar's presence says
 // the rest. A session is taken as running from its `joined` (and before any event says otherwise).
 //
-// Each working-record fold carries its bounds for DX8's `transcript` slot: the `src` of the session's exchange item
-// before it and of the one after it (a `<message>` span's `<row uuid>#<span index>`; a question's call id), null for
-// an open end; a live session's channel ends with an open-ended fold after its last item.
+// A live session's channel ends with a fold after its last item: its working record goes on.
 import { writerMachine, type LogEvent, type Raised, type Recipient } from 'desk-hub/protocol';
 import { requestKey } from '../project/conversation';
 import type { Channel } from '../shell/layout';
@@ -29,25 +28,20 @@ export type StreamItem =
   | { kind: 'question'; key: string; offset: number; event: LogEvent; session: string | null; from: string; text: string; choices: string[]; request: string; ref: string; answered: { text: string; event: LogEvent } | null }
   | { kind: 'system'; key: string; offset: number; event: LogEvent; text: string }
   | { kind: 'agents'; key: string; says: Entry[] }
-  | { kind: 'work'; key: string; offset: number; session: string; range: { from: string | null; to: string | null } }
+  | { kind: 'work'; key: string; offset: number; session: string }
   /** `request`: the request's id; `ref`: its key in the conversation's `requests`. */
   | { kind: 'request'; key: string; request: string; ref: string };
 
 /**
  * A request as the stream places it: `key` is its key in the conversation's `requests` (machine, session, id); `at`
- * is the offset of the last log entry the browser held when it first saw it; `question` whether it is a question (an exchange item, so it bounds the working record: a native one has no
- * `question` event to do it); `call` the transcript's tool-use id of the call it belongs to, the bound a question
- * gives the working record (its `request` when absent).
+ * is the offset of the last log entry the browser held when it first saw it; `question` whether it is a question (an
+ * exchange item, so a working-record fold stands before it: a native one has no `question` event to do it).
  */
-export type PlacedRequest = { key: string; request: string; session: string; at: number; question?: boolean; call?: string };
+export type PlacedRequest = { key: string; request: string; session: string; at: number; question?: boolean };
 
-/**
- * A request the browser holds, placed: a raised request names its transcript call as `toolUseId ?? request` (DX4,
- * composite 43a27604) — `toolUseId` is there only where the two differ, as for the ask mod's blocking question, raised
- * under the engine dialog's id while the transcript holds the outer call. Decisions and answers still go to `request`.
- */
+/** A request the browser holds, placed. */
 export function placedRequest(record: { key: string; request: string; raised: Raised; at: number }): PlacedRequest {
-  return { key: record.key, request: record.request, session: record.raised.session, at: record.at, question: isQuestion(record.raised.tool), call: record.raised.toolUseId ?? record.request };
+  return { key: record.key, request: record.request, session: record.raised.session, at: record.at, question: isQuestion(record.raised.tool) };
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
@@ -156,18 +150,14 @@ export function buildStream(
     flush();
     items.push(item);
   };
-  /** The `src` of the channel's session's last exchange item: where the next working-record fold begins. */
-  let lastSrc: string | null = null;
-  const workBefore = (key: string, offset: number, session: string | null, src: string) => {
-    if (channel.kind !== 'session' || session !== channel.session) return;
-    push({ kind: 'work', key, offset, session, range: { from: lastSrc, to: src || null } });
-    lastSrc = src || null;
+  const workBefore = (key: string, offset: number, session: string | null) => {
+    if (channel.kind === 'session' && session === channel.session) push({ kind: 'work', key, offset, session });
   };
   const placeUpTo = (offset: number) => {
     while (next < placed.length && placed[next].at < offset) {
       const r = placed[next];
-      // A question with no `question` event (a native one) is the exchange item that bounds the working record.
-      if (r.question) workBefore(`work:request:${r.key}`, r.at, r.session, r.call ?? r.request);
+      // A question with no `question` event (a native one) is an exchange item: the working record before it folds.
+      if (r.question) workBefore(`work:request:${r.key}`, r.at, r.session);
       push({ kind: 'request', key: `request:${r.key}`, request: r.request, ref: r.key });
       next++;
     }
@@ -188,14 +178,14 @@ export function buildStream(
         break;
       case 'message': {
         const session = writerSession(event.writer);
-        workBefore(`work:${offset}`, offset, session, str(event.src));
+        workBefore(`work:${offset}`, offset, session);
         push({ kind: 'message', key, offset, event, session, from: str(event.from), text: str(event.text) });
         break;
       }
       case 'question': {
         const session = writerSession(event.writer);
         const answer = answers.get(questionRef(event));
-        workBefore(`work:${offset}`, offset, session, str(event.src));
+        workBefore(`work:${offset}`, offset, session);
         push({
           kind: 'question',
           key,
@@ -231,6 +221,6 @@ export function buildStream(
   }
   placeUpTo(Infinity);
   flush();
-  if (channel.kind === 'session' && options.live) items.push({ kind: 'work', key: 'work:live', offset: Number.MAX_SAFE_INTEGER, session: channel.session, range: { from: lastSrc, to: null } });
+  if (channel.kind === 'session' && options.live) items.push({ kind: 'work', key: 'work:live', offset: Number.MAX_SAFE_INTEGER, session: channel.session });
   return items;
 }

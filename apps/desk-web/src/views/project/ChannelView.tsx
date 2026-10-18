@@ -8,9 +8,16 @@
 // the owner into another session's channel.
 //
 // A channel a tapped notification opened lands on its card (`useLanding`): the card is marked once it is drawn, and
-// until then, or when it will not be, the channel says why. On a phone (mockups/desk/05-phone.html, 5A) Retire sits
+// until then, or when it will not be, the channel says why. In the session view a request's card is at the tail and a
+// `<message>`'s is its transcript row (`landed-message.ts`). On a phone (mockups/desk/05-phone.html, 5A) Retire sits
 // behind ⋯ with the note that depth opens on a computer, and an ended session shows Resume in place of the composer.
-import { useEffect, useMemo, useState } from 'react';
+//
+// On a desktop whose session's machine is online, a direct channel's center is its session view (DC9,
+// `SessionView.tsx`): MAWS's report over the session's own transcript, the status word of that transcript in the
+// header; the composer stays below it. The channel built from the log stays where the session view cannot draw: on the
+// phone, for a machine that is offline, and for a session its machine serves no transcript for (the view says why);
+// its working record is then a label saying where the record is.
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent } from 'desk-hub/protocol';
 import { buildStream, byWhom, placedRequest, type PlacedRequest } from '../../conversation/stream';
@@ -27,6 +34,14 @@ import { useConnected, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
 import { StreamView } from '../conversation/StreamView';
 import { SessionLabel } from '../../shell/SessionLabel';
+import { moduleLoader, useLoadedModule } from './module-loader';
+
+// The session view and its status word: one chunk, loaded the first time a desktop draws a session view, both drawn
+// from that one load (`module-loader.ts`).
+const sessionViews = moduleLoader(() => import('./SessionView'));
+
+/** Whether a direct channel's center is its session view: on a desktop, while the session's machine is online. */
+const drawsSessionView = (session: DeskSession | null, phone: boolean): session is DeskSession => session !== null && !phone && session.machineOnline !== false;
 
 export function ChannelView(props: {
   name: string;
@@ -47,6 +62,14 @@ export function ChannelView(props: {
   }, [channel, events, sessions, requests, session, member]);
   const outbox = Object.values(outboxAll).filter((o) => channel.kind === 'group' || (o.to !== '*' && o.to.some((r) => r.session === channel.session)));
   const landed = useLanded(channel, items);
+  const landedRequest = useLanding((s) => (s.landed?.landing.kind === 'request' && s.landed.project === connection.project && channel.kind === 'session' && s.landed.session === channel.session ? s.landed.landing.request : null));
+  const landedMessage = useLandedMessage(channel, events);
+  const sessionView = channel.kind === 'session' && drawsSessionView(session, phone) ? session : null;
+  // Keyed by channel, so each opens at its own tail (the composer beside it is keyed by the session alone).
+  const stream = (workLabel: string) => (
+    <StreamView key={channel.kind === 'group' ? 'stream:group' : `stream:${channel.session}`} items={items} outbox={outbox} landed={landed.item} workLabel={workLabel} />
+  );
+  const { module: views, failed: viewFailed, retry: retryView } = useLoadedModule(sessionViews, sessionView !== null);
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg" aria-label="Channel">
       <header className={['flex shrink-0 items-center gap-2 border-b border-border', phone ? 'min-h-[44px] flex-wrap px-3 py-1.5' : 'h-[44px] px-4'].join(' ')} data-testid="channel-header">
@@ -66,7 +89,14 @@ export function ChannelView(props: {
               )}
               {session?.charge && <span className="min-w-0 truncate text-ui-sm text-fg-muted">· {session.charge}</span>}
             </span>
-            {session && <SessionActions key={session.session} session={session} phone={phone} />}
+            {session && (
+              <SessionActions
+                key={session.session}
+                session={session}
+                phone={phone}
+                status={sessionView && views && <views.SessionStatus project={connection.project} session={sessionView} plane={connection.client} />}
+              />
+            )}
           </>
         )}
       </header>
@@ -90,8 +120,44 @@ export function ChannelView(props: {
           )}
         </div>
       )}
-      {/* Keyed by channel, so each opens at its own tail (the composer beside it is keyed by the session alone). */}
-      <StreamView key={channel.kind === 'group' ? 'stream:group' : `stream:${channel.session}`} items={items} outbox={outbox} landed={landed.item} />
+      {sessionView ? (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {views && (
+            <views.default
+              key={sessionView.session}
+              project={connection.project}
+              session={sessionView}
+              plane={connection.client}
+              events={events}
+              landedRequest={landedRequest}
+              landedMessage={landedMessage}
+              fallback={(why) => (
+                <>
+                  <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-fg-muted" role="status" data-testid="no-transcript">
+                    {why}
+                  </div>
+                  {stream(`no transcript on ${sessionView.machine}`)}
+                </>
+              )}
+            />
+          )}
+          {viewFailed !== null && (
+            <div className="m-4 flex items-center gap-2 text-ui-sm text-danger" role="alert" data-testid="session-view-failed">
+              <span className="min-w-0">The session view could not be loaded ({viewFailed}).</span>
+              <button type="button" className="shrink-0 rounded-sm border border-border-strong px-2 py-0.5 text-fg hover:bg-bg-hover" onClick={retryView}>
+                Retry
+              </button>
+              {/* A browser may keep a module it failed to fetch (Chrome's module map does) and refuse it again without a
+                  fetch: a reload fetches it anew, and the desk comes back where it was (the URL, the browser's log). */}
+              <button type="button" className="shrink-0 rounded-sm border border-border-strong px-2 py-0.5 text-fg hover:bg-bg-hover" onClick={() => location.reload()}>
+                Reload the page
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        stream(phone || !session ? 'on a computer' : `${session.machine} is offline`)
+      )}
       {channel.kind === 'group' ? (
         <GroupComposer name={name} />
       ) : (
@@ -123,6 +189,20 @@ function useLanded(channel: Channel, items: ReturnType<typeof buildStream>) {
       : refused(failed).some((e) => e.event?.writer === landing.writer && e.event?.seq === landing.seq);
   const status = landingStatus({ landing, found: item !== null, ready: landingReady(caughtUp, { checked }, failed), unverified: bad });
   return { item, notice: status.kind === 'shown' ? null : status };
+}
+
+/**
+ * The transcript row a tapped notification's `<message>` came from, when this channel is the one it opened: the `src` of
+ * the log's `message` event it names (`<row uuid>#<span>`), for the session view to land on.
+ */
+function useLandedMessage(channel: Channel, events: Array<{ offset: number; event: LogEvent }>): string | null {
+  const { connection } = useDesk();
+  const landing = useLanding((s) => (s.landed?.landing.kind === 'event' && s.landed.project === connection.project && channel.kind === 'session' && s.landed.session === channel.session ? s.landed.landing : null));
+  return useMemo(() => {
+    if (landing?.kind !== 'event') return null;
+    const event = events.find((e) => e.event.writer === landing.writer && e.event.seq === landing.seq)?.event;
+    return event?.kind === 'message' && typeof event.src === 'string' ? event.src : null;
+  }, [landing, events]);
 }
 
 /** "Retired by <who>", from the log's `retired`. */
@@ -158,7 +238,8 @@ function ResumeBar({ session }: { session: DeskSession }) {
   );
 }
 
-function SessionActions({ session, phone }: { session: DeskSession; phone: boolean }) {
+/** The session's actions, after `status`: the session view's word for its transcript (loading, unavailable, …). */
+function SessionActions({ session, phone, status }: { session: DeskSession; phone: boolean; status?: ReactNode }) {
   const { connection, member } = useDesk();
   const [rpc, setRpc] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -177,6 +258,7 @@ function SessionActions({ session, phone }: { session: DeskSession; phone: boole
   return (
     // The header's own width bounds it: a confirmation's words truncate rather than run under the depth column.
     <span className={['ml-auto flex min-w-0 items-center gap-2', phone ? 'w-full flex-wrap' : ''].join(' ')}>
+      {status}
       {phone && <span className="w-full text-ui-sm text-fg-muted">{sessionName(session)}'s transcript, subagents and diff open on a computer.</span>}
       <RpcStatus nonce={rpc} />
       {retired !== null ? (

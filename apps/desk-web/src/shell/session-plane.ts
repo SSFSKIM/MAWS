@@ -8,7 +8,8 @@ export type SessionTarget = { machine: string; session: string; agentId: string 
 
 /**
  * The messages a subscription delivers to its listener: everything of DX4's subscription kinds but `end` — `usage`
- * (context use and cost, main-transcript subscriptions only) passed through like the rest.
+ * (context use and cost, main-transcript subscriptions only) and `output` (a task's output tail, answering `output()`)
+ * passed through like the rest.
  */
 export type SubscriptionMessage = SessionMessage<Exclude<SubscriptionKind, 'end'>>;
 
@@ -32,6 +33,12 @@ export interface Subscription {
    * main-transcript subscription's only (`agentId` null), and nothing is sent on an agent's.
    */
   diff(): void;
+  /**
+   * The last `tail` bytes of a background task's output file, read on request and answered as an `output` message in
+   * one of DX4's four variants; on a main or an agent subscription (a job belongs to the loop whose rows started it).
+   * `tail` is brought within 1 to 524288 bytes; a `taskId` the engine never spells (`isTaskId`) is not asked for.
+   */
+  output(taskId: string, tail: number): void;
   /** Ends the subscription; the listener hears nothing more. */
   close(): void;
 }
