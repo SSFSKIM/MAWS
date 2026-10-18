@@ -1,0 +1,28 @@
+{
+  "assign": {
+    "e2e/sessions.spec.ts": "design-proof",
+    "e2e/support/deck-history.ts": "editor-proof",
+    "e2e/support/packaged-resolution.ts": "composition",
+    "src/engine-host/documents/loop-delay.test.ts": "store-versions",
+    "src/engine-host/documents/loop-delay.ts": "store-versions",
+    "test/snapshots/transcript/events/agents-relay.rows.json": "shell",
+    "test/snapshots/transcript/pass3/relay-to-child.rows.json": "shell",
+    "test/snapshots/transcript/transcript/agents-and-messages.rows.json": "shell",
+    "test/support/deck-history.test.ts": "editor-proof",
+    "test/support/packaged-resolution.test.ts": "composition"
+  },
+  "move": {},
+  "drop": [],
+  "note": {
+    "status": "controller-approved assignments; actual source/coverage established by the final helper audit, not this file alone",
+    "preparedFrom": "b9bf74237db6de51ed81c3bc56f51a31280a3b80",
+    "rationale": {
+      "design-proof": "Session fork readiness correction belongs with the existing shell/supervisor acceptance cases; 8 changed lines, xhigh proof tier.",
+      "editor-proof": "Keep the heavy deck generation/check helper and its unit test with presentations-scale.spec.ts and presentations-history.spec.ts, whose scale/history inputs they validate; 234 changed lines, xhigh proof tier.",
+      "composition": "Keep packaged resolution and its regression together under dependency/bundle truthfulness and host launch integration; 311 changed lines, max tier.",
+      "store-versions": "Keep the host document loop-delay sampler and its unit test with the existing document-host/store measurement seam; 182 changed lines, max tier.",
+      "shell": "The three snapshot paths cover L260 renderer recipient-name formatting, not wire fixtures; put them with transcript derivation and fixtures.test.ts. Only paths, numstat and commit rationale were inspected, not snapshot contents; 10 changed lines, xhigh tier."
+    },
+    "spill": "same-tier spill only if actual final audit exceeds15000; previous store14948"
+  }
+}
