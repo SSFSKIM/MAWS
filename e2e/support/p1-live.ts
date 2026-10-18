@@ -127,12 +127,17 @@ const isPaidRequest = (row: JournalRow): boolean => {
   return row.direction === 'out' && (frame?.type === 'user' || (frame?.type === 'control_request' && frame.request?.subtype === 'side_question'));
 };
 
+// A main result that carries its figure: one without `total_cost_usd` is no receipt, its spend unknown rather than zero.
+const isPriced = (row: JournalRow): boolean => typeof (row.frame as { total_cost_usd?: unknown }).total_cost_usd === 'number';
+
 // What a session's paid calls cost, from its journal rows in order: its receipts (the main lane's `total_cost_usd`,
-// journalCost) when a result came after its last prompt or side question (`settled`); otherwise at least its whole
-// `allocationUsd`, since an absent receipt must never give money back (an interrupted or failed turn, a stopped one).
+// journalCost) when a result came after its last prompt or side question and every main result carried its figure
+// (`settled`); otherwise at least its whole `allocationUsd`, since an absent receipt must never give money back (an
+// interrupted or failed turn, a stopped one, a result whose figure is missing).
 export function chargeOf(rows: readonly JournalRow[], allocationUsd: number): { usd: number; receipted: number; settled: boolean } {
   const receipted = usd4(journalCost([...rows]).costUsd);
-  const settled = rows.findLastIndex(isPaidRequest) < rows.findLastIndex(isMainResult) || !rows.some(isPaidRequest);
+  const answered = rows.findLastIndex(isPaidRequest) < rows.findLastIndex(isMainResult) || !rows.some(isPaidRequest);
+  const settled = answered && rows.filter(isMainResult).every(isPriced);
   return { usd: settled ? receipted : Math.max(receipted, allocationUsd), receipted, settled };
 }
 

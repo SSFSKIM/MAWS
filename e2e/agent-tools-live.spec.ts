@@ -24,9 +24,11 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { GATEWAY_AUTH_TOKEN, RELAY_URL } from '../src/engine-host/launch';
+import type { JournalRow } from '@shared/wire/journal';
 import { ENGINE_BIN, ENGINE_VERSION } from '../test/support/engine-pin'; // FX4: the resolved live engine
 import { scratchConfigHome } from '../test/live/support/live';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
+import { chargeOf } from './support/p1-live';
 import { sidebarRow } from './support/sidebar';
 
 function skipReason(): string | null {
@@ -407,16 +409,13 @@ function findFile(dir: string, name: string): string | null {
   return null;
 }
 
-// What one launch cost: the engine's cumulative `total_cost_usd` on its last main-lane result (C7's `processCost`).
-function journalCost(path: string): number {
-  if (!existsSync(path)) return 0;
-  const costs = readFileSync(path, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as { direction: string; frame: { type?: string; total_cost_usd?: number; parent_tool_use_id?: string | null } })
-    .filter((row) => row.direction === 'in' && row.frame.type === 'result' && !row.frame.parent_tool_use_id)
-    .map((row) => row.frame.total_cost_usd ?? 0);
-  return Math.max(0, ...costs);
+// What one launch cost: the engine's cumulative `total_cost_usd` on its main-lane results, or the launch's whole
+// `--max-budget-usd` when its journal is gone, a prompt went unreceipted or a result carried no figure (p1-live.ts's
+// chargeOf), since an absent receipt must never read as no spend.
+function launchCost(path: string, budgetUsd: number): number {
+  if (!existsSync(path)) return budgetUsd;
+  const rows = readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as JournalRow);
+  return chargeOf(rows, budgetUsd).usd;
 }
 
 test('live: the agent tools over a real session (acceptance item 4, steps i to x)', async () => {
@@ -433,12 +432,12 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     writeFileSync(join(scratch, 'observations.json'), JSON.stringify(observed, null, 2));
     console.log(`[c8b-live] ${key} ${JSON.stringify(value)}`);
   };
-  const journals: string[] = [];
+  const journals: { path: string; budgetUsd: number }[] = []; // each launch's journal and the budget it launched with
   const kept = join(scratch, 'journals');
   mkdirSync(kept, { recursive: true });
   // C3 journals under the app's profile, which the launch's cleanup removes: copied before each cleanup.
   const keepJournals = () => {
-    for (const path of journals) if (existsSync(path)) cpSync(path, join(kept, basename(path)));
+    for (const { path } of journals) if (existsSync(path)) cpSync(path, join(kept, basename(path)));
   };
   let maws: MawsLaunch | null = null;
 
@@ -512,10 +511,11 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     const first = await open({});
     maws = first.launch;
     const { page, invoke, record } = first;
-    await launchSession(invoke, record, left(created.total_cost_usd));
+    const budget1 = left(created.total_cost_usd);
+    await launchSession(invoke, record, budget1);
     const s = new Session(page, invoke, record.appId, record.title.text);
     const status0 = await s.status();
-    journals.push(status0.journalPath);
+    journals.push({ path: status0.journalPath, budgetUsd: budget1 });
     note('session', { appId: record.appId, title: record.title.text, directory: record.directory, taskListId: status0.taskListId, mode: status0.permissionMode });
     const panel = page.locator('[data-region="panel"]');
     const agents = <T,>(read: string) => page.evaluate(`(() => { const a = window.__maws_agents; return (${read})(a); })()`) as Promise<T>;
@@ -862,7 +862,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
     });
 
     const status1 = await s.status();
-    note('launch1', { cost: journalCost(status1.journalPath), stray: s.stray });
+    note('launch1', { cost: launchCost(status1.journalPath, budget1), stray: s.stray });
     await invoke('session.stop', { appSessionId: record.appId, reason: 'stop' });
     keepJournals();
     await maws.cleanup();
@@ -897,9 +897,10 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
 
       if (STEPS.has('ix') || STEPS.has('vii')) {
         // Resumed under the task-list override, with the fork gate off (see `foreground`).
-        await launchSession(second.invoke, second.record, left(created.total_cost_usd + journalCost(join(kept, basename(status1.journalPath))), 1), { CLAUDE_CODE_FORK_SUBAGENT: 'false' });
+        const budget2 = left(created.total_cost_usd + launchCost(join(kept, basename(status1.journalPath)), budget1), 1);
+        await launchSession(second.invoke, second.record, budget2, { CLAUDE_CODE_FORK_SUBAGENT: 'false' });
         const s2 = new Session(p2, second.invoke, second.record.appId, second.record.title.text);
-        journals.push((await s2.status()).journalPath);
+        journals.push({ path: (await s2.status()).journalPath, budgetUsd: budget2 });
 
         await step('ix', 'CLAUDE_CODE_TASK_LIST_ID shows that list instead', async () => {
           const st = await s2.status();
@@ -924,14 +925,14 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
           await s2.idle();
         });
 
-        note('launch2', { cost: journalCost((await s2.status()).journalPath), stray: s2.stray });
+        note('launch2', { cost: launchCost((await s2.status()).journalPath, budget2), stray: s2.stray });
         await second.invoke('session.stop', { appSessionId: second.record.appId, reason: 'stop' });
       }
     }
   } finally {
     keepJournals();
     if (maws) await maws.cleanup().catch((error) => note('cleanupError', String(error)));
-    const spend = created.total_cost_usd + journals.reduce((sum, path) => sum + journalCost(join(kept, basename(path))), 0);
+    const spend = created.total_cost_usd + journals.reduce((sum, { path, budgetUsd }) => sum + launchCost(join(kept, basename(path)), budgetUsd), 0);
     note('spendUsd', Number(spend.toFixed(4)));
     note('ownerHome', ownerHomeNames(created.session_id, scratch));
     note('failures', failures);
