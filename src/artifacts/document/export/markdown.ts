@@ -2,10 +2,14 @@
 // kind's lossless forms, X26) with block ids and comment milestones off, so the file is plain GFM wherever GFM can say
 // the content and reads back through the import as the content it was written from. Per the parent's ruling of
 // 2026-10-18 (P3-F, tracker L166), a line ending inside text and a line break are written for a reader (`forReaders`):
-// a backslash break, or `<br>` in a heading, a table cell and at a block's end, never the agent read's `&#10;`, and
-// that part is judged by how a CommonMark reader renders it, not by reading back exactly (the import reads a backslash
-// break as a hardBreak and `<br>` as text). The canonical dialect itself stays exact. M8's linked-directory mirror (a
-// searchable read-only copy, not what `artifact_read` or an edit's quotes use) writes a document's `.md` through it.
+// a backslash break, or `<br>` in a heading, a table cell and at a block's end (a last line of bare whitespace is no
+// line), never the agent read's `&#10;`, and that part is judged by how a CommonMark reader renders it, not by reading
+// back exactly (the import reads a backslash break as a hardBreak and `<br>` as text). A cell's hardBreak (the
+// tracker's P4 row) and a line ending in a cell's inline code (where `<br>` would be literal) keep its table as
+// structure blocks. The canonical dialect is exact for a line ending inside text and a hardBreak with a line after it; a hardBreak
+// with none (a block's end, alone, a heading) and a break's own marks do not read back exactly (the same P4 row). M8's
+// linked-directory mirror (a searchable read-only copy, not what `artifact_read` or an edit's quotes use) writes a
+// document's `.md` through it.
 // Several tabs are written in order, each introduced by its title as a top-level heading.
 import { docMarkdown } from '../markdown';
 import { schemaFor } from '../schema';

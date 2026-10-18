@@ -260,10 +260,16 @@ const rawFenced = (name: string, attrs: Record<string, string | null>, source: s
 const ALIGNS = new Set(['left', 'center', 'right']);
 /**
  * Text a GFM cell keeps as written: no hard break, no whitespace a cell would trim or collapse; with `lineEndings` (a
- * reader's Markdown, which writes a line ending inside text as `<br>`; P3-F, tracker L166), line endings too.
+ * reader's Markdown, which writes a line ending inside text as `<br>`; P3-F, tracker L166), line endings too, but not in
+ * inline code, where the row's `<br>` would be literal text.
  */
-const gfmText = (child: Json, lineEndings = false): boolean =>
-  child.type === 'hardBreak' ? false : child.type !== 'text' || (!(lineEndings ? /[^\S \n]/ : /[^\S ]/).test(child.text ?? '') && !/^ | $| {2}/.test(child.text ?? ''));
+const gfmText = (child: Json, lineEndings = false): boolean => {
+  if (child.type === 'hardBreak') return false;
+  if (child.type !== 'text') return true;
+  const text = child.text ?? '';
+  const breaks = lineEndings && !(child.marks ?? []).some((mark) => mark.type === 'code');
+  return !(breaks ? /[^\S \n]/ : /[^\S ]/).test(text) && !/^ | $| {2}/.test(text);
+};
 
 /** True when a pipe table holds every attribute and the content of `table` (header row first, plain cells). */
 export function gfmTable(table: Json, { lineEndings = false }: { lineEndings?: boolean } = {}): boolean {

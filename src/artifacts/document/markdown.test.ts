@@ -666,6 +666,20 @@ describe('a line ending inside text', () => {
     expect(md.serialize(docOf([heading]), { ids: false, forReaders: true })).toBe('## c<br>d');
     expect(md.serialize(docOf([para('p5', schema.text('e'), hardBreak(), schema.text('f'), hardBreak())]), { ids: false, forReaders: true })).toBe('e\\\nf<br>');
   });
+
+  // CommonMark drops a block's whitespace-only last line, leaving a backslash before it as the block's last character
+  it('ends a reader’s block with <br> when only unmarked whitespace follows its last line ending or break, and leaves the canonical form alone', () => {
+    const reader = (...content: PMNode[]) => md.serialize(docOf([para('p1', ...content)]), { ids: false, forReaders: true });
+    expect(reader(schema.text('a\n '))).toBe('a<br> ');
+    expect(reader(schema.text('a\n\t'))).toBe('a<br>\t');
+    expect(reader(schema.text('a\n \n\t'))).toBe('a\\\n <br>\t');
+    expect(reader(schema.text('a'), hardBreak(), schema.text(' '))).toBe('a<br> ');
+    expect(reader(schema.text('a'), hardBreak(), hardBreak(), schema.text(' \t'))).toBe('a<br><br> \t');
+    // a marked space is written as an entity, the line's content: the break before it stays a backslash break
+    expect(reader(schema.text('a\n'), schema.text(' ', [schema.marks.bold.create()]))).toBe('a\\\n**&#32;**');
+    expect(md.serialize(docOf([para('p1', schema.text('a\n '))]), { ids: false })).toBe('a&#10; ');
+    expect(md.serialize(docOf([para('p1', schema.text('a'), hardBreak(), schema.text(' '))]), { ids: false })).toBe('a\\\n ');
+  });
 });
 
 describe('the fixed point (serialize → parse)', () => {

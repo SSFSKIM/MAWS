@@ -95,6 +95,44 @@ describe('exportMarkdown', () => {
     expect(html).not.toMatch(/&amp;#10;|:::/);
   });
 
+  // a GFM row writes a cell's line ending as <br>, which inside inline code is literal text: multiline inline code keeps
+  // the structure-block table it had before the reader's relaxation
+  it('keeps multiline inline code in a table cell out of the reader’s pipe row: never a <br> inside code', () => {
+    const md = exportMarkdown(
+      sourceOf([
+        {
+          type: 'table',
+          content: [{ type: 'tableRow', content: [{ type: 'tableHeader', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first\nsecond', marks: [{ type: 'code' }] }] }] }] }],
+        },
+      ]),
+    );
+    const html = new Marked({ gfm: true }).parse(md) as string;
+    expect(html).not.toContain('&lt;br&gt;');
+    expect(md).not.toMatch(/^\|.*\|$/m);
+    expect(html).toMatch(/<code>first\ssecond<\/code>/);
+  });
+
+  // CommonMark drops a block's whitespace-only last line, so a break before it ends the block: it must be <br>, as at
+  // the block's end, not a backslash the reader then sees
+  it('renders a block’s last line ending or break as a line break when only whitespace follows it, never a literal backslash', () => {
+    const md = exportMarkdown(
+      sourceOf([
+        { type: 'paragraph', content: [{ type: 'text', text: 'one\n ' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'two\n\t' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'three' }, { type: 'hardBreak' }, { type: 'text', text: ' ' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'four\n' }, { type: 'text', text: ' ', marks: [{ type: 'italic' }] }, { type: 'text', text: '\t' }] },
+        { type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'five\n  ' }] }] }] },
+      ]),
+    );
+    const html = new Marked({ gfm: true }).parse(md) as string;
+    expect(html).not.toContain('\\');
+    expect(html).toMatch(/<p>one<br>\s*<\/p>/);
+    expect(html).toMatch(/<p>two<br>\s*<\/p>/);
+    expect(html).toMatch(/<p>three<br>\s*<\/p>/);
+    expect(html).toMatch(/<p>four<br>\s*<em> <\/em>\s*<\/p>/); // a marked space is the line's content: the break stays a break
+    expect(html).toMatch(/<li>five<br>\s*<\/li>/);
+  });
+
   it('refuses a tab the document does not have', () => {
     expect(() => exportMarkdown(everyKindSource(), { tab: 'nope' })).toThrow(/no tab nope/);
   });

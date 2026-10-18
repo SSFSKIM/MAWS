@@ -243,8 +243,12 @@ function prepareInline(content: Json[], parent: Json, show: ReadonlySet<string>,
     }
     out.push({ ...node, text, marks: marks.length ? marks : undefined });
   });
-  // a hard line break ending a block would read as a literal backslash: a reader's block ends its lines with `<br>`
-  for (let k = out.length - 1; tables.forReaders && k >= 0 && out[k].text === LINE_BREAK; k--) out[k] = { type: 'text', text: NEWLINE };
+  // a hard line break ending a block would read as a literal backslash: a reader's block ends its lines with `<br>`. A
+  // last line of bare spaces and tabs is no line (CommonMark drops it), so the breaks before it end the block too; a
+  // marked space or tab is written as an entity (edges), the line's content
+  let end = out.length;
+  while (tables.forReaders && end > 0 && /^[ \t]+$/.test(out[end - 1].text ?? '')) end--;
+  for (let k = end - 1; tables.forReaders && k >= 0 && out[k].text === LINE_BREAK; k--) out[k] = { type: 'text', text: NEWLINE };
   for (const id of active.reverse()) pushSentinel(CLOSE, id, restMarks(content[content.length - 1]));
   return code ? out : separate(out);
 }
