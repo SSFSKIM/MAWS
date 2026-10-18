@@ -5,7 +5,7 @@
 // log a message and raise a question; then it attaches `window.deskLatency()` to the run's report and checks, loosely,
 // that every hop it exercised was timed and none is absurd. Paths timed from the recording's own stamps (a replayed
 // row's engine timestamp, a request's call row) carry the recording's age rather than a latency, and are reported, not
-// bounded; a chunk is timed only when the machine stamps it (`t`, the hub's #57 change).
+// bounded; a chunk carries the fake machine's own stamp (`t`, taken as it sends, on this host), so it is bounded.
 import type { Locator, Page } from '@playwright/test';
 import type { JsonObject } from 'desk-hub/protocol';
 import type { LatencyPath, LatencyReport } from '../src/latency/latency';
@@ -93,7 +93,8 @@ test('with the readout on, every hop the web sees is timed, and window.deskLaten
   await hub.append(PROJECT, { writer: `${MACHINE}/${fm.session}`, kind: 'message', from: ALIAS, to: 'host', text: 'Measured.', src: 'latency-framed-row#0' });
   await fm.raiseRecordedQuestion();
 
-  const exercised: LatencyPath[] = ['view.snapshot', 'view.drawn', 'view.first-rows', 'stream.row', 'owner.ack', 'owner.delivered', 'owner.row', 'session.message', 'request.drawn'];
+  // The fake machine stamps each chunk it sends (`t`, as the machine's plane passes the bridge's through), on this host.
+  const exercised: LatencyPath[] = ['view.snapshot', 'view.drawn', 'view.first-rows', 'stream.chunk', 'stream.row', 'owner.ack', 'owner.delivered', 'owner.row', 'session.message', 'request.drawn'];
   await expect
     .poll(
       async () => {
@@ -105,8 +106,10 @@ test('with the readout on, every hop the web sees is timed, and window.deskLaten
     .toEqual([]);
   const report = await readout(page);
   await test.info().attach('desk-latency', { body: JSON.stringify(report, null, 2), contentType: 'application/json' });
+  // Also in the run's log, which the gate keeps when the report is not uploaded (the list reporter writes no files).
+  console.log(`[desk latency e2e] ${JSON.stringify(report.paths)}`);
   expect(report.on).toBe(true);
   // Bounded only where both ends are on this host's clocks: the browser's, or the double's stamp on what it logs.
-  const bounded: LatencyPath[] = ['view.snapshot', 'view.drawn', 'view.first-rows', 'owner.ack', 'owner.delivered', 'owner.row', 'session.message', 'request.drawn'];
+  const bounded: LatencyPath[] = ['view.snapshot', 'view.drawn', 'view.first-rows', 'stream.chunk', 'owner.ack', 'owner.delivered', 'owner.row', 'session.message', 'request.drawn'];
   for (const path of bounded) expect(report.paths[path]!.p95, `${path}'s p95`).toBeLessThan(5000);
 });
