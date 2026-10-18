@@ -500,6 +500,17 @@ describe('DirectCalls: the source and the credential at the actual write', () =>
     expect(pool.acquires.at(-1)!.credential).toEqual(credential(2));
   });
 
+  it.each(['epoch', 'global'] as const)('%s withdrawal still drops a generic call’s untaken result', async (scope) => {
+    const { start } = await granted();
+    const credential = { connectionId: nextId(), credentialEpoch: 1, accessToken: TOKEN };
+    const { operationId } = calls.start(start({ credential }));
+    await vi.waitFor(() => expect(completed).toContain(operationId));
+    expect(fences()).toBe(1);
+    expect(scope === 'epoch' ? calls.withdraw(credential.connectionId, credential.credentialEpoch) : calls.withdraw()).toBe(1);
+    expect(calls.take(operationId)).toBeNull();
+    expect(fences()).toBe(0);
+  });
+
   it('withdrawing all direct work ends every operation and invalidates every connection', async () => {
     const grant = await granted();
     pool.startup = deferred();
@@ -631,6 +642,7 @@ describe('DirectCalls: lifetimes', () => {
 // E3c: direct results stay in the host under the shared dataset sink.
 describe('DirectCalls with a dataset sink', () => {
   let dashboards: ReturnType<typeof registerDashboards>;
+  let clock: ManualClock;
   let requests: DatasetRefreshRequests;
   let beforePublish: (() => Promise<void> | void) | undefined;
   let published: boolean;
@@ -641,13 +653,14 @@ describe('DirectCalls with a dataset sink', () => {
   const live = () => readDataset(documents.service.live(artifactId), 'live');
   beforeEach(async () => {
     dashboards = registerDashboards({ documents });
+    clock = new ManualClock();
     requests = new DatasetRefreshRequests({ announce: (id) => { requestId = id; }, hasClient: () => true });
     beforePublish = undefined;
     published = false;
     onAdmission = undefined;
     const sink = connectorDatasetSink({ store: () => documents.store, requests });
     await calls.close();
-    calls = build({ datasets: { admit: async (start, cancel) => {
+    calls = build({ clock, datasets: { admit: async (start, cancel) => {
       const admission = await sink.admit(start, cancel);
       if (!('publish' in admission)) return admission;
       return { publish: async (raw, guard, admitted) => {
@@ -699,7 +712,7 @@ describe('DirectCalls with a dataset sink', () => {
     expect(await answer).toMatchObject({ kind: 'published' });
   });
 
-  it.each(['revoke', 'cancel', 'credential', 'source'] as const)('publishes nothing when %s changes between take and commit', async (change) => {
+  it.each(['revoke', 'cancel', 'credential', 'directClose', 'source'] as const)('publishes nothing when %s changes between take and commit', async (change) => {
     const { start } = await granted();
     const credential = { connectionId: nextId(), credentialEpoch: 1, accessToken: TOKEN };
     const input = start({ dataset: { id: 'live' }, credential });
@@ -707,6 +720,7 @@ describe('DirectCalls with a dataset sink', () => {
       if (change === 'revoke') await documents.store.revokeConnectorTool(artifactId, query);
       if (change === 'cancel') calls.cancel(input.operationId);
       if (change === 'credential') calls.withdraw(credential.connectionId, credential.credentialEpoch);
+      if (change === 'directClose') calls.withdraw();
       if (change === 'source') observed(launch('app-2', 'L2'), report(toy(['other.mjs'])));
     };
     calls.start(input);
@@ -715,6 +729,10 @@ describe('DirectCalls with a dataset sink', () => {
     await vi.waitFor(() => expect(published).toBe(true));
     expect(live()).toEqual(prior);
     expect(documents.store.listAssets(artifactId)).toEqual([]);
+    if (change === 'credential' || change === 'directClose') {
+      expect(take(input.operationId)).toEqual({ outcome: null });
+      expect(fences()).toBe(0);
+    }
   });
 
   it('preserves the durable end once publication admission owns cancellation', async () => {
@@ -725,6 +743,97 @@ describe('DirectCalls with a dataset sink', () => {
     expect(await publish(id)).toMatchObject({ dataset: { status: 'dataset', rows: 1 } });
     expect(cancelled).toBe(false);
     expect(live()).toMatchObject({ rows: 1 });
+  });
+
+  describe.each(['epoch', 'global'] as const)('%s credential withdrawal', (scope) => {
+    const withdraw = (credential: NonNullable<DirectStartInput['credential']>) =>
+      scope === 'epoch' ? calls.withdraw(credential.connectionId, credential.credentialEpoch) : calls.withdraw();
+
+    it.each([
+      ['admission', 'rows'], ['admission', 'error'], ['admission', 'rollback'],
+      ['end', 'rows'], ['end', 'error'], ['end', 'rollback'],
+    ] as const)('keeps the %s-owned %s publication until its terminal result is taken', async (when, result) => {
+      const { start } = await granted();
+      const credential = { connectionId: nextId(), credentialEpoch: 1, accessToken: TOKEN };
+      if (result === 'error') pool.result = { content: [], structuredContent: { other: 107 }, isError: false };
+      if (result === 'rollback') {
+        const write = documents.store.writeWithAssets.bind(documents.store);
+        vi.spyOn(documents.store, 'writeWithAssets').mockImplementationOnce((id, actor, assets, edit, options) =>
+          write(id, actor, assets, edit, { ...options, afterWrite: () => { throw new Error('injected write failure'); } }));
+      }
+      const id = calls.start(start({ dataset: { id: 'live' }, credential })).operationId;
+      let ended: number | undefined;
+      if (when === 'admission') onAdmission = () => { ended = withdraw(credential); };
+      await announced(id, 1);
+      expect(take(id)).toEqual({ outcome: null, dataset: { status: 'publishing', operationId: id } });
+      await vi.waitFor(() => expect(published).toBe(true));
+      if (when === 'end') {
+        await announced(id, 2);
+        ended = withdraw(credential);
+      }
+      expect(ended).toBe(0);
+      // The connection loses write authority even though the host still owns the publication's terminal result.
+      expect(pool.acquires.at(-1)!.fence()).toBe(false);
+      const key = { cwd: project, sourceId: '', generation: 1, server: 'usertoy', entryDigest: '', connectionId: credential.connectionId, credentialEpoch: 1 };
+      expect(pool.invalidations.at(-1)!(key)).toBe(true);
+      expect(pool.invalidations.at(-1)!({ ...key, credentialEpoch: 2 })).toBe(scope === 'global');
+      expect(fences()).toBe(1);
+      await announced(id, 2);
+      const end = take(id);
+      if (result === 'rows') {
+        expect(end).toEqual({ outcome: null, dataset: { status: 'dataset', artifactId, id: 'live', revision: documents.store.revision(artifactId), columns: [{ name: 'v', type: 'number' }], rows: 1 } });
+        expect(live()).toMatchObject({ rows: 1, state: { status: 'ok' } });
+        expect(documents.store.listAssets(artifactId)).toHaveLength(1);
+      } else if (result === 'error') {
+        expect(end).toEqual({ outcome: null, dataset: { status: 'failed', reason: 'validation' } });
+        expect(live()).toMatchObject({ state: { status: 'error' }, source: { snapshot: null } });
+        expect(documents.store.listAssets(artifactId)).toEqual([]);
+      } else {
+        expect(end).toEqual({ outcome: { kind: 'call', outcome: { ok: false, failure: 'failed', reason: 'store' } } });
+        expect(live()).toEqual(prior);
+        expect(documents.store.listAssets(artifactId)).toEqual([]);
+      }
+      expect(take(id)).toEqual({ outcome: null });
+      expect(fences()).toBe(0);
+      const late = calls.start(start({ credential })).operationId;
+      expect(await callOutcome(late)).toEqual({ ok: false, failure: 'unavailable', reason: 'credential' });
+      expect(toolCalls()).toHaveLength(1);
+      const fresh = calls.start(start({ credential: { ...credential, credentialEpoch: 2 } })).operationId;
+      expect(await callOutcome(fresh)).toMatchObject({ ok: true });
+    });
+
+    it('does not extend the retention of a durable publication when credentials are withdrawn', async () => {
+      const { start } = await granted();
+      const credential = { connectionId: nextId(), credentialEpoch: 1, accessToken: TOKEN };
+      const id = calls.start(start({ dataset: { id: 'live' }, credential })).operationId;
+      await announced(id, 1);
+      expect(take(id)).toMatchObject({ dataset: { status: 'publishing' } });
+      await announced(id, 2);
+      clock.advance(DIRECT_RESULT_TTL_MS - 1);
+      expect(withdraw(credential)).toBe(0);
+      expect(fences()).toBe(1);
+      clock.advance(1);
+      expect(take(id)).toEqual({ outcome: null });
+      expect(fences()).toBe(0);
+      expect(live()).toMatchObject({ rows: 1, state: { status: 'ok' } });
+    });
+  });
+
+  it.each(['admission', 'end'] as const)('main-client loss still drops an %s-owned dataset publication', async (when) => {
+    const { start } = await granted();
+    const id = calls.start(start({ dataset: { id: 'live' } })).operationId;
+    if (when === 'admission') onAdmission = () => { void calls.close(); };
+    await announced(id, 1);
+    expect(take(id)).toMatchObject({ dataset: { status: 'publishing' } });
+    await vi.waitFor(() => expect(published).toBe(true));
+    if (when === 'end') {
+      await announced(id, 2);
+      await calls.close();
+    }
+    await tick();
+    expect(take(id)).toEqual({ outcome: null });
+    expect(fences()).toBe(0);
+    expect(completed.filter((one) => one === id)).toHaveLength(when === 'admission' ? 1 : 2);
   });
 
   it('refuses mismatched queries and non-read dataset calls before opening a connection', async () => {

@@ -20,7 +20,8 @@
 // - Decision Log 91, as route E: the fence is held past the call until the operation is taken, cancelled, expired or
 //   dropped with main; a revoke, delete or replacing grant while the outcome waits turns it into the revoke's refusal.
 // - `withdraw` (main's `connectors.directClose`) sets an epoch floor for a credential's connection before it answers:
-//   its operations end unannounced, its connections close, and a later start at or below the floor is refused.
+//   a dataset publication admitted into the store keeps its terminal ownership until taken or expired; other
+//   operations end unannounced. Its connections close, and a later start at or below the floor is refused.
 // - `close` (main gone): every operation and outcome goes synchronously, the credential floors with the attachment, and
 //   every connection is invalidated (its processes' end follows within the pool's bound); `shutdown` also awaits that.
 // - P3-HD M3b (Decision Log 15, 18 and 21): a resolution naming a tool ranks main's directories by the artifact's
@@ -106,7 +107,7 @@ interface Operation {
   outcome?: DirectOperationOutcome;
   sink?: true; // E3c: dataset terminal ownership follows route E
   dataset?: DatasetPhase;
-  committing?: boolean;
+  publicationAdmitted?: true; // the savepoint owns its end, including rollback; retained until take or expiry
   cancelled?: true;
   stop?: 'timeout'; // why its signal aborted, when it was not withdrawn
   revoked?: boolean; // its fence broke: a revoke, delete or replacing grant asked for while it ran or its outcome waited
@@ -211,13 +212,11 @@ export class DirectCalls {
       phase.publishing = true;
       this.clock.clearTimeout(operation.expiry);
       void phase.publish!().then((end) => {
-        delete operation.committing;
         if ('ok' in end) return this.finish(operation, end);
         if (this.operations.get(operation.id) !== operation || operation.cancelled) return;
         phase.take = end;
         this.announce(operation);
       }, () => {
-        delete operation.committing;
         this.finish(operation, failed('store'));
       });
     }
@@ -229,7 +228,7 @@ export class DirectCalls {
     const operation = this.operations.get(operationId);
     if (!operation) return false;
     if (operation.sink && operation.outcome === undefined) {
-      if (operation.committing || operation.dataset?.take) return false;
+      if (operation.publicationAdmitted || operation.dataset?.take) return false;
       operation.cancelled = true;
       operation.controller.abort();
       this.clock.clearTimeout(operation.deadline);
@@ -243,13 +242,19 @@ export class DirectCalls {
   }
 
   // `connectors.directClose`. With `connectionId`: its epoch `credentialEpoch` (absent: every epoch seen) and every
-  // earlier one withdrawn for good; otherwise all direct work. Synchronous: when this returns, no withdrawn operation
-  // remains and no connection under a withdrawn credential admits another write; their processes end after.
+  // earlier one withdrawn for good; otherwise all direct work. Synchronous: when this returns, no connection under a
+  // withdrawn credential admits another write; their processes end after. Admitted dataset publications keep their
+  // end until taken or expired; other withdrawn operations end unannounced.
   withdraw(connectionId?: string, credentialEpoch?: number): number {
     if (connectionId === undefined) {
       for (const [id, seen] of this.epochs) this.floors.set(id, Math.max(this.floors.get(id) ?? -1, seen));
       this.hints.clear(); // P3-HD M3b
-      const ended = this.endAll();
+      let ended = 0;
+      for (const operation of [...this.operations.values()]) {
+        if (operation.publicationAdmitted) continue;
+        this.end(operation);
+        ended += 1;
+      }
       void this.options.pool.invalidate(() => true);
       return ended;
     }
@@ -258,7 +263,7 @@ export class DirectCalls {
     this.hints.withdraw(connectionId, floor); // P3-HD M3b
     let ended = 0;
     for (const operation of [...this.operations.values()]) {
-      if (operation.credential?.connectionId !== connectionId || operation.credential.credentialEpoch > floor) continue;
+      if (operation.credential?.connectionId !== connectionId || operation.credential.credentialEpoch > floor || operation.publicationAdmitted) continue;
       this.end(operation);
       ended += 1;
     }
@@ -511,7 +516,7 @@ export class DirectCalls {
         const publication = await publishing.publish(raw, () => {
           const failure = check();
           return failure === null ? 'held' : failure.failure === 'refused' ? 'revoked' : 'cancelled';
-        }, () => (operation.committing = true));
+        }, () => (operation.publicationAdmitted = true));
         return takeOf(publication);
       } };
     } finally {
