@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 99,
-    "defer:pending": 24,
+    "defer:committed": 100,
+    "defer:pending": 23,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1343,7 +1343,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L163; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
       "remainingClause": "Re-check at the re-pin; a public hook upstream. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L163; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "b492ab2bab18dc5f2001258137d8a516f3a05060"
     },
     {
       "line": 164,
@@ -1353,8 +1353,8 @@
       "triageReason": "Existing measured mitigation/bound stands; a new performance architecture or proposal signal needs its own pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L164; parent Decision Log 106): Existing measured mitigation/bound stands; a new performance architecture or proposal signal needs its own pass. Owner: P4.",
       "remainingClause": "A host-side signal of which structs are real proposals. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L164; parent Decision Log 106): Existing measured mitigation/bound stands; a new performance architecture or proposal signal needs its own pass. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 167,
