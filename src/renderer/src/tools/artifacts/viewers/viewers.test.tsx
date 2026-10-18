@@ -449,7 +449,9 @@ describe('the File viewer', () => {
     names = { 9: 'budget.csv' };
     const { onShown } = mount('file');
     await waitFor(() => expect(document.querySelector('[data-file-viewer]')?.getAttribute('data-path')).toBe('/store/9/budget.csv'));
-    expect(main.callsOf('files.read')[0]).toMatchObject({ appSessionId: P, path: '/store/9/budget.csv' });
+    // the viewer draws its path at once; the store reads only once the session's watch is ready (viewer-store.ts's
+    // watch-then-read), so the read is awaited as its own event rather than assumed done with the first render
+    await waitFor(() => expect(main.callsOf('files.read')[0]).toMatchObject({ appSessionId: P, path: '/store/9/budget.csv' }));
     await waitFor(() => expect(onShown).toHaveBeenCalled());
   });
 

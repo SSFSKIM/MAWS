@@ -17,7 +17,7 @@ const DESIGN_SPECS = ['design.spec.ts', 'design-comments.spec.ts', 'design-histo
 
 const argvOf = (script: string) => [...RUNNER, ...playwrightArgs(script)!];
 const casesOf = (files: readonly { file: string; tests: number }[]) => files.flatMap(({ file, tests }) => Array.from({ length: tests }, (_, k) => ({ file, title: `case ${k}`, outcome: 'expected' })));
-const run = (script: string, over: Partial<InvocationSummary> = {}, files = DESIGN_SPECS.map((file) => ({ file, tests: 2 }))): InvocationSummary => ({
+const run = (script: string, over: Partial<InvocationSummary> = {}, files: readonly { file: string; tests: number }[] = DESIGN_SPECS.map((file) => ({ file, tests: 2 }))): InvocationSummary => ({
   status: 'passed',
   argv: argvOf(script),
   config: { grep: /.*/, grepInvert: null, shard: null, forbidOnly: true },
