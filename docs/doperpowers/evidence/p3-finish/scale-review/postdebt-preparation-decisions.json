@@ -1,0 +1,32 @@
+{
+  "assign": {
+    "e2e/sessions.spec.ts": "design-proof",
+    "e2e/support/deck-history.ts": "editor-proof",
+    "e2e/support/packaged-resolution.ts": "composition",
+    "src/engine-host/documents/loop-delay.test.ts": "store-versions",
+    "src/engine-host/documents/loop-delay.ts": "store-versions",
+    "test/snapshots/transcript/events/agents-relay.rows.json": "shell",
+    "test/snapshots/transcript/pass3/relay-to-child.rows.json": "shell",
+    "test/snapshots/transcript/transcript/agents-and-messages.rows.json": "shell",
+    "test/support/deck-history.test.ts": "editor-proof",
+    "test/support/packaged-resolution.test.ts": "composition"
+  },
+  "move": {},
+  "drop": [],
+  "note": {
+    "status": "Read-only pinned-source update preparation; not final post-debt acceptance or final review pairs",
+    "sourceHead": "fdfe73c312347e957e4019da0bfb4fc99a49e451",
+    "rangeBase": "5ad08789cc0f4e564091cdb2f5224026304fb889",
+    "helperSha256": "b6019ca8e191dfe9460ef0b23d2df2408c17611c974be187cda9f663917b4abc",
+    "rationale": {
+      "design-proof": "Session fork readiness correction belongs with the existing shell/supervisor acceptance cases; 8 changed lines, xhigh proof tier.",
+      "editor-proof": "Keep the heavy deck generation/check helper and its unit test with presentations-scale.spec.ts and presentations-history.spec.ts, whose scale/history inputs they validate; 234 changed lines, xhigh proof tier.",
+      "composition": "Keep packaged resolution and its regression together under dependency/bundle truthfulness and host launch integration; 311 changed lines, max tier.",
+      "store-versions": "Keep the host document loop-delay sampler and its unit test with the existing document-host/store measurement seam; 182 changed lines, max tier.",
+      "shell": "The three snapshot paths cover L260 renderer recipient-name formatting, not wire fixtures; put them with transcript derivation and fixtures.test.ts. Only paths, numstat and commit rationale were inspected, not snapshot contents; 10 changed lines, xhigh tier."
+    },
+    "moves": "None needed at this pin: adding loop-delay puts store-versions at 14948/15000, not over the ceiling. Preserve pair4's contingent-spill rule (spill only on actual overflow). The 598-line connector-grants.test.ts remains in store-versions; connectors-host is its documented same-max-tier destination if a later committed audit breaches the ceiling.",
+    "drops": "None: the baseline helper audit reported no obsolete assignment; pair1's five earlier removals remain effective.",
+    "preserved": "20 areas, 14 tier-1 max and 6 tier-2 xhigh; 15000 added-plus-deleted line ceiling; unchanged rule-based exclusions."
+  }
+}

@@ -78,5 +78,18 @@
     "mode": "explicit NON-FINAL pair4 manifest override",
     "result": "Prior controller tool result: all20 existing clones reusable, exact preliminary tuples recognized; no mutation. No durable preflight.json exists in the audit directory; do not cite it as a receipt.",
     "remaining": "current post-debt audit/preflight and actual final pair build"
+  },
+  "postdebtPreparation": {
+    "source": "fdfe73c312347e957e4019da0bfb4fc99a49e451",
+    "status": "pinned interim preparation only; not final acceptance or pairs, later source changed",
+    "decisions": "postdebt-preparation-decisions.json",
+    "audit": "postdebt-preparation-audit.json",
+    "verifiedHashes": [
+      "50ab8ce4e6efe6fa91a8f58baf98506e461942a2fc92fde5951105992cc24a76",
+      "ead3d81071b40a614130ca95c8a8857626b1ae675346700d67bbf6e2e306d5aa"
+    ],
+    "result": "10new assignments,0moves/drops;2877changed=1608assigned+1269excluded;236159assigned lines;20areas14max/6xhigh, all<=15000; no missing/overlap/obsolete",
+    "caps": "store-versions14948,editor-proof14561,slide-model14416; contingent same-tier spill only on actual overflow",
+    "needed": "rerun actual audit and all-clone preflight on eventual post-debt source, then build; MainArea test cleanup pending"
   }
 }
