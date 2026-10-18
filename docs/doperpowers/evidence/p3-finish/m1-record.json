@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 117,
-    "defer:pending": 6,
+    "defer:committed": 118,
+    "defer:pending": 5,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1541,7 +1541,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L243; parent Decision Log 106): Needs an engine-effective fact/probe absent from the current attested interface; each engine bump owns revalidation. Owner: each engine bump.",
       "remainingClause": "Closes when an attestation or probe seam of the engine's effective environment exists (parity coverage including the SDK-minimal keys), without settings re-resolution in product code and without credential-name heuristics; then referenced entries are admitted under the Decision Log 98 rule. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L243; parent Decision Log 106): Needs an engine-effective fact/probe absent from the current attested interface; each engine bump owns revalidation. Owner: each engine bump.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "d4f255a52f8d0e6dcd88c5d7e585a0592dcd898c"
     },
     {
       "line": 248,
@@ -1551,8 +1551,8 @@
       "triageReason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L248; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "Closes when the comparison uses the raw KB value and rounds only for the report. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L248; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 250,
