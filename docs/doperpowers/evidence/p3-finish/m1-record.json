@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 121,
-    "defer:pending": 2,
+    "defer:committed": 122,
+    "defer:pending": 1,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1585,7 +1585,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L254; parent Decision Log 106): Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely. Owner: P4.",
       "remainingClause": "Closes when one spawn carries the lifeline (the server started by the lifeline process itself, or an equivalent single spawn) with a hard-death test across the startup window; no native guardian or packaging change. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L254; parent Decision Log 106): Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "db25158283f1e126ceb42afafe1aecc7b3751234"
     },
     {
       "line": 263,
@@ -1595,8 +1595,8 @@
       "triageReason": "Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L263; parent Decision Log 106): Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here. Owner: the gate lane.",
       "remainingClause": "The cases join a gated group (a `voice` group or `default`'s own list) with their cost measured, or are recorded as developer-only with the reason beside them. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L263; parent Decision Log 106): Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here. Owner: the gate lane.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 272,
