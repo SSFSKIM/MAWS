@@ -1168,7 +1168,7 @@ function inboundRow(event: Event<'peer.message'>, turnId: TurnId): RowOf<'agent_
 }
 
 // A SendMessage call: to `main` or `parent` a child's report up (`from_child`), to an agent this transcript knows the
-// parent's message down (`to_child`, its text as before), to anything else a message to another session (`between`:
+// parent's message down (`to_child`, the agent named by its ref, P3-F L260), to anything else a message to another session (`between`:
 // a peer's name or address, a teammate), refined by its result; one whose turn closed with none was never answered (E11).
 function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, known: KnownAgents[], context: TurnContext): RowOf<'agent_message'> {
   const input = record(use.input);
@@ -1177,7 +1177,7 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
   const base = { id: rowId.agentMessage(use.id), turnId, at: use.at, kind: 'agent_message' as const, from: null };
   if (to === 'parent' || to === 'main') return { ...base, direction: 'from_child', to: null, text: agentMessageCopy('from_child', to, message) };
   const agent = to === '' ? null : agentNamed(known, to);
-  if (agent !== null || to === '') return { ...base, direction: 'to_child', to: agent, text: agentMessageCopy('to_child', to || null, message) };
+  if (agent !== null || to === '') return { ...base, direction: 'to_child', to: agent, text: agentMessageCopy('to_child', agent?.name ?? (to || null), message) };
   const outcome = result === undefined ? null : sendMessageOutcome(result);
   const preview = previewOf(message);
   const name = peerNamed(known, to);

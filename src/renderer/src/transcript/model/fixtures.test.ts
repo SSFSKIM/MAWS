@@ -129,7 +129,7 @@ describe('synthetic journals', () => {
     expect(subagents).toHaveLength(1);
     expect(subagents[0].agents.map((a) => [a.taskId, a.name, a.agentId])).toEqual([['ad1synthagent0001', 'Survey src for TODOs', 'ad1synthagent0001'], ['ad2synthagent0002', 'List the tests', 'ad2synthagent0002']]);
     expect(subagents[0]).toMatchObject({ status: 'finished', sentence: 'Survey src for TODOs and List the tests finished' });
-    expect(ofKind(rows, 'agent_message')[0]).toMatchObject({ direction: 'to_child', text: 'Sent message to ad1synthagent0001: Skip node_modules entirely.' });
+    expect(ofKind(rows, 'agent_message')[0]).toMatchObject({ direction: 'to_child', text: 'Sent message to Survey src for TODOs: Skip node_modules entirely.' }); // P3-F L260: by the ref's name
     expect(cellsOf(rows).some((c) => c.toolName === 'Agent' || c.toolName === 'Grep')).toBe(false); // the child's Grep is never a parent cell
     expect(state.turns.get(state.order[0])!.children.get('toolu_synth_agent_1' as never)?.length).toBeGreaterThan(0);
     expect(ofKind(rows, 'user')).toHaveLength(1);
