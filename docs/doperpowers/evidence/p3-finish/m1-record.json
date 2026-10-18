@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 55,
-    "defer:pending": 68,
+    "defer:committed": 56,
+    "defer:pending": 67,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -859,7 +859,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L91; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Such a launch stays unlisted until its inheritance is resolved (A's executor's proposal), or the waiting list survives a restart; with a test that a reload launch after a restart inherits the older launch's diagnostics until its own init. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L115): rare (a supervisor restart between two cut recovery passes); the next init replaces the diagnostics. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L91; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "453e267b391f61d0eef33eba08cf02b0ca58459f"
     },
     {
       "line": 92,
@@ -869,8 +869,8 @@
       "triageReason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L92; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "The seam takes the card's abort signal (or claim) through acquisition and the write, so a Cancel during either step sends nothing and a stale status cannot re-acquire; pinned by a test that races Cancel against the write. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L119): a few-millisecond window; the card side effects already check the card. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L92; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 93,
