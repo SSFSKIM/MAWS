@@ -91,22 +91,71 @@ export interface ProbeLaunchInputs {
   args: readonly string[];
 }
 
+// Where a path-valued launch input leads. The engine may join it lexically (`..` taken before any link) while the OS
+// resolves it physically (a link followed before `..`), so both readings are kept; a relative value is taken from
+// `base`. A physical reading that fails for any reason but absence throws, refusing the launch. The native realpath is
+// the OS's; Node's JS realpath resolves `..` lexically before it follows any link.
+function originsOf(value: string, base: string): string[] {
+  const raw = isAbsolute(value) ? value : `${base}/${value}`;
+  const origins = [resolvePath(raw)];
+  try {
+    origins.push(realpathSync.native(raw));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error;
+  }
+  return [...new Set(origins)];
+}
+
 // The files an engine launched so could read servers or settings from (P3-F L256): the config file and settings of each
 // home its environment names (CLAUDE_CONFIG_DIR, HOME), the legacy file, and the project files of every directory from
-// the cwd up to the root.
+// the cwd up to the root, each path read both lexically and physically. A cwd that does not resolve refuses the launch.
 export function launchConfigurationFiles(inputs: ProbeLaunchInputs): string[] {
-  const { CLAUDE_CONFIG_DIR: configDir, HOME: home } = inputs.env;
-  const homes = [configDir, home].filter((dir): dir is string => dir !== undefined && isAbsolute(dir));
-  const configDirs = [configDir, home === undefined ? undefined : join(home, '.claude')].filter((dir): dir is string => dir !== undefined && isAbsolute(dir));
+  const cwd = realpathSync.native(inputs.cwd); // the directory the spawn runs in; relative inputs are taken from it
+  const { CLAUDE_CONFIG_DIR: configDir, HOME: home, PWD: pwd } = inputs.env;
+  const homes = [configDir, home].flatMap((dir) => (dir === undefined ? [] : originsOf(dir, cwd)));
+  const configDirs = [configDir, home === undefined ? undefined : `${home}/.claude`].flatMap((dir) => (dir === undefined ? [] : originsOf(dir, cwd)));
   const files = [
     ...homes.flatMap((dir) => [join(dir, '.claude.json'), join(dir, '.claude-custom-oauth.json')]),
     ...configDirs.flatMap((dir) => [join(dir, 'settings.json'), join(dir, 'settings.local.json'), join(dir, '.config.json')]),
   ];
-  for (let dir = resolvePath(inputs.cwd); ; dir = dirname(dir)) {
-    files.push(join(dir, '.mcp.json'), join(dir, '.claude', 'settings.json'), join(dir, '.claude', 'settings.local.json'));
-    if (dir === dirname(dir)) break;
+  const projects = [cwd, ...originsOf(inputs.cwd, process.cwd()), ...(pwd === undefined ? [] : originsOf(pwd, cwd))];
+  for (const start of projects) {
+    for (let dir = start; ; dir = dirname(dir)) {
+      files.push(join(dir, '.mcp.json'), join(dir, '.claude', 'settings.json'), join(dir, '.claude', 'settings.local.json'));
+      if (dir === dirname(dir)) break;
+    }
   }
   return [...new Set(files)];
+}
+
+// The flags whose values may each be inline JSON or a file to read (`--mcp-config` takes several).
+const CONFIGURATION_FLAGS = new Set(['--mcp-config', '--settings']);
+
+// The configuration files the arguments name instead of inline JSON; one that exists at none of its origins throws.
+function argumentFiles(inputs: ProbeLaunchInputs, cwd: string): string[] {
+  const files: string[] = [];
+  let flag: string | null = null;
+  for (const arg of inputs.args) {
+    if (arg.startsWith('-')) {
+      flag = CONFIGURATION_FLAGS.has(arg) ? arg : null;
+      continue;
+    }
+    if (flag === null || isJson(arg)) continue;
+    const found = originsOf(arg, cwd).filter((path) => existsSync(path));
+    if (found.length === 0) throw new Error(`the probe launch's ${flag} names ${arg}, which cannot be read`);
+    files.push(...found);
+  }
+  return files;
+}
+
+function isJson(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Every string a JSON text holds (keys and values, escapes resolved), or the text itself when it is not JSON.
@@ -132,14 +181,23 @@ function stringsOf(text: string): string[] {
   return found;
 }
 
-// The first of `ports` the launch could reach, or null. Matched by the port number alone, so that no spelling of the
-// loopback host (localhost, [::1], 127.1, a zero-padded port) and no value split across a configuration reference and
-// the environment escapes it. A file that exists but cannot be read throws, refusing the launch.
-export function authFixtureExposure(inputs: ProbeLaunchInputs, ports: Iterable<number>): number | null {
-  const texts = [...launchConfigurationFiles(inputs).filter((path) => existsSync(path)).flatMap((path) => stringsOf(readFileSync(path, 'utf8'))), ...Object.values(inputs.env), ...inputs.args.flatMap(stringsOf)];
-  for (const port of ports) {
+// Why the launch could reach one of `ports`, or null when it provably cannot. A fixture is matched by its port number
+// alone, so no spelling of the loopback host (localhost, [::1], 127.1, a zero-padded port) escapes. A configuration
+// reference (`${…}`) is refused outright while any fixture runs: it can compose the address from pieces no single
+// string holds, and the settings can override the environment it expands from, so its expansion is no attested fact.
+// A file that exists but cannot be read, or a cwd that does not resolve, throws, refusing the launch.
+export function authFixtureExposure(inputs: ProbeLaunchInputs, ports: Iterable<number>): string | null {
+  const wanted = [...ports];
+  if (wanted.length === 0) return null;
+  const files = [...launchConfigurationFiles(inputs), ...argumentFiles(inputs, realpathSync.native(inputs.cwd))];
+  const configuration = [...new Set(files)].filter((path) => existsSync(path)).flatMap((path) => stringsOf(readFileSync(path, 'utf8')));
+  const argumentStrings = inputs.args.flatMap(stringsOf);
+  const reference = [...configuration, ...argumentStrings].find((text) => text.includes('${'));
+  if (reference !== undefined) return `an unresolved reference in ${JSON.stringify(reference.slice(0, 120))}`;
+  const texts = [...configuration, ...argumentStrings, ...Object.values(inputs.env)];
+  for (const port of wanted) {
     const named = new RegExp(`(?<!\\d)0*${port}(?!\\d)`);
-    if (texts.some((text) => named.test(text))) return port;
+    if (texts.some((text) => named.test(text))) return `127.0.0.1:${port}`;
   }
   return null;
 }
@@ -147,8 +205,8 @@ export function authFixtureExposure(inputs: ProbeLaunchInputs, ports: Iterable<n
 // No engine may see a resource that advertises authorization, not even its 401 (P3-HD Decision Log 23): nothing the
 // launch would read (P3-F L256: its own cwd, config homes, environment and arguments) may name an auth fixture.
 export function assertNoAuthFixture(inputs: ProbeLaunchInputs): void {
-  const port = authFixtureExposure(inputs, authPorts);
-  if (port !== null) throw new Error(`a probe engine must never be configured with the auth-advertising fixture at 127.0.0.1:${port} (P3-HD Decision Log 23)`);
+  const exposure = authFixtureExposure(inputs, authPorts);
+  if (exposure !== null) throw new Error(`a probe engine must never be configured with an auth-advertising fixture: ${exposure} (P3-HD Decision Log 23)`);
 }
 
 // The PATH a probe launch hands its engine: the layout's bin first, then the runner's.
