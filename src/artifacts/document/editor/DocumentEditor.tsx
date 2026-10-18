@@ -85,7 +85,8 @@ export interface DocumentEditorProps {
   saveVersionRequest?: number;
   /**
    * What the page is drawn in: the governing design system's scope (D's `<DesignSystemScope>`); the page alone without.
-   * F (S-RESTYLE): while a version is shown, `pinned` is the system it pinned with its own overrides, to draw it in.
+   * F (S-RESTYLE): while a version is shown, `pinned` is the system it pinned with its own overrides, to draw it in; the
+   * scope alone draws them (the page declares a version's tokens itself only when it has no scope).
    */
   pageScope?: ComponentType<{ children: ReactNode; pinned?: PinnedScope }>;
   /** The page's element as it appears and goes (the shell's Mark-up surface). */
@@ -523,8 +524,11 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
     };
   }, [editor, handle, author]);
 
-  // a version is drawn with the design-system tokens it pinned (and its own overrides)
+  // a version is drawn with the design-system tokens it pinned (and its own overrides): by the page's scope when there is
+  // one (F, S-RESTYLE: the scope resolves them, a bundled family under its face's private name, which a declaration on
+  // the page would shadow), else declared on the page itself
   const tokens = preview ? (preview.tokens as CSSProperties) : undefined;
+  const declared = Scope ? undefined : tokens;
   const page = useRef<HTMLDivElement>(null);
   const ground = usePageGround(page, tokens);
   useLayoutEffect(() => {
@@ -532,7 +536,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
     return () => onPage?.(null);
   }, [onPage]);
   const sheet = (
-    <div ref={page} className="ds-doc" style={tokens} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments ? moved : undefined}>
+    <div ref={page} className="ds-doc" style={declared} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments ? moved : undefined}>
       <div className="ds-doc-page">
         <div className="doc-live" hidden={previewEditor !== null}>
           <EditorContent editor={live} />

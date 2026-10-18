@@ -12,8 +12,14 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { applyEdit } from '../../patch-writer';
 import { schemaFor } from '../../schema';
 import { addTab, createDocument, deleteTab, renameTab, tabBody } from '../../tabs';
-import { isBindingTransaction } from '../../../yjs';
+import { isBindingTransaction, newDoc, stateV2 } from '../../../yjs';
 import { ynodeToPmnode } from '../../../yjs/prosemirror';
+import { DesignSystemHostContext, DesignSystemScope } from '../../../design-system/apply';
+import complete from '../../../design-system/fixtures/complete.tokens.json';
+import { writeSystem } from '../../../design-system/model';
+import { parseTokens, serializeTokens } from '../../../design-system/tokens';
+import type { ArtifactHost } from '../../../host';
+import { setDsOverrides } from '../../meta';
 import { DocumentEditor } from '../DocumentEditor';
 import type { DocumentHandle } from '../host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
@@ -343,6 +349,65 @@ describe('the preview', () => {
     await until(() => scopeKey() === 'live', 'the live system');
     // only the scope changed: the live editor is the one mounted before the preview
     expect(document.querySelector('.ProseMirror:not([data-editor="preview"])')).toBe(liveEditor);
+  });
+
+  // F's S-RESTYLE review: with D's own scope around the page, the scope alone draws a version in the system it pinned, so
+  // a version override naming the system's bundled family reaches the page under the face's private name, its face
+  // loaded from the pinned revision's asset; the page itself declares none of the version's tokens (an inline one would
+  // shadow the scope's aliased value with the bare family name, which no face declares).
+  it('lets D’s scope draw a version’s bundled-family override, with its pinned face, declaring nothing on the page', async () => {
+    const system = '00000000-0000-4000-8000-0000000000d6';
+    const pinnedSeq = 7;
+    const systemDoc = newDoc();
+    writeSystem(
+      systemDoc,
+      {
+        'tokens.tokens.json': serializeTokens(parseTokens(complete).tokens!),
+        'components/document.css': '@font-face { font-family: "Iowan Old Style"; font-weight: 400; src: url("assets/iowan.woff2") format("woff2"); }\n',
+      },
+      { route: 'derived', at: Date.UTC(2026, 9, 13) },
+      { name: 'Harbor' },
+    );
+    const pinnedState = stateV2(systemDoc);
+    systemDoc.destroy();
+    const systems = {
+      versionState: async (id: string, at: number | { seq: number }) => {
+        if (id !== system || typeof at === 'number' || at.seq !== pinnedSeq) throw new Error(`no state of ${id}`);
+        return pinnedState;
+      },
+      assetUrl: (id: string, ref: string, revision?: number) => `https://assets.example/${id}/${revision ?? 'live'}/${ref}`,
+    } as unknown as ArtifactHost;
+    const SystemScope = ({ children, pinned }: { children: ReactNode; pinned?: { system: { id: string; versionSeq: number } | { builtin: 'maws' }; overrides: Record<`--ds-${string}`, string> } }) => (
+      <DesignSystemScope system={pinned?.system ?? { builtin: 'maws' }} medium="document" overrides={pinned?.overrides} className="doc-page-system">
+        {children}
+      </DesignSystemScope>
+    );
+    const BODY = '"Iowan Old Style", serif';
+    await setup(
+      async ({ history: h, agentWrites }) => {
+        await agentWrites((agent) => setDsOverrides(agent.doc, { '--ds-font-body': BODY }));
+        h.version('named', HUMAN, { label: 'Old look', designSystemRef: { id: system, versionSeq: pinnedSeq } });
+      },
+      {},
+      (node) => <DesignSystemHostContext.Provider value={systems}>{node}</DesignSystemHostContext.Provider>,
+      SystemScope,
+    );
+    const page = () => document.querySelector<HTMLElement>('.ds-doc')!;
+    const scopeCss = () => {
+      const scope = page().closest<HTMLElement>('[data-ds-scope]')?.dataset.dsScope;
+      return (scope && document.head.querySelector(`style[data-ds-scope-style="${scope}"]`)?.textContent) || '';
+    };
+    await openHistory();
+    click(row('Old look'));
+    await previewing();
+    await until(() => /assets\.example\/[\w-]+\/7\/assets\/iowan\.woff2/.test(scopeCss()), 'the pinned system’s face in the scope');
+    const css = scopeCss();
+    expect(css).toContain(`assets.example/${system}/7/assets/iowan.woff2`);
+    const alias = /font-family: (ds-face-[a-z0-9]+);/.exec(css)?.[1];
+    expect(alias).toBeDefined();
+    expect(css).toContain(`--ds-font-body: ${alias}, "Iowan Old Style", serif;`);
+    expect(page().hasAttribute('data-preview')).toBe(true);
+    expect(page().getAttribute('style') ?? '').toBe('');
   });
 
   it('compares two versions picked by shift-click', async () => {
