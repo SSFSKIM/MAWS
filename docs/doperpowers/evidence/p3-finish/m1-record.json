@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 92,
-    "defer:pending": 31,
+    "defer:committed": 93,
+    "defer:pending": 30,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1266,7 +1266,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L152; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
       "remainingClause": "A disambiguating marker on singleton lists. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L152; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "22dc78dac05196454f46e8eb9915e0bc80d08356"
     },
     {
       "line": 153,
@@ -1276,8 +1276,8 @@
       "triageReason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L153; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
       "remainingClause": "Moves reconciled by block id before the drag applies. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L153; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 156,
