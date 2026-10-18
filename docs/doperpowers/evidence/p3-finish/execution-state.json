@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "DL109 calibrated document-only39169679475 active; all other paired selected groups accepted; post-debt pairs next on its result",
+  "phase": "M1 selected-group wave gates accepted; post-debt partition audit/preflight/build and20-pair hand-up next; M3 reviews, final freeze/hand-back and owner sitting remain",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -1153,7 +1153,7 @@
   "documentCalibration": {
     "parent": "843275754ae6e2058963f8c41c531c76cad6bf64",
     "merge": "a8ff60d21c5ddea153ad1c079fe0663d4f2eb35e",
-    "status": "reviewed correct,document-only quiet gate39169679475 running",
+    "status": "reviewed and green39169679475; source/wave acceptance complete, final frozen-source gates remain",
     "quietRelay": {
       "quietSince": "2026-10-18T21:27:56Z",
       "reportedLoads": [
@@ -1178,7 +1178,7 @@
     "wrapperHead": "6fa1502ed09d166bcd2dd22255b610de2c6a26a6",
     "createdAt": "2026-10-18T21:51:35Z",
     "statusAtIdentityRead": "in_progress",
-    "conclusion": null,
+    "conclusion": "success",
     "groups": [
       "e2e:document-scale"
     ],
@@ -1200,6 +1200,52 @@
     },
     "review": "a18977fda743d3513 correct/no material findings on62f780871..b9bf74237, static only",
     "calibration": "parentDL109 corrected843275754, exact20/1200/600 rows only; original product targets and three P4 rows retained",
-    "remaining": "one document-only DL59 result needed; no full-set credit"
+    "remaining": "one document-only DL59 result needed; no full-set credit",
+    "status": "completed",
+    "attempt": 1,
+    "exit": 0,
+    "job": 117799999480,
+    "startedAt": "2026-10-18T21:51:53Z",
+    "completedAt": "2026-10-18T21:56:40Z",
+    "rawArtifact": "/private/tmp/p3f-doc-final.pHMXML",
+    "rawJsonSha256": "2b1c22083140d858de0a1786d3117ae94b3765ddc370dd306561ffbc4036a848",
+    "measurements": "measurements/document-calibrated-raw.json",
+    "rows": "38 total:33met/5recorded,0failed/marginal",
+    "evidenceStatusAfterGate": "empty",
+    "quietRelease": "completion sent to architect; architect coordinates flag release",
+    "finalFigures": {
+      "typingP95": 16.6,
+      "typingLoad": 2.22,
+      "previewEnters": [
+        925.1,
+        910.5,
+        877.7
+      ],
+      "previewLoads": [
+        2.09,
+        2.09,
+        2.48
+      ],
+      "rendererCollected1": 527.8,
+      "rendererCollected2": 414.7,
+      "memoryLoad": 2.48,
+      "loads": {
+        "launched": 4.22,
+        "steadyStart": 2.76,
+        "steadyEnd": 2.22
+      }
+    }
+  },
+  "pairedWaveAcceptance": {
+    "runs": [
+      39156492025,
+      39162779550,
+      39165341280,
+      39169679475
+    ],
+    "status": "all26selected groups accepted as ruled corrective union, not whole-set or frozen-S hand-back",
+    "calibration": "parentDL108/109, product targets carriedP4",
+    "heavy": "descriptor-valid preview proof, separate logical repeatability P4 carry",
+    "laterObligation": "MainArea final full-unit proof, native count clauses, source-scale review, final hand-back,paid7,owner sitting"
   }
 }
