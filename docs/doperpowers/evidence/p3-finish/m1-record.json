@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 3,
-    "defer:pending": 120,
+    "defer:committed": 4,
+    "defer:pending": 119,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -287,7 +287,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L28; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "The store is kept across hot updates (`import.meta.hot.data`), or the harness reloads on any change under `transcript/model/`. Re-deferred 2026-10-07 (E11 1.6): development only. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L27): development only (`pnpm dev:harness` hot update); no product effect. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L28; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "610cae81d631b209e22a7f5a8d93de79d11ea284"
     },
     {
       "line": 29,
@@ -297,8 +297,8 @@
       "triageReason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L29; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "A journal produces it and the rule reveals or moves the accepted turn. 2026-09-29 (debt wave 4): left open; still no recorded fixture produces it, and whether the engine can run a prompt a rewind withdrew (the rewind returns its text to the editor) decides between revealing it after the boundary and dropping its start, so the rule waits for the evidence. Re-deferred 2026-10-07 (E11 1.6): no fixture produces it. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L28): no fixture produces it; the rule waits for evidence. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L29; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 30,
