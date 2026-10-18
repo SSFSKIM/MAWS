@@ -296,7 +296,7 @@ async function openBesideSession(page: Page, title: string, lines: string[]): Pr
 // The editor element's Tiptap editor, as `durable` reads it: its document, its selection and its edits not yet acknowledged.
 type EditorRoot = HTMLElement & {
   editor?: {
-    state: { doc: { descendants(f: (node: { type: { name: string }; textContent: string }) => boolean | void): void; textBetween(from: number, to: number, separator: string): string }; selection: { from: number; to: number } };
+    state: { doc: { descendants(f: (node: { type: { name: string }; textContent: string; nodeSize: number }, pos: number) => boolean | void): void; textBetween(from: number, to: number, separator: string): string }; selection: { from: number; to: number } };
     extensionManager: { extensions: Array<{ name: string; options: { hold?: { base: { state(): { unsaved: number } } } } }> };
   };
 };
@@ -393,6 +393,8 @@ const passageAt = (text: Locator, index: number, quote: string) =>
 
 // The caret at the end of paragraph `index`. P3-D: the click lands on the paragraph's last line, since `End` ends the
 // visual line and the governing system's type (D's scope, the P3 spec's Decision Log 61) wraps a paragraph in the panel.
+// P3-F (tracker row 199, the paste): the caret is there in the editor's own selection too, which is what a paste
+// replaces; the gate's foreground run pasted over the copy's selection while the page's caret was here.
 async function caretAtEndOf(page: Page, text: Locator, index: number): Promise<void> {
   const paragraph = text.locator('p').nth(index);
   const lastLine = await paragraph.evaluate((p) => {
@@ -406,11 +408,25 @@ async function caretAtEndOf(page: Page, text: Locator, index: number): Promise<v
   await paragraph.click({ position: lastLine }); // P3-D
   await page.keyboard.press('End');
   await expect(text).toBeFocused();
-  await expect.poll(() => text.evaluate((root, at) => {
-    const selection = getSelection()!;
-    const p = root.querySelectorAll('p')[at]!;
-    return selection.isCollapsed && p.contains(selection.focusNode) && selection.focusOffset === (selection.focusNode?.textContent ?? '').length && p.textContent!.endsWith(selection.focusNode?.textContent ?? '');
-  }, index)).toBe(true);
+  await expect
+    .poll(
+      () =>
+        text.evaluate((root, at) => {
+          const selection = getSelection()!;
+          const p = root.querySelectorAll('p')[at]!;
+          const pageAtEnd = selection.isCollapsed && p.contains(selection.focusNode) && selection.focusOffset === (selection.focusNode?.textContent ?? '').length && p.textContent!.endsWith(selection.focusNode?.textContent ?? '');
+          const editor = (root as EditorRoot).editor!;
+          let end = -1;
+          let seen = -1;
+          editor.state.doc.descendants((node, pos) => {
+            if (node.type.name === 'paragraph' && ++seen === at) end = pos + node.nodeSize - 1;
+          });
+          const { from, to } = editor.state.selection;
+          return { page: pageAtEnd, editor: from === to && from === end };
+        }, index),
+      { message: 'the caret at the paragraph’s end, on the page and in the editor' },
+    )
+    .toEqual({ page: true, editor: true });
 }
 
 // The window's Edit command on the OS pasteboard, as ⌘C, ⌘X and ⌘V run it: the app menu's Edit roles (src/main/menu.ts)

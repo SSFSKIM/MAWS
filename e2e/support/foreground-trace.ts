@@ -118,9 +118,10 @@ export async function traceForeground(app: ElectronApplication, page: Page, opti
 
     if (!editorSelector) return;
     type PMPlugin = { key: string; props: Record<string, unknown>; spec: { filterTransaction?: (tr: unknown, state: unknown) => boolean } };
-    type PMState = { plugins: PMPlugin[]; doc: { content: { size: number } }; selection: { from: number; to: number } };
-    type PMTransaction = { docChanged: boolean; getMeta(key: string): unknown };
-    type PMView = { state: PMState; dispatch(tr: PMTransaction): void; someProp(name: string, f?: (prop: unknown) => unknown): unknown };
+    type PMDoc = { content: { size: number }; descendants(f: (node: { type: { name: string }; textContent: string }) => boolean | void): void };
+    type PMState = { plugins: PMPlugin[]; doc: PMDoc; selection: { from: number; to: number; toJSON(): unknown } };
+    type PMTransaction = { docChanged: boolean; getMeta(key: string): unknown; steps: Array<{ toJSON(): { stepType?: string; from?: number; to?: number } }> };
+    type PMView = { state: PMState; composing: boolean; hasFocus(): boolean; dispatch(tr: PMTransaction): void; someProp(name: string, f?: (prop: unknown) => unknown): unknown };
     const root = document.querySelector(editorSelector) as (Element & { editor?: { view: PMView } }) | null;
     const view = root?.editor?.view;
     if (!view || trace.editors.has(view)) return;
@@ -139,12 +140,48 @@ export async function traceForeground(app: ElectronApplication, page: Page, opti
       );
       return handled;
     };
+    const paragraphs = (doc: PMDoc) => {
+      const out: string[] = [];
+      doc.descendants((node) => {
+        if (node.type.name === 'paragraph') out.push(node.textContent.slice(0, 80));
+      });
+      return out;
+    };
+    // At the paste event itself, before any handler of the editor runs (a capture listener on the document): the page's
+    // anchor and focus, the editor's selection, whether it is composing and whether it holds focus.
+    document.addEventListener(
+      'paste',
+      (e) => {
+        if (!root || !root.contains(e.target as Node)) return;
+        const s = getSelection();
+        push({
+          type: 'paste-capture',
+          page: s ? { anchor: describe(s.anchorNode), anchorOffset: s.anchorOffset, focus: describe(s.focusNode), focusOffset: s.focusOffset } : null,
+          editor: view.state.selection.toJSON(),
+          composing: view.composing,
+          hasFocus: view.hasFocus(),
+        });
+      },
+      true,
+    );
     const dispatch = view.dispatch.bind(view);
     view.dispatch = (tr) => {
-      const before = view.state.doc;
-      dispatch(tr);
+      const before = view.state;
       const ui = tr.getMeta('uiEvent') ?? (tr.getMeta('paste') ? 'paste' : null);
-      if (ui !== null) push({ type: 'dispatch', ui, docChanged: tr.docChanged, applied: view.state.doc !== before, selection: [view.state.selection.from, view.state.selection.to] });
+      // a paste's transaction before it applies: the selection it replaces and its steps, with the paragraphs either side
+      if (ui === 'paste')
+        push({
+          type: 'paste-dispatch',
+          selection: before.selection.toJSON(),
+          steps: tr.steps.map((step) => {
+            const { stepType, from, to } = step.toJSON();
+            return { stepType, from, to };
+          }),
+          paragraphsBefore: paragraphs(before.doc),
+        });
+      dispatch(tr);
+      if (ui === 'paste') push({ type: 'paste-applied', paragraphsAfter: paragraphs(view.state.doc), selection: view.state.selection.toJSON() });
+      if (ui !== null) push({ type: 'dispatch', ui, docChanged: tr.docChanged, applied: view.state.doc !== before.doc, selection: [view.state.selection.from, view.state.selection.to] });
     };
     const proto = Object.getPrototypeOf(view.state) as { filterTransaction(this: PMState, tr: PMTransaction, ignore?: number): boolean; __mawsTraced?: boolean };
     if (proto.__mawsTraced) return;
