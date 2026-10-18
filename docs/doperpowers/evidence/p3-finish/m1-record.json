@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 90,
-    "defer:pending": 33,
+    "defer:committed": 91,
+    "defer:pending": 32,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1244,7 +1244,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L150; parent Decision Log 106): Binding implementation limitation; no untested dependency upgrade in Finish. Owner: P4; revalidated at each binding re-pin.",
       "remainingClause": "Removed at the re-pin. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L150; parent Decision Log 106): Binding implementation limitation; no untested dependency upgrade in Finish. Owner: P4; revalidated at each binding re-pin.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "c53c377f85774b1a4ea1d161fc89208123b873d5"
     },
     {
       "line": 151,
@@ -1254,8 +1254,8 @@
       "triageReason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L151; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "A thinning pass at version retention. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L151; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 152,
