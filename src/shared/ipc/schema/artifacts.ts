@@ -15,13 +15,15 @@ import { AppSessionIdSchema } from '../../graph/ids';
 import { ARTIFACT_EXPORT_FONTS /* P3-C */, ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
 import { JsonValueSchema, type CommandSpec } from './common';
-import { ConnectorGrantGestureSchema, ConnectorGrantSchema, ConnectorToolRefSchema } from '../../artifacts/connectors'; // P3-H H3b
+import { ConnectorDatasetSinkSchema /* E3 */, ConnectorGrantGestureSchema, ConnectorGrantSchema, ConnectorToolRefSchema } from '../../artifacts/connectors'; // P3-H H3b
 import { ConnectorGrantOutcomeSchema } from './connectors'; // P3-H H3b
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
 
 const Id = z.uuid();
+// E3: the snapshot refs one hold names (an artifact's own assets, `assets/<name>`), 1 to 64 (ASSET_HOLD_LIMITS.groupRefs)
+const HoldRefs = z.array(z.string().startsWith('assets/').max(1_000)).min(1).max(64);
 const Seq = z.number().int().nonnegative();
 // The realm-local class each structured-clone hop produces (pty.ts's note), over any buffer (a Yjs encoder's included).
 const Bytes = z.custom<Uint8Array>((value) => value instanceof Uint8Array, 'expected a Uint8Array');
@@ -268,6 +270,35 @@ export const commands = {
   'artifacts.grantConnectorTool': main(z.strictObject({ artifactId: Id, tool: ConnectorGrantGestureSchema }), ConnectorGrantOutcomeSchema),
   'artifacts.revokeConnectorTool': main(z.strictObject({ artifactId: Id, ...ConnectorToolRefSchema.shape }), z.strictObject({ revoked: z.boolean() })),
   // P3-H H3b end
+  // E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b; E's Decision Log 48 (3); the ledger's E3
+  // hold-IPC row): holds over a dashboard's snapshot bytes, so a reader that captured a descriptor reads the bytes it
+  // names whatever a refresh retires meanwhile. A hold is all or none and bounded per artifact (64 holds, 256 distinct
+  // refs, 64 refs in one: `tooLarge {hold, limit}`); a ref the artifact no longer holds is `notFound {ref,
+  // snapshotUnavailable: true}`, nothing held. Main-only, the host's holds are main's connection's: its going releases
+  // them, and an id it did not mint releases nothing (`released: false`).
+  // The export's capture: the live state (or `versionId`'s) and one hold over every snapshot its descriptors name, in one
+  // host read; the export releases `assetHoldId` when it ends. Main-only.
+  'artifacts.captureDatasetState': host(z.strictObject({ artifactId: Id, versionId: z.number().int().positive().optional() }), z.strictObject({ revision: Seq, bytes: Bytes, assetHoldId: z.uuid() })),
+  // Main's own hold over `refs` (a window's handle below, a Download's own). Main-only.
+  'artifacts.holdAssets': host(z.strictObject({ artifactId: Id, refs: HoldRefs }), z.strictObject({ assetHoldId: z.uuid() })),
+  'artifacts.releaseAssets': host(z.strictObject({ assetHoldId: z.uuid() }), z.strictObject({ released: z.boolean() })),
+  // A window's hold (the source sheet's captured snapshots, the painted cache's): main takes the host's hold and answers
+  // an unforgeable handle bound to the asking window, which alone releases it; the window's closing, navigating or
+  // crashing releases it too. Main's.
+  'artifacts.holdDatasets': main(z.strictObject({ artifactId: Id, refs: HoldRefs }), z.strictObject({ holdId: z.uuid() })),
+  'artifacts.releaseDatasets': main(z.strictObject({ holdId: z.uuid() }), z.strictObject({ released: z.boolean() })),
+  // An agent's pending `artifact_dataset` refresh (R3), read by main once `maws.artifact.datasetRefresh` named it: the
+  // dashboard, the dataset and the base the session read it at, the asking session, and the query its descriptor names
+  // (the tool and its arguments). Null once the request ended or for an id the host never issued. Main-only.
+  'artifacts.datasetRefreshRequest': host(
+    z.strictObject({ requestId: z.uuid() }),
+    z.strictObject({
+      request: z
+        .strictObject({ artifactId: Id, datasetId: ConnectorDatasetSinkSchema.shape.id, baseRevision: Seq, appSessionId: AppSessionIdSchema, ...ConnectorToolRefSchema.shape, args: z.record(z.string(), z.unknown()) })
+        .nullable(),
+    }),
+  ),
+  // E3 end
 } as const satisfies Record<`artifacts.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

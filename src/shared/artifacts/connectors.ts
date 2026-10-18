@@ -130,3 +130,26 @@ export type ConnectorDeclareOutcome = { ok: true; declared: ConnectorToolRef[] }
 export type ConnectorWatchStart = { ok: true; watchId: string; intervalMs: number } | ConnectorInvalid;
 export type ConnectorGrantOutcome = { ok: true; grant: ConnectorGrant } | ConnectorRefusal;
 // ── P3-H H3 end ──
+
+// E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3; E's Decision Log 48): the trusted owner's
+// dataset sink beside a page's call or watch (never inside the page's own request): the host validates the result as a
+// dashboard dataset's snapshot and publishes it under `id`, answering the publication's metadata in the result's slot
+// instead of the tool's answer. `baseRevision` is the revision the caller read the descriptor at; a watch omits it, so
+// each refresh takes the host's base at its start.
+export const ConnectorDatasetSinkSchema = z.strictObject({
+  id: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,64}$/)
+    .refine((id) => id !== '__proto__', '"__proto__" is reserved'),
+  baseRevision: z.number().int().nonnegative().optional(),
+});
+export type ConnectorDatasetSink = z.infer<typeof ConnectorDatasetSinkSchema>;
+export const ConnectorCallOptionsSchema = z.strictObject({ dataset: ConnectorDatasetSinkSchema });
+export type ConnectorCallOptions = z.infer<typeof ConnectorCallOptionsSchema>;
+
+// The one budget of a connector operation (moved here from main's route E by the E3 M2 fix, which re-exports it):
+// past the host's own bound on an operation (two mcp_status reads of 8 s, the store, mcp_call's 120 s long deadline).
+// A dataset refresh's runs from its admission through its route, grant, call and the host's publication, never a new
+// budget per phase.
+export const CONNECTOR_OPERATION_DEADLINE_MS = 180_000;
+// E3 end

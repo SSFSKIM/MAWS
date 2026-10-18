@@ -58,6 +58,7 @@ import type { EngineTransport, TransportItem, TransportProblem } from './transpo
 import type { ObservedFactsAnswer } from '@shared/engine/observed-facts';
 import type { ObservedFactsRecorder, ObservedFactsService } from './observed-facts';
 import type { ArtifactStore } from './documents/store'; // P3-A (M6)
+import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 // P2-A end
 import { connectorLaunchContext, type ConnectorLaunchContext } from './connectors/provenance'; // P3-HD
 import type { ConnectorLocalKey } from './connectors/local-key'; // P3-HD
@@ -120,6 +121,9 @@ export interface EngineSessionOptions {
   // P3-A (M6): the engine host's artifact store, which the artifact tools write through (null when it failed to open);
   // its turn version is written at each of the session's turn ends. Absent, the artifact tools answer `unavailable`.
   artifacts?: () => ArtifactStore | null;
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): the host's registry an agent's dataset refresh
+  // asks main through. Absent, `artifact_dataset`'s refresh answers `unavailable`.
+  datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>;
   // P3-HD: the local-scope `projects` key the launcher captured before this launch spawned (connectors/local-key.ts);
   // host-private, for route D's observations only. Absent (a replay, a test), local scope stays engine-only.
   connectorLocalKey?: ConnectorLocalKey;
@@ -222,7 +226,7 @@ export class EngineSession {
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.maws = new SessionMaws({
-      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, hasClient: opts.hasClient, artifactScope: opts.artifactScope /* P2-E1 */, artifacts: opts.artifacts /* P3-A */,
+      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, hasClient: opts.hasClient, artifactScope: opts.artifactScope /* P2-E1 */, artifacts: opts.artifacts /* P3-A */, datasetRefresh: opts.datasetRefresh /* E3 */,
       emit: (name, payload) => this.emit(name, payload),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,

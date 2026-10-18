@@ -26,6 +26,7 @@ export function openDocuments(userData: string, log: (line: string) => void = (l
   }
   const service = new DocumentService(storage, { kindOf: (artifactId) => storage.kindOf(artifactId), log });
   const store = new ArtifactStore(service, storage, { root, log });
+  store.collectRetiredAssets(); // E3: at the reopen, no hold survives a restart (retention.ts)
   store.maintenance.start();
   return {
     storage,

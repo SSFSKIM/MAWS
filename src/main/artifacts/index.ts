@@ -62,12 +62,18 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
   for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content, embeds);
   const exporters = new ExporterRegistry();
   const stopHtml = registerHtmlExporters(exporters, { content, env });
+  // E3: the engine host's connection losses, counted for a dashboard export's one recapture across a restart
+  let hostLosses = 0;
+  const stopLosses = hosts.onState('engine-host', (state) => {
+    if (state.state !== 'ready') hostLosses += 1;
+  });
   const exports = startExportService({
     registry: exporters,
     root,
     call,
     onEvent: (name, listener) => hosts.onEvent(name, listener),
     answer: (input) => call('maws.artifact.exported', input),
+    hostGeneration: () => hostLosses,
   });
   register('artifacts.export', (input) => exports.exportForLibrary(input));
   // P3-L M6b: `artifact_screenshot`'s captures, answered to the requesting session
@@ -107,6 +113,7 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
     stop: () => {
       stopDefaults();
       stopResync();
+      stopLosses(); // E3
       stopCaptures();
       exports.stop();
       stopHtml();

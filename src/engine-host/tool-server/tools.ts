@@ -24,6 +24,7 @@ import { designThreadTools } from '../designs/threads'; // P3-E (E1's M2)
 import { dashboardThreadTools } from '../dashboards/threads'; // P3-E (E2 M2)
 import { legacyDashboardTools } from '../dashboards/legacy'; // P3-E (E2 M2 fix wave)
 import { artifactDatasetTool } from './datasets'; // P3-E (E2 M2)
+import type { DatasetRefreshRequests } from '../connectors/dataset-requests'; // E3
 
 export function mawsTools(deps: {
   bridge: PaneBridge; capture: CaptureBridge; asks: AskTable; askCancelled: (ask: PendingAsk, reason: AskCancelReason) => void;
@@ -34,6 +35,7 @@ export function mawsTools(deps: {
   session?: ArtifactSession;
   log?: (line: string) => void;
   // P3-A end
+  datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>; // E3: the host's registry `artifact_dataset`'s refresh asks main through
 }): McpToolDefinition[] {
   const artifacts: ArtifactToolDeps = { artifacts: deps.artifacts, artifactScope: deps.artifactScope, session: deps.session ?? new ArtifactSession(), log: deps.log };
   // P3-L (M6b fix wave 1; Decision Log 39a): a call over the store waits for the host's start import of the X12
@@ -58,7 +60,7 @@ export function mawsTools(deps: {
       // P3-A (M6)
       artifactDescribeTypeTool(artifacts), documentReadTool(documents, genericRead), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
       artifactExportTool({ ...artifacts, exporter: deps.exporter }),
-      artifactDatasetTool(artifacts), // P3-E (E2 M2)
+      artifactDatasetTool({ ...artifacts, refreshes: deps.datasetRefresh /* E3 */ }), // P3-E (E2 M2)
       // P3-B (M7); P3-C (M7): B's thread tools answer a deck from its threads; P3-E: a design (E1's M2) and a dashboard (E2 M2) from their own
       ...dashboardThreadTools(documents, designThreadTools(documents, presentationThreadTools(documents, documentTools(documents)))),
     ], genericRead).map(afterImport),

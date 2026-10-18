@@ -15,6 +15,9 @@ import { CommandFailure, type registerMainHandler } from '../ipc/router';
 
 export interface AssetDownloadDeps {
   call<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>; // the engine host's commands
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): main's own hold over the snapshot, taken before
+  // the path and the dialog and kept through the copy (holds.ts `holdAsset` in the app), whatever the sheet does meanwhile
+  hold?: (artifactId: string, ref: string) => Promise<{ release(): Promise<void> }>;
   downloads(): string; // app.getPath('downloads')
   showSaveDialog(options: SaveDialogOptions, sender: WebContents | undefined): Promise<{ canceled: boolean; filePath?: string }>;
   env: NodeJS.ProcessEnv;
@@ -50,19 +53,24 @@ export function createAssetDownload(deps: AssetDownloadDeps) {
   };
   return {
     async downloadAsset({ artifactId, ref, name }: CommandInput<'artifacts.downloadAsset'>, sender?: WebContents): Promise<CommandOutput<'artifacts.downloadAsset'>> {
-      const found = await deps.call('artifacts.content', { artifactId, path: ref });
-      if (!found.ok) throw new CommandFailure(found.error);
-      const to = await destination(safeDownloadName(name, found.value.name), sender);
-      if (to === null) return { path: null };
-      const temp = join(dirname(to), `.${randomUUID()}.tmp`);
+      const held = await deps.hold?.(artifactId, ref); // E3: before anything else, released however the Download ends
       try {
-        await copyFile(found.value.path, temp);
-        await rename(temp, to);
-      } catch (error) {
-        await rm(temp, { force: true }).catch(() => {});
-        throw error;
+        const found = await deps.call('artifacts.content', { artifactId, path: ref });
+        if (!found.ok) throw new CommandFailure(found.error);
+        const to = await destination(safeDownloadName(name, found.value.name), sender);
+        if (to === null) return { path: null };
+        const temp = join(dirname(to), `.${randomUUID()}.tmp`);
+        try {
+          await copyFile(found.value.path, temp);
+          await rename(temp, to);
+        } catch (error) {
+          await rm(temp, { force: true }).catch(() => {});
+          throw error;
+        }
+        return { path: to };
+      } finally {
+        await held?.release();
       }
-      return { path: to };
     },
   };
 }

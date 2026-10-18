@@ -14,7 +14,8 @@ export function datasetFooter(doc: Doc, author: (actor: Actor) => CommentAuthor)
     columns: descriptor.columns,
     rows: descriptor.rows,
     ...(descriptor.rowKey !== undefined && { rowKey: descriptor.rowKey }),
-    updated: { at: new Date(descriptor.updated.at).toISOString(), ...author(descriptor.updated.by) },
+    // E3: a query never fetched has no update to name, and says so
+    ...(descriptor.updated ? { updated: { at: new Date(descriptor.updated.at).toISOString(), ...author(descriptor.updated.by) } } : { notFetched: true as const }),
     ...(descriptor.state.status !== 'ok' && { state: { status: descriptor.state.status, ...(descriptor.state.message !== undefined && { message: descriptor.state.message }) } }),
   }));
 }

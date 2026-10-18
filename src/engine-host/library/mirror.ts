@@ -34,6 +34,7 @@ import { isMirrorCopy, mirrorSlug, mirrorWriterFor, type MirrorOutput } from '@a
 import { applyV2, newDoc } from '@artifacts/yjs';
 import { isDocKind, type Artifact, type Space } from '@shared/artifacts/entity';
 import { byteContentOf, fileBytes, type LibraryDocuments } from './reads';
+import { datasetRefsOf } from '../documents/retention'; // E3
 
 export const MIRROR_SETTLE_MS = 1_000;
 export const MIRROR_MAX_WAIT_MS = 10_000;
@@ -63,6 +64,8 @@ export interface MirrorOptions {
 type ContentRead = { state: Uint8Array } | { bytes: Uint8Array; name: string } | { path: string; name: string } | null;
 // M6b: the artifact's assets as the store listed them inside the barrier; their bytes are read only when a writer asks.
 type AssetsRead = { ref: string; name: string; mime: string; size: number; sha256: string }[];
+// What one artifact's mirror pass read inside the barrier, or null when its entry is current or it is gone (E3: named).
+type MirrorRead = { artifact: Artifact; revision: number; inputs: string | undefined; content: ContentRead; assets: AssetsRead } | null;
 
 export class LibraryMirror {
   private readonly log: (line: string) => void;
@@ -271,22 +274,41 @@ export class LibraryMirror {
   }
 
   // Writes the artifact's files as it stands now unless its entry is current; removes the files it no longer produces.
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): the dashboard snapshots the read state names are
+  // held from that read until the files are written (`captureWithAssets`: the read and its hold in one synchronous turn,
+  // released only after writing), so a refresh's collection meanwhile never leaves a half-written mirror.
   private async upsert(dir: string, manifest: Manifest, artifactId: string): Promise<void> {
-    const { store, service } = this.documents;
     const root = join(dir, MIRROR_DIR);
-    const read = await store.readCommitted((): { artifact: Artifact; revision: number; inputs: string | undefined; content: ContentRead; assets: AssetsRead } | null => {
-      const artifact = store.get(artifactId);
-      if (!artifact) return null; // deleted since: its event removes it
-      const revision = store.revision(artifactId);
-      const writer = mirrorWriterFor(artifact.kind);
-      const inputs = writer?.inputs?.(artifact); // P3-C (Decision Log 29)
-      const entry = manifest.artifacts[artifactId];
-      if (entry && entry.revision === revision && entry.inputs === inputs && entry.slug === mirrorSlug(artifact) && entry.files.every((file) => existsSync(join(root, file)))) return null; // current
-      if (!writer) return { artifact, revision, inputs, content: null, assets: [] };
-      const assets = store.listAssets(artifactId).map(({ ref, name, mime, size, sha256 }) => ({ ref, name, mime, size, sha256 }));
-      if (isDocKind(artifact.kind)) return { artifact, revision, inputs, content: { state: service.readState(artifactId).state }, assets };
-      return { artifact, revision, inputs, content: byteContentOf(store, artifactId), assets };
+    const captured = await this.documents.store.captureWithAssets(artifactId, () => {
+      const value = this.readNow(root, manifest, artifactId);
+      const listed = new Set(value?.assets.map((asset) => asset.ref));
+      return { value, refs: value?.content && 'state' in value.content ? datasetRefsOf(value.content.state).filter((ref) => listed.has(ref)) : [] };
     });
+    try {
+      this.write(root, manifest, artifactId, captured.value);
+    } finally {
+      captured.release();
+    }
+  }
+
+  // What `upsert` writes from, read inside the barrier: null when the entry is current or the artifact is gone.
+  private readNow(root: string, manifest: Manifest, artifactId: string): MirrorRead {
+    const { store, service } = this.documents;
+    const artifact = store.get(artifactId);
+    if (!artifact) return null; // deleted since: its event removes it
+    const revision = store.revision(artifactId);
+    const writer = mirrorWriterFor(artifact.kind);
+    const inputs = writer?.inputs?.(artifact); // P3-C (Decision Log 29)
+    const entry = manifest.artifacts[artifactId];
+    if (entry && entry.revision === revision && entry.inputs === inputs && entry.slug === mirrorSlug(artifact) && entry.files.every((file) => existsSync(join(root, file)))) return null; // current
+    if (!writer) return { artifact, revision, inputs, content: null, assets: [] };
+    const assets = store.listAssets(artifactId).map(({ ref, name, mime, size, sha256 }) => ({ ref, name, mime, size, sha256 }));
+    if (isDocKind(artifact.kind)) return { artifact, revision, inputs, content: { state: service.readState(artifactId).state }, assets };
+    return { artifact, revision, inputs, content: byteContentOf(store, artifactId), assets };
+  }
+
+  // The files of what `readNow` read, written synchronously.
+  private write(root: string, manifest: Manifest, artifactId: string, read: MirrorRead): void {
     const entry = manifest.artifacts[artifactId];
     if (!read || (read.content === null && !entry)) return; // current, gone, or nothing to write and nothing written
     const { artifact, revision, inputs, content } = read;

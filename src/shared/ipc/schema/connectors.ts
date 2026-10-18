@@ -18,6 +18,7 @@ import {
   CONNECTOR_GRANT_MODES,
   CONNECTOR_REFUSAL_REASONS,
   ConnectorCallRefSchema,
+  ConnectorDatasetSinkSchema, // E3
   ConnectorGrantRequestSchema,
   ConnectorGrantSchema,
   ConnectorToolRefSchema,
@@ -67,12 +68,16 @@ export type ConnectorResolveAnswer = z.infer<typeof ConnectorResolveAnswerSchema
 
 // One tool run as main's check admitted it: the grant's `fingerprint` and `mode`, which the host compares with the
 // grant again (before an Allow once is consumed) and with the session's mcp_status at the write.
+// E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): `dataset`, the trusted sink main forwards from the
+// owner's surface (or an agent's refresh request, `requestId`, which the host issued): the host keeps the result, checks
+// it against the dataset's query and publishes it as the dataset's snapshot instead of answering it.
 export const ConnectorStartSchema = ConnectorSessionToolSchema.extend({
   operationId: OperationId,
   artifactId: ArtifactId,
   arguments: z.record(z.string(), z.unknown()),
   fingerprint: ConnectorGrantRequestSchema.shape.fingerprint,
   mode: z.enum(CONNECTOR_GRANT_MODES),
+  dataset: ConnectorDatasetSinkSchema.extend({ requestId: z.uuid().optional() }).optional(), // E3
 });
 
 // How an operation ended, for main alone. `refused`: the host's own last check found no grant to admit it (named as the
@@ -85,6 +90,29 @@ export const ConnectorOperationOutcomeSchema = z.union([
   z.strictObject({ ok: z.literal(false), failure: z.literal('refused'), refusal: z.enum(CONNECTOR_REFUSAL_REASONS.revoked), message: Message }),
 ]);
 export type ConnectorOperationOutcome = z.infer<typeof ConnectorOperationOutcomeSchema>;
+
+// E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3; the architect's M2 correction): a dataset
+// operation's take, beside H's nullable outcome, for main alone. Main's first take after the call's end (made only once
+// main rechecked that the work may still publish) starts the host's publication: `publishing` while it runs (any later
+// take joins it); then its end once: `dataset`, the committed snapshot's compact metadata (never a row), or `failed`
+// with nothing new to draw: `stale` the dataset changed or went meanwhile (a descriptor-level conflict, nothing
+// written), `revoked` its grant's fence broke before the commit, and `validation`, `toolError` or `timeout` the error
+// state recorded in its place, the previous snapshot kept.
+export const ConnectorDatasetTakeSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('publishing'), operationId: OperationId }),
+  z.strictObject({
+    status: z.literal('dataset'),
+    artifactId: ArtifactId,
+    id: ConnectorDatasetSinkSchema.shape.id,
+    revision: Time,
+    columns: z.array(z.strictObject({ name: z.string(), type: z.string(), mismatches: z.number().int().nonnegative().optional() })),
+    rows: z.number().int().nonnegative(),
+    warnings: z.array(z.string()).optional(),
+  }),
+  z.strictObject({ status: z.literal('failed'), reason: z.enum(['stale', 'validation', 'toolError', 'timeout', 'revoked']) }),
+]);
+export type ConnectorDatasetTake = z.infer<typeof ConnectorDatasetTakeSchema>;
+// E3 end
 
 export const ConnectorAuthorizationSchema = z.discriminatedUnion('granted', [
   z.strictObject({ granted: z.literal(true), mode: z.enum(CONNECTOR_GRANT_MODES) }),
@@ -277,12 +305,16 @@ export const commands = {
   // `tools`: the page's `{server, tool}` pairs, as it sent them.
   'connectors.declare': main(z.strictObject({ leaseId: LeaseId, tools: z.unknown() }), ConnectorDeclareOutcomeSchema),
   // `request`: the page's `{server, tool, args?}`. Answers once the tool has (no fixed bound: a tool may take minutes).
-  'connectors.call': main(z.strictObject({ leaseId: LeaseId, request: z.unknown() }), ConnectorCallOutcomeSchema),
+  // E3: `dataset`, the trusted owner's sink beside the request (never the page's): the result becomes the dataset's
+  // snapshot in the host, and the outcome's `result` is the publication's metadata.
+  'connectors.call': main(z.strictObject({ leaseId: LeaseId, request: z.unknown(), dataset: ConnectorDatasetSinkSchema.optional() /* E3 */ }), ConnectorCallOutcomeSchema),
   // `request`: the page's `{server, tool, args?, intervalMs}`; its refreshes arrive as `connectors.watchUpdate`.
-  'connectors.watch': main(z.strictObject({ leaseId: LeaseId, request: z.unknown() }), ConnectorWatchStartSchema),
+  'connectors.watch': main(z.strictObject({ leaseId: LeaseId, request: z.unknown(), dataset: ConnectorDatasetSinkSchema.optional() /* E3 */ }), ConnectorWatchStartSchema),
   'connectors.unwatch': main(LeaseWatch, z.strictObject({ stopped: z.boolean() })),
   // The owner's Refresh (after its Start, say): one now, when the watch is visible, granted and idle.
-  'connectors.refresh': main(LeaseWatch, z.strictObject({ refreshing: z.boolean() })),
+  // E3 panel (Decision Log 17): `probe`, the trusted owner's liveness check of its dataset watch: `refreshing` then says
+  // whether that watch lives, and nothing is woken, checked, called or rescheduled.
+  'connectors.refresh': main(z.strictObject({ ...LeaseWatch.shape, probe: z.boolean().optional() /* E3 panel */ }), z.strictObject({ refreshing: z.boolean() })),
   // The surface shown or hidden: hidden, the lease calls nothing.
   'connectors.visibility': main(z.strictObject({ leaseId: LeaseId, visible: z.boolean() }), z.strictObject({ ok: z.boolean() })),
   'connectors.close': main(Lease, z.strictObject({ closed: z.boolean() })),
@@ -300,8 +332,15 @@ export const commands = {
   'connectors.check': host(z.strictObject({ artifactId: ArtifactId, call: ConnectorCallRefSchema }), ConnectorAuthorizationSchema),
   'connectors.resolve': host(ConnectorSessionToolSchema, ConnectorResolveAnswerSchema),
   'connectors.start': host(ConnectorStartSchema, z.strictObject({ operationId: OperationId })),
-  // null: no such operation (taken, cancelled, expired, or still running)
-  'connectors.take': host(z.strictObject({ operationId: OperationId }), z.strictObject({ outcome: ConnectorOperationOutcomeSchema.nullable() })),
+  // null: no such operation (taken, cancelled, expired, or still running). E3: `dataset`, a dataset operation's phase
+  // or end (its `outcome` then null); a dataset operation that ended before its call (refused, unavailable) answers
+  // its `outcome` as H's do.
+  'connectors.take': host(
+    z.strictObject({ operationId: OperationId }),
+    z
+      .strictObject({ outcome: ConnectorOperationOutcomeSchema.nullable(), dataset: ConnectorDatasetTakeSchema.optional() /* E3 */ })
+      .refine((taken) => taken.dataset === undefined || taken.outcome === null, 'a dataset phase comes with a null outcome'), // E3 M2 residual
+  ),
   'connectors.cancel': host(z.strictObject({ operationId: OperationId }), z.strictObject({ cancelled: z.boolean() })),
   // P3-HD start: route D's host half (above); each answers at once, its operation's end is `connectors.directOperation`
   'connectors.directResolve': host(DirectResolveInputSchema, Started),

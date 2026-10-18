@@ -14,6 +14,7 @@ import { ArtifactRefusalSchema } from './artifacts'; // P3-E (E1 M5; Decision Lo
 import type { CommandSpec } from './common';
 import { BrowserTabIdSchema } from '../../browser/tab'; // E13
 import { AbsolutePathSchema } from './settings'; // E13
+import { ConnectorRefusalSchema } from './connectors'; // E3
 
 export const MawsPaneShowSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
@@ -101,6 +102,17 @@ export const MawsDownloadRecordedSchema = z.strictObject({
 export type MawsDownloadRecorded = z.infer<typeof MawsDownloadRecordedSchema>;
 // E13 end
 
+// E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3; E's Decision Log 48): `artifact_dataset`'s
+// one refresh, asked of main as the export is but privately. The host announces a pending request by its id alone
+// (`maws.artifact.datasetRefresh`, which every window receives, so nothing else rides it); main reads what it asks
+// through the main-only `artifacts.datasetRefreshRequest` and answers with how its call went
+// (`maws.artifact.datasetRefreshed`, main-only): `ok` when the call ran to its publication, else the refusal the
+// broker answered. The tool's answer is the host's own durable record of the publication, never main's words.
+export const MawsArtifactDatasetRefreshSchema = z.strictObject({ requestId: z.uuid() });
+export const MawsDatasetRefreshOutcomeSchema = z.union([z.strictObject({ ok: z.literal(true) }), ConnectorRefusalSchema]);
+export type MawsDatasetRefreshOutcome = z.infer<typeof MawsDatasetRefreshOutcomeSchema>;
+// E3 end
+
 export const commands = {
   // The session's pending asks (none for a session this host does not hold).
   'maws.asks.list': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ asks: z.array(PendingAskSchema) }), owner: 'engine-host' },
@@ -132,10 +144,17 @@ export const commands = {
     output: z.strictObject({ outcome: z.enum(['delivered', 'not_pending']) }),
     owner: 'engine-host',
   },
+  // E3: main's answer to `maws.artifact.datasetRefresh`, main-only: `not_pending` when the request ended or was answered.
+  'maws.artifact.datasetRefreshed': {
+    input: z.strictObject({ requestId: z.uuid(), outcome: MawsDatasetRefreshOutcomeSchema }),
+    output: z.strictObject({ outcome: z.enum(['delivered', 'not_pending']) }),
+    owner: 'engine-host',
+  },
 } as const satisfies Record<`maws.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'maws.pane.show': MawsPaneShowSchema,
   'maws.artifact.capture': MawsArtifactCaptureSchema, // E2
   'maws.artifact.export': MawsArtifactExportSchema, // P3-A M7
+  'maws.artifact.datasetRefresh': MawsArtifactDatasetRefreshSchema, // E3: the request's id alone
 } as const satisfies Record<`maws.${string}`, z.ZodType>;

@@ -12,7 +12,12 @@
 // Nothing here grants, revokes or starts on the page's behalf: the specs do that as the owner, through the header's
 // Connectors sheet. The scene only observes: the fixture's call log (which process answered, when), the host's live
 // sessions, the supervisor's pid and the session's journal (its launches), and attaches them as evidence.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+//
+// E3 M4 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R5, Decision Log 13): `{liveData: true}` makes the
+// scene a live dashboard's, fixture-only: the app also starts the host's dashboard acceptance seam (MAWS_DASHBOARD_E2E=1,
+// read by an AgentSeam over `userData`), and the fixture server runs in its rows mode, answering the reply the scene's
+// control file names (`fixtureReply`). Without it the scene is H's, unchanged.
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,6 +36,27 @@ export const TOOL = 'read_series';
 export const TOOL_NAME = `${SERVER} · ${TOOL}`;
 export const PAGE_TITLE = 'Signups, live';
 export const WATCH_MS = 30_000; // the shortest watch interval main allows
+
+// E3 start: the fixture's rows mode and what its control file may name (connector-mcp-server.mjs): flat records, an
+// invalid structured result, or a tool error, each after an optional delay; read at each call
+export type FixtureRow = Record<string, string | number | boolean | null>;
+export type FixtureReply = ({ reply: 'rows'; rows: FixtureRow[] } | { reply: 'invalid' } | { reply: 'isError' }) & { delayMs?: number };
+
+/** The fixture server as the scene configures it; with a control file, in its rows mode answering what that names
+ * (test/support/connector-mcp-server-e3.test.ts runs it with these arguments). */
+function fixtureServer(log: string, control: string | null): { type: 'stdio'; command: string; args: string[] } {
+  const rows = control === null ? [] : ['--mode', 'rows', '--control', control];
+  return { type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', 'series', '--log', log, '--tools', JSON.stringify([TOOL]), ...rows] };
+}
+
+/** Names the fixture's next replies, whole (written aside and renamed, so a call never reads half of it). */
+function writeFixtureReply(control: string, reply: FixtureReply): void {
+  writeFileSync(`${control}.tmp`, JSON.stringify(reply));
+  renameSync(`${control}.tmp`, control);
+}
+
+// ConnectorSceneOptions.liveData (below, beside P3-HD's options): the dashboard seam on and the fixture in its rows mode
+// E3 end
 
 // The page: declares the fixture's tool, watches it at the shortest interval, and writes each outcome where a spec reads
 // it (`#last`: the latest as `ok n=<k>` or `<state>:<reason>`; `#updates`: how many arrived).
@@ -91,6 +117,7 @@ export interface ConnectorSceneOptions {
   // variables for every launch (MAWS_E2E_OPEN_LOG, the fake browser's seam)
   servers?: (scene: ConnectorScene) => Record<string, Record<string, unknown>>;
   env?: (scene: ConnectorScene) => Record<string, string>;
+  liveData?: boolean; // E3: the dashboard seam on and the fixture in its rows mode
 }
 // P3-HD M4 end
 
@@ -100,6 +127,7 @@ export class ConnectorScene {
   readonly home: string;
   readonly project: string;
   readonly log: string;
+  readonly fixtureControl: string | null; // E3: the rows mode's control file, null in H's scene
   readonly supervisors = new Set<number>();
   private readonly runs: Run[] = [];
   private readonly sockets = new Set<string>();
@@ -112,7 +140,15 @@ export class ConnectorScene {
     this.home = join(this.root, 'home');
     this.project = join(this.root, 'project');
     this.log = join(this.root, 'calls.jsonl');
+    this.fixtureControl = options.liveData ? join(this.root, 'fixture-reply.json') : null; // E3
     for (const dir of [this.userData, this.home, this.project]) mkdirSync(dir, { recursive: true });
+  }
+
+  // E3: the fixture's replies from its next call on (the live data scene's only)
+  fixtureReply(reply: FixtureReply): void {
+    if (this.fixtureControl === null) throw new Error('the fixture answers rows only in a live data scene ({liveData: true})');
+    writeFixtureReply(this.fixtureControl, reply);
+    this.note('fixture reply', reply);
   }
 
   note(event: string, detail?: unknown): void {
@@ -125,10 +161,10 @@ export class ConnectorScene {
     const maws = await launchMaws({
       userData: this.userData,
       keepConfigHome: !first,
-      env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', MAWS_E2E_ENGINE_BIN: this.engine.bin, HOME: this.home, DISABLE_AUTOUPDATER: '1', ...this.options.env?.(this) }, // P3-HD M4b: the scene's env
+      env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', MAWS_E2E_ENGINE_BIN: this.engine.bin, HOME: this.home, DISABLE_AUTOUPDATER: '1', ...(this.fixtureControl !== null && { MAWS_DASHBOARD_E2E: '1' }) /* E3 */, ...this.options.env?.(this) }, // P3-HD M4b: the scene's env
       prepare: ({ claudeConfigDir }) => {
         if (!first) return;
-        const mcpServers = { [SERVER]: this.options.server?.(this) ?? { type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', 'series', '--log', this.log, '--tools', JSON.stringify([TOOL])] }, ...this.options.servers?.(this) }; // P3-HD M4: the optional server entry; M4b: the others
+        const mcpServers = { [SERVER]: this.options.server?.(this) ?? fixtureServer(this.log, this.fixtureControl), ...this.options.servers?.(this) }; // P3-HD M4: the optional server entry; M4b: the others. E3: the default entry through fixtureServer
         writeFileSync(join(claudeConfigDir, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, mcpServers, projects: { [this.project]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
       },
     });
@@ -366,7 +402,7 @@ export class ConnectorScene {
 }
 
 export async function withScene(name: string, info: TestInfo, body: (scene: ConnectorScene) => Promise<void>, options: ConnectorSceneOptions = {}): Promise<void> {
-  const scene = new ConnectorScene(name, options); // P3-HD M4: the optional scene options
+  const scene = new ConnectorScene(name, options); // P3-HD M4: the optional scene options (E3: liveData among them)
   let failed = false;
   try {
     await body(scene);
