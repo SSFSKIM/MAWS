@@ -9,7 +9,7 @@
     "means": "one original row per fresh commit through /private/tmp/p3f-commit-row.py under lockf /private/tmp/maws-p3f-commit.lock; documentary validation only; no gate run",
     "preEditPlanAcknowledged": "controller confirmed the claimed paths (docs/tech-debt-tracker.md through the helper; this file) and the batch plan before any edit"
   },
-  "base": "2c45e150f",
+  "base": "2c45e150f (dispatch pin); first record commit on f75d4dbac (the controller's preflight pin, no tracker change)",
   "checkedAt": "all 10 close, 123 defer and 17 preclosed frozen rows matched the current tracker exactly once before the first edit",
   "deferFormat": "each defer row keeps its whole text; its closing cell gains 'Re-deferred 2026-10-18 (P3-F triage, triage.txt L<n>; parent Decision Log 106): <ruled reason> Owner: <ruled step made explicit>.' (the P2-F pattern)",
   "counts": {
@@ -201,7 +201,7 @@
       "action": "re-defer",
       "triageReason": "Bounded-head budget uses the measured/load-aware seam, not an unconditional Linux wall limit. Evidence: e2e/support/latency.ts; e2e/code-tools.spec.ts.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)",
+      "commit": "881562a30aaebb16e5e60dd83c4b66c42c2361ff",
       "binAtM0": "close",
       "ruling": "Architect's ruling relayed by the P3-F controller (af4cd2993bc56e015) on 2026-10-18: L173 close -> defer under P3 Decision Log 107 (parent docs/doperpowers/plans/2026-10-12-p3-co-work.md; the entry is not in this worktree's copy of the parent at the time of this commit). Effective counts become fix 53 / sitting 10 / close 9 / defer 124 / theirs 42; frozen 238 unchanged.",
       "appended": "Re-deferred 2026-10-18 (P3-F M1-record; P3 Decision Log 107): the ratified close cited 5e277d082, which predates the Linux failure and does not loosen the 2 s budget on a quiet machine; no P3 source repair. Owner: the gate lane, before any class-1b run on a platform slower than the mini; closes when the budget is platform-aware or the lane rules Linux out of e2e:code for good.",
@@ -1611,5 +1611,54 @@
       "status": "committed",
       "commit": "d616b6f7dceeec022d8dfb6037c3396229cdeb3d"
     }
+  ],
+  "range": "f75d4dbac..453ee1a9d (149 row commits, nothing else interleaved), then this records-only commit",
+  "summary": {
+    "preclosedRemoved": [
+      56,
+      184,
+      188,
+      221,
+      223,
+      224,
+      225,
+      226,
+      228,
+      234,
+      236,
+      239,
+      240,
+      273,
+      274,
+      278
+    ],
+    "preclosedUntouched": [
+      230
+    ],
+    "closedRemoved": [
+      131,
+      144,
+      171,
+      172,
+      181,
+      189,
+      206,
+      220,
+      222
+    ],
+    "reDeferred": 124,
+    "rebinned": {
+      "173": "close -> defer (gate lane), P3 Decision Log 107, relayed by the controller"
+    },
+    "effectiveBins": "fix 53 / sitting 10 / close 9 / defer 124 / theirs 42 = 238 frozen open rows; 17 preclosed (16 removed, L230 untouched)",
+    "tableRows": "tracker table 251 rows before this wave, 226 after (25 removals; 124 rows edited in place)"
+  },
+  "validation": "Documentary only (no app, engine, gate or test run). Checked with a script against tracker-m0.json and the tracker at f75d4dbac: each removed frozen row is absent; each re-deferred row appears exactly once as its frozen text with only the appended sentence before the final cell border; L230 matches its frozen text; the whole tracker equals the base with exactly these 149 changes, so no fix, sitting or theirs row and no other row moved; each of the 149 commits touches only docs/tech-debt-tracker.md and this file, changes exactly one tracker row (numstat 0/1 for a removal, 1/1 for a re-deferral), carries no attribution, and its subject names its handle.",
+  "notes": [
+    "L56: P2-F 1.6 (ad89b5809) appended a re-deferral to the cua_repl session after the row's cua #102 closure; the closure is verified in code, so the trailing re-deferral was stale.",
+    "L225: the recorded closure says \"the suffix pass runs after filtering\"; the code names labels over the unfiltered domain (render.ts:304-305, :364), so the clause is met despite that wording.",
+    "L171 and L181 close by architect ruling rather than the clause's literal act (no compatMode shim; the house-token file kept as production fallback).",
+    "L220: the gate's unit:darwin step bypasses the package test script, so node:sqlite's warning can still print there (gate-owned).",
+    "L189: the triage cites rail.dom.test.ts; the file is rail.dom.test.tsx."
   ]
 }
