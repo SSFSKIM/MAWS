@@ -12,6 +12,11 @@
 // idle) and the renderers' working set; Korean composed under load into a block the agent edits; a host SIGKILL under
 // load. Run on purpose only, at low load (each bound is judged at load under 20):
 //   pnpm e2e:document-scale        (the script sets MAWS_DOCUMENT_PERF=1)
+// Decision Log 109 calibrates three rows to the Mac mini, the designated host, and the labels name the MacBook targets
+// beside them: `1 p95` ≤ 20 ms (mini 16.8 and 17.2; MacBook target 16), `7 enter` ≤ 1,200 ms per preview (mini 890.8 to
+// 1,126.8; MacBook target 1,000), `8 renderer collected` ≤ 600 MB (mini 480.5 and 519.7, about 8% run variance; MacBook 412
+// to 469, target 500). The MacBook targets in B's section and S7b's table are unchanged; a rise over these bounds is the
+// regression signal.
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -269,7 +274,7 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     const keys = keystrokeMeasures(report);
     const painted = stats(paintedInB(report, await remoteSeen(pageB)));
     const note = `${keys.keystrokes} keystrokes (${keys.noTransaction} without a transaction); agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}`;
-    rows.add('1 p95', 'keystroke → frame in A, p95 (200 pages, 2 windows, 2 agents)', keys.frame.p95, 'ms', 16, 'p95 ≤ 16 ms', note);
+    rows.add('1 p95', 'keystroke → frame in A, p95 (200 pages, 2 windows, 2 agents)', keys.frame.p95, 'ms', 20, 'p95 ≤ 20 ms (mini 16.8 and 17.2; MacBook target 16)', note);
     rows.add('1 max', 'keystroke → frame in A, max', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
     rows.add('2 p95', 'keystroke → presented (Event Timing; a keystroke under its 16 ms threshold counted at 16)', keys.presented.p95, 'ms', 50, 'p95 ≤ 50 ms', `${keys.presentedReported} keydowns reported at ≥ 16 ms; max ${keys.presented.max}`);
     rows.add('3 p95', 'keystroke → durable ack, p95', keys.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${keys.acked} acked; p50 ${keys.ack.p50}, max ${keys.ack.max}`);
@@ -355,7 +360,7 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
       await armHistory(page, id, 'leave');
       await page.getByRole('toolbar', { name: 'Version preview' }).getByRole('button', { name: 'Back to document' }).click();
       const leave = await historyResult(page);
-      rows.add(`7 enter ${k}`, `history preview enter (press → the preview editor bound and drawn and the bar’s change count drawn, the extra render included → frame after), preview ${k}`, enter.toPostPaintMs, 'ms', 1000, '≤ 1,000 ms');
+      rows.add(`7 enter ${k}`, `history preview enter (press → the preview editor bound and drawn and the bar’s change count drawn, the extra render included → frame after), preview ${k}`, enter.toPostPaintMs, 'ms', 1200, '≤ 1,200 ms per preview (mini 890.8 to 1,126.8; MacBook target 1,000)');
       rows.add(`7 leave ${k}`, `history preview leave, preview ${k}`, leave.toPostPaintMs, 'ms', 500, '≤ 500 ms');
     }
     const memory = await processMemory(app);
@@ -363,8 +368,9 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     await collectGarbage(page);
     await collectGarbage(pageB);
     const collected = await processMemory(app);
-    // Decision Log 44: the 500 MB bound reads on the retained set after a forced collection (row "8 renderer
-    // collected"); the figure right after the previews, before it, is recorded beside it
+    // Decision Log 44: the 600 MB bound (Decision Log 109's calibration of the 500 MB target to the mini) reads on the
+    // retained set after a forced collection (row "8 renderer collected"); the figure right after the previews, before
+    // it, is recorded beside it
     for (const renderer of memory.renderers) {
       const after = collected.renderers.find((r) => r.windowId === renderer.windowId)?.workingSetMB;
       rows.add(`8 renderer ${renderer.windowId}`, `renderer working set just after three previews, before a forced collection (window ${renderer.windowId})`, renderer.workingSetMB, 'MB', null, 'recorded; the ≤ 500 MB bound reads after a forced collection (Decision Log 44)', after === undefined ? undefined : `${after} MB right after the forced collection`);
@@ -376,7 +382,7 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     const memory = await processMemory(app);
     const loaded = await seam.heap();
     rows.add('8 host loaded', 'host heap delta with the 200-page document open in two windows and two agent replicas (from the warm idle)', MB(loaded.heapUsed - idle1.heapUsed), 'MB', 100, '≤ +100 MB', `idle ${MB(idle1.heapUsed)} → ${MB(loaded.heapUsed)} MB; host working set ${memory.utility.map((u) => `${u.name} ${u.workingSetMB}`).join(', ')} MB`);
-    for (const renderer of memory.renderers) rows.add(`8 renderer collected ${renderer.windowId}`, `renderer working set once the previews' garbage is collected (window ${renderer.windowId}; a forced collection)`, renderer.workingSetMB, 'MB', 500, '≤ 500 MB');
+    for (const renderer of memory.renderers) rows.add(`8 renderer collected ${renderer.windowId}`, `renderer working set once the previews' garbage is collected (window ${renderer.windowId}; a forced collection)`, renderer.workingSetMB, 'MB', 600, '≤ 600 MB (mini 480.5 and 519.7, about 8% run variance; MacBook 412 to 469, target 500)');
     await closeTab(page, 'Scale 200');
     await pageB.close();
     for (const agent of agents) await seam.release(agent.session);
