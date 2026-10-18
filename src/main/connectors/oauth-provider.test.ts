@@ -752,14 +752,29 @@ describe('work outliving its generation or its flow', () => {
     await vi.waitFor(() => expect(flow.connects).toHaveLength(1));
     flow.connects[0]!.answer.resolve(grant(tokens(9)));
     expect(await settled(replacing)).toEqual({ ok: true, connectionId: FRESH, reused: false });
+    // the withdrawn generation's demand is refused at the withdrawal, not when its stalled save answers
+    expect(await settled(demand)).toEqual({ ok: false });
     const next = await settled(prepare());
     expect(next === 'pending' ? next : credentialOf(next)).toMatchObject({ connectionId: FRESH, accessToken: 'at-9' });
     release.resolve();
-    expect(await demand).toEqual({ ok: false }); // the withdrawn generation's demand: nothing of it is delivered
     await vi.waitFor(() => expect(onDisk()).toEqual([`${FRESH}.sealed`]));
     expect(await storeOf().read(SAVED)).toBeNull();
     expect(credentialOf(await prepare())).toMatchObject({ connectionId: FRESH, accessToken: 'at-9' });
     expect(closes.filter((close) => close.connectionId === FRESH)).toEqual([]);
+  });
+
+  it('a demand whose grant lookup is still decrypting when Disconnect withdraws the identity is refused at once', async () => {
+    await seed();
+    sealer.holdOpen = deferred();
+    const release = sealer.holdOpen;
+    const demand = prepare();
+    await vi.waitFor(() => expect(sealer.openWaiting).toBe(true)); // the adoption's read, held in decryption
+    const disconnected = provider.disconnect(SAVED);
+    expect(await settled(demand)).toEqual({ ok: false });
+    release.resolve();
+    expect(await disconnected).toMatchObject({ local: 'forgotten' });
+    expect(await prepare()).toEqual({ ok: false }); // withdrawn until the owner connects
+    expect(onDisk()).toEqual([]);
   });
 
   for (const end of ['owner', 'hostLost'] as const) {

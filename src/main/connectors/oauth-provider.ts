@@ -143,6 +143,9 @@ interface Slot {
   closing: { connectionId: string; credentialEpoch: number }[];
   // P3-HD panel correction: the single-flight work of one grant generation; a withdrawn generation's is never joined
   work: { readonly generation: number; readonly done: Promise<void> } | null;
+  // P3-HD panel correction: aborted when this generation ends (`advance`), so a demand waiting on its lookup or work
+  // is refused at the withdrawal rather than when a stalled step of it answers; nothing shared is cancelled by it
+  ended: AbortController;
   refresh: AbortController | null;
   flow: { connectionId: string; controller: AbortController } | null;
   blocked: 'withdrawn' | 'needsConnect' | 'needsReconnect' | null;
@@ -241,7 +244,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         }
         if (slots.size >= OAUTH_PROVIDER_IDENTITY_LIMIT) return null;
       }
-      slot = { identity, key, generation: 0, held: null, issued: null, closing: [], work: null, refresh: null, flow: null, blocked: null, users: 0 };
+      slot = { identity, key, generation: 0, held: null, issued: null, closing: [], work: null, refresh: null, flow: null, blocked: null, users: 0, ended: new AbortController() };
       slots.set(key, slot);
     }
     slot.users += 1;
@@ -258,9 +261,17 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
   }
 
   // Ends the slot's saved state at once (Disconnect, a Reconnect's withdrawal): no later step of earlier work lands.
+  // A new grant generation: every waiter of the old one hears its end (P3-HD panel correction).
+  function advance(slot: Slot): void {
+    slot.generation += 1;
+    const ended = slot.ended;
+    slot.ended = new AbortController();
+    ended.abort();
+  }
+
   function withdraw(slot: Slot): void {
     const visible = slot.blocked !== 'withdrawn' || slot.held !== null || slot.flow !== null || slot.closing.length > 0; // P3-HD M3c2 correction
-    slot.generation += 1;
+    advance(slot);
     slot.blocked = 'withdrawn';
     slot.refresh?.abort();
     slot.flow?.controller.abort();
@@ -617,11 +628,12 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       const host = attachment.signal;
       return withSlot(identity, REFUSED, async (slot) => {
         const generation = slot.generation;
+        const withdrawn = slot.ended.signal; // P3-HD panel correction: this generation's end, raced by every wait below
         const live = () => !stopped && !signal.aborted && !host.aborted && slot.generation === generation && !slot.blocked && !slot.flow;
         if (!live()) return REFUSED;
         if (!slot.held) {
           let found = 'stale' as Found; // until the lookup answers
-          await settledOrEnded(adopt(slot).then((answer) => { found = answer; }), signal, host);
+          await settledOrEnded(adopt(slot).then((answer) => { found = answer; }), signal, host, withdrawn);
           if (!live()) return REFUSED;
           if (found === 'none' && !slot.held) return NONE;
           if (!slot.held) return REFUSED;
@@ -629,10 +641,10 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         const ready = deliverable(slot);
         if (!ready || expiring(ready)) {
           const joined = working(slot);
-          await settledOrEnded(ensure(slot), signal, host);
+          await settledOrEnded(ensure(slot), signal, host, withdrawn);
           if (!live()) return REFUSED;
           if (joined && !deliverable(slot)) {
-            await settledOrEnded(ensure(slot), signal, host);
+            await settledOrEnded(ensure(slot), signal, host, withdrawn);
             if (!live()) return REFUSED;
           }
         }
@@ -776,7 +788,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       attachment.abort();
       lifetime.abort();
       for (const slot of slots.values()) {
-        slot.generation += 1;
+        advance(slot);
         slot.refresh?.abort();
         slot.flow?.controller.abort();
       }
