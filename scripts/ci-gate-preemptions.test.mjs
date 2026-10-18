@@ -23,7 +23,10 @@ const recorded = {
   ],
 };
 // A MAWS pool job ended the same way: the recorded job's conclusion, runner shape and annotations under a gate's name.
-const preempted = (name, runner = 'ci-kit-gce-hs99r2glck') => ({ name, conclusion: recorded.job.conclusion, runner_name: runner, annotations: recorded.annotations });
+const preempted = (name, runner = 'ci-kit-gce-hs99r2glck', annotations = recorded.annotations) => ({ name, conclusion: recorded.job.conclusion, runner_name: runner, annotations });
+// MAWS's own pool jobs, preempted mid-step (simulated, run 39112141861: unit 117630377116 in its vitest step, static
+// 117630377153 in typecheck), carry the first annotation alone: the exit-130 line is the sandbox's step's own.
+const preemptedMidStep = (name, runner) => preempted(name, runner, [{ path: '.github', annotation_level: 'failure', title: '', message: 'The operation was canceled.', raw_details: '' }]);
 const green = (name, runner = 'ci-kit-gce-hs99qt76im') => ({ name, conclusion: 'success', runner_name: runner, annotations: [] });
 const red = (name, runner = 'ci-kit-gce-hs99sz4glw') => ({ name, conclusion: 'failure', runner_name: runner, annotations: [{ annotation_level: 'failure', message: 'Process completed with exit code 1.' }] });
 const plan = { name: 'plan', conclusion: 'success', runner_name: 'GitHub Actions 1000005582', annotations: [] };
@@ -94,7 +97,7 @@ if (args[0] === 'api') {
       save();
     }
     print(runObject, flag('--jq'));
-  } else if (endpoint === repo + 'actions/runs/' + scenario.run + '/jobs?per_page=100' && args.includes('--paginate')) {
+  } else if (endpoint === repo + 'actions/runs/' + scenario.run + '/attempts/' + attempt + '/jobs?per_page=100' && args.includes('--paginate')) {
     if ((state.unread[attempt] ?? 0) < (scenario.unreadJobs?.[attempt] ?? 0)) {
       state.unread[attempt] = (state.unread[attempt] ?? 0) + 1;
       save();
@@ -199,7 +202,7 @@ test("a failure with the preemption's annotations on a runner that is not ci-kit
 
 // Two jobs preempted in attempt 1 beside a red: the first goes green on its rerun, the second red.
 const twoPreempted = {
-  jobs: [plan, preempted('e2e:desk-web', 'ci-kit-gce-hs99wo3ici'), green('probes'), red('static'), preempted('unit')],
+  jobs: [plan, preempted('e2e:desk-web', 'ci-kit-gce-hs99wo3ici'), green('probes'), red('static'), preemptedMidStep('unit', 'ci-kit-gce-hs9ae8fiqa')],
   reruns: { 'e2e:desk-web': [green('e2e:desk-web')], unit: [red('unit')] },
 };
 const settledTwoPreempted = (result) => {

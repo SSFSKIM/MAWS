@@ -36,13 +36,13 @@ settle_run() {
   local rows found id name pending='' retried='' twice='' refused='' next rerun_err started observed run_status unread=0
   while :; do
     await_run
-    # The attempt, its status and its conclusion from one observation of the run.
+    # The attempt, its status and its conclusion from one observation of the run, then that attempt's jobs.
     if observed=$(gh api "repos/$REPO/actions/runs/$run_id" --jq '"\(.run_attempt)\t\(.status)\t\(.conclusion)"'); then
       IFS=$'\t' read -r run_attempt run_status conclusion <<<"$observed"
     else
       run_status=unread
     fi
-    if [[ $run_status == completed ]] && ! rows=$(gh api --paginate "repos/$REPO/actions/runs/$run_id/jobs?per_page=100" --jq '.jobs[] | [.id, (.conclusion // .status), (.runner_name // ""), .name] | @tsv'); then
+    if [[ $run_status == completed ]] && ! rows=$(gh api --paginate "repos/$REPO/actions/runs/$run_id/attempts/$run_attempt/jobs?per_page=100" --jq '.jobs[] | [.id, (.conclusion // .status), (.runner_name // ""), .name] | @tsv'); then
       run_status=unread
     fi
     if [[ $run_status != unread ]]; then
