@@ -2,8 +2,9 @@
 // a `human` addressed to it, a steer this tab issued — that no row of the transcript is yet known to be, with the state
 // of its delivery. A send gives way only to its own row, matched by identity alone: a delivered prompt whose whole first
 // line is the frame sminos writes for the send's event (`[sminos chat <project> <writer_short>:<seq> from <from> →
-// @you]`, or `[sminos message from … id=<msg_id>]` for an event that carries one), or the row a steer's result names.
-// No text is compared.
+// @you]`, or `[sminos message from … id=<msg_id>]` for an event that carries one) on a row that marks a delivery's
+// provenance (the bridge's prompt as the user, its row appended into a running turn, a peer's or plugin's queued
+// command), or the row a steer's result names. No text is compared.
 import { describe, expect, it } from 'vitest';
 import type { Delivery, JsonObject, LogEvent, Rpc } from 'desk-hub/protocol';
 import { deliveryKey, type OutboxItem, type RpcEntry } from '../project/conversation';
@@ -28,6 +29,13 @@ let uuid = 0;
 const userRow = (content: unknown, ts = '2026-10-15T09:00:05.000Z', origin: JsonObject | null = { kind: 'plugin', name: 'doperpowers', asUser: true }): JsonObject =>
   ({ type: 'user', uuid: `u${++uuid}`, timestamp: ts, message: { role: 'user', content }, ...(origin && { origin }) }) as JsonObject;
 const typedRow = (content: string, ts?: string) => userRow(content, ts, { kind: 'human' });
+/** A send through sminos's inbox as the engine (2.1.300 on) keeps it: a peer message, the frame inside its envelope. */
+const INBOX = { kind: 'peer', from: 'unknown', verifiedPeerPid: 4242, name: 'maws-45' };
+const envelope = (body: string) => `<cross-session-message from-name="maws-45">\n${body}\n</cross-session-message>`;
+const inboxRow = (body: string): JsonObject => ({ ...userRow(`Another Claude session sent a message:\n${envelope(body)}\n\nThis came from another Claude session.`, undefined, INBOX), isMeta: true }) as JsonObject;
+const inboxQueued = (body: string): JsonObject => ({ type: 'attachment', uuid: `q${++uuid}`, timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt: envelope(body), source_uuid: `s${uuid}`, commandMode: 'prompt', origin: INBOX, isMeta: true } }) as JsonObject;
+/** A row the bridge appended into the running turn (`$.session.append`), as the engine keeps it: meta, the plugin's origin. */
+const appendedRow = (text: string, origin: JsonObject = { kind: 'plugin', name: 'doperpowers' }): JsonObject => ({ ...userRow([{ type: 'text', text }], undefined, origin), isMeta: true }) as JsonObject;
 const assistantRow = (text: string, ts = '2026-10-15T08:59:00.000Z'): JsonObject => ({ type: 'assistant', uuid: `a${++uuid}`, timestamp: ts, message: { role: 'assistant', content: [{ type: 'text', text }] } }) as JsonObject;
 /** The frame the bridge submits for a web send: its first line names the event, then the text. */
 const framed = (seq: number, text: string, writer = WEB) => `[sminos chat MAWS ${writer}:${seq} from human → @you]\n${text}`;
@@ -160,31 +168,81 @@ describe("a send at the session view's tail", () => {
       expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), row], complete: false } })), JSON.stringify(row)).toHaveLength(1);
   });
 
-  it('takes a frame from the bridge as the user, or from a command a peer or a plugin queued, in either form', () => {
+  it('takes a frame from the bridge as the user, from a command the bridge queued, or from the peer message the engine made of one sent through the inbox, in either form', () => {
     const send = human(1, 'x');
     const machineHuman = { offset: ++offset, event: { ts: '2026-10-15T09:00:00.000Z', writer: 'mini/human', seq: 1, kind: 'human', from: 'human', to: [{ session: S, alias: 'maws-45' }], text: 'r', msg_id: '5e551e17', mac: { nonce: 'h4', value: 'v' } } as LogEvent };
     const queued = (prompt: string, kind: string) => ({ type: 'attachment', uuid: `q${++uuid}`, timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind } } }) as JsonObject;
-    const delivered = (frame: string) => [userRow(frame), queued(frame, 'peer'), queued(frame, 'plugin')];
+    const delivered = (frame: string) => [
+      userRow(frame),
+      queued(frame, 'plugin'),
+      inboxRow(frame), // idle, through the inbox: the engine's peer message, the frame inside its envelope
+      inboxQueued(frame), // busy, through the inbox: the bare envelope queued
+      queued(frame, 'peer'), // busy, through the inbox, as engines through 2.1.289 queued it: the frame raw
+    ];
     for (const row of delivered(framed(1, 'x'))) expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
     for (const row of delivered('[sminos message from human id=5e551e17]\nr')) expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
   });
 
-  it("is never taken by the bridge's steer row, even one carrying the send's frame: a steer matches only the row its result names", () => {
+  it("takes a frame from the bridge's row appended into a running turn (doperpowers #233), in either form", () => {
+    // While the main turn runs, the bridge appends a delivery (`$.session.append`, one text block), which the engine keeps
+    // meta with the plugin's origin and no `asUser`: its frame is the only word that it is a delivery.
     const send = human(1, 'x');
-    // The bridge's steer appends a user row (`$.session.append`, a text block) that is no submission as the user: it
-    // marks no origin, or a plugin's without `asUser`.
-    const appended = (origin: JsonObject | null) => ({ ...userRow([{ type: 'text', text: framed(1, 'x') }], undefined, origin), uuid: 'steer-row', session_id: S }) as JsonObject;
-    for (const row of [appended(null), appended({ kind: 'plugin', name: 'doperpowers' })])
-      expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } })).map((s) => s.key), JSON.stringify(row.origin)).toEqual([`chat:${WEB}:1`]);
+    const machineHuman = { offset: ++offset, event: { ts: '2026-10-15T09:00:00.000Z', writer: 'mini/human', seq: 1, kind: 'human', from: 'human', to: [{ session: S, alias: 'maws-45' }], text: 'r', msg_id: '5e551e17', mac: { nonce: 'h5', value: 'v' } } as LogEvent };
+    expect(tailSends(base({ entries: [send], deliveries: delivery(1, 'delivered'), transcript: { rows: [assistantRow('x'), appendedRow(framed(1, 'x'))], complete: false } }))).toEqual([]);
+    expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), appendedRow('[sminos message from human id=5e551e17]\nr')], complete: false } }))).toEqual([]);
+    // Two identical sends, each taken by its own appended row only.
+    const sends = [human(2, 'continue'), human(3, 'continue')];
+    expect(tailSends(base({ entries: sends, transcript: { rows: [assistantRow('x'), appendedRow(framed(3, 'continue'))], complete: false } })).map((s) => s.key)).toEqual([`chat:${WEB}:2`]);
   });
 
-  it("matches a frame however the engine carries the prompt: the row's text, a text block, a queued command", () => {
+  it("is never taken by a steer's row, the bridge's other rows, nor a frame on a plugin's row the engine did not keep as the bridge's append", () => {
     const send = human(1, 'x');
-    const forms = [userRow([{ type: 'text', text: framed(1, 'x') }]), { type: 'attachment', uuid: 'q1', timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt: framed(1, 'x'), commandMode: 'prompt', origin: { kind: 'peer' } } } as JsonObject];
-    for (const row of forms) expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
+    for (const row of [
+      appendedRow('x'), // a steer with the send's words
+      appendedRow(`continue\n${framed(1, 'x')}`), // a steer quoting the frame past its first line
+      appendedRow('[Request interrupted by user]'),
+      appendedRow('The interrupt came from the desk.'),
+      appendedRow('Task bk3x9a1, a background task, was stopped from the desk: it is not running.'),
+      appendedRow(framed(1, 'x').split('\n')[0]), // a steer whose whole text is the frame line: sminos writes its text after it
+      appendedRow(framed(1, 'x'), { kind: 'plugin', name: 'another' }), // another plugin's meta row
+      { ...appendedRow(framed(1, 'x')), isMeta: false } as JsonObject, // the bridge's origin, not kept as its append
+      userRow([{ type: 'text', text: framed(1, 'x') }], undefined, null), // an append with no origin
+    ])
+      expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } })).map((s) => s.key), JSON.stringify(row)).toEqual([`chat:${WEB}:1`]);
+  });
+
+  it("matches a steer by the row its result names, never by the bridge's row carrying its words", () => {
+    const rpc: RpcEntry = {
+      nonce: 'st',
+      state: 'done',
+      outcome: { state: 'done', result: { row: 'u-steered' } },
+      rpc: { rpc: 'steer', project: 'p', machine: 'mini', member: M, created: '2026-10-15T09:00:00.000Z', nonce: 'st', args: { session: S, text: 'use the split store' }, mac: 'm' } as Rpc,
+    };
+    const lookalike = appendedRow('use the split store'); // its words, another row
+    expect(tailSends(base({ rpcs: [rpc], transcript: { rows: [assistantRow('x'), lookalike], complete: false } })).map((s) => s.key)).toEqual(['steer:st']);
+    const own = { ...appendedRow('use the split store'), uuid: 'u-steered' } as JsonObject;
+    expect(tailSends(base({ rpcs: [rpc], transcript: { rows: [assistantRow('x'), own], complete: false } }))).toEqual([]);
+  });
+
+  it("matches a frame however the engine carries the prompt: the row's text, a text block, a queued command, a peer message's envelope", () => {
+    const send = human(1, 'x');
+    const forms = [userRow([{ type: 'text', text: framed(1, 'x') }]), { type: 'attachment', uuid: 'q1', timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt: framed(1, 'x'), commandMode: 'prompt', origin: { kind: 'plugin' } } } as JsonObject, { ...inboxRow(framed(1, 'x')), message: { role: 'user', content: [{ type: 'text', text: `Another Claude session sent a message:\n${envelope(framed(1, 'x'))}` }] } } as JsonObject];
+    for (const row of forms) expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } })), JSON.stringify(row)).toEqual([]);
     // A tool's result quoting the frame (a log read back) is not a prompt.
     const quoted = userRow([{ type: 'tool_result', tool_use_id: 't', content: framed(1, 'x') }]);
     expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), quoted], complete: false } }))).toHaveLength(1);
+  });
+
+  it('is never taken by a peer message whose envelope does not open with its whole frame, nor by a peer message elsewhere in a row', () => {
+    const send = human(1, 'x');
+    for (const row of [
+      inboxRow(`Look: ${framed(1, 'x')}`), // not the whole first line
+      inboxRow(`hi\n${framed(1, 'x')}`), // not the first line
+      inboxQueued(framed(1, 'x').split('\n')[0]), // the frame with no text after it
+      { ...inboxRow(framed(1, 'x')), origin: { kind: 'human' } } as JsonObject, // an envelope typed at the terminal
+      userRow(`Another Claude session sent a message:\n${envelope(framed(1, 'x'))}`, undefined, null), // no origin
+    ])
+      expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } })), JSON.stringify(row)).toHaveLength(1);
   });
 
   it("matches a machine's own human by its msg_id frame", () => {
