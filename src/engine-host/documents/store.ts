@@ -326,7 +326,7 @@ export class ArtifactStore {
   // batch they read (`writeCommitted`).
   async create(input: CreateInput, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     this.checkCreate(input, actor);
-    if (!input.content || !('path' in input.content) || input.content.digest) return this.createChecked(input, actor, inFrame);
+    if (input.kind !== 'file' || !input.content || !('path' in input.content) || input.content.digest) return this.createChecked(input, actor, inFrame); // a path of another kind is refused by its write, unread
     const content = await this.withDigest(input.content);
     return this.writeCommitted(async () => {
       this.checkCreate(input, actor);

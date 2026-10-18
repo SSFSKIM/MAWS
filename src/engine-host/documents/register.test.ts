@@ -282,6 +282,7 @@ describe('the owner’s file writes hash before their batch', () => {
     const missing = '00000000-0000-4000-8000-00000000dead';
 
     expect(await refusal('artifacts.create', { kind: 'document', title: 'Doc', content: { path: file } })).toMatchObject({ issues: { reason: 'invalid' } });
+    expect(await refusal('artifacts.create', { kind: 'html', title: 'Page', content: { path: file } })).toMatchObject({ issues: { reason: 'invalid' } });
     expect(await refusal('artifacts.create', { kind: 'file', title: 'F', content: { path: file }, designSystemId: missing })).toMatchObject({ issues: { reason: 'invalid' } });
     expect(await refusal('artifacts.create', { kind: 'file', title: 'F', content: { path: file }, spaceId: missing })).toMatchObject({ issues: { reason: 'notFound' } });
     for (const path of [dir, '/dev/null']) expect(await refusal('artifacts.create', { kind: 'file', title: 'F', content: { path } })).toMatchObject({ issues: { reason: 'invalid' } });
