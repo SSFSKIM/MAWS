@@ -1,0 +1,95 @@
+{
+  "run": 39165341280,
+  "source": "cdf54fbeb36c98c9e0c2f10a65b89e09e25b33f6",
+  "result": "1failed/1passed/0skipped,no marginal rows",
+  "raw": "quiet-document-raw.json",
+  "failedRows": [
+    {
+      "row": "1 p95",
+      "measure": "keystroke → frame in A, p95 (200 pages, 2 windows, 2 agents)",
+      "bound": "p95 ≤ 16 ms",
+      "limit": 16,
+      "value": 17.2,
+      "unit": "ms",
+      "pass": false,
+      "verdict": "failed",
+      "load": 4.39,
+      "note": "300 keystrokes (0 without a transaction); agents: perf-agent-1 31 batches, 0 refused; perf-agent-2 32 batches, 0 refused"
+    },
+    {
+      "row": "7 enter 2",
+      "measure": "history preview enter (press → the preview editor bound and drawn and the bar’s change count drawn, the extra render included → frame after), preview 2",
+      "bound": "≤ 1,000 ms",
+      "limit": 1000,
+      "value": 1016.9,
+      "unit": "ms",
+      "pass": false,
+      "verdict": "failed",
+      "load": 4.55
+    },
+    {
+      "row": "8 renderer collected 1",
+      "measure": "renderer working set once the previews' garbage is collected (window 1; a forced collection)",
+      "bound": "≤ 500 MB",
+      "limit": 500,
+      "value": 519.7,
+      "unit": "MB",
+      "pass": false,
+      "verdict": "failed",
+      "load": 4.55
+    }
+  ],
+  "loads": {
+    "launched": 2.85,
+    "steadyStart": 2.54,
+    "steadyEnd": 4.39
+  },
+  "firstSample": "20page cold179ms at2.33; no above10 first-sample settle trigger",
+  "typing": "300/300 acknowledged,0missing transactions/long tasks; steady2.54->4.39; framep95 17.2,post-paintp95 19.3,ackp95 24.1",
+  "preview": "each enter judged,not best-of-three;934.9@4.34,1016.9@4.55,890.8@4.55ms",
+  "memoryScope": "each BrowserWindow renderer process app.getAppMetrics workingSetSize/1024 after CDP HeapProfiler.collectGarbage; not JS heap,sum,host,component-only or after-close",
+  "memory": {
+    "window1": {
+      "workingSetBefore": 1024.5,
+      "workingSetAfter": 519.7,
+      "heapBefore": 208.5,
+      "heapAfter": 71.6
+    },
+    "window2": {
+      "workingSetBefore": 433.8,
+      "workingSetAfter": 433.4,
+      "heapBefore": 53.7,
+      "heapAfter": 53.1
+    },
+    "hostLoadedDelta": 67.2,
+    "hostAfterCloseDelta": 3.2,
+    "priorHeapA": 71.8,
+    "interpretation": "working-set variance does not establish a JS-heap leak"
+  },
+  "clock": {
+    "testStepStart": "21:12:05.623205Z",
+    "lastRestoreLog": "21:12:06.638377Z",
+    "typingEnvelope": [
+      "21:13:22.468Z",
+      "21:14:03.174Z"
+    ],
+    "typingRowWrite": [
+      "21:14:05.409Z",
+      "21:14:05.425Z"
+    ],
+    "preview2Envelope": [
+      "21:14:19.074Z",
+      "21:14:20.117Z"
+    ],
+    "preview2RowWrite": [
+      "21:14:20.299Z",
+      "21:14:20.302Z"
+    ],
+    "memorySample": [
+      "21:14:21.766Z",
+      "21:14:21.767Z"
+    ],
+    "limits": "row load sampled at recording, not continuous; no exact independent build exit or per-row event timestamp"
+  },
+  "ruling": "parentDL109 corrected843275754 authorizes mini calibration20/1200/600, product targets16/1000/500 retained and three P4 rows; no measurement/protocol defect established by read-only source/evidence"
+}

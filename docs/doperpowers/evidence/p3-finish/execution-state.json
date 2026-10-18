@@ -1149,5 +1149,26 @@
       "fullSetCredit": false
     }
   },
-  "heavyRepeatability": "measurements/heavy-repeatability-observation.json: same seeded input counts, logical output differs across mandatory runs; no optimization/probe"
+  "heavyRepeatability": "P4 carry row committed with both shapes; parent accepts preview validity by descriptor, no probe/optimization",
+  "documentCalibration": {
+    "parent": "843275754ae6e2058963f8c41c531c76cad6bf64",
+    "merge": "a8ff60d21c5ddea153ad1c079fe0663d4f2eb35e",
+    "status": "prepared source awaiting single calibration commit and focused review",
+    "quietRelay": {
+      "quietSince": "2026-10-18T21:27:56Z",
+      "reportedLoads": [
+        4.72,
+        3.78
+      ],
+      "recheckApprox": "21:29Z",
+      "recheckLoads": [
+        3.39,
+        3.69
+      ],
+      "noScenes": true,
+      "noRunnerJobAtRelay": true,
+      "launcherHeld": true,
+      "launchCondition": "single document-scale only after calibration review; architect notified run start/end"
+    }
+  }
 }
