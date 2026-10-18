@@ -16,8 +16,8 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 8,
-    "preclosed:pending": 8,
+    "preclosed:committed": 9,
+    "preclosed:pending": 7,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -83,15 +83,15 @@
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at E2's M6 tick ba05e4680 (on master).",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "1e74905a12e0eb008de639258f2a7b17fda4df26"
     },
     {
       "line": 228,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at P3-F1's landing bd8532a18 (on master), proven by e2e/document-narrow.spec.ts.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 230,
