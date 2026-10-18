@@ -4681,6 +4681,21 @@ a hub that connects into machines (§2).
   agent (`TaskStop` would kill it), so agents stay out of DC10.
   Rejected: waiting for the engine's notification, which never comes for
   a main-loop task.
+  2026-10-18, the owner: a peer's message arrives as a peer's. The bridge
+  has submitted every log event as the human's words (`$.prompt.submit`,
+  `asUser`). So the terminal, the MAWS app and the desk all drew a
+  peer's message as the owner's prompt, and the model read it in the
+  owner's voice, approvals included. The desk's "From <name>" label only
+  covered that up. A peer's event now takes the session's inbox socket,
+  the channel native SendMessage between sessions rides. Claude Code
+  delivers it as "Another Claude session sent a message", and MAWS's
+  derivation already draws that as an `agent_message` row (`origin`
+  `peer`, `parsePeerMessage`). Only the owner's events stay the human's
+  words through the bridge. Sending is unchanged: `sminos say`, the log,
+  and the hub across machines. Rejected: having agents switch to native
+  SendMessage, which reaches only the same machine and leaves no record.
+  Also rejected: changing only how surfaces draw the row, which leaves
+  the model reading a peer in the owner's voice.
   2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
   desk-dc8 370662a2, c81b77fc, 578b11b8):
   - DX5's `resync` gains `refused`, so a refusal whose post failed is not
