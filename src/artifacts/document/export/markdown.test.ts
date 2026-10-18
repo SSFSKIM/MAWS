@@ -129,7 +129,7 @@ describe('exportMarkdown', () => {
     expect(html).toMatch(/<p>one<br>\s*<\/p>/);
     expect(html).toMatch(/<p>two<br>\s*<\/p>/);
     expect(html).toMatch(/<p>three<br>\s*<\/p>/);
-    expect(html).toMatch(/<p>four<br>\s*<em> <\/em>\s*<\/p>/); // a marked space is the line's content: the break stays a break
+    expect(html).toMatch(/<p>four<br>\s*<em>&#32;<\/em>\s*<\/p>/); // a marked space is the line's content: the break stays a break
     expect(html).toMatch(/<li>five<br>\s*<\/li>/);
   });
 
