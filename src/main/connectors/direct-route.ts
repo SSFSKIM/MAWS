@@ -25,6 +25,8 @@
 //   check) or the owner's discovery, within the operation's registered and bounded lifetime: its cancellation, its
 //   deadline, the host's loss, a close and stop each settle it at once and abort the preparation, and a late answer
 //   sends nothing. Resolution never prepares one. An `unauthorized` answer is reported with exactly the credential sent.
+//   P3-F F-connectors 6: the broker's door preceded the preparation's awaits, so the call asks main's admission again
+//   (`admit`, the native window re-read) in the same turn as its start.
 import { randomUUID } from 'node:crypto';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import type { DirectCallOutcome, DirectCredential, DirectDiscoverAnswer, DirectOperationOutcome, DirectResolveAnswer, DirectSource, DirectToolMetadata } from '@shared/ipc/schema/connectors';
@@ -268,6 +270,9 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
           if (!deps.streaming()) return withdraw(operationId, lost('the engine host is not streaming its events yet'));
           credential = prepared.credential;
         }
+        // P3-F F-connectors 6: main's admission again, in the same turn as the send (a window that hid unannounced while
+        // the credential was prepared aborts the call here, before anything, an Allow once included, is used)
+        if (context?.admit && !context.admit()) return withdraw(operationId, lost('cancelled'));
         operation.sent = true;
         let started;
         try {

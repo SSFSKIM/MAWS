@@ -113,7 +113,7 @@ describe('a page call or watch with a dataset sink', () => {
     expect(await broker.callTool(ME, lease, { ...ROWS, args: { series: 'revenue' } }, { dataset: { id: 'live', baseRevision: 3 } })).toMatchObject({ ok: true, result: META });
     expect(engine.calls[0]!.context.dataset).toEqual({ id: 'live', baseRevision: 3 });
     await broker.callTool(ME, lease, ROWS);
-    expect(Object.keys(engine.calls[1]!.context).sort()).toEqual(['fingerprint', 'mode', 'signal']);
+    expect(Object.keys(engine.calls[1]!.context).sort()).toEqual(['admit', 'fingerprint', 'mode', 'signal']); // P3-F F-connectors 6: main's admission recheck
   });
 
   it('answers publishable from the native window read now, and false once the surface or the window hid', async () => {

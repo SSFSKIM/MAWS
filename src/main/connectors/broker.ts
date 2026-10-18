@@ -523,12 +523,16 @@ export class ConnectorBroker {
     let answer;
     try {
       // The backend's door (P3-H H4): the window re-read in the same turn as the call, so a hide no event announced while
-      // the route or the grant answered aborts the work here and nothing is dispatched.
+      // the route or the grant answered aborts the work here and nothing is dispatched. P3-F F-connectors 6: the same
+      // recheck goes to the route (`admit`), for its own door after awaits of its own (route D's credential preparation).
       const admitted = authorization;
-      const dispatched = Promise.resolve().then<ConnectorRouteAnswer | typeof ABORTED>(() => {
+      const admit = () => {
         if (owner !== null) this.recheckWindow(owner);
-        return signal.aborted ? ABORTED : target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode, ...(dataset && { dataset: dataset.sink, publishable: dataset.publishable, ...(dataset.appSessionId && { appSessionId: dataset.appSessionId }) }) /* E3 */ });
-      });
+        return !signal.aborted;
+      };
+      const dispatched = Promise.resolve().then<ConnectorRouteAnswer | typeof ABORTED>(() =>
+        admit() ? target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode, admit, ...(dataset && { dataset: dataset.sink, publishable: dataset.publishable, ...(dataset.appSessionId && { appSessionId: dataset.appSessionId }) }) /* E3 */ }) : ABORTED,
+      );
       // E3 M2 residual: a dataset call, once dispatched, is settled by its route even when aborted (never raced)
       answer = await (dataset ? dispatched : unlessAborted(dispatched, signal));
     } catch (error) {

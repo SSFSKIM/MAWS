@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName } from '@shared/ipc/schema';
 import type { DirectOperationOutcome, DirectSource } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
+import { ConnectorBroker } from './broker';
 import { createDirectRoute, DIRECT_OPERATION_DEADLINE_MS, type DirectCredentialPreparation, type DirectRoute, type DirectRouteDeps } from './direct-route';
-import type { ConnectorRouteTarget } from './route';
+import type { ConnectorGrantAuthority, ConnectorRouteTarget } from './route';
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const SOURCE_ID = '22222222-2222-4222-8222-222222222222';
@@ -254,5 +255,32 @@ describe('the owner’s discovery and tool-specific source selection', () => {
     expect(last('connectors.directResolve').input).not.toHaveProperty('tool');
     finish('connectors.directResolve', resolved(null));
     expect(await bare).toEqual({ ok: true, source: httpSource() });
+  });
+});
+
+// P3-F F-connectors 6: the broker's re-read of the owner's native window happens at route D's own door, after the
+// credential preparation's awaits, so a window that hid unannounced meanwhile dispatches nothing (no Allow once is used)
+describe('the native window after a credential preparation', () => {
+  it('a window that hid with no event while the credential was prepared dispatches nothing, its call paused', async () => {
+    let shown = true;
+    const grants: ConnectorGrantAuthority = { list: async () => [], grant: async () => Promise.reject(new Error('no grant here')), revoke: async () => false, check: async () => ({ granted: true, mode: 'once' }) };
+    const broker: ConnectorBroker = new ConnectorBroker({ routes: [route], grants, log: () => {}, recheckWindow: (owner) => broker.setWindowShown(owner, shown) });
+    try {
+      broker.setWindowShown('window-1', true);
+      const lease = broker.open('window-1', ART);
+      broker.declareTools('window-1', lease, [ROWS]);
+      broker.setVisible('window-1', lease, true);
+      const calling = broker.callTool('window-1', lease, ROWS);
+      await settle();
+      finish('connectors.directResolve', resolved({ fingerprint: FP, readOnly: false }));
+      await vi.waitFor(() => expect(preparer.asked).toHaveLength(1));
+      shown = false; // hidden, and no Electron event says so: only a re-read hears it
+      preparer.answer({ ok: true, credential });
+      await settle();
+      expect(of('connectors.directStart')).toEqual([]);
+      expect(await calling).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    } finally {
+      broker.stop();
+    }
   });
 });
