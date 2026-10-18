@@ -1248,4 +1248,21 @@ describe("the owner's grant and revoke", () => {
     await broker.grantTool(ART, { ...ROWS, mode: 'read' });
     expect(await broker.revokeTool(ART, ROWS)).toBe(true);
   });
+
+  // P3-F F-connectors 1: a revoke committed while an older gesture's route resolved is the owner's latest decision; the
+  // older gesture restores no grant of either mode
+  it('writes no grant, an Allow once included, for a gesture a revoke overtook while its route resolved', async () => {
+    engine.has(ROWS);
+    for (const mode of ['read', 'once'] as const) {
+      let open!: () => void;
+      engine.resolveGate = new Promise((resolve) => (open = resolve));
+      const granting = broker.grantTool(ART, { ...ROWS, mode });
+      await settle();
+      expect(await broker.revokeTool(ART, ROWS), mode).toBe(false);
+      engine.resolveGate = null;
+      open();
+      expect(await granting, mode).toEqual({ ok: false, state: 'revoked', reason: 'revoked' });
+      expect(await broker.grants(ART), mode).toEqual([]);
+    }
+  });
 });
