@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 78,
-    "defer:pending": 45,
+    "defer:committed": 79,
+    "defer:pending": 44,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1112,7 +1112,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L133; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
       "remainingClause": "The re-pin that fixes it upstream; the shim deleted and `skipLibCheck: false` still holding. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L133; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "d7480a85e49add4d4201e08745a94c47562a4d87"
     },
     {
       "line": 134,
@@ -1122,8 +1122,8 @@
       "triageReason": "Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L134; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
       "remainingClause": "The `@y/y` release note naming yjs#814; the special case removed with the tests green. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L134; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 135,
