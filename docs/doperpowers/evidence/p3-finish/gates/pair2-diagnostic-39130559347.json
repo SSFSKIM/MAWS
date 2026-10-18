@@ -1,0 +1,92 @@
+{
+  "kind": "pair2 union MINI native diagnosis and STORE acceptance; not final-source evidence",
+  "runId": 39130559347,
+  "sourceCommit": "3cc3f0286b0f84c1a66aa73e750de14ee366b7db",
+  "wrapperHead": "03591260da475a44f3762c884b84ec97f9492c44",
+  "createdAt": "2026-10-18T13:12:54Z",
+  "recordedAt": "2026-10-18T13:35:10Z",
+  "label": "p3f-mini-store",
+  "groups": [
+    "static",
+    "unit",
+    "probes",
+    "unit:darwin",
+    "e2e:default",
+    "e2e:document-app",
+    "e2e:to-human",
+    "e2e:widgets",
+    "e2e:presentations",
+    "e2e:artifacts",
+    "e2e:design-systems",
+    "e2e:document",
+    "e2e:dashboard"
+  ],
+  "attempt": 1,
+  "conclusion": "failure",
+  "wrapperExit": 1,
+  "terminalLines": [
+    "ci-gate: run 39130559347 attempt 1",
+    "ci-gate: run 39130559347 failure",
+    "p3f-gate-exit: 1"
+  ],
+  "log": "/tmp/maws-review/gates/p3f-mini-store-diagnosis-ci.log",
+  "completionTask": "b7408uqe9",
+  "queueThresholdTask": "bet8xg7l6",
+  "reviewBasis": "Two candidate rounds per MINI/STORE plus exact final STORE HTML-kind guard5b5017f9d mechanically verified",
+  "failures": {
+    "unit": {
+      "job": 117684708430,
+      "passed": 20309,
+      "failed": 1,
+      "skipped": 73,
+      "filesPassed": 1524,
+      "filesFailed": 1,
+      "filesSkipped": 7,
+      "signature": "tokens-guard.test.ts renderer token-only scan: DocumentPanel.test.tsx:235/238/243/251 literal #111111/#222222 introduced by S-RESTYLE test; controller verified source"
+    },
+    "e2e:document-app": {
+      "job": 117684708559,
+      "passed": 9,
+      "failed": 1,
+      "signature": "commented-paste paragraph2 expected appended launch plan but unchanged",
+      "nativeEntry": {
+        "at": "2026-10-18T13:14:26.656Z",
+        "focused": true,
+        "contentsFocused": true
+      },
+      "nativeAtFailure": {
+        "at": "2026-10-18T13:14:31.669Z",
+        "focused": false,
+        "contentsFocused": false
+      },
+      "pageHasFocusAtFailure": true,
+      "trace": "paste carries launch plan; dispatch reports docChanged/applied true; paragraph snapshot unchanged; cause not yet established",
+      "L277": "restore selection passed, native entry true at13:14:40.167Z; count qualification pending"
+    },
+    "e2e:to-human": {
+      "job": 117684708546,
+      "passed": 1,
+      "failed": 1,
+      "signature": "must-read activeElement does not contain essential owner card at line103; native focused/contentsFocused true at entry13:24:40.984Z and failure13:24:45.948Z; active remains Needs-you button; target row connected; 60 frames during later one-second sample",
+      "disposition": "foreground activation alone did not repair same signature; source diagnosis pending"
+    }
+  },
+  "successfulJobs": [
+    "static",
+    "probes",
+    "unit:darwin",
+    "e2e:widgets",
+    "e2e:default",
+    "e2e:document",
+    "e2e:artifacts",
+    "e2e:presentations",
+    "e2e:dashboard",
+    "e2e:design-systems"
+  ],
+  "successfulJobCounts": "pending log readings; conclusions verified via jobs API",
+  "packaged": "skipped because not selected",
+  "afterGateEvidenceStatus": "empty after completion and before record write",
+  "fullSetCounterAdvance": false,
+  "paidSpendUsd": 0,
+  "acceptance": "pair2 not accepted; token-test fix and MINI native diagnoses/repairs pending; actual restyle test detail and other passing traces still to read"
+}

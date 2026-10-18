@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M1 pair2 source review corrections complete; preparing named union diagnostic gate",
+  "phase": "M1 pair2 diagnostic gate completed with token-test and two MINI failures; diagnosis and repair pending",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -88,7 +88,7 @@
     "comparisonCommit": "b34c32786"
   },
   "W-MINI": {
-    "status": "diagnostic candidate approved, not wave complete; native reading pending",
+    "status": "native diagnosis run failed paste and must-read; other native readings and source repairs pending",
     "foreground": "package-script activation permitted; lane hold lifted; child DL13",
     "executor": "ab180409652104010",
     "claims": "pair2-claims.json",
@@ -106,7 +106,7 @@
     "reviewFixCommit": "5f115a09d"
   },
   "W-STORE": {
-    "status": "review findings addressed; final specified guard mechanically verified; remote gate pending",
+    "status": "review findings addressed; unit token-only guard fails new test literals; native design-systems job success, detailed restyle proof reading pending",
     "executor": "a53b2ea8e3417bc02",
     "claims": "pair2-claims.json",
     "rowCommits": [
@@ -150,7 +150,17 @@
   "pair2GatePrepared": {
     "launcher": "/tmp/maws-review/p3f-mini-store-diagnosis-launch.sh",
     "label": "p3f-mini-store",
-    "status": "not launched",
+    "status": "launched and completed",
     "extraGroupReason": "dashboard shares document editor/history surface"
+  },
+  "pair2Gate": {
+    "runId": 39130559347,
+    "source": "3cc3f0286b0f84c1a66aa73e750de14ee366b7db",
+    "wrapper": "03591260da475a44f3762c884b84ec97f9492c44",
+    "attempt": 1,
+    "conclusion": "failure",
+    "completionTask": "b7408uqe9",
+    "queueThresholdTask": "bet8xg7l6",
+    "record": "gates/pair2-diagnostic-39130559347.json"
   }
 }
