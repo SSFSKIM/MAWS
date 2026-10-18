@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 9,
-    "defer:pending": 114,
+    "defer:committed": 10,
+    "defer:pending": 113,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -353,7 +353,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L36; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "The stripped command is confirmed from the transcript (the `stop_hook_summary` that follows names it), the prompt boundary by the queue operation's text, and the tool-loop rule by a recorded fold-time rejection; or a recorded case shows one of them in use. Re-deferred 2026-10-07 (E11 1.6): needs recorded cases. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L38): needs recorded cases. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L36; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "d5fb06fcab106a47c675d0e3251c12e8e62d38b5"
     },
     {
       "line": 37,
@@ -363,8 +363,8 @@
       "triageReason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L37; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "remainingClause": "The notice knows the prompt it blocked (an optional prompt uuid on the hook events, set by C3 from the `command_lifecycle started` it follows and by C4 from the record), Edit prompt resolves that bubble, and offers nothing when the prompt left no bubble. Re-deferred 2026-10-07 (E11 1.6): prompt identity on hook events spans three owners. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L39): prompt identity on hook events spans three owners; P2-C added queue transitions, not hook prompt ids. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L37; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 38,
