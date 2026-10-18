@@ -1,63 +1,143 @@
 P3-F owner results — blank template, no sitting step has been run
 Script: docs/doperpowers/evidence/p3-finish/owner-script.txt
-Owner appointment: 2026-10-20 evening KST, one approximately three-hour sitting.
+Owner appointment: 2026-10-20 evening KST, one approximately three-hour sitting (170 minutes plus 10 minutes slack). Rest marks, not appointments.
+Every value below is entered by the owner at the sitting. A blank is not a pass, and a note or skipped step is not a pass. 'owner: not run' needs its precise reason in 'what was seen'.
+
+Sitting
 Date/start/end:
-Landed master build commit / Diagnostics identity:
-Identifier / Authority / TeamIdentifier:
-Engine version / locale / displays / theme order:
-Project, OAuth server and harmless tool (no secrets):
-Write-capable Drive/Notion connectors and destinations (no secrets):
+Locale / displays (widths) / theme order:
+Selected project and app version:
+
+Build identity (PRE.1)
+Architect's landed master commit:
+Package version / Diagnostics 8-hex build HEAD / build time (the Diagnostics MAWS build row; it has no engine version and no dirty-tree marker):
+8-hex matches the first 8 of the master commit: [ ] yes [ ] no
+Checkout clean (git status) before the build: [ ] yes [ ] no   MAWS_SIGN_IDENTITY nonempty: [ ] yes [ ] no
+codesign Identifier:
+codesign Authority:
+codesign TeamIdentifier:
+Older MAWS quit before opening the new build: [ ] yes [ ] no
+Installed engine version (Settings > Engine > Binary):
+Session engine version per session used (Session info > Engine > Version / Binary; name the session):
 Final-source agent run summary supplied by architect:
+Recorder (MAWS_IME_TRACE) present in the final build, per M4.2: [ ] present [ ] absent
+
+Preparation (no secrets)
+Project, OAuth server and harmless read tool:
+Declaring HTML artifact (id/title) and the route label it shows:
+Server source eligible (literal user/local scope, no ${…}, normal directory, DCR and S256 sign-in): [ ] yes [ ] no, reason:
+Write-capable Drive connector and destination:
+Write-capable Notion connector and destination:
 
 step | surface/clause | pass | fail | note | owner: not run | what was seen | screenshot
-PRE.1 | all items: development-signed landed build | [ ] | [ ] | [ ] | [ ] | |
-PRE.2 | all items: evidence provenance | [ ] | [ ] | [ ] | [ ] | |
-1.1 | item 1: organiser and search | [ ] | [ ] | [ ] | [ ] | |
-1.2 | item 1: Space and creation | [ ] | [ ] | [ ] | [ ] | |
-1.3 | item 1: row actions | [ ] | [ ] | [ ] | [ ] | |
-1.4 | item 1: detached persistence | [ ] | [ ] | [ ] | [ ] | |
-2.1 | item 2: create and open | [ ] | [ ] | [ ] | [ ] | |
-2.2 | item 2: editor coverage | [ ] | [ ] | [ ] | [ ] | |
-2.3 | item 2: concurrent targeted edit and awareness | [ ] | [ ] | [ ] | [ ] | |
-2.4 | item 2: one state | [ ] | [ ] | [ ] | [ ] | |
-3.1 | item 3: passage and route | [ ] | [ ] | [ ] | [ ] | |
-3.2 | item 3: anchor survival | [ ] | [ ] | [ ] | [ ] | |
-3.3 | item 3: statuses and standalone context | [ ] | [ ] | [ ] | [ ] | |
-3.4 | item 3: object anchor | [ ] | [ ] | [ ] | [ ] | |
-4.1 | item 4: versions | [ ] | [ ] | [ ] | [ ] | |
-4.2 | item 4: read-only diff and appearance | [ ] | [ ] | [ ] | [ ] | |
-4.3 | item 4: artifact-wide restore | [ ] | [ ] | [ ] | [ ] | |
-4.4 | item 4: new-change comparison and attribution | [ ] | [ ] | [ ] | [ ] | |
-5.1 | item 5: dialect and editor | [ ] | [ ] | [ ] | [ ] | |
-5.2 | item 5: stale conflict and atomic publish | [ ] | [ ] | [ ] | [ ] | |
-5.3 | item 5: history and comments | [ ] | [ ] | [ ] | [ ] | |
-5.4 | item 5: export choices | [ ] | [ ] | [ ] | [ ] | |
-6.1 | item 6: defaults and authoring | [ ] | [ ] | [ ] | [ ] | |
-6.2 | item 6: live restyle | [ ] | [ ] | [ ] | [ ] | |
-6.3 | item 6: default authority and ask | [ ] | [ ] | [ ] | [ ] | |
-7.1 | item 7: artboards | [ ] | [ ] | [ ] | [ ] | |
-7.2 | item 7: file-backed data | [ ] | [ ] | [ ] | [ ] | |
-7.3 | item 7: chart taste | [ ] | [ ] | [ ] | [ ] | |
-7.4 | item 7: granted connector data | [ ] | [ ] | [ ] | [ ] | |
-8.1 | item 8: floating session | [ ] | [ ] | [ ] | [ ] | |
-8.2 | item 8: meaningful header | [ ] | [ ] | [ ] | [ ] | |
-8.3 | item 8: Mark-up | [ ] | [ ] | [ ] | [ ] | |
-N.1 | item 2; item 5; item 7: Korean composition | [ ] | [ ] | [ ] | [ ] | |
-N.2 | item 1 last clause; item 3 restart | [ ] | [ ] | [ ] | [ ] | |
-N.3 | native platform | [ ] | [ ] | [ ] | [ ] | |
-X.1 | item 5: PPTX fidelity | [ ] | [ ] | [ ] | [ ] | |
-X.2 | item 2; item 6: document export | [ ] | [ ] | [ ] | [ ] | |
-X.3 | item 7: design/dashboard exports | [ ] | [ ] | [ ] | [ ] | |
-P.1 | item 5: native presentation | [ ] | [ ] | [ ] | [ ] | |
-A.1 | item 7; route D native custody | [ ] | [ ] | [ ] | [ ] | |
-A.2 | item 1 Export; H Send-to | [ ] | [ ] | [ ] | [ ] | |
-R.1 | Rulings by frozen handle (proposed defaults, rechecked against final code at M4.2): | [ ] | [ ] | [ ] | [ ] | |
-R.2 | Carry the explicit taste checklist: L DL8 panel model and DL13 creation cards; G pill/tab-row and be | [ ] | [ ] | [ ] | [ ] | |
-R.3 | Capture any irritation in the owner's own words. Each later gets one route: wave S, tracker, P4, dis | [ ] | [ ] | [ ] | [ ] | |
-M.1 | What artifact work still sends you to Claude Desktop or a terminal? Name the concrete task and why.  | [ ] | [ ] | [ ] | [ ] | |
+PRE.1 | all items: development-signed landed build | [ ] | [ ] | [ ] | [ ] | | |
+PRE.2 | all items: evidence provenance | [ ] | [ ] | [ ] | [ ] | | |
+1.1 | item 1: organiser and search | [ ] | [ ] | [ ] | [ ] | | |
+1.2 | item 1: Space and creation | [ ] | [ ] | [ ] | [ ] | | |
+1.3 | item 1: row actions | [ ] | [ ] | [ ] | [ ] | | |
+1.4 | item 1: detached persistence | [ ] | [ ] | [ ] | [ ] | | |
+2.1 | item 2: create and open | [ ] | [ ] | [ ] | [ ] | | |
+2.2 | item 2: editor coverage | [ ] | [ ] | [ ] | [ ] | | |
+2.3 | item 2: concurrent targeted edit and awareness | [ ] | [ ] | [ ] | [ ] | | |
+2.4 | item 2: one state | [ ] | [ ] | [ ] | [ ] | | |
+3.1 | item 3: passage and route | [ ] | [ ] | [ ] | [ ] | | |
+3.2 | item 3: anchor survival | [ ] | [ ] | [ ] | [ ] | | |
+3.3 | item 3: statuses and standalone context | [ ] | [ ] | [ ] | [ ] | | |
+3.4 | item 3: object anchor | [ ] | [ ] | [ ] | [ ] | | |
+4.1 | item 4: versions | [ ] | [ ] | [ ] | [ ] | | |
+4.2 | item 4: read-only diff and appearance | [ ] | [ ] | [ ] | [ ] | | |
+4.3 | item 4: artifact-wide restore | [ ] | [ ] | [ ] | [ ] | | |
+4.4 | item 4: new-change comparison and attribution | [ ] | [ ] | [ ] | [ ] | | |
+5.1 | item 5: dialect and editor | [ ] | [ ] | [ ] | [ ] | | |
+5.2 | item 5: stale conflict and atomic publish | [ ] | [ ] | [ ] | [ ] | | |
+5.3 | item 5: history and comments | [ ] | [ ] | [ ] | [ ] | | |
+5.4 | item 5: export choices | [ ] | [ ] | [ ] | [ ] | | |
+6.1 | item 6: defaults and authoring | [ ] | [ ] | [ ] | [ ] | | |
+6.2 | item 6: live restyle | [ ] | [ ] | [ ] | [ ] | | |
+6.3 | item 6: default authority and ask | [ ] | [ ] | [ ] | [ ] | | |
+7.1 | item 7: artboards | [ ] | [ ] | [ ] | [ ] | | |
+7.2 | item 7: file-backed data | [ ] | [ ] | [ ] | [ ] | | |
+7.3 | item 7: chart taste | [ ] | [ ] | [ ] | [ ] | | |
+7.4 | item 7: granted connector data | [ ] | [ ] | [ ] | [ ] | | |
+8.1 | item 8: floating session | [ ] | [ ] | [ ] | [ ] | | |
+8.2 | item 8: meaningful header | [ ] | [ ] | [ ] | [ ] | | |
+8.3 | item 8: Mark-up | [ ] | [ ] | [ ] | [ ] | | |
+N.1-document | item 2: Korean composition in the document editor | [ ] | [ ] | [ ] | [ ] | | |
+N.1-slide | item 5: Korean composition in the slide text editor | [ ] | [ ] | [ ] | [ ] | | |
+N.1-design | item 7: Korean composition in the design workbench | [ ] | [ ] | [ ] | [ ] | | |
+N.2 | item 1 last clause; item 3 restart | [ ] | [ ] | [ ] | [ ] | | |
+N.3 | native platform | [ ] | [ ] | [ ] | [ ] | | |
+X.1 | item 5: PPTX fidelity | [ ] | [ ] | [ ] | [ ] | | |
+X.2 | item 2; item 6: document export | [ ] | [ ] | [ ] | [ ] | | |
+X.3 | item 7: design/dashboard exports | [ ] | [ ] | [ ] | [ ] | | |
+P.1 | item 5: native presentation | [ ] | [ ] | [ ] | [ ] | | |
+A.1 | item 7; route D native custody | [ ] | [ ] | [ ] | [ ] | | |
+A.2 | item 1 Export; H Send-to | [ ] | [ ] | [ ] | [ ] | | |
+T.1 | L81: terminal-only Korean trace sample (inside the slack; not N.1) | [ ] | [ ] | [ ] | [ ] | | |
+R.1 | Rulings by frozen handle and supplement: one row each in the Rulings table below | [ ] | [ ] | [ ] | [ ] | | |
+R.2 | Explicit taste checklist: L DL8 panel model and DL13 creation cards; G pill/tab-row and below-chrome column; C presenter and font variants; E1 narrow toolbar and standalone comment destination; E2 repeated-bar layout; HD native custody; H actual delivery and editor-header Send-to (one answer each in the Taste table below) | [ ] | [ ] | [ ] | [ ] | | |
+R.3 | Irritations in the owner's own words, each with one route (wave S, tracker, P4, dismissed against a binding design, or architect ruling): the Irritations table below | [ ] | [ ] | [ ] | [ ] | | |
+M.1 | Measure: what artifact work still sends you to Claude Desktop or a terminal (the concrete task and why), and whether the co-work layer is fit for the week's daily use: the Measure lines below | [ ] | [ ] | [ ] | [ ] | | |
 
-Rulings: handle | proposal | keep / fix now / P4 | owner words | route after sitting
-Irritations: observation | owner words | screenshot | route
-Measure: concrete work still requiring Desktop or terminal | reason
+N.1 record, one editor at a time (partial syllables, candidate commit, caret, retained text; while the agent updated another block/element)
+document:
+slide text editor:
+design workbench:
+
+A.1 fields (no tokens, no credentials)
+Native prompt(s) seen and the process each named (MAWS or a claude/engine process):
+Order actually followed (preparation (e)); disposable observing session used (project, archived [ ] yes [ ] no, unarchived after relaunch [ ] yes [ ] no [ ] n/a); the owner declined archiving [ ] yes [ ] no:
+via.route shown at each refresh (direct = D MAWS's own connection / engine = E connected session / none) and whether an eligible session was connected:
+Authorisations asked: first connect / after relaunch (a second one is a finding unless the owner chose Reconnect):
+Reconnect / Disconnect result:
+If not run: precise reason (no eligible server, unsupported route, no declaring page, other):
+
+A.2 fields (no credentials)
+Drive: sending session and connector/tool named in its approval; account and destination as the approval/result showed them; remote link; content arrived once [ ] yes [ ] no; retried [ ] no [ ] yes (remote checked before retry: [ ] yes)
+Notion: sending session and connector/tool named in its approval; account and destination as the approval/result showed them; remote link; content arrived once [ ] yes [ ] no; retried [ ] no [ ] yes (remote checked before retry: [ ] yes)
+Editor-header Send-to: [ ] present [ ] absent; acceptable: [ ] yes [ ] no; routed by S-HEADER-SEND below
+
+T.1 fields (the trace itself stays with the owner and is not pasted here)
+Recorder present in the final build: [ ] yes [ ] no (then owner: not run)
+Launched from Terminal.app with MAWS_IME_TRACE=1 on a fresh process, no older instance: [ ] yes [ ] no
+Symptom recurred in the terminal tab: [ ] yes [ ] no [ ] unclear; what was seen:
+~/Library/Logs/MAWS/ime-trace.log exists after the sample: [ ] yes [ ] no
+Relaunched normally afterwards: [ ] yes [ ] no
+
+Rulings (R.1): one row per frozen handle or supplement; proposal per the script, rechecked against final code at M4.2
+handle | proposal | keep | fix now | P4 | owner words | route after sitting
+L32 catalogue | keep final recorded residue | [ ] | [ ] | [ ] | |
+L35 SessionStart floor | keep | [ ] | [ ] | [ ] | |
+L81 Terminal Korean | T.1 trace if the recorder is present, else owner: not run; P2 stays open | [ ] | [ ] | [ ] | |
+L140 locale | keep shipped locale behaviour unless one locale per surface is chosen | [ ] | [ ] | [ ] | |
+L142 mirror cap | keep 64 MiB | [ ] | [ ] | [ ] | |
+L175 HWP/HWPX | P4 | [ ] | [ ] | [ ] | |
+L183 DOCX embedding | P4, with the native reader observation | [ ] | [ ] | [ ] | |
+L202 embedded PPTX variant | P4 if the three shipped variants serve the task | [ ] | [ ] | [ ] | |
+L213 presenter/fonts/SVG | native pass/fail, then keep / fix now / P4 for any gap | [ ] | [ ] | [ ] | |
+L267 mini ClaudeUsage polling | owner decides; F never operates its credentials | [ ] | [ ] | [ ] | |
+S-NATIVE-OAUTH | HD acceptance 4: A.1 | [ ] | [ ] | [ ] | |
+S-REAL-SEND | P3 DL95/97: A.2 | [ ] | [ ] | [ ] | |
+S-HEADER-SEND | DL95/97/105: currently library-only; keep library-only / fix now / P4 | [ ] | [ ] | [ ] | |
+S-DESIGN-TOOLBAR | keep E1's shipped wrap/density unless regrouping is requested | [ ] | [ ] | [ ] | |
+S-REPEATED-BARS | keep the current warning/layout after the deterministic warning fix | [ ] | [ ] | [ ] | |
+L180 retained-version design-system export | informed deferral, not a decision and not a vote: P4 owns the versioned-assets repair (DL106) | acknowledged [ ] | | | |
+
+Taste checklist (R.2): [ ] keep / [ ] change, owner words; where DL97 or E DL41 already settled a proposal, keep confirms the built result
+L DL8 panel model:
+L DL13 creation cards:
+G pill/tab-row and below-chrome column:
+C presenter and font variants:
+E1 narrow toolbar and standalone comment destination:
+E2 repeated-bar layout:
+HD native custody:
+H actual delivery and editor-header Send-to:
+
+Irritations (R.3): observation | owner words | screenshot | route (wave S / tracker / P4 / dismissed against a binding design / architect ruling)
+
+Measure (M.1)
+Concrete artifact work still requiring Claude Desktop or a terminal, and the reason:
+Is the co-work layer fit for the week's daily use: [ ] yes [ ] no [ ] not yet, why:
 Daily-use declaration: pending; a positive sitting is not the week-later declaration.
+
 Provenance: only owner-entered observations count as owner results. Agent evidence is named separately.
