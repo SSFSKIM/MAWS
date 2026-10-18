@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 17,
-    "defer:pending": 106,
+    "defer:committed": 18,
+    "defer:pending": 105,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -441,7 +441,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L44; parent Decision Log 106): Voice feature residue needs its own change and verification, not the co-work finish. Owner: P4 (the voice lane).",
       "remainingClause": "`probe` returns the on-device locale list (helper, `protocol.ts` mirror, `VoiceStatusSchema`), and the select marks every language without a model. Re-deferred 2026-10-07 (E11 1.6): a helper protocol change. Owner: P2 (voice). Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L46): a helper protocol change. Owner: P3 (voice). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L44; parent Decision Log 106): Voice feature residue needs its own change and verification, not the co-work finish. Owner: P4 (the voice lane).",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "b3f9d284c4f1a5bc38e1418e48bd63326085b873"
     },
     {
       "line": 45,
@@ -451,8 +451,8 @@
       "triageReason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L45; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "A widgets e2e case cancels a stub CLI that ignores SIGTERM and asserts its process group is gone, or the live run adds a Stop step. Re-deferred 2026-10-07 (E11 1.6): needs a stubborn-stub e2e. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L47): a stubborn-stub e2e; test coverage, no defect seen. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L45; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 46,
