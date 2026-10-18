@@ -252,8 +252,10 @@ jobs:
       # DC5: the desk's browser suites drive Playwright's own Chromium on Linux; a Mac drives its installed Chrome. The
       # phone's layout cases run again in Playwright's WebKit, on Linux only (apps/desk-web/playwright.config.ts). On the
       # pool, --with-deps installs their system libraries through the runner's passwordless sudo, as on a hosted runner.
+      # The install uses desk-web's own Playwright, the copy its suite runs, so the browsers match it whatever the root
+      # package pins.
       - if: matrix.group == 'desk-web' && runner.os == 'Linux'
-        run: pnpm exec playwright install --with-deps chromium webkit
+        run: pnpm --filter desk-web exec playwright install --with-deps chromium webkit
       - env:
           SCRIPT: ${{ matrix.script }}
         run: |
