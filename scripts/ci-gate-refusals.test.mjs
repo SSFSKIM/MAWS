@@ -1,7 +1,7 @@
 // node --test scripts/ci-gate-refusals.test.mjs (from anywhere; no install needed). ci-gate.sh's summary of a run the mini
 // refused jobs of, scripts/ci-gate-refusals.sh, run in bash as ci-gate.sh runs it, on a run's job list and failed log.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
@@ -48,7 +48,24 @@ test("a relaunch that takes default names the run's other e2e groups in --defaul
 
 test("a relaunch of a relaunch keeps the groups its own --default-beside named, after the run's", () => {
   const log = [refusal('e2e:default'), refusal('e2e:tools')];
-  assert.match(refusals(run(), log, { default_beside: 'artifacts, e2e:side default,c7' }), / --gates e2e:default,e2e:desk-web,e2e:library,e2e:tools --default-beside desk-web,library,side,tools,artifacts,c7 --label /);
+  assert.match(refusals(run(), log, { default_beside: 'artifacts, e2e:side default,c7' }), / --gates e2e:default,e2e:desk-web,e2e:library,e2e:tools --default-beside desk-web,library,side,tools,artifacts,e2e:side,c7 --label /);
+});
+
+test("an own name is carried verbatim, so a prefix doubled by mistake stays an unknown name on the relaunch", () => {
+  const log = [refusal('e2e:default'), refusal('e2e:tools')];
+  assert.match(refusals(run(), log, { default_beside: 'e2e:e2e:side' }), / --default-beside desk-web,library,side,tools,e2e:e2e:side --label /);
+});
+
+// ci-gate.sh refuses a --default-beside value with a character that is not inert in the printed relaunch command, before
+// it touches git or gh; a valid list gets past that check and fails later on the missing target.
+test('--default-beside with shell metacharacters is refused with exit 2, a valid list is not', () => {
+  const gate = (value) => spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), '/nonexistent', '--default-beside', value], { encoding: 'utf8' });
+  const refused = gate('library;x');
+  assert.equal(refused.status, 2);
+  assert.match(refused.stderr, /^ci-gate: --default-beside takes group names .*, not library;x\n$/);
+  const passed = gate('side,library');
+  assert.doesNotMatch(passed.stderr, /--default-beside takes/);
+  assert.match(passed.stderr, /no commit \/nonexistent/);
 });
 
 test('a relaunch without default carries no --default-beside', () => {

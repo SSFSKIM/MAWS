@@ -10,6 +10,7 @@
 # A relaunch that takes e2e:default names, in --default-beside, every e2e group this run's `default` ran beside: its other
 # e2e jobs, as the plan made them, and the groups of its own --default-beside. The relaunch's `default` then runs the
 # specs this run's `default` ran, not also those of every group the relaunch leaves out (Decision Log 66).
+# The invocation's own names go through verbatim: the relaunch's plan normalises them exactly as this run's plan did.
 refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   local refused beside relaunch="scripts/ci-gate.sh $sha"
   refused=$(printf '%s\n' "$2" | perl -ne 'print "$1\n" if /^([^\t]+)\t[^\t]*\t\S+ ci-kit: .*rerun\s*$/' | sort -u | tr '\n' ' ')
@@ -18,7 +19,7 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   [[ -n $class1a ]] && relaunch+=" --class1a $class1a"
   beside=$({
     printf '%s\n' "$1" | awk -F'\t' '$1 != "skipped" && $2 ~ /^e2e:[A-Za-z0-9._:-]+$/ { print substr($2, 5) }'
-    printf '%s\n' "$default_beside" | tr ', ' '\n' | sed 's/^e2e://'
+    printf '%s\n' "$default_beside" | tr ', ' '\n'
   } | awk 'NF && $0 != "default" && !seen[$0]++' | paste -sd, -)
   printf '%s\n' "$1" | awk -F'\t' -v refused="$refused" -v relaunch="$relaunch" -v label="$label" -v asked="$gates" -v beside="$beside" '
     BEGIN { n = split(refused, names, " "); for (i = 1; i <= n; i++) isrefused[names[i]] = 1 }

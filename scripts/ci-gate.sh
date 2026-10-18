@@ -77,6 +77,8 @@ done
 [[ -n $target ]] || usage
 case $runner in '' | linux | macos) ;; *) echo "ci-gate: --runner is linux or macos, not $runner" >&2; exit 2 ;; esac
 case $class1a in '' | linux | macos | pool) ;; *) echo "ci-gate: --class1a is linux, macos or pool, not $class1a" >&2; exit 2 ;; esac
+# The names land unquoted in a printed relaunch command, so only characters that are inert there pass.
+case $default_beside in *[!A-Za-z0-9._:,\ -]*) echo "ci-gate: --default-beside takes group names of letters, digits, . _ : - separated by commas, not $default_beside" >&2; exit 2 ;; esac
 
 # The repository the git commands run in: the worktree given, or this script's own checkout for a bare sha.
 if [[ -d $target ]]; then
