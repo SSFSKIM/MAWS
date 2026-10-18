@@ -30,7 +30,7 @@
 - [x] M3 — The per-session owner and the session view (2026-10-17, reviewed clean: 36131d48..57320abd on `desk-dc9-m3`, fixes ..6b2ddded, ..2388b1f3, ..55c6e118; merged at 582aecfd)
 - [x] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements (2026-10-17, reviewed clean: ec8021c6..7e2bbe64, fixes b05deb29..1b05db7a and 1b05db7a..38791976)
 - [x] M5 — The column: agents with real status, the jobs view, `output`, MCP names (2026-10-17, reviewed clean: 34d32461..488b7329 on `desk-dc9-m5`, merge b0b1e3ff, fix ..4cca48d8; merged at ec0e9013)
-- [ ] M6 — The acceptance, the phone's bundle, and the gate
+- [x] M6 — The acceptance, the phone's bundle, and the gate (2026-10-17, reviewed clean: d2772a0e..429fdbf7, fix 2adfb847..4f4495ad; gates static,unit 39080859887 and e2e:desk-web 39081425111 on 4f4495ad)
 
 ## Constraints that bind every milestone
 
@@ -997,6 +997,26 @@ in their own worktrees.
   loads. Residue: shiki and KaTeX loaded on the phone only when a message
   holds code or math.
   Date/Author: 2026-10-17, the composite's writer.
+
+- Decision (M6, as built): the acceptance (G1–G5) runs on `session-view`
+  with `producer: 'dc8'`, mapped clause by clause in M6's report; the
+  recording gained a compaction in its older history (shapes from MAWS's
+  committed `w1-compact.jsonl`), so paging to the first row crosses it.
+  The frame line is cut on the drawing copy only (the held row keeps it
+  for the tail matcher): the owner's own send (`from human`) shows no
+  frame; a peer's row opens with an italic "From <name>" paragraph inside
+  the bubble — not a caption, since MAWS's `UserRow` gives a mid-turn send
+  its own fixed caption — and a queued peer delivery is redrawn in MAWS's
+  mid-turn queued-prompt shape (keyed `user:<source_uuid>`), so its body
+  draws. A message landing resolves its span across the row's text blocks
+  with MAWS's mark parser and pages toward an older row ("Finding the
+  message in the session's history…", then "not in the session's
+  transcript" when history runs out). "Finished" is proved on the
+  recording's own `turn_duration`. Both interrupt shapes draw no bubble
+  and read stopped. Deferred minors: a `$` in a peer's name is not
+  escaped (math in the label), and a landing that arrives late can pull
+  a reader once from a place chosen while it paged.
+  Date/Author: 2026-10-17, M6 executor, folded by the controller.
 
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
