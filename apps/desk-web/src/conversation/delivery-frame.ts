@@ -22,8 +22,10 @@
 // either (a queued delivery is a synthetic peer message to it, its peer parser reading MAWS's own envelope, not sminos's
 // frame; an appended row is meta), so its drawing's copy takes the shape MAWS gives a prompt queued at the terminal
 // (`humanQueuedPrompt`). The text the session read is otherwise unchanged; only the drawing's copy of the row changes,
-// the held row stays verbatim for the tail.
+// the held row stays verbatim for the tail. The owner's send whose words are the engine's interrupt marker whole keeps
+// its frame line: without it MAWS would read the bubble as the marker, drawing nothing and stopping the turn.
 import type { JsonObject } from 'desk-hub/protocol';
+import { isInterruptionMarker } from '../../../../src/renderer/src/transcript/model/user-text';
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
 
@@ -120,7 +122,11 @@ export function asQueuedPrompt(row: JsonObject, prompt: string | JsonObject[]): 
 export function deliveryAsDrawn(row: JsonObject): JsonObject {
   const frame = deliveryFrame(row);
   if (frame === null) return row;
-  const cut = (text: string) => (frame.own ? '' : `*From ${literal(frame.from)}*\n\n`) + text.slice(text.indexOf('\n') + 1);
+  const cut = (text: string) => {
+    const words = text.slice(text.indexOf('\n') + 1);
+    if (frame.own && isInterruptionMarker(null, words)) return text; // words that are the engine's marker whole would read as one: kept framed
+    return (frame.own ? '' : `*From ${literal(frame.from)}*\n\n`) + words;
+  };
   const prompts = deliveredPrompts(row)!;
   if (prompts.kind === 'queued') {
     const attachment = { ...object(row.attachment)! };

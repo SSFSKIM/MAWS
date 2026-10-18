@@ -185,4 +185,19 @@ describe('a delivered send’s frame line', () => {
       expect(drawnRows.filter((r) => r.kind === 'divider'), frame).toHaveLength(1); // one turn: the delivery opened none
     }
   });
+
+  it("keeps the frame on the owner's send whose words are the engine's interrupt marker: a bubble, never a stop", async () => {
+    for (const marker of ['[Request interrupted by user]', '[Request interrupted by user for tool use]']) {
+      expect(text(deliveryAsDrawn(row(`${OWN}\n${marker}`, BRIDGE))), marker).toBe(`${OWN}\n${marker}`);
+      const id = `toolu_${String(++n).padStart(6, '0')}`;
+      const prompt = row('List the files.', { kind: 'human' }, { promptId: 'p1' });
+      const call = { uuid: uuid(), parentUuid: prompt.uuid, timestamp: '2026-10-17T10:00:01.000Z', sessionId: SESSION, isSidechain: false, type: 'assistant', message: { id: `msg_${n}a`, role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'ls' } }], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } } };
+      const result = row([{ type: 'tool_result', tool_use_id: id, content: 'a.txt', is_error: false }], null, { toolUseResult: { stdout: 'a.txt', stderr: '', interrupted: false, isImage: false } });
+      const delivery = appended(`${OWN}\n${marker}`);
+      const answer = { uuid: uuid(), parentUuid: delivery.uuid, timestamp: '2026-10-17T10:00:03.000Z', sessionId: SESSION, isSidechain: false, type: 'assistant', message: { id: `msg_${n}b`, role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'text', text: 'Noted.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } };
+      const drawnRows = await drawn([prompt, call, result, delivery, answer, row('Next.', { kind: 'human' }, { promptId: 'p2' })]);
+      expect(users(drawnRows).map((u) => u.text), marker).toEqual(['List the files.', `${OWN}\n${marker}`, 'Next.']);
+      expect(drawnRows.flatMap((r) => (r.kind === 'divider' ? [r.state] : [])), marker).not.toContain('stopped');
+    }
+  });
 });
