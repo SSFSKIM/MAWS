@@ -11,7 +11,11 @@
 //   credential and main's attachment still standing), so a withdrawn credential's pending listing never reaches here.
 // - Lifetimes: `clear` (main's going, a global close) forgets every slot; `withdraw` a credential's slots at or below its
 //   floor (a rotation included: the next epoch's demanded listing repopulates them). Neither a clear, a withdrawal nor an
-//   eviction can be undone by a publisher admitted before it: such a publisher may no longer create a slot.
+//   eviction can be undone by a publisher admitted before it, and each reaches only what it invalidated (P3-F L269): a
+//   clear every publisher admitted before it; a withdrawal those publishing the sources it removed or under the withdrawn
+//   credential; an eviction those publishing the evicted source. Another source's pending first listing still lands.
+//   At most `sources` fences of each kind are kept; one forgotten past that bound refuses every publisher admitted
+//   before it, so the bound fails closed (a listing arrives late, never a withdrawn one).
 // Host memory only: never persisted, serialized or sent.
 
 export const DIRECT_HINT_BOUNDS = { sources: 256, toolsPerSource: 1_024 } as const;
@@ -31,10 +35,20 @@ interface Slot {
   readonly taskRequired: ReadonlySet<string>; // P3-HD panel correction: names whose listing required task execution
 }
 
+interface Fence {
+  readonly at: number; // the admissions count when it was raised: it refuses publishers admitted at or before
+}
+
+interface CredentialFence extends Fence {
+  readonly floor: number; // the connection's epochs at or below this were withdrawn
+}
+
 export class DirectToolHints {
   private admissions = 0;
-  private createdAfter = 0; // a publisher admitted at or before this may create no slot (a clear, withdrawal or eviction since)
+  private createdAfter = 0; // a publisher admitted at or before this may create no slot: a clear, or a fence forgotten past its bound
   private readonly slots = new Map<string, Slot>(); // by source id, oldest first
+  private readonly sourceFences = new Map<string, Fence>(); // by source id: its slot's last withdrawal or eviction, oldest first
+  private readonly credentialFences = new Map<string, CredentialFence>(); // by connection id: its last withdrawal, oldest first
 
   constructor(private readonly bounds: { readonly sources: number; readonly toolsPerSource: number } = DIRECT_HINT_BOUNDS) {}
 
@@ -45,10 +59,12 @@ export class DirectToolHints {
   // Whether the listing was kept.
   publish(source: SourceIdentity, tools: readonly { readonly name: string; readonly readOnly: boolean; readonly taskRequired?: boolean }[], publisher: DirectHintPublisher): boolean {
     if (tools.length > this.bounds.toolsPerSource) return false;
+    if (this.fenced(source, publisher)) return false;
     const held = this.slots.get(source.sourceId);
-    if (held ? !supersedes(publisher, held.publisher) : publisher.admittedAt <= this.createdAfter) return false;
+    if (held && !supersedes(publisher, held.publisher)) return false;
     if (held) this.slots.delete(source.sourceId);
     else if (this.slots.size >= this.bounds.sources) this.evictOldest();
+    this.sourceFences.delete(source.sourceId); // the new slot's own order supersedes it from here
     this.slots.set(source.sourceId, { generation: source.generation, entryDigest: source.entryDigest, publisher, tools: new Map(tools.map((tool) => [tool.name, tool.readOnly])), taskRequired: new Set(tools.filter((tool) => tool.taskRequired === true).map((tool) => tool.name)) });
     return true;
   }
@@ -71,22 +87,47 @@ export class DirectToolHints {
 
   // The credential's epochs at or below `floor` were withdrawn: their slots go.
   withdraw(connectionId: string, floor: number): void {
-    this.createdAfter = this.admissions;
+    const at = this.admissions;
     for (const [sourceId, slot] of this.slots) {
       const { credential } = slot.publisher;
-      if (credential?.connectionId === connectionId && credential.credentialEpoch <= floor) this.slots.delete(sourceId);
+      if (credential?.connectionId !== connectionId || credential.credentialEpoch > floor) continue;
+      this.slots.delete(sourceId);
+      this.fence(this.sourceFences, sourceId, { at });
     }
+    this.fence(this.credentialFences, connectionId, { at, floor: Math.max(floor, this.credentialFences.get(connectionId)?.floor ?? floor) });
   }
 
   clear(): void {
     this.createdAfter = this.admissions;
     this.slots.clear();
+    this.sourceFences.clear();
+    this.credentialFences.clear();
+  }
+
+  // Whether a clear, or an invalidation of this source or of the publisher's credential, came after its admission.
+  private fenced(source: SourceIdentity, publisher: DirectHintPublisher): boolean {
+    const { admittedAt, credential } = publisher;
+    if (admittedAt <= this.createdAfter || admittedAt <= (this.sourceFences.get(source.sourceId)?.at ?? 0)) return true;
+    if (!credential) return false;
+    const withdrawn = this.credentialFences.get(credential.connectionId);
+    return withdrawn !== undefined && admittedAt <= withdrawn.at && credential.credentialEpoch <= withdrawn.floor;
+  }
+
+  private fence<T extends Fence>(fences: Map<string, T>, key: string, fence: T): void {
+    fences.delete(key);
+    fences.set(key, fence);
+    for (const [oldest, forgotten] of fences) {
+      if (fences.size <= this.bounds.sources) break;
+      fences.delete(oldest);
+      this.createdAfter = Math.max(this.createdAfter, forgotten.at);
+    }
   }
 
   private evictOldest(): void {
     const oldest = this.slots.keys().next();
-    if (!oldest.done) this.slots.delete(oldest.value);
-    this.createdAfter = this.admissions;
+    if (oldest.done) return;
+    this.slots.delete(oldest.value);
+    this.fence(this.sourceFences, oldest.value, { at: this.admissions });
   }
 }
 
