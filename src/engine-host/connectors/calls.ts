@@ -19,7 +19,8 @@
 //   an Allow once's row went with the call and the deletion announces no grant.
 // - Nothing here launches, acquires or marks a session used; nothing outlives its bound: a running operation ends with
 //   mcp_call's long deadline, an untaken outcome (and its fence) after `resultTtlMs`, and all of them when main goes
-//   (`close`).
+//   (`close`). P3-F: `close` also cancels every resolve still running, and an observation for route D is begun and
+//   lands only within the attachment its resolve or operation began in, so none repopulates the cache a close cleared.
 // - E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): a start that carries `dataset` is a dataset
 //   refresh. It is admitted by the sink (`datasets`) before the engine is asked anything, needs a read grant, and its
 //   result never leaves the host: the call's end is announced as any is, and main's first take
@@ -90,6 +91,7 @@ const MESSAGE_MAX = 1_000;
 interface Operation {
   readonly id: string;
   readonly controller: AbortController;
+  readonly attachment: number; // P3-F: main's attachment it began in
   revoked?: boolean; // its fence broke: a revoke or delete asked for while it ran, or while its outcome waits
   outcome?: ConnectorOperationOutcome;
   expiry?: ReturnType<typeof setTimeout>;
@@ -117,7 +119,9 @@ const revokedWhile = (input: ConnectorStart, when: string) => refused('revoked',
 
 export class ConnectorCalls {
   private readonly operations = new Map<string, Operation>();
-  private readonly support = new WeakMap<ControlClient, Promise<McpCallSupport>>();
+  private support = new WeakMap<ControlClient, Promise<McpCallSupport>>();
+  private readonly resolving = new Set<AbortController>(); // P3-F: each running resolve's bound, aborted by `close`
+  private attachment = 0; // P3-F: moves with every `close`
   private readonly probe: (client: ControlClient, signal: AbortSignal) => Promise<McpCallSupport>;
   private readonly ttlMs: number;
   private readonly maxResultBytes: number;
@@ -133,23 +137,26 @@ export class ConnectorCalls {
   async resolve(input: ConnectorSessionTool): Promise<ConnectorResolveAnswer> {
     const live = this.live(input);
     if (!live) return { ready: false, why: 'notLive' };
+    const attachment = this.attachment;
     const bound = new AbortController();
+    this.resolving.add(bound);
     const timer = setTimeout(() => bound.abort(), CONNECTOR_RESOLVE_BOUND_MS);
     try {
       const support = await this.supportOf(live.client, bound.signal);
       if (support !== 'supported') return { ready: false, why: support };
-      const state = await this.toolState(live.client, input, bound.signal);
+      const state = await this.toolState(live.client, input, bound.signal, attachment);
       if (state === null) return { ready: false, why: 'unknown' };
       if (!this.live(input)) return { ready: false, why: 'notLive' };
       return state.ready ? { ready: true, fingerprint: state.fingerprint, readOnly: state.readOnly } : { ready: false, why: state.why };
     } finally {
       clearTimeout(timer);
+      this.resolving.delete(bound);
     }
   }
 
   start(input: ConnectorStart): { operationId: string } {
     if (this.operations.has(input.operationId)) throw new Error(`connector operation ${input.operationId} is already known`);
-    const operation: Operation = { id: input.operationId, controller: new AbortController(), ...(input.dataset && { sink: true as const }) /* E3 */ };
+    const operation: Operation = { id: input.operationId, controller: new AbortController(), attachment: this.attachment, ...(input.dataset && { sink: true as const }) /* E3 */ };
     this.operations.set(operation.id, operation);
     void this.execute(operation, input).then(
       (outcome) => {
@@ -209,6 +216,10 @@ export class ConnectorCalls {
 
   // Main is gone (its client left, or the host shuts down): every operation stops and every outcome goes.
   close(): void {
+    this.attachment += 1; // P3-F
+    for (const bound of this.resolving) bound.abort();
+    this.resolving.clear();
+    this.support = new WeakMap(); // a probe those aborts cancelled is never joined by the next attachment
     for (const operation of [...this.operations.values()]) {
       this.drop(operation);
       operation.controller.abort();
@@ -295,7 +306,7 @@ export class ConnectorCalls {
     const first = this.live(input);
     if (!first) return unavailable(`${input.appSessionId} is no longer the live session main found`);
     // what main admitted, against the session's mcp_status now, before the grant is asked (and an Allow once used)
-    const before = await this.admitted(first.client, input, signal);
+    const before = await this.admitted(first.client, input, signal, operation.attachment);
     if (before !== null) return before;
     // Main's cancel or close may land between the check's answer and this continuation: an operation no longer
     // registered takes no fence (nothing would drop it again) and asks for no grant.
@@ -320,7 +331,7 @@ export class ConnectorCalls {
     // Taken and its cleanup installed in the same synchronous step as the check above found the operation registered,
     // so its `drop` (take, cancel, expiry, close) is what lets go of the fence.
     operation.release = () => store.releaseConnectorFence(fence);
-    const outcome = await this.fenced(store, fence, first.client, input, signal, sink !== null);
+    const outcome = await this.fenced(store, fence, first.client, input, signal, operation.attachment, sink !== null);
     if (!('raw' in outcome)) return outcome;
     // E3: the publication's guard, read in its commit's prepare: still registered, not cancelled, the fence held
     const guard = (): 'held' | 'revoked' | 'cancelled' => {
@@ -332,7 +343,7 @@ export class ConnectorCalls {
     return { publish: async () => takeOf(await publishing.publish(outcome.raw, guard, () => (operation.committing = true))) };
   }
 
-  private async fenced(store: ConnectorGrantStore, fence: ConnectorFence, client: ControlClient, input: ConnectorStart, signal: AbortSignal, dataset = false): Promise<ConnectorOperationOutcome | { raw: RefreshRaw }> {
+  private async fenced(store: ConnectorGrantStore, fence: ConnectorFence, client: ControlClient, input: ConnectorStart, signal: AbortSignal, attachment: number, dataset = false): Promise<ConnectorOperationOutcome | { raw: RefreshRaw }> {
     const named = `${input.artifactId}'s ${input.server} · ${input.tool} in ${input.appSessionId}`;
     const call = { server: input.server, tool: input.tool, fingerprint: input.fingerprint };
     let authorization: ConnectorAuthorization;
@@ -344,7 +355,7 @@ export class ConnectorCalls {
       throw error;
     }
     if (!authorization.granted) return refused(authorization.refusal, `no grant admits ${named} (${authorization.refusal})`);
-    const after = await this.admitted(client, input, signal);
+    const after = await this.admitted(client, input, signal, attachment);
     if (after !== null) return after;
     // ── synchronous from here to the request: the fence held now, and its break aborting the request after ──
     if (signal.aborted) return unavailable('cancelled');
@@ -390,8 +401,8 @@ export class ConnectorCalls {
 
   // Null when the session's mcp_status still shows the tool main admitted: ready, the same fingerprint, read-only for a
   // read grant. Otherwise why not, as the operation's outcome.
-  private async admitted(client: ControlClient, input: ConnectorStart, signal: AbortSignal): Promise<ConnectorOperationOutcome | null> {
-    const state = await this.toolState(client, input, signal);
+  private async admitted(client: ControlClient, input: ConnectorStart, signal: AbortSignal, attachment: number): Promise<ConnectorOperationOutcome | null> {
+    const state = await this.toolState(client, input, signal, attachment);
     if (signal.aborted) return unavailable('cancelled');
     if (state === null) return unavailable(`${input.appSessionId}'s mcp_status could not be read`);
     if (!state.ready) return unavailable(`${input.server} · ${input.tool} is ${state.why} in ${input.appSessionId}`);
@@ -400,14 +411,14 @@ export class ConnectorCalls {
     return null;
   }
 
-  private async toolState(client: ControlClient, input: ConnectorSessionTool, signal: AbortSignal) {
-    const ticket = this.observing(client, input); // P3-HD
+  private async toolState(client: ControlClient, input: ConnectorSessionTool, signal: AbortSignal, attachment: number) {
+    const ticket = attachment === this.attachment ? this.observing(client, input) : null; // P3-HD; P3-F: never past a close
     try {
       const answer = await mcpStatus(client, {}, { signal });
-      if (ticket && this.stillObserving(client, input, ticket.context)) this.options.statusCache?.observe(ticket, answer); // P3-HD
+      if (ticket && this.stillObserving(client, input, ticket.context, attachment)) this.options.statusCache?.observe(ticket, answer); // P3-HD
       return connectorToolState(answer, input.server, input.tool);
     } catch (error) {
-      if (ticket && error instanceof ControlError && error.code === 'invalid_response' && this.stillObserving(client, input, ticket.context)) this.options.statusCache?.reject(ticket); // P3-HD
+      if (ticket && error instanceof ControlError && error.code === 'invalid_response' && this.stillObserving(client, input, ticket.context, attachment)) this.options.statusCache?.reject(ticket); // P3-HD
       if (error instanceof ControlError) return null;
       throw error;
     }
@@ -416,14 +427,15 @@ export class ConnectorCalls {
   // P3-HD start: an observation is taken only for the session's live launch, still in the directory it was launched in
   // (a set_cwd since then makes its report another directory's), its place in that launch's order taken before the
   // request is written; and (panel correction) its answer lands only if that still holds once it arrives, so a
-  // set_cwd or a relaunch while the request was pending discards it.
+  // set_cwd or a relaunch while the request was pending discards it. P3-F: so does main's going (`close`) meanwhile.
   private observing(client: ControlClient, input: ConnectorSessionTool) {
     const cache = this.options.statusCache;
     const context = this.observedContext(client, input);
     return cache && context ? cache.begin(context) : null;
   }
 
-  private stillObserving(client: ControlClient, input: ConnectorSessionTool, begun: ConnectorLaunchContext): boolean {
+  private stillObserving(client: ControlClient, input: ConnectorSessionTool, begun: ConnectorLaunchContext, attachment: number): boolean {
+    if (attachment !== this.attachment) return false; // P3-F
     const context = this.observedContext(client, input);
     return context !== null && context.appSessionId === begun.appSessionId && context.launchId === begun.launchId && context.cwd === begun.cwd;
   }
