@@ -7,9 +7,13 @@
     "executor": "a57f5bfb86c7f98b3"
   },
   "W-RD": {
-    "status": "executing",
+    "status": "review approved; authoritative union gate pending",
     "base": "73f24d2a0",
-    "executor": "a53212fbc596ac2a9"
+    "executor": "a53212fbc596ac2a9",
+    "reviewer": "a84a924b3c8fb8e36",
+    "rowCommits": ["ba8ff17e5", "b7889552e", "ed201bdb1", "36cc73187", "7fcca4305", "aa710027e"],
+    "fixCommit": "a0acd8c76",
+    "reviewRounds": 2
   },
   "dependencyInstall": "completed exit 0 under with-slot",
   "dragDiscriminator": "prepared cce228678; not before 12Z; no wave gate pending",
