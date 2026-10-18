@@ -221,6 +221,29 @@ describe('the owner’s server rows', () => {
     expect(seen!.aborted).toBe(true);
     expect((await answer).servers).toEqual([{ kind: 'engineOnly', server: 'notes', why: 'unavailable', tools: ['search'] }]);
   });
+
+  // P3-F F-connectors 8: the query's deadline, and main's stop, bound a resolution that never hears its signal (route D's
+  // lookups before its abortable operation): the rows answer with what the query has
+  it('answers at the query deadline, and at stop, while a resolution ignores its signal', async () => {
+    selections.set(key('notes', 'search'), () => new Promise(() => {}));
+    const answered = (promise: Promise<unknown>) => {
+      let done = false;
+      void promise.then(() => (done = true));
+      return () => done;
+    };
+    const bounded = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer as never);
+    const boundedDone = answered(bounded);
+    await vi.advanceTimersByTimeAsync(OWNER_QUERY_DEADLINE_MS);
+    await settle();
+    expect(boundedDone()).toBe(true);
+    expect((await bounded).servers).toEqual([{ kind: 'engineOnly', server: 'notes', why: 'unavailable', tools: ['search'] }]);
+    const stopped = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer as never);
+    const stoppedDone = answered(stopped);
+    await settle();
+    owner.stop();
+    await settle();
+    expect(stoppedDone()).toBe(true);
+  });
 });
 
 describe('the owner’s Connect', () => {

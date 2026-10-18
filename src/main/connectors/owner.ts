@@ -15,8 +15,9 @@
 //   first, and only the server's refusal leads to the provider's flow. A usable saved sign-in is used without a browser;
 //   an unusable one is `needsReconnect`, never a new consent. Reconnect is the provider's explicit replacement.
 // - Bounds live in the owner operation, not in a window dropping a late answer: a query aborts its resolutions at
-//   OWNER_QUERY_DEADLINE_MS and answers with what it has; an action is acknowledged at once and runs under its own
-//   controller (its deadline, the host's loss and main's stop abort the provider's flow and the host's discoveries).
+//   OWNER_QUERY_DEADLINE_MS (or main's stop) and answers with what it has, each selection raced with that end (P3-F
+//   F-connectors 8); an action is acknowledged at once and runs under its own controller (its deadline, the host's
+//   loss and main's stop abort the provider's flow and the host's discoveries).
 //   Its end, and its start, are `connectors.serversChanged {artifactId}` to the windows that read rows: they read again.
 // - Disconnect takes a saved connection's id alone (no current source, no decryption). A retirement the host has not
 //   confirmed stays visible as its own row, retryable, after the provider has forgotten the record (`disconnecting` is the
@@ -230,7 +231,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
       }
       return answer;
     };
-    return async (tool: ConnectorToolRef): Promise<Selection> => {
+    const choose = async (tool: ConnectorToolRef): Promise<Selection> => {
       try {
         const found = await direct.resolveSource(artifactId, tool.server, signal, tool.tool);
         if (found.ok) return { ok: true, source: found.source, known: found.tool !== undefined };
@@ -240,6 +241,9 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
         return { ok: false, why: 'unavailable' };
       }
     };
+    // P3-F F-connectors 8: raced with the query's (or the action's) signal, so a resolution that never hears it (route
+    // D's lookups before its abortable operation) holds no answer past its deadline or main's stop
+    return (tool: ConnectorToolRef): Promise<Selection> => within<Selection>(choose(tool), signal, { ok: false, why: 'unavailable' });
   }
 
   // ── the rows ──
