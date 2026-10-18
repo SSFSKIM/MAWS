@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 4,
-    "defer:pending": 119,
+    "defer:committed": 5,
+    "defer:pending": 118,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -298,7 +298,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L29; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "A journal produces it and the rule reveals or moves the accepted turn. 2026-09-29 (debt wave 4): left open; still no recorded fixture produces it, and whether the engine can run a prompt a rewind withdrew (the rewind returns its text to the editor) decides between revealing it after the boundary and dropping its start, so the rule waits for the evidence. Re-deferred 2026-10-07 (E11 1.6): no fixture produces it. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L28): no fixture produces it; the rule waits for evidence. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L29; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "a3eacb57a9369904d2548cb331ec1ce069c7895d"
     },
     {
       "line": 30,
@@ -308,8 +308,8 @@
       "triageReason": "Compatibility override removal belongs to the dependency bump after its range moves.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L30; parent Decision Log 106): Compatibility override removal belongs to the dependency bump after its range moves. Owner: P4, at the next highlighting re-pin (when `@git-diff-view`'s range moves).",
       "remainingClause": "`@git-diff-view/*` and `lowlight` resolve one `highlight.js` without the override (their ranges meet at one version, or lowlight moves to `^11`), and `pnpm typecheck` passes with the block removed. 2026-09-29 (debt wave 4): still needed. With the block removed, `pnpm install` keeps the lockfile's single 11.11.2 and typecheck passes, but only because the old resolution is carried; a fresh resolve (`pnpm install --lockfile-only` from `package.json` alone) splits into 11.12.0 (diff view) and 11.11.2 (lowlight), and typecheck then fails: `node_modules/highlight.js/types/index.d.ts(6,1): error TS6200`, `node_modules/lowlight/node_modules/highlight.js/types/index.d.ts(6,1): error TS6200`, `node_modules/lowlight/node_modules/highlight.js/types/index.d.ts(164,22): error TS2320: Interface 'Mode' cannot simultaneously extend types 'ModeDetails' and 'ModeDetails'`. Block and lockfile restored. 2026-10-07 (E11 1.6): re-deferred; the ranges still do not meet. On an APFS copy with the block removed, `pnpm install --lockfile-only` over the committed lockfile keeps one `highlight.js` (11.11.2, the carried resolution wave 4 saw), and the same command with no lockfile resolves two: 11.12.0 for `@git-diff-view/{core,lowlight,react}` 0.1.7 and 11.11.2 for `lowlight` 3.3.0 (the registry's latest of each that day: lowlight 3.3.0, highlight.js 11.12.0, `@git-diff-view/core` 0.1.7). Owner: P2 (the next bump of `@git-diff-view` or `lowlight`; rerun the fresh resolve). Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L29): the ranges still do not meet; M0.3 re-runs the fresh resolve once (one copy: W-T drops the block in one more commit; two: kept). Owner: P3 (the next bump of @git-diff-view or lowlight). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L30; parent Decision Log 106): Compatibility override removal belongs to the dependency bump after its range moves. Owner: P4, at the next highlighting re-pin (when `@git-diff-view`'s range moves).",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 31,
