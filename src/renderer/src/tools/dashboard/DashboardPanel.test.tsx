@@ -2,7 +2,6 @@
 // Log 19): B's document body over B's tab state with the dashboard's charts drawn in the page, the Datasets action after
 // B's header actions opening the source sheet on the shown document's datasets, a source label opening it on its own
 // dataset, and a held legacy dashboard shown as held (its files and the way forward), never as a blank editable page.
-import '../../../../../test/support/artifacts-dom-setup'; // first: the editor loads KaTeX, which warns under happy-dom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';

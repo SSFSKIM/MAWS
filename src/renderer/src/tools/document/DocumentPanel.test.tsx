@@ -4,7 +4,6 @@
 // scope given (the title, the saved word, History toggling the rail the tab holds, the close guard the tab's), the page
 // a Mark-up surface while visible, Comment offered only with a session to send to, and the page inside the governing
 // system's scope once D's apply API is provided.
-import '../../../../../test/support/artifacts-dom-setup'; // first: the editor loads KaTeX, which warns under happy-dom
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';

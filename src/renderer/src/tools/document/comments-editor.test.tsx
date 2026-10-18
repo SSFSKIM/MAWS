@@ -3,7 +3,6 @@
 // the card host's id is the document's; the composing card survives that remount (P2's host keeps it), so its draft
 // must too, or the card would send an anchor naming a deleted thread. The draft goes when its card closes unsent or
 // the editor as a whole goes (P2's host closes the card then).
-import '../../../../../test/support/artifacts-dom-setup'; // first: the editor loads KaTeX, which warns under happy-dom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { Editor } from '@tiptap/core';
 import { afterEach, beforeEach, expect, it } from 'vitest';

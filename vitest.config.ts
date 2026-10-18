@@ -44,6 +44,9 @@ const TIMING_RENDERER_TESTS = [
 // P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md); P3-C M4 shares the
 // project (the slide canvas, the deck editor).
 const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
+// Every happy-dom project drops KaTeX's one quirks-mode advisory (happy-dom has no `document.compatMode`, so no doctype
+// silences it); every other warning passes through.
+const HAPPY_DOM_SETUP = ['test/support/artifacts-dom-setup.ts'];
 
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay
 // (`MAWS_LIVE=1 pnpm test:live`); it exists only under MAWS_LIVE=1 so `pnpm test` and `pnpm verify` never see it.
@@ -90,9 +93,10 @@ export default defineConfig({
           environment: 'happy-dom',
           include: ['src/renderer/**/*.test.{ts,tsx}', 'src/main/artifacts/*.dom.test.tsx'],
           exclude: [...configDefaults.exclude, RENDERER_NODE_TESTS, ...TIMING_RENDERER_TESTS],
+          setupFiles: HAPPY_DOM_SETUP,
         },
       },
-      { resolve: { alias }, test: { name: 'renderer-timing', environment: 'happy-dom', include: TIMING_RENDERER_TESTS, ...TIMING_TIMEOUTS } },
+      { resolve: { alias }, test: { name: 'renderer-timing', environment: 'happy-dom', include: TIMING_RENDERER_TESTS, setupFiles: HAPPY_DOM_SETUP, ...TIMING_TIMEOUTS } },
       ...liveProjects, // C3
       // P3-A start: the portable artifact layer (src/artifacts/, docs/doperpowers/plans/2026-10-12-p3-a-store.md) under
       // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
@@ -112,7 +116,7 @@ export default defineConfig({
           name: 'artifacts-dom',
           environment: 'happy-dom',
           include: [ARTIFACTS_DOM_TESTS],
-          setupFiles: ['test/support/artifacts-dom-setup.ts'],
+          setupFiles: HAPPY_DOM_SETUP,
           css: { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/] },
         },
       },
@@ -154,6 +158,7 @@ export default defineConfig({
             'src/renderer/src/tools/dashboard/live.compiled.test.tsx',
           ],
           env: { MAWS_REACT_COMPILER: '1' },
+          setupFiles: HAPPY_DOM_SETUP,
         },
       },
       // C8a end

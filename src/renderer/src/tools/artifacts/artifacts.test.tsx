@@ -68,6 +68,7 @@ function installMain() {
     if (name === 'library.get') return ok({ row: rows.find((r) => r.id === input.artifactId) ?? null });
     if (name === 'artifacts.get') return ok({ artifact: null });
     if (name === 'artifacts.markViewed') return ok();
+    if (name === 'layout.get') return ok({ value: null }); // nothing persisted: the panel's Summary reads its sections
     if (name === 'layout.set') return ok();
     return fail(`unexpected ${name}`);
   });

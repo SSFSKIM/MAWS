@@ -2,7 +2,6 @@
 // B's editor draws its page inside D's scope, in the system that governs the document as the chain resolves it from the
 // owner's and the Spaces' defaults (settings 14), the house system the window follows and the library's live systems;
 // and the page moves when any of those does. Mounted as L's record view mounts B's editor, under the app's provider.
-import '../../../../../test/support/artifacts-dom-setup'; // first: the editor loads KaTeX, which warns under happy-dom
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { colorToCss, type ColorValue } from '@artifacts/design-system/color';
