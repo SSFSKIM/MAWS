@@ -163,6 +163,10 @@
     "L253": "observation pin9cf551db ancestor, condition met; host/lifecycle diff empty; restartHost unchanged though other dashboard helper functions changed. Counts10/10 stall-event, alternate5/10. ffbc2e072 idle-unload test substitution is not a repair. Actual old failure is test-initiated SIGKILL/restartHost30s pid poll, not closeOrKill teardown; whole sets exercise adjacent host-kill scenes, not opt-in original scale case. L265 cleanup3dff5766f is unrelated, not a reset claimed.",
     "L246": "Observation pin512107c14 is throwaway landing-gate merge, not ancestor of4287e099 or current F HEAD. General parent criterion for such pins: both merge parents ancestors AND watched spec identical. Verified552242811 and2cde39578 ancestry exit0 plus empty deliverables.spec.ts diff satisfy criterion;39109740879 therefore fifth, close at M4 with this caveat. This is the ruled criterion, not a claim that parent ancestry alone proves whole-tree equality.",
     "status": "Both dispositions ruled for M4; no tracker row closed yet",
-    "generalThrowawayMergeRuling": "For an unrepaired observation pinned to a never-landed throwaway gate merge, counted source descends from both parents and watched spec is identical to pin. Applies to future F full sets too; no manufactured ancestry."
+    "generalThrowawayMergeRuling": "For an unrepaired observation pinned to a never-landed throwaway gate merge, counted source descends from both parents and watched spec is identical to pin. Applies to future F full sets too; no manufactured ancestry.",
+    "currentSourceCaveat": {
+      "source": "e3f5ce79a35ea1e9a895a0a34e81a4828a37893e",
+      "L246": "Controller actual diff against512107c14 shows later f4f6a0b69 changes only the separate bridge locate-response case, not watched1061. Therefore current whole spec is not byte-identical; do not automatically credit a future F full set under the identical-spec criterion. Historical fifth39109740879 at4287e099 remains the accepted qualifying set and M4 disposition is unchanged."
+    }
   }
 }

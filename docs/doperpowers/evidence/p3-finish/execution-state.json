@@ -612,7 +612,7 @@
     "denominator": "all three outside immutable F M0",
     "disclosure": "P3-owned, development StrictMode only; no F fix, carry with fix clause into next phase and section13 draft",
     "DC9": "desk-owned, no action",
-    "MainArea": "P3 shell test-side cleanup assigned to a3e02495556068b4b after union launch; final-pairs/freeze window, hand-back unit proof, CI-opt repeat clause retained",
+    "MainArea": "test-only e3f5ce79a committed after union launch; residual-timer RED and final10 named test instances verified; applied-source review correct; hand-back unit and CI-opt repeated-run clause remain",
     "decisionLog": "none"
   }
 }
