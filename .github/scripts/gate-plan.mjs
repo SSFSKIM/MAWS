@@ -9,6 +9,9 @@
 // The e2e lane: the `runner` input or the `Runner:` trailer (`linux` or `macos`), else the repository variable
 // GATE_E2E_RUNNER, else GATE_RUNNER unless it is `pool` (Chromium would lose its sandbox in the pool's containers), else
 // `linux`; a Linux lane takes only the groups that run green there (LINUX_E2E).
+// `DefaultBeside:` (a push only): e2e groups that `default` treats as if they ran beside it, so a relaunch of part of a
+// set narrows `default` to the specs the whole set's `default` ran (Decision Log 66). Passed through unchecked: a name
+// the derivation cannot use makes `default` the bare set, never smaller (e2e-default-specs.mjs).
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -75,6 +78,9 @@ const e2e = [...gates]
     return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group) };
   });
 
+// Group names; an `e2e:` prefix, as --gates writes them, is read as the group.
+const defaultBeside = dispatched ? [] : [...new Set(words(trailer('DefaultBeside')).map((name) => name.replace(/^e2e:/, '')))].filter((group) => group !== 'default');
+
 const has = (gate) => String(gates.has(gate));
 const runners = CLASS1A_RUNNERS[class1a];
 const pool = class1a === 'pool' && ['static', 'unit', 'probes'].some((gate) => gates.has(gate));
@@ -83,7 +89,8 @@ appendFileSync(
   `static=${has('static')}\nunit=${has('unit')}\nunit_darwin=${has('unit:darwin')}\nprobes=${has('probes')}\ne2e=${JSON.stringify(e2e)}\ne2e_runner=${JSON.stringify(RUNNERS[lane])}\n` +
     `static_runner=${JSON.stringify(runners.static)}\nunit_runner=${JSON.stringify(runners.unit)}\nprobes_runner=${JSON.stringify(runners.probes)}\npool=${pool}\n`,
 );
-appendFileSync(env.GITHUB_OUTPUT, `packaged=${has('packaged')}\nevidence=${evidence}\n`);
+appendFileSync(env.GITHUB_OUTPUT, `packaged=${has('packaged')}\nevidence=${evidence}\ndefault_beside=${JSON.stringify(defaultBeside)}\n`);
 const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
-appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}.${evidence ? ' Evidence: yes.' : ''}\n`);
-process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}\n`);
+const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join(', ')}.` : '';
+appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}.${evidence ? ' Evidence: yes.' : ''}${beside}\n`);
+process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}\n${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}`);

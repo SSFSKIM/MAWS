@@ -1,87 +1,132 @@
 // node --test .github/scripts/e2e-default-specs.test.mjs (from the checkout's root, after pnpm install). The first case
 // runs the derivation on this tree, its package.json and both Playwright configs, for the macOS lane's default set; when
-// a spec or a group changes, its list is the one to update, after reading the derivation's notes.
+// a spec or a group changes, its list is the one to update, after reading the derivation's notes. The relaunch cases
+// compare against that same derivation, so they need no list of their own.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const script = join(root, '.github/scripts/e2e-default-specs.mjs');
 const { defaultSpecs, readScript } = await import(script);
 const { name: rootName, scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
-// The plan job's e2e matrix for a push on the macOS lane with no Gates: trailer, CLASS1_E2E read from the workflow.
-function macosPlan() {
-  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
-  const class1 = /^ {2}CLASS1_E2E: >-\n((?: {4}.*\n)+)/m.exec(workflow)[1].replace(/\s+/g, ' ').trim();
+const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+const class1 = /^ {2}CLASS1_E2E: >-\n((?: {4}.*\n)+)/m.exec(workflow)[1].replace(/\s+/g, ' ').trim();
+
+// The plan job's outputs for a push on the macOS lane, CLASS1_E2E read from the workflow: the e2e matrix and the
+// DefaultBeside groups, for a commit carrying `trailers` (none: the default set).
+function plan(trailers = '') {
   const dir = mkdtempSync(join(tmpdir(), 'maws-default-specs-'));
   try {
     const output = join(dir, 'output');
     execFileSync(process.execPath, [join(root, '.github/scripts/gate-plan.mjs')], {
       cwd: root,
-      env: { ...process.env, EVENT: 'push', HEAD_MESSAGE: '', GATE_RUNNER: '', GATE_E2E_RUNNER: 'macos', CLASS1_E2E: class1, LINUX_E2E: '', LIBREOFFICE_E2E: '', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, 'summary') },
+      env: { ...process.env, EVENT: 'push', HEAD_MESSAGE: trailers && `ci-gate: test\n\n${trailers}`, GATE_RUNNER: '', GATE_E2E_RUNNER: 'macos', CLASS1_E2E: class1, LINUX_E2E: '', LIBREOFFICE_E2E: '', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, 'summary') },
     });
-    return /^e2e=(.*)$/m.exec(readFileSync(output, 'utf8'))[1];
+    const outputs = readFileSync(output, 'utf8');
+    return { e2e: /^e2e=(.*)$/m.exec(outputs)[1], defaultBeside: /^default_beside=(.*)$/m.exec(outputs)[1] };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+const macosPlan = () => plan().e2e;
+
+// default's derivation step on a plan's outputs, as gate.yml runs it: the specs it prints and the summary it writes.
+async function derive({ e2e, defaultBeside }) {
+  const dir = mkdtempSync(join(tmpdir(), 'maws-default-specs-'));
+  try {
+    const { stdout } = await promisify(execFile)(process.execPath, [script], { cwd: root, encoding: 'utf8', env: { ...process.env, E2E_PLAN: e2e, DEFAULT_BESIDE: defaultBeside, GITHUB_STEP_SUMMARY: join(dir, 'summary') } });
+    return { specs: stdout.trim().split('\n').filter(Boolean), summary: readFileSync(join(dir, 'summary'), 'utf8') };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
-test("this tree: beside the macOS lane's other groups, default runs its own specs, read from the job's output", () => {
-  const dir = mkdtempSync(join(tmpdir(), 'maws-default-specs-'));
-  try {
-    const stdout = execFileSync(process.execPath, [script], { cwd: root, encoding: 'utf8', env: { ...process.env, E2E_PLAN: macosPlan(), GITHUB_STEP_SUMMARY: join(dir, 'summary') }, stdio: ['ignore', 'pipe', 'pipe'] });
-    assert.deepEqual(stdout.trim().split('\n'), [
-      'e2e/agent-tools-live.spec.ts',
-      'e2e/c11-live.spec.ts',
-      'e2e/c11-shots.spec.ts',
-      'e2e/c12-live.spec.ts',
-      'e2e/c12-prerun.spec.ts',
-      'e2e/c3-stall.spec.ts',
-      'e2e/c7-shots.spec.ts',
-      'e2e/code-tools-live.spec.ts',
-      'e2e/composer-live.spec.ts',
-      'e2e/connectors-soak.spec.ts',
-      'e2e/dashboard-live-data.spec.ts',
-      'e2e/dashboard-live.spec.ts',
-      'e2e/dashboard-scale.spec.ts',
-      'e2e/design-live.spec.ts',
-      'e2e/design-scale.spec.ts',
-      'e2e/design-systems-live.spec.ts',
-      'e2e/document-live.spec.ts',
-      'e2e/document-scale.spec.ts',
-      'e2e/engine-replay.spec.ts',
-      'e2e/fixture-safety.spec.ts',
-      'e2e/library-live.spec.ts',
-      'e2e/maws-tools-live.spec.ts',
-      'e2e/p1-live-keep-quit.spec.ts',
-      'e2e/p1-live.spec.ts',
-      'e2e/palette.spec.ts',
-      'e2e/plugins-library-live.spec.ts',
-      'e2e/plugins-live.spec.ts',
-      'e2e/presentations-live.spec.ts',
-      'e2e/presentations-scale.spec.ts',
-      'e2e/resume-picker.spec.ts',
-      'e2e/send-to-live.spec.ts',
-      'e2e/sessions-available-live.spec.ts',
-      'e2e/sessions.spec.ts',
-      'e2e/shell.spec.ts',
-      'e2e/sigusr1.spec.ts',
-      'e2e/smoke.spec.ts',
-      'e2e/statusline.spec.ts',
-      'e2e/supervisor-packaged.spec.ts',
-      'e2e/to-human-live.spec.ts',
-      'e2e/voice.spec.ts',
-    ]);
-    assert.match(readFileSync(join(dir, 'summary'), 'utf8'), /its own 40 of the bare set's 75 specs/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+// Started together, since each lists the groups' selections on this tree. The relaunch of default and two groups that
+// ci-gate.sh's refused summary prints, with DefaultBeside naming the whole set, and without it (a hand-written relaunch).
+const relaunchGates = 'Gates: e2e:default,e2e:side,e2e:library\nRunner: macos';
+const whole = derive(plan());
+const relaunch = derive(plan(`${relaunchGates}\nDefaultBeside: ${class1}`));
+const widened = derive(plan(relaunchGates));
+for (const derivation of [whole, relaunch, widened]) derivation.catch(() => {}); // a failure is the awaiting test's
+
+test("this tree: beside the macOS lane's other groups, default runs its own specs, read from the job's output", async () => {
+  const { specs, summary } = await whole;
+  assert.deepEqual(specs, [
+    'e2e/agent-tools-live.spec.ts',
+    'e2e/c11-live.spec.ts',
+    'e2e/c11-shots.spec.ts',
+    'e2e/c12-live.spec.ts',
+    'e2e/c12-prerun.spec.ts',
+    'e2e/c3-stall.spec.ts',
+    'e2e/c7-shots.spec.ts',
+    'e2e/code-tools-live.spec.ts',
+    'e2e/composer-live.spec.ts',
+    'e2e/connectors-soak.spec.ts',
+    'e2e/dashboard-live-data.spec.ts',
+    'e2e/dashboard-live.spec.ts',
+    'e2e/dashboard-scale.spec.ts',
+    'e2e/design-live.spec.ts',
+    'e2e/design-scale.spec.ts',
+    'e2e/design-systems-live.spec.ts',
+    'e2e/document-live.spec.ts',
+    'e2e/document-scale.spec.ts',
+    'e2e/engine-replay.spec.ts',
+    'e2e/fixture-safety.spec.ts',
+    'e2e/library-live.spec.ts',
+    'e2e/maws-tools-live.spec.ts',
+    'e2e/p1-live-keep-quit.spec.ts',
+    'e2e/p1-live.spec.ts',
+    'e2e/palette.spec.ts',
+    'e2e/plugins-library-live.spec.ts',
+    'e2e/plugins-live.spec.ts',
+    'e2e/presentations-live.spec.ts',
+    'e2e/presentations-scale.spec.ts',
+    'e2e/resume-picker.spec.ts',
+    'e2e/send-to-live.spec.ts',
+    'e2e/sessions-available-live.spec.ts',
+    'e2e/sessions.spec.ts',
+    'e2e/shell.spec.ts',
+    'e2e/sigusr1.spec.ts',
+    'e2e/smoke.spec.ts',
+    'e2e/statusline.spec.ts',
+    'e2e/supervisor-packaged.spec.ts',
+    'e2e/to-human-live.spec.ts',
+    'e2e/voice.spec.ts',
+  ]);
+  assert.match(summary, /its own 40 of the bare set's 75 specs/);
+});
+
+test("this tree: a relaunch of default and two groups, DefaultBeside naming the whole class-1 set, runs exactly the whole set's own specs", async () => {
+  const [all, part] = await Promise.all([whole, relaunch]);
+  assert.deepEqual(part.specs, all.specs);
+  assert.match(part.summary, /, \d+ of them named by DefaultBeside/);
+});
+
+test('this tree: the same relaunch without DefaultBeside still widens default by the specs of the groups it leaves out', async () => {
+  const [all, part] = await Promise.all([whole, widened]);
+  assert.deepEqual(all.specs.filter((spec) => !part.specs.includes(spec)), []);
+  assert.ok(part.specs.includes('e2e/artifacts-store.spec.ts'), 'e2e:artifacts, absent from the relaunch, leaves its spec to default');
+  assert.ok(!part.specs.includes('e2e/side.spec.ts') && !part.specs.includes('e2e/library.spec.ts'));
+});
+
+test("gate.yml hands the plan's DefaultBeside groups to default's derivation", () => {
+  assert.match(workflow, /\n {6}default_beside: \$\{\{ steps\.plan\.outputs\.default_beside \}\}\n/);
+  assert.match(workflow, /\n {6}- if: matrix\.group == 'default'\n {8}env:\n {10}E2E_PLAN: \$\{\{ needs\.plan\.outputs\.e2e \}\}\n {10}DEFAULT_BESIDE: \$\{\{ needs\.plan\.outputs\.default_beside \}\}\n/);
+});
+
+test('this tree: a DefaultBeside name with no script makes default the bare set, with the warning', () => {
+  const run = spawnSync(process.execPath, [script], { cwd: root, encoding: 'utf8', env: { ...process.env, E2E_PLAN: '[{"group":"default"},{"group":"side"}]', DEFAULT_BESIDE: '["library","nope"]', GITHUB_STEP_SUMMARY: '' } });
+  assert.equal(run.status, 0);
+  assert.equal(run.stdout, '');
+  assert.match(run.stderr, /^::warning title=e2e:default runs the bare set::no package\.json script e2e:nope \(named by DefaultBeside\)$/m);
 });
 
 test("every class-1 group's script on this tree has a shape the derivation reads", () => {
@@ -159,4 +204,30 @@ test('a spec its group lists only part of stays in default', async () => {
   const result = await defaultSpecs({ scripts: fixture, rootName, groups: ['a', 'b'], list: partial });
   assert.deepEqual(result.specs, ['e2e/b.spec.ts', 'e2e/c.spec.ts']);
   assert.ok(result.notes.some((note) => /e2e\/b\.spec\.ts stays: the groups that collect it list 1 of its 2 tests/.test(note)));
+});
+
+test("DefaultBeside's groups count exactly as the run's own; default alone with them narrows too", async () => {
+  const inRun = await defaultSpecs({ scripts: fixture, rootName, groups: ['a', 'b'], list: stub });
+  assert.deepEqual(inRun.specs, ['e2e/c.spec.ts']);
+  for (const [groups, beside] of [
+    [['a'], ['b']],
+    [['a'], ['a', 'b', 'web']],
+    [[], ['b', 'default', 'a']],
+  ]) {
+    const result = await defaultSpecs({ scripts: fixture, rootName, groups, beside, list: stub });
+    assert.deepEqual([result.specs, result.total], [inRun.specs, inRun.total], `${groups} beside ${beside}`);
+  }
+  assert.ok((await defaultSpecs({ scripts: fixture, rootName, groups: ['a'], beside: ['b'], list: stub })).notes.includes('e2e:b (named by DefaultBeside) collects e2e/b.spec.ts'));
+  assert.match((await defaultSpecs({ scripts: fixture, rootName, groups: ['default'], beside: ['default'], list: stub })).bare, /no other e2e group/);
+});
+
+test('a DefaultBeside group with no script, or a script it cannot read, makes default the bare set, as a doubt', async () => {
+  const unlisted = () => assert.fail('nothing is listed once a named group is unusable');
+  const missing = await defaultSpecs({ scripts: fixture, rootName, groups: ['a'], beside: ['nope'], list: unlisted });
+  assert.equal(missing.doubt, true);
+  assert.match(missing.bare, /^no package\.json script e2e:nope \(named by DefaultBeside\)$/);
+  const grepped = { ...fixture, 'e2e:b': `${fixture['e2e:b']} --grep fast` };
+  const unreadable = await defaultSpecs({ scripts: grepped, rootName, groups: [], beside: ['b'], list: unlisted });
+  assert.equal(unreadable.doubt, true);
+  assert.match(unreadable.bare, /^cannot read e2e:b's script shape \(.*--grep fast\) \(named by DefaultBeside\)$/);
 });
