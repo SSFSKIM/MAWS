@@ -768,4 +768,17 @@ describe('labels and values at their edges (P3-F dashboard-model wave)', () => {
     const percent = renderView({ view: 'table', format: { v: 'percent' } }, small, theme, 't').html!;
     expect([...percent.matchAll(/<td class="dash-num">([^<]*)<\/td>/g)].map((m) => m[1])).toEqual(['0.1%', '−0.1%', '0.001%']);
   });
+
+  // sweep#3: a pie of two measures is the view's error in place, never the first measure drawn and the second dropped
+  it('draws a pie of more than one measure as the error naming the rest; a pie of one measure as before', () => {
+    const t: ViewTable = { columns: [{ name: 'region', type: 'string' }, { name: 'sales', type: 'number' }, { name: 'cost', type: 'number' }], rows: [['N', 3, 1], ['S', 1, 2]] };
+    const two = renderView({ view: 'pie', x: 'region', y: ['sales', 'cost'], title: 'Mix' }, t, theme, 't');
+    expect(two.warnings).toEqual(['a pie view draws one measure; y also names "cost"']);
+    expect(two.svg).toContain('<title>Mix</title>');
+    expect(tips(two.svg!)).toEqual([]);
+    expect(viewPreview({ view: 'pie', x: 'region', y: ['sales', 'cost'] }, t, 't')).toEqual({ ok: false, error: 'a pie view draws one measure; y also names "cost"' });
+    const one = renderView({ view: 'pie', x: 'region', y: ['sales'] }, t, theme, 't');
+    expect(tips(one.svg!)).toEqual(['N: 3 (75%)', 'S: 1 (25%)']);
+    expect(one).toEqual(renderView({ view: 'pie', x: 'region', y: 'sales' }, t, theme, 't'));
+  });
 });
