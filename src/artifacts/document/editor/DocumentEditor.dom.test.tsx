@@ -6,9 +6,10 @@ import type { Editor, JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
 import { ynodeToPmnode } from '../../yjs/prosemirror';
 import { schemaFor } from '../schema';
-import { createDocument, listTabs, tabBody } from '../tabs';
+import { addTab, createDocument, listTabs, tabBody } from '../tabs';
 import { DocumentEditor } from './DocumentEditor';
 import type { DocumentHandle, EditorHost } from './host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
@@ -217,6 +218,28 @@ describe('tabs', () => {
     act(() => fireEvent.click(screen.getByRole('tab', { name: 'Main' })));
     await until(() => editor().getText() === 'First tab text', 'the first tab’s body');
     expect(endOf(editor(), 'p1')).toBeGreaterThan(0);
+  });
+
+  // P3-F W-DOC-B (tracker L155): the guide's 50-tab limit is refused in the editor too, the reason named on the control
+  it('refuses Add tab at the document’s limit with the limit named, adds nothing on a click, and adds again below it', async () => {
+    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    act(() => {
+      for (let n = 2; n <= DOCUMENT_LIMITS.tabs; n++) addTab(handle.doc, { title: `Tab ${n}` });
+    });
+    await until(() => screen.getAllByRole('tab').length === 50, 'fifty tabs');
+    const add = screen.getByRole('button', { name: 'Add tab' });
+    expect(add).toHaveProperty('disabled', true);
+    expect(add.getAttribute('title')).toBe('A document holds at most 50 tabs');
+    act(() => fireEvent.click(add));
+    expect(listTabs(handle.doc)).toHaveLength(50);
+
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Tab options' })));
+    act(() => fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' })));
+    await until(() => screen.getAllByRole('tab').length === 49, 'a tab deleted');
+    expect(screen.getByRole('button', { name: 'Add tab' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Add tab' }).getAttribute('title')).toBeNull();
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Add tab' })));
+    await until(() => listTabs(handle.doc).length === 50, 'the tab added below the limit');
   });
 });
 

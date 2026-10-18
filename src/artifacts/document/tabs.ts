@@ -3,6 +3,7 @@
 // binds and the writer edits. Tabs sort by a fractional `order` key, so a reorder writes one attribute and two
 // replicas reordering concurrently converge without renumbering.
 import type { Node as PMNode } from '@tiptap/pm/model';
+import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
 import { transact, type Doc, type Node } from '../yjs';
 import { YNode } from '../yjs/document';
 import { pmnodeToDelta } from '../yjs/prosemirror';
@@ -69,9 +70,13 @@ export function createDocument(doc: Doc, { title, body, id, generateID = nanoid8
   return tabId;
 }
 
-/** Adds a tab after `after` (default: last). Returns its id. */
+/** The document's tab limit as the guide states it, which the editor shows on its refused Add tab (P3-F, tracker L155). */
+export const TAB_LIMIT_REFUSAL = `A document holds at most ${DOCUMENT_LIMITS.tabs} tabs`;
+
+/** Adds a tab after `after` (default: last), refused before any write at `DOCUMENT_LIMITS.tabs`. Returns its id. */
 export function addTab(doc: Doc, { title, body, id, generateID = nanoid8, after }: NewTab & { after?: string }, origin?: unknown): string {
   const tabs = listTabs(doc);
+  if (tabs.length >= DOCUMENT_LIMITS.tabs) throw new Error(`addTab: a document holds at most ${DOCUMENT_LIMITS.tabs} tabs`);
   const at = after == null ? tabs.length - 1 : tabs.findIndex((tab) => tab.id === after);
   if (after != null && at < 0) throw new Error(`addTab: no tab ${after}`);
   const tabId = id ?? generateID();
