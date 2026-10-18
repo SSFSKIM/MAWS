@@ -105,5 +105,10 @@
     "currentRows": "docs/doperpowers/evidence/p3-finish/tracker-current.json",
     "reviewer": "a1e3175e07d93770d",
     "status": "independent medium review approved; exact original/current guards retained"
+  },
+  "dragIdleWindowReminder": {
+    "task": "bdvfnkxaf",
+    "at": "2026-10-18T12:00:00Z",
+    "rule": "one notification; consider discriminator only with no wave gate pending"
   }
 }

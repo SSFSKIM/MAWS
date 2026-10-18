@@ -26,14 +26,17 @@
       "src/renderer/src/widgets/model.ts",
       "src/renderer/src/widgets/ModelSelector.test.tsx",
       "src/artifacts/slides/editor/Filmstrip.tsx",
-      "src/artifacts/slides/editor/DeckEditor.dom.test.tsx"
+      "src/artifacts/slides/editor/DeckEditor.dom.test.tsx",
+      "src/renderer/src/keymap/actions-runtime.ts",
+      "src/renderer/src/main/MainArea.test.tsx"
     ],
     "foregroundScripts": [
       "e2e",
       "e2e:document-app",
       "e2e:to-human",
       "e2e:widgets"
-    ]
+    ],
+    "scopeNote": "Deferred focus restoration regression for L200/L264; source candidate, Mac proof still required."
   },
   "W-STORE": {
     "executor": "a53b2ea8e3417bc02",
