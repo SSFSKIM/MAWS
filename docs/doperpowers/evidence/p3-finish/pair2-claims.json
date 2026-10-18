@@ -59,9 +59,16 @@
       "src/main/artifacts/export-document.test.ts",
       "src/main/presentations/export.ts",
       "e2e/design-systems.spec.ts",
-      "e2e/support/design-restyle.ts"
+      "e2e/support/design-restyle.ts",
+      "src/artifacts/document/editor/history/controller.ts",
+      "src/artifacts/document/editor/DocumentEditor.tsx",
+      "src/renderer/src/tools/document/design-system.tsx",
+      "src/artifacts/document/editor/history/rail.dom.test.tsx",
+      "src/renderer/src/tools/document/DocumentPanel.test.tsx"
     ],
-    "conditions": "history/paint.ts comment wording only; presentations/export.ts only necessary shared-face reuse; AskSheetTool.tsx needs a new claim before edit"
+    "conditions": "history/paint.ts comment wording only; presentations/export.ts only necessary shared-face reuse; AskSheetTool.tsx needs a new claim before edit",
+    "supplementalScope": "S-RESTYLE discovered production history preview inherited live scope; approved existing pinned Scope/face-alias repair with version-owned overrides, no new persisted or X28 contract. history-api path proposal dropped.",
+    "fixExecutor": "a9b6e9e5eb14418ce"
   },
   "intersection": [],
   "commitLock": "/private/tmp/maws-p3f-commit.lock",

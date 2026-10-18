@@ -1,0 +1,9 @@
+W-STORE round1: needs fixes before authoritative gate. Reviewer a64e6ed27a8f39b3f.
+Exact source:af74add9b,46bb88734,46dac3eb4,c1eb9bd74,33ecf47c0,f71d7e046; MINI excluded.
+Four Important findings, verified by controller and all within intended bounded scope:
+1 Validate create kind/domain and regular-file path before streaming; current register/withDigest can open a refused FIFO/device before existing refusal.
+2 Revalidate source/references after digest await before write; duplicate captures designSystemId S, source can move off S and S can be deleted while digest waits, then stale S is inserted. Audit create/byte-restore await boundaries too.
+3 Raw preview.tokens inline on .ds-doc shadows pinned Scope private font aliases. Real scoped consumers must let Scope own overrides; preserve unscoped fallback. Test pinned bundled-family override and asset URL.
+4 Empty document plus synthetic i accent probe is not rendered-content restyle proof. Seed real token-painted links/marks and check actual visible content before/after/in retained preview; keep deck headline proof.
+Fresh fix executor a9b6e9e5eb14418ce owns the fix wave. No code patched by controller.
+Folder-filter local checks violated named-file rule and are retained with exact scope in waves/W-STORE-checkpoint.json. holds5s timeout is unresolved, not an accepted baseline. No local checks were run by reviewer; counts/lint worker-reported, native/export/e2e proof pending.

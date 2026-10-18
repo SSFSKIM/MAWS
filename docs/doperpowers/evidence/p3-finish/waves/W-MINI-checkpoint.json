@@ -1,0 +1,46 @@
+{
+  "status": "intermediate diagnostic candidate; all six rows remain open/narrowed, not wave completion",
+  "recordedAt": "2026-10-18T12:06:59Z",
+  "executor": "ab180409652104010",
+  "base": "344d7131c",
+  "commits": {
+    "L199": "8e2a7ac51",
+    "L200": "4143ca059",
+    "L264": "93b9e35bf",
+    "L201": "d26b65149",
+    "L217": "287b45bb1",
+    "L277": "1235d4a77"
+  },
+  "foregroundScripts": [
+    "e2e",
+    "e2e:document-app",
+    "e2e:to-human",
+    "e2e:widgets"
+  ],
+  "checks": {
+    "provenance": "worker reported; independent review was static",
+    "red": "Controlled deferred-frame Overview-focus regression failed old code in renderer and renderer-compiled; ordinary restoration passed",
+    "green": "MainArea86/86; broader named153/153 across9 files; named eslint clean",
+    "notRun": "local typecheck, e2e, app, engine"
+  },
+  "diagnoses": {
+    "L199": "paste and must-read instrumented only; native traces and resulting fixes/pinning still required",
+    "L200": "deferred close-tab focus restore can steal a subsequently opened Overview; deterministic source regression proven, mini ordering pending",
+    "L264": "palette now waits actual combobox focus; full-set default green remains",
+    "L201": "await aria-enabled after async selector write (fast-mode write, not model set as old suspicion); native pass pending",
+    "L217": "one queued page timer orders the single arrow after sensor listener; preserved over/order/replica checks; native root cause unconfirmed",
+    "L277": "selection follows matching editor/DOM paragraph and zero unacknowledged edits; original failure occurred before restore"
+  },
+  "remainingCounts": {
+    "L199-must-read": "0/10 qualifying Mac runs after candidate; no run yet",
+    "L277": "0/10 qualifying Mac runs after candidate; no run yet"
+  },
+  "review": {
+    "reviewer": "aef4b40cb8d4b7d76",
+    "round": 2,
+    "verdict": "approved for diagnostic gate after5f115a09d; full wave acceptance remains open",
+    "finding": "Native state was sampled only after failure and a1s frame count; store timestamped native state immediately before each targeted action, without clipboard/poll/focus side effects. Initial unconditional approval was superseded by this clarified finding.",
+    "fixCommit": "5f115a09d"
+  },
+  "next": "Reviewed union gate after STORE fixes/re-review; retain each scene native entry state, obtain native diagnosis, then actual fix/pinning where needed."
+}

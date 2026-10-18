@@ -1,0 +1,5 @@
+W-MINI diagnostic candidate: approved after correction5f115a09d, not wave completion.
+Scope:8e2a7ac51,4143ca059,93b9e35bf,d26b65149,287b45bb1,1235d4a77; reviewer aef4b40cb8d4b7d76.
+Round1 confirmed handler semantics, readiness waits, focus ownership and preserved clauses, then superseded its initial approval on the native-focus evidence gap: report-time native state did not establish triggering state. Controller verified and dispatched correction.
+Round2 approved5f115a09d: timestamped per-step native and page entry state retained even on pass, immediate failure state separate from1s sample; no forced focus, clipboard read, polling, assertion or timeout change. Native=false/error is not foreground proof.
+All six rows remain open/narrowed; native diagnosis, resulting repairs/pinning and actual run counts still required. Review was static; worker153/153 and lint counts not independently rerun.

@@ -1,0 +1,42 @@
+{
+  "status": "implementation committed; independent review and authoritative union gate pending",
+  "base": "344d7131c",
+  "executor": "a53b2ea8e3417bc02",
+  "reviewer": "a64e6ed27a8f39b3f",
+  "commits": {"L139":"af74add9b","L160":"46bb88734","L176":"46dac3eb4","L182":"c1eb9bd74","S-RESTYLE-repair":"33ecf47c0","S-RESTYLE-proof":"f71d7e046"},
+  "diff": "/private/tmp/maws-review/p3f-W-STORE.patch.txt",
+  "changes": {
+    "L139": "ArtifactStore.withDigest streams owner create/duplicate/byte restore before batch; caller reports supplied digest/bytes/relative/unreadable paths pass through and doc duplicate stays synchronous. Review must verify pre-read validation and digest integrity.",
+    "L160": "carriedBlocks recognizes accept/reject as Accepted/Restored alongside move/retype, preserving existing block-level rule.",
+    "L176": "Submit revalidates each picked system through artifacts.get prepare:false; deleted picks cleared with notice; failed check retains picks for retry.",
+    "L182": "Document HTML/PDF reuse systemFacesCss and viewCss with sanitized authored-name faces and data bytes at pinned revision; no faces for Markdown/Word and no duplicate dashboard faces. Official adds about3.7MB font bytes,5MB base64 per export (worker report).",
+    "S-RESTYLE": "Document history carries pinned system and version-owned overrides into existing pageScope/SystemPage, including floor for versions without pin; live-since remains live. Existing D Scope owns revision-specific aliases/assets/lifetime; live editor identity regression. No designTokens workaround or persisted/X28 change. Actual-editor e2e is unrun; helper's synthetic accent probe/paint selectors require review and remote proof."
+  },
+  "checksProvenance": "Worker reports only; reviewer has not independently rerun checks. No standalone raw stdout logs found under /tmp/wstore; no agent transcript was read.",
+  "localPrefix": "export pnpm_config_verify_deps_before_run=false; /tmp/maws-review/with-slot.sh pnpm -C /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015 exec vitest run <args>",
+  "namedFileChecks": [
+    {"args":"--project node src/engine-host/documents/register.test.ts -t 'hash before their batch'","result":"RED: expected [true,true,true] to deeply equal []; create/duplicate/restore hashed inside batch"},
+    {"args":"--project node src/engine-host/documents/holds.test.ts","result":"5/5 alone after timeout in folder run; not established as accepted baseline"},
+    {"args":"src/artifacts/document/history.test.ts src/engine-host/tool-server/documents.test.ts -t 'copy|Accept credits'","result":"RED: missing accept/reject carry labels"},
+    {"args":"src/artifacts/document/history.test.ts src/artifacts/document/history.extras.test.ts src/engine-host/tool-server/documents.test.ts","result":"GREEN69/69"},
+    {"args":"src/artifacts/document/editor/history/rail.dom.test.tsx","result":"GREEN21/21 before supplemental repair"},
+    {"args":"--project renderer src/renderer/src/tools/maws/ask/store.test.ts -t 're-validates'","result":"RED3 new cases: artifacts.get absent, deleted-pick case timed out"},
+    {"args":"--project node src/main/design-systems/documents.test.ts","result":"RED missing font faces; GREEN8/8"},
+    {"args":"src/artifacts/document/editor/history/rail.dom.test.tsx -t 'hands the page'","result":"RED pinned-system handoff absent"}
+  ],
+  "unauthorizedFolderChecks": [
+    {"args":"src/artifacts/document/editor src/renderer/src/tools/document","result":"323 passed /34 files"},
+    {"args":"src/renderer/src/tools/document/DocumentPanel.test.tsx src/artifacts/document/editor/history/rail.dom.test.tsx src/artifacts/document/editor/DocumentEditor.dom.test.tsx src/renderer/src/artifacts/design-system","result":"107 passed /12 files; final argument is folder"},
+    {"args":"src/renderer/src/tools/dashboard src/artifacts/dashboard","result":"330 passed /39 files"},
+    {"args":"--project node src/engine-host/documents/register.test.ts src/engine-host/documents/store.test.ts src/engine-host/documents/restore.test.ts src/engine-host/tool-server/send-file.test.ts src/engine-host/library","result":"154 passed /10 files; final argument is folder"},
+    {"args":"--project node src/engine-host/documents src/engine-host/tool-server/artifact-tools.test.ts","result":"287/288; holds.test.ts 5s timeout"},
+    {"args":"--project node src/engine-host/documents","result":"254/255; same holds.test.ts timeout"},
+    {"args":"src/renderer/src/tools/maws/ask","result":"117 passed /6 files"},
+    {"args":"--project node src/main/design-systems src/main/artifacts/export-document.test.ts src/main/presentations src/main/dashboard","result":"70 passed /13 files"}
+  ],
+  "processDisposition": "Worker acknowledged folder-filter runs violated the named-file-only rule. Retained honestly, not represented as compliant named checks; no reruns merely to repair bookkeeping. holds timeout is not accepted as baseline from unchanged-file/isolated-green alone. Two unnecessary sleep waiters were reported: one exited0, the other stopped; worker reports no background work remains. Future checks must name files.",
+  "lint": "Worker reports named-file eslint through same slot prefix green on every changed file, including e2e proof/helper.",
+  "notRun": "Local typecheck, e2e, app, engine, native PDF/font observation. S-RESTYLE e2e has not run anywhere.",
+  "gateGroups": ["static","unit","probes","unit:darwin","e2e:artifacts","e2e:design-systems","e2e:document","e2e:presentations"],
+  "acceptance": "Four tracker entries were removed by source commits; this is not authoritative acceptance before review and gate. Supplemental actual-editor/retained-appearance proof remains unverified."
+}

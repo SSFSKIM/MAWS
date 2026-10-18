@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M1 pair2 implementation active on disjoint approved paths",
+  "phase": "M1 pair2: MINI diagnostic candidate approved; fresh STORE fix wave before union gate",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -39,7 +39,7 @@
     "reviewRounds": 2
   },
   "dependencyInstall": "completed exit 0 under with-slot",
-  "dragDiscriminator": "prepared cce228678; not before 12Z; no wave gate pending",
+  "dragDiscriminator": "prepared, unrun; idle-half reminder fired but wave diagnostic takes priority",
   "commitLock": "/private/tmp/maws-p3f-commit.lock",
   "helper": "/private/tmp/p3f-commit-row.py",
   "paidSpendUsd": 0,
@@ -85,15 +85,41 @@
     "reviewRounds": 2
   },
   "W-MINI": {
-    "status": "file claim acknowledged; implementing/diagnosing",
+    "status": "diagnostic candidate approved, not wave complete; native reading pending",
     "foreground": "package-script activation permitted; lane hold lifted; child DL13",
     "executor": "ab180409652104010",
-    "claims": "pair2-claims.json"
+    "claims": "pair2-claims.json",
+    "rowCommits": [
+      "8e2a7ac51",
+      "4143ca059",
+      "93b9e35bf",
+      "d26b65149",
+      "287b45bb1",
+      "1235d4a77"
+    ],
+    "reviewer": "aef4b40cb8d4b7d76",
+    "reviewRounds": 2,
+    "checkpoint": "waves/W-MINI-checkpoint.json",
+    "reviewFixCommit": "5f115a09d"
   },
   "W-STORE": {
-    "status": "file claim acknowledged; implementing",
+    "status": "four original plus two supplemental commits reviewed; four verified findings in fresh fix wave",
     "executor": "a53b2ea8e3417bc02",
-    "claims": "pair2-claims.json"
+    "claims": "pair2-claims.json",
+    "rowCommits": [
+      "af74add9b",
+      "46bb88734",
+      "46dac3eb4",
+      "c1eb9bd74"
+    ],
+    "supplementCommits": [
+      "33ecf47c0",
+      "f71d7e046"
+    ],
+    "reviewer": "a64e6ed27a8f39b3f",
+    "reviewRounds": 1,
+    "fixExecutor": "a9b6e9e5eb14418ce",
+    "checkpoint": "waves/W-STORE-checkpoint.json"
   },
   "baselineFold": {
     "merge": "25eb0e6a8",
@@ -109,6 +135,7 @@
   "dragIdleWindowReminder": {
     "task": "bdvfnkxaf",
     "at": "2026-10-18T12:00:00Z",
-    "rule": "one notification; consider discriminator only with no wave gate pending"
+    "rule": "one notification; consider discriminator only with no wave gate pending",
+    "status": "completed; no discriminator started because pair2 diagnostic gate pending"
   }
 }
