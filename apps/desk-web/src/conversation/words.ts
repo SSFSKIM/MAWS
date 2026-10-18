@@ -35,6 +35,8 @@ export function failureText(failure: RpcError, machine: string): string {
       return 'the session is already running somewhere';
     case 'idle':
       return 'the session is idle: Send starts a turn instead';
+    case 'unknown-task':
+      return `${machine} does not hold that job as running`;
     case 'copy-started':
       return 'the session was reopened in a terminal meanwhile; the copy the resume started was stopped';
     case 'interrupted':
@@ -73,6 +75,8 @@ export function resultText(rpc: string, result: JsonObject): { text: string; war
       return { text: 'retired', warning: false };
     case 'resume':
       return { text: 'resumed; it rejoins in a moment', warning: false };
+    case 'stop':
+      return { text: 'stopped; the job reads so in a moment', warning: false };
     default:
       return { text: 'done', warning: false };
   }

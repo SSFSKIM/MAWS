@@ -14,9 +14,13 @@
 // DC9 replays `SESSION_VIEW` with `producer: 'dc8'`: the widened `subagents` body, `jobs` and `mcp` in the snapshot and
 // as they change, and `output` answered on a subscription from the recording's `tasks/`; the subscription stays open after
 // the replayed session ends, answering `rows` and `output`. The defaults (`TWO_SUBAGENTS`, `dc3`) are DC6's.
+//
+// DC10: it answers a `stop` for its session as the machine does — `unknown-task` for a job its index does not hold as
+// running, else `TaskStop`'s call and result written to the job's loop (`SessionDepth.stopJob`), so the job turns
+// `stopped` on the session's own body, and `done` — each nonce once, a retry answered from its ledger.
 import type { SessionMessage } from 'desk-hub/protocol';
 import { loadRecording, SessionDepth, TWO_SUBAGENTS, type Producer, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
-import type { JsonObject, Raised, TaskOutput } from 'desk-hub/protocol';
+import type { JsonObject, Raised, Rpc, RpcOutcome, TaskOutput } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
 
 export class FakeMachineReplay {
@@ -29,6 +33,13 @@ export class FakeMachineReplay {
   private readonly heldRows: Array<{ sub: string; before: string; limit: number }> = [];
   /** An `output` answer a suite puts in the machine's place for a task (a race the recording cannot stage); else none. */
   answerOutput: ((taskId: string) => TaskOutput | null) | null = null;
+  /** A stop's outcome a suite puts in the machine's place (the engine's error, a refusal); else the machine's own. */
+  answerStop: ((taskId: string) => RpcOutcome | null) | null = null;
+  /** Holds each `stop` until `releaseStops`, so a suite can look at the row while it is on its way. */
+  holdStops = false;
+  private readonly heldStops: Array<Rpc<'stop'>> = [];
+  /** Each stop's outcome by nonce: a retry is answered from here and never stops anything twice. */
+  private readonly ledger = new Map<string, RpcOutcome>();
   /** The next subscription's snapshot hooks (`raceNextSnapshot`'s `advance` and `overlap`) and its scope, used once. */
   private nextSnapshot: { agentId: string | null; options: SnapshotOptions } | null = null;
   private cursor = 0;
@@ -94,6 +105,18 @@ export class FakeMachineReplay {
     return held.length;
   }
 
+  /** How many stops are held, waiting for `releaseStops` (the machine reads the hub's frames every few ms). */
+  get stopsHeld(): number {
+    return this.heldStops.length;
+  }
+
+  /** Answers the stops held so far; how many there were. */
+  releaseStops(): number {
+    const held = this.heldStops.splice(0);
+    for (const rpc of held) this.stopJob(rpc);
+    return held.length;
+  }
+
   /** The browser's socket drops: the hub forgets its subscriptions, and so does the machine. */
   drop(): void {
     this.hub.dropConnections();
@@ -136,6 +159,23 @@ export class FakeMachineReplay {
     if (step.k === 'presence') this.sendPresence();
   }
 
+  /** A stop the double forwarded (one it failed at once, offline or stale, never reaches a machine). */
+  private stopJob(rpc: Rpc<'stop'>): void {
+    const { project } = this.where;
+    if (this.hub.rpcState(project, rpc.nonce) !== 'forwarded') return;
+    let outcome = this.ledger.get(rpc.nonce);
+    if (!outcome) {
+      const { taskId } = rpc.args;
+      outcome =
+        this.answerStop?.(taskId) ??
+        (this.depth.stopJob(taskId)
+          ? { state: 'done', result: { taskId } }
+          : { state: 'failed', error: { code: 'unknown-task', message: `${taskId} is not a running job of ${this.session}` } });
+      this.ledger.set(rpc.nonce, outcome);
+    }
+    this.hub.answerRpc(project, rpc.nonce, outcome);
+  }
+
   private poll(): void {
     while (this.cursor < this.hub.up.length) {
       const { project, frame } = this.hub.up[this.cursor++];
@@ -148,6 +188,10 @@ export class FakeMachineReplay {
       else if (frame.t === 'rows') {
         if (this.holdRows) this.heldRows.push({ sub: frame.sub, before: frame.before, limit: frame.limit });
         else this.depth.page(frame.sub, frame.before, frame.limit);
+      }
+      else if (frame.t === 'rpc' && frame.rpc.rpc === 'stop' && frame.rpc.args.session === this.session) {
+        if (this.holdStops) this.heldStops.push(frame.rpc);
+        else this.stopJob(frame.rpc);
       }
       else if (frame.t === 'output') {
         const forced = this.answerOutput?.(frame.taskId);

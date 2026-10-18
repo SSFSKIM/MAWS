@@ -36,7 +36,7 @@ const isLaunchText = (text: string) => text === FORK_LAUNCH || LAUNCH.test(text)
 type Word = { raw: string | null; at: string; summary?: string; outputFile?: string; event?: string };
 
 /** A row that names a task: by its task id, or, for an agent's result or notification, by the call's tool-use id. */
-type Mention = Word & { taskId: string | null; toolUseId: string | null; from: 'result' | 'notification' | 'task_status' | 'stop' };
+type Mention = Word & { taskId: string | null; toolUseId: string | null; from: 'result' | 'notification' | 'task_status' | 'stop' | 'note' };
 
 type Call = { name: string; input: JsonObject; at: string };
 type Started = { taskId: string; kind: Job['kind']; toolUseId: string; startedAt: string; description: string; command?: string };
@@ -78,6 +78,38 @@ function plainNotification(row: JsonObject): string | null {
   return at < 0 ? null : text.slice(at + 2);
 }
 
+// The bridge's notes of tasks it stopped (DC10; DX4's rule in the vectors' `about`): a plugin's TaskStop writes no row,
+// and the engine queues no notification for a main-loop task it stops, so the note the bridge appends is the rows' word.
+// Known by the whole text of a user row kept isMeta with the plugin's origin (a steer's row is kept so too): a stop's
+// note is that whole text; an interrupt's is its origin line, then only lines naming each task it moved to the
+// background, stopped or not. Only a stopped line is evidence; a text with any other line is no note.
+const TASK = '([A-Za-z0-9_-]{1,64})';
+const STOP_NOTE = new RegExp(`^Task ${TASK}, a background task, was stopped from (?:the desk|outside the terminal): it is not running\\.$`);
+const INTERRUPT_ORIGINS = new Set(['The interrupt came from the desk.', 'The interrupt came from outside the terminal.']);
+const INTERRUPT_STOPPED = new RegExp(`^Task ${TASK}, the Bash command the interrupt moved to the background, was then stopped: it is not running, and no notification will come for it\\.$`);
+const INTERRUPT_RUNNING = new RegExp(`^Task ${TASK}, the Bash command the interrupt moved to the background, could not be stopped: it may still be running\\.$`);
+
+/** The note's text for a stop the bridge ran (`from` the desk, or another surface outside the terminal). */
+export const stopNote = (taskId: string, from: 'desk' | 'outside' = 'desk'): string =>
+  `Task ${taskId}, a background task, was stopped from ${from === 'desk' ? 'the desk' : 'outside the terminal'}: it is not running.`;
+
+/** Each task a bridge's note in this row says it stopped, with the line saying so; none for any other row. */
+function noteStops(row: JsonObject): Array<{ taskId: string; line: string }> {
+  if (row.type !== 'user' || row.isMeta !== true || obj(row.origin)?.kind !== 'plugin') return [];
+  const text = textOf(obj(row.message)?.content);
+  const whole = STOP_NOTE.exec(text);
+  if (whole) return [{ taskId: whole[1], line: text }];
+  const [first, ...lines] = text.split('\n');
+  if (!INTERRUPT_ORIGINS.has(first)) return [];
+  const out: Array<{ taskId: string; line: string }> = [];
+  for (const line of lines) {
+    const stopped = INTERRUPT_STOPPED.exec(line);
+    if (stopped) out.push({ taskId: stopped[1], line });
+    else if (!INTERRUPT_RUNNING.test(line)) return [];
+  }
+  return out;
+}
+
 /** The path a background Bash result's text names after "Output is being written to:", a trailing '.' dropped. */
 function bashOutputPath(text: string): string | null {
   const match = /Output is being written to: (\S+)/.exec(text);
@@ -116,6 +148,10 @@ export class LoopIndex {
     if (row.type !== 'user') return;
     const plain = plainNotification(row);
     if (plain !== null) return this.notified(plain, at);
+    for (const { taskId, line } of noteStops(row)) {
+      this.known.add(taskId);
+      this.mentions.push({ from: 'note', taskId, toolUseId: null, raw: 'stopped', at, summary: line });
+    }
     for (const b of blocksOf(row)) if (b.type === 'tool_result' && typeof b.tool_use_id === 'string') this.result(b, row.toolUseResult, at);
   }
 
@@ -319,9 +355,12 @@ export function derive(d: Derivation): Body {
 
 /** One loop's background shells and monitors, and its MCP server names: the main loop's for the session's body, an
  * agent's own for a subscription to that agent. `running`: whether the session's process runs. */
-export function loopJobs(loop: LoopIndex, running: boolean): Pick<Body, 'jobs' | 'mcp'> {
+export function loopJobs(loop: LoopIndex, running: boolean, also?: LoopIndex): Pick<Body, 'jobs' | 'mcp'> {
+  const naming = (index: LoopIndex, taskId: string) => index.mentions.filter((m) => m.taskId === taskId && m.from !== 'result');
   const jobs = loop.started.map((s): Job => {
-    const mentions = loop.mentions.filter((m) => m.taskId === s.taskId && m.from !== 'result');
+    // `also`, the main loop's index for a subagent's loop: its words on the agent's tasks count after the loop's own,
+    // since the bridge's note of a subagent's task it stopped is in the main transcript (the plane's `jobs_body`).
+    const mentions = [...naming(loop, s.taskId), ...(also ? naming(also, s.taskId) : [])];
     const start: Outcome = { status: 'running', raw: 'running', at: s.startedAt, terminal: false };
     const outcome = fold(mentions, loop.monitors.has(s.taskId), start)!;
     const status: JobStatus = outcome.terminal ? (outcome.status as JobStatus) : running ? 'running' : 'exited';

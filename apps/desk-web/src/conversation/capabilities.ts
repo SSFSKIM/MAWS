@@ -35,7 +35,9 @@ export function retiredBy(s: Pick<CapabilityInput, 'member' | 'ended'>): string 
 
 export type SessionKind = 'bridged' | 'seat' | 'terminal' | 'not-running' | 'unknown' | 'offline';
 
-export const VERBS = ['send', 'steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume'] as const;
+// `stop` is a background job's Stop (DC10): whether the session can stop a job at all; whether a job runs is the jobs
+// view's to say.
+export const VERBS = ['send', 'steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop'] as const;
 export type Verb = (typeof VERBS)[number];
 
 /** `path: 'send'`: the verb is carried by a log `human` (the send path), not by its RPC. */
@@ -70,14 +72,14 @@ export function capabilities(s: CapabilityInput, connected = true): Record<Verb,
   const can = retiredBy(s) === null ? byKind : { ...byKind, send: yes('recorded, not delivered: it is retired') };
   if (connected) return can;
   const off = no('not connected to the hub');
-  return { send: can.send.can ? yes('sent once the desk reconnects') : can.send, steer: off, interrupt: off, answer: off, decide: off, model: off, compact: off, retire: off, resume: off };
+  return { send: can.send.can ? yes('sent once the desk reconnects') : can.send, steer: off, interrupt: off, answer: off, decide: off, model: off, compact: off, retire: off, resume: off, stop: off };
 }
 
 function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
   const kind = kindOf(s);
   if (s.machineReadOnly === true && kind !== 'offline') {
     const ro = no(`${s.machine} is read-only: it runs nothing sent from outside it`);
-    return { send: yes(`recorded, not delivered: ${s.machine} is read-only`), steer: ro, interrupt: ro, answer: ro, decide: ro, model: ro, compact: ro, retire: ro, resume: ro };
+    return { send: yes(`recorded, not delivered: ${s.machine} is read-only`), steer: ro, interrupt: ro, answer: ro, decide: ro, model: ro, compact: ro, retire: ro, resume: ro, stop: ro };
   }
   const running = turnRunning(s);
   const name = sessionName(s);
@@ -86,19 +88,19 @@ function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
     case 'offline': {
       const off = no(`${s.machine} is offline`);
       const shown = no(`${s.machine} is offline: shown, not answerable`);
-      return { send: yes(`kept in the log; delivered when ${s.machine} reconnects`), steer: off, interrupt: off, answer: shown, decide: shown, model: off, compact: off, retire: off, resume: off };
+      return { send: yes(`kept in the log; delivered when ${s.machine} reconnects`), steer: off, interrupt: off, answer: shown, decide: shown, model: off, compact: off, retire: off, resume: off, stop: off };
     }
     case 'not-running': {
       const stopped = no(`${name} is not running`);
       if (retiredBy(s) !== null) {
-        return { send: yes(), steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no('retired: a retired session is not resumed') };
+        return { send: yes(), steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no('retired: a retired session is not resumed'), stop: stopped };
       }
       const send = yes(s.seat ? 'resumes the seat to read it' : 'recorded, not delivered: a closed terminal session is reopened only by Resume');
-      return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: yes() };
+      return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: yes(), stop: stopped };
     }
     case 'unknown': {
       const waiting = no(`waiting for ${name}'s presence`);
-      return { send: yes(), steer: waiting, interrupt: waiting, answer: waiting, decide: waiting, model: waiting, compact: waiting, retire, resume: waiting };
+      return { send: yes(), steer: waiting, interrupt: waiting, answer: waiting, decide: waiting, model: waiting, compact: waiting, retire, resume: waiting, stop: waiting };
     }
     case 'bridged':
       return {
@@ -111,6 +113,7 @@ function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
         compact: yes(running ? 'at the end of this turn' : undefined),
         retire,
         resume: no(`${name} is running`),
+        stop: yes(),
       };
     case 'seat': {
       const terminal = no(`terminal only: ${name} runs without the bridge`);
@@ -125,6 +128,7 @@ function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
         compact: bridge,
         retire,
         resume: no(`${name} is running`),
+        stop: no(`${name} runs without the bridge: stop its jobs in its terminal`),
       };
     }
     case 'terminal': {
@@ -141,6 +145,7 @@ function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
         compact: bridge,
         retire,
         resume: no(`${name} is running`),
+        stop: no(`${name} runs without the bridge: stop its jobs in its terminal`),
       };
     }
   }

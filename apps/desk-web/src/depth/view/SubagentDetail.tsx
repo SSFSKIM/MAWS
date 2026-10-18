@@ -2,7 +2,9 @@
 // `tools/agents/subagents/DrillIn.tsx`, copied and adapted — over the agent's own subscription (DX3 scopes it by
 // `agentId`), whose transcript and stream are drawn as the main thread's are. The header is MAWS's: Back, the agent's
 // glyph and title, `<model> · <elapsed> · <tokens>`, and who dispatched it. MAWS's drill-in also stops the agent and
-// relays a message to it through its parent; the depth column issues no writes, so neither is here.
+// relays a message to it through its parent; neither is here (stopping an agent is not in phase 1). The agent's own
+// background shells and monitors, which its subscription carries, stand above its transcript while it has any, each
+// with Stop (DC10, `JobsPane`'s agent scope).
 import { useRef, useState, type ReactNode } from 'react';
 import type { JsonObject } from 'desk-hub/protocol';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
@@ -17,6 +19,7 @@ import { sessionName } from '../../log/projection';
 import type { SessionPlane } from '../../shell/session-plane';
 import type { DeskSession } from '../../shell/sessions';
 import { DeskTranscript } from '../source/desk-transcript';
+import { JobsPane } from './JobsPane';
 import { TranscriptPane, transcriptStatus, useDeskTranscript } from './TranscriptPane';
 
 type Props = {
@@ -72,6 +75,7 @@ export function SubagentDetail({ project, session, plane, agentId, node, actions
           </span>
         </div>
       </header>
+      <JobsPane controller={controller} state={state} session={session} scope="agent" />
       <TranscriptPane controller={controller} state={state} variant="child" actions={actions} list={list} />
     </div>
   );

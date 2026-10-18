@@ -18,11 +18,12 @@
 //   comes first; and `output` is answered from the recording's `tasks/`;
 // - a subscription outlives the replayed session: it stays open, idle, answering `rows` and `output` (DX4, "History and
 //   ended sessions").
+import { randomUUID } from 'node:crypto';
 import { join, posix } from 'node:path';
 import { isOutputTail, isTaskId } from '../src/protocol/browser';
 import type { JsonObject } from '../src/protocol/json';
-import type { SessionBodies, SessionMessage, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
-import { derive, fileFacts, LoopIndex, loopJobs, type Body, type BridgeAgent, type Derivation } from './jobs';
+import type { Job, SessionBodies, SessionMessage, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
+import { derive, fileFacts, LoopIndex, loopJobs, stopNote, type Body, type BridgeAgent, type Derivation } from './jobs';
 import { answerOutput, type Locate } from './output';
 import type { Recording, Row, Step } from './recording';
 
@@ -101,6 +102,8 @@ export class SessionDepth {
   usage: Usage | null = null;
   /** The main loop's turn running now, or null. */
   mainTurn: string | null = null;
+  /** Stops run before a crash whose TaskStop rows the replay has not reached yet (`restoreStop`). */
+  private readonly stopsToRestore = new Set<string>();
 
   constructor(
     readonly id: string,
@@ -170,7 +173,7 @@ export class SessionDepth {
    * MCP names. */
   private agentBody(agentId: string): { subagents: SubagentMeta[] } & Pick<Body, 'jobs' | 'mcp'> {
     const loop = this.indexes.get(agentId)?.index ?? new LoopIndex();
-    return { subagents: [], ...loopJobs(loop, this.record !== null) };
+    return { subagents: [], ...loopJobs(loop, this.record !== null, this.indexes.get('main')?.index) };
   }
 
   /**
@@ -292,6 +295,19 @@ export class SessionDepth {
     held.bytes += Buffer.byteLength(JSON.stringify(row)) + 1;
     for (const [sub, s] of this.subs) if (s.agentId === agentId) this.deliver(sub, s, { kind: 'row', body: { row, agentId } });
     this.refresh();
+    for (const taskId of this.stopsToRestore) {
+      if (!this.runningJob(taskId)) continue;
+      this.stopsToRestore.delete(taskId);
+      this.stopJob(taskId);
+    }
+  }
+
+  /**
+   * A stop this machine ran before a crash (its trace): the replay starts again from the recording, so its TaskStop rows
+   * are written again as soon as the job they stopped is running, as a transcript on disk would still hold them.
+   */
+  restoreStop(taskId: string): void {
+    this.stopsToRestore.add(taskId);
   }
 
   /** Folds a chunk into its block, as DX5's child does: a chunk that does not follow its message's watermark (one was
@@ -486,6 +502,41 @@ export class SessionDepth {
       return root === undefined ? null : join(dir, path.slice(root.length));
     };
     return { roots: [dir], locate };
+  }
+
+  /** The job `taskId` names and the loop whose rows started it, while the session's jobs index holds it as running. */
+  runningJob(taskId: string): { loop: string; job: Job } | null {
+    for (const [loop, { index }] of this.indexes) {
+      const job = loopJobs(index, this.record !== null, loop === 'main' ? undefined : this.indexes.get('main')?.index).jobs.find((j) => j.taskId === taskId);
+      if (job) return job.status === 'running' ? { loop, job } : null;
+    }
+    return null;
+  }
+
+  /**
+   * What the bridge's `stop` (DC10) leaves in the session. Its `TaskStop` through `$.tool.call` writes no row, so the
+   * bridge appends its note to the main transcript (`$.session.append`: a meta user row with the plugin's origin), whose
+   * whole text DX4 reads as the task `stopped` (`stopNote`, the vectors' case 16): a subagent's job too, since an
+   * agent's jobs read the main loop's words on its tasks after its own (`loopJobs`'s `also`), as the plane does; the
+   * live check saw the engine's own notice never reach a parked subagent. False, and nothing written, when the job is
+   * not running.
+   */
+  stopJob(taskId: string): boolean {
+    const held = this.runningJob(taskId);
+    if (!held) return false;
+    const timestamp = new Date().toISOString();
+    this.appendRow(null, {
+      type: 'user',
+      uuid: randomUUID(),
+      parentUuid: this.rows.get('main')?.at(-1)?.uuid ?? null,
+      sessionId: this.id,
+      isSidechain: false,
+      timestamp,
+      isMeta: true,
+      origin: { kind: 'plugin', name: 'doperpowers' },
+      message: { role: 'user', content: [{ type: 'text', text: stopNote(taskId) }] },
+    });
+    return true;
   }
 
   /** The working tree's diff, on a main-scope subscription. */

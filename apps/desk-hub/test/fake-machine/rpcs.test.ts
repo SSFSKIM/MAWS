@@ -3,9 +3,11 @@
 // before the crash-after-effect checkpoint and before its outcome is recorded; a malformed RPC is refused before any
 // claim, and an effect or a script that throws ends as a recorded `failed` outcome rather than a claim left open.
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { emptyMemory, FakeMachine, type Memory, type Recording, type RpcScript } from '../../fake-machine';
+import { emptyMemory, FakeMachine, type Memory, type Recording, type Row, type RpcScript } from '../../fake-machine';
+import { indexOf, loopJobs, stopNote } from '../../fake-machine/jobs';
 import type { ProjectDown } from '../../src/protocol/browser';
 import { inputSha256, newNonce, sealRpc, importOrgKey } from '../../src/protocol/codes';
+import type { JsonObject } from '../../src/protocol/json';
 import type { Rpc, RpcDraft } from '../../src/protocol/rpc';
 import type { Raised } from '../../src/protocol/session';
 import { BrowserClient, enroll } from '../support/clients';
@@ -55,14 +57,14 @@ const other: Recording = {
   steps: [{ at: 0, k: 'raised', draft: { request: 'toolu_other', tool: 'Bash', input: { command: 'rm -rf build' } } }],
 };
 
-async function setUp(options: { memory?: Memory; script?: RpcScript; recordings?: Recording[] } = {}) {
+async function setUp(options: { memory?: Memory; script?: RpcScript; recordings?: Recording[]; bridge?: boolean; readOnly?: boolean } = {}) {
   const project = newProject();
   const name = `rp-${count}`;
   const credentials = await enroll(hub, ADMIN, name);
   // Miniflare sees a stream's close only when a write to it fails, so a test that crashes the machine beats often.
   await hub.timing(name, { heartbeatMs: 250, leaseMs: 45_000 });
   const memory = options.memory ?? emptyMemory();
-  const make = () => new FakeMachine({ hub: hub.url, machine: name, credentials, orgKey: RAW_KEY, project, recordings: options.recordings ?? [requests], member, memory, script: options.script });
+  const make = () => new FakeMachine({ hub: hub.url, machine: name, credentials, orgKey: RAW_KEY, project, recordings: options.recordings ?? [requests], member, memory, script: options.script, bridge: options.bridge, readOnly: options.readOnly });
   const fm = make();
   await fm.connect();
   await fm.play({ speed: 0 });
@@ -249,5 +251,91 @@ describe('a fake machine that stops', () => {
       });
     }
     b.close();
+  });
+});
+
+const JOBS = '1f2e3d4c-5b6a-4798-8a7b-6c5d4e3f2a1b';
+/** A session with a background shell and a monitor running, and a shell that has completed. */
+const jobs: Recording = (() => {
+  const t = (i: number) => new Date(Date.parse('2026-10-17T10:00:00.000Z') + i * 1000).toISOString();
+  const call = (i: number, id: string, name: string, input: JsonObject): Row => ({ type: 'assistant', uuid: `a${i}`, timestamp: t(i), sessionId: JOBS, message: { id: `msg_${i}`, role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+  const result = (i: number, id: string, content: string, toolUseResult: JsonObject): Row => ({ type: 'user', uuid: `u${i}`, timestamp: t(i), sessionId: JOBS, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content }] }, toolUseResult });
+  const path = (taskId: string) => `/private/tmp/claude-501/-src-demo/${JOBS}/tasks/${taskId}.output`;
+  const rows: Row[] = [
+    call(1, 'toolu_sleep', 'Bash', { command: 'sleep 600', description: 'Wait a while', run_in_background: true }),
+    result(2, 'toolu_sleep', `Command running in background with ID: bsleep001. Output is being written to: ${path('bsleep001')}`, { backgroundTaskId: 'bsleep001' }),
+    call(3, 'toolu_watch', 'Monitor', { command: 'tail -f build.log', description: 'Watch the build' }),
+    result(4, 'toolu_watch', 'Monitor started', { taskId: 'bmon00001', timeoutMs: 300000, persistent: false }),
+    call(5, 'toolu_done', 'Bash', { command: 'true', description: 'Done at once', run_in_background: true }),
+    result(6, 'toolu_done', `Command running in background with ID: bdone0001. Output is being written to: ${path('bdone0001')}`, { backgroundTaskId: 'bdone0001' }),
+    { type: 'attachment', uuid: 'x7', timestamp: t(7), sessionId: JOBS, attachment: { type: 'task_status', taskId: 'bdone0001', taskType: 'local_bash', status: 'completed', description: 'Done at once' } },
+  ];
+  return { name: 'jobs', session: JOBS, cwd: '/src/demo', member: null, rows: { main: rows, agents: {} }, meta: {}, diff: '', chunks: 'synthesized', steps: rows.map((row, i) => ({ at: i, k: 'row', agentId: null, row })) };
+})();
+
+describe('stop (DC10)', () => {
+  const jobsOf = (fm: FakeMachine) => loopJobs(indexOf(fm.sessions.get(JOBS)!.rows.get('main')!), true).jobs;
+
+  it("stops a running shell and a running monitor: done with the task, and the job stopped by the bridge's note its rows now hold", async () => {
+    const { fm, b, call, final } = await setUp({ recordings: [jobs] });
+    for (const taskId of ['bsleep001', 'bmon00001']) {
+      const stop = await call('stop', { session: JOBS, taskId });
+      expect((await final(stop)).outcome).toEqual({ state: 'done', result: { taskId } });
+      expect(jobsOf(fm).find((j) => j.taskId === taskId)).toMatchObject({ status: 'stopped', summary: stopNote(taskId) });
+    }
+    const notes = fm.sessions.get(JOBS)!.rows.get('main')!.filter((r) => r.isMeta === true && JSON.stringify(r).includes('was stopped from the desk'));
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toMatchObject({ type: 'user', origin: { kind: 'plugin', name: 'doperpowers' } });
+    b.close();
+    await fm.close();
+  });
+
+  it('refuses a task its jobs index does not hold as running with unknown-task, before any claim; a retry after a crash stops nothing twice', async () => {
+    const memory = emptyMemory();
+    const { fm, b, call, final, make } = await setUp({ recordings: [jobs], memory });
+    for (const taskId of ['bdone0001', 'bnone0001']) {
+      const stop = await call('stop', { session: JOBS, taskId });
+      expect((await final(stop)).outcome).toMatchObject({ state: 'failed', error: { code: 'unknown-task' } });
+      expect(memory.ledger[stop.nonce]).toBeUndefined();
+    }
+    const malformed = await call('stop', { session: JOBS, taskId: 'not a task id' });
+    expect((await final(malformed)).outcome).toMatchObject({ state: 'failed', error: { code: 'bad-shape' } });
+
+    fm.crashAfterEffect();
+    const stop = await call('stop', { session: JOBS, taskId: 'bsleep001' });
+    await b.next((f) => f.t === 'rpc-state' && f.nonce === stop.nonce && f.state === 'uncertain', 'uncertain', 0, 10_000);
+    const again = make();
+    await again.connect();
+    const from = b.frames.length;
+    b.send({ t: 'rpc', rpc: stop });
+    expect((await final(stop, from)).outcome).toEqual({ state: 'done', result: { taskId: 'bsleep001' } });
+    expect(again.rpcs).toMatchObject([{ nonce: stop.nonce, executed: false }]);
+    // The machine that came back replays its session with the stop's rows still in it: the job stays stopped, once.
+    await again.play({ speed: 0 });
+    expect(jobsOf(again).find((j) => j.taskId === 'bsleep001')?.status).toBe('stopped');
+    expect(again.sessions.get(JOBS)!.rows.get('main')!.filter((r) => JSON.stringify(r).includes(stopNote('bsleep001')))).toHaveLength(1);
+    b.close();
+    await again.close();
+  });
+
+  it('is unsupported without the bridge and refused on a read-only machine, the job left running', async () => {
+    for (const [options, code] of [[{ bridge: false }, 'unsupported'], [{ readOnly: true }, 'read-only']] as const) {
+      const { fm, b, call, final } = await setUp({ recordings: [jobs], ...options });
+      const stop = await call('stop', { session: JOBS, taskId: 'bsleep001' });
+      expect((await final(stop)).outcome, code).toMatchObject({ state: 'failed', error: { code } });
+      expect(jobsOf(fm).find((j) => j.taskId === 'bsleep001')?.status).toBe('running');
+      b.close();
+      await fm.close();
+    }
+  });
+
+  it("fails with the engine's message when TaskStop errs, the job keeping its status", async () => {
+    const engine = 'Task bsleep001 could not be stopped: the process ignored the signal';
+    const { fm, b, call, final } = await setUp({ recordings: [jobs], script: { stop: () => ({ state: 'failed', error: { code: 'failed', message: engine } }) } });
+    const stop = await call('stop', { session: JOBS, taskId: 'bsleep001' });
+    expect((await final(stop)).outcome).toEqual({ state: 'failed', error: { code: 'failed', message: engine } });
+    expect(jobsOf(fm).find((j) => j.taskId === 'bsleep001')?.status).toBe('running');
+    b.close();
+    await fm.close();
   });
 });

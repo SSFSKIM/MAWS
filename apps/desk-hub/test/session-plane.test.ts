@@ -120,6 +120,26 @@ describe('RPCs', () => {
     await m.close();
   });
 
+  it('take stop (DC10) as any session RPC: forwarded as sealed, its result and its refusal relayed as the machine sent them', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const call = await rpc(project, m.name, 'stop', { session: SESSION, taskId: 'bserve4q9' });
+    b.send({ t: 'rpc', rpc: call });
+    expect(((await m.next((f) => f.t === 'rpc', 'the stop')) as Extract<DownFrame, { t: 'rpc' }>).rpc).toEqual(call);
+    await m.postOk([{ t: 'rpc-result', project, nonce: call.nonce, outcome: { state: 'done', result: { taskId: 'bserve4q9' } } }]);
+    expect(await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce && f.state === 'done', 'done')).toMatchObject({ outcome: { state: 'done', result: { taskId: 'bserve4q9' } } });
+
+    const unknown = await rpc(project, m.name, 'stop', { session: SESSION, taskId: 'bgone0001' });
+    b.send({ t: 'rpc', rpc: unknown });
+    await m.next((f) => f.t === 'rpc' && f.rpc.nonce === unknown.nonce, 'the second stop');
+    const refusal = { state: 'failed', error: { code: 'unknown-task', message: 'bgone0001 is not a running job of the session' } } as const;
+    await m.postOk([{ t: 'rpc-result', project, nonce: unknown.nonce, outcome: refusal }]);
+    expect(await b.next((f) => f.t === 'rpc-state' && f.nonce === unknown.nonce && f.state === 'failed', 'unknown-task')).toMatchObject({ outcome: refusal });
+    b.close();
+    await m.close();
+  });
+
   it("carry a late decision's winner, by, and terminalOnly to the browser unchanged, live and from the record on a retry; a wrong type is refused", async () => {
     const project = newProject();
     const m = await machine(project);
