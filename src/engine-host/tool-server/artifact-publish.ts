@@ -5,7 +5,9 @@
 //      a session that has none (it never read it, or the host restarted, or its replica closed) reads first.
 //   2. A sent file nobody changed since that read applies over the live artifact, the others kept.
 //   3. A sent file someone else changed since the read refuses the whole publish naming it ("removed by restore" when a
-//      restore since the read took it away); `force` skips 2 and 3 for the files sent.
+//      restore since the read took it away); `force` skips 2 and 3 for the files sent. A merge the kind's loader would
+//      hold or that would lose content is refused even under force, its detail naming why (P3-F, L214; the parent's
+//      Decision Log 73), and the refusal says so rather than offering force.
 //
 // An `html` page is its one file (`index.html`, or the name it was created under), written as a new immutable version;
 // its answer carries E2's fields the transcript's artifact row is drawn from (`id`, `deliverableId`, the version's place
@@ -91,11 +93,16 @@ const staleBase = (liveRevision: number, sentence: string) => refuse(TOOL, { rea
 const NEVER_READ = 'read the artifact first: this session has not read it since MAWS started (or its read expired)';
 const notLastRead = (sent: number, read: number) => `baseRevision ${sent} is not the revision your last read returned (${read}); read the artifact again`;
 
-// Layer 3's refusal, with each file's reason.
-function conflict(conflicts: { path: string; detail?: string }[]): ToolRefusal {
+// Layer 3's refusal, with each file's reason. P3-F (L214): what a forced publish still conflicts on is a merge force does
+// not settle (held or lossy), so its copy does not offer force; unforced, the copy names that case beside force.
+function conflict(conflicts: { path: string; detail?: string }[], forced: boolean): ToolRefusal {
   const paths = conflicts.map((c) => c.path);
   const named = conflicts.map((c) => (c.detail ? `${c.path} (${c.detail})` : c.path)).join(', ');
-  return refuse(TOOL, { reason: 'conflict', paths, conflicts }, `changed by someone else since your read: ${named}; read the artifact again, apply your change to what you read and publish again (force: true overwrites them)`);
+  const again = 'read the artifact again, apply your change to what you read and publish again';
+  const sentence = forced
+    ? `even with force, merging with the changes since your read would leave content held or lost: ${named}; ${again}`
+    : `changed by someone else since your read: ${named}; ${again} (force: true overwrites their changes, but never a merge that would leave content held or lost)`;
+  return refuse(TOOL, { reason: 'conflict', paths, conflicts }, sentence);
 }
 
 async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
@@ -119,7 +126,7 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifac
         if (input.baseRevision !== base.revision) return refusedAfterCommit(store, staleBase(live.revision, notLastRead(input.baseRevision, base.revision)));
         const bytes = Buffer.from(text, 'utf8');
         const sha256 = createHash('sha256').update(bytes).digest('hex');
-        if (live.ref.sha256 !== base.sha256 && sha256 !== live.ref.sha256 && !input.force) return refusedAfterCommit(store, conflict([{ path: PAGE, detail: 'changed since your read' }]));
+        if (live.ref.sha256 !== base.sha256 && sha256 !== live.ref.sha256 && !input.force) return refusedAfterCommit(store, conflict([{ path: PAGE, detail: 'changed since your read' }], false));
         const answer = (revision: number): ArtifactPublishResult => ({
           status: 'published', artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision, changed: revision === live.revision ? [] : [PAGE], kept: [], removed: [],
         });
@@ -220,7 +227,7 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
         if (outcome.failure !== undefined) throw outcome.failure;
         if (outcome.conflicts) {
           const restored = (path: string) => restoredSince && path in baseFiles && !pathsOf(store, artifact.kind, store.service.live(target)).includes(path); // P3-C: paths
-          throw conflict(outcome.conflicts.map((c) => (restored(c.path) ? { path: c.path, detail: 'removed by restore' } : c)));
+          throw conflict(outcome.conflicts.map((c) => (restored(c.path) ? { path: c.path, detail: 'removed by restore' } : c)), input.force ?? false);
         }
         return outcome.result!;
       },

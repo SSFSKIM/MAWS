@@ -11,7 +11,7 @@ import { readFiles } from '@artifacts/files';
 import type { KindAdapter } from '@artifacts/host';
 import { createPresentationAdapter } from '@artifacts/slides/adapter';
 import { DECK_PATH } from '@artifacts/slides/deck';
-import { setStyle } from '@artifacts/slides/model';
+import { setNotes, setStyle } from '@artifacts/slides/model';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { ToolUseId } from '@shared/graph/ids';
 import { ArtifactCreateResultSchema, ArtifactPublishResultSchema, ArtifactReadResultSchema, artifactRefusalOf, type ArtifactPublishResult } from '@shared/maws/tools';
@@ -147,6 +147,24 @@ describe('a deck through A’s tool server (M3)', () => {
     expect(answer).toMatchObject({ status: 'published', changed: [S1], kept: [DECK_PATH, S2], removed: [] });
     expect(liveFiles(id)[S1]).toContain('font-size:72px');
     expect(liveFiles(id)[S1]).toContain('color:#333333');
+  });
+
+  // P3-F (L214; the parent's Decision Log 73): a merge the loader would hold or that would lose content is refused even
+  // under force (A2), so A's refusal copy does not offer force for it
+  it('refuses a merge the loader would hold even under force, the copy saying force does not overwrite it', async () => {
+    const notes = 'x'.repeat(3_998);
+    const created = await create({ kind: 'presentation', title: 'Q3 review', files: { ...DECK, [S1]: slide('s1', `<h2 id="title" style="font-size:64px">Plan</h2>\n<aside>${notes}</aside>`) } });
+    const { files, revision } = await read(created.artifactId);
+    await w.service.writeAs(created.artifactId, HUMAN, (doc) => setNotes(doc, 's1', `ab${notes}`)); // the owner: 4,000
+    const sent = { [S1]: files![S1]!.replace(notes, `${notes}cd`) }; // the agent: 4,000; merged, 4,002
+    const forced = await publish({ artifact: created.artifactId, baseRevision: revision, files: sent, force: true });
+    expect(artifactRefusalOf(textOf(forced))).toMatchObject({ reason: 'conflict', paths: [S1] });
+    expect(textOf(forced)).toMatch(/even with force, merging with the changes since your read would leave content held or lost: project\/slides\/s1\.html \(slide: merged with the changes since your read, it would not load/);
+    expect(textOf(forced)).not.toContain('force: true overwrites');
+    const plain = await publish({ artifact: created.artifactId, baseRevision: revision, files: sent });
+    expect(textOf(plain)).toContain('(force: true overwrites their changes, but never a merge that would leave content held or lost)');
+    expect(liveFiles(created.artifactId)[S1]).toContain(`ab${notes}`);
+    expect(liveFiles(created.artifactId)[S1]).not.toContain(`${notes}cd`);
   });
 
   it('lands a multi-file publish whole at one revision, the created slide named as added', async () => {
