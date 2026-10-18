@@ -232,15 +232,15 @@ describe('the document editor in L’s registry', () => {
   it('draws a shown version in the system it pinned, with the version’s overrides', () => {
     const scopes: Array<Omit<DesignSystemScopeProps, 'children'>> = [];
     const Scope = ({ children, ...props }: DesignSystemScopeProps) => (scopes.push(props), <div data-testid="system-scope">{children}</div>);
-    const value = { system: { Scope, systemFor: () => ({ id: 'ds-1' }) }, governing: { id: 'ds-1' }, overrides: { '--ds-color-accent': '#111111' } };
+    const value = { system: { Scope, systemFor: () => ({ id: 'ds-1' }) }, governing: { id: 'ds-1' }, overrides: { '--ds-page-margin': '1in' } };
     const { rerender } = render(
       <PageSystemProvider value={value}>
-        <SystemPage pinned={{ system: { id: 'ds-1', versionSeq: 4 }, overrides: { '--ds-color-accent': '#222222' } }}>
+        <SystemPage pinned={{ system: { id: 'ds-1', versionSeq: 4 }, overrides: { '--ds-page-margin': '0.75in' } }}>
           <p>page</p>
         </SystemPage>
       </PageSystemProvider>,
     );
-    expect(scopes.at(-1)).toMatchObject({ system: { id: 'ds-1', versionSeq: 4 }, medium: 'document', overrides: { '--ds-color-accent': '#222222' } });
+    expect(scopes.at(-1)).toMatchObject({ system: { id: 'ds-1', versionSeq: 4 }, medium: 'document', overrides: { '--ds-page-margin': '0.75in' } });
     rerender(
       <PageSystemProvider value={value}>
         <SystemPage>
@@ -248,7 +248,7 @@ describe('the document editor in L’s registry', () => {
         </SystemPage>
       </PageSystemProvider>,
     );
-    expect(scopes.at(-1)).toMatchObject({ system: { id: 'ds-1' }, overrides: { '--ds-color-accent': '#111111' } });
+    expect(scopes.at(-1)).toMatchObject({ system: { id: 'ds-1' }, overrides: { '--ds-page-margin': '1in' } });
     expect(scopes.at(-1)!.system).not.toHaveProperty('versionSeq');
   });
 });
