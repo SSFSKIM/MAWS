@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M3 fix waves: seven of twenty areas routed, fix waves running or queued; source not frozen",
+  "phase": "M3 fix waves: fifteen of twenty areas routed; waves running or queued; source not frozen",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -1319,13 +1319,53 @@
   },
   "scaleReviewFixes": {
     "record": "scale-review/report.txt",
-    "routedAreas": 7,
-    "remainingAreas": 13,
+    "routedAreas": 15,
+    "remainingAreas": 5,
     "findings": 46,
     "trackerRows": [
       "S-SHOWPANE-RECAPTURE",
-      "S-DOC-CARRY-LABELS"
+      "S-DOC-CARRY-LABELS",
+      "S-PPTX-SKEW",
+      "S-DESIGN-NOTES-STOPS",
+      "S-DESIGN-FRAME-SLICES",
+      "S-STORE-SUGGESTION-ATTRS"
     ],
-    "compositionFix": "91d4874fa2f799261fffe8208c8fc3b3d88f773d"
-  }
+    "compositionFix": "91d4874fa2f799261fffe8208c8fc3b3d88f773d",
+    "compositionFollowUp": [
+      "068f25725",
+      "bc837f236"
+    ],
+    "connectorsCommits": {
+      "host": [
+        "90d43609e",
+        "cc8270eaa",
+        "2bed35b08",
+        "2d08cc287"
+      ],
+      "main": [
+        "e366f527e",
+        "eb97b441b",
+        "4be8d3b9b",
+        "681c37f18",
+        "bb3aea301",
+        "1bbed2d6f",
+        "525f9b0c9",
+        "6660f4515",
+        "fc95f2e8f"
+      ],
+      "siblings": {
+        "F5": "93258657f (a take unanswered after a false cancel keeps the operation)",
+        "F3": "4393f3bb1 (form-encoded Basic on the SDK exchange and refresh via addClientAuthentication)"
+      },
+      "note": "siblings complete routed classes F5 and F3 in claimed files; architect confirmed they stay in, recorded under those findings"
+    },
+    "dashboardModelCommits": [
+      "2d6357818",
+      "f2380b48e",
+      "42f327f55",
+      "62d9feabb",
+      "2f0e99a4c"
+    ]
+  },
+  "finalGatePreparation": "final-gate-preparation.json"
 }

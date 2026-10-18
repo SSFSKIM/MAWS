@@ -1,13 +1,22 @@
 P3-F M3 scale review: routing and accounting. In progress; regenerated at the freeze as the final record.
 Reviewed source: 070e23f49875006484683d280cb61b52aa17f2dc (twenty pairs, pairs.json). Fixes land on the branch after it; each fix wave gets one review of its own range.
-Updated: 2026-10-18T22:35:01Z
+Updated: 2026-10-18T23:08:13Z
 
-composition | wf_5bc93935-4a1 max | incorrect | 1 P2 | 1 FIX + 1 P4 tracker row (S-SHOWPANE-RECAPTURE) | controller-directed fix 91d4874fa (fixture bytes restored, truthful replay assertions, no derived fixture) | medium review: first dispatch died at its first request on the sol quota with no verdict; re-dispatch on opus pending | open
-connectors-main | wf_57d353ce-f1b max | incorrect | 1 P1, 8 P2 | 9 FIX, order 1, 5, 6, 2, 4, 7, 8, 9, 3 | F-connectors main worker (opus), claims under src/main/connectors approved | combined connectors high review (fable) pending | in progress
-connectors-host | wf_d361571f-bcd max | incorrect | 4 P2 | 4 FIX | F-connectors host worker (opus), claims approved (direct-client, calls, direct-stdio, direct-test-fakes, ConnectorsSheet) | combined connectors high review (fable) pending | in progress
-artifact-protocol | wf_4751f50b-b80 max | incorrect | 1 P1, 7 P2 | 8 FIX, order 1, 4, 6, 8, 2, 3, 7, 5 | F-artifact-protocol worker (opus) | high review (fable) pending | in progress
-dashboard-model | wf_8808ae43-24e max | incorrect | 5 P2 | 5 FIX | F-dashboard-model worker (opus) | high review (fable) pending | in progress
-design-systems | wf_23344226-0de max | incorrect | 2 P2, 4 P3 | 6 FIX (item 6 has a stated fallback: header correction plus tracker row) | queued for a worker slot | high review (fable) | queued
-document-model | wf_ace26740-012 max | incorrect | 1 P1, 5 P2, 7 P3 | 12 FIX, 1 P4 tracker row (S-DOC-CARRY-LABELS), 1 dismissal (item 9's no-id case: format.md binds identity to a copied ^id) | queued as two workers (move-carry; edit-plan) | high review (fable) | queued
+area | panel run | findings | routing | wave and commits | review | status
+composition | wf_5bc93935-4a1 max | 1 P2 | 1 FIX + P4 row S-SHOWPANE-RECAPTURE | controller-directed fix 91d4874fa; follow-up worker (opus) 068f25725, bc837f236 | medium: sol dispatch died (quota); opus re-review incorrect (3 consumers) -> follow-up; bounded recheck pending | follow-up committed; recheck pending
+connectors-main | wf_57d353ce-f1b max | 1 P1, 8 P2 | 9 FIX (order 1,5,6,2,4,7,8,9,3) | worker (opus): e366f527e, eb97b441b, 4be8d3b9b, 681c37f18, bb3aea301, 1bbed2d6f, 525f9b0c9, 6660f4515, fc95f2e8f; siblings under F5 93258657f and F3 4393f3bb1 (architect-confirmed) | combined connectors high review (fable) running | committed; review running
+connectors-host | wf_d361571f-bcd max | 4 P2 | 4 FIX | worker (opus): 90d43609e, cc8270eaa, 2bed35b08, 2d08cc287 | combined connectors high review (fable) running | committed; review running
+artifact-protocol | wf_4751f50b-b80 max | 1 P1, 7 P2 | 8 FIX (order 1,4,6,8,2,3,7,5) | worker (opus) in progress | high (fable) after the wave | in progress
+dashboard-model | wf_8808ae43-24e max | 5 P2 | 5 FIX | worker (opus): 2d6357818, f2380b48e, 42f327f55, 62d9feabb, 2f0e99a4c | one medium review (opus) over both dashboard waves (architect) | committed; review after dashboard-live-ui
+design-systems | wf_23344226-0de max | 2 P2, 4 P3 | 6 FIX | worker (opus) in progress | high (fable) | in progress
+document-model | wf_ace26740-012 max | 1 P1, 5 P2, 7 P3 | 12 FIX, P4 row S-DOC-CARRY-LABELS, 1 dismissal (item 9 no-id case, format.md) | two workers (move-carry; edit-plan) queued | high (fable) | queued
+exports-capture | wf_306f7df2-89c max | 2 P2, 6 P3 | 7 FIX, P4 row S-PPTX-SKEW | queued | medium (opus) | queued
+design-workbench | wf_2422589f-c95 max | 2 P2, 4 P3 | 6 FIX | queued | medium (opus) | queued
+history-anchors | wf_94146ab3-668 max | 5 P3 | 4 FIX, P4 row S-DESIGN-NOTES-STOPS | queued | medium (opus) | queued
+library | wf_18bd3cf9-250 max | 2 P2, 3 P3 | 5 FIX | queued | high (fable) | queued
+library-viewers-cutover | wf_96c93315-8d5 max | 1 P2, 3 P3 | 4 FIX | queued | medium (opus) | queued
+dashboard-live-ui | wf_b9baa603-273 xhigh | 5 P3 | 5 FIX + format.md pie-measure line | dashboard-model worker continuing (opus) | one medium review (opus) over both dashboard waves | in progress
+design-proof | wf_2e164f70-43f xhigh | 1 P2, 1 P3 | 2 FIX (test-only unless the restyle step goes red on the deck), P4 row S-DESIGN-FRAME-SLICES | queued | medium (opus) | queued
+store-versions | wf_95f0e036-74a max | 5 P3 | 4 FIX, P4 row S-STORE-SUGGESTION-ATTRS | queued after artifact-protocol (both claim src/engine-host/documents/store.ts) | high (fable) | queued
 
-Routed so far: 7 of 20 areas, 46 confirmed findings; 45 FIX items, 2 tracker rows, 1 dismissal (document-model item 9 is split between a fix and a dismissal). Remaining 13 areas: panels at the architect.
+Routed: 15 of 20 areas. Panels pending at the architect: slide-model, document-editor, editor-proof, shell, slide-editor.
