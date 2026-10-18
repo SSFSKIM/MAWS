@@ -32,7 +32,7 @@ import { sidebarOf } from './support/sidebar';
 const SEND_FILE = `${PASS3}/p1-maws-send-file.jsonl`;
 const ASK_BLOCKING = `${PASS3}/p1-maws-ask-blocking.jsonl`;
 const ASK_ASYNC = `${PASS3}/p1-maws-ask-async.jsonl`;
-const SHOW_PANE = `${PASS3}/p1-maws-show-pane.jsonl`;
+const SHOW_PANE = 'e2e/fixtures/derived/p1-maws-show-pane-artifact.jsonl'; // derived, not recorded: pass3/p1-maws-show-pane with its retired `deliverable` pane renamed `artifact`, the pane the host serves now
 const ROUNDTRIP = `${PASS3}/p1-sdk-mcp-roundtrip.jsonl`;
 
 const SHOTS = process.env.MAWS_E1_SHOTS === '1' ? join(REPO_ROOT, 'docs/doperpowers/evidence/p1-e1') : null;
@@ -517,7 +517,7 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
     await allowNext(s, id); // terminal (seq 68)
     const terminalTab = s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Terminal/ });
     await expect(terminalTab).toHaveAttribute('aria-selected', 'true');
-    await allowNext(s, id); // artifact (seq 85; E2's deliverable, the recording renamed by P3-L M6b)
+    await allowNext(s, id); // artifact (seq 85; the recording's deliverable, renamed in the derived fixture)
     await allowNext(s, id); // nope (seq 100)
     await idle(s, id);
 
@@ -538,7 +538,7 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
     // the cells: what opened, and why nothing did twice
     await unfoldWork(s.pane);
     await expect(s.pane.getByText('Opened Terminal')).toBeVisible();
-    // the cell reads the engine's tool_result, which the replay plays as recorded (E1's build answered "not available")
+    // the cell reads the engine's tool_result, which the replay plays as the fixture has it (E1's build answered "not available")
     await expect(s.pane.getByText('Could not open pane: the artifact pane is not available in this build of MAWS')).toBeVisible();
     await expect(s.pane.getByText(/Could not open pane: unknown pane "nope"/)).toBeVisible();
     await shoot(s, 'pane');
