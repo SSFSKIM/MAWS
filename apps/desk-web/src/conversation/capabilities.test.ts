@@ -55,7 +55,7 @@ describe('capabilities', () => {
   it('a machine offline: send goes to the log, everything else fails at once', () => {
     const c = at({ machineOnline: false });
     expect(c.send).toEqual({ can: true, reason: null, note: 'kept in the log; delivered when mini reconnects' });
-    for (const verb of ['steer', 'interrupt', 'model', 'compact', 'retire', 'resume'] as const) expect(c[verb], verb).toEqual({ can: false, reason: 'mini is offline' });
+    for (const verb of ['steer', 'interrupt', 'model', 'compact', 'retire', 'resume', 'stop'] as const) expect(c[verb], verb).toEqual({ can: false, reason: 'mini is offline' });
     expect(c.answer).toEqual({ can: false, reason: 'mini is offline: shown, not answerable' });
   });
 
@@ -63,7 +63,7 @@ describe('capabilities', () => {
     const readOnly = 'mini is read-only: it runs nothing sent from outside it';
     for (const c of [at({ machineReadOnly: true }), at({ machineReadOnly: true, group: 'ended', seat: 'maws-45', presence: { record: null, bridge: false } })]) {
       expect(c.send).toEqual({ can: true, reason: null, note: 'recorded, not delivered: mini is read-only' });
-      for (const verb of ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume'] as const) expect(c[verb], verb).toEqual({ can: false, reason: readOnly });
+      for (const verb of ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop'] as const) expect(c[verb], verb).toEqual({ can: false, reason: readOnly });
     }
     // Offline says more than read-only: nothing reaches the machine at all.
     expect(at({ machineReadOnly: true, machineOnline: false }).steer).toEqual({ can: false, reason: 'mini is offline' });
@@ -96,6 +96,16 @@ describe('capabilities', () => {
     expect(live.send).toEqual({ can: true, reason: null, note: 'recorded, not delivered: it is retired' });
   });
 
+  it("stops a job (§5's Stop row, DC10) through the bridge alone, at work or at rest; never without it, nor on a session that is not running", () => {
+    expect(at({}).stop).toEqual({ can: true, reason: null });
+    expect(at({ group: 'idle', presence: { record: { status: 'idle' }, bridge: true } }).stop).toEqual({ can: true, reason: null });
+    const noBridge = { can: false, reason: 'maws-45 runs without the bridge: stop its jobs in its terminal' };
+    expect(at({ seat: 'maws-45', presence: { record: { status: 'busy' }, bridge: false } }).stop).toEqual(noBridge);
+    expect(at({ presence: { record: { status: 'busy' }, bridge: false } }).stop).toEqual(noBridge);
+    expect(at({ group: 'ended', presence: { record: null, bridge: false } }).stop).toEqual({ can: false, reason: 'maws-45 is not running' });
+    expect(at({ presence: null }).stop).toEqual({ can: false, reason: "waiting for maws-45's presence" });
+  });
+
   it('presence not known yet: the log plane only', () => {
     const c = at({ presence: null });
     expect(c.send.can).toBe(true);
@@ -107,7 +117,7 @@ describe('capabilities', () => {
 describe('while the project socket is not connected', () => {
   it('offers no RPC, whatever presence last said: the hub queues nothing for an absent party; a send waits for the reconnect', () => {
     const c = capabilities(base, false);
-    for (const verb of ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume'] as const) expect(c[verb], verb).toEqual({ can: false, reason: 'not connected to the hub' });
+    for (const verb of ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop'] as const) expect(c[verb], verb).toEqual({ can: false, reason: 'not connected to the hub' });
     expect(c.send).toEqual({ can: true, reason: null, note: 'sent once the desk reconnects' });
   });
 });

@@ -11,6 +11,7 @@
 //     the bridge's discontinuity does, refuse a subscribe before its snapshot, and race a snapshot with the replay.
 import { randomUUID } from 'node:crypto';
 import { base64urlDecode } from '../src/protocol/base64url';
+import { isTaskId } from '../src/protocol/browser';
 import { canonicalize } from '../src/protocol/canonical';
 import { deriveLogNonce, importOrgKey, inputSha256, seal, verify, verifyRpc, type OrgKey } from '../src/protocol/codes';
 import { decodeEnrollmentCode, type Redeemed } from '../src/protocol/identity';
@@ -70,7 +71,7 @@ export type FakeMachineOptions = {
   /**
    * Whether its sessions have the bridge (default true). Without it, as §5's table has it: presence says so, no chunk,
    * `block-row`, `step-end`, or `usage` is sent (rows only), a steer goes out as a seat's `reply` and names no row
-   * (`{row: null}`), and interrupt, decisions, answers, model, and compact fail `unsupported`.
+   * (`{row: null}`), and interrupt, decisions, answers, model, compact, and stop fail `unsupported`.
    */
   bridge?: boolean;
   /** Reconnects by itself, with backoff, whenever the stream ends (as the daemon does; a redeploy ends every stream).
@@ -89,7 +90,7 @@ export type FakeMachineOptions = {
 export type RpcRecord = { nonce: string; rpc: RpcName; outcome: RpcOutcome | null; executed: boolean };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume']);
+const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop']);
 const fail = (code: RpcError['code'], message: string, extra: Partial<RpcError> = {}): RpcOutcome => ({ state: 'failed', error: { code, message, ...extra } });
 const done = (result: object): RpcOutcome => ({ state: 'done', result }) as RpcOutcome;
 
@@ -655,6 +656,10 @@ export class FakeMachine {
       const misfit = held && decisionMisfit(rpc as Rpc<'decide' | 'answer'>, held.raised);
       if (misfit) return answer(misfit);
     }
+    // A stop names a job the session's own jobs index holds as running, or it is refused before the claim (DC10).
+    if (rpc.rpc === 'stop' && !this.sessions.get(rpc.args.session)!.runningJob(rpc.args.taskId)) {
+      return answer(fail('unknown-task', `${rpc.args.taskId} is not a running job of ${rpc.args.session}`));
+    }
     this.memory.ledger[rpc.nonce] = { rpc: rpc.rpc, session: session ?? null, claimed: Date.now(), outcome: null };
     this.remember();
     // Every effect is complete (and its trace kept) when this returns; only progress notices follow the result.
@@ -692,7 +697,7 @@ export class FakeMachine {
     const member = rpc.member;
     if (this.options.bridge === false) {
       if (rpc.rpc === 'steer') return this.traced(rpc, record, rpc.args.session, { row: null });
-      if (['interrupt', 'decide', 'answer', 'model', 'compact'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
+      if (['interrupt', 'decide', 'answer', 'model', 'compact', 'stop'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
     }
     switch (rpc.rpc) {
       case 'steer': {
@@ -776,6 +781,13 @@ export class FakeMachine {
         this.sendPresence(depth);
         await this.flush();
         return this.traced(rpc, record, depth.id, { session: depth.id });
+      }
+      case 'stop': {
+        // TaskStop through the bridge: its call and result land in the job's loop, and the job reads stopped from them.
+        const depth = this.sessions.get(rpc.args.session)!;
+        if (!depth.stopJob(rpc.args.taskId)) return fail('failed', `Task ${rpc.args.taskId} is not running`);
+        await this.flush();
+        return this.traced(rpc, record, depth.id, { taskId: rpc.args.taskId });
       }
     }
   }
@@ -915,6 +927,8 @@ function argumentProblem(rpc: Rpc): string | null {
     }
     case 'model':
       return needs(str('session') && optStr('model') && optStr('effort') && (a.model !== undefined || a.effort !== undefined), '{session, model?, effort?} with at least one');
+    case 'stop':
+      return needs(str('session') && isTaskId(a.taskId), '{session, taskId}, taskId as the engine spells it');
     case 'spawn':
       return needs(str('checkout') && str('brief') && ['worktree', 'model', 'effort', 'permission_mode'].every(optStr), '{checkout, brief, worktree?, model?, effort?, permission_mode?}');
     default:

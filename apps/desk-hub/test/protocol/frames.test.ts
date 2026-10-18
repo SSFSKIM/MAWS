@@ -67,6 +67,7 @@ export const results: { [N in keyof RpcResults]: RpcResults[N] } = {
   spawn: { session: 's', alias: 'maws-45' },
   retire: {},
   resume: { session: 's' },
+  stop: { taskId: 'b7k2m9q4x' },
 };
 
 export const outcomes: RpcOutcome<'interrupt' | 'steer'>[] = [
@@ -101,7 +102,7 @@ export const browserDown: ProjectDown[] = [
 describe("DX2's and DX3's frames", () => {
   it('are pinned by their types', () => {
     expect(up.length + down.length + browserUp.length + browserDown.length).toBe(29);
-    expect(Object.keys(results)).toHaveLength(9);
+    expect(Object.keys(results)).toHaveLength(10);
     expect(outcomes).toHaveLength(8);
   });
 });

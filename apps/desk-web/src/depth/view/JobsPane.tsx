@@ -5,29 +5,48 @@
 // variant (`jobs/output-requests.ts`), the tail as plain text only (a row's text is untrusted, and so is a file's). A
 // job's summary, which MAWS's row does not draw, stands under it.
 //
-// Stop is MAWS's row as it stands, drawn on every running job; the desk has no web Stop yet (no DX6 RPC; the owner's
-// first follow-up once DC8 and DC9 land), so it is drawn disabled with its reason on hover. MAWS's button takes no such
-// prop, and MAWS is not edited for it: the desk sets `disabled` and the title on the drawn button (React leaves an
-// attribute its own props never changed), and its handler does nothing besides.
+// Stop is MAWS's row as it stands, drawn on every running job (DC10): it sends DX6 `stop`, reads `stopping…` until the
+// session's own body says the job no longer runs, and a failure stands under the row while the job keeps its status
+// (`jobs/job-stops.ts`). Where §5's table says the session cannot stop a job — no bridge, its machine offline or
+// read-only, the session not running, the desk not connected — Stop is drawn disabled with the reason on hover. MAWS's
+// button takes no such prop, and MAWS is not edited for it: the desk sets `disabled` and the title on the drawn button
+// after each render, and its handler sends nothing besides.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { McpServer } from 'desk-hub/protocol';
+import { capabilities, type Capability } from '../../conversation/capabilities';
+import type { DeskSession } from '../../shell/sessions';
+import { useConnected, useDesk } from '../../views/conversation/desk-context';
+import { RpcStatus } from '../../views/conversation/RpcStatus';
 import { BACKGROUND_COPY } from '../../../../../src/renderer/src/tools/agents/copy';
 import { Group, type BackgroundSection } from '../../../../../src/renderer/src/tools/agents/background/Group';
 import { MonitorRow, ShellRow } from '../../../../../src/renderer/src/tools/agents/background/TaskRows';
 import type { TaskNode } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import { useTicker } from '../../../../../src/renderer/src/tools/agents/subagents/shared';
 import { jobLists } from '../jobs/job-nodes';
-import { JOBS_COPY, noFileNote, shortPath, STOP_UNAVAILABLE } from '../jobs/jobs-copy';
+import { jobStop, latestStops, type JobStop } from '../jobs/job-stops';
+import { JOBS_COPY, noFileNote, shortPath } from '../jobs/jobs-copy';
 import type { OutputView } from '../jobs/output-requests';
 import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
 
 type Section = 'shells' | 'monitors' | 'mcp';
-const noop = () => {};
 
-/** `ended`: the session's process is gone (its presence says no process), so no job of it will name a file now. */
-export function JobsPane({ controller, state, machine, ended }: { controller: DeskTranscript; state: DepthTranscriptState; machine: string; ended: boolean }) {
+export function JobsPane({ controller, state, session }: { controller: DeskTranscript; state: DepthTranscriptState; session: DeskSession }) {
+  const { machine } = session;
+  // The session's process is gone (its presence says no process), so no job of it will name a file now.
+  const ended = session.presence?.record === null;
   const outputs = useStore(controller.outputs.state, (s) => s.open);
+  const { connection, member } = useDesk();
+  const can = capabilities(session, useConnected()).stop;
+  const stops = latestStops(
+    useStore(connection.conversation.store, (s) => s.rpcs),
+    machine,
+    session.session,
+  );
+  const onStop = (taskId: string) => {
+    if (can.can) void connection.rpc(member, machine, 'stop', { session: session.session, taskId });
+  };
+  const stopOf = (node: TaskNode) => jobStop(stops.get(node.taskId), node.status === 'running');
   const [collapsed, setCollapsed] = useState<ReadonlySet<Section>>(new Set());
   const { jobs, mcp } = state;
   const now = useTicker(jobs?.some((job) => job.status === 'running') ?? false);
@@ -56,9 +75,10 @@ export function JobsPane({ controller, state, machine, ended }: { controller: De
           BACKGROUND_COPY.shellsRunning(running(lists.shells)),
           lists.shells.map((node) => {
             const view = outputs.get(node.taskId);
+            const stop = stopOf(node);
             return (
-              <JobRow key={node.taskId} open={view !== undefined}>
-                <ShellRow node={node} now={now} selected={false} stopError={null} onStop={noop} onOutput={() => (view ? controller.outputs.close(node.taskId) : controller.outputs.open(node.taskId))} />
+              <JobRow key={node.taskId} open={view !== undefined} can={can} stop={stop}>
+                <ShellRow node={{ ...node, stopping: stop.stopping }} now={now} selected={false} stopError={stop.error} onStop={onStop} onOutput={() => (view ? controller.outputs.close(node.taskId) : controller.outputs.open(node.taskId))} />
                 <JobSummary node={node} />
                 {view && <OutputPanel taskId={node.taskId} path={node.outputFile} view={view} machine={machine} final={ended || node.status !== 'running'} controller={controller} />}
               </JobRow>
@@ -69,13 +89,16 @@ export function JobsPane({ controller, state, machine, ended }: { controller: De
         group(
           'monitors',
           BACKGROUND_COPY.monitors(lists.monitors.length),
-          lists.monitors.map((node) => (
-            <JobRow key={node.taskId}>
-              <MonitorRow node={node} now={now} selected={false} stopError={null} onStop={noop} />
-              <JobSummary node={node} />
-              {node.outputFile === null && <p className="m-0 mx-3 px-2 pb-1 pl-[22px] text-ui-sm text-fg-muted">{JOBS_COPY.monitorNoFile}</p>}
-            </JobRow>
-          )),
+          lists.monitors.map((node) => {
+            const stop = stopOf(node);
+            return (
+              <JobRow key={node.taskId} can={can} stop={stop}>
+                <MonitorRow node={{ ...node, stopping: stop.stopping }} now={now} selected={false} stopError={stop.error} onStop={onStop} />
+                <JobSummary node={node} />
+                {node.outputFile === null && <p className="m-0 mx-3 px-2 pb-1 pl-[22px] text-ui-sm text-fg-muted">{JOBS_COPY.monitorNoFile}</p>}
+              </JobRow>
+            );
+          }),
         )}
       {mcp !== null && mcp.length > 0 && group('mcp', JOBS_COPY.mcp(mcp.length), <McpList servers={mcp} />)}
       {empty && <p className="m-0 flex flex-1 items-center justify-center p-4 text-ui text-fg-muted">{JOBS_COPY.none}</p>}
@@ -84,21 +107,32 @@ export function JobsPane({ controller, state, machine, ended }: { controller: De
 }
 
 /**
- * One job's row and what opens under it, with MAWS's Stop drawn disabled and saying why. An open output draws inside
- * the row's selected border (the owner's 4A), so the border is the row's wrapper's and MAWS's row gives up its margin.
+ * One job's row and what opens under it. MAWS's Stop is disabled while the job is stopping, and where the session
+ * cannot stop a job, saying why (§5); a stop whose fate is unknown draws the desk's RPC status under the row, with its
+ * Retry. An open output draws inside the row's selected border (the owner's 4A), so the border is the row's wrapper's
+ * and MAWS's row gives up its margin.
  */
-function JobRow({ open = false, children }: { open?: boolean; children: ReactNode }) {
+function JobRow({ open = false, can, stop, children }: { open?: boolean; can: Capability; stop: JobStop; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     for (const button of ref.current?.querySelectorAll('button') ?? []) {
-      if (button.textContent !== BACKGROUND_COPY.stop) continue;
-      button.disabled = true;
-      button.title = STOP_UNAVAILABLE;
+      if (button.textContent !== BACKGROUND_COPY.stop && button.textContent !== BACKGROUND_COPY.stopping) continue;
+      // Set every time: React writes `disabled` only when its own prop (`stopping`) changes, so a reason that went
+      // away would otherwise leave the button disabled.
+      button.disabled = stop.stopping || !can.can;
+      if (can.reason === null) {
+        button.removeAttribute('title');
+        button.removeAttribute('aria-description');
+      } else {
+        button.title = can.reason;
+        button.setAttribute('aria-description', can.reason);
+      }
     }
   });
   return (
-    <div ref={ref} data-job-row="" data-open={open} className={open ? 'mx-3 flex flex-col rounded-sm border border-accent [&>[data-task-id]]:mx-0' : undefined}>
+    <div ref={ref} data-job-row="" data-open={open} data-stop={stop.stopping ? 'stopping' : stop.error !== null ? 'failed' : undefined} className={open ? 'mx-3 flex flex-col rounded-sm border border-accent [&>[data-task-id]]:mx-0' : undefined}>
       {children}
+      {stop.status !== null && <RpcStatus nonce={stop.status} className="mx-3 block px-2 pb-1 pl-[22px]" />}
     </div>
   );
 }

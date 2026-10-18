@@ -288,6 +288,11 @@ export class HubDouble {
     return this.up.filter((u) => u.project === project && u.frame.t === 'rpc').map((u) => (u.frame as { rpc: Rpc }).rpc);
   }
 
+  /** The state the double recorded for an RPC, or null for one it failed at once (or never received). */
+  rpcState(project: string, nonce: string): RpcState | null {
+    return this.project(project).rpcs.get(nonce)?.state ?? null;
+  }
+
   /** The machine's result for an RPC, or `uncertain` (its lease lapsed first): recorded per nonce and sent on. */
   answerRpc(project: string, nonce: string, outcome: RpcOutcome | 'uncertain'): void {
     const record = this.project(project).rpcs.get(nonce);

@@ -1,8 +1,6 @@
-// The jobs view's words (DC9; the mockup's 4A and 4C): the tab's label, the MCP list's, Stop's reason, and what a
-// shell's Output says for each of DX4's `output` answers.
+// The jobs view's words (DC9; the mockup's 4A and 4C): the tab's label, the MCP list's, and what a shell's Output says
+// for each of DX4's `output` answers. Stop's words are MAWS's row's and §5's reasons (`conversation/capabilities.ts`).
 import type { Job } from 'desk-hub/protocol';
-
-export const STOP_UNAVAILABLE = "Stopping a job from the web is not available yet: stop it from the session's terminal";
 
 /** A byte count as a reader takes it in: bytes, then KB and MB to one decimal. */
 export function formatBytes(bytes: number): string {

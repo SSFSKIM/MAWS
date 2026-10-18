@@ -18,10 +18,11 @@
 //   comes first; and `output` is answered from the recording's `tasks/`;
 // - a subscription outlives the replayed session: it stays open, idle, answering `rows` and `output` (DX4, "History and
 //   ended sessions").
+import { randomUUID } from 'node:crypto';
 import { join, posix } from 'node:path';
 import { isOutputTail, isTaskId } from '../src/protocol/browser';
 import type { JsonObject } from '../src/protocol/json';
-import type { SessionBodies, SessionMessage, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
+import type { Job, SessionBodies, SessionMessage, Streaming, StreamingBlock, SubagentMeta, SubscriptionKind, Usage } from '../src/protocol/session';
 import { derive, fileFacts, LoopIndex, loopJobs, type Body, type BridgeAgent, type Derivation } from './jobs';
 import { answerOutput, type Locate } from './output';
 import type { Recording, Row, Step } from './recording';
@@ -486,6 +487,50 @@ export class SessionDepth {
       return root === undefined ? null : join(dir, path.slice(root.length));
     };
     return { roots: [dir], locate };
+  }
+
+  /** The job `taskId` names and the loop whose rows started it, while the session's jobs index holds it as running. */
+  runningJob(taskId: string): { loop: string; job: Job } | null {
+    for (const [loop, { index }] of this.indexes) {
+      const job = loopJobs(index, this.record !== null).jobs.find((j) => j.taskId === taskId);
+      if (job) return job.status === 'running' ? { loop, job } : null;
+    }
+    return null;
+  }
+
+  /**
+   * What the bridge's `stop` (DC10) leaves in the session: `TaskStop` on the job's own loop, its call and its result
+   * written as the engine writes a model's (`toolUseResult.message` and the task's facts), so the job reads `stopped`
+   * from the rows as any `TaskStop` does. False, and nothing written, when the job is not running.
+   */
+  stopJob(taskId: string): boolean {
+    const held = this.runningJob(taskId);
+    if (!held) return false;
+    const { loop, job } = held;
+    const agentId = loop === 'main' ? null : loop;
+    const last = this.rows.get(loop)?.at(-1);
+    const envelope = { sessionId: this.id, isSidechain: agentId !== null, ...(agentId !== null && { agentId }), timestamp: new Date().toISOString() };
+    const call = randomUUID();
+    const toolUseId = `toolu_stop_${call.slice(0, 8)}`;
+    const message = `Successfully stopped task: ${taskId} (${job.command ?? job.description})`;
+    const result = { message, task_id: taskId, task_type: job.kind === 'shell' ? 'local_bash' : 'monitor', ...(job.command !== undefined && { command: job.command }) };
+    this.appendRow(agentId, {
+      ...envelope,
+      type: 'assistant',
+      uuid: call,
+      parentUuid: last?.uuid ?? null,
+      message: { id: `msg_stop_${call.slice(0, 8)}`, type: 'message', role: 'assistant', content: [{ type: 'tool_use', id: toolUseId, name: 'TaskStop', input: { task_id: taskId } }], stop_reason: 'tool_use', usage: { input_tokens: 0, output_tokens: 0 } },
+    });
+    this.appendRow(agentId, {
+      ...envelope,
+      type: 'user',
+      uuid: randomUUID(),
+      parentUuid: call,
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: JSON.stringify(result) }] },
+      toolUseResult: result,
+      sourceToolAssistantUUID: call,
+    });
+    return true;
   }
 
   /** The working tree's diff, on a main-scope subscription. */
