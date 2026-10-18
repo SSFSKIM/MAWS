@@ -192,6 +192,22 @@ describe('artifact_publish of a file kind (the generic file model)', () => {
     expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A', 'b.css': 'B' });
   });
 
+  // P3-F (artifact-protocol finding 3): a refused publish leaves nothing durable, the session's edited link included
+  it('a refused publish links nothing: no edited link for a session that never edited, and an existing one keeps its time', async () => {
+    const created = await design();
+    const edited = () => w.store.links(created.artifactId).filter((link) => link.appSessionId === SELF && link.role === 'edited');
+    await human(created.artifactId, (f) => f.setAttr('a.html', 'A by the user'));
+    expect(artifactRefusalOf(textOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { 'a.html': 'A2' } })))).toMatchObject({ reason: 'conflict' });
+    expect(artifactRefusalOf(textOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { '../escape.css': 'x' } })))).toMatchObject({ reason: 'invalid' });
+    expect(edited()).toEqual([]);
+    const published = jsonOf<{ revision: number }>(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { 'b.css': 'B2' } }));
+    expect(edited()).toHaveLength(1);
+    const at = edited()[0]!.lastAt;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(artifactRefusalOf(textOf(await publish({ artifact: created.artifactId, baseRevision: published.revision, files: { 'a.html': 'A3' } })))).toMatchObject({ reason: 'conflict' });
+    expect(edited()).toEqual([expect.objectContaining({ lastAt: at })]);
+  });
+
   it('after a publish the base is what the session knows: a file the user changed that it never read still conflicts', async () => {
     const created = await design();
     await human(created.artifactId, (f) => f.setAttr('b.css', 'B by the user'));

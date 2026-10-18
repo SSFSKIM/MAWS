@@ -144,17 +144,19 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifac
         const answer = (revision: number): ArtifactPublishResult => ({
           status: 'published', artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision, changed: revision === live.revision ? [] : [PAGE], kept: [], removed: [],
         });
-        const linked = store.link(artifact.id, ctx.appSessionId, 'edited');
-        linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
+        // the op and the session's `edited` link, recorded in the frame of what the publish writes (P3-F)
+        const settled = (result: ArtifactPublishResult) => {
+          op.record(result);
+          store.linkInWrite(artifact.id, ctx.appSessionId, 'edited');
+        };
         let result: ArtifactPublishResult;
         if (sha256 === live.ref.sha256) {
           result = answer(live.revision); // the page as it is: nothing to write but the op
-          await store.service.inBatch(() => op.record(result));
+          await store.service.inBatch(() => settled(result));
         } else {
-          const written = await store.writeContent(artifact.id, { bytes, name: live.ref.name }, actor, {}, (w) => op.record(answer(w.revision)));
+          const written = await store.writeContent(artifact.id, { bytes, name: live.ref.name }, actor, {}, (w) => settled(answer(w.revision)));
           result = answer(written.revision);
         }
-        await linked;
         deps.session.byteBases.set(artifact.id, { revision: result.revision, sha256 });
         return result;
       },
@@ -208,8 +210,6 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
         const assets = artifact.kind === 'presentation' || artifact.kind === 'design' ? new Set(store.listAssets(artifact.id).map((asset) => asset.ref)) : null; // P3-C: D6's warnings; P3-E: a design's by board path
         const pictureWarnings = artifact.kind === 'design' ? boardAssetWarnings : assetWarnings; // P3-E
         const restoredSince = store.listVersions(artifact.id).some((v) => v.kind === 'restore' && v.seq > base.revision);
-        const linked = store.link(artifact.id, ctx.appSessionId, 'edited');
-        linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
         const target = suggest ? store.service.suggestionDoc(artifact.id) : artifact.id;
         await store.service.writeAs(
           target,
@@ -240,10 +240,10 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
               const warnings = [...(outcome.result.warnings ?? []), ...(assets ? pictureWarnings(doc, assets, changedLive) : [])]; // P3-C; P3-E
               outcome.result = { ...outcome.result, revision, changed: changedLive, kept, removed, ...(warnings.length > 0 && { warnings }) };
               op.record(outcome.result);
+              store.linkInWrite(artifact.id, ctx.appSessionId, 'edited'); // P3-F: only with files taken, never on a refusal
             },
           },
         );
-        await linked;
         if (outcome.failure !== undefined) throw outcome.failure;
         if (outcome.conflicts) {
           const restored = (path: string) => restoredSince && path in baseFiles && !pathsOf(store, artifact.kind, store.service.live(target)).includes(path); // P3-C: paths

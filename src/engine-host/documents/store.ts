@@ -596,6 +596,14 @@ export class ArtifactStore {
     this.emit(artifactId, 'linked');
   }
 
+  // A session's link written in the frame of a write its caller holds open (a `writeAs`'s or a store write's `inFrame`),
+  // so it commits with that write or not at all (P3-F, artifact-protocol finding 3: a publish links `edited` only with
+  // what it wrote, never on a refusal), and announced after that commit as `link`'s is.
+  linkInWrite(artifactId: string, appSessionId: AppSessionId, role: ArtifactSessionLink['role']): void {
+    this.linkInFrame(artifactId, appSessionId, role, this.now());
+    this.emit(artifactId, 'linked');
+  }
+
   links(artifactId: string): ArtifactSessionLink[] {
     return this.storage.db.prepare('SELECT artifactId, appSessionId, role, lastAt FROM artifact_sessions WHERE artifactId = ? ORDER BY lastAt, appSessionId, role').all(artifactId) as unknown as ArtifactSessionLink[];
   }
