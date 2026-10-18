@@ -5747,6 +5747,70 @@ a hub that connects into machines (§2).
 
 ## Outcomes & Retrospective
 
-Pending — written when the unit closes. Closing is a RECOMPOSITION check:
-verify Parent-Level Acceptance as written — all children landed is not the
-same event — then retrospect.
+**Phase 1 closed on 2026-10-18 by recomposition.** The two-Mac walk checked Parent-Level Acceptance item by item on
+the owner's two Macs (`macbook`, `mini`) and iPhone, with the hub deployed for org `ssfskim`. The walk sheet is
+`docs/doperpowers/plans/2026-10-16-desk-recomposition-walk.md`. Parts A–H ran on 2026-10-17 between 05:57Z and
+07:27Z in the scratch project `desk-walk`. Part I was the owner's working day in MAWS, through 2026-10-18. The text
+evidence is under `docs/doperpowers/evidence/desk-walk/`: list captures, the hub's audit, per-writer counts, and the
+daemons' refusal lines.
+
+| item | verdict | evidence and notes |
+| --- | --- | --- |
+| 1 Projects | holds | Part A. Card counts matched `sminos list` on each machine (the `20261017T…` captures). Once, in A1, the card lagged about 10 s, and it did not recur. Local presence flips 0.3–0.5 s after a prompt (`sample-walk-a.txt`), so that lag lay between the uplink and the web. |
+| 2 Messages | holds | Part A, after the IPv6 fix below. |
+| 3 Questions | holds | Part B. Blocking and async questions on both machines were answered from the web: decided rows in `audit-after-B.txt`, by the owner's member, from `web`. |
+| 4 Permissions | holds | Part B: a web deny, a web allow, and a terminal deny that left the web (`audit-after-B.txt`). Deviation: B3's compound command (`mkdir && ls && rm -rf`) prompted as one. |
+| 5 Depth | holds | Part C1. |
+| 6 The three verbs | holds | Part C. The steer arrived mid-sleep and was acted on. Each of five interrupts stopped the sleep within 2 s. A send to an idle session started a turn. The finding that the model was never told of the interrupt is below. |
+| 7 Spawn, retire, resume | holds | Part D. A seat was spawned on `mini` and retired from the web. An ended terminal session showed "recorded, not delivered", and Resume brought it back in about 5 s under the same id (`D-chat-mini.txt`). |
+| 8 The machine decides | holds, by the method decided on 2026-10-16 | Part G. Live (G1, G3): a forged `human` event and a forged RPC from the browser console were refused `bad-code` by both daemons (`G-*-daemon.txt`), and the web drew the refusal banner and the audit's rejected rows (`audit-after-G.txt`). Read-only (G6) was also live (`G6-on.txt`, `G6-off.txt`). G2, G4 and G5 were shown by the suites: MAWS gate 39004066775 and doperpowers' `sminos-suites`. A stopped seat under read-only was not exercised; the owner waived it. |
+| 9 Offline | holds | Part E. With `mini`'s daemon booted out, the desk read one of two machines online and its session offline, and `mini` rejoined on bootstrap. |
+| 10 No loss across restarts | holds | Part F: a Worker redeploy, a daemon restart and a browser reload while both machines wrote a 480-event loop. Before (`F1-counts.txt`) and after convergence (`F4b-counts.txt`) every writer agreed: 8 writers, 1,051 events, nothing lost or duplicated. `F4-counts.txt` caught the import lag below before it converged. |
+| 11 The desk | holds | Part I. The owner worked about 18 hours across both Macs from the desk, in MAWS, a hub project since d7c926733. Verdict (owner, 2026-10-18): fine. The one thing that sent them to a terminal was **the working record**. |
+| 12 The phone | holds | Part H. A question pushed, the notification opened its card, and the answer "pear" continued the session and closed `mini`'s dialog. A permission pushed and was denied from the phone. |
+
+**Not verified.** The "Sign in again" round trip in the iPhone's installed app was never walked; the owner ended
+the walk first. This is the path MAWS #33 added for a lapsed Access session, and since #35 an application session
+lasts 30 days. Only the desktop browser's path has been seen working.
+
+**What the walk turned up.** Each finding below was fixed while the walk was still running.
+- **IPv6 blackhole (A2).** The MacBook's network has a global IPv6 route that is blackholed toward Cloudflare. The
+  uplink tried the AAAA addresses first, serially, and every POST timed out at 60 s. Fixed with Happy Eyeballs
+  (doperpowers #206, 7.162.2).
+- **Interrupt invisible to the model (C3).** A desk interrupt left the model no record, so it believed the killed
+  sleep was still running. #207 (7.162.3) added a record, and #225 (7.170.0) reshaped it into the engine's own
+  marker plus a note.
+- **Import lag (F).** Under load, the MacBook imported `mini`'s events up to about 5.7 minutes late, because the
+  uplink took one frame per tick. Fixed by drain-then-tick (#208, 7.162.4).
+
+Part I then turned into the working day it was meant to be, and the day produced children and fixes. Each one is in
+the Tracking Map and the Decision Log:
+- DC8 (machine history and jobs), DC9 (the session view) and DC10 (stopping a job from the web);
+- the bridge's rows: a delivery appended into a running turn (#233), and a peer's message arriving as a peer's
+  (#236);
+- the owner's message after an Esc (#238), and the live chain's off-chain marks (#239, MAWS #48);
+- the steer's own line (#240, MAWS #49);
+- the async answer drawn as the answer, and the phone's top bar (MAWS #49, #51);
+- Access lapse detection and a 30-day session (MAWS #33, #35).
+
+**Left for later.**
+- The next phase is **MAWS #52**, from the owner's verdict: the desk becomes web MAWS plus a Claude Code
+  remote-control client. It is ticketed for a discussion before any design.
+- Its likely prerequisites: MAWS #36 (sign-in and hosting), #37 (machine join tokens) and #38 (the org key's split).
+- Phase 1 residue: MAWS #43, #44 and #45, and doperpowers #94, #95 and #96.
+- The sminos org directory (doperpowers #93) is specced and being built.
+
+**Retrospective.**
+- **Real machines found what no suite did.** The suites run on loopback stand-ins and idle machines. Only the
+  owner's own hardware, under its real load, exposed a blackholed IPv6 path, an interrupt the model never heard
+  of, and an uplink that took one frame per tick. Each was found within an hour of the walk reaching it. The next
+  phase should keep a walk like this one, on the same machines.
+- **Inference was the fragile part.** At first the desk knew a steer only by exclusion, a rewound row by nothing,
+  and an interrupt by a row shape the engine's own readers did not share. Each of these became a positive mark the
+  machine writes: the steer's line, the off-chain marks, the engine's own marker. Where the desk reads a transcript,
+  the writer should mark what each row means.
+- **The standing deploy approval (2026-10-16) set the pace.** A finding went from diagnosis to a deployed fix in
+  the same sitting, while the owner kept working. The gates that bound it held: no migration, no Access change and
+  no secret without the owner.
+- **What the owner still lacks is reading, not control.** Every verb worked from the web. What sent the owner back
+  to a terminal was seeing what a session did between its messages, and that is where #52 begins.

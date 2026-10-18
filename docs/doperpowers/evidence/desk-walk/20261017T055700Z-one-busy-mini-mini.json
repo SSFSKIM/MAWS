@@ -1,0 +1,20 @@
+[
+  {
+    "project": "desk-walk",
+    "project_id": "d4abe9f5-d1d1-4785-86d6-a0422cc4aeb3",
+    "alias": "walk-b",
+    "session": "aa6459e7-e9d0-41b2-922c-a2b20459db34",
+    "short": "aa6459e7",
+    "name_source": "user",
+    "machine": "mini",
+    "local": true,
+    "state": "busy",
+    "state_age": null,
+    "charge": "walk-b",
+    "charge_source": "name",
+    "by": "",
+    "status": "",
+    "worktree": "",
+    "seat": null
+  }
+]

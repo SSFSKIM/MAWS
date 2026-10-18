@@ -1,0 +1,38 @@
+[
+  {
+    "project": "desk-walk",
+    "project_id": "d4abe9f5-d1d1-4785-86d6-a0422cc4aeb3",
+    "alias": "walk-b",
+    "session": "aa6459e7-e9d0-41b2-922c-a2b20459db34",
+    "short": "aa6459e7",
+    "name_source": "user",
+    "machine": "mini",
+    "local": false,
+    "state": "busy",
+    "state_age": 67.96384596824646,
+    "charge": "walk-b",
+    "charge_source": "name",
+    "by": "",
+    "status": "",
+    "worktree": "",
+    "seat": null
+  },
+  {
+    "project": "desk-walk",
+    "project_id": "d4abe9f5-d1d1-4785-86d6-a0422cc4aeb3",
+    "alias": "walk-a",
+    "session": "b24618ae-120e-48ea-9fc2-bc982495bc18",
+    "short": "b24618ae",
+    "name_source": "user",
+    "machine": "macbook",
+    "local": true,
+    "state": "idle",
+    "state_age": null,
+    "charge": "walk-a",
+    "charge_source": "name",
+    "by": "",
+    "status": "",
+    "worktree": "",
+    "seat": null
+  }
+]

@@ -1,0 +1,17 @@
+--- while read-only
+desk-walk
+  web-a07368   stopped            his  · now: brief is just 'his'; awaiting clarification  · by 1858fe3c549a424fe314c429383eb453
+  walk-g       idle
+  walk-c       idle @macbook 49m
+  web-7641de   retired            walk seat: answers pings  · now: standing by for pings  · by 1858fe3c549a424fe314c429383eb453
+chat desk-walk · last 4 of 969
+07:05:42 macbook/human:478 human → *  F macbook 478
+07:05:43 macbook/human:479 human → *  F macbook 479
+07:05:44 macbook/human:480 human → *  F macbook 480
+07:26:00 hub/1858fe3c549a424fe314c429383eb453:9 human → @walk-g  ping
+2026-10-17T06:27:07.828Z uplink: a POST was not delivered (The read operation timed out): reconnecting, to redo the handshake
+2026-10-17T07:01:31.961Z uplink: a POST was not delivered (the hub answered 409 {"error":"stale-generation","message":"the POST names no current stream of this machine; open the stream and use its generation"}): reconnecting, to redo the handshake
+--- policy off
+read-only: no
+ceiling: auto (from your settings' defaultMode)
+07:26:30
