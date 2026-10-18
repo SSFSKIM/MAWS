@@ -13,9 +13,9 @@
   "checkedAt": "all 10 close, 123 defer and 17 preclosed frozen rows matched the current tracker exactly once before the first edit",
   "deferFormat": "each defer row keeps its whole text; its closing cell gains 'Re-deferred 2026-10-18 (P3-F triage, triage.txt L<n>; parent Decision Log 106): <ruled reason> Owner: <ruled step made explicit>.' (the P2-F pattern)",
   "counts": {
-    "close:committed": 5,
+    "close:committed": 6,
     "close:held": 1,
-    "close:pending": 4,
+    "close:pending": 3,
     "defer:pending": 123,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
@@ -214,7 +214,7 @@
       "note": "Closed as obsolete under parent Decision Log 106 (1); the clause's act (remove the file) is deliberately not performed. The premise 'read only by B's tests' no longer holds: src/artifacts/dashboard/render/svg.ts imports HOUSE_TOKENS (used at :113) and src/artifacts/dashboard/export.ts:14 imports houseSystem from src/artifacts/document/export/design-system.ts in production, so removing it would break that fallback.",
       "triageReason": "Premise obsolete: production uses the fallback tokens; deleting them would break the landed fallback. Architect ratifies obsolete-row closure. Evidence: src/artifacts/dashboard/render/svg.ts:113; dashboard/export.ts.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "130f1f12b8be4e287623e4711680329c2e72a83b"
     },
     {
       "line": 189,
@@ -223,8 +223,8 @@
       "closeKind": "close",
       "note": "Clause met by d6b58a91a (on master): the history rail names days against HistoryApi.now; src/artifacts/document/editor/history/rail.dom.test.tsx:112-128 fixes now at local noon 2026-10-15 through setup's {now}, so 'Today, Yesterday' no longer reads the wall clock. (The triage cites rail.dom.test.ts; the file is .tsx.)",
       "triageReason": "Injected clock pins the date grouping. Evidence: d6b58a91a; document/editor/history/rail.dom.test.ts:112–128.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 206,
