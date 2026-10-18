@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
 import { formatChord } from '../src/shared/keymap/chord';
-import { traceForeground } from './support/foreground-trace';
+import { activateForScene, traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
@@ -587,7 +587,9 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
 
     // ⌘0 floats the Overview over the session, which stays mounted behind it; Esc closes it and gives focus back.
     const shown = main.getByRole('tabpanel');
-    // P3-F (tracker rows 200 and 264): a focus loss here reports the page's focus timeline and the window's state
+    // P3-F (tracker rows 200 and 264): a focus loss here reports the page's focus timeline and the window's state; in a
+    // foreground run the app takes the front once first and says whether it got it (no credit when it did not)
+    await activateForScene(app, 'overview-focus');
     const trace = await traceForeground(app, page);
     await trace.step('overview-focus', async () => {
       await menu(app, 'tab.overview');

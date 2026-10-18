@@ -214,6 +214,37 @@ export async function traceForeground(app: ElectronApplication, page: Page, opti
   };
 }
 
+// Under MAWS_E2E_FOREGROUND=1 only: activates this app and its first window once, right before a scene whose foreground
+// state is the question (another app can take the front during a job), as the launch does (`win.show()`), then taking
+// the front (`app.focus({ steal: true })`, `win.focus()`). It then reads the window's native focus once, after its own
+// `focus` event or one second, and records the answer as the test's `foreground` annotation: `obtained`, or `not
+// obtained` with the reading, which gives the scene no foreground credit. Nothing is retried and the scene runs as before
+// either way. Without the flag it does nothing.
+export async function activateForScene(app: ElectronApplication, scene: string): Promise<void> {
+  if (process.env.MAWS_E2E_FOREGROUND !== '1') return;
+  const native = await app
+    .evaluate(async ({ app: electron, BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
+      if (!win) return { window: false };
+      const focused = new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 1_000);
+        win.once('focus', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      win.show();
+      electron.focus({ steal: true });
+      win.focus();
+      if (!win.isFocused()) await focused;
+      return { window: true, focused: win.isFocused(), contentsFocused: win.webContents.isFocused(), visible: win.isVisible(), opacity: win.getOpacity() };
+    })
+    .catch((reason: unknown) => ({ window: false, error: String(reason) }));
+  const obtained = 'focused' in native && native.focused === true && native.contentsFocused === true;
+  console.log(`[trace ${scene}] activation ${JSON.stringify({ at: new Date().toISOString(), obtained, native })}`);
+  test.info().annotations.push({ type: 'foreground', description: obtained ? `${scene}: obtained` : `${scene}: not obtained (${JSON.stringify(native)}); no foreground credit` });
+}
+
 // One reading, taken at once with no sampling: the wall-clock time, each window's native focus and visibility, the
 // page's focus, visibility and focused element, and with a traced editor both selections and each comment's marked text
 // (drawn and held). A reading that cannot be taken says why rather than throwing.
