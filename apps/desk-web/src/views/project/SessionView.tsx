@@ -92,8 +92,8 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
     [owner, phone],
   );
 
-  // The rows held, as the subscription keeps them: read again whenever the held set changes (a row, a page, a reset),
-  // which its count and its oldest row say.
+  // The rows held, as the subscription keeps them: read again whenever the held set changes (a row, a page, a fresh
+  // snapshot merged in), which its count and its oldest row say.
   const held = owner.main.heldRows();
   const loaded = state.phase === 'live' || held.length > 0;
   const heldCount = held.length;

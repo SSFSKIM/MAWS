@@ -266,7 +266,7 @@ describe('the session plane', () => {
     const log: string[] = [];
     const listener: SubscriptionListener = {
       message: (m) => log.push(m.kind === 'snapshot' ? 'snapshot' : `${m.kind}:${m.n}`),
-      reset: () => log.push('reset'),
+      interrupted: () => log.push('interrupted'),
       end: (body) => log.push(`end:${body.reason}`),
     };
     return { log, listener };
@@ -371,7 +371,7 @@ describe('the session plane', () => {
     double.sendSession(PROJECT, diff(first, 3)); // a late message of the old sub is not delivered
     double.sendSession(PROJECT, snapshot(second));
     await until(() => log.length === 3);
-    expect(log).toEqual(['snapshot', 'reset', 'snapshot']);
+    expect(log).toEqual(['snapshot', 'interrupted', 'snapshot']);
   });
 
   it('subscribes again after the socket drops', async () => {
@@ -388,7 +388,7 @@ describe('the session plane', () => {
     const second = (double.up.filter((u) => u.frame.t === 'subscribe').at(-1)!.frame as { sub: string }).sub;
     double.sendSession(PROJECT, snapshot(second));
     await until(() => log.length === 3);
-    expect(log).toEqual(['snapshot', 'reset', 'snapshot']);
+    expect(log).toEqual(['snapshot', 'interrupted', 'snapshot']);
   });
 
   it('ends a subscription the hub ended, and closes one the consumer closed', async () => {
@@ -503,7 +503,7 @@ describe('the session plane', () => {
     const third = (double.up.filter((u) => u.frame.t === 'subscribe').at(-1)!.frame as { sub: string }).sub;
     double.sendSession(PROJECT, snapshot(third));
     await until(() => log.includes('snapshot'));
-    expect(log).toEqual(['reset', 'reset', 'snapshot']);
+    expect(log).toEqual(['interrupted', 'interrupted', 'snapshot']);
   });
 
   it('recovers from the hub ending a subscription for a discontinuity, under a fresh sub', async () => {
@@ -520,7 +520,7 @@ describe('the session plane', () => {
     expect(second).not.toBe(first);
     double.sendSession(PROJECT, snapshot(second));
     await until(() => log.length === 3);
-    expect(log).toEqual(['snapshot', 'reset', 'snapshot']);
+    expect(log).toEqual(['snapshot', 'interrupted', 'snapshot']);
   });
 });
 

@@ -33,21 +33,43 @@
 //
 // Jobs (DC9 M5). The same `subagents` body, from a producer of DC8 or later, carries the loop's background jobs and
 // MCP server names (absent from an older one: null here), and a job's output is asked for on the subscription and
-// answered as an `output` message (`jobs/output-requests.ts`, which also asks again what a reset or an end lost).
+// answered as an `output` message (`jobs/output-requests.ts`, which also asks again what an interruption or an end lost).
 //
 // An interrupted turn ends at the engine's marker row (`interrupt.ts`), in the mapping every rule above shares.
 //
 // Beside the transcript (M3). A main-thread subscription carries the session's context use and cost (DX4 `usage`, in the
 // snapshot and after each main turn) and answers `diff()` with the working tree's diff against its base branch: both
 // are kept in the state for the column's Info and Diff tabs. The diff is asked for only when the view says so (its tab
-// opening, the reader's refresh), never polled; a request lost to a reset or an end is asked again once the fresh
+// opening, the reader's refresh), never polled; a request lost to an interruption or an end is asked again once the fresh
 // snapshot is in.
 //
-// Disruptions (DX8). A `reset` (a gap, a dropped socket, a hub restart, the bridge's own discontinuity) drops what was
-// drawn: the layer is cleared, the source resets MAWS's store key, and its next snapshot waits for the fresh one the
-// client subscribes for. Any other `end` keeps what was drawn and says why; `resubscribe` takes a fresh snapshot,
-// which replaces the held rows, the older ones paging back in with their own marks; an older producer's, which marks
-// nothing, continues the held rows where it overlaps them.
+// Disruptions (DX8). An interruption (a gap, a dropped socket, a hub restart, the bridge's own discontinuity) keeps what
+// is drawn — the held rows and their marks, the tree, the jobs, the usage, the streaming layer's blocks — while the
+// client subscribes again: what the subscription delivered stays valid, and a machine's reconnect of a second must not
+// blank the reader's view and reload it (desk ticket #57). What needs the live subscription (an older page, the diff,
+// an output) waits for its fresh snapshot, as a request made while it is down does. An `end` keeps what was drawn too,
+// and says why; `resubscribe` takes a fresh snapshot. A fresh snapshot after either is merged into the held rows, not
+// swapped in: rows are keyed by uuid and a snapshot is a contiguous window of the newest rows, so where its oldest row
+// is held the result is the held rows before it, its own rows, then any held row newer than its newest (one the old
+// subscription delivered past the new snapshot's cut, which arrives again live and is one row by its uuid), and `more`
+// stays as held — the older pages the reader loaded stay drawn. A snapshot that marks (`offChain`) is merged only where
+// its marks agree with the held ones on every row both hold, both hold one of them on the chain (not a progress row,
+// which the machine never marks), and no row it brings that was not held was written under a row outside it: a branch
+// in the gap (a /rewind, a second append under a tool call) can leave held rows older than the snapshot off the chain
+// with nothing but their own page to say so, and the overlap disagreeing, holding no row on the chain to vouch for them,
+// or a row branching from outside the snapshot's window (from a held row, or from one older than every held row), is
+// how it shows; then, as when the snapshot overlaps nothing held, it replaces the held rows, the older ones paging back
+// in with their own marks. An older producer's, which marks nothing, is merged wherever it overlaps. Either way the
+// transcript is rebuilt under a new source, which MAWS's store installs staged, so the old rows stay drawn until the new
+// state is whole; a block the snapshot no longer streams (its row written, or its step ended, in the gap) stays drawn
+// until the rows the snapshot brought have landed, and one a `block-row` named before the disruption until its own row
+// has, wherever that row is sure to come, so no block leaves before its row is drawn. A request the snapshot holds less
+// of than was drawn (a producer that went back) is kept as drawn, and the live part after the snapshot's cut goes on
+// from there.
+//
+// Latency (desk ticket #57). The hops this transcript sees are timed for `latency/latency.ts`: a main thread's first rows
+// (subscribe, snapshot, drawn), each live row that draws and each of its own chunks from the machine's stamp until
+// drawn, the owner's own send until its row, each tool call's time (a raised request's anchor), and each resume's gap.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, TranscriptRecordSchema } from '@shared/wire/transcript';
@@ -62,7 +84,9 @@ import { noteModel } from '../../state/models';
 import { taskGraphOf, withEvents, withMetas, withStatuses } from '../agents/task-feed';
 import { OutputRequests } from '../jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
-import { deliveryAsDrawn, deliveryFrame } from '../../conversation/delivery-frame';
+import { deliveredLines, deliveryAsDrawn, deliveryFrame } from '../../conversation/delivery-frame';
+import { framePattern } from '../../conversation/tail';
+import { latency } from '../../latency/latency';
 import { withAppendedTurn } from './appended-turn';
 import { withAnswerLines } from './ask-answer';
 import { isMirrorLine, steerAsDrawn } from './bridge-rows';
@@ -77,9 +101,10 @@ export type DepthTranscriptState = {
   /** The source MAWS's view attaches under `key`; a new one when the transcript is rebuilt (older rows, a new subscription). */
   source: TranscriptSource;
   /**
-   * `loading` until the first snapshot is in; `reconnecting` after a reset until the fresh one is (a subscription the
-   * hub ended before its snapshot, `end {discontinuity}` at n 0, reaches here as a reset too); `ended` after any other
-   * `end`, with its reason.
+   * `loading` until the first snapshot is in; `reconnecting` while a fresh one is awaited after an interruption (a
+   * subscription the hub ended before its snapshot, `end {discontinuity}` at n 0, reaches here as one too) or, for a
+   * transcript served before, after `resubscribe`; `ended` after any other `end`, with its reason. What was drawn stays
+   * drawn through each of them.
    */
   phase: 'loading' | 'reconnecting' | 'live' | 'ended';
   ended: SessionBodies['end'] | null;
@@ -94,8 +119,9 @@ export type DepthTranscriptState = {
   jobs: Job[] | null;
   mcp: McpServer[] | null;
   /**
-   * The session's context use and cost (DX4 `usage`), a main-thread subscription's only: undefined until its snapshot
-   * (and after a reset, until the fresh one), null when the session has no bridge or none has come yet.
+   * The session's context use and cost (DX4 `usage`), a main-thread subscription's only: undefined until its first
+   * snapshot, kept through a disruption until a fresh one says again, null when the session has no bridge or none has
+   * come yet.
    */
   usage: Usage | null | undefined;
   /** The working tree's diff: null until asked for; `pending` while an answer is awaited, the last answer kept meanwhile. */
@@ -116,12 +142,22 @@ export type DeskTranscriptOptions = {
 const PAGE = 100;
 
 type Row = JsonObject & { uuid: string };
+/** The row types the machine marks on or off the session's chain; it never marks another (a progress row). */
+const CHAIN_TYPES: ReadonlySet<string> = new Set(['user', 'assistant', 'system', 'attachment']);
 const hasUuid = (row: JsonObject): row is Row => typeof row.uuid === 'string' && row.uuid !== '';
 /** The model a response row was answered by; the engine's own rows (`<synthetic>`) name none. */
 const modelOf = (row: JsonObject): string | null => {
   const model = row.type === 'assistant' ? (row.message as JsonObject | undefined)?.model : undefined;
   return typeof model === 'string' && model !== '' && model !== '<synthetic>' ? model : null;
 };
+
+/** Each tool call a response row makes, told to `latency.ts` with the row's time: the anchor of a request it raises. */
+function noteCalls(row: JsonObject): void {
+  if (row.type !== 'assistant') return;
+  const content = (row.message as JsonObject | undefined)?.content;
+  if (!Array.isArray(content)) return;
+  for (const block of content as JsonObject[]) if (block?.type === 'tool_use' && typeof block.id === 'string') latency.noteCall(block.id, row.timestamp);
+}
 
 /** The backfill's subagent lookup over DX4's `subagents` metas (each `subagents/*.meta.json` verbatim). */
 export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLookup {
@@ -225,23 +261,16 @@ class RowsSource implements TranscriptSource {
   }
 
   /**
-   * The transcript's one reset signal, whichever source registers on it: a rebuild publishes a new source that the
-   * view attaches later (in an effect), and a reset in between must reach the one still attached.
+   * A row after the snapshot, under the snapshot's context; before it, the snapshot will hold the row. Its hop from its
+   * engine timestamp until drawn (`latency.ts`) is timed once the store has applied its events: a row that draws nothing
+   * (a progress row, a row off the chain) or reaches no store yet gives no sample.
    */
-  onReset(listener: () => void): () => void {
-    return this.owner.onReset(listener);
-  }
-
-  /** A row after the snapshot, under the snapshot's context; before it, the snapshot will hold the row. */
   live(row: Row): void {
     if (this.ctx === null) return;
     const events = this.owner.mapRow(row, this.ctx);
-    if (events.length > 0) this.listener?.(events);
-  }
-
-  /** Its live rows wait for its next snapshot, which waits for the fresh one. */
-  reset(): void {
-    this.ctx = null;
+    if (events.length === 0 || this.listener === null) return;
+    this.listener(events);
+    latency.drawn('stream.row', Date.parse(String(row.timestamp)), true);
   }
 }
 
@@ -281,16 +310,21 @@ export class DeskTranscript {
       return found;
     },
   };
-  private readonly resets = new Set<() => void>();
   private readonly layer = new StreamingLayer();
-  private snapshotted: Deferred = deferred();
-  /** A snapshot has been served since the transcript opened or last reset: a later one rebuilds from what is held. */
-  private served = false;
+  private readonly snapshotted: Deferred = deferred();
+  /** A snapshot has been served since the transcript opened: the held rows are a transcript's, and a later one is merged into them. */
+  private held = false;
+  /** The subscription open now has served its snapshot: what it is asked (an older page, the diff, an output) is answered. */
+  private serving = false;
   private source: RowsSource;
   private offStore: (() => void) | null = null;
+  /** A main thread's first rows on their way (`latency.ts`): when it subscribed, and when the snapshot came in. */
+  private firstRows: { subscribed: number; snapshot: number | null } | null = null;
+  /** When the disruption the next snapshot resumes from began (`latency.ts`'s resume gap). */
+  private disruptedAt: number | null = null;
   /** The jobs view's open outputs, asked for on this subscription (a main-thread one's). */
   readonly outputs = new OutputRequests((taskId, tail) => {
-    if (!this.served || this.subscription === null) return false;
+    if (!this.serving || this.subscription === null) return false;
     this.subscription.output(taskId, tail);
     return true;
   });
@@ -323,7 +357,9 @@ export class DeskTranscript {
     if (this.subscription) return;
     this.offStore ??= this.store.subscribe(() => {
       if (this.settleLanded()) this.publish();
+      this.firstRowsDrawn();
     });
+    if (!this.held && this.target.agentId === null) this.firstRows = { subscribed: performance.now(), snapshot: null };
     this.subscribe();
   }
 
@@ -335,20 +371,22 @@ export class DeskTranscript {
     this.outputs.clear();
   }
 
-  /** After an `end` other than a reset: subscribe again; the fresh snapshot replaces what is drawn (an older producer's continues it). */
+  /** After an `end`: subscribe again; the fresh snapshot is merged into what is drawn, which stays drawn meanwhile. */
   resubscribe(): void {
     if (this.subscription || this.state.getState().phase !== 'ended') return;
-    this.state.setState({ phase: 'loading' });
+    this.state.setState({ phase: this.held ? 'reconnecting' : 'loading' });
     this.subscribe();
   }
 
   /**
-   * Asks for the page of rows before the oldest held one, when older rows exist and none is on its way.
+   * Asks for the page of rows before the oldest held one, when older rows exist and none is on its way. Not while the
+   * subscription is down or its fresh snapshot is not in: the hub drops `rows` on a subscription it has not served, and
+   * the pane asks again once the snapshot is in.
    */
   loadOlder(): void {
     const { more, loadingOlder } = this.state.getState();
     const oldest = this.rows[0];
-    if (!more || loadingOlder || !this.subscription || !oldest) return;
+    if (!more || loadingOlder || !this.serving || !this.subscription || !oldest) return;
     this.state.setState({ loadingOlder: true });
     this.subscription.rows(oldest.uuid, this.page);
   }
@@ -360,7 +398,7 @@ export class DeskTranscript {
   requestDiff(): void {
     if (this.target.agentId !== null) return;
     this.state.setState((s) => ({ diff: { pending: true, answer: s.diff?.answer ?? null } }));
-    if (this.served) this.subscription?.diff();
+    if (this.serving) this.subscription?.diff();
   }
 
   /** One agent's blocks still streaming on this subscription (the main one carries every agent's). */
@@ -382,11 +420,6 @@ export class DeskTranscript {
     return contextFor(this.target, this.lookup);
   }
 
-  onReset(listener: () => void): () => void {
-    this.resets.add(listener);
-    return () => this.resets.delete(listener);
-  }
-
   mapRow(row: Row, ctx: BackfillContext): SessionEvent[] {
     const events = this.drawnEventsOf(row, ctx);
     if (!events.some((event) => event.id === row.uuid)) this.silent.add(row.uuid);
@@ -402,9 +435,11 @@ export class DeskTranscript {
   private subscribe(): void {
     this.subscription = this.plane.subscribe(this.target, {
       message: (message) => (message.kind === 'snapshot' ? this.snapshot(message.body) : this.receive(message)),
-      reset: () => this.reset(),
+      interrupted: () => this.interrupted(),
       end: (body) => {
         this.subscription = null;
+        this.serving = false;
+        this.disruptedAt ??= performance.now();
         this.outputs.lost();
         this.state.setState({ phase: 'ended', ended: body, loadingOlder: false });
       },
@@ -417,30 +452,47 @@ export class DeskTranscript {
     this.unresolved.clear();
     const fresh = [...body.rows].reverse().filter(hasUuid);
     let more = body.more;
-    if (this.served) {
-      // A snapshot after an end. A producer that marks (`offChain`) marks the snapshot's own rows only, and a held row
-      // older than them may have left the chain in the gap (a /rewind while unsubscribed) with nothing but its own page
-      // to say so: the snapshot replaces the held rows, and the older ones page back in with their marks. An older
-      // producer's continues the held rows where it overlaps them, else it replaces them.
-      const at = body.offChain === undefined && fresh.length > 0 ? this.rows.findIndex((row) => row.uuid === fresh[0].uuid) : -1;
-      if (at >= 0) more = this.state.getState().more;
+    if (this.held) {
+      // A snapshot after a disruption: merged into the held rows, or replacing them (the module's header says when).
+      const merged = this.merged(fresh, body.offChain);
+      if (merged !== null) more = this.state.getState().more;
       else this.off.clear();
+      const before = new Set(this.uuids);
       this.mark(fresh, body.offChain);
-      this.setRows(at >= 0 ? [...this.rows.slice(0, at), ...fresh] : fresh);
+      this.setRows(merged ?? fresh);
+      // The newest row the snapshot brought lands once the rebuild below is installed; until then a block the snapshot
+      // no longer streams stays drawn. A row a `block-row` named lands too when it is held now, and, where the snapshot
+      // was merged, when it is not: the held rows ran up to the newest the old subscription delivered and the merge kept
+      // them all, so a named row neither they nor the snapshot hold is newer than the snapshot's cut, and comes live.
+      // After a replace it may be older than the snapshot's window instead, to come only with a page.
+      const landing = this.rows.findLast((row) => !before.has(row.uuid))?.uuid ?? null;
+      this.layer.resume(body.streaming, landing, (uuid) => merged !== null || this.uuids.has(uuid));
       this.rebuild();
     } else {
       this.off.clear();
       this.mark(fresh, body.offChain);
       this.setRows(fresh);
       this.retree();
+      this.layer.load(body.streaming);
+      if (this.firstRows !== null) {
+        this.firstRows.snapshot = performance.now();
+        latency.record('view.snapshot', this.firstRows.snapshot - this.firstRows.subscribed);
+        if (fresh.length === 0) this.firstRows = null; // nothing to draw: no first rows to time
+      }
     }
-    this.layer.load(body.streaming);
-    this.served = true;
+    for (const row of fresh) noteCalls(row);
+    if (this.held && this.disruptedAt !== null) {
+      latency.record('resume.gap', performance.now() - this.disruptedAt);
+      latency.count('subscription.resumes');
+    }
+    this.disruptedAt = null;
+    this.held = true;
+    this.serving = true;
     this.snapshotted.resolve();
     this.state.setState({ phase: 'live', ended: null, more, loadingOlder: false, usage: this.target.agentId === null ? (body.usage ?? null) : undefined });
     this.setJobs(body);
-    if (this.state.getState().diff?.pending) this.subscription?.diff(); // a request the reset or end lost
-    this.outputs.resend(); // the outputs the reset or end lost
+    if (this.state.getState().diff?.pending) this.subscription?.diff(); // a request the disruption lost
+    this.outputs.resend(); // the outputs the disruption lost
     this.publish();
   }
 
@@ -448,9 +500,14 @@ export class DeskTranscript {
     switch (message.kind) {
       case 'row':
         return this.row(message.body);
-      case 'chunk':
-        if (this.layer.chunk(message.body)) this.publish();
+      case 'chunk': {
+        if (!this.layer.chunk(message.body)) return;
+        this.publish();
+        // The bridge's stamp, ms on the machine's clock (absent from an older producer).
+        const { t } = message.body;
+        if (message.body.agentId === this.target.agentId && typeof t === 'number' && Number.isFinite(t)) latency.drawn('stream.chunk', t, true);
         return;
+      }
       case 'block-row':
         this.layer.blockRow(message.body);
         // Another transcript's block (a subagent's, on the main subscription): its row never comes on this
@@ -490,6 +547,7 @@ export class DeskTranscript {
       this.rows.push(row);
       const model = modelOf(row);
       if (model !== null && model !== this.state.getState().model) this.setModel(model);
+      this.noteRow(row);
     }
     // What is drawn of the rows already mapped changes only with the marks, an owner input (it may repeat an undone one's
     // words), a delivery (a later copy of a held one), or, while an input draws as undone, a response (the session read
@@ -500,7 +558,7 @@ export class DeskTranscript {
       const drawing = drawingOf(this.rows, this.off);
       const changed = drawingsDiffer(this.drawing, drawing, fresh ? row.uuid : null);
       this.drawing = drawing;
-      if (changed && this.served) {
+      if (changed && this.held) {
         this.rebuild();
         return this.publish();
       }
@@ -516,7 +574,7 @@ export class DeskTranscript {
     this.subagents = subagentLookupOf(subagents);
     const resolved = [...this.unresolved].filter((toolUseId) => this.subagents.byToolUseId(toolUseId) !== null);
     for (const toolUseId of resolved) this.unresolved.delete(toolUseId);
-    if (resolved.length > 0 && this.served) this.rebuild();
+    if (resolved.length > 0 && this.held) this.rebuild();
     else this.setTree(withMetas(this.heldTasks, subagents));
   }
 
@@ -537,20 +595,72 @@ export class DeskTranscript {
     this.state.setState({ more: body.more, loadingOlder: false });
   }
 
-  private reset(): void {
-    this.off.clear();
-    this.setRows([]);
-    this.layer.clear();
-    this.served = false;
-    this.snapshotted = deferred();
-    this.unresolved.clear();
-    this.metas = [];
-    this.treeContext = null;
-    this.heldTasks = emptyGraph();
+  /**
+   * The client lost the subscription and subscribes again: everything drawn stays as it is, and what needs the live
+   * subscription waits for the fresh snapshot (an older page on its way is lost with it, and asked again after).
+   */
+  private interrupted(): void {
+    this.serving = false;
+    this.disruptedAt ??= performance.now();
     this.outputs.lost();
-    this.state.setState({ phase: 'reconnecting', ended: null, more: false, loadingOlder: false, streaming: [], tasks: this.heldTasks, jobs: null, mcp: null, usage: undefined });
-    this.source.reset();
-    for (const listener of [...this.resets]) listener(); // MAWS's store empties the key and hydrates it again
+    this.state.setState({ phase: 'reconnecting', ended: null, loadingOlder: false });
+  }
+
+  /**
+   * What a live row tells `latency.ts` as it is received: a tool call's time, for the request it may raise, and, for the
+   * owner's own send delivered here, from its sending until its row was written. Its hop until drawn is the source's to
+   * time (`RowsSource.live`), once its events are in the store.
+   */
+  private noteRow(row: Row): void {
+    noteCalls(row);
+    if (this.target.agentId !== null || deliveryFrame(row)?.own !== true) return;
+    const lines = deliveredLines(row);
+    latency.ownerRow((ref) => {
+      const frame = framePattern({ ...ref, from: 'human' });
+      return lines.some((line) => frame.test(line));
+    }, row.timestamp);
+  }
+
+  /** A main thread's first rows are in the store: drawn at the next frame. */
+  private firstRowsDrawn(): void {
+    const first = this.firstRows;
+    if (first === null || first.snapshot === null) return;
+    const entry = this.store.getState().entries[this.key];
+    if (entry?.phase !== 'live' || entry.rows.length === 0) return;
+    this.firstRows = null;
+    latency.drawn('view.drawn', first.snapshot);
+    latency.drawn('view.first-rows', first.subscribed);
+  }
+
+  /**
+   * The held rows with a fresh snapshot's (oldest first) merged in, or null when it replaces them: it overlaps nothing
+   * held, or it marks a row both hold otherwise than the held marks do, or none of the rows both hold is one the chain
+   * carries on it, or a row it brings was written under a row it does not hold.
+   */
+  private merged(fresh: readonly Row[], offChain: readonly string[] | undefined): Row[] | null {
+    const at = fresh.length === 0 ? -1 : this.rows.findIndex((row) => row.uuid === fresh[0].uuid);
+    if (at < 0) return null;
+    const inSnapshot = new Set(fresh.map((row) => row.uuid));
+    if (offChain !== undefined) {
+      const off = new Set(offChain);
+      const overlap = fresh.filter((row) => this.uuids.has(row.uuid));
+      if (overlap.some((row) => this.off.has(row.uuid) !== off.has(row.uuid))) return null;
+      // Agreeing marks vouch for the held rows older than the snapshot only through a row both hold on the chain: each of
+      // those the held marks put on the chain is that row's ancestor, so on it still, and each they put off is no ancestor
+      // of it, so off it still. A row the producer never marks (a progress row) vouches for nothing.
+      if (!overlap.some((row) => CHAIN_TYPES.has(row.type as string) && !off.has(row.uuid))) return null;
+      // That holds only while the chain has not forked before the snapshot's window. A row the gap wrote under a row the
+      // snapshot does not hold is such a fork, its point outside the window whether held or older than every held row
+      // (paged history can hold a call's appends and result without the call), and it can take held rows older than
+      // the window off the chain while every row the window holds stays on (a second append under a tool call leaves
+      // the first, while the call's result stays), so the overlap cannot vouch for them. A fork inside the window is the
+      // snapshot's own marks to say. A row under no parent (a compaction's boundary) continues the chain; a tool result
+      // written in the gap under a call outside the window is not told from a branch here, and costs only a staged
+      // replace.
+      const forked = (row: Row) => !this.uuids.has(row.uuid) && typeof row.parentUuid === 'string' && row.parentUuid !== '' && !inSnapshot.has(row.parentUuid);
+      if (fresh.some(forked)) return null;
+    }
+    return [...this.rows.slice(0, at), ...fresh, ...this.rows.slice(at).filter((row) => !inSnapshot.has(row.uuid))];
   }
 
   /** The held rows under a new source: MAWS's store rebuilds the key from all of them, staged; the tree with them. */

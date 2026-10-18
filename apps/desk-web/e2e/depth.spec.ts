@@ -2,9 +2,11 @@
 // moved to the center by DC9's M3 (the session view draws the session's main transcript there, the depth column's
 // Transcript tab gone): selecting a direct channel draws the session's main transcript, through MAWS's transcript view;
 // a response streams per content block and settles into the rows a reload draws; a reconnect, a hub restart, and a
-// chunk the snapshot already held each end with no gap and no duplicated text; older rows page in at the top with the
-// reader kept in place; an end keeps what was drawn and says why, and the view subscribes again once the session is
-// reachable; a row's script, raw HTML, and `javascript:` link draw inert.
+// chunk the snapshot already held each end with no gap and no duplicated text, what was drawn kept drawn meanwhile;
+// older rows page in at the top with the reader kept in place; an end keeps what was drawn and says why, and the view
+// subscribes again once the session is reachable; a reconnect that outlasts the quiet window (desk ticket #57, under a
+// fast-forwarded clock) is said, and says nothing again once the fresh snapshot is in (`reconnect.spec.ts` pins the
+// quiet one against the fake machine); a row's script, raw HTML, and `javascript:` link draw inert.
 import type { Locator, Page } from '@playwright/test';
 import type { JsonObject } from 'desk-hub/protocol';
 import { DepthPlayer, type PlayerOptions } from './depth-player';
@@ -91,7 +93,7 @@ async function midAnswer(player: DepthPlayer, depth: Locator, prefix: string): P
   }
 }
 
-test('a reconnect in the middle of a response redraws from the fresh snapshot with no gap and no duplicated text', async ({ page, hub }) => {
+test('a reconnect in the middle of a response keeps what was drawn, merges the fresh snapshot, and ends with no gap and no duplicated text', async ({ page, hub }) => {
   const { player, depth } = await openDepth(page, hub);
   await midAnswer(player, depth, 'Both sub');
   hub.dropConnections();
@@ -132,7 +134,8 @@ test('older rows page in when the reader reaches the top, and the reader stays w
   const { player, depth } = await openDepth(page, hub, { limit: 8 });
   await midAnswer(player, depth, 'Both sub');
   player.holdRows = true;
-  hub.dropConnections(); // a fresh snapshot of the newest rows only
+  // A fresh load: a snapshot of the newest rows only. (A reconnect would not do: it keeps every row drawn before it.)
+  await page.reload();
   await expect.poll(() => player.subscriptions()).toBe(2);
   await expect(streamingRows(depth).last()).toContainText('Both sub');
   await expect(depth).not.toContainText('Think briefly first');
@@ -201,9 +204,9 @@ test("a response cut off mid-block drops its partial text at its step-end; what 
 test('an end keeps what was drawn and says why, and the view takes the transcript up again while the session stays reachable', async ({ page, hub }) => {
   const { player, depth } = await openDepth(page, hub);
   await midAnswer(player, depth, 'Both sub');
-  // The machine's lease replaced online to online: its old subscriptions end `machine-offline`, no offline between.
-  player.end('machine-offline');
-  await expect(depth.getByTestId('depth-unavailable')).toContainText('The machine is offline');
+  // The machine could not serve the transcript: no reconnect, so said at once.
+  player.end('error');
+  await expect(depth.getByTestId('depth-unavailable')).toContainText('The transcript could not be served.');
   await expect(depth.getByTestId('depth-unavailable')).toContainText('Trying again in 1 s.');
   await expect(status(page)).toHaveText('Unavailable');
   await expect(streamingRows(depth).last()).toContainText('Both sub');
@@ -215,6 +218,45 @@ test('an end keeps what was drawn and says why, and the view takes the transcrip
   await expect(streamingRows(depth)).toHaveCount(0);
   await expect.poll(() => occurrences(depth, ANSWER)).toBe(1);
 });
+
+const mainSubscribes = (hub: HubDouble) => hub.up.filter((u) => u.frame.t === 'subscribe' && u.frame.session === S.asks && u.frame.agentId === null).length;
+
+/** A disruption: how the suite stages it, and the pane's line it is said by past the quiet window (none for a drop). */
+const disruptions: Array<[string, (player: DepthPlayer, hub: HubDouble) => void, string | null]> = [
+  ["the browser's socket drops", (_player, hub) => hub.dropConnections(), null],
+  // The machine's stream replaced online to online: its old subscriptions end `machine-offline`, no offline between.
+  ["the machine's stream ends", (player) => player.end('machine-offline'), 'The machine is offline'],
+];
+
+for (const [disruption, disrupt, line] of disruptions) {
+  test(`when ${disruption} for longer than the quiet window, the view says so over the rows it keeps, and nothing once the fresh snapshot is in`, async ({ page, hub }) => {
+    await page.clock.install();
+    const { player, depth } = await openDepth(page, hub);
+    await midAnswer(player, depth, 'Both sub');
+    player.holdSubscriptions = true;
+    const subscribed = mainSubscribes(hub);
+    disrupt(player, hub);
+    await expect.poll(() => mainSubscribes(hub)).toBe(subscribed + 1); // taken up again at once; its snapshot held
+    await page.waitForTimeout(300);
+    await expect(status(page)).toHaveText(''); // quiet so far
+    await expect(depth.getByTestId('depth-unavailable')).toHaveCount(0);
+
+    await page.clock.fastForward(16_000); // past the quiet window
+    await expect(status(page)).toHaveText('Reconnecting…');
+    if (line) await expect(depth.getByTestId('depth-unavailable')).toContainText(line);
+    else await expect(depth.getByTestId('depth-unavailable')).toHaveCount(0);
+    await expect(depth.getByTestId('depth-reconnecting')).toHaveCount(0); // the rows are still drawn
+    await expect(depth).toContainText('Think briefly first');
+    await expect(streamingRows(depth).last()).toContainText('Both sub');
+
+    expect(player.releaseSubscriptions()).toBe(1);
+    await expect(status(page)).toHaveText('');
+    await expect(depth.getByTestId('depth-unavailable')).toHaveCount(0);
+    player.advance(player.script.length);
+    await expect(streamingRows(depth)).toHaveCount(0);
+    await expect.poll(() => occurrences(depth, ANSWER)).toBe(1);
+  });
+}
 
 test("while the machine is offline the center falls back to the log-built stream and the column keeps the transcript; once it is back the view draws it again and subscribes once", async ({ page, hub }) => {
   const { player, depth } = await openDepth(page, hub);

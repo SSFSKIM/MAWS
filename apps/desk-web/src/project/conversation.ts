@@ -5,9 +5,11 @@
 // fails is kept out and reported. Every verdict holds only under the key it was reached with.
 //
 // A request is known by what the hub keys it by — its machine, its session, and its id — since an id is minted per
-// bridge (a synthetic `request-…`) and two sessions may raise the same one.
+// bridge (a synthetic `request-…`) and two sessions may raise the same one. A request raised live is timed until the
+// pass that draws it (`latency/latency.ts`), from its arrival and from its call's row when a transcript holds it.
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { verify, type Decision, type Delivery, type OrgKey, type PendingRequest, type Raised, type Recipient, type Rpc, type RpcOutcome, type SessionBodies, type Settled } from 'desk-hub/protocol';
+import { latency } from '../latency/latency';
 
 export type CompactBody = SessionBodies['compact'];
 
@@ -86,6 +88,11 @@ export class Conversation {
   private pending: PendingRequest[] = [];
   private readonly settlements = new Map<string, { machine: string; session: string; settled: Settled }>();
   private readonly deliveries = new Map<string, { machine: string | null; delivery: Delivery }>();
+  /**
+   * Requests raised live and not drawn yet (`latency.ts`): when each came in, and its call's tool-use id, by key; timed
+   * once a pass draws it.
+   */
+  private readonly raisedIn = new Map<string, { at: number; call: string }>();
 
   constructor(
     private readonly project: string,
@@ -119,6 +126,7 @@ export class Conversation {
    */
   reset(): void {
     this.seen.clear();
+    this.raisedIn.clear();
     this.settlements.clear();
     this.deliveries.clear();
     this.pending = [];
@@ -136,6 +144,9 @@ export class Conversation {
   }
 
   raised(machine: string, raised: Raised): void {
+    const key = requestKey({ machine, session: raised.session, request: raised.request });
+    if (!this.raisedIn.has(key) && !this.store.getState().requests[key]) this.raisedIn.set(key, { at: performance.now(), call: raised.toolUseId ?? raised.request });
+    while (this.raisedIn.size > 64) this.raisedIn.delete(this.raisedIn.keys().next().value!);
     this.see(machine, raised);
     this.recompute();
   }
@@ -294,5 +305,12 @@ export class Conversation {
     // Something changed meanwhile: the next pass, which covers it, commits instead (every pending set starts one).
     if (this.again) return;
     this.store.setState({ requests, deliveries, unverified, checked: this.pendingReceived });
+    for (const [key, { at, call }] of this.raisedIn) {
+      if (!requests[key]) continue;
+      this.raisedIn.delete(key);
+      latency.drawn('request.drawn', at);
+      const written = latency.callAt(call);
+      if (written !== undefined) latency.drawn('request.row', written, true);
+    }
   }
 }

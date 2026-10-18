@@ -1,6 +1,6 @@
 // DC9's M5 through the main subscription: a DC8 producer's snapshot and `subagents` messages give the column its jobs,
 // MCP names and agent statuses; a job's output is asked for on the subscription and its `output` answer drawn; a
-// request a reset lost is asked again after the fresh snapshot; an older producer's body leaves jobs unknown.
+// request an interruption lost is asked again after the fresh snapshot; an older producer's body leaves jobs unknown.
 import type { Job, SessionBodies, SubagentMeta } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
@@ -41,7 +41,7 @@ describe('the main subscription’s jobs', () => {
     expect(state().tasks.tasks.get('a1' as never)?.status).toBe('unknown');
   });
 
-  it('asks for a job’s output on the subscription and draws its answer; asks again after a reset’s fresh snapshot', () => {
+  it('asks for a job’s output on the subscription and draws its answer; asks again after an interruption’s fresh snapshot', () => {
     const { plane, controller } = open();
     plane.send('snapshot', snapshot({ jobs: [shell] }));
     controller.outputs.open('b1');
@@ -51,7 +51,7 @@ describe('the main subscription’s jobs', () => {
 
     controller.outputs.refresh('b1');
     expect(plane.current.outputs).toHaveLength(2);
-    plane.current.listener.reset(); // the answer is lost with the subscription
+    plane.current.listener.interrupted(); // the answer is lost with the subscription
     plane.send('snapshot', snapshot({ jobs: [shell] }));
     expect(plane.current.outputs).toEqual([
       { taskId: 'b1', tail: OUTPUT_TAIL },

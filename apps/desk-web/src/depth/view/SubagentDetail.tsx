@@ -27,7 +27,7 @@ type Props = {
   session: DeskSession;
   plane: SessionPlane;
   agentId: string;
-  /** The agent's node in the main subscription's tree; absent while the tree does not hold it (a reset, say). */
+  /** The agent's node in the main subscription's tree; absent while the tree does not hold it (before a snapshot names it). */
   node: TaskNode | undefined;
   actions: Partial<TranscriptActions>;
   onBack: () => void;

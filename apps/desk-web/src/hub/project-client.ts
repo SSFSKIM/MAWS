@@ -3,7 +3,8 @@
 // skips — and sends again everything the hub has not acknowledged: a web `human` until its `human-ack`, an RPC until
 // the hub reports its result. A new RPC is refused while the socket is not welcomed; a `human` is held until it is. It
 // also serves the session plane (DX8's `SessionPlane`): DX4 subscriptions whose messages reach their listener in order,
-// re-subscribed after any discontinuity.
+// re-subscribed after any discontinuity. The hops of #57's instrument it sees (`latency/latency.ts`: a `human` to its
+// acknowledgement and its delivery, the reconnects) are recorded as their frames arrive.
 import {
   newNonce,
   type HumanEvent,
@@ -20,6 +21,7 @@ import {
   OUTPUT_TAIL_MAX,
   SUBSCRIPTION_KINDS,
 } from 'desk-hub/protocol';
+import { latency } from '../latency/latency';
 import type { SessionPlane, SessionTarget, Subscription, SubscriptionListener, SubscriptionMessage } from '../shell/session-plane';
 import { backoff, HubSocket, type ConnectionStatus } from './socket';
 
@@ -96,6 +98,8 @@ const IN_SUB = new Set<string>(SUBSCRIPTION_KINDS);
 export class ProjectClient implements SessionPlane {
   private readonly socket: HubSocket<ProjectDown, ProjectUp>;
   private welcomed = false;
+  /** This client has been welcomed before: a welcome after a drop is a reconnect (`latency.ts` counts them). */
+  private welcomedBefore = false;
   private visible: boolean | null = null;
   private repeat: ReturnType<typeof setInterval> | null = null;
   private readonly humans = new Map<string, { event: HumanEvent; resolve: (ack: HumanAck) => void; reject: (error: HumanRefused) => void }>();
@@ -136,6 +140,7 @@ export class ProjectClient implements SessionPlane {
   sendHuman(event: HumanEvent): Promise<HumanAck> {
     return new Promise((resolve, reject) => {
       this.humans.set(event.mac.nonce, { event, resolve, reject });
+      latency.humanSent(event.mac.nonce, event.wake === true);
       if (this.welcomed) this.socket.send({ t: 'human', event });
     });
   }
@@ -228,7 +233,7 @@ export class ProjectClient implements SessionPlane {
       open.retry = null;
       if (open.sub === null) continue;
       open.sub = null;
-      open.listener.reset();
+      open.listener.interrupted();
     }
   }
 
@@ -249,6 +254,8 @@ export class ProjectClient implements SessionPlane {
         }
         handlers.welcome?.(frame);
         this.welcomed = true;
+        if (this.welcomedBefore) latency.count('socket.reconnects');
+        this.welcomedBefore = true;
         this.socket.send({ t: 'resume', after: handlers.held() });
         if (this.visible !== null) this.socket.send({ t: 'visibility', visible: this.visible });
         for (const event of [...this.humans.values()].map((h) => h.event)) this.socket.send({ t: 'human', event });
@@ -272,6 +279,7 @@ export class ProjectClient implements SessionPlane {
         const waiting = this.humans.get(frame.nonce);
         if (!waiting) return;
         this.humans.delete(frame.nonce);
+        latency.humanAcked(frame.nonce, frame);
         waiting.resolve({ offset: frame.offset, writer: frame.writer, seq: frame.seq });
         this.humanSettled();
         return;
@@ -284,12 +292,19 @@ export class ProjectClient implements SessionPlane {
         return;
       case 'session':
         if (IN_SUB.has(frame.message.kind)) this.receiveInSub(frame.message);
-        else handlers.session?.(frame.message);
+        else {
+          if (frame.message.kind === 'delivery') {
+            const { event, outcome } = frame.message.body as Delivery;
+            latency.delivery(event, outcome);
+          }
+          handlers.session?.(frame.message);
+        }
         return;
       case 'pending':
         handlers.pending?.(frame.requests);
         return;
       case 'deliveries':
+        for (const { event, outcome } of frame.deliveries) latency.delivery(event, outcome);
         handlers.deliveries?.(frame.deliveries);
         return;
       case 'machines':
@@ -323,7 +338,7 @@ export class ProjectClient implements SessionPlane {
     if (message.n !== open.next) {
       // A gap: give this sub up and take a fresh snapshot under a new one.
       this.socket.send({ t: 'unsubscribe', sub: open.sub! });
-      open.listener.reset();
+      open.listener.interrupted();
       this.sendSubscribe(open);
       return;
     }
@@ -336,7 +351,7 @@ export class ProjectClient implements SessionPlane {
         // The bridge's stream lost events (DX4): the live part no longer follows the snapshot. Take a fresh one — at
         // once after a snapshot, and after a growing wait when none could be taken, so a bridge still starting is not
         // asked again and again.
-        open.listener.reset();
+        open.listener.interrupted();
         if (message.n !== 0) {
           this.sendSubscribe(open);
           return;
