@@ -40,7 +40,14 @@
       "src/artifacts/slides/editor/DeckEditor.tsx",
       "src/renderer/src/tools/presentation/exports.test.ts"
     ],
-    "constraints": "L203/L233 in-memory DeckSession only, serial shared paths; existing versionId export; publish copy only, no shared tool-schema edits."
+    "constraints": "L203/L233 in-memory DeckSession only, serial shared paths; existing versionId export; publish copy only, no shared tool-schema edits.",
+    "fixExecutor": "a2097c2f1e042d41a",
+    "fixAdditionalPaths": [
+      "src/artifacts/slides/editor/copy.ts",
+      "src/renderer/src/tools/presentation/tab-state.ts",
+      "src/renderer/src/tools/presentation/tab-state.test.ts"
+    ],
+    "fixBoundary": "Existing discard confirmation counts genuine rebased extant-slide drafts; explicit pending indication; no new header/persisted contract or readonly writes. Actual writes may wait; intentional pending drafts confirm immediately once writes settle. Readonly cannot silently bypass a real owner draft."
   },
   "intersection": [],
   "commitLock": "/private/tmp/maws-p3f-commit.lock",
