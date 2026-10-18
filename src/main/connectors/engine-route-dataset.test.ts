@@ -7,7 +7,7 @@
 // agent's refresh resolves the asking session alone.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
-import { createEngineRoute, CONNECTOR_OPERATION_DEADLINE_MS, DATASET_CANCEL_RETRY_MS, type EngineRoute } from './engine-route';
+import { createEngineRoute, CONNECTOR_OPERATION_DEADLINE_MS, DATASET_RETRY_MS, type EngineRoute } from './engine-route';
 
 type Sent = { name: string; input: Record<string, unknown> };
 let sent: Sent[];
@@ -15,6 +15,7 @@ let takes: Record<string, unknown>[]; // what each `connectors.take` answers, in
 let gate: Promise<void> | null; // while set, each take's answer waits for it
 let cancelled: boolean; // what `connectors.cancel` answers (E3 M2 residual: false once the host admitted the commit)
 let cancelUnanswered: boolean; // P3-F F-connectors 5: `connectors.cancel` fails (the dispatch timed out): unconfirmed
+let takeUnanswered: boolean; // P3-F F-connectors 5 sibling: `connectors.take` fails the same way
 let route: EngineRoute;
 let order: string[];
 const LIVE = [
@@ -31,6 +32,7 @@ beforeEach(() => {
   gate = null;
   cancelled = true;
   cancelUnanswered = false;
+  takeUnanswered = false;
   order = [];
   route = createEngineRoute({
     call: (async (name: string, input: CommandInput<never>) => {
@@ -45,6 +47,7 @@ beforeEach(() => {
           return ok({ operationId: (input as { operationId: string }).operationId });
         case 'connectors.take': {
           if (gate) await gate;
+          if (takeUnanswered) return { ok: false, error: { code: 'timeout', message: 'no answer' } } as unknown as CommandResult<never>;
           return ok(takes.shift() ?? { outcome: null });
         }
         case 'connectors.cancel':
@@ -227,7 +230,7 @@ describe('route E with a dataset sink', () => {
     await settle();
     let done = false;
     void answer.then(() => (done = true));
-    await vi.advanceTimersByTimeAsync(DATASET_CANCEL_RETRY_MS);
+    await vi.advanceTimersByTimeAsync(DATASET_RETRY_MS);
     expect(done).toBe(false);
     expect(sentNames().filter((name) => name === 'connectors.cancel')).toHaveLength(2);
     expect(takesSent()).toBe(0);
@@ -237,6 +240,28 @@ describe('route E with a dataset sink', () => {
     route.operationEnded(operationId());
     await settle();
     expect(order.slice(-2)).toEqual(['connectors.cancel', 'connectors.take']);
+    expect(await answer).toEqual({ ok: true, result: META });
+  });
+
+  // P3-F F-connectors 5 sibling: a take that went unanswered may have started (or joined) the publication: nothing is
+  // settled; the take is asked again, and the host's durable end answers the operation
+  it('keeps an operation whose take went unanswered, takes again, and settles with the host’s durable end', async () => {
+    const { answer } = await started(() => true);
+    takeUnanswered = true;
+    route.operationEnded(operationId()); // the take that would start the publication goes unanswered
+    await settle();
+    let done = false;
+    void answer.then(() => (done = true));
+    await settle();
+    expect(done).toBe(false);
+    takeUnanswered = false;
+    takes.push(publishing());
+    await vi.advanceTimersByTimeAsync(DATASET_RETRY_MS); // asked again
+    expect(takesSent()).toBe(2);
+    expect(done).toBe(false);
+    takes.push(ended(META));
+    route.operationEnded(operationId()); // the publication's end
+    await settle();
     expect(await answer).toEqual({ ok: true, result: META });
   });
 

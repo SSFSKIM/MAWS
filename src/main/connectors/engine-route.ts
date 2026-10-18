@@ -29,8 +29,9 @@
 // admitted, or its end decided) is followed by takes, without the recheck, until the host's durable end, its rollback
 // included, answers it. P3-F F-connectors 5: a cancel the host never answered (its dispatch failed) proves neither, so
 // nothing is settled and nothing taken (a take could start the publication); the cancel is asked again on the
-// operation's next end or reconciliation, or after DATASET_CANCEL_RETRY_MS, until the host answers it. `resolveSession`
-// is an agent's: the asking session alone, never another eligible one.
+// operation's next end or reconciliation, or after DATASET_RETRY_MS, until the host answers it. Its sibling: a take the
+// host never answered may have started or joined the publication, so it settles nothing either and is asked again the
+// same way. `resolveSession` is an agent's: the asking session alone, never another eligible one.
 import { randomUUID } from 'node:crypto';
 import { CONNECTOR_OPERATION_DEADLINE_MS, type ConnectorToolRef } from '@shared/artifacts/connectors'; // E3: the deadline
 import type { CommandInput, CommandOutput, CommandResult } from '@shared/ipc/schema';
@@ -66,7 +67,7 @@ interface Pending {
   again?: DatasetFetch; // E3: the fetch asked while it was, the most final of them
   stopping?: boolean; // E3 M2 residual: its host cancel sent: only the host's end settles it now
   unconfirmed?: ConnectorRouteAnswer; // P3-F F-connectors 5: its cancel went unanswered: asked again before anything is taken
-  retry?: ReturnType<typeof setTimeout>; // P3-F F-connectors 5: that ask, should no end come first
+  retry?: ReturnType<typeof setTimeout>; // P3-F F-connectors 5: an unanswered cancel's or take's next ask, should no end come first
 }
 
 // E3: why a dataset operation's outcome is fetched, least final first: reconciliation (still calling is fine), its end
@@ -76,8 +77,9 @@ type DatasetFetch = (typeof DATASET_FETCHES)[number];
 const finalOf = (a: DatasetFetch | undefined, b: DatasetFetch): DatasetFetch => (a !== undefined && DATASET_FETCHES.indexOf(a) > DATASET_FETCHES.indexOf(b) ? a : b);
 const LOST: ConnectorRouteAnswer = { ok: false, failure: 'failed', message: 'the host kept no outcome for the operation' };
 const DEADLINE: ConnectorRouteAnswer = { ok: false, failure: 'unavailable', message: 'the operation outlived its deadline' };
-// P3-F F-connectors 5: how long after an unanswered cancel main asks it again, when no end of the operation came first.
-export const DATASET_CANCEL_RETRY_MS = 1_000;
+// P3-F F-connectors 5: how long after an unanswered cancel or take main asks it again, when no end of the operation came
+// first.
+export const DATASET_RETRY_MS = 1_000;
 
 // E3: a dataset publication's end as the route answers it: a revoke as the route's own refusal; the metadata and every
 // other failure in the result's slot, typed (the descriptor the host wrote, or kept, is what is drawn).
@@ -141,12 +143,23 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
     }
     if (!asked.stopping && !asked.publishable!()) return stopDataset(operationId, unavailable('the work may no longer publish'));
     asked.taking = true;
+    clearTimeout(asked.retry); // a take asked now is the one a failed take's retry would ask
+    // P3-F F-connectors 5 sibling: unanswered, the take may have started or joined the publication: the operation stays,
+    // and the take (the most final asked meanwhile) is asked again
+    const unanswered = () => {
+      if (pending.get(operationId) !== asked) return;
+      asked.taking = false;
+      const again = finalOf(asked.again, why);
+      delete asked.again;
+      clearTimeout(asked.retry);
+      asked.retry = setTimeout(() => fetchDataset(operationId, again), DATASET_RETRY_MS);
+    };
     void deps.call('connectors.take', { operationId }).then(
       (taken) => {
         const operation = pending.get(operationId);
         if (!operation) return;
+        if (!taken.ok) return unanswered();
         operation.taking = false;
-        if (!taken.ok) return operation.settle(unavailable(`connectors.take failed: ${taken.error.code} ${taken.error.message}`));
         const { outcome, dataset } = taken.value;
         if (outcome !== null) return operation.settle(outcome); // ended before its call: H's outcome
         if (dataset && dataset.status !== 'publishing') return operation.settle(datasetAnswer(dataset));
@@ -156,7 +169,7 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
         delete operation.again;
         if (again !== undefined) fetchDataset(operationId, again);
       },
-      (error: unknown) => pending.get(operationId)?.settle(unavailable(`connectors.take failed: ${error instanceof Error ? error.message : String(error)}`)),
+      unanswered,
     );
   }
 
@@ -173,7 +186,7 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
       if (pending.get(operationId) !== operation) return;
       operation.stopping = false;
       operation.unconfirmed = answer;
-      operation.retry = setTimeout(() => stopDataset(operationId, answer), DATASET_CANCEL_RETRY_MS);
+      operation.retry = setTimeout(() => stopDataset(operationId, answer), DATASET_RETRY_MS);
     };
     void deps.call('connectors.cancel', { operationId }).then((cancelled) => {
       if (pending.get(operationId) !== operation) return;

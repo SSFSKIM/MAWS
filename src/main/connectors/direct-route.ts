@@ -15,7 +15,8 @@
 //   then and a streaming connection reconciles every pending one by `take`; each has a deadline past the host's own,
 //   at which main takes or withdraws it. P3-F F-connectors 5: a dataset operation's cancel the host never answered
 //   proves neither outcome, so it settles nothing and nothing is taken; the cancel is asked again on the operation's
-//   next end or reconciliation, or after DIRECT_CANCEL_RETRY_MS, until the host answers it.
+//   next end or reconciliation, or after DIRECT_RETRY_MS, until the host answers it. Its sibling: a dataset take the
+//   host never answered may have started the publication, so it settles nothing either and is asked again the same way.
 // - A call is bound to the target main selected: one `directStart` per call, never retried or moved to another route,
 //   even when an eligible engine appears meanwhile (the next resolution picks route E). Only fixed words reach the broker
 //   and the log: the host's answers are closed enums, and no SDK, server, file or token text exists to leak.
@@ -89,8 +90,8 @@ export const DIRECT_RESOLVE_DEADLINE_MS = 8_000;
 export const DIRECT_OPERATION_DEADLINE_MS = 180_000;
 // The operations main keeps pending at once (E keeps no bound; the host's own is 256).
 export const DIRECT_PENDING_LIMIT = 64;
-// P3-F F-connectors 5: how long after an unanswered dataset cancel main asks it again, when no end came first.
-export const DIRECT_CANCEL_RETRY_MS = 1_000;
+// P3-F F-connectors 5: how long after an unanswered dataset cancel or take main asks it again, when no end came first.
+export const DIRECT_RETRY_MS = 1_000;
 
 type Kind = DirectOperationOutcome['kind'];
 type OutcomeOf<K extends Kind> = Extract<DirectOperationOutcome, { kind: K }>;
@@ -106,7 +107,7 @@ interface Pending {
   publishable?: () => boolean; // E3c: native visibility/request recheck before every publication take
   stopping?: boolean;
   unconfirmed?: Lost; // P3-F F-connectors 5: its cancel went unanswered: asked again before anything is taken
-  retry?: ReturnType<typeof setTimeout>; // P3-F F-connectors 5: that ask, should no end come first
+  retry?: ReturnType<typeof setTimeout>; // P3-F F-connectors 5: an unanswered cancel's or take's next ask, should no end come first
   settle(result: DirectOperationOutcome | Lost): void;
   sent: boolean; // P3-HD M3b: its command was sent (until then, preparing its credential: the host knows nothing of it)
   taking: boolean; // a `directTake` is in flight
@@ -157,11 +158,23 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     }
     if (operation.publishable && !operation.stopping && !operation.publishable()) return stopDataset(operationId, lost('the work may no longer publish'));
     operation.taking = true;
+    clearTimeout(operation.retry); // a take asked now is the one a failed take's retry would ask
+    // P3-F F-connectors 5 sibling: unanswered, a dataset take may have started the publication: the operation stays, and
+    // the take is asked again; any other operation is withdrawn, as the host may still run it
+    const unanswered = (word: string) => {
+      operation.taking = false;
+      if (pending.get(operationId) !== operation) return;
+      if (!operation.publishable) return withdraw(operationId, lost(word));
+      const next = operation.again;
+      operation.again = undefined;
+      clearTimeout(operation.retry);
+      operation.retry = setTimeout(() => fetch(operationId, next?.whenNone ?? whenNone), DIRECT_RETRY_MS);
+    };
     void deps.call('connectors.directTake', { operationId }).then(
       (taken) => {
         operation.taking = false;
         if (!pending.has(operationId)) return;
-        if (!taken.ok) return withdraw(operationId, lost(`directTake failed: ${taken.error.code}`)); // the host may still run it
+        if (!taken.ok) return unanswered(`directTake failed: ${taken.error.code}`);
         const { outcome, dataset } = taken.value;
         if (dataset && operation.publishable) {
           if (dataset.status !== 'publishing') return operation.settle({ kind: 'call', outcome: dataset.status === 'failed' && dataset.reason === 'revoked' ? { ok: false, failure: 'refused', refusal: 'revoked', reason: 'grant' } : { ok: true, result: dataset } });
@@ -176,10 +189,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
         if (next) return fetch(operationId, next.whenNone ?? whenNone);
         if (whenNone !== null) withdraw(operationId, whenNone);
       },
-      () => {
-        operation.taking = false;
-        withdraw(operationId, lost('directTake failed'));
-      },
+      () => unanswered('directTake failed'),
     );
   }
 
@@ -196,7 +206,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
       if (pending.get(operationId) !== operation) return;
       operation.stopping = false;
       operation.unconfirmed = result;
-      operation.retry = setTimeout(() => stopDataset(operationId, result), DIRECT_CANCEL_RETRY_MS);
+      operation.retry = setTimeout(() => stopDataset(operationId, result), DIRECT_RETRY_MS);
     };
     void deps.call('connectors.directCancel', { operationId }).then((answer) => {
       if (pending.get(operationId) !== operation) return;

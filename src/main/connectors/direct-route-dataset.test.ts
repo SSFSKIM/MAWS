@@ -5,7 +5,7 @@ import type { CommandName } from '@shared/ipc/schema';
 import type { ConnectorDatasetTake, DirectOperationOutcome } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { ConnectorBroker } from './broker';
-import { createDirectRoute, type DirectRoute, type DirectRouteDeps } from './direct-route';
+import { createDirectRoute, DIRECT_RETRY_MS, type DirectRoute, type DirectRouteDeps } from './direct-route';
 import type { ConnectorGrantAuthority, ConnectorRoute, ConnectorRouteTarget } from './route';
 
 const ART = '11111111-1111-4111-8111-111111111111';
@@ -27,6 +27,7 @@ let phases: Map<string, ConnectorDatasetTake>;
 let holdPublication: boolean;
 let cancelled: boolean;
 let cancelUnanswered: boolean; // P3-F F-connectors 5: `connectors.directCancel` fails (the dispatch timed out)
+let takeUnanswered: boolean; // P3-F F-connectors 5 sibling: `connectors.directTake` fails the same way
 const PUBLISHED = { status: 'dataset' as const, artifactId: ART, id: DATASET.id, revision: 5, columns: [{ name: 'day', type: 'string' as const }, { name: 'signups', type: 'number' as const }], rows: 1 };
 
 // The scripted host: a resolution ends at once with READY; a start ends only when the test finishes it.
@@ -37,6 +38,7 @@ const call: DirectRouteDeps['call'] = async (name, input) => {
   let value: unknown;
   if (name === 'library.entry') value = { artifact: { id: ART, kind: 'dashboard', title: 'Live', createdBy: { kind: 'session', appSessionId: 'app-own' }, projectId: 'proj', createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0 }, links: [] };
   else if (name === 'connectors.directTake') {
+    if (takeUnanswered) return { ok: false, error: { code: 'timeout', message: 'no answer' } } as never;
     const dataset = phases.get(operationId);
     value = { outcome: outcomes.get(operationId) ?? null, ...(dataset && { dataset }) };
     if (dataset?.status === 'publishing' && !holdPublication) setTimeout(() => { phases.set(operationId, PUBLISHED); route.operationEnded(operationId); }, 0);
@@ -73,6 +75,7 @@ beforeEach(() => {
   holdPublication = false;
   cancelled = true;
   cancelUnanswered = false;
+  takeUnanswered = false;
   route = createDirectRoute({ call, sessions: { get: () => ({ projectId: 'proj', directory: '/repo' }) }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] }, realpath: (path) => path, streaming: () => true, log: () => {} });
 });
 afterEach(() => {
@@ -152,6 +155,22 @@ describe('route D’s target and a dataset sink', () => {
     route.operationEnded(id);
     expect(await settled(answer)).toEqual({ ok: true, result: PUBLISHED });
     expect(dispatched.filter((entry) => entry.input.operationId === id).map((entry) => entry.name).slice(-3)).toEqual(['connectors.directCancel', 'connectors.directCancel', 'connectors.directTake']);
+  });
+
+  // P3-F F-connectors 5 sibling: an unanswered take may have started the publication: kept, and taken again until the
+  // publication's durable end
+  it('keeps an operation whose take went unanswered and takes again until the publication’s durable end', async () => {
+    const found = await target();
+    takeUnanswered = true;
+    let ended = false;
+    const answer = found.call({}, { signal: new AbortController().signal, fingerprint: FP, mode: 'read', dataset: DATASET, publishable: () => true }).then((end) => { ended = true; return end; });
+    await vi.advanceTimersByTimeAsync(2);
+    const id = started()[0]!.input.operationId as string;
+    expect(dispatched.filter((entry) => entry.name === 'connectors.directTake' && entry.input.operationId === id)).toHaveLength(1);
+    expect(ended).toBe(false);
+    takeUnanswered = false;
+    await vi.advanceTimersByTimeAsync(DIRECT_RETRY_MS); // taken again: the publication runs and ends
+    expect(await settled(answer)).toEqual({ ok: true, result: PUBLISHED });
   });
 
   it('a plain call (no dataset) still starts and answers as P3-HD built it', async () => {
