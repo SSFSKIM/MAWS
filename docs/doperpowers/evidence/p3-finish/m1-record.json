@@ -13,9 +13,8 @@
   "checkedAt": "all 10 close, 123 defer and 17 preclosed frozen rows matched the current tracker exactly once before the first edit",
   "deferFormat": "each defer row keeps its whole text; its closing cell gains 'Re-deferred 2026-10-18 (P3-F triage, triage.txt L<n>; parent Decision Log 106): <ruled reason> Owner: <ruled step made explicit>.' (the P2-F pattern)",
   "counts": {
-    "close:committed": 8,
+    "close:committed": 9,
     "close:held": 1,
-    "close:pending": 1,
     "defer:pending": 123,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
@@ -244,7 +243,7 @@
       "note": "Clause met on master: 4f4939b5a removed vitest's node-project type-check pass (the experimental-typecheck advisory); 6dff46f35 made package.json's test script NODE_OPTIONS include --disable-warning=ExperimentalWarning (node:sqlite's warning). Note: the gate's unit:darwin step calls `pnpm exec vitest run` directly (.github/workflows/gate.yml:155), outside the test script, so node:sqlite's warning can still print in that lane (gate-owned; not a reopening of this row).",
       "triageReason": "Experimental typecheck advisory removed and node:sqlite warning disabled. Evidence: 4f4939b5a; package test flags.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "e848a2c31ac57046c29420760ea66eacf426f563"
     },
     {
       "line": 222,
@@ -253,8 +252,8 @@
       "closeKind": "close",
       "note": "Clause met by 99dbafeb7 (on master, E2 M3, 'bar hatching pointer-transparent'): src/artifacts/dashboard/render/render.ts:703 draws the hatch with pointer-events='none', so the bar's full path beneath it is the hit target.",
       "triageReason": "Hatch overlay pointer-events none, underlying bar remains hit target. Evidence: 99dbafeb7; src/artifacts/dashboard/render/render.ts:703.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 26,
