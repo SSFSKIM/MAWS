@@ -56,10 +56,12 @@ test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its j
   // packaged always on the Mac.
   assert.match(workflow, /\n {2}plan:\n(?: {4}.*\n|\n)*? {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| 'ubuntu-slim' \}\}\n/);
   for (const job of ['unit-darwin', 'packaged']) assert.match(workflow, new RegExp(`\\n {2}${job}:\\n(?: {4}.*\\n)*? {4}runs-on: \\[self-hosted, macOS, ARM64\\]\\n`), job);
+  // Each e2e job takes the runner its matrix entry carries, the lane's or, for POOL_E2E on a Linux lane, the pool's.
+  assert.match(workflow, /\n {2}e2e:\n(?: {4}.*\n)*? {4}runs-on: \$\{\{ fromJSON\(matrix\.runner\) \}\}\n/);
   const onMac = (runner) => JSON.stringify(JSON.parse(runner)) === mac;
 
   const cases = [];
-  for (const gates of ['', 'static', 'static,unit,probes', 'unit:darwin', 'packaged', 'e2e:library'])
+  for (const gates of ['', 'static', 'static,unit,probes', 'unit:darwin', 'packaged', 'e2e:library', 'e2e:library,e2e:desk-web'])
     for (const runner of ['', 'linux', 'macos'])
       for (const class1a of ['', 'linux', 'macos', 'pool'])
         for (const GATE_RUNNER of ['', 'linux', 'macos', 'pool'])
@@ -72,7 +74,7 @@ test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its j
       const output = join(dir, `output-${index}`);
       await promisify(execFile)(process.execPath, [join(root, '.github/scripts/gate-plan.mjs')], {
         cwd: root,
-        env: { ...process.env, EVENT: 'push', HEAD_MESSAGE: `ci-gate: test\n\n${trailers}`, GATE_RUNNER, GATE_E2E_RUNNER, CLASS1_E2E: 'library', LINUX_E2E: 'library', LIBREOFFICE_E2E: '', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, `summary-${index}`) },
+        env: { ...process.env, EVENT: 'push', HEAD_MESSAGE: `ci-gate: test\n\n${trailers}`, GATE_RUNNER, GATE_E2E_RUNNER, CLASS1_E2E: 'library', LINUX_E2E: 'library desk-web', POOL_E2E: 'desk-web', LIBREOFFICE_E2E: '', GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(dir, `summary-${index}`) },
       });
       const out = Object.fromEntries(readFileSync(output, 'utf8').trim().split('\n').map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
       return (
@@ -80,7 +82,7 @@ test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its j
         ['static', 'unit', 'probes'].some((gate) => out[gate] === 'true' && onMac(out[`${gate}_runner`])) ||
         out.unit_darwin === 'true' ||
         out.packaged === 'true' ||
-        (JSON.parse(out.e2e).length > 0 && onMac(out.e2e_runner))
+        JSON.parse(out.e2e).some((entry) => onMac(entry.runner))
       );
     };
     const results = new Array(cases.length);

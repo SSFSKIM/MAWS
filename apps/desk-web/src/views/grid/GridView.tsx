@@ -1,10 +1,14 @@
 // The home: the grid of the org's projects (§4), live from the registry socket, in the states of the approved mockup
 // (mockups/desk/01-grid.html, card B): connecting on first load (tile shapes only — no zeros, which would claim nobody
 // is waiting), empty (enrolling a machine is the one next step), and reconnecting (the last counts held, dimmed, with
-// how old they are; tiles still open). On a phone, two columns of the same tiles (mockups/desk/05-phone.html, 2).
+// how old they are; tiles still open). Once the hub refuses this browser (its sign-in expired), the notice says so and
+// offers to sign in again, in place of waiting for an answer that will not come. On a phone, two columns of the same
+// tiles (mockups/desk/05-phone.html, 2).
 import { useMemo } from 'react';
+import { useAccess } from '../../hub/access';
 import { useDeskLayout } from '../../shell/layout';
 import { sortForGrid, useGrid } from '../../state/grid';
+import { LapsedBanner } from '../access/SignInAgain';
 import { GridPushBanner } from '../notifications/PushBanner';
 import { ProjectCard } from './ProjectCard';
 
@@ -14,14 +18,21 @@ export function GridView({ onEnroll }: { onEnroll: () => void }) {
   const { projects, loaded, status, asOf } = useGrid();
   const navigate = useDeskLayout((s) => s.navigate);
   const sorted = useMemo(() => sortForGrid(projects), [projects]);
-  const stale = loaded && status === 'connecting';
+  const lapsed = useAccess((s) => s.lapsed);
+  const stale = loaded && (status === 'connecting' || lapsed !== null);
+  const asOfText = `Counts as of ${asOf === null ? 'the last connection' : time(asOf)}.`;
   return (
     <main className="h-full overflow-y-auto bg-bg" aria-label="Projects">
       <GridPushBanner />
-      {stale && sorted.length > 0 && (
-        <div className="flex items-center gap-2 border-b border-border bg-bg-raised px-6 py-2 text-ui-sm text-fg-muted" role="status" data-testid="grid-stale">
-          <strong className="font-medium text-fg">Counts as of {asOf === null ? 'the last connection' : time(asOf)}.</strong> They may have changed since; the grid updates as soon as the hub answers.
-        </div>
+      {lapsed !== null ? (
+        <LapsedBanner lapse={lapsed} what="the grid" lead={stale && sorted.length > 0 ? asOfText : undefined} />
+      ) : (
+        stale &&
+        sorted.length > 0 && (
+          <div className="flex items-center gap-2 border-b border-border bg-bg-raised px-6 py-2 text-ui-sm text-fg-muted" role="status" data-testid="grid-stale">
+            <strong className="font-medium text-fg">{asOfText}</strong> They may have changed since; the grid updates as soon as the hub answers.
+          </div>
+        )
       )}
       <div className="mx-auto max-w-[1120px] px-4 py-4 md:px-6 md:py-6">
         {!loaded ? (

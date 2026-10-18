@@ -48,6 +48,10 @@ env:
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
   # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
   LINUX_E2E: library artifacts available tools agents desk-web
+  # The Linux groups that drive no Electron, so the pool's containers, where Electron would lose its sandbox, can run
+  # them: on a Linux lane whose class 1a runs on the pool, they run there too (Decision Log 68). desk-web drives
+  # Playwright's own browsers, which Playwright starts without Chromium's sandbox on every runner (chromiumSandbox).
+  POOL_E2E: desk-web
   # The groups that render documents through LibreOffice (P3-B's DOCX-to-PDF case, P3-C's render-and-compare).
   LIBREOFFICE_E2E: document presentations
 
@@ -60,8 +64,9 @@ jobs:
     # The smallest hosted runner (ubuntu-slim, 1 vCPU; the plan only computes outputs and takes seconds), or the self-hosted Mac
     # when the repository variable GATE_RUNNER is `macos` (§3.6); hosted under `pool`, since it is what makes the pool's box
     # (Decision Log 53). The jobs below take the runners the plan resolves: class 1a's from the `Class1a:` trailer or
-    # GATE_RUNNER (linux, macos or pool), the e2e jobs' lane. A push to master runs nothing here (the warm job of Decision
-    # Log 26 left with Decision Log 53); master's class 1a is the landing gate's.
+    # GATE_RUNNER (linux, macos or pool), each e2e job its lane's runner or, for POOL_E2E, the pool's. A push to master
+    # runs nothing here (the warm job of Decision Log 26 left with Decision Log 53); master's class 1a is the landing
+    # gate's.
     runs-on: ${{ vars.GATE_RUNNER == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-slim' }}
     timeout-minutes: 30
     outputs:
@@ -70,7 +75,6 @@ jobs:
       unit_darwin: ${{ steps.plan.outputs.unit_darwin }}
       probes: ${{ steps.plan.outputs.probes }}
       e2e: ${{ steps.plan.outputs.e2e }}
-      e2e_runner: ${{ steps.plan.outputs.e2e_runner }}
       static_runner: ${{ steps.plan.outputs.static_runner }}
       unit_runner: ${{ steps.plan.outputs.unit_runner }}
       probes_runner: ${{ steps.plan.outputs.probes_runner }}
@@ -95,7 +99,7 @@ jobs:
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
         run: node .github/scripts/gate-plan.mjs
-      # ci-kit's pool (Decision Log 35): creates the box when a class-1a job runs there and none exists; it does not wait
+      # ci-kit's pool (Decision Log 35): creates the box when a job runs there and none exists; it does not wait
       # for the boot, the jobs wait in GitHub's queue.
       - if: steps.plan.outputs.pool == 'true'
         uses: SSFSKIM/ci-kit/pool-ensure@v1
@@ -215,7 +219,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.e2e != '[]'
     name: e2e:${{ matrix.group }}
-    runs-on: ${{ fromJSON(needs.plan.outputs.e2e_runner) }}
+    runs-on: ${{ fromJSON(matrix.runner) }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -246,9 +250,12 @@ jobs:
             : >"$RUNNER_TEMP/e2e-specs"
           fi
       # DC5: the desk's browser suites drive Playwright's own Chromium on Linux; a Mac drives its installed Chrome. The
-      # phone's layout cases run again in Playwright's WebKit, on Linux only (apps/desk-web/playwright.config.ts).
+      # phone's layout cases run again in Playwright's WebKit, on Linux only (apps/desk-web/playwright.config.ts). On the
+      # pool, --with-deps installs their system libraries through the runner's passwordless sudo, as on a hosted runner.
+      # The install uses desk-web's own Playwright, the copy its suite runs, so the browsers match it whatever the root
+      # package pins.
       - if: matrix.group == 'desk-web' && runner.os == 'Linux'
-        run: pnpm exec playwright install --with-deps chromium webkit
+        run: pnpm --filter desk-web exec playwright install --with-deps chromium webkit
       - env:
           SCRIPT: ${{ matrix.script }}
         run: |
