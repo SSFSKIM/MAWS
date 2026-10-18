@@ -495,9 +495,9 @@ export class DeskTranscript {
       case 'chunk': {
         if (!this.layer.chunk(message.body)) return;
         this.publish();
-        // The bridge's stamp, ms on the machine's clock; `t` joins the chunk's type with the hub's #57 change.
-        const t = (message.body as { t?: unknown }).t;
-        if (message.body.agentId === this.target.agentId && typeof t === 'number') latency.drawn('stream.chunk', t, true);
+        // The bridge's stamp, ms on the machine's clock (absent from an older producer).
+        const { t } = message.body;
+        if (message.body.agentId === this.target.agentId && typeof t === 'number' && Number.isFinite(t)) latency.drawn('stream.chunk', t, true);
         return;
       }
       case 'block-row':
