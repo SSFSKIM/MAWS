@@ -730,3 +730,27 @@ describe('aggregate overflow and renamed measures', () => {
     expect(own).toContain('<td class="dash-num">10%</td>');
   });
 });
+
+// P3-F dashboard-model wave: what valid data the figure must still say, whatever its words or its size.
+describe('labels and values at their edges (P3-F dashboard-model wave)', () => {
+  /** The legend's labels, in its order. */
+  const legendLabels = (svg: string) => [.../<g>(.*?)<\/g>/.exec(svg)![1].matchAll(/<text [^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
+
+  // sweep#1: a whitespace-only text is a valid cell, a category or a series with no words to wrap
+  const blank: ViewTable = { columns: [{ name: 'k', type: 'string' }, { name: 's', type: 'string' }, { name: 'v', type: 'number' }], rows: [[' ', ' ', 1], ['b', 'B', 2]] };
+  it('draws a blank pie category as an empty label in the list, its tip whole, never throwing', () => {
+    const pie = renderView({ view: 'pie', x: 'k', y: 'v' }, blank, theme, 't');
+    expect(tips(pie.svg!)).toEqual([' : 1 (33.3%)', 'b: 2 (66.7%)']);
+    expect(grade(pie.svg!).problems).toEqual([]);
+    expect(pie.svg).not.toMatch(/undefined|NaN/);
+  });
+
+  it('draws a blank series as an empty label in the legend, never throwing', () => {
+    for (const view of ['bar', 'line']) {
+      const { svg = '' } = renderView({ view, x: 'k', y: 'v', series: 's' }, blank, theme, 't');
+      expect(legendLabels(svg), view).toEqual(['', 'B']);
+      expect(grade(svg).problems, view).toEqual([]);
+      expect(svg, view).not.toMatch(/undefined|NaN/);
+    }
+  });
+});
