@@ -2,6 +2,7 @@
 // M4): every host-owned command has a handler and one deadline shape, the store's refusals reach the caller typed, the
 // test-only commands answer only under MAWS_E2E=1, the change feed is emitted, and a document port main posts is
 // attached for a document kind and closed for anything else.
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -236,6 +237,33 @@ describe('the artifacts and spaces surface (M4)', () => {
     const closed = new Promise<void>((resolve) => port2.once('close', () => resolve()));
     docHandler!({ t: 'doc', channel: 1, artifactId: '33333333-3333-4333-8333-333333333333', actor: { kind: 'human' } }, asPortMain(port1));
     await closed;
+  });
+});
+
+// F's L139 (the P3-A landing's tracker row): the owner's file create, copy and restore hash a file artifact's bytes by a
+// streamed read before the write's batch opens, as the agent's `send_file` and `artifact_create` do, so a large file
+// never holds the host's event loop inside the transaction; what is recorded is still the bytes' own size and hash.
+describe('the owner’s file writes hash before their batch', () => {
+  it('creates, copies and restores a large file artifact without hashing inside a batch, recording its digest', async () => {
+    const big = Buffer.alloc(3 * 1024 * 1024 + 7);
+    for (let i = 0; i < big.length; i++) big[i] = (i * 31) % 251;
+    const file = join(dir, 'big.bin');
+    writeFileSync(file, big);
+    const inBatch: boolean[] = [];
+    const files = documents!.store.files;
+    const hashInPlace = files.describe.bind(files);
+    vi.spyOn(files, 'describe').mockImplementation((path) => (inBatch.push(documents!.storage.batchOpen), hashInPlace(path)));
+    const digest = { size: big.length, sha256: createHash('sha256').update(big).digest('hex') };
+
+    const created = (await call('artifacts.create', { kind: 'file', title: 'Big', content: { path: file } })).artifact;
+    expect(await call('artifacts.content', { artifactId: created.id })).toMatchObject({ kind: 'file', path: file, ...digest });
+    const copy = (await call('artifacts.duplicate', { artifactId: created.id })).artifact;
+    expect(await call('artifacts.content', { artifactId: copy.id })).toMatchObject({ kind: 'file', path: file, ...digest });
+    const [first] = (await call('artifacts.versions', { artifactId: created.id })).versions;
+    await call('artifacts.restore', { artifactId: created.id, versionId: first!.id });
+    expect(await call('artifacts.content', { artifactId: created.id })).toMatchObject({ kind: 'file', path: file, ...digest });
+
+    expect(inBatch).toEqual([]);
   });
 });
 

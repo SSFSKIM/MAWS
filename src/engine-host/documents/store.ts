@@ -449,7 +449,7 @@ export class ArtifactStore {
     const version = options.versionId === undefined ? undefined : this.requireVersion(artifactId, options.versionId);
     const id = randomUUID();
     const at = this.now();
-    const content = isDocKind(source.kind) ? null : this.byteContentOf(source, version ? (JSON.parse(version.content!) as ContentRef) : this.contentRef(artifactId).ref);
+    const content = isDocKind(source.kind) ? null : await this.withDigest(this.byteContentOf(source, version ? (JSON.parse(version.content!) as ContentRef) : this.contentRef(artifactId).ref)); // F (L139): hashed before the batch
     const state = !isDocKind(source.kind) ? null : version ? this.versions.state(artifactId, version.id) : this.service.readState(artifactId).state;
     const pinned = version ? (JSON.parse(version.assetRefs) as string[]) : this.assetIds(artifactId);
     const assets = state ? this.retention.copiedAssets(artifactId, pinned, state) : pinned; // E3: never a snapshot its state cannot name
@@ -646,6 +646,16 @@ export class ArtifactStore {
 
   private byteContentOf(row: EntityRow, ref: ContentRef): ByteContent {
     return row.kind === 'html' ? { bytes: this.files.read(row.id, ref), name: ref.name } : { path: ref.path };
+  }
+
+  // A file's content with its digest, hashed now by a streamed read (`files.describeStreamed`), so the write's batch only
+  // records it and a large file never holds the event loop inside the transaction (the owner's create, copy and restore,
+  // as the agent's `send_file` and `artifact_create` hash first). Bytes, a given digest, or a path that cannot be read
+  // are answered unchanged: the write's own checks refuse what it cannot use.
+  async withDigest(content: ByteContent): Promise<ByteContent> {
+    if (!('path' in content) || content.digest || !isAbsolute(content.path)) return content;
+    const described = await this.files.describeStreamed(content.path).catch(() => null);
+    return described ? { path: content.path, digest: { sha256: described.sha256, size: described.size } } : content;
   }
 
   // Inside a savepoint: one byte-kind write (its log row, its file in place, its version, pinned to the governing design

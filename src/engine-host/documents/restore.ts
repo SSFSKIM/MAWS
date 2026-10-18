@@ -23,7 +23,8 @@ export const restoreLabel = (version: Pick<VersionRow, 'label' | 'at'>): string 
 export async function restoreArtifact(store: ArtifactStore, row: EntityRow, version: VersionRow, actor: Actor, inFrame?: InFrame<{ revision: number; versionId: number }>): Promise<{ revision: number; versionId: number }> {
   const label = restoreLabel(version);
   if (!isDocKind(row.kind)) {
-    const written = await store.writeBytes(row, actor, store.readBytes(row, JSON.parse(version.content!) as ContentRef), { kind: 'restore', label }, inFrame);
+    const content = await store.withDigest(store.readBytes(row, JSON.parse(version.content!) as ContentRef)); // F (L139): a file hashed before the batch
+    const written = await store.writeBytes(row, actor, content, { kind: 'restore', label }, inFrame);
     return { revision: written.revision, versionId: written.versionId };
   }
   const { service } = store;
