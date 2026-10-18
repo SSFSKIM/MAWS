@@ -19,8 +19,25 @@
     "notRun": "packaged scene, lint, typecheck; remote gate required"
   },
   "reviewer": "a28c0a091cef6f3c5",
-  "review": "independent high running on immutable three-path range; no verdict yet",
+  "review": "one verified P2: inherited NODE_OPTIONS differs from actual packaged supervisor scrub",
   "gate": "combined pair5 must include packaged and connectors-direct plus shared static/unit/probes/Darwin and W-E named/measured groups",
   "claim": "actual packaged supervisor route D plus packaged-binary RunAsNode dependency resolution inside Resources; no model turn,OAuth or native custody claim",
-  "paidSpendUsd": 0
+  "paidSpendUsd": 0,
+  "fixExecutor": "aa596e346b79e8587",
+  "fixPaths": [
+    "e2e/support/packaged-resolution.ts",
+    "test/support/packaged-resolution.test.ts"
+  ],
+  "reviewRecord": "reviews/W-PKG-result.txt",
+  "fix": {
+    "executor": "aa596e346b79e8587",
+    "commits": [
+      "24c606c906ab55dfd4ea2b41b80e7f6282abc213",
+      "4463dcac6d06e8802af0f42347ef215cd4d7599b"
+    ],
+    "controllerVerified": "final two-file supplement diff; red2.exit1,green3.exit0;6/6 green3.log",
+    "logs": "/tmp/maws-review/wpkg-fix/",
+    "recheck": "a28c0a091cef6f3c5 closed original scrub and allowlisted capture; mechanical test-path quoting correction pending, no third review",
+    "testBoundaryDeviation": "24c606c90 regression temporarily wrote full child environment to owned scratch file. Controller caught it before recheck and notified architect. Actual sensitive-value presence unknown; neither controller nor worker opened that capture afterward. afterEach removes scratch root and GREEN completed.4463dcac6 records only six controlled fields/presence; no complete environment dump. No claim earlier capture safe."
+  }
 }

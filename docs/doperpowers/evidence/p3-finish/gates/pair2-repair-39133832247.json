@@ -158,5 +158,10 @@
     "commit": "4b0e1f1e3",
     "verification": "controller read exact callback-only diff and retained Bash eslint exit0",
     "next": "authoritative typecheck in DOC-A/DECK union"
+  },
+  "viewerConfound": {
+    "record": "viewer-confound.json",
+    "note": "Screen Sharing attached during this run or its known17:45Z interval; not a cause inferred, native focus snapshots and existing diagnoses stand. remote=none is unreliable (ci-kit#50).",
+    "knownInputOverlap": "no input overlap established for this specific reading"
   }
 }

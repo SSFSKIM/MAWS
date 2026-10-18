@@ -380,12 +380,15 @@
   },
   "W-PKG": {
     "executor": "af1eb156dd5f3f542",
-    "status": "source f58b9736b committed, row narrowed; independent high review running; packaged proof pending",
+    "status": "probe environment fix24c606c90 plus allowlisted-test supplement4463dcac6 single recheck closed scrub; mechanical wrapper quoting correction running",
     "claims": "pair5-claims.json",
     "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
     "rowCommit": "f58b9736b7512a097c86a7dbf48cbcd8913d1c9d",
     "reviewer": "a28c0a091cef6f3c5",
-    "checkpoint": "waves/W-PKG-checkpoint.json"
+    "checkpoint": "waves/W-PKG-checkpoint.json",
+    "fixExecutor": "aa596e346b79e8587",
+    "fixCommit": "24c606c906ab55dfd4ea2b41b80e7f6282abc213",
+    "fixSupplement": "4463dcac6d06e8802af0f42347ef215cd4d7599b"
   },
   "pair4GatePrepared": {
     "launcher": "/tmp/maws-review/p3f-doc-b-shell-launch.sh",
@@ -470,5 +473,6 @@
     "notFinalSource": true,
     "fullSetCounterAdvance": false,
     "paidSpendUsd": 0
-  }
+  },
+  "nativeViewerContext": "viewer-confound.json; CI-opt reported attached since12:49:09Z through17:45Z, remote=none unreliable; no failure cause inferred"
 }

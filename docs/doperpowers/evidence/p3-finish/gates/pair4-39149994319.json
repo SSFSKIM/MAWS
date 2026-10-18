@@ -46,5 +46,10 @@
   "consumerScope": "C10 nonempty fixture users covered by side,to-human,browser-comment,available,library and sessions through default; shared HTML frame/Document CardHost, browser cover, panel/transcript and agent graph included. c12 has empty fixture list and does not seed.",
   "notFinalSource": true,
   "fullSetCounterAdvance": false,
-  "paidSpendUsd": 0
+  "paidSpendUsd": 0,
+  "viewerConfound": {
+    "record": "viewer-confound.json",
+    "note": "Screen Sharing attached during this run or its known17:45Z interval; not a cause inferred, native focus snapshots and existing diagnoses stand. remote=none is unreliable (ci-kit#50).",
+    "knownInputOverlap": "no input overlap established for this specific reading"
+  }
 }

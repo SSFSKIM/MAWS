@@ -29,5 +29,10 @@
     "e2e:design": "14 passed,55.6s"
   },
   "afterGateEvidenceStatus": "empty",
-  "union": "all13 original selected groups green across39140360292 and this fix-only corrective retry; no full-set credit"
+  "union": "all13 original selected groups green across39140360292 and this fix-only corrective retry; no full-set credit",
+  "viewerConfound": {
+    "record": "viewer-confound.json",
+    "note": "Screen Sharing attached during this run or its known17:45Z interval; not a cause inferred, native focus snapshots and existing diagnoses stand. remote=none is unreliable (ci-kit#50).",
+    "knownInputOverlap": "no input overlap established for this specific reading"
+  }
 }

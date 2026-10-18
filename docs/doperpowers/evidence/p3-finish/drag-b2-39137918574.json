@@ -1,6 +1,6 @@
 {
   "run": "2026-10-18T14:53:22.230Z",
-  "deck": "benchDeckFiles(100): S6\u2019s seven bench shapes cycled, S7b\u2019s 100-slide deck",
+  "deck": "benchDeckFiles(100): S6’s seven bench shapes cycled, S7b’s 100-slide deck",
   "loads": {
     "start": 6.39,
     "end": 3.04
@@ -65,18 +65,18 @@
       ]
     }
   },
-  "heavyPreview": "skipped: MAWS_DECK_HISTORY names no export of S7a\u2019s heavy deck soak (src/engine-host/presentations/history-bench.test.ts says how)",
+  "heavyPreview": "skipped: MAWS_DECK_HISTORY names no export of S7a’s heavy deck soak (src/engine-host/presentations/history-bench.test.ts says how)",
   "marginal": [],
   "judging": {
     "marginalMiss": 0.2,
     "marginalLoad": 10,
-    "rule": "Decision Log 24: marginal under a 20 % miss at load \u2265 10; failed at a 20 % miss or more, any miss below load 10, any miss of a zero bound; a row judged on its best trial (the parent\u2019s Decision Log 54), a per-publish bound on the median of its publishes (judgedBy)"
+    "rule": "Decision Log 24: marginal under a 20 % miss at load ≥ 10; failed at a 20 % miss or more, any miss below load 10, any miss of a zero bound; a row judged on its best trial (the parent’s Decision Log 54), a per-publish bound on the median of its publishes (judgedBy)"
   },
   "rows": [
     {
       "row": "1 open cold",
-      "measure": "open cold to interactive: the editor\u2019s createState to the stage and 100 live thumbnails drawn, the host\u2019s copy unloaded first",
-      "bound": "\u2264 1,000 ms (S7b 116)",
+      "measure": "open cold to interactive: the editor’s createState to the stage and 100 live thumbnails drawn, the host’s copy unloaded first",
+      "bound": "≤ 1,000 ms (S7b 116)",
       "limit": 1000,
       "unit": "ms",
       "value": 97.9,
@@ -87,7 +87,7 @@
         {
           "value": 155.2,
           "load": 5.21,
-          "note": "synced at 55.0 ms; 100 thumbnails; the window\u2019s first open of a deck"
+          "note": "synced at 55.0 ms; 100 thumbnails; the window’s first open of a deck"
         },
         {
           "value": 103.8,
@@ -103,8 +103,8 @@
     },
     {
       "row": "1 open warm",
-      "measure": "open warm: the same, reopened at once (the host\u2019s copy loaded)",
-      "bound": "\u2264 1,000 ms",
+      "measure": "open warm: the same, reopened at once (the host’s copy loaded)",
+      "bound": "≤ 1,000 ms",
       "limit": 1000,
       "unit": "ms",
       "value": 80.4,
@@ -131,8 +131,8 @@
     },
     {
       "row": "4 publish one slide",
-      "measure": "a one-slide publish through A\u2019s publishDoc on the 100-slide deck (the agent\u2019s session, after its own publish): the host loop\u2019s busy time over the call, median of 7",
-      "bound": "\u2264 50 ms",
+      "measure": "a one-slide publish through A’s publishDoc on the 100-slide deck (the agent’s session, after its own publish): the host loop’s busy time over the call, median of 7",
+      "bound": "≤ 50 ms",
       "limit": 50,
       "unit": "ms",
       "value": 42.45,
@@ -143,45 +143,45 @@
         {
           "value": 32.76,
           "load": 3.95,
-          "note": "loop\u2019s longest stretch 33.8 ms; wall 33.7 ms"
+          "note": "loop’s longest stretch 33.8 ms; wall 33.7 ms"
         },
         {
           "value": 50.95,
           "load": 3.95,
-          "note": "loop\u2019s longest stretch 51.9 ms; wall 51.9 ms"
+          "note": "loop’s longest stretch 51.9 ms; wall 51.9 ms"
         },
         {
           "value": 33.2,
           "load": 3.95,
-          "note": "loop\u2019s longest stretch 34.2 ms; wall 34.2 ms"
+          "note": "loop’s longest stretch 34.2 ms; wall 34.2 ms"
         },
         {
           "value": 32.29,
           "load": 3.95,
-          "note": "loop\u2019s longest stretch 33.3 ms; wall 33.3 ms"
+          "note": "loop’s longest stretch 33.3 ms; wall 33.3 ms"
         },
         {
           "value": 49.72,
           "load": 3.95,
-          "note": "loop\u2019s longest stretch 50.7 ms; wall 50.7 ms"
+          "note": "loop’s longest stretch 50.7 ms; wall 50.7 ms"
         },
         {
           "value": 47.82,
           "load": 3.95,
-          "note": "loop\u2019s longest stretch 40.7 ms; wall 49.8 ms"
+          "note": "loop’s longest stretch 40.7 ms; wall 49.8 ms"
         },
         {
           "value": 42.45,
           "load": 3.95,
-          "note": "loop\u2019s longest stretch 34.8 ms; wall 44.4 ms"
+          "note": "loop’s longest stretch 34.8 ms; wall 44.4 ms"
         }
       ],
       "note": "longest stretch p95 51.9 ms"
     },
     {
       "row": "4 publish whole deck",
-      "measure": "a whole-deck publish (100 slide files, each changed) through A\u2019s publishDoc: the host loop\u2019s busy time over the call, median of 5",
-      "bound": "\u2264 200 ms",
+      "measure": "a whole-deck publish (100 slide files, each changed) through A’s publishDoc: the host loop’s busy time over the call, median of 5",
+      "bound": "≤ 200 ms",
       "limit": 200,
       "unit": "ms",
       "value": 150.51,
@@ -192,27 +192,27 @@
         {
           "value": 190.49,
           "load": 3.95,
-          "note": "loop\u2019s longest stretch 191.5 ms; wall 191.5 ms"
+          "note": "loop’s longest stretch 191.5 ms; wall 191.5 ms"
         },
         {
           "value": 155.84,
           "load": 3.95,
-          "note": "loop\u2019s longest stretch 156.8 ms; wall 156.8 ms"
+          "note": "loop’s longest stretch 156.8 ms; wall 156.8 ms"
         },
         {
           "value": 150.51,
           "load": 3.79,
-          "note": "loop\u2019s longest stretch 150.5 ms; wall 150.5 ms"
+          "note": "loop’s longest stretch 150.5 ms; wall 150.5 ms"
         },
         {
           "value": 150.15,
           "load": 3.79,
-          "note": "loop\u2019s longest stretch 89.6 ms; wall 152.1 ms"
+          "note": "loop’s longest stretch 89.6 ms; wall 152.1 ms"
         },
         {
           "value": 140.86,
           "load": 3.79,
-          "note": "loop\u2019s longest stretch 79.0 ms; wall 142.8 ms"
+          "note": "loop’s longest stretch 79.0 ms; wall 142.8 ms"
         }
       ],
       "note": "longest stretch max 191.5 ms"
@@ -220,7 +220,7 @@
     {
       "row": "2 drag p95",
       "measure": "drag move to frame, p95 over 200 pointer moves, while the agent republishes one slide every 0.7 s through publishDoc",
-      "bound": "p95 \u2264 16 ms (S7b 8.9)",
+      "bound": "p95 ≤ 16 ms (S7b 8.9)",
       "limit": 16,
       "unit": "ms",
       "value": 18.5,
@@ -231,24 +231,24 @@
         {
           "value": 18.5,
           "load": 3.79,
-          "note": "167/200 moves wrote; move \u2192 transaction p95 17.5 ms; move \u2192 frame p50 10.3, max 22.6 ms; 0 long tasks; the agent published 8 slides (busy p95 45.7 ms)"
+          "note": "167/200 moves wrote; move → transaction p95 17.5 ms; move → frame p50 10.3, max 22.6 ms; 0 long tasks; the agent published 8 slides (busy p95 45.7 ms)"
         },
         {
           "value": 20.1,
           "load": 3.52,
-          "note": "169/200 moves wrote; move \u2192 transaction p95 18.9 ms; move \u2192 frame p50 10.6, max 21.9 ms; 0 long tasks; the agent published 8 slides (busy p95 52.8 ms)"
+          "note": "169/200 moves wrote; move → transaction p95 18.9 ms; move → frame p50 10.6, max 21.9 ms; 0 long tasks; the agent published 8 slides (busy p95 52.8 ms)"
         },
         {
           "value": 19,
           "load": 3.23,
-          "note": "167/200 moves wrote; move \u2192 transaction p95 18.1 ms; move \u2192 frame p50 10.9, max 22.8 ms; 0 long tasks; the agent published 8 slides (busy p95 45.9 ms)"
+          "note": "167/200 moves wrote; move → transaction p95 18.1 ms; move → frame p50 10.9, max 22.8 ms; 0 long tasks; the agent published 8 slides (busy p95 45.9 ms)"
         }
       ]
     },
     {
       "row": "5 preview",
-      "measure": "history preview of a version (the seeded one, against the deck after the run\u2019s publishes and drags): the controller\u2019s request to the slide drawn with its marks",
-      "bound": "\u2264 1,000 ms",
+      "measure": "history preview of a version (the seeded one, against the deck after the run’s publishes and drags): the controller’s request to the slide drawn with its marks",
+      "bound": "≤ 1,000 ms",
       "limit": 1000,
       "unit": "ms",
       "value": 58.7,
@@ -272,8 +272,8 @@
     },
     {
       "row": "3 renderer 1",
-      "measure": "the renderer\u2019s working set (window 1) with the deck open after the drags and the previews, read after a forced collection",
-      "bound": "\u2264 500 MB",
+      "measure": "the renderer’s working set (window 1) with the deck open after the drags and the previews, read after a forced collection",
+      "bound": "≤ 500 MB",
       "limit": 500,
       "unit": "MB",
       "value": 266.6,
@@ -288,5 +288,9 @@
       ],
       "note": "378.9 MB before the collection"
     }
-  ]
+  ],
+  "viewerContext": {
+    "record": "viewer-confound.json",
+    "note": "job falls within reported attached-viewer interval; shared A/B context, no extra causal claim or bound waiver; accepted no-discernible-gap reading retained"
+  }
 }
