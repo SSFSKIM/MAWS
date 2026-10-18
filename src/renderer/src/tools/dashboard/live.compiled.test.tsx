@@ -8,6 +8,7 @@ import '../../../../../test/support/artifacts-dom-setup'; // first: the editor l
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
+import { newDoc } from '@artifacts/yjs'; // E3 panel residual
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { schemaFor } from '@artifacts/document/schema';
 import { createDocument } from '@artifacts/document/tabs';
@@ -41,6 +42,8 @@ let memory: MemoryDocumentHost;
 let off = () => {};
 let client: FakeClient;
 let surface: ReturnType<typeof fakeSurface>;
+// E3 panel residual: the window's dataset holds, as main answers them
+let holds: { refs: string[]; released: boolean; lose(): void }[] = [];
 beforeEach(() => {
   resetShellStores();
   resetEditorHosts();
@@ -50,6 +53,7 @@ beforeEach(() => {
   window.maws = client.client;
   memory = new MemoryDocumentHost();
   surface = fakeSurface();
+  holds = [];
 });
 afterEach(() => {
   cleanup();
@@ -99,7 +103,13 @@ function deps(): DocumentTabDeps {
       return handle;
     },
     readDataset: vi.fn(async () => PAGE),
-    holdDatasets: async () => ({ release: () => {}, invalidated: new Promise<void>(() => {}) }),
+    holdDatasets: async (_artifactId: string, refs: readonly string[]) => {
+      let lose!: () => void;
+      const invalidated = new Promise<void>((resolve) => (lose = resolve));
+      const entry = { refs: [...refs], released: false, lose };
+      holds.push(entry);
+      return { release: () => void (entry.released = true), invalidated };
+    },
     downloadAsset: vi.fn(async () => ({ path: null })),
     versionState: async () => new Uint8Array(),
     attributions: async () => new Uint8Array(),
@@ -206,6 +216,30 @@ describe('a live dashboard in L’s surfaces (E3 M3)', () => {
     expect(within(block).getByText(words)).toBeTruthy(); // transient answers are no authority over it
     act(() => memory.write((doc) => setDataset(doc, 'sales', { ...live, state: { status: 'ok', at: AT + 90_000 } }))); // a later success
     await until(() => within(block).queryByText(words) === null, 'the error gone with the success');
+  });
+
+  // E3 panel residual (the retained high review): L's pane renders only its active tab's body, and B's history drops a
+  // preview when its editor detaches; the body's unmount lets the preview's hold go, where its window hiding does not
+  it('a displayed preview’s hold outlasts its window hiding and goes with its body’s unmount, taken again by nothing (E3 panel residual)', async () => {
+    const m = mount();
+    await until(() => document.querySelector('button.dash-source-label') !== null, 'the view');
+    const version = newDoc(); // the version the editor displays (B's history preview reports it so)
+    setDataset(version, 'sales', { ...live, source: { ...live.source, snapshot: { ref: 'assets/query-0.json', at: AT - 60_000 } } } as DatasetDescriptor);
+    act(() => m.state.displayed(version));
+    const previewed = () => holds.filter((hold) => hold.refs.includes('assets/query-0.json'));
+    await until(() => previewed().length === 1, 'the preview’s hold');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    act(() => void document.dispatchEvent(new Event('visibilitychange'))); // the window hid: the body stays mounted
+    expect(visibility().at(-1)).toBe(false);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(previewed().map((hold) => hold.released)).toEqual([false]);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    act(() => void document.dispatchEvent(new Event('visibilitychange')));
+    m.unmount(); // its tab went inactive: the pane unmounts the body
+    await until(() => previewed()[0]!.released, 'the preview’s hold let go');
+    previewed()[0]!.lose(); // a host restart afterwards
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(previewed()).toHaveLength(1); // nothing taken again
   });
 
   it('an open sheet loses its live controls while a history preview or suggestion review runs, and gets them back (E3 M3 fix)', async () => {

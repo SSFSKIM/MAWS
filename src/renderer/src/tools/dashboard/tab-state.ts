@@ -11,12 +11,13 @@ import { listDatasets, snapshotOf, type DatasetDescriptor } from '@artifacts/das
 import { datasetChanges } from '@artifacts/dashboard/history';
 import { createChartRenderer } from '@artifacts/dashboard/editor/chart-view';
 import { SourceSheetState, type SheetDataset, type SheetRecapture } from '@artifacts/dashboard/editor/sheet';
-import { SnapshotReader, type SnapshotLease } from '@artifacts/dashboard/snapshots';
+import { SnapshotReader } from '@artifacts/dashboard/snapshots';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import { DocumentTabState, type DocumentTabDeps } from '../document/tab-state';
 import { LiveDatasetsController } from './live-datasets'; // E3
 import type { DashboardLiveDeps } from './live-start'; // E3
+import { PreviewHold } from './preview-hold'; // E3 panel
 
 /** E3: how long an open source sheet whose hold the host's restart took waits for the displayed document to sync again
  * before it says the snapshot is unavailable (the host has not come back). */
@@ -35,7 +36,7 @@ export class DashboardTabState {
   private bodyShown = false; // E3 M3: the body on screen and its window's document visible
   private shown: SheetDataset[] = [];
   private stopShown = () => {};
-  private previewHold: { key: string; lease: SnapshotLease } | null = null; // E3 panel: the displayed preview's snapshots
+  private readonly preview: PreviewHold; // E3 panel: the snapshots a displayed preview names, held while it is displayed
   // E3: how many times the live replica has come to be live and synced (a host restart's reconnection is one more)
   private syncs = 0;
   private synced = false;
@@ -59,6 +60,7 @@ export class DashboardTabState {
     });
     this.document = new DocumentTabState(target, { ...deps, extraChanges: datasetChanges }); // M4: B's history counts its dataset changes
     this.reader = new SnapshotReader(deps.host, target.artifactId);
+    this.preview = new PreviewHold((refs) => this.reader.holdAll(refs), (line) => deps.log(`dashboard ${target.artifactId}: ${line}`)); // E3 panel
     this.renderChart = createChartRenderer({
       reader: this.reader,
       actorName: this.actorName,
@@ -89,41 +91,29 @@ export class DashboardTabState {
   actorName = (actor: Actor): string => actorDisplay(actor, actor.kind === 'session' ? this.deps.sessionTitle(actor.appSessionId) : undefined).name;
 
   /** The editor shows `doc` now (the live one, a version's, the suggestion replica's): its datasets, followed as values.
-   * E3 panel: a preview's (any document but the live one) snapshots held while it is displayed. */
+   * E3 panel: a preview's (any document but the live one) snapshots held while it is displayed (./preview-hold.ts); the
+   * live document takes no such hold, its current descriptors protecting what it names. */
   displayed = (doc: Doc): void => {
     this.stopShown();
     const preview = doc !== this.document.snapshot().handle?.doc; // E3 panel
     const capture = () => {
       this.shown = listDatasets(doc).map(({ id, descriptor }) => ({ id, descriptor }));
-      this.holdPreview(preview ? this.shown : []); // E3 panel
+      this.preview.want(preview ? this.shown.flatMap(({ descriptor }) => snapshotOf(descriptor)?.ref ?? []) : []); // E3 panel
     };
     capture();
     this.stopShown = onUpdate(doc, capture);
   };
 
-  // E3 panel wave (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, Decision Log 16 (3); R1b: a preview is held
-  // while displayed): every snapshot the displayed preview names, in one hold, until another document is displayed or
-  // the tab ends, so retention never takes what a version or a review shows (whatever version pinned it pruned meanwhile).
-  // New refs are held before the old hold goes; one the host's restart took is taken again on the same immutable refs.
-  // The live document takes none: its current descriptors protect what it names.
-  private holdPreview(datasets: readonly SheetDataset[]): void {
-    const refs = [...new Set(datasets.flatMap(({ descriptor }) => snapshotOf(descriptor)?.ref ?? []))].sort();
-    const key = refs.join('\n');
-    const before = this.previewHold;
-    if (before?.key === key) return;
-    this.previewHold = null;
-    if (refs.length > 0 && !this.disposed) {
-      const held = { key, lease: this.reader.holdAll(refs) };
-      this.previewHold = held;
-      void held.lease.invalidated.then(() => {
-        if (this.previewHold !== held) return;
-        this.previewHold = null;
-        this.holdPreview(datasets); // still displayed: held again
-        held.lease.release();
-      });
-    }
-    before?.lease.release();
-  }
+  /** E3 panel residual: the editor's body unmounted (its tab inactive or its surface gone, not its window merely hidden):
+   * B's history dropped any preview or review with it, so the live document is what the tab shows again and the
+   * preview's hold goes, never taken again by a later restart. */
+  bodyUnmounted = (): void => {
+    const live = this.document.snapshot().handle?.doc;
+    if (live && !this.disposed) return this.displayed(live);
+    this.stopShown();
+    this.stopShown = () => {};
+    this.preview.clear();
+  };
 
   /** E3 M3: the editor's report that its body is on screen with its window's document visible (false once it unmounts). */
   setBodyShown = (shown: boolean): void => {
@@ -197,8 +187,7 @@ export class DashboardTabState {
     for (const wake of [...this.syncWaiters]) wake();
     this.stopShown();
     this.stopShown = () => {};
-    this.previewHold?.lease.release(); // E3 panel
-    this.previewHold = null;
+    this.preview.dispose(); // E3 panel
     this.sheet.close();
     this.reader.dispose(); // E3: the reader's holds go with the tab
     this.document.dispose();

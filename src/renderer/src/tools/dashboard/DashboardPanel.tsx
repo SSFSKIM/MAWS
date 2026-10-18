@@ -4,7 +4,8 @@
 // its view and caption (E's Decision Log 28). A dashboard made before dashboards were
 // documents (held legacy content: files and no tab) is shown as held, its files named with the way forward, never as an
 // editable blank document. E3 M3: the body reports whether it is on screen with its window's document visible (its tab's
-// live datasets are shown only then) and gives the sheet the tab's live datasets.
+// live datasets are shown only then) and gives the sheet the tab's live datasets. E3 panel residual: its unmount (an
+// inactive tab, a closed surface), unlike its window hiding, ends whatever preview it displayed for the tab's holds.
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { blockCommentQuote } from '@artifacts/dashboard/comments';
 import { legacyDashboardFiles } from '@artifacts/dashboard/legacy';
@@ -52,7 +53,13 @@ function DashboardBody({ state, surface, ...props }: DashboardEditorProps & { su
   // E3 M3: the live datasets shown only while this body is on screen and its window's document is visible
   const shown = useDocumentVisible() && props.visible;
   useEffect(() => state.setBodyShown(shown), [state, shown]);
-  useEffect(() => () => state.setBodyShown(false), [state]);
+  useEffect(
+    () => () => {
+      state.setBodyShown(false);
+      state.bodyUnmounted(); // E3 panel residual: the body went (not its window hiding): any preview's hold goes with it
+    },
+    [state],
+  );
   const document = useSyncExternalStore(state.document.subscribe, state.document.snapshot);
   const sheet = useSyncExternalStore(state.sheet.subscribe, state.sheet.snapshot);
   const held = useHeldFiles(document.handle?.doc ?? null);
