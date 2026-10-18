@@ -571,13 +571,21 @@ function cssRefProblem(css: string): string | null {
 /**
  * Claude's svg rules (format.md, "Graphics"): one opaque graphic whose root and every descendant hold no `<script>` or
  * `<foreignObject>`, no `on*` handler, no script URL, and no reference (an `href`, a `src`, a CSS `url()` in an attribute,
- * a `style` or a `<style>`, read with CSS escapes decoded; an animated `href`'s values) but a local `#id`. The reason, or
- * null when it passes.
+ * a `style` or a `<style>`, read with CSS escapes decoded; an animated `href`'s values) but a local `#id`. A `<desc>` or
+ * `<title>` holds text: parse5 and the browser read HTML inside them (integration points, as inside `<foreignObject>`),
+ * so an element there is an HTML element the dialect never screened (an `iframe srcdoc`, an `img srcset`, a `video
+ * poster`, an `object data`, a `meta refresh`, a form), held as `<foreignObject>` is; a `<style>` alone is admitted,
+ * read here as any svg stylesheet, and the canvas and the export scope it (P3-F slide-model scalpel-4#1; B1, A16). The
+ * reason, or null when it passes.
  */
 export function svgProblem(root: RawElement): string | null {
   const walk = (n: RawElement): string | null => {
     const tag = n.tag.toLowerCase();
     if (tag === 'script' || tag === 'foreignobject') return `an <svg> holding <${n.tag}>`;
+    if (tag === 'desc' || tag === 'title') {
+      const held = n.children.find((c): c is RawElement => c.kind === 'element' && c.tag.toLowerCase() !== 'style');
+      if (held) return `an <svg> <${n.tag}> holding <${held.tag}> (a desc or title holds text)`;
+    }
     for (const [name, value] of n.attrs) {
       const attr = name.toLowerCase();
       if (attr.startsWith('on')) return `an <svg> with an event handler (${name})`;
