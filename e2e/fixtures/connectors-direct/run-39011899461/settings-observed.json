@@ -1,0 +1,27 @@
+{
+  "env": {
+    "MAWS_PROBE_OVERRIDDEN": "from-settings",
+    "MAWS_PROBE_TOKEN_SHAPED": "benign-token-shaped-not-a-credential",
+    "MAWS_PROBE_ABSENT": "from-settings",
+    "MAWS_PROBE_ABSENT_FALLBACK": "from-settings",
+    "MAWS_PROBE_PLAIN": "plain-envtoy",
+    "MAWS_PROBE_WITHHELD": "",
+    "MAWS_PROBE_NOWHERE_FALLBACK": "fallback",
+    "MAWS_PROBE_LAUNCH": "probe-value-from-launch"
+  },
+  "sdk": {
+    "HOME": "<scratch>/home",
+    "LOGNAME": "new",
+    "PATH": "<scratch>/bin:<runner-work>/node_modules/.bin:~/.cache/node/corepack/v1/pnpm/11.23.0/dist/node-gyp-bin:<runner-work>/node_modules/.bin:~/actions-runner-maws/_work/_temp/bin:~/actions-runner-maws/_work/_tool/node/22.23.3/arm64/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    "SHELL": "/bin/zsh",
+    "TERM": "dumb",
+    "USER": "new"
+  },
+  "reportedArgs": [
+    "--overridden",
+    "from-settings",
+    "--setting",
+    "from-settings"
+  ],
+  "launchPath": "<scratch>/bin:<runner-work>/node_modules/.bin:~/.cache/node/corepack/v1/pnpm/11.23.0/dist/node-gyp-bin:<runner-work>/node_modules/.bin:~/actions-runner-maws/_work/_temp/bin:~/actions-runner-maws/_work/_tool/node/22.23.3/arm64/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+}

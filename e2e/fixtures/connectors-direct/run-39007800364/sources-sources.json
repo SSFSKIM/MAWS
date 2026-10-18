@@ -1,0 +1,121 @@
+[
+  {
+    "name": "usertoy",
+    "status": "connected",
+    "scope": "user",
+    "source": "user",
+    "configFields": [
+      "args",
+      "command",
+      "type"
+    ],
+    "cache": {
+      "ok": true,
+      "scope": "user",
+      "transport": "stdio",
+      "entryPath": [
+        "mcpServers",
+        "usertoy"
+      ]
+    }
+  },
+  {
+    "name": "userref",
+    "status": "connected",
+    "scope": "user",
+    "source": "user",
+    "configFields": [
+      "args",
+      "command",
+      "type"
+    ],
+    "cache": {
+      "ok": false,
+      "why": "unattested"
+    }
+  },
+  {
+    "name": "userhttp",
+    "status": "connected",
+    "scope": "user",
+    "source": "user",
+    "configFields": [
+      "headers",
+      "type",
+      "url"
+    ],
+    "cache": {
+      "ok": true,
+      "scope": "user",
+      "transport": "http",
+      "entryPath": [
+        "mcpServers",
+        "userhttp"
+      ]
+    }
+  },
+  {
+    "name": "userauth",
+    "status": "needs-auth",
+    "scope": "user",
+    "source": "user",
+    "configFields": [
+      "type",
+      "url"
+    ],
+    "cache": {
+      "ok": true,
+      "scope": "user",
+      "transport": "http",
+      "entryPath": [
+        "mcpServers",
+        "userauth"
+      ]
+    }
+  },
+  {
+    "name": "projtoy",
+    "status": "connected",
+    "scope": "project",
+    "source": "project",
+    "configFields": [
+      "args",
+      "command",
+      "type"
+    ],
+    "cache": {
+      "ok": false,
+      "why": "engineOnly"
+    }
+  },
+  {
+    "name": "localtoy",
+    "status": "connected",
+    "scope": "local",
+    "source": "local",
+    "configFields": [
+      "args",
+      "command",
+      "type"
+    ],
+    "cache": {
+      "ok": false,
+      "why": "unidentified"
+    }
+  },
+  {
+    "name": "dyntoy",
+    "status": "connected",
+    "scope": "dynamic",
+    "source": "dynamic",
+    "configFields": [
+      "args",
+      "command",
+      "type"
+    ],
+    "cache": {
+      "ok": false,
+      "why": "engineOnly"
+    }
+  }
+]

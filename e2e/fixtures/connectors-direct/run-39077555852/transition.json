@@ -1,0 +1,207 @@
+{
+  "refreshes": [
+    {
+      "last": "ok n=1 via=direct",
+      "updates": 4,
+      "submitted": 1
+    },
+    {
+      "last": "ok n=1 via=direct",
+      "updates": 5,
+      "submitted": 1
+    },
+    {
+      "last": "ok n=1 via=direct",
+      "updates": 6,
+      "submitted": 1
+    },
+    {
+      "last": "ok n=1 via=direct",
+      "updates": 1,
+      "submitted": 1
+    },
+    {
+      "last": "ok n=1 via=engine",
+      "updates": 2,
+      "submitted": 1
+    }
+  ],
+  "direct": {
+    "last": "ok n=1 via=direct",
+    "updates": 4,
+    "submitted": 1
+  },
+  "back": {
+    "last": "ok n=1 via=engine",
+    "updates": 2,
+    "submitted": 1
+  },
+  "quiet": {
+    "hidden": {
+      "silentMs": 40000,
+      "caught": {
+        "last": "ok n=1 via=direct",
+        "updates": 5,
+        "submitted": 1
+      }
+    },
+    "minimized": {
+      "silentMs": 40000,
+      "caught": {
+        "last": "ok n=1 via=direct",
+        "updates": 6,
+        "submitted": 1
+      }
+    },
+    "unmounted": {
+      "silentMs": 40000,
+      "shown": {
+        "last": "ok n=1 via=direct",
+        "updates": 1,
+        "submitted": 1
+      }
+    }
+  },
+  "eReturn": {
+    "route": "fresh eligible session, not a resume of the old record",
+    "debt": "blank resume (a pinned engine session id with no transcript): the related blank-chat row at docs/tech-debt-tracker.md:242 (2026-10-17, P3-F; it names the side-thread --resume --fork-session manifestation, not this plain no-message acquire), parent Decision Log 102 and P3-HD Decision Log 40",
+    "old": "ab918967-7e54-4161-b1ac-83cfca6a5718",
+    "fresh": {
+      "appSessionId": "f182ca8d-3bbf-4877-9682-49218870c871",
+      "start": {
+        "status": "starting",
+        "appSessionId": "f182ca8d-3bbf-4877-9682-49218870c871"
+      },
+      "signals": {
+        "engineProcess": "ready",
+        "mcp": "fixture connected"
+      }
+    }
+  },
+  "pids": {
+    "engine": 88372,
+    "engineServer": 88390,
+    "directServer": 89768,
+    "directParent": 88356,
+    "directParentIsSupervisor": true,
+    "resumed": 97140,
+    "engineAgain": 97155,
+    "engineAgainParentIsEngine": true
+  },
+  "journals": [
+    {
+      "turns": {
+        "spawns": 2,
+        "exits": 2,
+        "userFrames": 0,
+        "modelFrames": 1,
+        "needsAuth": 0
+      },
+      "dirMode": "700",
+      "fileModes": [
+        "600",
+        "600"
+      ]
+    },
+    {
+      "turns": {
+        "spawns": 1,
+        "exits": 0,
+        "userFrames": 0,
+        "modelFrames": 0,
+        "needsAuth": 0
+      },
+      "dirMode": "700",
+      "fileModes": [
+        "600"
+      ]
+    }
+  ],
+  "frames": [
+    {
+      "appSessionId": "ab918967-7e54-4161-b1ac-83cfca6a5718",
+      "counts": {
+        "out:control_request": 18,
+        "in:control_request": 3,
+        "out:control_response": 3,
+        "in:control_response": 20,
+        "in:system": 1,
+        "in:result": 1
+      },
+      "otherFrames": 0,
+      "results": [
+        {
+          "spawn": 2,
+          "direction": "in",
+          "subtype": "error_during_execution",
+          "isError": true,
+          "numTurns": 0,
+          "totalCostUsd": 0,
+          "usage": {
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 0,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "<string>",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "<string>",
+            "iterations": "<array:0>",
+            "speed": "<string>",
+            "fallback_credit": null
+          },
+          "modelUsage": {},
+          "errorMatch": true,
+          "keys": [
+            "type",
+            "subtype",
+            "duration_ms",
+            "duration_api_ms",
+            "is_error",
+            "num_turns",
+            "stop_reason",
+            "session_id",
+            "total_cost_usd",
+            "usage",
+            "modelUsage",
+            "permission_denials",
+            "uuid",
+            "errors",
+            "result_index"
+          ]
+        }
+      ],
+      "resultsTotal": 1
+    },
+    {
+      "appSessionId": "f182ca8d-3bbf-4877-9682-49218870c871",
+      "counts": {
+        "out:control_request": 13,
+        "in:control_request": 3,
+        "out:control_response": 3,
+        "in:control_response": 16,
+        "in:system": 1
+      },
+      "otherFrames": 0,
+      "results": [],
+      "resultsTotal": 0
+    }
+  ],
+  "journalsTotal": 2,
+  "startupRejection": {
+    "appSessionId": "ab918967-7e54-4161-b1ac-83cfca6a5718",
+    "ok": false,
+    "failures": [
+      "usage"
+    ]
+  }
+}

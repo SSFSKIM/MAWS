@@ -205,6 +205,21 @@ describe('E8 operations', () => {
     expect(closed).toBe(2);
   });
 
+  // P3-HD M2: route D's owned processes end beside the sessions' stop, and engine.shutdown answers only after them
+  it('starts duringShutdown with the sessions’ stop and answers engine.shutdown only once it settles', async () => {
+    let finish!: () => void;
+    let started = 0;
+    const host = engineHost({ duringShutdown: () => ((started += 1), new Promise<void>((resolve) => (finish = resolve))) });
+    let answered = false;
+    const stopping = host.call('engine.shutdown', { graceMs: 5_000 }).then(() => (answered = true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(started).toBe(1);
+    expect(answered).toBe(false);
+    finish();
+    await stopping;
+    expect(answered).toBe(true);
+  });
+
   it('engine.shutdown stops a running CLI with the host', async () => {
     behave('sleep 30\n');
     const host = engineHost();

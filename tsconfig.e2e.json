@@ -34,6 +34,16 @@
     "src/engine-host/binary-info.ts",
     // P3-H: the connector runs drive a scratch engine through the host's control client and route E's call
     "src/engine-host/controls.ts",
+    // P3-HD: the direct-route probe observes real reports through route D's cache and compares H's fingerprint
+    "src/engine-host/connectors/local-key.ts",
+    // P3-HD M2: the transport scenes drive MAWS's own connections
+    "src/engine-host/connectors/direct-client.ts",
+    "src/engine-host/connectors/direct-http.ts",
+    "src/engine-host/connectors/direct-stdio.ts",
+    "src/engine-host/connectors/direct-wire.ts",
+    "src/engine-host/connectors/provenance.ts",
+    "src/engine-host/connectors/source-entry.ts",
+    "src/engine-host/connectors/status.ts",
     "src/engine-host/mcp-call.ts",
     "src/engine-host/outbound-writer.ts",
     "src/engine-host/rpc.ts",
@@ -60,6 +70,7 @@
     "src/renderer/src/tools/agents/model/relay.ts",
     "src/renderer/src/tools/agents/model/task-graph.ts",
     "src/renderer/src/tools/browser/comment/copy.ts",
+    "src/renderer/src/tools/artifacts/viewers/connectors/copy.ts", // P3-HD M4b: route D's scenes read the sheet's own words
     "src/renderer/src/widgets/plugins/browse.ts",
     "src/renderer/src/widgets/plugins/library.ts",
     "test/live/support/live.ts",

@@ -1,0 +1,17 @@
+[
+  {
+    "name": "mainkey",
+    "status": "connected",
+    "scope": "local",
+    "source": "local",
+    "configFields": [
+      "args",
+      "command",
+      "type"
+    ],
+    "cache": {
+      "ok": false,
+      "why": "unidentified"
+    }
+  }
+]

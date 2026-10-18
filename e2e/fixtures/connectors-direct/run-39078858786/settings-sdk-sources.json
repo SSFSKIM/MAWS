@@ -1,0 +1,22 @@
+[
+  {
+    "name": "sdktoy",
+    "status": "connected",
+    "scope": "user",
+    "source": "user",
+    "configFields": [
+      "args",
+      "command",
+      "type"
+    ],
+    "cache": {
+      "ok": true,
+      "scope": "user",
+      "transport": "stdio",
+      "entryPath": [
+        "mcpServers",
+        "sdktoy"
+      ]
+    }
+  }
+]

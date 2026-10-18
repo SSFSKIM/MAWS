@@ -9,8 +9,12 @@
 // transcript under `~/.claude` already keeps it. The probe's redaction is applied only when a journal is exported as a
 // fixture (`redactJournal`, test/live/support/live.ts); the writer's `redact` option serves that path and tests.
 // Rotation at `maxBytes` continues in `<launchId>.<n>.jsonl` with `seq` continuing; pruning keeps recent launches.
-import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readSync, rmdirSync, statSync, unlinkSync, writeSync } from 'node:fs';
-import { join } from 'node:path';
+// P3-HD (P3 co-work Decision Logs 97 and 98): a faithful record is kept owner-only, as `~/.claude` keeps the engine's
+// transcript. The journal root and session directories are 0700 and every file the writer opens, base and rotations, is
+// 0600: created so whatever the umask, and tightened at open when an earlier build left them wider. Directories above
+// the journal root keep the modes they have; launch files the writer does not open sit behind the 0700 directories.
+import { chmodSync, closeSync, createReadStream, existsSync, fchmodSync, mkdirSync, openSync, readdirSync, readSync, rmdirSync, statSync, unlinkSync, writeSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseJournalRow, type JournalDirection, type JournalRow } from '@shared/wire/journal';
 
@@ -19,6 +23,31 @@ export const JOURNAL_KEEP_PER_SESSION = 20;
 export const JOURNAL_MAX_AGE_DAYS = 30;
 
 const identity = (line: string) => line;
+
+// P3-HD start (Decision Logs 97 and 98)
+export const JOURNAL_DIR_MODE = 0o700;
+export const JOURNAL_FILE_MODE = 0o600;
+
+// A journal directory (the root, a session's): its missing ancestors are created as before, the directory itself
+// owner-only, and an existing one is tightened.
+export function ownerOnlyJournalDirectory(path: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(path, { recursive: true, mode: JOURNAL_DIR_MODE });
+  chmodSync(path, JOURNAL_DIR_MODE);
+}
+
+// A launch file opened for append, owner-only whether new or left wider; the descriptor is changed, never a path.
+function openOwnerOnly(path: string): number {
+  const fd = openSync(path, 'a', JOURNAL_FILE_MODE);
+  try {
+    fchmodSync(fd, JOURNAL_FILE_MODE);
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
+  return fd;
+}
+// P3-HD end
 
 export class JournalWriter {
   readonly path: string; // the launch's first file
@@ -38,10 +67,10 @@ export class JournalWriter {
     private readonly opts: { maxBytes: number; redact?: (line: string) => string },
   ) {
     this.redact = opts.redact ?? identity;
-    mkdirSync(dir, { recursive: true });
+    ownerOnlyJournalDirectory(dir); // P3-HD
     this.path = join(dir, `${launchId}.jsonl`);
     this.current = this.path;
-    this.fd = openSync(this.path, 'a');
+    this.fd = openOwnerOnly(this.path); // P3-HD
   }
 
   // The file rows go to now (`path`, or the rotation `<launchId>.<n>.jsonl`).
@@ -70,7 +99,7 @@ export class JournalWriter {
     closeSync(this.fd!);
     this.index += 1;
     this.current = join(this.dir, `${this.launchId}.${this.index}.jsonl`);
-    this.fd = openSync(this.current, 'a');
+    this.fd = openOwnerOnly(this.current); // P3-HD
     this.bytes = 0;
   }
 

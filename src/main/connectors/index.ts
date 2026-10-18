@@ -31,7 +31,10 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import type { HostSupervisor } from '../hosts/supervisor';
 import type { registerMainHandler } from '../ipc/router';
 import { ConnectorBroker } from './broker';
+import type { DirectRoute, DirectRouteDeps } from './direct-route';
 import { createEngineRoute, type EngineRouteDeps } from './engine-route';
+import type { ConnectorOAuthProvider, ConnectorOAuthProviderDeps } from './oauth-provider'; // P3-HD M3c2
+import { createConnectorOwner } from './owner'; // P3-HD M3c2
 import type { ConnectorGrantAuthority, ConnectorRoute } from './route';
 
 export type ConnectorSender = Pick<WebContents, 'id' | 'isDestroyed' | 'send' | 'on' | 'once'>;
@@ -50,6 +53,14 @@ export interface ConnectorsDeps {
   // P3-H H4: the native window that owns a webContents (production: `BrowserWindow.fromWebContents`), or null
   windowOf: (sender: ConnectorSender) => ConnectorWindow | null;
   log?: (line: string) => void;
+  // P3-HD (Decision Log 14): route D's factory, supplied by the application's composition root (`createDirectRoute`),
+  // which the service composes after route E. H's own engine-only service tests omit it: there is then no route D.
+  direct?: (deps: DirectRouteDeps) => DirectRoute;
+  // P3-HD M3c2 (Decision Log 14, 19, 29): MAWS's own OAuth provider's factory, supplied by the root with route D
+  // (./oauth-root.ts's `productionConnectorOAuth`). It prepares route D's HTTP credentials and serves the owner's
+  // Connect, Reconnect and Disconnect; its host closes are `connectors.directClose` with the epoch floor it names. Absent
+  // (or without route D), route D sends no credential of MAWS's own.
+  oauth?: (deps: Pick<ConnectorOAuthProviderDeps, 'closeHost' | 'log'>) => ConnectorOAuthProvider;
 }
 
 const canonical = (path: string): string | null => {
@@ -60,7 +71,7 @@ const canonical = (path: string): string | null => {
   }
 };
 
-export function startConnectors({ hosts, register, index, realpath = canonical, windowOf, log = (line) => console.warn(`[connectors] ${line}`) }: ConnectorsDeps): { stop(): void } {
+export function startConnectors({ hosts, register, index, realpath = canonical, windowOf, log = (line) => console.warn(`[connectors] ${line}`), direct: createDirect, oauth: createOAuth }: ConnectorsDeps): { stop(): void } {
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const host = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const result = await call(name, input);
@@ -74,7 +85,12 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
     check: (artifactId, ref) => host('connectors.check', { artifactId, call: ref }),
   };
   const engine = createEngineRoute({ call, sessions: index.sessions, projects: index.projects, realpath, streaming: () => hosts.streaming('engine-host'), log });
-  const routes: ConnectorRoute[] = [engine]; // route D joins after it (P3-H's brief: E first)
+  // P3-HD: route D joins after E (P3-H's brief: E first), when the root supplies it; its host leg is the direct operation family
+  // P3-HD M3c2: MAWS's own OAuth, only beside route D; a host close is confirmed only by the host's acknowledgment
+  const closeHost = async (target: { connectionId: string; credentialEpoch?: number }) => (await call('connectors.directClose', target).catch(() => null))?.ok === true;
+  const oauth = createDirect && createOAuth ? createOAuth({ closeHost, log }) : null;
+  const direct = createDirect?.({ call, sessions: index.sessions, projects: index.projects, realpath, streaming: () => hosts.streaming('engine-host'), log, ...(oauth && { credentials: oauth }) });
+  const routes: ConnectorRoute[] = direct ? [engine, direct] : [engine];
   const broker = new ConnectorBroker({ routes, grants, log, recheckWindow: (owner) => followed.get(owner)?.read() });
 
   // ── the owner windows ──
@@ -156,22 +172,38 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
   register('artifacts.connectorGrants', async ({ artifactId }) => ({ grants: await broker.grants(artifactId) }));
   register('artifacts.grantConnectorTool', ({ artifactId, tool }) => broker.grantTool(artifactId, tool));
   register('artifacts.revokeConnectorTool', async ({ artifactId, server, tool }) => ({ revoked: await broker.revokeTool(artifactId, { server, tool }) }));
+  // P3-HD M3c2: the owner's per-server rows and actions (./owner.ts), where route D exists; trusted, never a page's
+  const owner = direct ? createConnectorOwner({ direct, oauth, grants: grants.list, log }) : null;
+  if (owner) {
+    register('connectors.servers', ({ artifactId, tools }, { sender }) => owner.servers(artifactId, tools, sender));
+    register('connectors.connect', ({ artifactId, sourceHandle }) => owner.connect(artifactId, sourceHandle));
+    register('connectors.reconnect', ({ artifactId, sourceHandle }) => owner.reconnect(artifactId, sourceHandle));
+    register('connectors.disconnect', ({ connectionId }) => owner.disconnect(connectionId));
+  }
 
   const stopEnded = hosts.onEvent('connectors.operation', ({ operationId }) => engine.operationEnded(operationId));
+  const stopDirectEnded = hosts.onEvent('connectors.directOperation', ({ operationId }) => direct?.operationEnded(operationId)); // P3-HD
   const stopGrants = hosts.onEvent('connectors.grantChanged', (change) => broker.onGrantChange(change));
   const stopDeletes = hosts.onEvent('artifacts.changed', (change) => {
     if (change.change === 'deleted') broker.onArtifactDeleted(change.artifactId);
   });
   const stopState = hosts.onState('engine-host', (state: HostState) => {
-    if (state.state !== 'ready') engine.hostLost();
+    if (state.state !== 'ready') {
+      engine.hostLost();
+      direct?.hostLost(); // P3-HD
+      oauth?.hostLost(); // P3-HD M3c2: that attachment's epochs and flows end
+      owner?.hostLost(); // P3-HD M3c2: owner actions end; rows are read again
+    }
   });
   const stopStreaming = hosts.onStreaming('engine-host', () => {
     engine.reconcile();
+    direct?.reconcile(); // P3-HD
     broker.recheckGrants();
   });
   return {
     stop: () => {
       stopEnded();
+      stopDirectEnded(); // P3-HD
       stopGrants();
       stopDeletes();
       stopState();
@@ -181,6 +213,9 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
       followed.clear();
       broker.stop();
       engine.stop();
+      owner?.stop(); // P3-HD M3c2
+      direct?.stop(); // P3-HD: terminal, each pending operation withdrawn from the host
+      oauth?.stop(); // P3-HD M3c2
     },
   };
 }

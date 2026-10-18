@@ -12,10 +12,17 @@
 //   Start (../../../../artifacts/session-context.ts's policy). Once the session it started is ready, the page's watches
 //   are refreshed now rather than at their next interval; a setup that fails, meets a card or is held ends the Start
 //   with its words, and the next Start retries the session it named. Nothing here starts a session unasked.
+// - P3-HD M3c2 (docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md, Decision Log 29): with the owner's connector
+//   dependency (../../../../artifacts/connector-owner.ts, never the ArtifactHost), the sheet also shows MAWS's own
+//   per-server rows. They are read when the sheet opens, again on main's `connectors.serversChanged` for this artifact
+//   and after a change of its tools while it is open; an older read answering after a newer one, or after the tab went,
+//   is dropped. An owner action is acknowledged at once; the rows are read again then and when main says it ended.
 import { createStore } from 'zustand/vanilla';
 import type { ArtifactHost, ConnectorSurface } from '@artifacts/host';
 import { connectorToolKey, type ConnectorCallOutcome, type ConnectorGrant, type ConnectorGrantMode, type ConnectorRefusal, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { ConnectorOwnerAck, ConnectorServerRow } from '@shared/ipc/schema/connectors';
+import type { ConnectorsOwner } from '../../../../artifacts/connector-owner';
 import type { ArtifactSessionContext, ArtifactSessionEnd, ArtifactSessionStart } from '../../../../artifacts/session-context';
 import { relayPage, type PagePort, type PageRelay } from './relay';
 
@@ -24,6 +31,16 @@ export type StartView =
   | { phase: 'asking' } // the gesture's answer not in yet
   | { phase: 'starting' | 'ready'; appSessionId: AppSessionId }
   | { phase: 'card' | 'refused'; appSessionId: AppSessionId | null; words: string };
+
+// P3-HD M3c2: the owner's per-server rows as last read. `failed`: the latest read failed (the rows shown, if any, are
+// older); `refused`: an owner action main did not accept, by its target (a source handle or a connection id).
+export interface ServersView {
+  rows: ConnectorServerRow[] | null; // null until read
+  saved: 'ok' | 'unavailable';
+  withdrawnUnattributed: boolean;
+  failed: boolean;
+  refused: { target: string; why: Extract<ConnectorOwnerAck, { accepted: false }>['why'] } | null;
+}
 
 export interface ConnectorsView {
   declared: ConnectorToolRef[]; // the current page load's
@@ -34,15 +51,29 @@ export interface ConnectorsView {
   needsSession: boolean;
   sheet: boolean;
   start: StartView;
+  servers: ServersView; // P3-HD M3c2
+  serverBusy: string | null; // P3-HD M3c2: the row an owner action is being acknowledged for
 }
 
 export interface ConnectorsTabDeps {
   host: Pick<ArtifactHost, 'openConnectors' | 'connectorGrants' | 'grantConnectorTool' | 'revokeConnectorTool'>;
   startSession(context: ArtifactSessionContext, previous: AppSessionId | null): Promise<ArtifactSessionStart>;
   log?(line: string): void;
+  owner?: ConnectorsOwner; // P3-HD M3c2: absent, the sheet shows no server rows (H's engine-only tab)
 }
 
-const initialView = (): ConnectorsView => ({ declared: [], last: {}, grants: null, refusals: {}, busy: null, needsSession: false, sheet: false, start: { phase: 'idle' } });
+const initialView = (): ConnectorsView => ({
+  declared: [], last: {}, grants: null, refusals: {}, busy: null, needsSession: false, sheet: false, start: { phase: 'idle' },
+  servers: { rows: null, saved: 'ok', withdrawnUnattributed: false, failed: false, refused: null }, serverBusy: null, // P3-HD M3c2
+});
+
+// The sheet's tools: the page load's declared ones first, then the ones the artifact holds a grant for.
+export function sheetTools(view: Pick<ConnectorsView, 'declared' | 'grants'>): ConnectorToolRef[] {
+  const tools = new Map<string, ConnectorToolRef>();
+  for (const tool of view.declared) tools.set(connectorToolKey(tool), tool);
+  for (const grant of view.grants ?? []) if (!tools.has(connectorToolKey(grant))) tools.set(connectorToolKey(grant), { server: grant.server, tool: grant.tool });
+  return [...tools.values()];
+}
 
 // A view that never changes, for a surface with no connectors to subscribe to (a File artifact's tab).
 export const NO_CONNECTORS = createStore<ConnectorsView>()(initialView);
@@ -56,6 +87,8 @@ export class ConnectorsTab {
   private waiting: (() => void) | null = null; // stops listening for the setup of the session a Start started
   private started: AppSessionId | null = null; // the session the last Start named (one it created, retried rather than another)
   private disposed = false;
+  private serverReads = 0; // P3-HD M3c2: the latest rows read's serial
+  private unlistenServers: (() => void) | null = null; // P3-HD M3c2
 
   constructor(
     readonly artifactId: string,
@@ -66,7 +99,11 @@ export class ConnectorsTab {
   attach(port: PagePort): () => void {
     const surface = this.deps.host.openConnectors(this.artifactId);
     const relay = relayPage(port, surface, {
-      declared: (declared) => this.page?.relay === relay && this.update({ declared }),
+      declared: (declared) => {
+        if (this.page?.relay !== relay) return;
+        this.update({ declared });
+        if (this.view.getState().sheet) void this.readServers(); // P3-HD M3c2: its tools changed
+      },
       outcome: (tool, outcome) => this.page?.relay === relay && this.update({ last: { ...this.view.getState().last, [connectorToolKey(tool)]: outcome } }),
     });
     this.page = { relay, surface };
@@ -92,7 +129,9 @@ export class ConnectorsTab {
   async readGrants(): Promise<void> {
     try {
       const grants = await this.deps.host.connectorGrants(this.artifactId);
-      if (!this.disposed) this.update({ grants });
+      if (this.disposed) return;
+      this.update({ grants });
+      if (this.view.getState().sheet) void this.readServers(); // P3-HD M3c2: its tools may have changed
     } catch (error) {
       this.deps.log?.(`the connector grants of ${this.artifactId} could not be read: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -142,7 +181,64 @@ export class ConnectorsTab {
 
   openSheet(): void {
     this.update({ sheet: true });
+    // P3-HD M3c2: the owner's rows, read on opening and again when main says they changed
+    const { owner } = this.deps;
+    if (!owner || this.disposed) return;
+    this.unlistenServers ??= owner.onServersChanged((artifactId) => {
+      if (artifactId === this.artifactId && this.view.getState().sheet) void this.readServers();
+    });
+    void this.readServers();
   }
+
+  // P3-HD M3c2 start: the owner's per-server rows and actions
+  get owned(): boolean {
+    return this.deps.owner !== undefined;
+  }
+
+  async readServers(): Promise<void> {
+    const { owner } = this.deps;
+    if (!owner || this.disposed) return;
+    const serial = ++this.serverReads;
+    const current = () => !this.disposed && serial === this.serverReads;
+    try {
+      const answer = await owner.servers(this.artifactId, sheetTools(this.view.getState()));
+      if (!current()) return;
+      this.update({ servers: { ...this.view.getState().servers, rows: answer.servers, saved: answer.saved, withdrawnUnattributed: answer.withdrawnUnattributed, failed: false } });
+    } catch (error) {
+      if (!current()) return;
+      this.deps.log?.(`the connector servers of ${this.artifactId} could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      this.update({ servers: { ...this.view.getState().servers, failed: true } });
+    }
+  }
+
+  connectServer(sourceHandle: string): Promise<void> {
+    return this.ownerGesture(sourceHandle, (owner) => owner.connect(this.artifactId, sourceHandle));
+  }
+
+  reconnectServer(sourceHandle: string): Promise<void> {
+    return this.ownerGesture(sourceHandle, (owner) => owner.reconnect(this.artifactId, sourceHandle));
+  }
+
+  disconnectServer(connectionId: string): Promise<void> {
+    return this.ownerGesture(connectionId, (owner) => owner.disconnect(connectionId));
+  }
+
+  private async ownerGesture(target: string, run: (owner: ConnectorsOwner) => Promise<ConnectorOwnerAck>): Promise<void> {
+    const { owner } = this.deps;
+    if (!owner || this.disposed || this.view.getState().serverBusy !== null) return;
+    this.update({ serverBusy: target });
+    let ack: ConnectorOwnerAck;
+    try {
+      ack = await run(owner);
+    } catch (error) {
+      this.deps.log?.(`a connector server action failed: ${error instanceof Error ? error.message : String(error)}`);
+      ack = { accepted: false, why: 'stale' };
+    }
+    if (this.disposed) return;
+    this.update({ serverBusy: null, servers: { ...this.view.getState().servers, refused: ack.accepted ? null : { target, why: ack.why } } });
+    await this.readServers();
+  }
+  // P3-HD M3c2 end
 
   closeSheet(): void {
     this.update({ sheet: false });
@@ -151,6 +247,8 @@ export class ConnectorsTab {
   // The tab went: its page's relay and any wait for a session end.
   dispose(): void {
     this.disposed = true;
+    this.unlistenServers?.(); // P3-HD M3c2
+    this.unlistenServers = null;
     this.waiting?.();
     this.waiting = null;
     this.page?.relay.dispose();

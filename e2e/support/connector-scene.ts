@@ -83,6 +83,17 @@ export interface LiveEngine {
   pid: number;
 }
 
+// P3-HD M4 start: a scene may configure the fixture server differently (route D's disconnect scene runs it through a
+// wrapper); H's scenes pass nothing and keep the plain stdio entry.
+export interface ConnectorSceneOptions {
+  server?: (scene: ConnectorScene) => Record<string, unknown>;
+  // P3-HD M4b: more servers beside it in the same scratch config (route D's OAuth scenes: an open HTTP server), and more
+  // variables for every launch (MAWS_E2E_OPEN_LOG, the fake browser's seam)
+  servers?: (scene: ConnectorScene) => Record<string, Record<string, unknown>>;
+  env?: (scene: ConnectorScene) => Record<string, string>;
+}
+// P3-HD M4 end
+
 export class ConnectorScene {
   readonly root: string;
   readonly userData: string;
@@ -95,7 +106,7 @@ export class ConnectorScene {
   private readonly timeline: { at: string; event: string; detail?: unknown }[] = [];
   private readonly engine = installedEngine();
 
-  constructor(name: string) {
+  constructor(name: string, private readonly options: ConnectorSceneOptions = {}) {
     this.root = realpathSync(mkdtempSync(join(tmpdir(), `maws-connectors-${name}-`)));
     this.userData = join(this.root, 'ud');
     this.home = join(this.root, 'home');
@@ -114,10 +125,10 @@ export class ConnectorScene {
     const maws = await launchMaws({
       userData: this.userData,
       keepConfigHome: !first,
-      env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', MAWS_E2E_ENGINE_BIN: this.engine.bin, HOME: this.home, DISABLE_AUTOUPDATER: '1' },
+      env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', MAWS_E2E_ENGINE_BIN: this.engine.bin, HOME: this.home, DISABLE_AUTOUPDATER: '1', ...this.options.env?.(this) }, // P3-HD M4b: the scene's env
       prepare: ({ claudeConfigDir }) => {
         if (!first) return;
-        const mcpServers = { [SERVER]: { type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', 'series', '--log', this.log, '--tools', JSON.stringify([TOOL])] } };
+        const mcpServers = { [SERVER]: this.options.server?.(this) ?? { type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', 'series', '--log', this.log, '--tools', JSON.stringify([TOOL])] }, ...this.options.servers?.(this) }; // P3-HD M4: the optional server entry; M4b: the others
         writeFileSync(join(claudeConfigDir, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, mcpServers, projects: { [this.project]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
       },
     });
@@ -237,11 +248,11 @@ export class ConnectorScene {
   // The artifact in a main tab of its own: the tab already showing it when there is one (opening the library over it
   // would unmount the page, and its next mount is a new page load whose watch reads at once), else opened from the
   // library as the owner opens it. Answers the tab and its page's frame.
-  async openPage(page: Page, artifactId: string): Promise<{ tab: Locator; frame: FrameLocator }> {
+  async openPage(page: Page, artifactId: string, title = PAGE_TITLE /* P3-HD M4b: another page's */): Promise<{ tab: Locator; frame: FrameLocator }> {
     const tab = page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`);
     if (!(await tab.locator('[data-artifact-frame="html"]').isVisible())) {
       await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
-      await page.locator('[data-library]').getByRole('article', { name: PAGE_TITLE, exact: true }).click({ timeout: 15_000 });
+      await page.locator('[data-library]').getByRole('article', { name: title, exact: true }).click({ timeout: 15_000 });
     }
     await expect(tab.locator('[data-artifact-frame="html"]')).toBeVisible();
     return { tab, frame: tab.frameLocator('[data-artifact-frame="html"]') };
@@ -282,6 +293,19 @@ export class ConnectorScene {
     await win.evaluate((w) => w.showInactive());
     await expect.poll(() => win.evaluate((w) => w.isVisible() && !w.isMinimized()), { message: 'the page’s window reads shown, not minimized' }).toBe(true);
     this.note('shown', await this.windowState(run));
+  }
+  // P3-HD M4b: the page's window minimized and restored (main's veto reads a minimized window as hidden).
+  async minimizeWindow(run: Run): Promise<void> {
+    const win = await this.windowOf(run);
+    await win.evaluate((w) => w.minimize());
+    await expect.poll(() => win.evaluate((w) => w.isMinimized()), { message: 'the page’s window reads minimized' }).toBe(true);
+    this.note('minimized', await this.windowState(run));
+  }
+  async restoreWindow(run: Run): Promise<void> {
+    const win = await this.windowOf(run);
+    await win.evaluate((w) => w.restore());
+    await expect.poll(() => win.evaluate((w) => w.isVisible() && !w.isMinimized()), { message: 'the page’s window reads restored' }).toBe(true);
+    this.note('restored', await this.windowState(run));
   }
   private async windowOf(run: Run): Promise<JSHandle<BrowserWindow>> {
     return (await run.maws.app.browserWindow(run.page)) as JSHandle<BrowserWindow>;
@@ -341,8 +365,8 @@ export class ConnectorScene {
   }
 }
 
-export async function withScene(name: string, info: TestInfo, body: (scene: ConnectorScene) => Promise<void>): Promise<void> {
-  const scene = new ConnectorScene(name);
+export async function withScene(name: string, info: TestInfo, body: (scene: ConnectorScene) => Promise<void>, options: ConnectorSceneOptions = {}): Promise<void> {
+  const scene = new ConnectorScene(name, options); // P3-HD M4: the optional scene options
   let failed = false;
   try {
     await body(scene);

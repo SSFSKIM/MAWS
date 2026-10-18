@@ -56,6 +56,13 @@ export function connectorToolState(answer: McpStatusResponse, server: string, to
   return { ready: true, fingerprint: fingerprint(entry, config, tool), readOnly: record(listed[0]!.annotations)?.readOnly === true };
 }
 
+// P3-HD start (route D's verified source, ./provenance.ts): the same fingerprint over the same named fields, so a route
+// change alone never asks the owner again.
+export function connectorFingerprint(server: { name: string; scope?: unknown; config?: unknown }, tool: string): string {
+  return fingerprint(server as Server, record(server.config), tool);
+}
+// P3-HD end
+
 // The fields are named, so a field the engine adds later (or a header, `env`, `headersHelper`, `oauth`) never enters.
 function fingerprint(server: Server, config: Record<string, unknown> | null, tool: string): string {
   const field = (value: unknown) => (value === undefined ? null : value);

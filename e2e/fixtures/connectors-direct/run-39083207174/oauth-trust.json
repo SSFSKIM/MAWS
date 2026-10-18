@@ -1,0 +1,88 @@
+{
+  "ended": {
+    "fixture": "resource",
+    "peer": "issuer"
+  },
+  "tenant": [
+    {
+      "seq": 0,
+      "phase": "open",
+      "requests": 6,
+      "advertised": 0,
+      "unauthorized": 0,
+      "authRoutes": 0,
+      "authorizationHeaders": 0,
+      "toolCallAttempts": 1,
+      "toolCalls": 1,
+      "registrations": 0,
+      "authorizations": 0,
+      "codeExchanges": 0,
+      "refreshes": 0,
+      "revocations": 0,
+      "revocationsUnavailable": 0,
+      "refusals": {}
+    },
+    {
+      "seq": 1,
+      "phase": "oauth",
+      "requests": 2,
+      "advertised": 2,
+      "unauthorized": 1,
+      "authRoutes": 1,
+      "authorizationHeaders": 0,
+      "toolCallAttempts": 0,
+      "toolCalls": 0,
+      "registrations": 0,
+      "authorizations": 0,
+      "codeExchanges": 0,
+      "refreshes": 0,
+      "revocations": 0,
+      "revocationsUnavailable": 0,
+      "refusals": {}
+    }
+  ],
+  "peer": [
+    {
+      "seq": 0,
+      "phase": "open",
+      "requests": 6,
+      "advertised": 0,
+      "unauthorized": 0,
+      "authRoutes": 0,
+      "authorizationHeaders": 0,
+      "toolCallAttempts": 1,
+      "toolCalls": 1,
+      "registrations": 0,
+      "authorizations": 0,
+      "codeExchanges": 0,
+      "refreshes": 0,
+      "revocations": 0,
+      "revocationsUnavailable": 0,
+      "refusals": {}
+    },
+    {
+      "seq": 1,
+      "phase": "oauth",
+      "requests": 4,
+      "advertised": 2,
+      "unauthorized": 1,
+      "authRoutes": 1,
+      "authorizationHeaders": 0,
+      "toolCallAttempts": 0,
+      "toolCalls": 0,
+      "registrations": 0,
+      "authorizations": 0,
+      "codeExchanges": 0,
+      "refreshes": 0,
+      "revocations": 0,
+      "revocationsUnavailable": 0,
+      "refusals": {}
+    }
+  ],
+  "elsewhere": [],
+  "ownCandidates": [
+    404,
+    404
+  ],
+  "opens": 0
+}

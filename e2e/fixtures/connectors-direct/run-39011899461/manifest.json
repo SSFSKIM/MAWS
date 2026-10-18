@@ -1,0 +1,173 @@
+{
+  "run": 39011899461,
+  "label": "hd-m1-local",
+  "gates": "static,unit,probes,unit:darwin,e2e:connectors,e2e:connectors-direct (evidence)",
+  "conclusion": "success",
+  "sourcePin": "d8dfe762fe57c9fe2335c6ee83c5132baf14870e",
+  "engineVersion": "2.1.302",
+  "decodedFrom": "MAWS-CONNECTORS-DIRECT-EVIDENCE blocks; original bytes and SHA-256 checked before retention",
+  "scrub": "Temporary runner paths only: probe scratch as <scratch>, runner work tree as <runner-work>, runner home as ~; all other values preserved.",
+  "files": [
+    {
+      "file": "git-child/engine-wire.jsonl",
+      "originalBytes": 2713,
+      "originalSha256": "ebf6088a24548b88e108dc7627c01412ad1352c7bf95d4d76e3c77444b7ecb2e",
+      "retainedSha256": "ebf6088a24548b88e108dc7627c01412ad1352c7bf95d4d76e3c77444b7ecb2e",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "git-child-sources.json",
+      "originalBytes": 452,
+      "originalSha256": "019e4e56410aaa1afd15b183542476241c5505df387c4b03f96fbef401db2adc",
+      "retainedSha256": "5f7babcfd64268dc135934172c615edf0ce84a95cef5a498dc052cbda4a945b9",
+      "pathsScrubbed": true
+    },
+    {
+      "file": "git-keys.json",
+      "originalBytes": 136,
+      "originalSha256": "c262cef3212ad980c99b831667c08d8de1cfff1e9a5feaf626f2034f6ec582a3",
+      "retainedSha256": "c262cef3212ad980c99b831667c08d8de1cfff1e9a5feaf626f2034f6ec582a3",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "git-root/engine-wire.jsonl",
+      "originalBytes": 2709,
+      "originalSha256": "b682dade681aed1f3b855272f11f4b33ee1866c77b04e51483891791e42bd49b",
+      "retainedSha256": "b682dade681aed1f3b855272f11f4b33ee1866c77b04e51483891791e42bd49b",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "git-root-sources.json",
+      "originalBytes": 377,
+      "originalSha256": "d267bea410dfed3b8b910f36cd2bbbe427190bc3a520901e8086dce9ff4513d2",
+      "retainedSha256": "d267bea410dfed3b8b910f36cd2bbbe427190bc3a520901e8086dce9ff4513d2",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "home/engine-wire.jsonl",
+      "originalBytes": 2694,
+      "originalSha256": "a62ee56c33045c6a48a4dbcb1ef1d4291ba969fdd417da6a5ef46321c39f2ecd",
+      "retainedSha256": "a62ee56c33045c6a48a4dbcb1ef1d4291ba969fdd417da6a5ef46321c39f2ecd",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "home-sources.json",
+      "originalBytes": 339,
+      "originalSha256": "fa3bbde0300160d094db5a7697a38b3fe017c04a82b3d065a86349b04506b135",
+      "retainedSha256": "fa3bbde0300160d094db5a7697a38b3fe017c04a82b3d065a86349b04506b135",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "negative-absent/engine-wire.jsonl",
+      "originalBytes": 2706,
+      "originalSha256": "cd4815e94dedf5fd0d3c0510edd2c33f86e380abbf34e7ec3f1d24234d5942a0",
+      "retainedSha256": "cd4815e94dedf5fd0d3c0510edd2c33f86e380abbf34e7ec3f1d24234d5942a0",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "negative-disabled/engine-wire.jsonl",
+      "originalBytes": 3120,
+      "originalSha256": "7b7143f3d8920a764c72fa357d2efda7ba08b5c5268592097c99ee43f5d73ed2",
+      "retainedSha256": "7b7143f3d8920a764c72fa357d2efda7ba08b5c5268592097c99ee43f5d73ed2",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "negative-fresh/engine-wire.jsonl",
+      "originalBytes": 3240,
+      "originalSha256": "1139f9b957099c0c5bf221affe710219142025d8bd860cbb17a3b45b68fa9aff",
+      "retainedSha256": "1139f9b957099c0c5bf221affe710219142025d8bd860cbb17a3b45b68fa9aff",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "negative-positive/engine-wire.jsonl",
+      "originalBytes": 3234,
+      "originalSha256": "fe579895cefa9136d3095269addc0a610c712e525ac764499ef1349b10584bd2",
+      "retainedSha256": "fe579895cefa9136d3095269addc0a610c712e525ac764499ef1349b10584bd2",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "negative-statuses.json",
+      "originalBytes": 571,
+      "originalSha256": "067c13804bafae58b3e2f314b821b2085e877ab834c4e37f574b5e785e19e99f",
+      "retainedSha256": "067c13804bafae58b3e2f314b821b2085e877ab834c4e37f574b5e785e19e99f",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "settings/engine-wire.jsonl",
+      "originalBytes": 2914,
+      "originalSha256": "106b07e8d8de85e9e812ba9d32202b510a5a4648dee5a98d310ab0536de86014",
+      "retainedSha256": "106b07e8d8de85e9e812ba9d32202b510a5a4648dee5a98d310ab0536de86014",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "settings-observed.json",
+      "originalBytes": 1636,
+      "originalSha256": "001ed5e3c2b9098d79737f4ec7227dfd7ac3cf8d8362dfeb34cf23c24181c67b",
+      "retainedSha256": "996cd916e174747315202619fdd11d74d738c0456edbe482ea2e3da1ebc90fc3",
+      "pathsScrubbed": true
+    },
+    {
+      "file": "settings-sdk/engine-wire.jsonl",
+      "originalBytes": 2706,
+      "originalSha256": "f070bb8ea5db4a11f73acb65f70454fc9094deef582700785709ece53ed0a6fc",
+      "retainedSha256": "f070bb8ea5db4a11f73acb65f70454fc9094deef582700785709ece53ed0a6fc",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "settings-sdk-observed.json",
+      "originalBytes": 2031,
+      "originalSha256": "48ca64d844a7588472bcff051ba9a986644ebb390f9cf857bfa3d952b50d3539",
+      "retainedSha256": "4294d1bcdff373841be7d9c2bd84443d455d65374a2717056aeeab399eed4ae1",
+      "pathsScrubbed": true
+    },
+    {
+      "file": "settings-sdk-sources.json",
+      "originalBytes": 335,
+      "originalSha256": "ec6b9df677d17dcdd63e34adf2b608933613abdbcb4407cebb70be69980084bf",
+      "retainedSha256": "ec6b9df677d17dcdd63e34adf2b608933613abdbcb4407cebb70be69980084bf",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "settings-sources.json",
+      "originalBytes": 243,
+      "originalSha256": "7327a1ea9dce4bd56f501258a24668afc4e1ef090047455a51e575d7173d86f8",
+      "retainedSha256": "7327a1ea9dce4bd56f501258a24668afc4e1ef090047455a51e575d7173d86f8",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "sources/engine-wire.jsonl",
+      "originalBytes": 25681,
+      "originalSha256": "178873d2faf1c27973d9dad15eda3da0060f342e4c3a3beff67ad70444350c2c",
+      "retainedSha256": "178873d2faf1c27973d9dad15eda3da0060f342e4c3a3beff67ad70444350c2c",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "sources-sources.json",
+      "originalBytes": 2099,
+      "originalSha256": "f6879b2372a260944ba6c52f94430c50c97c167d37ad9fda70e04eeba893e200",
+      "retainedSha256": "f6879b2372a260944ba6c52f94430c50c97c167d37ad9fda70e04eeba893e200",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "worktree/engine-wire.jsonl",
+      "originalBytes": 2713,
+      "originalSha256": "b91edea778e38e304a85b42c337f3900fdb88e0b73054262a19dda7299aacfdd",
+      "retainedSha256": "b91edea778e38e304a85b42c337f3900fdb88e0b73054262a19dda7299aacfdd",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "worktree-keys.json",
+      "originalBytes": 50,
+      "originalSha256": "a06d7b356a371f92096ed4cd91de5e3ae265af6e2229acacf12b519d1ea6b6bf",
+      "retainedSha256": "a06d7b356a371f92096ed4cd91de5e3ae265af6e2229acacf12b519d1ea6b6bf",
+      "pathsScrubbed": false
+    },
+    {
+      "file": "worktree-sources.json",
+      "originalBytes": 248,
+      "originalSha256": "987c78515abc1ea2615f9212f660b89ffb1df9d0581ad3db7b155cc40ebf6b53",
+      "retainedSha256": "987c78515abc1ea2615f9212f660b89ffb1df9d0581ad3db7b155cc40ebf6b53",
+      "pathsScrubbed": false
+    }
+  ]
+}
