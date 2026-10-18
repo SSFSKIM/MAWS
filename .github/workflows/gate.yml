@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       gates:
-        description: 'A comma list over static, unit, unit:darwin, probes, packaged, e2e:<group> (e2e:default is the bare `pnpm e2e`); empty runs the default set.'
+        description: 'A comma list over static, unit, unit:darwin, probes, packaged, e2e:<group> (e2e:default is the bare `pnpm e2e`, less the specs the run''s other e2e groups collect); empty runs the default set.'
         type: string
         default: ''
       runner:
@@ -111,6 +111,11 @@ jobs:
       - run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm typecheck
       - if: ${{ !cancelled() }}
         run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm lint
+      # The gate scripts' own tests (gate-plan, e2e-default-specs, ci-gate-alerts), seconds and no lane: vitest collects
+      # no .github/ file, and e2e-default-specs pins default's own specs at the head, so a branch that adds a spec or a
+      # group without moving the pin goes red here rather than unseen (P3-HD's 73 against the tree's 74, 2026-10-17).
+      - if: ${{ !cancelled() }}
+        run: .github/scripts/gate-run.sh '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' node --test .github/scripts/*.test.mjs scripts/*.test.mjs
 
   unit:
     needs: plan
@@ -225,6 +230,17 @@ jobs:
           libreoffice: ${{ matrix.libreoffice }}
       - if: matrix.build
         run: .github/scripts/gate-run.sh 'built in|error' pnpm build
+      # Decision Log 60(2): beside other e2e groups, `default` runs only the specs none of them collects, derived at this
+      # tree from their package scripts through `playwright test --list`; alone, or when the derivation cannot read a
+      # script or a listing fails (a warning says which), it is the bare `pnpm e2e`.
+      - if: matrix.group == 'default'
+        env:
+          E2E_PLAN: ${{ needs.plan.outputs.e2e }}
+        run: |
+          if ! node .github/scripts/e2e-default-specs.mjs >"$RUNNER_TEMP/e2e-specs"; then
+            echo '::warning title=e2e:default runs the bare set::the derivation of its own specs failed'
+            : >"$RUNNER_TEMP/e2e-specs"
+          fi
       # DC5: the desk's browser suites drive Playwright's own Chromium on Linux; a Mac drives its installed Chrome. The
       # phone's layout cases run again in Playwright's WebKit, on Linux only (apps/desk-web/playwright.config.ts).
       - if: matrix.group == 'desk-web' && runner.os == 'Linux'
@@ -237,7 +253,10 @@ jobs:
           # The one-job Mac builds each out/ variant once per run: scripts/e2e-build.sh restores it from this disk
           # (Decision Log 35); the key is the checked-out commit, whose sha the build stamp carries.
           if [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_BUILD_CACHE=$HOME/Library/Caches/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA; fi
-          .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: ' "${display[@]}" pnpm "$SCRIPT"
+          # default's own specs, when the step above derived them (macOS's bash 3.2 has no mapfile).
+          specs=()
+          if [[ -s $RUNNER_TEMP/e2e-specs ]]; then while IFS= read -r spec; do specs+=("$spec"); done <"$RUNNER_TEMP/e2e-specs"; fi
+          .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: ' "${display[@]}" pnpm "$SCRIPT" "${specs[@]}"
       - if: failure() || needs.plan.outputs.evidence == 'true'
         uses: actions/upload-artifact@v7
         with:
