@@ -10,8 +10,10 @@
 //   3 renderer working set ≤ 500 MB (read after a forced collection, B's Decision Log 44; the figure before it kept)
 //   4 publish  one slide occupies the host loop ≤ 50 ms; the whole deck ≤ 200 ms (the loop's busy time over the call;
 //              the longest single stretch kept beside it)
-//   5 preview  a version's history preview ≤ 1,000 ms (on this deck; and on S7a's heavy deck when MAWS_DECK_HISTORY
-//              names its export, as M8's case reads it)
+//   5 preview  a version's history preview ≤ 1,000 ms (on this deck; and on S7a's heavy deck: the export
+//              MAWS_DECK_HISTORY names or, unset, one the soak generates in this job (P3-F W-E,
+//              e2e/support/deck-history.ts), checked before it is applied; a generation or check failure fails the
+//              heavy row by name, never a skip)
 // Each row is met, marginal or failed (Decision Log 24): marginal for a miss under 20 % with the load at 10 or more
 // during its trials; failed for a miss of 20 % or more, any miss below load 10, or any miss of a zero bound. A row
 // measured in trials is judged on its best (the parent's Decision Log 54); every trial is in the results JSON,
@@ -19,9 +21,11 @@
 // Run on purpose only, at the quietest load the machine gives:
 //   pnpm e2e:presentations-scale   (the script sets MAWS_PRESENTATIONS_SCALE=1)
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
+import { checkDeckHistory, generateDeckHistory } from './support/deck-history';
 import { collectGarbage, load1, MARGINAL_LOAD, MARGINAL_MISS, PerfSeam, processMemory, stats, verdictOf, type LoopStats, type Verdict } from './support/document-scale';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
@@ -34,6 +38,7 @@ const TRIALS = 3;
 const TITLE = 'Scale 100';
 const AGENT = 'deck-agent';
 const HEAVY = process.env.MAWS_DECK_HISTORY ?? '';
+const HEAVY_GENERATION_MS = 360_000; // the soak's budget in the job: the ruling's about five minutes, and a margin
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
 
@@ -91,6 +96,15 @@ class Rows {
     this.rows.push(entry);
     this.write();
     console.log(`[deck scale] ${row}: ${entry.value} ${unit} (${judgedBy}; ${entry.verdict}; bound ${bound}; trials ${trials.map((t) => `${t.value.toFixed(1)} at load ${t.load}`).join(', ')})`);
+    return entry;
+  }
+
+  /** A row that could not be measured, failed by name (P3-F W-E: the heavy deck's generation or check). */
+  failed(row: string, measure: string, unit: string, limit: number, bound: string, reason: string): Row {
+    const entry: Row = { row, measure, bound, limit, unit, value: Number.NaN, judgedBy: 'best', load: load1(), verdict: 'failed', trials: [], note: reason };
+    this.rows.push(entry);
+    this.write();
+    console.log(`[deck scale] ${row}: failed (${reason})`);
     return entry;
   }
 
@@ -350,47 +364,66 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
     rows.write({ memory: { before, after } });
   });
 
-  await test.step('5 (heavy): the preview of a 3-month-old version of S7a’s heavy deck, when its export is named', async () => {
-    if (!HEAVY || !existsSync(join(HEAVY, 'next.bin'))) {
-      rows.write({ heavyPreview: 'skipped: MAWS_DECK_HISTORY names no export of S7a’s heavy deck soak (src/engine-host/presentations/history-bench.test.ts says how)' });
-      return;
+  await test.step('5 (heavy): the preview of a 3-month-old version of S7a’s heavy deck, the named export or one generated in this job', async () => {
+    const from = HEAVY || 'generated in this job';
+    const measure = `history preview of a 3-month-old version of S7a’s heavy deck against today (${from})`;
+    const scratch = HEAVY ? null : mkdtempSync(join(tmpdir(), 'maws-deck-history-'));
+    const dir = HEAVY || scratch!;
+    try {
+      if (scratch) {
+        test.setTimeout(test.info().timeout + HEAVY_GENERATION_MS);
+        const generated = await generateDeckHistory(scratch, { root: REPO_ROOT, timeoutMs: HEAVY_GENERATION_MS });
+        rows.write({ heavyGeneration: generated });
+        if (!generated.ok) {
+          rows.failed('5 preview heavy', measure, 'ms', 1000, '≤ 1,000 ms (M8’s bound)', `the heavy deck was not generated: ${generated.reason}`);
+          return;
+        }
+      }
+      const check = checkDeckHistory(dir, { generated: scratch !== null });
+      rows.write({ heavyExport: { from, ...check } });
+      if (!check.ok) {
+        rows.failed('5 preview heavy', measure, 'ms', 1000, '≤ 1,000 ms (M8’s bound)', check.reason);
+        return;
+      }
+      await closeTab(page, TITLE);
+      const { artifact: heavy } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'presentation', title: 'Heavy deck' });
+      const apply = async (file: string) => {
+        const bytes = [...readFileSync(join(dir, file))];
+        await page.evaluate(async ([artifactId, state]) => {
+          const docs = (window as unknown as DeckSeam).__maws_documents;
+          const handle = await docs.open(artifactId as string);
+          docs.applyState(handle, new Uint8Array(state as number[]));
+          for (let i = 0; i < 600 && docs.state(handle).unsaved > 0; i++) await new Promise((r) => setTimeout(r, 50));
+          docs.close(handle);
+        }, [heavy.id, bytes] as const);
+      };
+      await apply('prev.bin');
+      await ok(page, 'artifacts.saveVersion', { artifactId: heavy.id, label: 'Three months ago' });
+      await apply('next.bin');
+      await ok(page, 'artifacts.saveVersion', { artifactId: heavy.id, label: 'Today' });
+      await showLibrary(page);
+      await page.locator('[data-library]').getByRole('article', { name: 'Heavy deck', exact: true }).click();
+      const heavyTab = page.locator(`[data-region="main"] [data-artifact-tab="${heavy.id}"]`);
+      await expect(heavyTab.locator('[data-deck-editor]')).toBeVisible({ timeout: 30_000 });
+      await headerAction(page, 'Version history');
+      const rail = heavyTab.getByRole('complementary', { name: 'Version history' });
+      const bar = heavyTab.getByRole('toolbar', { name: 'Version preview' });
+      const trials: Trial[] = [];
+      for (let k = 0; k < TRIALS; k++) {
+        // the 3-month-old version against today, as S7a measured it and M8's case reads it: a click, then a shift-click
+        const load = load1();
+        await rail.getByRole('button', { name: /^Version Three months ago/ }).click();
+        await expect(bar).toBeVisible();
+        await rail.getByRole('button', { name: /^Version Today/ }).click({ modifiers: ['Shift'] });
+        await expect(bar.locator('.deck-history-heading')).toHaveText('Three months ago → Today');
+        await expect.poll(async () => (await timingsOf(page, heavy.id))[0]?.timings.previewMs?.length ?? 0, { timeout: 30_000 }).toBe(2 * (k + 1));
+        trials.push({ value: (await timingsOf(page, heavy.id))[0]!.timings.previewMs!.at(-1)!, load });
+        await bar.getByRole('button', { name: 'Back to presentation' }).click();
+      }
+      rows.add('5 preview heavy', measure, 'ms', 1000, '≤ 1,000 ms (M8’s bound)', trials);
+    } finally {
+      if (scratch) rmSync(scratch, { recursive: true, force: true });
     }
-    await closeTab(page, TITLE);
-    const { artifact: heavy } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'presentation', title: 'Heavy deck' });
-    const apply = async (file: string) => {
-      const bytes = [...readFileSync(join(HEAVY, file))];
-      await page.evaluate(async ([artifactId, state]) => {
-        const docs = (window as unknown as DeckSeam).__maws_documents;
-        const handle = await docs.open(artifactId as string);
-        docs.applyState(handle, new Uint8Array(state as number[]));
-        for (let i = 0; i < 600 && docs.state(handle).unsaved > 0; i++) await new Promise((r) => setTimeout(r, 50));
-        docs.close(handle);
-      }, [heavy.id, bytes] as const);
-    };
-    await apply('prev.bin');
-    await ok(page, 'artifacts.saveVersion', { artifactId: heavy.id, label: 'Three months ago' });
-    await apply('next.bin');
-    await ok(page, 'artifacts.saveVersion', { artifactId: heavy.id, label: 'Today' });
-    await showLibrary(page);
-    await page.locator('[data-library]').getByRole('article', { name: 'Heavy deck', exact: true }).click();
-    const heavyTab = page.locator(`[data-region="main"] [data-artifact-tab="${heavy.id}"]`);
-    await expect(heavyTab.locator('[data-deck-editor]')).toBeVisible({ timeout: 30_000 });
-    await headerAction(page, 'Version history');
-    const rail = heavyTab.getByRole('complementary', { name: 'Version history' });
-    const bar = heavyTab.getByRole('toolbar', { name: 'Version preview' });
-    const trials: Trial[] = [];
-    for (let k = 0; k < TRIALS; k++) {
-      // the 3-month-old version against today, as S7a measured it and M8's case reads it: a click, then a shift-click
-      const load = load1();
-      await rail.getByRole('button', { name: /^Version Three months ago/ }).click();
-      await expect(bar).toBeVisible();
-      await rail.getByRole('button', { name: /^Version Today/ }).click({ modifiers: ['Shift'] });
-      await expect(bar.locator('.deck-history-heading')).toHaveText('Three months ago → Today');
-      await expect.poll(async () => (await timingsOf(page, heavy.id))[0]?.timings.previewMs?.length ?? 0, { timeout: 30_000 }).toBe(2 * (k + 1));
-      trials.push({ value: (await timingsOf(page, heavy.id))[0]!.timings.previewMs!.at(-1)!, load });
-      await bar.getByRole('button', { name: 'Back to presentation' }).click();
-    }
-    rows.add('5 preview heavy', `history preview of a 3-month-old version of S7a’s heavy deck against today (${HEAVY})`, 'ms', 1000, '≤ 1,000 ms (M8’s bound)', trials);
   });
 
   loads.end = load1();
