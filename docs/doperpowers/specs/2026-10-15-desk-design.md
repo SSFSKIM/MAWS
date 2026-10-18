@@ -478,8 +478,8 @@ unavailable; everything they sent the human is still in the log.
 - **Projects.** The home is the grid of the org's projects.
 - **A project.** Left: `# <project>`, then the sessions as direct
   channels, grouped by waiting on you / working / idle / ended (a session
-  holding a pending request or an open async question is waiting on you,
-  its state word unchanged: 2026-10-18), each named
+  holding a pending request, or an open async question while its process
+  runs, is waiting on you, its state word unchanged: 2026-10-18), each named
   by its title — the harness's "Session name", which its machine publishes
   as `titled` (smns §3, §5) — with its machine and whether that is online
   after it, and under it, muted, its alias, the name `@` addresses (alias
@@ -2583,7 +2583,10 @@ reads them). **[2026-10-18, owner]** `waiting` also counts, once, a session of a
 question, while its `status` stays `busy` (its engine works on, and it counts as `working` too): a pending request the
 bridge raised `async`, or a log `question` (from the session's feed, `src` the ask's id) with no `answered` of the same
 `src` from the session since, asked since the session's latest `retired` (an ask dies with its process), that the plane
-has not settled (a bridge's ask is the request its call's id names). The hub keeps the log's open questions as it
+has not settled (a bridge's ask is the request its call's id names). A log question counts only while its session's
+process lives: a session whose kept presence says `record: null` (no process, as a stopped seat's, which never
+retires) is not counted for it, and counts again once it runs, as a bridge's ask is withdrawn when its process ends;
+the web reads it the same way and keeps such a session under ended. The hub keeps the log's open questions as it
 stores each event (`log-store.ts` `open_questions`; events stored before that table are not read into it), and reports
 the summary again when a `question`, `answered` or `retired` moves them, or the pending set moves. Blocking questions
 and permission requests count as before, by presence. Each `Project` reports its counts to the `Registry` when they change. The grid takes nothing up. A frame above the frame bound (a `grid` of many
@@ -4993,7 +4996,13 @@ a hub that connects into machines (§2).
   bridge holds it raised, or while the log holds its `question` with no
   `answered` of the same `src` from the session and no `retired` of the
   session since, unless the plane settled it; the count is of sessions, so
-  one ask learned both ways counts once (DX3's grid). The hub keeps the
+  one ask learned both ways counts once (DX3's grid). A log question counts
+  only while its session's process lives: a session whose kept presence
+  says `record: null` (a stopped seat, which never retires, so the log
+  holds its ask open) is not counted for it, and counts again once it
+  runs, as a bridge's ask is withdrawn when its process ends; the web
+  reads it the same way and keeps such a session under ended, where the
+  phone's Resume bar and the tail's end marker are. The hub keeps the
   log's side in `open_questions` (session, ask; machine), maintained in the
   transaction that stores each event, so a backlog's events apply in each
   feed's order; the protocol's `questionEffect` is the one reading of an
@@ -5006,10 +5015,12 @@ a hub that connects into machines (§2).
   older ask whose end the log does not hold, for as long as its session is
   not retired. Rejected: counting asks per request rather than per session
   (the count has always been of sessions); a settlement deleting the log's
-  row (a withdrawn ask's event can reach the hub after its settlement, on
-  the other plane, and would open it again). Bounds: a settlement is kept a
-  month (`settled`), so a bridge's ask withdrawn without `answered` or
-  `retired` (a `--bg` seat that stopped) counts again after a month; and
+  row in place of the count's check (a withdrawn ask's event can reach the
+  hub after its settlement, on the other plane, and would open it again).
+  Bounds: a settlement is kept a month (`settled`), so a bridge's ask
+  withdrawn with no `answered` or `retired` counts again after a month if
+  its session runs that long (a stopped one's is not counted; tracked in
+  `docs/tech-debt-tracker.md`); and
   an ask a `retired` closed stays closed though a resumed session's ask mod
   reads it back from its transcript (a bridge raises it again, and it
   counts from the pending set).
