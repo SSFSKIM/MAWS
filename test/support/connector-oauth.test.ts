@@ -43,6 +43,15 @@ describe('the phase control', () => {
     expect(() => assertOpenPhase(paths)).toThrow(/OAuth phase/);
   });
 
+  // P3-HD panel correction: the trust-binding scene's advertisements ride the OAuth phase's control
+  it('writes an advertisement override with the OAuth phase and keeps it across later writes', () => {
+    const advertise = { resource: 'http://127.0.0.1:41000/mcp?tenant=beta' };
+    expect(enterOAuthPhase(paths, { enginePids: [101] }, { alive: dead, advertise })).toEqual({ seq: 1, phase: 'oauth', accessTtlSeconds: 3600, revocation: 'available', advertise });
+    expect(readControl(paths)).toMatchObject({ advertise });
+    expect(updateOAuthControl(paths, { accessTtlSeconds: 2 })).toMatchObject({ seq: 2, advertise });
+    expect(() => enterOAuthPhase(paths, { enginePids: [101] }, { alive: dead, advertise: { resource: 'https://elsewhere.example/' } })).toThrow(/not a valid OAuth fixture control/);
+  });
+
   it('checks liveness with the real process table by default', () => {
     expect(() => enterOAuthPhase(paths, { enginePids: [process.pid] })).toThrow(/still alive/);
   });

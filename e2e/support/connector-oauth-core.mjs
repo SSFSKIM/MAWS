@@ -26,6 +26,20 @@ export const OPEN_CONTROL = Object.freeze({ seq: 0, phase: 'open', accessTtlSeco
 
 const PHASES = new Set(['open', 'oauth']);
 const REVOCATION = new Set(['available', 'unavailable']);
+// P3-HD panel correction: what the trust-binding scene makes a fixture advertise instead of its own, in the OAuth
+// phase only: `resource` (protected-resource metadata), `authorizationServer` (its one authorization server) and
+// `issuer` (the issuer its metadata names, also served then as OpenID discovery metadata). Loopback URLs only.
+const ADVERTISED = ['resource', 'authorizationServer', 'issuer'];
+const ADVERTISED_MAX = 2048;
+const advertisedUrl = (value) => typeof value === 'string' && value.length <= ADVERTISED_MAX && value.startsWith('http://127.0.0.1:');
+
+// The override as given, or null when malformed (then the whole control is).
+function parseAdvertise(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (!keys.every((key) => ADVERTISED.includes(key) && advertisedUrl(value[key]))) return null;
+  return Object.fromEntries(ADVERTISED.filter((key) => key in value).map((key) => [key, value[key]]));
+}
 
 export function parseOAuthControl(text) {
   if (text === null) return OPEN_CONTROL;
@@ -35,9 +49,11 @@ export function parseOAuthControl(text) {
   } catch {
     return OPEN_CONTROL;
   }
-  const { seq, phase, accessTtlSeconds, revocation } = value ?? {};
+  const { seq, phase, accessTtlSeconds, revocation, advertise } = value ?? {};
   const valid = Number.isInteger(seq) && seq >= 0 && PHASES.has(phase) && Number.isInteger(accessTtlSeconds) && accessTtlSeconds >= 1 && accessTtlSeconds <= 86_400 && REVOCATION.has(revocation);
-  return valid ? { seq, phase, accessTtlSeconds, revocation } : OPEN_CONTROL;
+  const advertised = advertise === undefined ? undefined : parseAdvertise(advertise);
+  if (!valid || advertised === null) return OPEN_CONTROL;
+  return { seq, phase, accessTtlSeconds, revocation, ...(advertised !== undefined && { advertise: advertised }) };
 }
 
 export const tokenHash = (value) => createHash('sha256').update(value).digest('hex').slice(0, 16);
@@ -91,6 +107,13 @@ export function createOAuthFixtureCore({ id, origin, tools = ['read_series'], no
     response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'], code_challenge_methods_supported: ['S256'],
     token_endpoint_auth_methods_supported: ['none'], revocation_endpoint_auth_methods_supported: ['none'], scopes_supported: [OAUTH_SCOPE], authorization_response_iss_parameter_supported: true,
   };
+
+  // P3-HD panel correction: the documents as the control's overrides make them (unchanged without one)
+  const advertisedResource = ({ resource: advertised, authorizationServer }) => ({
+    ...resourceMetadata, ...(advertised !== undefined && { resource: advertised }), ...(authorizationServer !== undefined && { authorization_servers: [authorizationServer] }),
+  });
+  const advertisedServer = ({ issuer }) =>
+    issuer === undefined ? serverMetadata : { ...serverMetadata, issuer, jwks_uri: `${origin}/jwks`, subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'] };
 
   function bearerOf(headers) {
     const header = headers.authorization;
@@ -317,6 +340,7 @@ export function createOAuthFixtureCore({ id, origin, tools = ['read_series'], no
       const url = new URL(request.url, origin);
       const route = routeOf(url.pathname);
       const secrets = [];
+      const advertise = control.advertise ?? {}; // P3-HD panel correction
       const entry = { server: id, event: 'http', phase: control.phase, seq: control.seq, route, httpMethod: request.method, path: url.pathname, method: null, bearer: 'none', status: 0, advertised: false };
       let response;
       if (route === 'mcp') {
@@ -330,10 +354,10 @@ export function createOAuthFixtureCore({ id, origin, tools = ['read_series'], no
           response = answer(401, { error: 'invalid_token' }, { 'www-authenticate': `Bearer ${error}resource_metadata="${resourceMetadataUrl}", scope="${OAUTH_SCOPE}"` });
           entry.advertised = true;
         } else response = mcp(request, message);
-      } else if (control.phase === 'open' || route === 'other' || url.pathname === '/.well-known/openid-configuration') {
+      } else if (control.phase === 'open' || route === 'other' || (url.pathname === '/.well-known/openid-configuration' && advertise.issuer === undefined)) {
         response = answer(404, { error: 'not_found' });
       } else if (route === 'resourceMetadata' || route === 'serverMetadata') {
-        response = request.method === 'GET' ? answer(200, route === 'resourceMetadata' ? resourceMetadata : serverMetadata) : empty(405, { allow: 'GET' });
+        response = request.method === 'GET' ? answer(200, route === 'resourceMetadata' ? advertisedResource(advertise) : advertisedServer(advertise)) : empty(405, { allow: 'GET' });
         entry.advertised = response.status === 200;
       } else if (route === 'register') response = register(request, entry);
       else if (route === 'authorize') response = authorize(request, url, entry, secrets);

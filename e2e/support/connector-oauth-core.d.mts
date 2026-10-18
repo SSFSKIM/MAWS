@@ -9,6 +9,13 @@ export interface OAuthControl {
   readonly phase: OAuthPhase;
   readonly accessTtlSeconds: number; // 1..86400, stamped on each access token as it is issued
   readonly revocation: 'available' | 'unavailable'; // unavailable: the revocation endpoint answers 503
+  // P3-HD panel correction: in the OAuth phase, what the fixture advertises instead of its own (127.0.0.1 URLs only)
+  readonly advertise?: OAuthAdvertise;
+}
+export interface OAuthAdvertise {
+  readonly resource?: string; // protected-resource metadata's `resource`
+  readonly authorizationServer?: string; // its one `authorization_servers` entry
+  readonly issuer?: string; // the metadata's `issuer`, then also served as OpenID discovery metadata
 }
 export const OPEN_CONTROL: OAuthControl;
 export function parseOAuthControl(text: string | null): OAuthControl;

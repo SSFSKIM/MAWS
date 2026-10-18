@@ -13,13 +13,19 @@
 //          observed it again; then D reads on the sealed grant (mock keychain) with no browser. Disconnect revokes and
 //          forgets, the revocation endpoint up or down, and leaves D blocked; a Connect's listener pending at shutdown is
 //          closed with the app.
+//   oauth trust binding (P3-HD Decision Log 45 and 46): a query-bearing request URL whose protected-resource metadata
+//          names another query's resource, and an authorization server whose discovery would leave its origin (a `//`
+//          path, its own candidates answering 404, another loopback origin serving a document naming that issuer), each
+//          end the owner's Connect before any listener, registration, consent or browser; the other origin is never
+//          asked anything and nothing is minted or sealed.
 import { existsSync } from 'node:fs';
 import { test, expect, type Locator, type TestInfo } from '@playwright/test';
 import { CONNECTORS_COPY as C, SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { PAGE_HTML, PAGE_TITLE, SERVER, TOOL, TOOL_NAME, wait, WATCH_MS, withScene, type ConnectorScene } from './support/connector-scene';
 import { createPageIn, expectQuietJournals, Refreshes, serverConnected, serverRow, sessionJournals } from './support/connector-direct-scene';
-import { bearerCrossings, pageVariant, plaintextHits, scanScratchTree } from './support/connector-direct-checks';
+import { addedListeners, bearerCrossings, pageVariant, plaintextHits, scanScratchTree } from './support/connector-direct-checks';
 import { allow, evidence, stopEngine } from './support/connector-direct-acceptance';
+import { tcpListeners } from './support/processes';
 import { browserOpens, cleanShot, connectionWords, connectThroughBrowser, documentTexts, expectScratchCustody, httpEntry, listenersOnPort, MainOutput, mcpRequestsSince, openLogOf, sealedRecords, toolCallAttempts } from './support/connector-direct-oauth';
 import { assertOpenPhase, enterOAuthPhase, enterOpenPhase, readOAuthLog, scanForSecrets, startOAuthFixture, summarizeOAuthLog, updateOAuthControl, type OAuthFixture, type OAuthFixturePaths } from './support/connector-oauth';
 
@@ -377,5 +383,93 @@ test('oauth relaunch: after a quit nothing reaches the server until an open-phas
       }
     },
     { server: () => httpEntry(series!.resourceUrl), env: (scene) => ({ MAWS_E2E_OPEN_LOG: openLogOf(scene) }) },
+  );
+});
+
+// P3-HD panel correction (Decision Log 45 and 46): the trust bindings of MAWS's own sign-in, on the built app.
+const PEER = 'peer';
+const PEER_TITLE = 'Signups, peer';
+const PEER_TOOL_NAME = C.toolName(PEER, TOOL);
+
+test('oauth trust binding: another query’s resource and discovery off the issuer’s origin each end Connect before any registration, consent or browser', async () => {
+  test.setTimeout(600_000);
+  const info = test.info();
+  let tenant: OAuthFixture | undefined;
+  let peer: OAuthFixture | undefined;
+  let elsewhere: OAuthFixture | undefined;
+  await withScene(
+    'oauthtrust',
+    info,
+    async (scene) => {
+      try {
+        elsewhere = await startOAuthFixture({ root: scene.root, id: 'elsewhere' }); // configured nowhere
+        tenant = await startOAuthFixture({ root: scene.root, id: 'tenant' });
+        peer = await startOAuthFixture({ root: scene.root, id: PEER });
+        const fixtures = [tenant, peer, elsewhere];
+        const openLog = openLogOf(scene);
+        const output = new MainOutput();
+        const run = await output.launch(scene);
+        await expectScratchCustody(run, scene);
+        const page1 = await createPageIn(run.page, scene, { html: PAGE_HTML, title: PAGE_TITLE });
+        const page2 = await createPageIn(run.page, scene, { html: pageVariant(PAGE_HTML, { server: PEER, title: PEER_TITLE }), title: PEER_TITLE, spaceId: page1.spaceId });
+
+        // the engine observes both configured servers in their open phase and reads each once
+        let { frame } = await scene.openPage(run.page, page1.artifactId);
+        await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+        for (const fixture of fixtures) assertOpenPhase(fixture);
+        const engine = await scene.ownerStart(run.page);
+        await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+        await allow(scene, run.page, TOOL_NAME);
+        await expect(frame.locator('#last')).toHaveText(/^ok n=\d+ via=engine$/, { timeout: 20_000 });
+        await serverConnected(run.page, engine.appSessionId, PEER);
+        const frame2 = (await scene.openPage(run.page, page2.artifactId, PEER_TITLE)).frame;
+        await expect(frame2.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+        await allow(scene, run.page, PEER_TOOL_NAME);
+        await expect(frame2.locator('#last')).toHaveText(/^ok n=\d+ via=engine$/, { timeout: 20_000 });
+
+        // the engine stopped and confirmed dead; only then do the servers advertise, to MAWS alone
+        await stopEngine(scene, run, engine);
+        const issuer = `${peer.origin}//${new URL(elsewhere.origin).host}`; // its last OpenID candidate is the other origin
+        enterOAuthPhase(tenant, { enginePids: [engine.pid] }, { advertise: { resource: `${tenant.resourceUrl}?tenant=beta` } });
+        enterOAuthPhase(peer, { enginePids: [engine.pid] }, { advertise: { authorizationServer: issuer } });
+        enterOAuthPhase(elsewhere, { enginePids: [engine.pid] }, { advertise: { issuer } });
+
+        const pid = run.child.pid!;
+        const ended: Record<string, unknown> = {};
+        for (const [artifactId, title, server, why] of [[page1.artifactId, PAGE_TITLE, SERVER, 'resource'], [page2.artifactId, PEER_TITLE, PEER, 'issuer']] as const) {
+          ({ frame } = await scene.openPage(run.page, artifactId, title));
+          const sheet = await scene.openSheet(run.page);
+          const row = serverRow(sheet, server, 'source');
+          const before = tcpListeners(pid);
+          await row.getByRole('button', { name: S.connectLabel(server) }).click();
+          await expect(row.locator('[data-connector-server-last]')).toHaveText(` · ${S.last({ action: 'connect', ok: false, why })}`, { timeout: 30_000 });
+          expect(addedListeners(before, tcpListeners(pid)), `${server}: no callback listener was bound`).toEqual([]);
+          await cleanShot(info, `oauth-trust-${why}.png`, sheet.locator('[data-connectors-servers]'), run.page, fixtures);
+          await scene.closeSheet(run.page);
+          ended[server] = why;
+        }
+
+        const tenantAsked = summaryOf(tenant).oauth;
+        expect(tenantAsked.byRoute.resourceMetadata ?? 0, 'the tenant’s resource metadata was read').toBeGreaterThan(0);
+        expect(tenantAsked.byRoute.serverMetadata ?? 0, 'and no authorization server was asked after it').toBe(0);
+        const ownCandidates = readOAuthLog(peer).filter((entry) => entry.phase === 'oauth' && entry.route === 'other' && entry.path.startsWith('/.well-known/'));
+        expect(ownCandidates.length, 'the issuer origin’s own discovery candidates were asked').toBeGreaterThan(0);
+        expect(readOAuthLog(elsewhere), 'the other origin was asked nothing').toEqual([]);
+        for (const fixture of fixtures) {
+          expect(summaryOf(fixture).oauth, `${fixture.id}: nothing registered, consented or exchanged`).toMatchObject({ registrations: 0, authorizations: 0, codeExchanges: 0, refreshes: 0 });
+          expect(existsSync(fixture.secrets), `${fixture.id} minted nothing`).toBe(false);
+        }
+        expect(browserOpens(openLog), 'no browser opened').toBe(0);
+        expect(sealedRecords(scene).records, 'nothing sealed').toEqual([]);
+        await evidence(info, 'oauth-trust', { ended, tenant: phasesOf(tenant), peer: phasesOf(peer), elsewhere: phasesOf(elsewhere), ownCandidates: ownCandidates.map((entry) => entry.status), opens: browserOpens(openLog) });
+        await scene.quit(run);
+        expectQuietJournals(sessionJournals(scene));
+      } finally {
+        await tenant?.close();
+        await peer?.close();
+        await elsewhere?.close();
+      }
+    },
+    { server: () => httpEntry(`${tenant!.resourceUrl}?tenant=alpha`), servers: () => ({ [PEER]: httpEntry(peer!.resourceUrl) }), env: (scene) => ({ MAWS_E2E_OPEN_LOG: openLogOf(scene) }) },
   );
 });

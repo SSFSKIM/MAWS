@@ -15,7 +15,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   OPEN_CONTROL, parseOAuthControl,
-  type OAuthControl, type OAuthLogEntry, type OAuthPhase, type OAuthRoute, type OAuthSecret, type OAuthSecretKind,
+  type OAuthAdvertise, type OAuthControl, type OAuthLogEntry, type OAuthPhase, type OAuthRoute, type OAuthSecret, type OAuthSecretKind,
 } from './connector-oauth-core.mjs';
 import { isAlive } from './processes';
 
@@ -74,7 +74,8 @@ export function readControl(paths: Pick<OAuthFixturePaths, 'control'>): OAuthCon
 function writeControl(paths: Pick<OAuthFixturePaths, 'control'>, control: OAuthControl): OAuthControl {
   const text = JSON.stringify(control);
   const parsed = parseOAuthControl(text);
-  if (!(Object.keys(OPEN_CONTROL) as (keyof OAuthControl)[]).every((key) => parsed[key] === control[key])) throw new Error(`not a valid OAuth fixture control: ${text}`);
+  const same = (Object.keys(OPEN_CONTROL) as (keyof OAuthControl)[]).every((key) => parsed[key] === control[key]) && JSON.stringify(parsed.advertise) === JSON.stringify(control.advertise);
+  if (!same) throw new Error(`not a valid OAuth fixture control: ${text}`);
   const temporary = `${paths.control}.${process.pid}.tmp`;
   writeFileSync(temporary, text);
   renameSync(temporary, paths.control);
@@ -90,6 +91,7 @@ export interface OAuthPhaseOptions {
   alive?: (pid: number) => boolean;
   accessTtlSeconds?: number;
   revocation?: OAuthControl['revocation'];
+  advertise?: OAuthAdvertise; // P3-HD panel correction: the trust-binding scene's overrides
 }
 
 // The OAuth phase, for MAWS alone: every engine that observed the fixture must be named, and gone.
@@ -97,7 +99,7 @@ export function enterOAuthPhase(paths: Pick<OAuthFixturePaths, 'control'>, proof
   const alive = options.alive ?? isAlive;
   if (proof.enginePids.length === 0) throw new Error('enterOAuthPhase: no engine was named; the OAuth phase follows a confirmed engine exit (P3-HD Decision Log 23)');
   for (const pid of proof.enginePids) if (alive(pid)) throw new Error(`enterOAuthPhase: engine ${pid} is still alive; no engine may see the OAuth phase (P3-HD Decision Log 23)`);
-  return next(paths, { phase: 'oauth', ...(options.accessTtlSeconds !== undefined && { accessTtlSeconds: options.accessTtlSeconds }), ...(options.revocation !== undefined && { revocation: options.revocation }) });
+  return next(paths, { phase: 'oauth', ...(options.accessTtlSeconds !== undefined && { accessTtlSeconds: options.accessTtlSeconds }), ...(options.revocation !== undefined && { revocation: options.revocation }), ...(options.advertise !== undefined && { advertise: options.advertise }) });
 }
 
 export function enterOpenPhase(paths: Pick<OAuthFixturePaths, 'control'>): OAuthControl {

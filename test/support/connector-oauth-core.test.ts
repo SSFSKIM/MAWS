@@ -73,6 +73,16 @@ describe('the control file', () => {
     expect(parseOAuthControl(JSON.stringify({ ...OAUTH, seq: -1 }))).toEqual(OPEN_CONTROL);
     expect(parseOAuthControl(JSON.stringify({ ...OAUTH, revocation: 'maybe' }))).toEqual(OPEN_CONTROL);
   });
+  // P3-HD panel correction: the trust-binding scene's advertisements, valid only as 127.0.0.1 URLs of bounded length
+  it('reads an optional advertisement override, refusing a malformed one whole', () => {
+    const advertise = { resource: `${RESOURCE}?tenant=beta`, authorizationServer: `${ORIGIN}//127.0.0.1:41001`, issuer: `${ORIGIN}//127.0.0.1:41001` };
+    expect(parseOAuthControl(JSON.stringify({ ...OAUTH, advertise }))).toEqual({ ...OAUTH, advertise });
+    expect(parseOAuthControl(JSON.stringify({ ...OAUTH, advertise: {} }))).toEqual({ ...OAUTH, advertise: {} });
+    for (const bad of [{ resource: 7 }, { issuer: 'https://elsewhere.example/' }, { other: 'x' }, ['x'], 'x', { resource: `${ORIGIN}/${'x'.repeat(2_100)}` }]) {
+      expect(parseOAuthControl(JSON.stringify({ ...OAUTH, advertise: bad })), JSON.stringify(bad).slice(0, 40)).toEqual(OPEN_CONTROL);
+    }
+  });
+
   it('reads a complete control', () => {
     expect(parseOAuthControl(JSON.stringify(OAUTH))).toEqual(OAUTH);
     expect(parseOAuthControl(JSON.stringify({ seq: 4, phase: 'oauth', accessTtlSeconds: 2, revocation: 'unavailable' }))).toEqual({ seq: 4, phase: 'oauth', accessTtlSeconds: 2, revocation: 'unavailable' });
@@ -135,6 +145,32 @@ describe('the OAuth phase: discovery', () => {
     });
     expect(send({ url: '/.well-known/openid-configuration' }).response.status).toBe(404); // RFC 8414 only
     expect(entries.filter((entry) => entry.status === 200).every((entry) => entry.advertised)).toBe(true);
+  });
+});
+
+// P3-HD panel correction: what the trust-binding scene makes a fixture advertise (another tenant's resource; an
+// authorization server whose discovery would leave its origin; a foreign document naming that issuer)
+describe('the OAuth phase: advertisement overrides', () => {
+  it('advertises the control’s resource and authorization server instead of its own', () => {
+    const advertise = { resource: `${RESOURCE}?tenant=beta`, authorizationServer: `${ORIGIN}//127.0.0.1:41001` };
+    for (const url of ['/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-protected-resource']) {
+      expect(json(send({ url }, { ...OAUTH, advertise }))).toEqual({ resource: advertise.resource, authorization_servers: [advertise.authorizationServer], scopes_supported: ['series:read'], bearer_methods_supported: ['header'] });
+    }
+    // its own discovery paths under that server's `//` path are unknown routes: 404
+    for (const url of ['/.well-known/oauth-authorization-server//127.0.0.1:41001', '/.well-known/openid-configuration//127.0.0.1:41001']) {
+      expect(send({ url }, { ...OAUTH, advertise }).response.status, url).toBe(404);
+    }
+  });
+
+  it('serves OpenID metadata naming the control’s issuer only when it names one', () => {
+    const issuer = 'http://127.0.0.1:41002//127.0.0.1:41000';
+    const oidc = send({ url: '/.well-known/openid-configuration' }, { ...OAUTH, advertise: { issuer } });
+    expect(oidc.response.status).toBe(200);
+    expect(json(oidc)).toMatchObject({ issuer, authorization_endpoint: `${ORIGIN}/authorize`, registration_endpoint: `${ORIGIN}/register`, jwks_uri: `${ORIGIN}/jwks`, subject_types_supported: ['public'], id_token_signing_alg_values_supported: ['RS256'] });
+    expect(oidc.entry).toMatchObject({ route: 'serverMetadata', advertised: true });
+    expect(json(send({ url: '/.well-known/oauth-authorization-server' }, { ...OAUTH, advertise: { issuer } })).issuer).toBe(issuer);
+    expect(send({ url: '/.well-known/openid-configuration' }, { ...OPEN_CONTROL, advertise: { issuer } }).response.status).toBe(404); // never in the open phase
+    expect(send({ url: '/.well-known/openid-configuration' }).response.status).toBe(404);
   });
 });
 
