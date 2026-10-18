@@ -5,6 +5,7 @@
 import { useEffect } from 'react';
 import { idbLogRecord, type LogRecord } from '../log/record';
 import { useKeyHolder } from '../key/holder';
+import { heldSends } from '../hub/access';
 import { hubBase } from '../hub/base';
 import { ProjectConnection } from './connection';
 
@@ -55,6 +56,9 @@ function close(project: string, h: Held): void {
   open.delete(project);
   h.connection.stop();
 }
+
+// Signing in again reloads the page, which loses a send the hub has not acknowledged: such a send is reported to it.
+heldSends(() => [...open.values()].some((h) => h.connection.client.holdsHumans()));
 
 /** The project's connection, opened if it is not. */
 export const projectConnection = (project: string): ProjectConnection => held(project).connection;

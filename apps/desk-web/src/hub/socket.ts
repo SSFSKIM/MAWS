@@ -1,7 +1,9 @@
 // A hub socket that stays connected: it reconnects with backoff after every close, joins `part` frames into the frame
 // they slice (a set begun on a dead connection is dropped with it), and cuts a frame over the bound into parts on the
 // way up (DX2's frame bound, which DX3 shares). What a connection means — resuming, re-subscribing — is its owner's.
+// Each connect that closes without opening is reported to `access.ts`, which asks whether a lapsed sign-in is why.
 import { FRAME_LIMIT, PartAssembler, toWire, type Part } from 'desk-hub/protocol';
+import { connectFailed, connectOpened } from './access';
 
 export type ConnectionStatus = 'connecting' | 'open';
 
@@ -24,6 +26,8 @@ export type HubSocketOptions<Down> = {
 export class HubSocket<Down extends { t: string }, Up extends object> {
   private ws: WebSocket | null = null;
   private attempt = 0;
+  /** Connects in a row that closed without opening. */
+  private failures = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = true;
   private last: ConnectionStatus | null = null;
@@ -68,9 +72,13 @@ export class HubSocket<Down extends { t: string }, Up extends object> {
     this.status('connecting');
     const ws = new WebSocket(this.options.url);
     const assembler = new PartAssembler();
+    let opened = false;
     this.ws = ws;
     ws.onopen = () => {
       if (this.ws !== ws) return;
+      opened = true;
+      this.failures = 0;
+      connectOpened();
       this.status('open');
       this.options.open();
     };
@@ -95,6 +103,7 @@ export class HubSocket<Down extends { t: string }, Up extends object> {
       if (this.ws !== ws) return;
       this.ws = null;
       if (this.stopped) return;
+      if (!opened) connectFailed(++this.failures);
       this.status('connecting');
       const delay = (this.options.delay ?? backoff)(this.attempt);
       this.attempt++;
