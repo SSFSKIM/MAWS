@@ -1,9 +1,11 @@
 // A failure-only timeline for the cases the app's foreground state decides (P3-F's W-MINI: tracker rows 199, 200, 217,
 // 264 and 277). The mini fails them and the MacBook does not, so a failing reading has to come from the gate's own run.
 // `traceForeground` adds passive page listeners (focus and window focus, visibility, selection, the clipboard events,
-// keys) and, given an editor, logs its paste path: each `transformPasted` and `handlePaste` prop with its plugin, each
-// transaction a paste or another UI event dispatches with whether it changed the document, and every document change a
-// plugin's `filterTransaction` refused. Each traced step prints one entry line, passing or not: the time and the window's
+// mouse and key input with the time each event was made and both selections a task later), passes every element
+// `focus()` call through while logging its target and whether it took focus, and, given an editor, reads its selection
+// and comment marks beside the page's and logs its paste path: each `transformPasted` and `handlePaste` prop with its
+// plugin, each transaction a paste or another UI event dispatches with whether it changed the document, and every
+// document change a plugin's `filterTransaction` refused. Each traced step prints one entry line, passing or not: the time and the window's
 // native focus as the step begins, with the page's focus, visibility and focused element, so a run shows the foreground
 // state each scene actually ran in. Native state is always read without any clipboard call (which broke the triage's
 // first probe). Only when the step fails is the rest reported, to the run's output and the test's attachments: the same
@@ -20,8 +22,19 @@ export interface ForegroundTrace {
 export async function traceForeground(app: ElectronApplication, page: Page, options: { editor?: string } = {}): Promise<ForegroundTrace> {
   await page.evaluate((editorSelector) => {
     type Entry = Record<string, unknown>;
-    const w = window as unknown as { __mawsTrace?: { log: Entry[]; t0: number; editors: WeakSet<object> } };
-    const trace = (w.__mawsTrace ??= { log: [], t0: performance.now(), editors: new WeakSet() });
+    type EditorElement = Element & { editor?: { state: { doc: { descendants(f: (node: { isText: boolean; text?: string; marks: Array<{ type: { name: string }; attrs: { threadId?: unknown } }> }) => void): void }; selection: { from: number; to: number } } } };
+    const w = window as unknown as {
+      __mawsTrace?: { log: Entry[]; t0: number; editors: WeakSet<object>; editorSelector: string | null; selections(): Entry; editorReading(): Entry | null };
+    };
+    const trace = (w.__mawsTrace ??= {
+      log: [],
+      t0: performance.now(),
+      editors: new WeakSet(),
+      editorSelector: null,
+      selections: () => ({}),
+      editorReading: () => null,
+    });
+    if (editorSelector) trace.editorSelector = editorSelector;
     const push = (entry: Entry) => {
       trace.log.push({ t: Math.round(performance.now() - trace.t0), ...entry });
       if (trace.log.length > 600) trace.log.splice(0, trace.log.length - 600);
@@ -34,8 +47,47 @@ export async function traceForeground(app: ElectronApplication, page: Page, opti
         .map((a) => `${a}=${(el.getAttribute(a) ?? '').slice(0, 40)}`);
       return `${el.tagName.toLowerCase()}[${attrs.join(',')}]`;
     };
+    // The page's selection and the traced editor's own, read without layout (nodes and offsets only, never the selected
+    // text, whose serialisation lays the page out).
+    const editorOf = () => (trace.editorSelector ? (document.querySelector(trace.editorSelector) as EditorElement | null) : null);
+    trace.selections = () => {
+      const s = getSelection();
+      const editor = editorOf()?.editor;
+      return {
+        page: s ? { anchor: describe(s.anchorNode), anchorOffset: s.anchorOffset, focus: describe(s.focusNode), focusOffset: s.focusOffset, collapsed: s.isCollapsed } : null,
+        ...(editor ? { editor: [editor.state.selection.from, editor.state.selection.to] } : {}),
+      };
+    };
+    // The selections, and each comment thread's marked text as the page draws it and as the editor's document holds it.
+    trace.editorReading = () => {
+      const root = editorOf();
+      const editor = root?.editor;
+      if (!root || !editor) return null;
+      const drawn: Record<string, string> = {};
+      root.querySelectorAll<HTMLElement>('[data-thread]').forEach((el) => {
+        const id = el.dataset.thread!;
+        drawn[id] = (drawn[id] ?? '') + (el.textContent ?? '');
+      });
+      const held: Record<string, string> = {};
+      editor.state.doc.descendants((node) => {
+        if (!node.isText) return;
+        for (const mark of node.marks) {
+          if (mark.type.name !== 'comment' || typeof mark.attrs.threadId !== 'string') continue;
+          held[mark.attrs.threadId] = (held[mark.attrs.threadId] ?? '') + (node.text ?? '');
+        }
+      });
+      return { ...trace.selections(), marks: { drawn, held } };
+    };
     if (!(w as { __mawsTraceListening?: boolean }).__mawsTraceListening) {
       (w as { __mawsTraceListening?: boolean }).__mawsTraceListening = true;
+      // Every element focus() call, passed through unchanged: what was asked, whether it is in the page, and whether it
+      // holds focus afterwards (an unfocusable or detached target leaves focus where it was).
+      const focus = HTMLElement.prototype.focus;
+      HTMLElement.prototype.focus = function (this: HTMLElement, options?: FocusOptions) {
+        const from = document.activeElement;
+        focus.call(this, options);
+        push({ type: 'focus-call', target: describe(this), connected: this.isConnected, took: document.activeElement === this, from: describe(from) });
+      };
       for (const type of ['focusin', 'focusout'])
         document.addEventListener(type, (e) => push({ type, target: describe(e.target), related: describe((e as FocusEvent).relatedTarget) }), true);
       for (const type of ['focus', 'blur']) window.addEventListener(type, (e) => e.target === window && push({ type: `window-${type}`, hasFocus: document.hasFocus() }), true);
@@ -44,17 +96,20 @@ export async function traceForeground(app: ElectronApplication, page: Page, opti
         const s = getSelection();
         push({ type: 'selectionchange', text: s?.toString().slice(0, 40), collapsed: s?.isCollapsed, focus: describe(s?.focusNode), offset: s?.focusOffset, active: describe(document.activeElement) });
       });
-      for (const type of ['paste', 'copy', 'cut', 'beforeinput', 'keydown'])
+      // Input and clipboard events, each with the time the event was made (`at`, on the timeline's clock) and, a task
+      // later, whether it was prevented and where both selections then stood.
+      for (const type of ['mousedown', 'mouseup', 'click', 'keydown', 'keyup', 'beforeinput', 'input', 'paste', 'copy', 'cut'])
         document.addEventListener(
           type,
           (e) => {
             const data = (e as ClipboardEvent).clipboardData;
-            const entry: Entry = { type, target: describe(e.target), active: describe(document.activeElement) };
+            const entry: Entry = { type, at: Math.round(e.timeStamp - trace.t0), target: describe(e.target), active: describe(document.activeElement) };
             if (e instanceof KeyboardEvent) entry.key = e.key;
+            if (e instanceof MouseEvent) entry.button = e.button;
             if (e instanceof InputEvent) entry.inputType = e.inputType;
             if (data) Object.assign(entry, { types: [...data.types], plain: data.getData('text/plain').slice(0, 60), htmlLength: data.getData('text/html').length });
             push(entry);
-            setTimeout(() => push({ type: `${type}-after`, defaultPrevented: e.defaultPrevented }), 0);
+            setTimeout(() => push({ type: `${type}-after`, defaultPrevented: e.defaultPrevented, ...trace.selections() }), 0);
           },
           true,
         );
@@ -122,9 +177,10 @@ export async function traceForeground(app: ElectronApplication, page: Page, opti
   };
 }
 
-// One reading, taken at once with no sampling: the wall-clock time, each window's native focus and visibility, and the
-// page's focus, visibility and focused element. A reading that cannot be taken says why rather than throwing.
-async function reading(app: ElectronApplication, page: Page): Promise<{ at: string; native: unknown; page: unknown }> {
+// One reading, taken at once with no sampling: the wall-clock time, each window's native focus and visibility, the
+// page's focus, visibility and focused element, and with a traced editor both selections and each comment's marked text
+// (drawn and held). A reading that cannot be taken says why rather than throwing.
+async function reading(app: ElectronApplication, page: Page): Promise<{ at: string; native: unknown; page: unknown; editor: unknown }> {
   const at = new Date().toISOString();
   const native = await app
     .evaluate(({ BrowserWindow }) =>
@@ -137,10 +193,12 @@ async function reading(app: ElectronApplication, page: Page): Promise<{ at: stri
     .evaluate(() => {
       const el = document.activeElement;
       const label = el?.getAttribute('aria-label') ?? el?.getAttribute('role') ?? '';
-      return { hasFocus: document.hasFocus(), visibility: document.visibilityState, active: el ? `${el.tagName.toLowerCase()}${label ? ` ${label.slice(0, 40)}` : ''}` : null };
+      const editor = (window as unknown as { __mawsTrace?: { editorReading(): unknown } }).__mawsTrace?.editorReading() ?? null;
+      return { hasFocus: document.hasFocus(), visibility: document.visibilityState, active: el ? `${el.tagName.toLowerCase()}${label ? ` ${label.slice(0, 40)}` : ''}` : null, editor };
     })
-    .catch((reason: unknown) => ({ error: String(reason) }));
-  return { at, native, page: pageState };
+    .catch((reason: unknown) => ({ error: String(reason), editor: null }));
+  const { editor, ...pageRest } = pageState;
+  return { at, native, page: pageRest, editor };
 }
 
 async function report(app: ElectronApplication, page: Page, label: string, entry: Awaited<ReturnType<typeof reading>>, snapshot?: () => Promise<unknown>): Promise<void> {

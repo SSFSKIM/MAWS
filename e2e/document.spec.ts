@@ -491,7 +491,8 @@ test('commented text through the Mac’s pasteboard: a copy pasted in the same d
       return '';
     });
     expect(html, 'the pasteboard’s text/html carries the thread id').toContain(`data-thread="${threadId}"`);
-    await caretAtEndOf(page, text, 1);
+    // the caret step's entry reading holds both selections and the marks before the click; the paste step's, after it
+    await trace.step('caret-before-paste', () => caretAtEndOf(page, text, 1));
     await trace.step(
       'commented-paste',
       async () => {
@@ -518,8 +519,10 @@ test('commented text through the Mac’s pasteboard: a copy pasted in the same d
     await expect(text.locator('p').nth(0)).toHaveText('The owner reviews the  today.');
     await caretAtEndOf(page, text, 1);
     await page.keyboard.type(' Moved: ');
-    await edit('paste');
-    await expect(text.locator('p').nth(1)).toHaveText(`A second paragraph waits here.${QUOTE} Moved: ${QUOTE}`);
+    await trace.step('cut-paste', async () => {
+      await edit('paste');
+      await expect(text.locator('p').nth(1)).toHaveText(`A second paragraph waits here.${QUOTE} Moved: ${QUOTE}`);
+    });
   });
   expect(await markedText(text), 'one comment, on the pasted text').toEqual({ [threadId]: QUOTE });
   await expect(text.locator('p').nth(1).locator(`[data-thread="${threadId}"]`)).toHaveText(QUOTE);
