@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState, MawsBridge, SettingsState } from '@shared/ipc/schema';
 import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 import { SUPERVISOR_NOTICES } from './app/copy';
@@ -155,6 +155,15 @@ function fakeMain(initial: SettingsState['settings']['theme']) {
 }
 
 let current: { send(name: string, payload: unknown): void } | null = null;
+
+// The first import of the app transforms its whole module graph, which under the React Compiler (vitest's
+// `renderer-compiled-timing`) can outlast a case's 30 s on a loaded machine; warmed once here, every case keeps its
+// own budget (each still imports the app afresh, from the transformed modules).
+beforeAll(async () => {
+  fakeMain('light');
+  await import('./App');
+  delete (window as { maws?: MawsBridge }).maws;
+}, 300_000);
 
 // The strip lives in the Diagnostics tab (C5 M4): the app opens, then Help › Diagnostics arrives from the menu.
 async function renderApp() {

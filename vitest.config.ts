@@ -37,6 +37,8 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
 ];
+// Every renderer component suite (P3-F: the `renderer-compiled` projects run them all again under the React Compiler).
+const RENDERER_COMPONENT_TESTS = 'src/renderer/src/**/*.test.tsx';
 const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',
   'src/renderer/src/sessions/resource.test.tsx', // a whole-tree mount switched across 20 sessions (gate offload, Decision Log 11)
@@ -47,6 +49,14 @@ const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
 // Every happy-dom project drops KaTeX's one quirks-mode advisory (happy-dom has no `document.compatMode`, so no doctype
 // silences it); every other warning passes through.
 const HAPPY_DOM_SETUP = ['test/support/artifacts-dom-setup.ts'];
+
+// A project under the React Compiler as electron-vite builds the app, over happy-dom (C8a; the `renderer-compiled`
+// projects), each with its own plugin instance.
+const compiled = (test: { name: string; include: string[]; exclude?: string[]; testTimeout?: number; hookTimeout?: number }) => ({
+  resolve: { alias },
+  plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } })],
+  test: { environment: 'happy-dom' as const, env: { MAWS_REACT_COMPILER: '1' }, setupFiles: HAPPY_DOM_SETUP, ...test },
+});
 
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay
 // (`MAWS_LIVE=1 pnpm test:live`); it exists only under MAWS_LIVE=1 so `pnpm test` and `pnpm verify` never see it.
@@ -121,46 +131,14 @@ export default defineConfig({
         },
       },
       // P3-B end
-      // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
-      // that reads mutable module state (the instance map, a tool's state) without selecting it is caught in a test.
-      {
-        resolve: { alias },
-        plugins: [react({ babel: { plugins: ['babel-plugin-react-compiler'] } })],
-        test: {
-          name: 'renderer-compiled',
-          environment: 'happy-dom',
-          include: [
-            'src/renderer/src/panel/**/*.test.tsx',
-            'src/renderer/src/app/Shell.panel.test.tsx', // M3: the host inside C5's Shell
-            // C8c start: the code tools render under the host's rule too (a tool's state is a store handle)
-            'src/renderer/src/tools/code/**/*.test.tsx',
-            // C8c end
-            // C8b start: the agent tools' component suites, whose tools render from store handles as the panel's do
-            'src/renderer/src/tools/agents/**/*.test.tsx',
-            // C8b end
-            // E6 start: the Source control tool renders from a store handle, as the panel's tools do
-            'src/renderer/src/tools/scm/**/*.test.tsx',
-            // E6 end
-            // E4a start: the Browser tool and its pane render from the browser store and a placement controller held in refs
-            'src/renderer/src/tools/browser/**/*.test.tsx',
-            // E4a end
-            'src/artifacts/design-system/**/*.test.tsx', // P3-D M4: the apply API and the Design System page, under happy-dom as built
-            // P3-D (the P3 spec's Decision Log 61): B's page bound to D's scope as built, where the compiler would memoize a hook
-            // B called inside a memo
-            'src/renderer/src/artifacts/design-system/documents.test.tsx',
-            // P3-H (the P3 spec's Decision Log 92): the library's components as built, where the first Export of a kind
-            // never showed (its formats read from the module's cache in render, memoized on the kind)
-            'src/renderer/src/library/**/*.test.tsx',
-            // P3-F1 (fix 2): the standalone tab's comment target and its pending notice, whose renders select the library,
-            // layout and pending stores through hooks
-            'src/renderer/src/tools/document/comment-session.test.tsx',
-            // E3 M3: the dashboard's live datasets as built, its editor rendering from its tab's live store
-            'src/renderer/src/tools/dashboard/live.compiled.test.tsx',
-          ],
-          env: { MAWS_REACT_COMPILER: '1' },
-          setupFiles: HAPPY_DOM_SETUP,
-        },
-      },
+      // C8a start: the renderer's component suites again under the React Compiler, as electron-vite builds the app, so a
+      // render that reads mutable module state (the instance map, a tool's state, a module's cache) without selecting it
+      // is caught in a test. C8a compiled the panel host; C8c, C8b, E6, E4a, P3-D, P3-H, P3-F1 and E3 each added their
+      // own suites; P3-F widened it to every renderer component suite (the tracker's compiled-include row: the library's
+      // first Export of a kind never showed, its formats read from the module's cache in render, while its uncompiled
+      // suite passed). The whole-app suites keep their timing budget in a project of their own.
+      compiled({ name: 'renderer-compiled', include: [RENDERER_COMPONENT_TESTS, 'src/artifacts/design-system/**/*.test.tsx' /* P3-D M4 */], exclude: [...configDefaults.exclude, ...TIMING_RENDERER_TESTS] }),
+      compiled({ name: 'renderer-compiled-timing', include: TIMING_RENDERER_TESTS, ...TIMING_TIMEOUTS }),
       // C8a end
       // The desk's hub (apps/desk-hub, DC3 of docs/doperpowers/specs/2026-10-15-desk-design.md): its own config, under
       // this vitest, so `pnpm test` and the unit job's `--maxWorkers` reach it as they reach every project above.

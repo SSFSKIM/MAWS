@@ -29,6 +29,9 @@ beforeAll(() => {
   });
 });
 afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight));
+// The transcript's lazy chunks (./lazy.tsx) loaded before the first case: their cold transform, longer under the React
+// Compiler (vitest's `renderer-compiled`), would otherwise eat a first case's one-second wait on a loaded machine.
+beforeAll(() => Promise.all([import('./view/Transcript'), import('./view/TranscriptSlot'), import('./view/markdown/Markdown')]), 120_000);
 
 let disconnect: () => void = () => {};
 beforeEach(() => {
