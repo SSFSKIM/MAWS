@@ -795,7 +795,7 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
   const shadow: Entry[] = [];
   const others = new Map<string, Entry[]>();
   const families = dict<string>();
-  const familyKeyOf = new Map<string, string>(); // a fontFamily token's path to its family key
+  const familyKeyOf = new Map<string, string>(); // a fontFamily token's identity (`font.body` for `font.body.$root`) to its family key
   const typography: Extract<ResolvedToken, { type: 'typography' }>[] = [];
   const familyKey = (segments: readonly string[]) => {
     const base = claudeName(segments).toLowerCase();
@@ -820,7 +820,7 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
       case 'fontFamily': {
         const key = familyKey(segments[0] === 'font' ? segments.slice(1) : segments);
         families[key] = stackOf(token.value);
-        familyKeyOf.set(token.path, key);
+        familyKeyOf.set(tokenIdentity(token.path), key);
         break;
       }
       case 'typography':
@@ -868,7 +868,7 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
   for (const token of typography) {
     const segments = splitPath(token.path).filter((s) => s !== '$root');
     const raw = writtenComposite(token, resolved.tokens).fontFamily;
-    let key = isAlias(raw) ? familyKeyOf.get(aliasPath(raw)) : undefined;
+    let key = isAlias(raw) ? familyKeyOf.get(tokenIdentity(aliasPath(raw))) : undefined;
     const role = typeRoleOf(token.path);
     const name = role ?? unique(styleNames, claudeName(segments[0] === 'type' ? segments.slice(1) : segments));
     if (!key) {
