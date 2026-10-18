@@ -13,7 +13,7 @@ import { useLayout, type ReplaceVerdict } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { NEW_CHAT } from '../sessions/title';
 import { allTabs, currentSet } from '../stores/layout-model';
-import { focusPaneElement } from '../main/pane-dom';
+import { focusPaneElement, paneDomId } from '../main/pane-dom';
 import { useSessions } from '../stores/sessions';
 import { create } from 'zustand';
 import { createHandlerRegistry } from './registry';
@@ -120,13 +120,25 @@ export async function requestCloseTab(id: string): Promise<void> {
     useLayout.getState().closeTab(id);
   }
   if (restore) {
-    // Wait for React to replace the tab/content, including collapsing a split whose last tab closed.
+    // Wait for React to replace the tab/content, including collapsing a split whose last tab closed. The restore only
+    // places the focus the close let fall: focus that another surface took within that frame (the Overview opened at
+    // once, a dialog, a click elsewhere) stays there (P3-F, tracker rows 200 and 264).
     requestAnimationFrame(() => {
       const main = useLayout.getState().main;
       if (main.current !== before.current) return;
-      focusPaneElement(currentSet(main).panes.length === 1 ? 0 : pane as 0 | 1);
+      const target = currentSet(main).panes.length === 1 ? 0 : pane as 0 | 1;
+      if (!focusLeftTo(pane as 0 | 1, target)) return;
+      focusPaneElement(target);
     });
   }
+}
+
+// Whether focus is still the close's to place: fallen to the page, or still inside the pane it closed in or the one it
+// goes to.
+function focusLeftTo(...panes: Array<0 | 1>): boolean {
+  const now = document.activeElement;
+  if (now === null || now === document.body) return true;
+  return panes.some((index) => document.getElementById(paneDomId(index))?.contains(now) ?? false);
 }
 
 // I2: an unstarted tab a session opened beside in its place (the layout store's `ReplaceGuard`): its guard as for a
