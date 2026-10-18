@@ -1108,6 +1108,22 @@ describe('the grid', () => {
     grid.close();
   });
 
+  // 2026-10-18 (owner): an open async question counts its session as waiting, its presence busy all the while.
+  it('counts a session holding an open async question as waiting and working, under the rule presence counts by: not once its machine is offline', async () => {
+    const project = newProject();
+    const m = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    await m.postOk([
+      { t: 'session', message: envelope(m, project, 'presence', presence('busy')) },
+      { t: 'events', project, events: [question(m, project, 1, 'toolu_grid')] },
+    ]);
+    await gridReached(grid, project, 0, { machines_online: 1, working: 1, waiting: 1 }, 'the open question counted');
+    const from = grid.frames.length;
+    await m.close();
+    await gridReached(grid, project, from, { machines_online: 0, working: 0, waiting: 0 }, 'nothing counted of an offline machine');
+    grid.close();
+  });
+
   it('stops counting a machine once it is revoked, and counts it again once the name is enrolled anew and opens the project', async () => {
     const project = newProject();
     const kept = await machine(project, CLOSES);

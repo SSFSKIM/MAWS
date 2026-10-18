@@ -1,18 +1,21 @@
 // A project's log as its `Project` object stores it (SQLite): each event once, keyed by `(writer, seq)`, with a project
-// offset in arrival order beside it, never inside it; each writer's last seq; and the project's audit record. Events
-// are kept as received (a `hub/` event with the `writer`, `seq`, and `ts` the hub assigned) and compared by their
-// canonical form, so a second copy of an event differs from the first only if its canonical form does.
+// offset in arrival order beside it, never inside it; each writer's last seq; the async questions the log holds open;
+// and the project's audit record. Events are kept as received (a `hub/` event with the `writer`, `seq`, and `ts` the hub
+// assigned) and compared by their canonical form, so a second copy of an event differs from the first only if its
+// canonical form does.
 import { isBase64urlOf } from '../protocol/base64url';
 import { canonicalize } from '../protocol/canonical';
-import { isHubWriter, isLogSeq, type LogEvent, type Vector } from '../protocol/log';
+import { isHubWriter, isLogSeq, questionEffect, type LogEvent, type Vector } from '../protocol/log';
 import { FRAME_LIMIT } from '../protocol/parts';
 
+// `open_questions`: one row per async question the log holds open (`questionEffect`), kept as each event is stored.
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS events (
   offset INTEGER PRIMARY KEY AUTOINCREMENT, writer TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL, nonce TEXT,
   UNIQUE (writer, seq));
 CREATE INDEX IF NOT EXISTS events_by_nonce ON events (nonce) WHERE nonce IS NOT NULL;
 CREATE TABLE IF NOT EXISTS writers (writer TEXT PRIMARY KEY, last INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS open_questions (session TEXT NOT NULL, ask TEXT NOT NULL, machine TEXT NOT NULL, PRIMARY KEY (session, ask));
 CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, entry TEXT NOT NULL);
 `;
 
@@ -25,6 +28,8 @@ const encoder = new TextEncoder();
 const hasControl = (text: string) => [...text].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
 
 export type Stored = { offset: number; event: LogEvent };
+/** An async question the log holds open: the session that asked it, the machine whose feed holds it, and its id. */
+export type OpenQuestion = { machine: string; session: string; ask: string };
 /** The hub's own refusals, daemons' rejections, and decisions on pending requests (from `settled`). */
 export type AuditKind = 'refused' | 'rejected' | 'decided';
 export type AuditRow = { id: number; at: string; kind: AuditKind; entry: Record<string, unknown> };
@@ -110,8 +115,32 @@ export class LogStore {
         )
         .one().offset;
       this.sql.exec('INSERT INTO writers (writer, last) VALUES (?, ?) ON CONFLICT (writer) DO UPDATE SET last = excluded.last', event.writer, event.seq);
+      this.keepQuestions(event);
     });
     return { offset, event };
+  }
+
+  /**
+   * The open questions as this event leaves them, applied in the transaction that stores it, so they follow the log's
+   * order: each feed's in its seq order, a machine's backlog included, which is the order a session wrote its ask, its
+   * answer, and its retirement. A question is keyed by its session and id, so its answer closes it under whichever name
+   * its machine went by.
+   *
+   * Events stored before this table existed are not read into it. Of the asks open then, a bridge's is counted from the
+   * pending set anyway; a log-only one (MAWS's ask, whose export landed in doperpowers 7.182.0 the same day) goes
+   * uncounted until it is answered. Reading every stored body at each project's first wake after the deploy would count
+   * it, and also every older ask whose end the log does not hold, for as long as its session is not retired.
+   */
+  private keepQuestions(event: LogEvent): void {
+    const effect = questionEffect(event);
+    if (effect?.kind === 'question') this.sql.exec('INSERT OR IGNORE INTO open_questions (session, ask, machine) VALUES (?, ?, ?)', effect.session, effect.ask, effect.machine);
+    else if (effect?.kind === 'answered') this.sql.exec('DELETE FROM open_questions WHERE session = ? AND ask = ?', effect.session, effect.ask);
+    else if (effect?.kind === 'retired') this.sql.exec('DELETE FROM open_questions WHERE session = ?', effect.session);
+  }
+
+  /** The async questions the log holds open (`keepQuestions`). */
+  openQuestions(): OpenQuestion[] {
+    return this.sql.exec<OpenQuestion>('SELECT machine, session, ask FROM open_questions ORDER BY rowid').toArray();
   }
 
   /** Every event after `offset`, in offset order, in batches of about BATCH_BYTES. */
