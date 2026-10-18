@@ -162,6 +162,9 @@ const OVERTAKEN = Symbol('overtaken'); // a lookup some change of the cache over
 
 const launchKeyOf = (context: ConnectorLaunchContext) => `${context.appSessionId}\0${context.launchId}`;
 const contextKeyOf = (context: ConnectorLaunchContext) => `${context.configFile ?? ''}\0${context.cwd}`;
+// P3-F L245: what a local-scope meaning takes from a captured key: the `projects` key string the engine reads, however it
+// was found (a directory before `git init`, a repository after); an unidentified capture matches no key and is refused.
+const keyMeaning = (localKey: ConnectorLocalKey): string | ConnectorLocalKey => (localKey.kind === 'unidentified' ? localKey : localKey.key);
 const record = (value: unknown): Record<string, unknown> | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
 
 export class ConnectorStatusCache {
@@ -502,7 +505,7 @@ export class ConnectorStatusCache {
     const read = stdio ? SDK_ENVIRONMENT_KEYS.filter((key) => !configured.has(key)) : [];
     return (context) => {
       const environment = Object.fromEntries(read.flatMap((key) => { const value = context.environment[key]; return typeof value === 'string' && !value.startsWith('()') ? [[key, value]] : []; }));
-      return canonicalJson([context.legacyConfigFile, scope === 'local' ? context.localKey : null, environment]);
+      return canonicalJson([context.legacyConfigFile, scope === 'local' ? keyMeaning(context.localKey) : null, environment]);
     };
   }
   // P3-HD M2 end
@@ -510,7 +513,7 @@ export class ConnectorStatusCache {
   // A local-scope identity includes the `projects` key its launch captured, so two launches that captured different keys
   // contradict each other at observation, stickily; a user-scope identity never carries one.
   private identity(scope: string | null, source: string | null, shape: unknown, localKey: ConnectorLocalKey): string {
-    return this.mac(canonicalJson(['maws.connector-source/1', scope, source, shape, scope === 'local' ? localKey : null]));
+    return this.mac(canonicalJson(['maws.connector-source/1', scope, source, shape, scope === 'local' ? keyMeaning(localKey) : null]));
   }
 
   private contest(state: ContextState, name: string): 'ambiguous' {

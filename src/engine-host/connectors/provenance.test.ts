@@ -200,6 +200,23 @@ describe('ConnectorStatusCache: a verified source from one live report', () => {
     observed(cache, launch('app-2', 'L2', {}, project, { kind: 'repository', key: dir }), local);
     expect(await cache.resolveSource(project, 'localtoy')).toEqual({ ok: false, why: 'ambiguous' });
   });
+
+  // P3-F L245: the engine reads the `projects` entry by its key string; how the key was found is not part of it.
+  it('two launches that captured the same key, once as a directory and once as a repository (`git init` between), are one source', async () => {
+    writeConfig();
+    const cache = new ConnectorStatusCache();
+    const local = report({ ...stdio('localtoy', ['local']), scope: 'local', source: 'local' });
+    observed(cache, launch('app-1', 'L1', {}, project, { kind: 'directory', key: project }), local);
+    const before = await cache.resolveSource(project, 'localtoy');
+    expect(before).toMatchObject({ ok: true, source: { entryPath: ['projects', project, 'mcpServers', 'localtoy'] } });
+    observed(cache, launch('app-2', 'L2', {}, project, { kind: 'repository', key: project }), local);
+    const after = await cache.resolveSource(project, 'localtoy');
+    expect(after).toMatchObject({ ok: true, source: { entryPath: ['projects', project, 'mcpServers', 'localtoy'] } });
+    if (before.ok && after.ok) expect(after.source.sourceId).toBe(before.source.sourceId);
+    // an unidentified capture beside an identified one is still never resolved
+    observed(cache, launch('app-3', 'L3', {}, project, { kind: 'unidentified', why: 'timeout' }), local);
+    expect((await cache.resolveSource(project, 'localtoy')).ok).toBe(false);
+  });
 });
 
 describe('ConnectorStatusCache: what MAWS’s own instance reads', () => {
