@@ -19,8 +19,10 @@ export const HEARTBEAT_MS = 15_000;
 /**
  * How long a machine stays online in a project after its last renewal (the `hello` that opened the project on the
  * stream, then each `hb-ack` of that stream's generation): three heartbeat periods, the same span after which the
- * daemon gives its stream up as dead. A lease that lapses, or the close of the stream it belongs to, puts the machine
- * offline: its subscriptions end and its forwarded RPCs without a result become `uncertain`.
+ * daemon gives its stream up as dead. A lease that lapses puts the machine offline. The close of the stream it belongs
+ * to ends what that stream carried at once (its subscriptions end and its forwarded RPCs without a result become
+ * `uncertain`) and holds the machine online for one more heartbeat period, for its next stream's `hello` to take the
+ * lease over; past that it lapses (Project's `closed`).
  */
 export const LEASE_MS = 3 * HEARTBEAT_MS;
 
