@@ -534,7 +534,7 @@ afleet's. Taste-heavy surfaces are reviewed as mockups in the web children.
 
 | From the web | Plane | Path |
 | --- | --- | --- |
-| Send | log | `human` event → `deliver_next` → bridge `$.prompt.submit({asUser: true})`, queued until idle |
+| Send | log | the owner's `human` event → `deliver_next` → the bridge: idle, `$.prompt.submit({asUser: true})`; while a turn runs, `$.session.append` of a row read at the loop's next request, with one `[sminos bridge]` wake if the turn answers first; refused after an Esc, the session's inbox frame (doperpowers #233). A peer's event never takes this path: it goes to the session's inbox socket as a peer message closed by its reply line (doperpowers #236) |
 | Steer | RPC | bridge `$.session.append` of a user row, read at the loop's next request; refused when no turn is running (the web offers Send instead); a turn that answers before any request read the steer gets one wake prompt, at most once per turn (DX5) |
 | Interrupt | RPC | bridge `$.turn.abort` (the main loop's turn), then `TaskStop` through `$.tool.call` on each Bash of that turn the abort moved to the background, the main loop's and its foreground subagents' (a background subagent's never), as Esc kills it in the terminal; the result names the tasks stopped and any still running, and a task still running means the interrupt is incomplete |
 | Answer a question | RPC | bridge: `classic.PermissionRequest` returning `updatedInput: {questions, answers}` for a native AskUserQuestion; the ask mod's external-answer path for an async one |
@@ -566,7 +566,7 @@ button is pressed; the acceptance timings cite it]**
 
 | | bridged (terminal or `--bg`) | `--bg` seat, no bridge | terminal, no bridge | machine offline |
 | --- | --- | --- | --- | --- |
-| Send | log → `deliver_next` → `$.prompt.submit`, queued until idle | `control.sock` `reply`, at the next step | cross-session frame, at the next tool round | in the log; delivered when the daemon reconnects |
+| Send | log → `deliver_next` → `$.prompt.submit` when idle, `$.session.append` at the next model request when busy, the inbox frame after an Esc | `control.sock` `reply`, at the next step | cross-session frame, at the next tool round | in the log; delivered when the daemon reconnects |
 | Steer | `$.session.append`, at the next model request | `reply`, at the next step | as send | fails at once |
 | Interrupt | `$.turn.abort` and `TaskStop`, within 2 s | no | no | fails at once |
 | Question | native: `PermissionRequest` racing the dialog; async: the ask mod's external path | terminal only: the supervisor's `reply` goes out with `nextTurn`, which queues a prompt rather than answering, and no path sends one without it in phase 1; async: none (the ask mod is itself a mod) | terminal only | shown, not answerable |
@@ -4736,6 +4736,21 @@ a hub that connects into machines (§2).
   are known by exclusion from the bridge's closed set of rows (DX5),
   pinned by a test. Rejected: the owner's message as an inbox frame
   while busy, which would put the owner's words in a peer's shape.
+  2026-10-18, landed and rolled: doperpowers #233 (7.176.0) and #236
+  (7.177.0, the peer's message as a peer's) merged, both Macs on 7.177.0
+  with their daemons restarted; desk-web draws the bridge's wake (a row
+  whose first line is `[sminos bridge]`) as a dim system line, and a
+  delivery the bridge appended again after an Esc-rewind once, keeping
+  the later copy, the one the engine read (MAWS #42, deployed `hub@cfaba533
+  web@master.cfaba533`). Rejected for the rewind: walking the chain from
+  the leaf, which drops parallel tool results that hang off their
+  assistant, not the leaf's ancestry. Still open: the owner's message
+  after an Esc pressed in the terminal (or a Remote Control cancel) falls
+  back to the inbox frame, and the engine labels that frame as another
+  session's, not the human's. The desk draws it as the owner's; the model
+  reads it as a peer's. The desk's Interrupt does not cause it: the mod's
+  `$.turn.abort` does not set the engine's stop marker (2.1.300). The fix
+  proposed: append the owner's row and send only a wake through the inbox.
   2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
   desk-dc8 370662a2, c81b77fc, 578b11b8):
   - DX5's `resync` gains `refused`, so a refusal whose post failed is not
