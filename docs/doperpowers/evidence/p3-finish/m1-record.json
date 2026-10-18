@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 40,
-    "defer:pending": 83,
+    "defer:committed": 41,
+    "defer:pending": 82,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -694,7 +694,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L68; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "Clear the watchdog on the child's exit, or kill through the child handle rather than a stored PID. Re-deferred 2026-10-07 (E11 1.6): spike code no one re-runs. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L76): spike code no one re-runs. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L68; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "21dbef930cec0515464f108dcd55d016798b8ea3"
     },
     {
       "line": 69,
@@ -704,8 +704,8 @@
       "triageReason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L69; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "remainingClause": "One selector list for both when the file is next consolidated. Re-deferred 2026-10-07 (E11 1.6): a refactor; `transcript.css` is not consolidated in E11. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L77): a refactor at the next consolidation of `transcript.css`. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L69; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 70,
