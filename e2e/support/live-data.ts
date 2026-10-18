@@ -60,6 +60,8 @@ export async function createBoard(scene: ConnectorScene, page: Page, agent: Agen
 // ---- what the owner sees --------------------------------------------------------------------------------------------
 
 export const mainTab = (page: Page, artifactId: string): Locator => page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`);
+/** A tab of the main area's strip by its name (main/Tab.tsx: `role="tab"`, its label the name, `aria-selected`). */
+export const stripTab = (page: Page, name: string): Locator => page.locator(`[data-region="main"] [role="tab"][data-tab-id][aria-label="${name}"]`);
 /** The live document's views under `scope` (a tab or a panel record), the bar first, the table second. */
 export const liveViews = (scope: Locator): Locator => scope.locator('.doc-live figure.dash-view');
 export const previewViews = (scope: Locator): Locator => scope.locator('.doc-preview figure.dash-view');

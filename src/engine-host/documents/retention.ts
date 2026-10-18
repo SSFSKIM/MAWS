@@ -19,6 +19,7 @@
 // membership to the one snapshot its restored descriptor names; a query with a snapshot and no membership (a copy's, a
 // restore's) is enrolled with it. A file dataset naming a managed asset adopts it: ordinary, never collected, its place in
 // any query's recency kept; an upload or a copy deduplicating to one adopts it too (store.ts).
+import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { listDatasets, snapshotOf } from '@artifacts/dashboard/datasets';
@@ -33,6 +34,16 @@ export const ASSET_HOLD_LIMITS = { groups: 64, refs: 256, groupRefs: 64 } as con
 
 /** The query keeps its latest this many distinct snapshots (R1). */
 const KEPT_PER_QUERY = 2;
+
+// E3 panel wave (Decision Log 16 (5); E's Decision Log 48: fresh UUID refs, no tombstones): the query-snapshot namespace.
+// Collection deletes a snapshot's row and so frees its name; the refresh sink alone names a snapshot in the namespace,
+// always afresh, and the store refuses an ordinary upload naming it (any case, as a case-folding disk would), so no
+// collected ref is ever recreated with other bytes.
+const QUERY_SNAPSHOT_NAME = /^query-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/i;
+/** A fresh query snapshot's asset name: the refresh sink's alone. */
+export const querySnapshotName = (): string => `query-${randomUUID()}.json`;
+/** Whether an asset name lies in the query-snapshot namespace an ordinary upload may not take. */
+export const isQuerySnapshotName = (name: string): boolean => QUERY_SNAPSHOT_NAME.test(name);
 
 export interface AssetHold {
   /** Idempotent; what the hold protected becomes collectable once nothing else names it. */

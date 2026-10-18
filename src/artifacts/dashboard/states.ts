@@ -57,10 +57,17 @@ export function sourceLabel(descriptor: DatasetDescriptor, by: string, live?: { 
   // after it (a closed string, said once); without `live` (an export, a history preview) E2's label as it was
   const staleSince = live ? datasetStateAt(descriptor, live.now).staleSince : undefined;
   if (staleSince !== undefined) parts.push(DATASET_STATES.staleSince(staleSince));
-  const stored = state.status === 'stale' ? DATASET_STATES.staleSince(state.at) : state.status === 'paused' ? DATASET_STATES.paused : state.status === 'error' ? (state.message ?? 'the last refresh failed') : null;
+  const stored = state.status === 'stale' ? DATASET_STATES.staleSince(state.at) : state.status === 'paused' ? DATASET_STATES.paused : datasetErrorOf(state) /* E3 panel */;
   if (stored !== null && (staleSince === undefined || stored !== DATASET_STATES.staleSince(staleSince))) parts.push(stored);
   if (live?.pause && live.pause !== stored) parts.push(live.pause);
   return parts.join(' · ');
+}
+
+// E3 panel wave (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, Decision Log 16): the words of a dataset's
+// recorded error, as its source label says them (the host's closed wording, else this fallback) and the source sheet's
+// live block repeats them; null when its state is no error.
+export function datasetErrorOf(state: DatasetState): string | null {
+  return state.status === 'error' ? (state.message ?? 'the last refresh failed') : null;
 }
 
 // E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R4; E's Decision Log 48 (4)): the dataset's state

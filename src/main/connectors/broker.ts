@@ -47,7 +47,9 @@
 //   architect's watch priority ruling): at the 64-watch cap a visible surface's request ends the oldest dormant dataset
 //   watch (hidden, nothing running), never one of H's generic watches or a visible one; its dashboard finds the handle
 //   gone (`refreshWatch` false) when shown and registers it again. A dataset watch whose refresh runs answers
-//   `refreshWatch` true, so a running handle never reads as an evicted one; H's generic answers are unchanged.
+//   `refreshWatch` true, so a running handle never reads as an evicted one; H's generic answers are unchanged. E3 panel
+//   (Decision Log 17): the owner asks that through the non-forcing probe (`{probe: true}`), its dataset watch's liveness
+//   alone, so its recovery never adds a refresh to the catch-up a showing already ran.
 import { randomUUID } from 'node:crypto';
 import * as z from 'zod';
 import {
@@ -275,8 +277,12 @@ export class ConnectorBroker {
   // The page's Refresh (after the owner's Start, say): a refresh now, when the lease is visible and the watch neither
   // waits for a grant nor has one in flight. P3-H H3b: a visible watch waiting for a grant has its grant re-read from the
   // store instead (a grant whose announcement was lost wakes it); true when either was started.
-  refreshWatch(owner: string, leaseId: string, watchId: string): boolean {
+  // E3 panel (Decision Log 17): `options.probe`, the owner's non-forcing check: whether its dataset watch lives, read
+  // and answered alone (no wake, grant read or check, call or schedule change), so a dashboard's recovery never starts a
+  // second refresh after the catch-up its showing already ran. H's generic watches answer false to it.
+  refreshWatch(owner: string, leaseId: string, watchId: string, options?: { probe?: boolean }): boolean {
     const watch = this.watchOf(owner, leaseId, watchId);
+    if (options?.probe) return watch?.dataset !== undefined; // E3 panel
     if (watch) this.wakeIfGranted(watch);
     if (watch?.waitingForGrant && this.visible(watch.lease)) {
       void this.recheck(watch);

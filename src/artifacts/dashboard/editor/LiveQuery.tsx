@@ -6,7 +6,9 @@
 // only while it is the one the sheet captured; a newer fetch or a replaced query asks for an explicit reopening, so the
 // captured rows and time are never changed underneath. E3 M3 fix: a concrete refusal is said as itself, and a tool
 // refused as one that may change data is not offered Allow or Refresh again in this opening (reopening tries once more;
-// a change of the query's source clears the refusal in the tab).
+// a change of the query's source clears the refusal in the tab). E3 panel wave (Decision Log 16): a newer fetch time with
+// the same ref (identical rows refetched) is a newer fetch too, and the block says the live descriptor's committed error
+// in its source label's words beside the controls, while the captured rows and time stay as captured.
 import { useState, useSyncExternalStore } from 'react';
 import type { QuerySource } from '../datasets';
 import { utcTime } from '../states';
@@ -56,7 +58,8 @@ export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProp
   const { start } = snapshot;
   const starting = start.phase === 'asking' || start.phase === 'starting';
   const opens = (start.phase === 'card' || start.phase === 'refused') && start.appSessionId !== null ? start.appSessionId : null;
-  const newer = status.snapshot !== null && status.snapshot.ref !== captured.snapshot?.ref ? status.snapshot : null;
+  // E3 panel: a newer fetch time is new provenance even when identical rows kept the ref
+  const newer = status.snapshot !== null && (captured.snapshot === null || status.snapshot.ref !== captured.snapshot.ref || status.snapshot.at > captured.snapshot.at) ? status.snapshot : null;
   return (
     <section className="dash-sheet-live" role="group" aria-label={C.heading}>
       <h3 className="dash-sheet-live-heading">{C.heading}</h3>
@@ -67,6 +70,7 @@ export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProp
         <span>{permission}</span>
         <span>{scheduleWords(status.schedule)}</span>
       </p>
+      {status.error !== null && <p className="dash-sheet-note">{status.error}</p> /* E3 panel: the live descriptor's committed error */}
       {detail && <p className="dash-sheet-note">{C.detail[detail]}</p>}
       {!snapshot.shown && <p className="dash-sheet-note">{C.hidden}</p>}
       {newer && (

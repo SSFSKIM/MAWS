@@ -2,7 +2,7 @@
 // dataset operation's take, `ConnectorDatasetTake`, beside H's nullable outcome on `connectors.take`. Its phases are
 // explicit and closed: publishing (the operation's id), the compact metadata once (never a row), or a typed failure.
 import { describe, expect, it } from 'vitest';
-import { validateCommandOutput } from '../validate';
+import { validateCommandInput, validateCommandOutput } from '../validate';
 import { ConnectorDatasetTakeSchema } from './connectors';
 
 const OP = '00000000-0000-4000-8000-000000000001';
@@ -43,5 +43,19 @@ describe('a dataset operation’s take', () => {
     expect(validateCommandOutput('connectors.take', { outcome: { ok: false, failure: 'unavailable', message: 'gone' }, dataset: META }).ok).toBe(false);
     expect(validateCommandOutput('connectors.take', { outcome: null, dataset: { status: 'publishing', operationId: OP } }).ok).toBe(true);
     expect(validateCommandOutput('connectors.take', { outcome: null }).ok).toBe(true);
+  });
+});
+
+// E3 panel wave (Decision Log 17): the owner's non-forcing probe of a dataset watch rides `connectors.refresh` as an
+// optional boolean beside the watch's id; without it the command is H's, unchanged.
+describe('`connectors.refresh`’s probe (E3 panel)', () => {
+  const LEASE = '22222222-2222-4222-8222-222222222222';
+  const WATCH = '44444444-4444-4444-8444-444444444444';
+  it('takes H’s input as before, or a boolean probe beside it, and nothing else', () => {
+    expect(validateCommandInput('connectors.refresh', { leaseId: LEASE, watchId: WATCH }).ok).toBe(true);
+    expect(validateCommandInput('connectors.refresh', { leaseId: LEASE, watchId: WATCH, probe: true }).ok).toBe(true);
+    expect(validateCommandInput('connectors.refresh', { leaseId: LEASE, watchId: WATCH, probe: false }).ok).toBe(true);
+    expect(validateCommandInput('connectors.refresh', { leaseId: LEASE, watchId: WATCH, probe: 'yes' }).ok).toBe(false);
+    expect(validateCommandInput('connectors.refresh', { leaseId: LEASE, watchId: WATCH, force: true }).ok).toBe(false);
   });
 });

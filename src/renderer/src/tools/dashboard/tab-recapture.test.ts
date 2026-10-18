@@ -95,6 +95,28 @@ describe('the dashboard tab’s source sheet across a host restart (E3)', () => 
     expect(w.tab.sheet.snapshot().hold).toBe('held');
   });
 
+  // E3 panel wave (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, Decision Log 16 (4)): the freshness is the
+  // synchronization that follows the host's loss, compared across it, never an earlier reconnect's
+  it('a reconnect between the opening and the restart does not count: it waits for the restarted replica’s sync', async () => {
+    const w = await opened();
+    w.setState({ phase: 'off', synced: false }); // the document's port reconnects; the hold is untouched
+    w.setState({ phase: 'live', synced: true });
+    await settle();
+    expect(w.tab.sheet.snapshot().hold).toBe('held');
+    expect(w.holds).toHaveLength(1);
+    w.setState({ phase: 'off', synced: false }); // then the host restarts: the replica's port closes, its hold goes
+    w.holds[0]!.lose();
+    await settle();
+    expect(w.tab.sheet.snapshot().hold).toBe('pending');
+    expect(w.holds).toHaveLength(1); // nothing recaptured from the stale document
+    setDataset(w.doc, 'live', live('assets/q2.json', 'Live, later')); // what the restarted host's sync brings
+    w.setState({ phase: 'live', synced: true });
+    await settle();
+    expect(w.holds.map((hold) => hold.refs)).toEqual([['assets/q1.json'], ['assets/q2.json']]);
+    expect(w.tab.sheet.snapshot().datasets.map(({ descriptor }) => descriptor.title)).toEqual(['Live, later']);
+    expect(w.tab.sheet.snapshot().hold).toBe('held');
+  });
+
   it('a document that does not sync again within the bound leaves the sheet unavailable', async () => {
     const w = await opened();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

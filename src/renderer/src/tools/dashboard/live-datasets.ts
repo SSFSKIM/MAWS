@@ -23,12 +23,18 @@
 //   from a mount, a pause or a timer.
 // - The stale label's clock: while shown, one timer at the nearest stale boundary of the live queries tells the views
 //   to relabel; it calls nothing.
+// - E3 panel wave (Decision Log 16 and 17): a watch shown again, or whose start answers after a hide and a showing, is
+//   recovered by H's non-forcing probe (whether its handle lives), never by a forced refresh, so the catch-up H runs on
+//   showing is never followed by a second; a watch H ends (its outcome invalid) is unwatched before it is forgotten, so
+//   its listener goes too; a lease whose cumulative declarations reach H's cap while some name no current query is
+//   recycled; each query's status carries its live descriptor's committed error in its source label's words.
 import type { ArtifactHost, ConnectorSurface } from '@artifacts/host';
-import { listDatasets, type QuerySource } from '@artifacts/dashboard/datasets';
+import { listDatasets, type DatasetState, type QuerySource } from '@artifacts/dashboard/datasets';
 import { queryIdentity } from '@artifacts/dashboard/query'; // E3 M3 fix: the shared identity
+import { datasetErrorOf } from '@artifacts/dashboard/states'; // E3 panel
 import { type LiveDatasets, type LivePause, type LiveQueryStatus, type LiveSnapshot, type LiveStart } from '@artifacts/dashboard/editor/live';
 import { onUpdate, type Doc } from '@artifacts/yjs';
-import { connectorToolKey, type ConnectorCallOutcome, type ConnectorGrant, type ConnectorGrantOutcome, type ConnectorToolRef } from '@shared/artifacts/connectors';
+import { CONNECTOR_DECLARE_LIMIT, connectorToolKey, type ConnectorCallOutcome, type ConnectorGrant, type ConnectorGrantOutcome, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactSessionEnd, ArtifactSessionStart } from '../../artifacts/session-context';
 
@@ -47,6 +53,7 @@ export interface LiveDatasetsDeps {
 interface Query {
   id: string;
   source: QuerySource;
+  state: DatasetState; // E3 panel: the live descriptor's committed state (its error the sheet says)
   identity: string;
   settings: string; // the identity and the schedule: what a watch is made of
   watch: { token: object; id: string | null } | null;
@@ -59,6 +66,9 @@ interface Query {
 
 // E3 M3 fix: the longest delay a timer takes (a longer one fires at once); a later boundary is reached by re-arming.
 const MAX_TIMER_MS = 2 ** 31 - 1;
+
+// E3 panel: H's non-forcing probe of a dataset watch's handle (Decision Log 17)
+const PROBE = { probe: true } as const;
 
 const INITIAL: LiveSnapshot = { shown: false, queries: new Map(), needsStart: false, start: { phase: 'idle' } };
 
@@ -90,9 +100,10 @@ export class LiveDatasetsController implements LiveDatasets {
   private stopDoc = () => {};
   private surface: ConnectorSurface | null = null;
   private stopGrants: (() => void) | null = null;
-  private declared = new Map<string, Promise<boolean>>(); // by tool key: its declaration on this surface
+  private declared = new Map<string, Promise<ConnectorSurface | null>>(); // by tool key: the surface it is declared on
   private grants: ConnectorGrant[] | null = null;
   private shown = false;
+  private showings = 0; // E3 panel: how many times it has been shown
   private start_: LiveStart = { phase: 'idle' };
   private started: AppSessionId | null = null; // the session the last Start named
   private waiting: (() => void) | null = null; // stops listening for a Start's setup
@@ -121,6 +132,7 @@ export class LiveDatasetsController implements LiveDatasets {
   setShown(shown: boolean): void {
     if (this.disposed || shown === this.shown) return;
     this.shown = shown;
+    if (shown) this.showings += 1; // E3 panel
     if (shown && !this.surface) this.ensureSurface(); // opened visible
     else {
       this.surface?.setVisible(shown);
@@ -134,10 +146,9 @@ export class LiveDatasetsController implements LiveDatasets {
   async refresh(id: string): Promise<void> {
     const query = this.queries.get(id);
     if (!query || !this.shown || this.disposed || query.busy) return;
-    const surface = this.ensureSurface();
-    if (!surface) return;
+    if (!this.ensureSurface()) return;
     if (query.source.schedule !== undefined) {
-      if (query.watch?.id) return this.probe(query); // E3 M3 fix: an evicted handle is registered again
+      if (query.watch?.id) return this.ask(query); // E3 M3 fix: the owner's, forced; an evicted handle is registered again
       if (query.watch) return; // its start is in flight; it refreshes at once
       query.pause = null;
       this.startWatch(query);
@@ -148,7 +159,9 @@ export class LiveDatasetsController implements LiveDatasets {
     this.patch(query, { busy: 'refresh' });
     let outcome: ConnectorCallOutcome | null = null;
     try {
-      if (await this.declare(query.source)) outcome = await surface.callTool({ server: query.source.server, tool: query.source.tool, args: query.source.args }, { dataset: { id } });
+      // E3 panel: on the surface it was declared on, while that is still the tab's (a recycled one calls nothing)
+      const on = await this.declare(query.source);
+      if (on && on === this.surface) outcome = await on.callTool({ server: query.source.server, tool: query.source.tool, args: query.source.args }, { dataset: { id } });
     } catch (error) {
       this.log(`the refresh of dataset "${id}" failed: ${messageOf(error)}`);
       outcome = { ok: false, state: 'failed', reason: 'routeFailed' };
@@ -239,10 +252,11 @@ export class LiveDatasetsController implements LiveDatasets {
       const known = this.queries.get(id);
       if (known && known.settings === settings) {
         known.source = source; // its snapshot and policy, for the sheet and the stale clock
+        known.state = descriptor.state; // E3 panel
         continue;
       }
       if (known) this.endWatch(known);
-      const query: Query = { id, source, identity, settings, watch: null, pause: known && known.identity === identity ? known.pause : null, busy: null, probes: 0 };
+      const query: Query = { id, source, state: descriptor.state, identity, settings, watch: null, pause: known && known.identity === identity ? known.pause : null, busy: null, probes: 0 };
       this.queries.set(id, query);
       if (this.surface && source.schedule !== undefined) this.startWatch(query);
     }
@@ -261,46 +275,84 @@ export class LiveDatasetsController implements LiveDatasets {
   private ensureSurface(): ConnectorSurface | null {
     if (this.surface || this.disposed) return this.surface;
     if (!this.shown || this.queries.size === 0) return null;
-    const surface = this.deps.host.openConnectors(this.deps.artifactId);
-    this.surface = surface;
-    surface.setVisible(true);
+    const surface = this.openSurface();
     this.stopGrants = this.deps.onGrantChanged((artifactId) => {
       if (artifactId === this.deps.artifactId) void this.readGrants();
     });
     void this.readGrants();
+    return surface;
+  }
+
+  // The tab's surface opened (visible as the tab is), every scheduled query's watch started on it.
+  private openSurface(): ConnectorSurface {
+    const surface = this.deps.host.openConnectors(this.deps.artifactId);
+    this.surface = surface;
+    surface.setVisible(this.shown);
     for (const query of this.queries.values()) if (query.source.schedule !== undefined) this.startWatch(query);
     return surface;
   }
 
-  // The query's tool declared on the surface (once), before any call or watch of it; false if it was refused.
-  private declare(source: QuerySource): Promise<boolean> {
+  // The query's tool declared on the surface (once), before any call or watch of it: the surface it was declared on, or
+  // null if it was refused. E3 panel: H's lease keeps every tool declared on it, CONNECTOR_DECLARE_LIMIT at most and
+  // none withdrawn, so a new tool that would pass that cap while a declared one names no current query first recycles
+  // the surface.
+  private declare(source: QuerySource): Promise<ConnectorSurface | null> {
     const tool: ConnectorToolRef = { server: source.server, tool: source.tool };
     const key = connectorToolKey(tool);
+    if (!this.declared.has(key) && this.declared.size >= CONNECTOR_DECLARE_LIMIT && this.declaresObsolete()) this.recycle(); // E3 panel
     let declared = this.declared.get(key);
     if (!declared) {
       const surface = this.surface;
-      declared = surface
-        ? surface.declareTools([tool]).then(
-            (outcome) => outcome.ok,
-            (error: unknown) => (this.log(`the declaration of ${source.server} · ${source.tool} failed: ${messageOf(error)}`), false),
-          )
-        : Promise.resolve(false);
-      this.declared.set(key, declared);
-      void declared.then((ok) => ok || this.declared.delete(key)); // a refused one is asked again next time
+      const table = this.declared;
+      declared = (
+        surface
+          ? surface.declareTools([tool]).then(
+              (outcome) => outcome.ok,
+              (error: unknown) => (this.log(`the declaration of ${source.server} · ${source.tool} failed: ${messageOf(error)}`), false),
+            )
+          : Promise.resolve(false)
+      ).then((ok) => (ok ? surface : null));
+      table.set(key, declared);
+      const asked = declared;
+      void asked.then((on) => on || (table.get(key) === asked && table.delete(key))); // a refused one is asked again next time
     }
     return declared;
   }
 
+  // E3 panel: whether the surface declares a tool no current query names
+  private declaresObsolete(): boolean {
+    const current = new Set([...this.queries.values()].map(({ source }) => connectorToolKey({ server: source.server, tool: source.tool })));
+    return [...this.declared.keys()].some((key) => !current.has(key));
+  }
+
+  // E3 panel: a fresh lease for the current queries alone. The old surface closes with its watches and calls (nothing it
+  // answers after is heard; a manual refresh it ran reads no pause) and each scheduled query's watch starts on the new.
+  private recycle(): void {
+    const old = this.surface;
+    for (const query of this.queries.values()) {
+      this.stopProbe(query);
+      query.watch = null;
+    }
+    this.declared = new Map();
+    this.surface = null;
+    if (old) {
+      old.setVisible(false);
+      old.close();
+    }
+    this.openSurface();
+  }
+
   private startWatch(query: Query): void {
-    const surface = this.surface;
     const schedule = query.source.schedule;
-    if (!surface || schedule === undefined) return;
+    if (!this.surface || schedule === undefined) return;
     const token = {};
     query.watch = { token, id: null };
     const mine = () => !this.disposed && this.queries.get(query.id) === query && query.watch?.token === token;
     const { server, tool, args } = query.source;
+    const showing = this.showings; // E3 panel
     void (async () => {
-      if (!(await this.declare(query.source)) || !mine()) {
+      const surface = await this.declare(query.source);
+      if (!surface || !mine()) {
         if (mine()) query.watch = null;
         return;
       }
@@ -311,6 +363,9 @@ export class LiveDatasetsController implements LiveDatasets {
       }
       if (start.ok) {
         query.watch = { token, id: start.watchId };
+        // E3 panel: hidden since it began, the watch may have yielded its slot before this answer; shown again meanwhile
+        // (whose recovery found no handle to ask), it is asked now; hidden now, its next showing asks it
+        if (this.shown && this.showings !== showing) this.recoverWatch(query, schedule);
         return;
       }
       query.watch = null;
@@ -332,15 +387,15 @@ export class LiveDatasetsController implements LiveDatasets {
   private heard(query: Query, update: ConnectorCallOutcome): void {
     query.heardAt = this.now(); // E3 M3 fix
     this.stopProbe(query); // E3 M3 residual: a refresh heard proves its handle; an armed or in-flight ask is obsolete
-    if (!update.ok && update.state === 'invalid') query.watch = null; // H ended the watch
+    if (!update.ok && update.state === 'invalid') this.endWatch(query); // H ended the watch; E3 panel: its listener goes too
     const pause = pauseOf(update);
     if (pause !== undefined) this.patch(query, { pause });
   }
 
   // ── E3 M3 fix: a watch that yielded its slot at the cap while hidden (Decision Log 11, 12) ──
 
-  // Shown again: each watch's handle asked once it is due (at once if it is, else at its due time while shown), and a
-  // query paused at the cap tries its watch again. A watch cannot yield while shown, so one answer per showing suffices.
+  // Shown again: each watch's handle asked once it is due, and a query paused at the cap tries its watch again. A watch
+  // cannot yield while shown, so one answer per showing suffices; a start still in flight is asked when it answers.
   private recover(): void {
     const now = this.now();
     for (const query of this.queries.values()) {
@@ -353,30 +408,36 @@ export class LiveDatasetsController implements LiveDatasets {
         }
         continue;
       }
-      if (!query.watch.id) continue; // its start is in flight
-      const wait = query.heardAt === undefined ? 0 : query.heardAt + schedule * 1000 - now;
-      this.stopProbe(query);
-      if (wait <= 0) void this.probe(query);
-      else
-        query.probe = setTimeout(() => {
-          delete query.probe;
-          void this.probe(query);
-        }, Math.min(wait, MAX_TIMER_MS));
+      if (query.watch.id) this.recoverWatch(query, schedule, now);
     }
   }
 
-  // Asks the watch's handle for a refresh: false is a handle the broker no longer has (a running dataset watch answers
-  // true), so it is unwatched and registered again, which refreshes at once. Never two watches for one query.
+  // The watch's handle asked once it is due: at once if it is, else at its due time while shown. E3 panel: by the
+  // non-forcing probe (Decision Log 17), so a catch-up H already ran on showing is never followed by a second refresh.
+  private recoverWatch(query: Query, schedule: number, now = this.now()): void {
+    const wait = query.heardAt === undefined ? 0 : query.heardAt + schedule * 1000 - now;
+    this.stopProbe(query);
+    if (wait <= 0) void this.ask(query, PROBE);
+    else
+      query.probe = setTimeout(() => {
+        delete query.probe;
+        void this.ask(query, PROBE);
+      }, Math.min(wait, MAX_TIMER_MS));
+  }
+
+  // Asks the watch's handle: the owner's Refresh forces a refresh (a running dataset watch answers true), the recovery
+  // only probes it (E3 panel); false is a handle the broker no longer has, so it is unwatched and registered again,
+  // which refreshes at once. Never two watches for one query.
   // E3 M3 residual: an ask is withdrawn when a refresh of the watch is heard, the dashboard hides or shows again, or another
   // ask finds the handle (`probes` advanced), so its late answer registers nothing and no refresh runs early.
-  private async probe(query: Query): Promise<void> {
+  private async ask(query: Query, probe?: typeof PROBE): Promise<void> {
     const surface = this.surface;
     const watch = query.watch;
     if (!surface || !watch?.id || !this.shown) return;
     const asked = query.probes;
     let kept: boolean;
     try {
-      kept = await surface.refreshWatch(watch.id);
+      kept = await (probe ? surface.refreshWatch(watch.id, probe) : surface.refreshWatch(watch.id));
     } catch (error) {
       this.log(`a watch refresh failed: ${messageOf(error)}`);
       return;
@@ -472,7 +533,7 @@ export class LiveDatasetsController implements LiveDatasets {
     for (const query of this.queries.values()) {
       const { server, tool, schedule, snapshot } = query.source;
       const held = this.grants === null ? null : this.grants.some((grant) => grant.server === server && grant.tool === tool && grant.mode === 'read');
-      queries.set(query.id, { identity: query.identity, server, tool, ...(schedule !== undefined && { schedule }), snapshot, permission: held === null ? 'unknown' : held ? 'read' : 'none', pause: query.pause, busy: query.busy });
+      queries.set(query.id, { identity: query.identity, server, tool, ...(schedule !== undefined && { schedule }), snapshot, error: datasetErrorOf(query.state) /* E3 panel */, permission: held === null ? 'unknown' : held ? 'read' : 'none', pause: query.pause, busy: query.busy });
     }
     const needsStart = [...queries.values()].some((status) => status.pause === 'noRoute'); // a grant refused for want of a session too
     this.current = { shown: this.shown, queries, needsStart, start: this.start_ };

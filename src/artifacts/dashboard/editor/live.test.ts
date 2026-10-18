@@ -19,7 +19,7 @@ const fetched = (patch: Partial<DatasetDescriptor> = {}): DatasetDescriptor =>
     state: { status: 'ok', at: AT },
     ...patch,
   }) as DatasetDescriptor;
-const status = (patch: Partial<LiveQueryStatus> = {}): LiveQueryStatus => ({ identity: 'x', server: 'fixture', tool: 'rows', snapshot: null, permission: 'read', pause: null, busy: null, ...patch });
+const status = (patch: Partial<LiveQueryStatus> = {}): LiveQueryStatus => ({ identity: 'x', server: 'fixture', tool: 'rows', snapshot: null, error: null /* E3 panel */, permission: 'read', pause: null, busy: null, ...patch });
 
 describe('the live source label (E3 M3)', () => {
   it('draws stale since snapshot.at + staleAfter exactly at the boundary, not a millisecond before', () => {

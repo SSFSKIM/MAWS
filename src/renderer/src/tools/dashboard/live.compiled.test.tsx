@@ -187,6 +187,27 @@ describe('a live dashboard in L’s surfaces (E3 M3)', () => {
     expect(editorHostOf(scope)?.actions?.at(-1)?.id).toBe('datasets');
   });
 
+  // E3 panel wave (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, Decision Log 16): the ruled failure line
+  it('an open sheet says the live descriptor’s committed error in its footer’s words beside its controls, its capture unchanged (E3 panel)', async () => {
+    mount();
+    await until(() => document.querySelector('button.dash-source-label') !== null && surface.listeners.length > 0, 'the view');
+    act(() => document.querySelector<HTMLButtonElement>('button.dash-source-label')!.click());
+    const dialog = screen.getByRole('dialog');
+    await until(() => within(dialog).queryByRole('button', { name: 'Revoke fixture · rows' }) !== null, 'the live controls');
+    const block = within(dialog).getByRole('group', { name: 'Live query' });
+    const words = 'the last refresh was refused: its structured content is neither an array of rows nor an object with a rows array';
+    act(() => memory.write((doc) => setDataset(doc, 'sales', { ...live, state: { status: 'error', message: words, at: AT + 60_000 } }))); // the host's committed error state
+    await until(() => within(block).queryByText(words) !== null, 'the committed error in the sheet');
+    expect(document.querySelector('button.dash-source-label')!.textContent).toContain(` · ${words}`); // the footer's same words
+    expect(within(dialog).getByText(/^Live sales · fixture · rows · updated [^·]+$/)).toBeTruthy(); // the captured label, as captured
+    expect(within(block).getByText('Allowed to read')).toBeTruthy();
+    expect(within(block).getByRole('button', { name: 'Refresh Live sales' })).toBeTruthy();
+    act(() => surface.listeners[0]!({ ok: true, result: { status: 'failed', reason: 'validation' }, fetchedAt: AT, via: { route: 'engine' } })); // the bridge's phase
+    expect(within(block).getByText(words)).toBeTruthy(); // transient answers are no authority over it
+    act(() => memory.write((doc) => setDataset(doc, 'sales', { ...live, state: { status: 'ok', at: AT + 90_000 } }))); // a later success
+    await until(() => within(block).queryByText(words) === null, 'the error gone with the success');
+  });
+
   it('an open sheet loses its live controls while a history preview or suggestion review runs, and gets them back (E3 M3 fix)', async () => {
     const m = mount();
     await until(() => document.querySelector('button.dash-source-label') !== null && surface.listeners.length > 0, 'the view');

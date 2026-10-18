@@ -57,7 +57,7 @@ class FakeLive implements LiveDatasets {
     this.current = { shown, needsStart: false, start: { phase: 'idle' }, queries: new Map([['sales', this.status(status)]]) };
   }
   status(patch: Partial<LiveQueryStatus> = {}): LiveQueryStatus {
-    return { identity: queryIdentity(SOURCE), server: 'fixture', tool: 'rows', schedule: 30, snapshot: { ref: 'assets/query-1.json', at: AT }, permission: 'read', pause: null, busy: null, ...patch };
+    return { identity: queryIdentity(SOURCE), server: 'fixture', tool: 'rows', schedule: 30, snapshot: { ref: 'assets/query-1.json', at: AT }, error: null /* E3 panel */, permission: 'read', pause: null, busy: null, ...patch };
   }
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -280,6 +280,46 @@ describe('the source sheet’s live query after a refusal (E3 M3 fix)', () => {
     expect(lease.release).not.toHaveBeenCalled();
     act(() => m.sheet.setPreviewing(false));
     expect(within(block()).getByRole('button', { name: 'Revoke fixture · rows' })).toBeTruthy();
+    expect(m.readDataset).toHaveBeenCalledTimes(1);
+  });
+});
+
+// E3 panel wave (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, Decision Log 16): a newer fetch time is new
+// provenance even when identical rows kept the ref, and the live block says the live descriptor's committed error in
+// the source label's words beside its controls; the captured rows and time never change underneath.
+describe('the source sheet’s live query after the panel (E3 panel)', () => {
+  it('a refetch of identical rows (the same ref, a newer time) keeps the captured time and offers to show the latest', async () => {
+    const live = new FakeLive();
+    const m = mountSheet(live);
+    act(() => m.sheet.open([{ id: 'sales', descriptor: fetched() }]));
+    await settle();
+    expect(within(block()).queryByRole('button', { name: 'Show latest' })).toBeNull(); // the fetch it captured
+    act(() => live.set({}, { snapshot: { ref: 'assets/query-1.json', at: AT + 60_000 } }));
+    expect(within(block()).getByText(`Newer rows were fetched at ${utcTime(AT + 60_000)}; the rows here are the ones captured when the source opened.`)).toBeTruthy();
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(`Live sales · fixture · rows · updated ${utcTime(AT)} by You`)).toBeTruthy();
+    expect(within(dialog).getAllByRole('row')).toHaveLength(2);
+    expect(m.readDataset).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(block()).getByRole('button', { name: 'Show latest' }));
+    expect(m.reopen).toHaveBeenCalledWith('sales');
+  });
+
+  it('says the live descriptor’s committed error beside Allowed, Revoke and Refresh, the captured label and rows unchanged', async () => {
+    const words = 'the last refresh was refused: its structured content is neither an array of rows nor an object with a rows array';
+    const live = new FakeLive({ error: words });
+    const m = mountSheet(live);
+    act(() => m.sheet.open([{ id: 'sales', descriptor: fetched() }]));
+    await settle();
+    expect(within(block()).getByText(words)).toBeTruthy();
+    expect(within(block()).getByText('Allowed to read')).toBeTruthy();
+    expect(within(block()).getByRole('button', { name: 'Revoke fixture · rows' })).toBeTruthy();
+    expect(within(block()).getByRole('button', { name: 'Refresh Live sales' }).hasAttribute('disabled')).toBe(false);
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(`Live sales · fixture · rows · updated ${utcTime(AT)} by You`)).toBeTruthy(); // as captured
+    expect(within(dialog).getAllByRole('row')).toHaveLength(2);
+    expect(within(block()).queryByRole('button', { name: 'Show latest' })).toBeNull(); // a failure moves no fetch time
+    act(() => live.set({}, { error: null })); // a later success
+    expect(within(block()).queryByText(words)).toBeNull();
     expect(m.readDataset).toHaveBeenCalledTimes(1);
   });
 });

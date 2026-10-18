@@ -184,7 +184,10 @@ export interface ConnectorSurface {
   watchTool(request: ConnectorWatchRequest, listener: (update: ConnectorCallOutcome) => void, options?: ConnectorCallOptions): Promise<ConnectorWatchStart>;
   unwatchTool(watchId: string): Promise<boolean>;
   // A refresh now, when the watch is visible, granted and idle (after the owner started a session, say).
-  refreshWatch(watchId: string): Promise<boolean>;
+  // E3 panel (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, Decision Log 17): `options.probe`, the trusted
+  // owner's alone (an artifact page's relay never passes it): whether its dataset watch still lives, nothing more (no
+  // wake, grant check, call or schedule change); false for a handle gone, another's, or not a dataset watch.
+  refreshWatch(watchId: string, options?: { probe?: boolean }): Promise<boolean>;
   // The trusted owner's alone (an artifact page never sets it): whether the page is on screen.
   setVisible(visible: boolean): void;
   close(): void;

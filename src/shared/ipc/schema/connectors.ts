@@ -139,7 +139,9 @@ export const commands = {
   'connectors.watch': main(z.strictObject({ leaseId: LeaseId, request: z.unknown(), dataset: ConnectorDatasetSinkSchema.optional() /* E3 */ }), ConnectorWatchStartSchema),
   'connectors.unwatch': main(LeaseWatch, z.strictObject({ stopped: z.boolean() })),
   // The owner's Refresh (after its Start, say): one now, when the watch is visible, granted and idle.
-  'connectors.refresh': main(LeaseWatch, z.strictObject({ refreshing: z.boolean() })),
+  // E3 panel (Decision Log 17): `probe`, the trusted owner's liveness check of its dataset watch: `refreshing` then says
+  // whether that watch lives, and nothing is woken, checked, called or rescheduled.
+  'connectors.refresh': main(z.strictObject({ ...LeaseWatch.shape, probe: z.boolean().optional() /* E3 panel */ }), z.strictObject({ refreshing: z.boolean() })),
   // The surface shown or hidden: hidden, the lease calls nothing.
   'connectors.visibility': main(z.strictObject({ leaseId: LeaseId, visible: z.boolean() }), z.strictObject({ ok: z.boolean() })),
   'connectors.close': main(Lease, z.strictObject({ closed: z.boolean() })),

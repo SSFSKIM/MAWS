@@ -19,7 +19,6 @@
 //      tool's failure). A result that fails validation, or a tool that failed, writes the error state alone under the
 //      same guard, so an old failure never covers a newer success, and says which failure it was. Right after a
 //      successful commit, `collectRetiredAssets` removes what that retention retired and nothing else protects.
-import { randomUUID } from 'node:crypto';
 import { readDataset, setDataset, type DatasetDescriptor, type QuerySource } from '@artifacts/dashboard/datasets';
 import { legacyDashboardFiles } from '@artifacts/dashboard/legacy';
 import { DatasetError, parseDataset, rowKeyProblem, type ParsedDataset } from '@artifacts/dashboard/parse';
@@ -28,6 +27,7 @@ import { canonicalQueryValue, queryIdentity } from '@artifacts/dashboard/query';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactDatasetResult } from '@shared/maws/dashboard-tools';
 import { ArtifactStoreError } from '../documents/errors';
+import { querySnapshotName } from '../documents/retention'; // E3 panel
 import type { ArtifactStore } from '../documents/store';
 import type { OpScope } from '../documents/ops';
 import { dashboardAdapterOf } from '.';
@@ -172,7 +172,7 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
       store.writeWithAssets(
         artifactId,
         actor,
-        'table' in made ? [{ bytes: made.bytes, name: `query-${randomUUID()}.json`, mime: 'application/json', querySnapshot: true }] : [],
+        'table' in made ? [{ bytes: made.bytes, name: querySnapshotName() /* E3 panel: the sink alone mints the namespace */, mime: 'application/json', querySnapshot: true }] : [],
         (doc, refs) => {
           if ('table' in made) {
             ref = refs[0]!.ref;

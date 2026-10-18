@@ -14,7 +14,7 @@ const META = { ok: true, result: { status: 'dataset', id: 'live', rows: 2 }, fet
 
 function bridge() {
   const sent: { name: CommandName; input: Record<string, unknown> }[] = [];
-  const answers: Partial<Record<CommandName, unknown>> = { 'connectors.open': { leaseId: LEASE }, 'connectors.call': META, 'connectors.watch': { ok: true, watchId: WATCH, intervalMs: 30_000 } };
+  const answers: Partial<Record<CommandName, unknown>> = { 'connectors.open': { leaseId: LEASE }, 'connectors.call': META, 'connectors.watch': { ok: true, watchId: WATCH, intervalMs: 30_000 }, 'connectors.refresh': { refreshing: true } /* E3 panel */ };
   const ipc = {
     invoke: vi.fn(async (name: CommandName, input: Record<string, unknown>) => {
       expect(validateCommandInput(name, input).ok, `${name} ${JSON.stringify(input)}`).toBe(true);
@@ -37,6 +37,18 @@ describe('the connector surface’s dataset sink', () => {
       { leaseId: LEASE, request: { ...TOOL, args: { series: 'revenue' } }, dataset: { id: 'live', baseRevision: 4 } },
       { leaseId: LEASE, request: { ...TOOL, intervalMs: 30_000 }, dataset: { id: 'live' } },
       { leaseId: LEASE, request: TOOL },
+    ]);
+  });
+
+  // E3 panel wave (Decision Log 17): the dashboard's recovery asks a watch's liveness, never forcing a refresh
+  it('sends the owner’s probe beside a watch’s refresh, and H’s forced refresh as before without it', async () => {
+    const b = bridge();
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    expect(await surface.refreshWatch(WATCH, { probe: true })).toBe(true);
+    expect(await surface.refreshWatch(WATCH)).toBe(true);
+    expect(b.sent.filter(({ name }) => name === 'connectors.refresh').map(({ input }) => input)).toEqual([
+      { leaseId: LEASE, watchId: WATCH, probe: true },
+      { leaseId: LEASE, watchId: WATCH },
     ]);
   });
 });

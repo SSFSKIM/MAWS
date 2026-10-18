@@ -11,7 +11,7 @@ import { listDatasets, snapshotOf, type DatasetDescriptor } from '@artifacts/das
 import { datasetChanges } from '@artifacts/dashboard/history';
 import { createChartRenderer } from '@artifacts/dashboard/editor/chart-view';
 import { SourceSheetState, type SheetDataset, type SheetRecapture } from '@artifacts/dashboard/editor/sheet';
-import { SnapshotReader } from '@artifacts/dashboard/snapshots';
+import { SnapshotReader, type SnapshotLease } from '@artifacts/dashboard/snapshots';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import { DocumentTabState, type DocumentTabDeps } from '../document/tab-state';
@@ -35,6 +35,7 @@ export class DashboardTabState {
   private bodyShown = false; // E3 M3: the body on screen and its window's document visible
   private shown: SheetDataset[] = [];
   private stopShown = () => {};
+  private previewHold: { key: string; lease: SnapshotLease } | null = null; // E3 panel: the displayed preview's snapshots
   // E3: how many times the live replica has come to be live and synced (a host restart's reconnection is one more)
   private syncs = 0;
   private synced = false;
@@ -87,15 +88,42 @@ export class DashboardTabState {
   /** Who an update is credited to: "You", a session by its title, else "Claude". */
   actorName = (actor: Actor): string => actorDisplay(actor, actor.kind === 'session' ? this.deps.sessionTitle(actor.appSessionId) : undefined).name;
 
-  /** The editor shows `doc` now (the live one, a version's, the suggestion replica's): its datasets, followed as values. */
+  /** The editor shows `doc` now (the live one, a version's, the suggestion replica's): its datasets, followed as values.
+   * E3 panel: a preview's (any document but the live one) snapshots held while it is displayed. */
   displayed = (doc: Doc): void => {
     this.stopShown();
+    const preview = doc !== this.document.snapshot().handle?.doc; // E3 panel
     const capture = () => {
       this.shown = listDatasets(doc).map(({ id, descriptor }) => ({ id, descriptor }));
+      this.holdPreview(preview ? this.shown : []); // E3 panel
     };
     capture();
     this.stopShown = onUpdate(doc, capture);
   };
+
+  // E3 panel wave (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, Decision Log 16 (3); R1b: a preview is held
+  // while displayed): every snapshot the displayed preview names, in one hold, until another document is displayed or
+  // the tab ends, so retention never takes what a version or a review shows (whatever version pinned it pruned meanwhile).
+  // New refs are held before the old hold goes; one the host's restart took is taken again on the same immutable refs.
+  // The live document takes none: its current descriptors protect what it names.
+  private holdPreview(datasets: readonly SheetDataset[]): void {
+    const refs = [...new Set(datasets.flatMap(({ descriptor }) => snapshotOf(descriptor)?.ref ?? []))].sort();
+    const key = refs.join('\n');
+    const before = this.previewHold;
+    if (before?.key === key) return;
+    this.previewHold = null;
+    if (refs.length > 0 && !this.disposed) {
+      const held = { key, lease: this.reader.holdAll(refs) };
+      this.previewHold = held;
+      void held.lease.invalidated.then(() => {
+        if (this.previewHold !== held) return;
+        this.previewHold = null;
+        this.holdPreview(datasets); // still displayed: held again
+        held.lease.release();
+      });
+    }
+    before?.lease.release();
+  }
 
   /** E3 M3: the editor's report that its body is on screen with its window's document visible (false once it unmounts). */
   setBodyShown = (shown: boolean): void => {
@@ -143,16 +171,20 @@ export class DashboardTabState {
     };
   }
 
-  // Whether the live replica synced again after `since` (now or within RECAPTURE_SYNC_MS).
+  // Whether the live replica synced again after the host's loss: synced now, at a later sync than `since` (the hold's),
+  // else at its next sync within RECAPTURE_SYNC_MS. E3 panel (Decision Log 16 (4)): a replica not synced when the loss is
+  // heard waits for the sync that follows it, compared across the loss, so a reconnect between the hold and the restart
+  // never passes for it.
   private syncedSince(since: number): Promise<boolean> {
-    if (this.syncs > since) return Promise.resolve(true);
+    if (this.synced && this.syncs > since) return Promise.resolve(true);
+    const loss = this.syncs; // E3 panel: the generation when the loss was heard
     return new Promise((resolve) => {
       const done = (fresh: boolean) => {
         clearTimeout(timer);
         this.syncWaiters.delete(wake);
         resolve(fresh);
       };
-      const wake = () => done(this.syncs > since);
+      const wake = () => done(this.syncs > loss);
       const timer = setTimeout(() => done(false), RECAPTURE_SYNC_MS);
       this.syncWaiters.add(wake);
     });
@@ -165,6 +197,8 @@ export class DashboardTabState {
     for (const wake of [...this.syncWaiters]) wake();
     this.stopShown();
     this.stopShown = () => {};
+    this.previewHold?.lease.release(); // E3 panel
+    this.previewHold = null;
     this.sheet.close();
     this.reader.dispose(); // E3: the reader's holds go with the tab
     this.document.dispose();

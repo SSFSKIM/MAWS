@@ -134,7 +134,8 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): Con
         listeners.delete(watchId);
         return under(false, false, async (leaseId) => (await call('connectors.unwatch', { leaseId, watchId })).stopped);
       },
-      refreshWatch: (watchId) => under(false, false, async (leaseId) => (await call('connectors.refresh', { leaseId, watchId })).refreshing),
+      // E3 panel: the owner's probe rides beside the watch's id; without it, the command H sends
+      refreshWatch: (watchId, options) => under(false, false, async (leaseId) => (await call('connectors.refresh', { leaseId, watchId, ...(options?.probe !== undefined && { probe: options.probe }) })).refreshing),
       setVisible: (visible) => {
         void under(null, null, (leaseId) => call('connectors.visibility', { leaseId, visible })).catch(() => {});
       },

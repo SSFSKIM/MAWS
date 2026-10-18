@@ -168,4 +168,22 @@ describe('main’s connector service with a dataset sink', () => {
     await settle();
     expect(fake.sent('maws.artifact.datasetRefreshed')).toHaveLength(1);
   });
+
+  // E3 panel wave (Decision Log 17): the owner's probe of a dataset watch reaches the broker as liveness alone
+  it('forwards a probe of a dataset watch: true and no start; without it, H’s forced refresh starts one', async () => {
+    const { leaseId } = (await invoke('connectors.open', { artifactId: ART })) as { leaseId: string };
+    await invoke('connectors.declare', { leaseId, tools: [{ server: 'fixture', tool: 'rows' }] });
+    await invoke('connectors.visibility', { leaseId, visible: true });
+    fake.takes = ['publishing', { outcome: null, dataset: META }];
+    const start = (await invoke('connectors.watch', { leaseId, request: { server: 'fixture', tool: 'rows', args: { series: 'revenue' }, intervalMs: 60_000 }, dataset: { id: 'live' } })) as { ok: true; watchId: string };
+    await settle();
+    expect(fake.sent('connectors.start')).toHaveLength(1); // its first refresh, ended
+    expect(await invoke('connectors.refresh', { leaseId, watchId: start.watchId, probe: true })).toEqual({ refreshing: true });
+    await settle();
+    expect(fake.sent('connectors.start')).toHaveLength(1);
+    fake.takes = ['publishing', { outcome: null, dataset: META }];
+    expect(await invoke('connectors.refresh', { leaseId, watchId: start.watchId })).toEqual({ refreshing: true });
+    await settle();
+    expect(fake.sent('connectors.start')).toHaveLength(2);
+  });
 });

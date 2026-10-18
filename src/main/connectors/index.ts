@@ -155,7 +155,7 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
     return start;
   });
   register('connectors.unwatch', ({ leaseId, watchId }, { sender }) => ({ stopped: broker.unwatch(ownerOf(sender), leaseId, watchId) }));
-  register('connectors.refresh', ({ leaseId, watchId }, { sender }) => ({ refreshing: broker.refreshWatch(ownerOf(sender), leaseId, watchId) }));
+  register('connectors.refresh', ({ leaseId, watchId, probe }, { sender }) => ({ refreshing: probe === undefined ? broker.refreshWatch(ownerOf(sender), leaseId, watchId) : broker.refreshWatch(ownerOf(sender), leaseId, watchId, { probe }) /* E3 panel */ }));
   register('connectors.visibility', ({ leaseId, visible }, { sender }) => ({ ok: broker.setVisible(ownerOf(sender), leaseId, visible) }));
   register('connectors.close', ({ leaseId }, { sender }) => ({ closed: broker.close(ownerOf(sender), leaseId) }));
   // ── the owner's grants, from the editor header ──

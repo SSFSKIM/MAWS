@@ -17,11 +17,11 @@
 //   5. the schedule's next call; the agent's one-shot refresh as the started session publishes through the host's
 //      registry (by the session, not You); its replay and a stale base call nothing
 //   6. a malformed result (the owner's Refresh) and a tool error (the agent's) keep the rows and their time and say the
-//      closed error, never the server's text
+//      closed error, never the server's text, in the view's label and in the open sheet's live block beside its controls
 //   7. the agent replaces the query: the open sheet asks to be reopened; the new query is fetched with its arguments
-//   8. silences longer than the schedule, each followed by exactly one catch-up: the tab inactive, the panel showing the
-//      dashboard hidden, the window hidden, main killed with its supervisor, engine and server alive (then reopened on
-//      the same launch)
+//   8. silences longer than the schedule, each followed by exactly one catch-up: the tab inactive behind the Artifacts
+//      tab beside it, the panel showing the dashboard beside its session hidden, the window hidden, main killed with its
+//      supervisor, engine and server alive (then reopened on the same launch)
 //   9. a retained version previews its own rows and time with no live controls and no calls
 //  10. a revoke during a slow call publishes nothing; the last rows stay and turn stale by expiry alone, uncalled
 //  11. Restore brings the first rows back, past the latest two snapshots of their query (the version pin kept them),
@@ -62,6 +62,7 @@ import {
   rows,
   setPanel,
   sheetOf,
+  stripTab,
   silence,
   SOURCE,
   STALE_AFTER_S,
@@ -258,6 +259,14 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         await nextCall(scene, before);
         await expect(labelOf(views)).toContainText(MALFORMED, { timeout: 20_000 });
         await expect(labelOf(views)).not.toContainText('not rows');
+        // E3 panel (Decision Log 16): the open sheet's live block says the committed error in the footer's words beside
+        // its controls, while the rows it captured stay
+        const block = liveBlock(sheet);
+        await expect(block).toContainText(MALFORMED);
+        await expect(block).not.toContainText('not rows');
+        await expect(block.getByRole('button', { name: `Revoke ${TOOL_NAME}` })).toBeVisible();
+        await expect(block.getByRole('button', { name: `Refresh ${TITLE}` })).toBeVisible();
+        await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', String(AGENTS.length + 1));
         await drawsRows(views, AGENTS, 'after the malformed result');
         await shot(run, 'malformed-kept');
         await closeSheet(sheet);
@@ -288,13 +297,30 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         await closeSheet(sheet);
       });
 
-      await test.step('8a. the dashboard’s tab inactive: no call; the panel showing it hidden: no call, one catch-up when shown', async () => {
+      await test.step('8a. the dashboard’s tab inactive behind the Artifacts tab beside it: no call; selected again: one catch-up', async () => {
         await setPanel(page, false);
-        await (await sidebarRow(page, { appSessionId: engine.appSessionId })).click();
+        const board = stripTab(page, BOARD);
+        await expect(board).toHaveAttribute('aria-selected', 'true');
+        // the sidebar's Artifacts opens its own tab beside the dashboard's (main/artifacts.ts `openArtifacts`); a plain
+        // session click would instead take the active tab's place (layout-model.ts `replaceActive`), closing it
+        await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+        await expect(stripTab(page, 'Artifacts')).toHaveAttribute('aria-selected', 'true');
+        await expect(board, 'the dashboard’s tab stays open, inactive').toHaveAttribute('aria-selected', 'false');
         await expect(tab.locator('.ds-doc').first()).toBeHidden();
-        await expect(page.getByRole('button', { name: `Close ${BOARD}`, exact: true }), 'the dashboard’s tab stays open, inactive').toHaveCount(1);
         await wait(1_000);
         await silence(scene, 'the dashboard’s tab is inactive');
+        const back = Date.now();
+        await board.click();
+        await expect(board).toHaveAttribute('aria-selected', 'true');
+        await expect(tab.locator('.ds-doc .ProseMirror').first()).toBeVisible();
+        await oneCatchUp(scene, back, 'the dashboard’s tab selected again');
+      });
+
+      await test.step('8b. the panel showing the dashboard beside its session: hidden, no call; shown, one catch-up', async () => {
+        // the right panel follows the session the focused pane shows: the started session in a tab of its own (⌘-click,
+        // `openSession` with `how: 'tab'`), so the dashboard's tab stays open rather than being replaced
+        await (await sidebarRow(page, { appSessionId: engine.appSessionId })).click({ modifiers: ['Meta'] });
+        await expect(tab.locator('.ds-doc').first()).toBeHidden();
         await setPanel(page, true);
         const panel = page.locator('[data-region="panel"]');
         await panel.getByRole('button', { name: 'Add a tool' }).click();
@@ -311,19 +337,19 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         await setPanel(page, false);
         await wait(1_000);
         const back = Date.now();
-        tab = await openInMain(page, id);
+        tab = await openInMain(page, id); // the library's row selects the dashboard's open tab
         views = liveViews(tab);
-        await oneCatchUp(scene, back, 'the dashboard’s tab active again');
+        await oneCatchUp(scene, back, 'the dashboard’s tab selected again');
       });
 
-      await test.step('8b. the window hidden: no call; shown: one catch-up', async () => {
+      await test.step('8c. the window hidden: no call; shown: one catch-up', async () => {
         await scene.hideWindow(run);
         const hidden = await silence(scene, 'the window is hidden');
         await scene.showWindow(run);
         await oneCatchUp(scene, hidden.to, 'the window shown again');
       });
 
-      await test.step('8c. main killed with its supervisor, engine and server alive: no call; reopened on the same launch: one catch-up', async () => {
+      await test.step('8d. main killed with its supervisor, engine and server alive: no call; reopened on the same launch: one catch-up', async () => {
         const supervisor = await scene.supervisor(page);
         scene.note('pids', { supervisor, engine: engine.pid, server, launchId: engine.launchId });
         await scene.killApp(run);

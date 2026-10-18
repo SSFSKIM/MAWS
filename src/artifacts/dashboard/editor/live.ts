@@ -18,6 +18,9 @@ export interface LiveQueryStatus {
   tool: string;
   schedule?: number;
   snapshot: { ref: string; at: number } | null; // the live descriptor's (a sheet compares its capture with it)
+  // E3 panel (Decision Log 16): the live descriptor's committed error in its source label's words (`datasetErrorOf`),
+  // null when its state is none; the descriptor's, never the bridge's transient answer
+  error: string | null;
   permission: LivePermission;
   pause: LivePause | null;
   busy: 'grant' | 'revoke' | 'refresh' | null; // an owner's gesture in flight

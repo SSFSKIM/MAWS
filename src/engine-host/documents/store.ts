@@ -26,7 +26,7 @@ import { ArtifactStoreError, StoreTooNewError } from './errors'; // P3-H: StoreT
 import { Maintenance } from './maintenance';
 import { OpLedger, type OpScope } from './ops';
 import { restoreArtifact } from './restore';
-import { datasetRefsOf, SnapshotRetention, type AssetHold } from './retention'; // E3
+import { datasetRefsOf, isQuerySnapshotName, SnapshotRetention, type AssetHold } from './retention'; // E3
 import type { Committed, DocumentService, WriteOptions } from './service';
 import type { SqliteDocumentStorage } from './storage';
 import { actorFromKey, VersionStore, type DesignSystemRef, type VersionKind } from './versions';
@@ -683,8 +683,15 @@ export class ArtifactStore {
   }
 
   // An asset (Decision Log 25l and M6's `artifact_upload_asset`): content-addressed, deduplicated per artifact, named by
-  // the ref a format uses (`assets/<name>`, made unique within the artifact).
+  // the ref a format uses (`assets/<name>`, made unique within the artifact). E3 panel wave: a name in the query-snapshot
+  // namespace is the refresh sink's alone, refused here (a copy carries its source asset's own name and bytes instead).
   async uploadAsset(artifactId: string, bytes: Uint8Array, meta: { name: string; mime: string }, actor: Actor, inFrame?: InFrame<{ assetId: string; ref: string }>): Promise<{ assetId: string; ref: string }> {
+    const name = safeName(meta.name); // E3 panel
+    if (name && isQuerySnapshotName(name)) throw reservedName(name); // E3 panel
+    return this.placeUpload(artifactId, bytes, meta, actor, inFrame);
+  }
+
+  private async placeUpload(artifactId: string, bytes: Uint8Array, meta: { name: string; mime: string }, actor: Actor, inFrame?: InFrame<{ assetId: string; ref: string }>): Promise<{ assetId: string; ref: string }> {
     this.requireLive(artifactId);
     if (bytes.length > ARTIFACT_MAX_BYTES) throw new ArtifactStoreError('tooLarge', `the asset is ${bytes.length} bytes; the limit is ${ARTIFACT_MAX_BYTES}`, { size: bytes.length, limit: ARTIFACT_MAX_BYTES });
     const name = safeName(meta.name);
@@ -745,6 +752,7 @@ export class ArtifactStore {
       if (asset.bytes.length > ARTIFACT_MAX_BYTES) throw new ArtifactStoreError('tooLarge', `the asset is ${asset.bytes.length} bytes; the limit is ${ARTIFACT_MAX_BYTES}`, { size: asset.bytes.length, limit: ARTIFACT_MAX_BYTES });
       const name = safeName(asset.name);
       if (!name) throw new ArtifactStoreError('invalid', `the asset name ${JSON.stringify(asset.name)} is not usable`);
+      if (!asset.querySnapshot && isQuerySnapshotName(name)) throw reservedName(name); // E3 panel: the refresh sink's namespace
       return { ...asset, name };
     });
     const stages: ReturnType<ArtifactFiles['stage']>[] = [];
@@ -815,12 +823,14 @@ export class ArtifactStore {
   // artifact copied into another, generic (a deck's pasted picture, a document's): the source's bytes written through
   // `uploadAsset` on the target, so the bytes and mime arrive unchanged, identical bytes answer the target's existing ref
   // and a name taken there is made unique. Both artifacts must be live; a deleted or missing one is refused by name.
+  // E3 panel wave: written as an upload is, past the query-snapshot namespace's refusal: the name it carries is its
+  // source asset's own, with that asset's own bytes, so it recreates no other bytes under a snapshot's ref.
   async copyAsset(from: string, ref: string, to: string, actor: Actor): Promise<{ assetId: string; ref: string }> {
     this.requireLive(from);
     this.requireLive(to);
     const asset = this.listAssets(from).find((candidate) => candidate.ref === ref);
     if (!asset) throw new ArtifactStoreError('notFound', `no asset ${ref} in ${from}`, { artifactId: from, ref });
-    return this.uploadAsset(to, this.files.readAsset(from, asset.sha256), { name: asset.name, mime: asset.mime }, actor);
+    return this.placeUpload(to, this.files.readAsset(from, asset.sha256), { name: asset.name, mime: asset.mime }, actor); // E3 panel
   }
 
   listAssets(artifactId: string): Asset[] {
@@ -1614,6 +1624,10 @@ function connectorInput<T>(schema: z.ZodType<T>, value: unknown, what: string): 
   return parsed.data;
 }
 // P3-H end
+
+// E3 panel wave (retention.ts `isQuerySnapshotName`): a name only the refresh sink mints, so a collected snapshot's ref is
+// never recreated by an ordinary upload.
+const reservedName = (name: string) => new ArtifactStoreError('invalid', `the asset name ${JSON.stringify(name)} is reserved for live query snapshots; choose another name`, { name });
 
 function uniqueName(name: string, taken: Set<string>): string {
   if (!taken.has(name)) return name;

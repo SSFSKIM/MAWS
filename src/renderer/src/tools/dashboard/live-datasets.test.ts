@@ -8,8 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorSurface } from '@artifacts/host';
 import { removeDataset, setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
+import { datasetErrorOf, sourceLabel } from '@artifacts/dashboard/states'; // E3 panel
 import { newDoc, type Doc } from '@artifacts/yjs';
-import type { ConnectorCallOutcome, ConnectorGrant, ConnectorGrantOutcome, ConnectorWatchStart } from '@shared/artifacts/connectors';
+import { CONNECTOR_DECLARE_LIMIT, type ConnectorCallOutcome, type ConnectorGrant, type ConnectorGrantOutcome, type ConnectorWatchStart } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactSessionEnd, ArtifactSessionStart } from '../../artifacts/session-context';
 import { LiveDatasetsController, type LiveDatasetsDeps } from './live-datasets';
@@ -566,7 +567,7 @@ describe('a dashboard tab’s live datasets: a watch that yielded its slot (E3 M
     w.surface.refreshWatch.mockResolvedValueOnce(false);
     w.live.setShown(true);
     await settle();
-    expect(w.surface.refreshWatch).toHaveBeenCalledWith('w1');
+    expect(w.surface.refreshWatch).toHaveBeenCalledWith('w1', { probe: true }); // E3 panel: recovery probes
     expect(w.log.filter((line) => /^(unwatch|watch)/.test(line)).slice(-2)).toEqual(['unwatch w1', `watch w2 rows {"region":"north"} 60000 {"dataset":{"id":"sales"}}`]);
     w.live.setShown(false);
     w.live.setShown(true);
@@ -606,7 +607,7 @@ describe('a dashboard tab’s live datasets: a watch that yielded its slot (E3 M
     await vi.advanceTimersByTimeAsync(49_999);
     expect(v.surface.refreshWatch).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    expect(v.surface.refreshWatch).toHaveBeenCalledWith('w1');
+    expect(v.surface.refreshWatch).toHaveBeenCalledWith('w1', { probe: true }); // E3 panel: recovery probes
   });
 
   it('the owner’s Refresh of an evicted handle registers it again', async () => {
@@ -737,5 +738,164 @@ describe('a dashboard tab’s live datasets: a recovery probe made obsolete (E3 
     expect(w.surface.refreshWatch).toHaveBeenCalledTimes(3);
     expect(w.surface.unwatchTool).not.toHaveBeenCalled();
     expect(w.surface.watchTool).toHaveBeenCalledTimes(1);
+  });
+});
+
+// E3 panel wave (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, Decision Log 16 and 17).
+describe('a dashboard tab’s live datasets: the panel wave (E3 panel)', () => {
+  // (6) the broker's own catch-up runs when shown; recovery only asks whether the handle lives, so no second refresh
+  it('recovery probes a watch’s handle, never forcing a refresh; the owner’s Refresh still forces one', async () => {
+    const w = world();
+    setDataset(w.doc, 'sales', query({ schedule: 60 }));
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    w.listeners.get('w1')!(DATASET('sales'));
+    w.live.setShown(false);
+    w.setClock(AT + 120_000);
+    w.live.setShown(true); // overdue: asked at once
+    await settle();
+    expect(w.surface.refreshWatch.mock.calls).toEqual([['w1', { probe: true }]]);
+    await w.live.refresh('sales');
+    expect(w.surface.refreshWatch.mock.calls.at(-1)).toEqual(['w1']);
+  });
+
+  // (7) main may evict a dormant watch before the renderer hears its start's answer
+  it('a start answered after a hide and a showing is probed then, and registered again when its handle is gone', async () => {
+    const w = world();
+    setDataset(w.doc, 'sales', query({ schedule: 60 }));
+    w.live.follow(w.doc);
+    const late = deferred<ConnectorWatchStart>();
+    w.watchGate.next = late;
+    w.live.setShown(true);
+    await settle();
+    w.live.setShown(false);
+    w.live.setShown(true); // shown again while the start is unanswered: nothing to ask yet
+    await settle();
+    expect(w.surface.refreshWatch).not.toHaveBeenCalled();
+    w.surface.refreshWatch.mockResolvedValueOnce(false); // evicted while hidden, before the answer
+    late.resolve({ ok: true, watchId: 'ignored', intervalMs: 60_000 });
+    await settle();
+    expect(w.surface.refreshWatch.mock.calls).toEqual([['w1', { probe: true }]]);
+    expect(w.log.filter((line) => /^(unwatch|watch)/.test(line)).slice(-2)).toEqual(['unwatch w1', `watch w2 rows {"region":"north"} 60000 {"dataset":{"id":"sales"}}`]);
+  });
+
+  it('a start answered while hidden is probed at the next showing; one answered with no hide since it began asks nothing', async () => {
+    const w = world();
+    setDataset(w.doc, 'sales', query({ schedule: 60 }));
+    w.live.follow(w.doc);
+    const late = deferred<ConnectorWatchStart>();
+    w.watchGate.next = late;
+    w.live.setShown(true);
+    await settle();
+    w.live.setShown(false);
+    late.resolve({ ok: true, watchId: 'ignored', intervalMs: 60_000 });
+    await settle();
+    expect(w.surface.refreshWatch).not.toHaveBeenCalled(); // hidden: dormant until shown
+    w.surface.refreshWatch.mockResolvedValueOnce(false);
+    w.live.setShown(true);
+    await settle();
+    expect(w.surface.refreshWatch.mock.calls).toEqual([['w1', { probe: true }]]);
+    expect(w.surface.watchTool).toHaveBeenCalledTimes(2);
+
+    const v = world();
+    setDataset(v.doc, 'sales', query({ schedule: 60 }));
+    v.live.follow(v.doc);
+    const answered = deferred<ConnectorWatchStart>();
+    v.watchGate.next = answered;
+    v.live.setShown(true);
+    await settle();
+    answered.resolve({ ok: true, watchId: 'ignored', intervalMs: 60_000 });
+    await settle();
+    expect(v.surface.refreshWatch).not.toHaveBeenCalled();
+  });
+
+  // (8) H ends a watch whose outcome is invalid; the renderer's listener goes with it
+  it('a terminal outcome unwatches before its handle is forgotten, so no listener outlives it, across retries', async () => {
+    const w = world();
+    setDataset(w.doc, 'sales', query({ schedule: 30 }));
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    for (const id of ['w1', 'w2', 'w3']) {
+      w.listeners.get(id)!({ ok: false, state: 'invalid', reason: 'notReadOnly' });
+      expect(w.surface.unwatchTool).toHaveBeenLastCalledWith(id);
+      expect(w.listeners.size).toBe(0);
+      await w.live.refresh('sales'); // the owner tries again: a new watch
+      await settle();
+      expect(w.listeners.size).toBe(1);
+    }
+    w.listeners.get('w4')!({ ok: false, state: 'invalid', reason: 'notReadOnly' });
+    removeDataset(w.doc, 'sales');
+    await settle();
+    expect(w.listeners.size).toBe(0);
+  });
+
+  // (2) H's lease declares at most CONNECTOR_DECLARE_LIMIT distinct tools, cumulatively, and has no undeclare
+  it('obsolete declarations never exhaust the lease: at H’s cap the surface is recycled for the current queries alone', async () => {
+    const w = world();
+    const surfaces: ReturnType<typeof fakeSurface>[] = [];
+    const declaredOn = new Map<object, Set<string>>();
+    w.host.openConnectors.mockImplementation(() => {
+      const fake = fakeSurface();
+      const declared = new Set<string>();
+      declaredOn.set(fake, declared);
+      fake.surface.declareTools.mockImplementation(async (tools: { server: string; tool: string }[]) => {
+        const keys = tools.map((t) => `${t.server}/${t.tool}`);
+        if (new Set([...declared, ...keys]).size > CONNECTOR_DECLARE_LIMIT) return { ok: false, state: 'invalid', reason: 'request' } as never;
+        for (const key of keys) declared.add(key);
+        return { ok: true as const, declared: tools };
+      });
+      surfaces.push(fake);
+      return fake.surface;
+    });
+    setDataset(w.doc, 'costs', query({ tool: 'costs', schedule: 300 })); // current throughout
+    setDataset(w.doc, 'sales', query({ tool: 't0', schedule: 60 }));
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    // one distinct pair after another in the one query: 128 declared with costs, then the 129th
+    for (let i = 1; i < CONNECTOR_DECLARE_LIMIT; i += 1) {
+      setDataset(w.doc, 'sales', query({ tool: `t${i}`, schedule: 60 }));
+      await settle();
+    }
+    expect(surfaces).toHaveLength(2);
+    const [first, second] = surfaces as [ReturnType<typeof fakeSurface>, ReturnType<typeof fakeSurface>];
+    expect(first.surface.close).toHaveBeenCalledTimes(1);
+    expect([...declaredOn.get(second)!].sort()).toEqual(['fixture/costs', `fixture/t${CONNECTOR_DECLARE_LIMIT - 1}`]);
+    expect(second.surface.setVisible).toHaveBeenLastCalledWith(true);
+    expect(second.surface.watchTool.mock.calls.map(([request]) => request.tool).sort()).toEqual(['costs', `t${CONNECTOR_DECLARE_LIMIT - 1}`]);
+    expect(w.live.snapshot().queries.get('sales')?.pause).toBeNull();
+    // the owner's Refresh of a manual query goes through the recycled surface
+    setDataset(w.doc, 'manual', query({ tool: 'manual' }));
+    await w.live.refresh('manual');
+    expect(second.surface.callTool).toHaveBeenCalledTimes(1);
+    expect(first.surface.callTool).not.toHaveBeenCalled();
+  });
+
+  // the ruled sheet line (Decision Log 16): the live descriptor's committed error, never the bridge's transient answer
+  it('says the live descriptor’s committed error in its source label’s words; a bridge failure clears none, a success does', async () => {
+    const w = world();
+    const SNAP = { ref: 'assets/query-1.json', at: AT };
+    setDataset(w.doc, 'sales', query({ schedule: 30 }, SNAP));
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    const error = () => w.live.snapshot().queries.get('sales')?.error;
+    expect(error()).toBeNull();
+    const words = 'the last refresh was refused: its structured content is neither an array of rows nor an object with a rows array';
+    const failed = query({ schedule: 30 }, SNAP, { state: { status: 'error', message: words, at: AT + 1 } });
+    setDataset(w.doc, 'sales', failed);
+    expect(error()).toBe(words);
+    expect(sourceLabel(failed, 'You').split(' · ')).toContain(error());
+    w.listeners.get('w1')!(FAILED('validation')); // the bridge's phase ends no pause it set, and leaves the error
+    expect(w.live.snapshot().queries.get('sales')?.pause).toBeNull();
+    expect(error()).toBe(words);
+    const unworded = query({ schedule: 30 }, SNAP, { state: { status: 'error', at: AT + 2 } });
+    setDataset(w.doc, 'sales', unworded);
+    expect(error()).toBe(datasetErrorOf(unworded.state));
+    expect(sourceLabel(unworded, 'You').split(' · ')).toContain(error());
+    setDataset(w.doc, 'sales', query({ schedule: 30 }, { ref: 'assets/query-2.json', at: AT + 3 }));
+    expect(error()).toBeNull();
   });
 });
