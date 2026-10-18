@@ -36,6 +36,8 @@ export class CarryRegistry {
   private readonly copies = new Map<string, CopyRecord>();
   /** Forwards added while replaying an edit (its new characters), so a chain of keystrokes keeps following. */
   private readonly extra = new Map<string, Slot>();
+  /** A copied or replayed character's slot → the slot it was made from, so two copies' bases meet at their common origin. */
+  private readonly origins = new Map<string, Slot>();
   private arrivals = 0;
 
   register(carries: readonly Carry[]): void {
@@ -103,6 +105,14 @@ export class CarryRegistry {
 
   private addCopy(node: Slot, blockId: string, base: Map<string, Slot>): void {
     this.copies.set(slotKey(node), { blockId, arrival: ++this.arrivals, base });
+    for (const [copy, source] of base) this.origins.set(copy, source);
+  }
+
+  private dropCopy(key: string): void {
+    const record = this.copies.get(key);
+    if (!record) return;
+    for (const copy of record.base.keys()) this.origins.delete(copy);
+    this.copies.delete(key);
   }
 
   copy(node: Slot): CopyRecord | undefined {
@@ -134,6 +144,21 @@ export class CarryRegistry {
   /** A replayed character's new slot, so the next keystroke typed after it follows. */
   noteForward(from: Slot, to: Slot): void {
     this.extra.set(slotKey(from), to);
+    if (!this.origins.has(slotKey(to))) this.origins.set(slotKey(to), from);
+  }
+
+  /**
+   * The slot a character was first made from, following copies of copies and replays (the slot itself when it was
+   * never copied): where the bases of two copies of one block, made from different copies of it, are matched.
+   */
+  origin(slot: Slot): Slot {
+    let at = slot;
+    for (let n = 0; n < MAX_CHAIN; n++) {
+      const source = this.origins.get(slotKey(at));
+      if (!source) break;
+      at = source;
+    }
+    return at;
   }
 
   /** Drops the carries (and replayed forwards) whose copy `doc` (a replica of this registry's artifact) shows deleted. */
@@ -148,10 +173,15 @@ export class CarryRegistry {
         if (now && slotKey(now) === slotKey(entry.carry.to[k] as Slot)) this.forward.delete(slotKey(from));
       });
       for (const [old, now] of entry.carry.blocks ?? []) if (slotKey(this.forwardBlock.get(slotKey(old)) ?? [0, -1]) === slotKey(now)) this.forwardBlock.delete(slotKey(old));
-      this.copies.delete(slotKey(node));
+      this.dropCopy(slotKey(node));
       return false;
     });
-    for (const key of this.copies.keys()) if (!this.entries.some((entry) => entry.carry.node && slotKey(entry.carry.node) === key) && deleted(parseSlot(key))) this.copies.delete(key);
-    for (const [key, to] of this.extra) if (deleted(to)) this.extra.delete(key);
+    for (const key of [...this.copies.keys()]) if (!this.entries.some((entry) => entry.carry.node && slotKey(entry.carry.node) === key) && deleted(parseSlot(key))) this.dropCopy(key);
+    for (const [key, to] of this.extra) {
+      if (!deleted(to)) continue;
+      this.extra.delete(key);
+      const origin = this.origins.get(slotKey(to));
+      if (origin && slotKey(origin) === key) this.origins.delete(slotKey(to)); // the replay's own entry, never a copy's
+    }
   }
 }

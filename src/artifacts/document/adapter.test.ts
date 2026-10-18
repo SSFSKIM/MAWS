@@ -780,3 +780,30 @@ describe('a forwarded insertion whose anchor was deleted', () => {
     expect(textOf(person, 'p3')).toBe(textOf(host.live, 'p3'));
   });
 });
+
+// P3-F document-model scalpel-2#2 (P2): the id repair matches a losing copy's characters to the kept copy's by their
+// common origin, following copies of copies, so a block moved twice and then moved once more by a stale replica holds
+// its text once, with the edit made in the losing copy carried over.
+describe('a stale move of a block moved twice', () => {
+  it('keeps the later copy with the text once and the losing copy’s edit carried into it', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const a1 = host.peer();
+    const a2 = host.peer(); // stale: it moves the original p3 without having seen either of a1's moves
+    const person = host.peer();
+    agentBatch(host, adapter, a1, agent1, [{ op: 'move', id: 'p3', after: 'c1' }]);
+    host.pull(a1);
+    agentBatch(host, adapter, a1, agent1, [{ op: 'move', id: 'p3', after: 'l1' }]);
+    host.pull(person);
+    typeAt(person, 'p3', 0, 'Edited: '); // into a1's second copy
+    host.send(person, human);
+    agentBatch(host, adapter, a2, agent2, [{ op: 'move', id: 'p3', after: 'h1' }]);
+    host.pull(person);
+    expect(order(host.live).filter((id) => id === 'p3')).toHaveLength(1);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('h1') + 1);
+    expect(textOf(host.live, 'p3')).toBe('Edited: A plain paragraph the human types into. Words to keep.');
+    expect(marksOf(host.live, 'p3')).toBe('Edited: A plain paragraph the human types into. |Words[c:t4]| to keep.');
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(textOf(person, 'p3')).toBe(textOf(host.live, 'p3'));
+  });
+});
