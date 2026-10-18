@@ -105,6 +105,11 @@ export class FakeMachineReplay {
     return held.length;
   }
 
+  /** How many stops are held, waiting for `releaseStops` (the machine reads the hub's frames every few ms). */
+  get stopsHeld(): number {
+    return this.heldStops.length;
+  }
+
   /** Answers the stops held so far; how many there were. */
   releaseStops(): number {
     const held = this.heldStops.splice(0);

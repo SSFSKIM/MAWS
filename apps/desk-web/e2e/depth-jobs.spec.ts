@@ -249,6 +249,7 @@ test('G1: Stop on a running shell and a running monitor sends stop, reads stoppi
     await expect(row).toHaveAttribute('data-stop', 'stopping');
     await expect.poll(() => stopsSent(hub).at(-1)?.args).toEqual({ session: fm.session, taskId });
     if (taskId === WATCH) await shot(page, 'dc10-stopping');
+    await expect.poll(() => fm.stopsHeld).toBe(1);
     expect(fm.releaseStops()).toBe(1);
     await expect(row).toContainText('stopped', { timeout: 2000 });
     await expect(row.getByRole('button', { name: STOP_BUTTON })).toHaveCount(0);
@@ -298,6 +299,7 @@ test('a stop whose machine dropped before answering offers Retry, and the retry,
   await row.getByRole('button', { name: 'Retry' }).click();
   await expect.poll(() => stopsSent(hub).length).toBe(2);
   expect(stopsSent(hub)[1].nonce).toBe(sent.nonce); // the same sealed stop
+  await expect.poll(() => fm.stopsHeld).toBe(2);
   expect(fm.releaseStops()).toBe(2); // the first answers it; the retry is answered from the ledger
   await expect(row).toContainText('stopped', { timeout: 2000 });
   const taskStops = fm.depth.rows.get('main')!.filter((r) => JSON.stringify(r).includes('"name":"TaskStop"') && JSON.stringify(r).includes(`"task_id":"${WATCH}"`));
