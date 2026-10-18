@@ -7,6 +7,7 @@ import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/hos
 import type { Restored } from '@artifacts/provider/port';
 import { newDoc, transact } from '@artifacts/yjs';
 import { importSlide, setStyle, writeDeckKeys } from '@artifacts/slides/model';
+import { deleteSlide } from '@artifacts/yjs/slides'; // P3-F (L203)
 import { loadSlide } from '@artifacts/slides/parse';
 import { addThread, resolve } from '@artifacts/slides/threads'; // M7
 import { DeckTabState } from './tab-state';
@@ -124,6 +125,33 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
     void session.later(new Promise<void>(() => {}), () => {}); // never finishes
     await expect(state.closeGuard()).resolves.toBe(false);
     expect(confirmDiscard).toHaveBeenCalledTimes(1);
+  });
+
+  // P3-F (L203): speaker notes the session keeps unwritten go with the tab; nothing writes them but the owner
+  it('its close guard asks about notes the session keeps unwritten, at once when nothing is in flight, read-only too, not for a slide gone', async () => {
+    const { handle, state, confirmDiscard } = await opened();
+    const session = state.snapshot().session!;
+    session.keepNotesDraft('a', { text: 'x'.repeat(4_001), from: '' });
+    const asked = state.closeGuard();
+    expect(confirmDiscard).toHaveBeenCalledTimes(1); // at once: waiting cannot write them
+    await expect(asked).resolves.toBe(false);
+    handle.set({ readOnly: true }); // a read-only replica cannot write them either: still asked, the text kept
+    await expect(state.closeGuard()).resolves.toBe(false);
+    expect(confirmDiscard).toHaveBeenCalledTimes(2);
+    expect(session.unwrittenNotes('a')).toBe('x'.repeat(4_001));
+    handle.set({ readOnly: false, unsaved: 1 }); // an edit in flight is waited for as before, then the notes asked about
+    const later = state.closeGuard();
+    await Promise.resolve();
+    expect(confirmDiscard).toHaveBeenCalledTimes(2);
+    handle.set({ unsaved: 0 });
+    await expect(later).resolves.toBe(false);
+    expect(confirmDiscard).toHaveBeenCalledTimes(3);
+    session.keepNotesDraft('a', null); // written, or short enough again
+    await expect(state.closeGuard()).resolves.toBe(true);
+    session.keepNotesDraft('a', { text: 'x'.repeat(4_001), from: '' });
+    deleteSlide(handle.doc, 'a');
+    await expect(state.closeGuard()).resolves.toBe(true);
+    expect(confirmDiscard).toHaveBeenCalledTimes(3);
   });
 
   it('an awaited edit finishing once the replica turned read-only writes nothing', async () => {

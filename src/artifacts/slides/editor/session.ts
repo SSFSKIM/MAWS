@@ -11,12 +11,16 @@
 // the live deck drops it.
 //
 // P3-F (L203): speaker notes the dialect refused (over its limit) are the tab's too, kept here per slide until written or
-// replaced, so the notes field shows them again when it mounts again; they are never written to the doc.
+// replaced, so the notes field shows them again when it mounts again; they are never written to the doc. Fix wave: carried
+// onto a change made meanwhile they may fit, yet stay unwritten until the owner writes them, and the tab's close guard
+// asks before they are lost.
 // P3-F (L233): what the editor shows in place of the live deck (`shown`), so the header's Export, which outlives the body,
 // exports what is on screen (the design's what-you-see rule, P3-E's Decision Log 31).
 import type { Awareness } from '@y/protocols/awareness';
 import { transact, type Doc } from '../../yjs';
+import { hasSlide, readNotes } from '../../yjs/slides';
 import { createDeckUndo, type DeckUndo } from '../../yjs/slides-undo';
+import { rebaseText } from '../caret';
 import { slideOrder } from '../model';
 import { keepingRemovedQuotes } from '../threads'; // M7 fix wave 1
 
@@ -219,6 +223,20 @@ export class DeckSession {
   keepNotesDraft(slideId: string, draft: NotesDraft | null): void {
     if (draft) this.notesDrafts.set(slideId, draft);
     else this.notesDrafts.delete(slideId);
+  }
+  /**
+   * L203 fix wave: the notes kept unwritten for a slide, carried onto its notes as they are now; null without any, or
+   * once the slide is gone. Within the limit after a change made elsewhere, they are still unwritten: the owner writes them.
+   */
+  unwrittenNotes(slideId: string): string | null {
+    const draft = this.notesDrafts.get(slideId);
+    if (!draft || !hasSlide(this.doc, slideId)) return null;
+    const now = readNotes(this.doc, slideId);
+    return draft.from === now ? draft.text : rebaseText(draft.from, draft.text, now);
+  }
+  /** L203 fix wave: whether any slide's notes are kept unwritten (lost with the tab: its close guard asks). */
+  hasUnwrittenNotes(): boolean {
+    return [...this.notesDrafts.keys()].some((id) => this.unwrittenNotes(id) !== null);
   }
 
   /** The composition hold: remote updates wait while an IME composes in the text box (no-op without a replica). */
