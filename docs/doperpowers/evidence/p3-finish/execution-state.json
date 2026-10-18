@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "quiet DL59 relaunch39165341280 active oncdf54fbeb after applied-source recheck and architect quiet relay; post-debt scale pairs still pending",
+  "phase": "quiet39165341280 completed4green/1document-scale red; parentDL109 document calibration directed, implementation/review and fresh quiet relay pending; heavy repeatability carry directed, preview validity descriptor-based",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -1040,7 +1040,7 @@
     "wrapperHead": "c82767cdbbc1bb3c19fdb7df21f286f62f392dfc",
     "createdAt": "2026-10-18T20:53:07Z",
     "statusAtIdentityRead": "queued",
-    "conclusion": null,
+    "conclusion": "failure",
     "groups": [
       "static",
       "packaged",
@@ -1088,6 +1088,66 @@
       "paidSpendUsd": 0
     },
     "queueThresholdTask": "b21w80pyy",
-    "queueThreshold": "single queue-age check at21:23:07Z, created+30min, not completion polling"
-  }
+    "queueThreshold": "own pending taskb21w80pyy stopped after completion before30min threshold, no check/poll performed",
+    "recordedCompletedAt": "2026-10-18T21:28:37Z",
+    "status": "completed",
+    "exit": 1,
+    "completedAt": "2026-10-18T21:21:19Z",
+    "rawLogs": "/private/tmp/p3f-quiet-complete.bZ8EnY/logs.zip",
+    "rawLogsSha256": "2e7851c2127c043c7e3edfd80fe76122b738020d6e5a8a892a68aef28c292051",
+    "reports": "/tmp/maws-review/gates/ci-cdf54fbe",
+    "evidenceStatusAfterGate": "empty; no dirty evidence paths",
+    "quietRelease": "completed result sent to architect; only architect coordinates flag release",
+    "jobs": [
+      {
+        "name": "packaged",
+        "databaseId": 117787051754,
+        "conclusion": "success",
+        "startedAt": "2026-10-18T20:56:09Z",
+        "completedAt": "2026-10-18T21:11:43Z"
+      },
+      {
+        "name": "e2e:artifacts-perf",
+        "databaseId": 117787051783,
+        "conclusion": "success",
+        "startedAt": "2026-10-18T20:53:25Z",
+        "completedAt": "2026-10-18T20:56:07Z"
+      },
+      {
+        "name": "e2e:presentations-scale",
+        "databaseId": 117787051814,
+        "conclusion": "success",
+        "startedAt": "2026-10-18T21:15:56Z",
+        "completedAt": "2026-10-18T21:21:19Z"
+      },
+      {
+        "name": "e2e:document-scale",
+        "databaseId": 117787051832,
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T21:11:45Z",
+        "completedAt": "2026-10-18T21:15:54Z"
+      },
+      {
+        "name": "static",
+        "databaseId": 117787051957,
+        "conclusion": "success",
+        "startedAt": "2026-10-18T20:54:52Z",
+        "completedAt": "2026-10-18T21:00:09Z"
+      }
+    ],
+    "results": {
+      "static": "green",
+      "packaged": "135passed/184skipped plus supervisor1 and voice1;137passed total, no failures",
+      "e2e:artifacts-perf": "5passed, announcement case76 passed unchanged and all3metrics passed",
+      "e2e:presentations-scale": "1passed, all8rows met24ms drag calibration; separate logical fixture non-repeatability discovered",
+      "e2e:document-scale": "1failed/1passed; typing17.2/16ms,preview-enter2 1016.9/1000ms,collected renderer1 519.7/500MB; parentDL109 calibration to be applied and singly relaunched after quiet relay"
+    },
+    "observationDisposition": {
+      "approval": "side.spec.ts931 passed3.3s at21:11:13.723Z; one unreproduced packaged observation, never fixed",
+      "announcement": "artifacts-store.spec.ts76 passed4.7s at20:54:29.912Z and again in packaged2.6s; P4 source-gap row retained, no causal-fix claim",
+      "settleTrigger": "no source settle implementation; actual first loads recorded, evaluate condition with completed extraction",
+      "fullSetCredit": false
+    }
+  },
+  "heavyRepeatability": "measurements/heavy-repeatability-observation.json: same seeded input counts, logical output differs across mandatory runs; no optimization/probe"
 }

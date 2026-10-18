@@ -7,5 +7,6 @@
   "sourceGap": "supervisor ready before streaming; runtime accepts commands but drops events before client ready; occurrence loss point unobserved",
   "ruling": "unchanged quiet relaunch; if reproduced own DL59 red and gap fixed before hand-back",
   "row": "| 2026-10-18 | P4 artifacts area (create-announcement streaming readiness gap) | The artifacts-store fixture waits for engine.hostState ready, which can precede streaming readiness: supervisor.ts238-243 marks ready on spawn,262-289 sends the ready line after resync; shared/host/runtime.ts118-127 drops pre-ready events while183-200 can answer commands. In union39156492025 case artifacts-store.spec.ts76, create succeeded then the page observed zero created events throughout5s; the actual loss point is unobserved. | e2e/artifacts-store.spec.ts39-42 and76-86; src/main/hosts/supervisor.ts; src/shared/host/runtime.ts; native create20:11:38.202-38.348Z, final empty poll43.270Z; no streaming/drop trace. | Owner: artifacts area, deferred to P4. Relaunch this case unchanged on the quiet mini. If it reproduces there, it is its own Decision Log59 red and the readiness gap is fixed before hand-back, using existing streaming readiness and preserving the created-event assertion; no cause is claimed from this one occurrence. Outside F frozen M0 denominator. |",
-  "decisionLog": "none"
+  "decisionLog": "none",
+  "quietResult": "39165341280 case76 passed unchanged in artifacts-perf and packaged; no product-cause/fix inference, deferred source-gap row retained"
 }

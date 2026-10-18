@@ -1,0 +1,72 @@
+{
+  "recordedAt": "2026-10-18T21:28:37Z",
+  "runs": [
+    39156492025,
+    39165341280
+  ],
+  "descriptor": {
+    "kind": "deck",
+    "profile": "heavy",
+    "encoding": "delta",
+    "months": 3,
+    "month": 3,
+    "seed": 11
+  },
+  "sameInputCounts": {
+    "turns": 1950,
+    "sessions": 195,
+    "comments": 130,
+    "named": 39,
+    "restores": 6
+  },
+  "first": {
+    "generationMs": 71222,
+    "generationLoads": [
+      4.43,
+      12.25
+    ],
+    "workload": {
+      "counts": {
+        "turns": 1950,
+        "sessions": 195,
+        "comments": 130,
+        "named": 39,
+        "restores": 6
+      },
+      "updates": 78290,
+      "slides": 84,
+      "versions": 120
+    },
+    "filesView": {
+      "prev": "872a715838d5",
+      "next": "52384da44462"
+    }
+  },
+  "quiet": {
+    "generationMs": 56553,
+    "generationLoads": [
+      2.21,
+      2.91
+    ],
+    "workload": {
+      "counts": {
+        "turns": 1950,
+        "sessions": 195,
+        "comments": 130,
+        "named": 39,
+        "restores": 6
+      },
+      "updates": 78842,
+      "slides": 86,
+      "versions": 122
+    },
+    "filesView": {
+      "prev": "872a715838d5",
+      "next": "35a2e8338883"
+    }
+  },
+  "finding": "logical outputs differ: updates,live slide count,version count,next filesView; not merely non-repeatable random binary hashes. Both validators ok and within time budget; no cross-run logical-equality assertion in validator.",
+  "interpretation": "non-deterministic-generator carry criterion triggered; parent notified. No optimization or probe, parent confirms carry with both shapes retained and no probe; preview validity depends on descriptor, not repeatability. Raw preview numbers remain actual observations of these distinct fixtures, not repeatability acceptance.",
+  "retainedM8": "120.1ms at loads17.7-31.7 retained per original fallback rule; no new bound waiver",
+  "cause": "not diagnosed; no product/generator fix claimed"
+}
