@@ -34,7 +34,9 @@ import { pmnodeToDelta } from '../yjs/prosemirror';
 import { documentAdapter, type DocumentAdapter } from './adapter';
 import { DocIndex } from './block-index';
 import { applyEdit } from './patch-writer';
+import { readDocument } from './read';
 import { schemaFor } from './schema';
+import { addTab, deleteTab, listTabs } from './tabs';
 import { addThread, anchorOfMark, getThread, listThreads, reply, resolve } from './threads';
 import { body, coveredIn, dupes, ids, marksOf, nodeOf, now, order, replica, seedDoc, sequence, textOf, TAB } from './writer.fixture';
 
@@ -805,5 +807,28 @@ describe('a stale move of a block moved twice', () => {
     expect(marksOf(host.live, 'p3')).toBe('Edited: A plain paragraph the human types into. |Words[c:t4]| to keep.');
     expect(dupes(ids(host.live))).toEqual([]);
     expect(textOf(person, 'p3')).toBe(textOf(host.live, 'p3'));
+  });
+});
+
+// P3-F document-model sweep#5 (P3): two replicas each deleting one of a document's last two tabs both pass the writer's
+// guard; the host's repair gives the merged document one empty tab again, so it stays readable.
+describe('concurrent deletions of the last two tabs', () => {
+  it('leave one readable tab', () => {
+    const adapter = adapterOf({ generateID: sequence('t') });
+    const seed = seedDoc();
+    addTab(seed, { title: 'Second', id: 'tab2' });
+    const host = new Host(seed, adapter);
+    const a = host.peer();
+    const b = host.peer();
+    deleteTab(a, TAB);
+    deleteTab(b, 'tab2');
+    host.send(a, human);
+    host.send(b, human);
+    expect(listTabs(host.live).map((tab) => tab.id)).toEqual([expect.stringMatching(/^t\d+$/)]);
+    expect(readDocument(host.live).shown).toEqual([expect.stringMatching(/^t\d+$/)]);
+    host.pull(a);
+    host.pull(b);
+    expect(listTabs(a)).toEqual(listTabs(host.live));
+    expect(listTabs(b)).toEqual(listTabs(host.live));
   });
 });

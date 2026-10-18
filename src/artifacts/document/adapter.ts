@@ -31,7 +31,7 @@ import { CarryRegistry } from './carries';
 import type { Carry, Slot } from './edit-ops';
 import { allBlocks, applyRepair, planRepair, repairNeeded } from './repair';
 import { nanoid8 } from './schema';
-import { createDocument, listTabs } from './tabs';
+import { TABS, createDocument, ensureTab, listTabs } from './tabs';
 import { deepSlotIds, formatAt, itemAt, itemOf, locateSlot, nodeAt, slotKey, textblocksY, charSlots } from './structs';
 import { THREADS, blockThreads /* P3-E */, getThread, isCommentKey, listThreads, refreshAnchors, stripMarklessComments, type Thread } from './threads';
 
@@ -135,18 +135,24 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
   // What a forwarding edit learnt for the `afterUpdate` that follows it on the same replica (A calls both in one frame).
   const stash = new WeakMap<Doc, AttributionCarry[]>();
 
-  /** The blocks an update touched, the nodes it inserted, and the threads it changed. */
-  function scan(doc: Doc, ids: ContentIds): { tops: Set<TopBlock>; inserted: Set<Node>; threads: Set<string> } {
+  /** The blocks an update touched, the nodes it inserted, the threads it changed, and whether it deleted a tab. */
+  function scan(doc: Doc, ids: ContentIds): { tops: Set<TopBlock>; inserted: Set<Node>; threads: Set<string>; tabDeleted: boolean } {
     const index = DocIndex.of(doc);
     const threadsRoot = doc.get(THREADS);
+    const tabsRoot = doc.get(TABS);
     const tops = new Set<TopBlock>();
     const inserted = new Set<Node>();
     const threads = new Set<string>();
+    let tabDeleted = false;
     const visit = (isInsert: boolean) => (item: Item) => {
       if (isInsert && item.content instanceof ContentType) inserted.add(item.content.type as Node);
       const parent = item.parent;
       if (!(parent instanceof YNode)) return;
       if (isInsert && item.parentSub === 'id') inserted.add(parent);
+      if (parent === tabsRoot) {
+        if (!isInsert) tabDeleted = true;
+        return;
+      }
       if (parent === threadsRoot) {
         if (item.parentSub) threads.add(item.parentSub);
         return;
@@ -160,7 +166,7 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     };
     itemsIn(doc, ids.inserts, visit(true));
     itemsIn(doc, ids.deletes, visit(false));
-    return { tops, inserted, threads };
+    return { tops, inserted, threads, tabDeleted };
   }
 
   /** The thread scope of a set of changed blocks: their threads, and per tab the blocks carrying any of them. */
@@ -415,7 +421,10 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     }
     const provenance: AttributionCarry[] = [...performed, ...(stash.get(doc) ?? [])];
     stash.delete(doc);
-    const { tops, inserted, threads } = scan(doc, ids);
+    const { tops, inserted, threads, tabDeleted } = scan(doc, ids);
+    // two replicas each deleting one of the last two tabs both passed the writer's guard: the merged document gets one
+    // empty tab again (P3-F document-model sweep#5); a document without tabs by design (a held legacy dashboard) is not touched
+    if (tabDeleted) ensureTab(doc, generateID);
     const plan = planRepair(doc, inserted, registry, (node) => !!node._item && ids.inserts.has(node._item.id.client, node._item.id.clock));
     if (repairNeeded(plan)) provenance.push(...applyRepair(doc, plan, registry, generateID).carries);
     if (tops.size > 0) {

@@ -142,11 +142,22 @@ function rekey(doc: Doc, rekeyed: Array<{ id: string; order: string }>): void {
   for (const { id, order } of rekeyed) tabNode(doc, id)?.setAttr('order', order);
 }
 
-/** Deletes a tab and its body. A document keeps at least one tab. */
+/** Deletes a tab and its body. A document keeps at least one tab (`ensureTab` restores one the guard could not keep). */
 export function deleteTab(doc: Doc, tabId: string, origin?: unknown): void {
   if (!tabNode(doc, tabId)) throw new Error(`deleteTab: no tab ${tabId}`);
   if (listTabs(doc).length === 1) throw new Error('deleteTab: a document keeps its last tab');
   transact(doc, () => tabsRoot(doc).deleteAttr(tabId), origin);
+}
+
+/**
+ * Gives a document that has no tab one empty tab again: two replicas each deleting one of its last two tabs both pass
+ * `deleteTab`'s guard, and the merged document has none (P3-F, document-model sweep#5); the host's repair calls this
+ * after an update that deleted a tab. Its title is empty (the editor shows an untitled tab). Answers whether it wrote.
+ */
+export function ensureTab(doc: Doc, generateID: () => string = nanoid8, origin?: unknown): boolean {
+  if (listTabs(doc).length > 0) return false;
+  createDocument(doc, { title: '', generateID }, origin);
+  return true;
 }
 
 // ── fractional order keys ──
