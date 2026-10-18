@@ -645,8 +645,9 @@ function importOthers(reading: ClaudeReading, d: Draft, warnings: string[]) {
     d.describe(group, list.note);
     for (const entry of list.tokens) {
       const numeric = typeof entry.value === 'number' ? entry.value : /^-?(\d+\.?\d*|\.\d+)$/.test(entry.value.trim()) ? Number(entry.value) : null;
-      const dimension = numeric === null ? dimensionOf(entry.value) : null;
-      if (numeric === null && (!dimension || /em$/i.test(String(entry.value)))) {
+      // A length by its parsed unit: px and rem are dimensions; an em, relative to where it is set, is not one here.
+      const dimension = numeric === null && parseLength(String(entry.value))?.unit !== 'em' ? dimensionOf(entry.value) : null;
+      if (numeric === null && !dimension) {
         warnings.push(`${list.key} "${entry.name}": ${JSON.stringify(entry.value)} has no DTCG type MAWS writes; it stays in ${CLAUDE_SOURCES}tokens.json`);
         continue;
       }

@@ -382,4 +382,14 @@ describe('P3-F design-systems wave', () => {
     expect(familyOf).toMatchObject({ title: 'display', h1: 'display', body: 'body', caption: 'body' });
     expect(validateClaudeTokens(exported)).toEqual([]);
   });
+
+  // scalpel-4#1: a further family's dimension is judged by its parsed unit; `1rem` is not an em.
+  it('imports a rem dimension in a further family and round-trips it, while an em one stays in the sources', () => {
+    const imported = fromClaude({ 'tokens.json': JSON.stringify({ layout: { tokens: [{ name: 'gutter', value: '1rem' }, { name: 'indent', value: '2em' }] } }) });
+    expect(imported.tokens.tokens.get('layout.gutter')!.$value).toEqual({ value: 1, unit: 'rem' });
+    expect(imported.warnings.filter((w) => w.startsWith('layout '))).toEqual(['layout "indent": "2em" has no DTCG type MAWS writes; it stays in sources/claude/tokens.json']);
+    const back = fromClaude(toClaude({ name: 'Layout', law: LAW, tokens: imported.tokens }));
+    expect(back.tokens.tokens.get('layout.gutter')!.$value).toEqual({ value: 1, unit: 'rem' });
+    expect(back.warnings.filter((w) => w.startsWith('layout '))).toEqual([]);
+  });
 });
