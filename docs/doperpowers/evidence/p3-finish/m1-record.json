@@ -13,9 +13,9 @@
   "checkedAt": "all 10 close, 123 defer and 17 preclosed frozen rows matched the current tracker exactly once before the first edit",
   "deferFormat": "each defer row keeps its whole text; its closing cell gains 'Re-deferred 2026-10-18 (P3-F triage, triage.txt L<n>; parent Decision Log 106): <ruled reason> Owner: <ruled step made explicit>.' (the P2-F pattern)",
   "counts": {
-    "close:committed": 6,
+    "close:committed": 7,
     "close:held": 1,
-    "close:pending": 3,
+    "close:pending": 2,
     "defer:pending": 123,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
@@ -224,7 +224,7 @@
       "note": "Clause met by d6b58a91a (on master): the history rail names days against HistoryApi.now; src/artifacts/document/editor/history/rail.dom.test.tsx:112-128 fixes now at local noon 2026-10-15 through setup's {now}, so 'Today, Yesterday' no longer reads the wall clock. (The triage cites rail.dom.test.ts; the file is .tsx.)",
       "triageReason": "Injected clock pins the date grouping. Evidence: d6b58a91a; document/editor/history/rail.dom.test.ts:112–128.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "e7f9f9ec95caa1d648b24a0f65e6524371c9619f"
     },
     {
       "line": 206,
@@ -233,8 +233,8 @@
       "closeKind": "close",
       "note": "Clause met: test/artifacts/document-docx-libreoffice.test.ts:17-21 runs describe.skipIf(!available) with a title naming why soffice does not run; e2e/presentations-export.spec.ts:517 test.skip with its reason when soffice is absent; the mini carries LibreOffice (the row's own record). A lane without it reports the named skip.",
       "triageReason": "Absent LibreOffice reports an explicit skip; mini supplies it. Evidence: test/artifacts/document-docx-libreoffice.test.ts:19–21; e2e/presentations-export.spec.ts:517.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 220,
