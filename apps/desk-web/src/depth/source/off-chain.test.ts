@@ -55,7 +55,7 @@ describe('the rows off the live chain', () => {
     expect(bubbles((await drawn(c.rows)).rows)).toEqual(['List the files.', 'Now the tests.', 'Now the tests.']);
   });
 
-  it('a prompt sent again edited is no repeat: its first wording draws as undone, the engine’s own notice between them or not', async () => {
+  it('a prompt sent again edited from the same point repeats it: drawn once, the engine’s own notice between them or not', async () => {
     for (const notice of [false, true]) {
       const c = new Chain();
       c.prompt('Write a poem about rivers.');
@@ -68,10 +68,49 @@ describe('the rows off the live chain', () => {
       c.answer('Still as glass.');
       c.end();
       const { rows } = await drawn(c.rows, [first, context]);
-      expect(bubbles(rows), `notice ${notice}`).toEqual(['Write a poem about rivers.', 'Write a poem about lakes.', 'Write a poem about lakes. Keep it short.']);
-      expect(user(rows, 'Write a poem about lakes.')).toMatchObject({ dropped: true, messageUuid: first.uuid });
+      expect(bubbles(rows), `notice ${notice}`).toEqual(['Write a poem about rivers.', 'Write a poem about lakes. Keep it short.']);
       expect(user(rows, 'Write a poem about lakes. Keep it short.')).toMatchObject({ dropped: false });
     }
+  });
+
+  it('a prompt is repeated only by a typed prompt from its own point: an answer or another owner input between leaves it undone', async () => {
+    for (const between of ['answer', 'steer'] as const) {
+      const c = new Chain();
+      c.prompt('Write a poem about rivers.');
+      c.answer('Rivers run.');
+      const ended = c.end();
+      const first = c.prompt('Write a poem about lakes.');
+      // From that point, before the next prompt: the owner's own words, or a message (no prompt) the session answered.
+      if (between === 'steer') c.appended('use short lines', ended);
+      else {
+        c.inboxWake('[sminos bridge]\nA note was added to the conversation.', ended);
+        c.answer('Noted.');
+        c.end();
+      }
+      c.prompt('Write a poem about lakes. Keep it short.');
+      c.answer('Still as glass.');
+      c.end();
+      const { rows } = await drawn(c.rows, [first]);
+      expect(user(rows, 'Write a poem about lakes.'), between).toMatchObject({ dropped: true, messageUuid: first.uuid });
+    }
+  });
+
+  it('a steer or a delivery is repeated only by its words: sent again edited, its first wording still draws as not read', async () => {
+    const c = new Chain();
+    c.end();
+    const abandoned = c.prompt('Fix the errors.');
+    const steer = c.appended('use the split store');
+    const delivery = c.delivery('d1e1d1e1', 'Run the suites.');
+    c.prompt('Fix the errors.', c.rows[1]);
+    c.answer('On it.');
+    c.appended('use the split store, please');
+    c.delivery('d2e2d2e2', 'Run the suites now.');
+    c.answer('Done.');
+    c.end();
+    const { rows } = await drawn(c.rows, [abandoned, steer, delivery]);
+    expect(user(rows, 'use the split store')).toMatchObject({ dropped: true, messageUuid: steer.uuid });
+    expect(user(rows, 'Run the suites.')).toMatchObject({ dropped: true, messageUuid: delivery.uuid });
+    expect(user(rows, 'Fix the errors.')).toMatchObject({ dropped: false });
   });
 
   it('a steer that went off the chain and is repeated by no row on it draws as not read, never as delivered', async () => {
@@ -140,7 +179,7 @@ describe('the rows off the live chain', () => {
     expect(user(undone.rows, 'Run the suites.')).toMatchObject({ messageUuid: first.uuid, dropped: true });
   });
 
-  it('an Esc that a notice of the engine branched (#238’s restore): the prompt draws as undone, the delivery appended again once', async () => {
+  it('an Esc that a notice of the engine branched (#238’s restore): the prompt sent again edited and the delivery appended again draw once', async () => {
     const c = new Chain();
     c.prompt('Write a story.');
     c.answer('Once upon a time.');
@@ -162,8 +201,7 @@ describe('the rows off the live chain', () => {
     c.end();
     const { rows, report, entry } = await drawn(c.rows, [abandoned, context, first, mirror]);
     for (const drawnRows of [rows, report]) {
-      expect(bubbles(drawnRows)).toEqual(['Write a story.', 'Write a 150-word poem about rivers. Use no tools.', 'Write a 150-word poem about rivers. Use no tools. Keep it short.', 'Include the word PAPAYA in your reply.']);
-      expect(user(drawnRows, 'Write a 150-word poem about rivers. Use no tools.')).toMatchObject({ dropped: true });
+      expect(bubbles(drawnRows)).toEqual(['Write a story.', 'Write a 150-word poem about rivers. Use no tools. Keep it short.', 'Include the word PAPAYA in your reply.']);
       expect(user(drawnRows, 'Include the word PAPAYA in your reply.')).toMatchObject({ messageUuid: again.uuid, steer: true, dropped: false });
     }
     // Neither mirror line is held as a notice: the bubbles are drawn, the lines are the terminal's.
@@ -261,7 +299,8 @@ describe('the rows off the live chain', () => {
     c.answer('Stopped.');
     c.end();
     const { rows } = await drawn(c.rows, [p1, s1, p2, s2]);
-    expect(bubbles(rows)).toEqual(['Go.', 'Go now.', 'and hurry', 'Stop.']);
+    // The prompts are each sent again from the same point (edited); the steers' words are repeated by no row on the chain.
+    expect(bubbles(rows)).toEqual(['and hurry', 'Stop.']);
     expect(user(rows, 'and hurry')?.messageUuid).toBe(s2.uuid);
   });
 });

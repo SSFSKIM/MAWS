@@ -14,8 +14,11 @@
 // "Before the session read it": no response was written under it, nor, for a row appended while a tool ran, under the
 // call's result (a row the model answered and a `/rewind` then undid was read, and goes with its turn). "Sent again": a
 // later owner input on the chain with the same words (an Esc's prompt sent again as it was, a delivery the bridge
-// appended again after an Esc, doperpowers #233); a prompt sent again edited is no repeat, and its first wording draws
-// as undone. Of several undone inputs with the same words, the last is drawn.
+// appended again after an Esc, doperpowers #233), or, for a prompt typed at the terminal, a typed prompt sent in its
+// place, edited or not: the next one from the same point of the conversation, with no response and no other owner input
+// in between. An Esc hands the prompt back to the input box, and most go back in edited (local transcripts, 2026-10-18:
+// of 975 prompts sent again from the same point, 159 as they were), so nothing was lost. A steer or a delivery is a
+// repeat only by its words. Of several undone inputs with the same words, the last is drawn.
 //
 // The delivery frame's dedupe (`supersededDeliveries`, MAWS PR #42) is this rule's special case under a producer that
 // marks: a delivery appended again after an Esc left its first copy off the chain, repeated by the copy on it. It is
@@ -39,18 +42,21 @@ export type Drawing = { hidden: ReadonlySet<string>; undone: ReadonlySet<string>
 
 export const NONE_OFF: ReadonlySet<string> = new Set();
 
-/** An owner input: what its bubble draws (a delivery without its frame line) and its words, by which a repeat is known. */
-export type OwnerInput = { content: string | ContentBlock[]; words: string };
+/**
+ * An owner input: what its bubble draws (a delivery without its frame line), its words, by which a repeat is known, and
+ * whether it is a prompt typed at the terminal, which a typed prompt sent in its place repeats whatever its words.
+ */
+export type OwnerInput = { content: string | ContentBlock[]; words: string; typed: boolean };
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
 const isBlock = (value: unknown): value is ContentBlock => typeof object(value)?.type === 'string';
 const COMMAND_TEXT = /^\s*<(?:bash-|local-command|command-)/;
 
-function input(content: unknown): OwnerInput | null {
+function input(content: unknown, typed = false): OwnerInput | null {
   const drawn = typeof content === 'string' ? content : Array.isArray(content) ? content.filter(isBlock) : null;
   if (drawn === null) return null;
   const text = typeof drawn === 'string' ? drawn : drawn.flatMap((block) => (block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])).join('\n');
-  return { content: drawn, words: text.trim() };
+  return { content: drawn, words: text.trim(), typed };
 }
 
 /** A prompt typed at the terminal: one that opens a turn (MAWS's `startsTurn`), of the human's origin, not a command's. */
@@ -60,12 +66,12 @@ function typedPrompt(row: JsonObject): OwnerInput | null {
     // One typed while a turn ran, which the engine queued into it (MAWS's `humanQueuedPrompt`).
     const attachment = object(row.attachment);
     const queued = attachment?.type === 'queued_command' && object(attachment.origin)?.kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true;
-    return queued ? input(attachment.prompt) : null;
+    return queued ? input(attachment.prompt, true) : null;
   }
   if (row.type !== 'user' || (origin !== null && origin.kind !== 'human')) return null;
   const record = row as TranscriptRecord;
   if (!startsTurn(record) || isTaskNotification(record) || localCommandKind(record) !== null) return null;
-  const typed = input(object(row.message)?.content);
+  const typed = input(object(row.message)?.content, true);
   return typed !== null && !COMMAND_TEXT.test(typed.words) ? typed : null;
 }
 
@@ -119,6 +125,26 @@ function readRows(rows: readonly JsonObject[]): Set<string> {
   return read;
 }
 
+/**
+ * For each point of the conversation a typed prompt on the chain was sent from, the index of the last such prompt: the
+ * rows from its parent up to the nearest response or owner input, which it follows with nothing read in between.
+ */
+function promptPoints(rows: readonly JsonObject[], off: ReadonlySet<string>): Map<string, number> {
+  const byUuid = new Map(rows.map((row) => [row.uuid as string, row]));
+  const points = new Map<string, number>();
+  rows.forEach((row, at) => {
+    if (off.has(row.uuid as string) || ownerInput(row)?.typed !== true) return;
+    let point = row.parentUuid;
+    for (let step = 0; typeof point === 'string' && step < 64; step++) {
+      points.set(point, at);
+      const parent = byUuid.get(point);
+      if (parent === undefined || parent.type === 'assistant' || ownerInput(parent) !== null) break;
+      point = parent.parentUuid;
+    }
+  });
+  return points;
+}
+
 /** What the drawing leaves out of the held rows (oldest first), and what it draws as undone, given the rows marked off. */
 export function drawingOf(rows: readonly JsonObject[], off: ReadonlySet<string>): Drawing {
   const marked = off.size > 0 && rows.some((row) => off.has(row.uuid as string));
@@ -126,6 +152,7 @@ export function drawingOf(rows: readonly JsonObject[], off: ReadonlySet<string>)
   const undone = new Set<string>();
   if (!marked) return { hidden, undone };
   const read = readRows(rows);
+  const points = promptPoints(rows, off);
   const later = new Set<string>(); // the words of the owner inputs after this row, on the chain or drawn undone
   for (let at = rows.length - 1; at >= 0; at--) {
     const row = rows[at];
@@ -135,7 +162,8 @@ export function drawingOf(rows: readonly JsonObject[], off: ReadonlySet<string>)
       if (owner !== null) later.add(owner.words);
       continue;
     }
-    if (owner === null || read.has(uuid) || later.has(owner.words)) {
+    const replaced = owner?.typed === true && typeof row.parentUuid === 'string' && (points.get(row.parentUuid) ?? -1) > at;
+    if (owner === null || read.has(uuid) || later.has(owner.words) || replaced) {
       hidden.add(uuid);
       continue;
     }
