@@ -16,8 +16,8 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 13,
-    "preclosed:pending": 3,
+    "preclosed:committed": 14,
+    "preclosed:pending": 2,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -131,15 +131,15 @@
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at P3-F1's landing bd8532a18 (on master); the switch is in src/main/chromium-features.ts (f327debe6, on master).",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "4baccce9edd932254956abf21ba90df1f89799ea"
     },
     {
       "line": 273,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-18 at P3-HD's landing 1462f7529 (on master), regression 92e424a41 (on master).",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 274,
