@@ -53,6 +53,7 @@ PRE.2 | all items: evidence provenance | [ ] | [ ] | [ ] | [ ] | | |
 4.3 | item 4: artifact-wide restore | [ ] | [ ] | [ ] | [ ] | | |
 4.4 | item 4: new-change comparison and attribution | [ ] | [ ] | [ ] | [ ] | | |
 5.1 | item 5: dialect and editor | [ ] | [ ] | [ ] | [ ] | | |
+5.1b | item 5: speaker-notes limit, not-saved state and Save notes (panel plus main tab; prepared from source a5359afa8, not executed; recheck at M4.2) | [ ] | [ ] | [ ] | [ ] | | |
 5.2 | item 5: stale conflict and atomic publish | [ ] | [ ] | [ ] | [ ] | | |
 5.3 | item 5: history and comments | [ ] | [ ] | [ ] | [ ] | | |
 5.4 | item 5: export choices | [ ] | [ ] | [ ] | [ ] | | |
@@ -83,6 +84,13 @@ R.1 | Rulings by frozen handle and supplement: one row each in the Rulings table
 R.2 | Explicit taste checklist: L DL8 panel model and DL13 creation cards; G pill/tab-row and below-chrome column; C presenter and font variants; E1 narrow toolbar and standalone comment destination; E2 repeated-bar layout; HD native custody; H actual delivery and editor-header Send-to (one answer each in the Taste table below) | [ ] | [ ] | [ ] | [ ] | | |
 R.3 | Irritations in the owner's own words, each with one route (wave S, tracker, P4, dismissed against a binding design, or architect ruling): the Irritations table below | [ ] | [ ] | [ ] | [ ] | | |
 M.1 | Measure: what artifact work still sends you to Claude Desktop or a terminal (the concrete task and why), and whether the co-work layer is fit for the week's daily use: the Measure lines below | [ ] | [ ] | [ ] | [ ] | | |
+
+5.1b record (notes field and alert as seen at each step)
+a paste of 4,000 characters accepted, panel same:
+b ZZ appended in main: 4,002 alert, panel still 4,000:
+c panel cleared:
+d main shows ZZ, 'not saved yet' alert, Save notes shown, field not invalid, panel empty:
+e Save notes clicked once: alert gone, panel shows ZZ, still ZZ after switching slide and back:
 
 N.1 record, one editor at a time (partial syllables, candidate commit, caret, retained text; while the agent updated another block/element)
 document:
