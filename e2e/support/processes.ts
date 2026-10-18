@@ -1,8 +1,10 @@
 // The processes a supervisor spec's scratch profile starts (E11 W-E; the tracker's E10 row on the packaged spec's copied
 // helpers): a supervisor's command line names the profile's root (`--detached <dir>`), so a case's cleanup kills every
 // pid it recorded and every process naming the root, and then checks that none outlives it. Used by e2e/supervisor.spec.ts
-// and e2e/supervisor-packaged.spec.ts; free of Playwright, so test/support/processes.test.ts runs it under vitest.
+// and e2e/supervisor-packaged.spec.ts; free of Playwright, so test/support/processes.test.ts runs it under vitest. The
+// launch's own cleanup (launch.ts) waits here for the shells the app started before it removes their scratch home.
 import { execFileSync } from 'node:child_process';
+import { basename } from 'node:path';
 
 export function isAlive(pid: number): boolean {
   try {
@@ -53,6 +55,53 @@ export async function killScratchProcesses(root: string, recorded: Iterable<numb
     if (left.length === 0) return;
     if (Date.now() > deadline) throw new Error(`processes of ${root} outlive the case: ${left.map((p) => `${p.pid} ${p.command}`).join('; ')}`);
     await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+// A process as one `ps` reading saw it: its pid and start time, so a pid the system later reuses is never taken for it.
+export interface ProcessIdentity {
+  pid: number;
+  started: string; // `ps -o lstart=`
+}
+
+// A shell's name as `ps` reports it (a login shell's carries a leading dash), by its last path component.
+const SHELL_NAME = /^-?(ba|z|da|k|tc|c|fi)?sh$/;
+
+// The shells among `rootPid`'s descendants (a terminal's login shell, a host's environment capture): what may still be
+// saving its history into a launch's scratch shell home as it exits on its terminal's hang-up, after the app has closed.
+// Their own children (a command a shell runs) are not shells and are not listed unless they are shells themselves.
+export function shellsUnder(rootPid: number): ProcessIdentity[] {
+  const out = execFileSync('ps', ['-axo', 'pid=,ppid=,comm='], { encoding: 'utf8' });
+  const children = new Map<number, { pid: number; comm: string }[]>();
+  for (const line of out.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (!m) continue;
+    const ppid = Number(m[2]);
+    children.set(ppid, [...(children.get(ppid) ?? []), { pid: Number(m[1]), comm: m[3]!.trim() }]);
+  }
+  const shells: number[] = [];
+  const queue = [rootPid];
+  while (queue.length > 0) {
+    for (const child of children.get(queue.pop()!) ?? []) {
+      queue.push(child.pid);
+      if (SHELL_NAME.test(basename(child.comm))) shells.push(child.pid);
+    }
+  }
+  return shells.map((pid) => ({ pid, started: ps(pid, 'lstart') })).filter((p) => p.started !== '');
+}
+
+// Still the process `p` names, and not a zombie (one that has exited and writes nothing, its parent yet to reap it).
+function running(p: ProcessIdentity): boolean {
+  return ps(p.pid, 'lstart') === p.started && !ps(p.pid, 'stat').startsWith('Z');
+}
+
+// Waits up to `timeoutMs` for every one of `processes` to exit, signalling none: those still running at the deadline.
+export async function untilExited(processes: readonly ProcessIdentity[], timeoutMs: number): Promise<ProcessIdentity[]> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const left = processes.filter(running);
+    if (left.length === 0 || Date.now() >= deadline) return left;
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
