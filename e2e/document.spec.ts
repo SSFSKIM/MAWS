@@ -302,7 +302,27 @@ type EditorRoot = HTMLElement & {
 };
 
 // Selects `quote` inside the editor's paragraph `index` (a DOM selection the editor reads, as a person's drag would set).
+// P3-F (tracker row 277): first the editor's own document holds the paragraph the page shows and the host has
+// acknowledged every edit, so none of the editor's own transactions (the last typed key's flush, the binding's answer to
+// it) lands between the range and the editor's read of it and puts the caret back; then the editor's selection, not
+// only the page's, holds the quote (Comment reads the editor's).
 async function selectIn(text: Locator, index: number, quote: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        text.evaluate((root, at) => {
+          const editor = (root as EditorRoot).editor;
+          if (!editor) return 'no editor on the element';
+          const paragraphs: string[] = [];
+          editor.state.doc.descendants((node) => {
+            if (node.type.name === 'paragraph') paragraphs.push(node.textContent);
+          });
+          const unsaved = editor.extensionManager.extensions.find((extension) => extension.name === 'collaboration')?.options.hold?.base.state().unsaved ?? 0;
+          return paragraphs[at] === root.querySelectorAll('p')[at]?.textContent && unsaved === 0 ? 'settled' : `paragraph "${paragraphs[at]}", ${unsaved} unacknowledged`;
+        }, index),
+      { timeout: 10_000, message: 'the editor holds the paragraph shown and the host has acknowledged every edit' },
+    )
+    .toBe('settled');
   await text.evaluate(
     (root, [at, q]) => {
       const p = root.querySelectorAll('p')[at as number]!;
@@ -330,7 +350,15 @@ async function selectIn(text: Locator, index: number, quote: string): Promise<vo
     },
     [index, quote] as const,
   );
-  await expect.poll(() => text.evaluate(() => getSelection()?.toString() ?? '')).toBe(quote);
+  await expect
+    .poll(() =>
+      text.evaluate((root) => {
+        const editor = (root as EditorRoot).editor!;
+        const { from, to } = editor.state.selection;
+        return { page: getSelection()?.toString() ?? '', editor: editor.state.doc.textBetween(from, to, '\n') };
+      }),
+    )
+    .toEqual({ page: quote, editor: quote });
 }
 
 // The passage `quote` of paragraph `index` on screen: the left edge of its first character, the right edge of its last,
@@ -572,7 +600,9 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   await caretAtEndOf(page, text, 0);
   await page.keyboard.press('Enter');
   await page.keyboard.type('A later sentence for the board.');
-  const newer = await commentOn(page, record, text, 1, 'later sentence');
+  // P3-F (tracker row 277): a selection that does not hold reports the page's selection and the editor's transactions
+  const trace = await traceForeground(launch!.app, page, { editor: '[data-region="panel"] .ds-doc .ProseMirror' });
+  const newer = await trace.step('restore-scene-selection', () => commentOn(page, record, text, 1, 'later sentence'));
   await durable(record);
 
   // A's restore, artifact-wide
