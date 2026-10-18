@@ -948,13 +948,16 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(request).toContainText('Approval needed', { timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
     // P3-F (a diagnostic, not a fix): the request's identity and the public pending state are read before the two clicks
-    // (so they follow each other as before), and again right after the one Allow click; a failure below carries both and
-    // a third reading, by which the answer's path (card, event, attention item, journal) can be told from where it stopped
+    // (so they follow each other as before), and again, collected alongside the poll and never awaited before it, from the
+    // one Allow click; a failure below carries both and a third reading, by which the answer's path (card, event,
+    // attention item, journal) can be told from where it stopped
     const evidenceFrom = Date.now();
     const pending = await allowEvidence(c, child, request, evidenceFrom);
     await request.getByRole('radio', { name: 'Allow once' }).click();
     await request.getByRole('button', { name: 'Allow', exact: true }).click();
-    const afterAllow = await allowEvidence(c, child, request, evidenceFrom);
+    // started at the click, not awaited here: the 20 s poll below runs from the click, so these reads (each may take
+    // seconds) cannot lengthen it, and a handler keeps a rejection from going unhandled while the poll runs
+    const afterAllow = allowEvidence(c, child, request, evidenceFrom).catch((error: unknown) => ({ unreadable: String(error).slice(0, 200) }));
 
     // the host served the call against the parent's artifact: two versions long, the thread's the second (P3-L M6b: the
     // store's versions; X12's copy of v2 under the parent's record directory was the Deliverables store's alone), and no
@@ -968,8 +971,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     try {
       await expect.poll(served, { timeout: 20_000 }).toMatchObject({ status: 'published', id: 'dash', deliverableId: record.id, version: 2, ownerAppSessionId: parent });
     } catch (error) {
-      const final = await allowEvidence(c, child, request, evidenceFrom);
-      const seen = Object.entries({ pending, afterAllow, final }).map(([label, reading]) => `  ${label}: ${JSON.stringify(reading)}`);
+      const [afterAllowReading, final] = await Promise.all([afterAllow, allowEvidence(c, child, request, evidenceFrom)]);
+      const seen = Object.entries({ pending, afterAllow: afterAllowReading, final }).map(([label, reading]) => `  ${label}: ${JSON.stringify(reading)}`);
       throw new Error(
         `case 12: the thread's artifact_publish was not served as expected within 20 s of its single Allow click (side thread ${child}, engine session ${CHILD}; ids and statuses only; ms counts from just before the first reading to the start of each):\n${seen.join('\n')}\n${error instanceof Error ? error.message : String(error)}`,
         { cause: error },
