@@ -1,6 +1,7 @@
-Checkpoint 1 inventory validation
-255 table rows = 17 preclosed + 238 M0 open.
+Inventory validation after parent DL107
+255 table rows =17 preclosed +238 M0 open.
 Every M0 open row has exactly one bin; missing=0; duplicate=0.
-DL106 promotes L128 and L260 from theirs to fix; no denominator change.
-Counts: {'defer': 123, 'sitting': 10, 'theirs': 42, 'fix': 53, 'close': 10}
-RESULT: pass (inventory; fixes still pending)
+DL106 promotes L128 and L260 from theirs to fix; DL107 reverses L173 close to defer; no denominator change.
+Counts: {'defer': 124, 'sitting': 10, 'theirs': 42, 'fix': 53, 'close': 9}
+RESULT: pass (inventory; remaining repairs/gates pending)
+Verified at 2026-10-18T10:35:45Z

@@ -1,10 +1,10 @@
 {
   "counts": {
-    "defer": 123,
+    "defer": 124,
     "sitting": 10,
     "theirs": 42,
     "fix": 53,
-    "close": 10
+    "close": 9
   },
   "fixSteps": {
     "M4-count": 3,
@@ -899,9 +899,9 @@
     },
     {
       "line": 173,
-      "bin": "close",
-      "step": "M1-record",
-      "reason": "Bounded-head budget uses the measured/load-aware seam, not an unconditional Linux wall limit. Evidence: e2e/support/latency.ts; e2e/code-tools.spec.ts."
+      "bin": "defer",
+      "step": "gate lane",
+      "reason": "P3 Decision Log107: the cited load wrapper predates the Linux failure; quiet slower machines retain the2s budget. No P3 source repair. Gate lane owns platform-aware classification or permanently excluding Linux from e2e:code before slower-platform1b."
     },
     {
       "line": 174,
@@ -1449,5 +1449,10 @@
       "step": "desk / sminos-hub lane",
       "reason": "Active desk/hub lane owns the path and its closure; row untouched."
     }
-  ]
+  ],
+  "latestRuling": {
+    "parentDecision": 107,
+    "recordedAt": "2026-10-18T10:35:45Z",
+    "change": "L173 close to defer; prior checkpoint106 close citation did not establish its clause"
+  }
 }

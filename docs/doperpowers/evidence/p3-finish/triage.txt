@@ -1,9 +1,9 @@
-P3-F M0 triage — ruled at checkpoint 1, parent DL106 at master 2af6b6f76
+P3-F M0 triage — checkpoint1 DL106 at master2af6b6f76; L173 corrected by parent DL107
 Parent dispatch: bb7f321e89e6db40ccd5cb75cdde9d4a11d1941c at 713eb5b3b; M0 re-pin a0a042346 at b54afedc8 (merge 607ad9b9b).
 Tracker blob: 8c3b0f4779cd5224ec03cb0d6ddb41cfb909afb4. Full original row text/closing clauses: tracker-m0.json.
 255 table rows; 17 explicitly preclosed; 238 M0 open rows. L230 retains F1’s document/deck closure but is narrowed to Design: supplemental correction S-DESIGN-COMMENT below, not silently counted as an originally open row.
 Bins: fix (bounded daily-use/contract/gate repair), sitting (owner direction/hands), close (cited master evidence or explicit accept branch for checkpoint ruling), defer (named next owner), theirs (active lane, untouched).
-Counts: fix=53, sitting=10, close=10, defer=123, theirs=42.
+Counts: fix=53, sitting=10, close=9, defer=124, theirs=42 (DL107; frozen238 unchanged).
 Fix steps: W-T=5, W-MINI=6, W-DOC-A=4, W-DOC-B=4, W-STORE=4, W-DECK=6, W-SHELL=8, W-RD=6, W-E=5, W-PKG=1, M4-measure=1, M4-count=3.
 Line handles are frozen at M0. Nothing here authorises starting before checkpoint 1.
 
@@ -153,7 +153,7 @@ L169 | 2026-10-14 | P3-B (landing) | A suggested batch cannot carry `answering` 
 L170 | 2026-10-14 | P3-B (landing) | Links are storable with control characters through `updateAttributes` or a raw `tr.addMark` (the link UI uses `setLink`, which sanitizes). | fix | W-DOC-A — X26/X10/X21 document behavior: thread replies, promised limits, dialect fidelity, stale moved targets, link safety, restore history and drawer focus.
 L171 | 2026-10-14 | P3-B (landing) | KaTeX logs a "quirks mode" warning under happy-dom (`document.compatMode` unimplemented; `renderToString` unaffected). | close | M1-record — Exact KaTeX warning filtered in B artifact suites; renderer residue is separate L238. Evidence: test/support/artifacts-dom-setup.ts.
 L172 | 2026-10-14 | P3-B (landing) | A's ownership comment at `tools.ts` 182 to 184 still says B re-points `DOCUMENT_READ_FIELDS` at its own export. | close | M1-record — Comment already describes the built tool behavior. Evidence: 349dee0ed; src/shared/maws/tools.ts:209–213.
-L173 | 2026-10-14 | gate-offload (landing) | `e2e/code-tools.spec.ts`'s 20 MB bounded-head read is a wall-clock budget (2 s) inside a functional case; it took 2,371 ms on a 2-core Linux r… | close | M1-record — Bounded-head budget uses the measured/load-aware seam, not an unconditional Linux wall limit. Evidence: e2e/support/latency.ts; e2e/code-tools.spec.ts.
+L173 | 2026-10-14 | gate-offload (landing) | `e2e/code-tools.spec.ts`'s 20 MB bounded-head read is a wall-clock budget (2 s) inside a functional case; it took 2,371 ms on a 2-core Linux r… | defer | gate lane — P3 Decision Log107: the cited load wrapper predates the Linux failure; quiet slower machines retain the2s budget. No P3 source repair. Gate lane owns platform-aware classification or permanently excluding Linux from e2e:code before slower-platform1b.
 L174 | 2026-10-14 | P3-D (landing) | Harness noise in the test output: vitest's experimental-typecheck banner and cache advisories, npm configuration warnings, Vite's mixed-import… | defer | P4 — Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass.
 L175 | 2026-10-14 | P3-D (landing) | HWP and HWPX export are not offered. | sitting | R-hwp — Default P4 for HWP/HWPX; new export format is the owner's product choice.
 L176 | 2026-10-14 | P3-D (landing) | In the ask sheet, a design system deleted between the owner's pick and Submit is still sent by id and the chain skips it silently. | fix | W-STORE — Durable/store/export behavior and defaults: streamed owner file digest, carry attribution, self-contained document faces, stale design-system choice.
