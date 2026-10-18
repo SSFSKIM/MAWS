@@ -78,16 +78,37 @@ function openThree() {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
   resetShellStores();
   fillStores(nine);
   offs.push(registerShellActions(fakeBridge()));
   window.maws = fakeClient({ 'attention.request': { event: null } }).client;
 });
-afterEach(() => {
+async function cleanupShell() {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
-  resetSlots();
-  offs.splice(0).forEach((off) => off());
+  // Repeated hover events can overwrite Radix's timer handle; unmount cancels only the latest.
+  // Exhaust the remaining callbacks while happy-dom's window still exists, rather than discarding them.
+  await act(async () => { await vi.runAllTimersAsync(); });
+}
+afterEach(async () => {
+  try {
+    await cleanupShell();
+  } finally {
+    vi.useRealTimers();
+    delete (window as { maws?: MawsBridge }).maws;
+    resetSlots();
+    offs.splice(0).forEach((off) => off());
+  }
+});
+
+it('exhausts superseded sidebar hover timers during teardown', async () => {
+  render(<Shell />);
+  const row = sidebarRow('Charter + research');
+  fireEvent.pointerEnter(row, { pointerType: 'mouse' });
+  fireEvent.pointerEnter(row, { pointerType: 'mouse' });
+  expect(vi.getTimerCount()).toBeGreaterThanOrEqual(2);
+  await cleanupShell();
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 describe('tab strip reorders, closes, reopens', () => {
