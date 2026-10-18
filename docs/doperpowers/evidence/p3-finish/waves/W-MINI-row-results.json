@@ -17,6 +17,18 @@
    ],
    "remaining": "must-read scene ten consecutive Mac passes (1/10); lane-wide foreground is CI-opt's separate choice",
    "closing": "Paste (P3-F W-MINI, 2026-10-18): gate 39130559347 established that the foreground paste was applied and unfiltered (no `handlePaste` took it, no `filterTransaction` refused it), ending with the editor's selection at 34/34 and the paragraphs' text unchanged; that it replaced the stale copy selection is inferred, not observed. The DOM-and-model caret readiness pin 63cbc8db7 (`caretAtEndOf` waits for the page's caret and the editor's own selection at the paragraph's end) is accepted as the fix; no generic product paste defect is claimed. In 39133832247 the copy and cut steps read native focus true, the editor's selection read 73/73 before the copy's paste, and the assertions passed. Must-read: abdad9d35 fixes a controlled source race (a jump whose frame a staged restart's install cancelled no longer counts as shown, so the reissued jump focuses its target); native focus true and the case passed in 39133832247. Remaining: the must-read scene passing ten consecutive Mac runs (1 of 10 so far); until then a failure with this exact signature stays this row's baseline. The lane-wide `MAWS_E2E_FOREGROUND=1` is CI-opt's choice after landing and the counts, separate from P3-F and not its prerequisite (architect ruling 2026-10-18). Owner: P3-F's fix wave (P2-C's code). Additional closing record (DL73): Closes with row 199's must-read fix (P3-F's fix wave, P2-C's code) and the case passing ten consecutive Mac runs; until then a failure with this exact signature reads against this row like rows 199 to 201. |"
+  },
+  "200": {
+   "action": "removed",
+   "sourceCommits": [
+    "4143ca059",
+    "7a23ef400"
+   ],
+   "closingGates": [
+    "39133832247"
+   ],
+   "ruling": "architect, named closure (2026-10-18)",
+   "remaining": null
   }
  }
 }
