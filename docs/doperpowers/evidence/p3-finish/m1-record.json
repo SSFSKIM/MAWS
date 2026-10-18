@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 11,
-    "defer:pending": 112,
+    "defer:committed": 12,
+    "defer:pending": 111,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -375,7 +375,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L38; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "remainingClause": "The host offers a claim (`session.ui.answer` split into claim and answer, or a host-side expiry the renderer reads before acting). Debt wave B, 2026-10-04: left open for an atomic host-side claim that clears the refusal and reserves the fill in one X2 step, so true/false stays truthful under submit, unmount and disable; a renderer-only prepared operation cannot guarantee that. Re-deferred 2026-10-07 (E11 1.6): needs an X2 split (claim and answer). Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L40): needs an X2 split (claim and answer). Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L38; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "90456983ca9b8550a934605f64436270de1d10d6"
     },
     {
       "line": 39,
@@ -385,8 +385,8 @@
       "triageReason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L39; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "remainingClause": "Add the rewritten text/cursor to X2, reconcile async edits against the composer's edit revision and actual rich-editor selection, and prove it with a scratch-engine prompt.edit hook. Re-deferred 2026-10-07 (E11 1.6): an X2 change with a hook probe. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L41): an X2 change with a hook probe. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L39; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 40,
