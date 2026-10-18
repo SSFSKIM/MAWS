@@ -223,7 +223,8 @@ export class SessionDepth {
         return;
       }
       case 'chunk': {
-        const body: SessionBodies['chunk'] = { turnId: step.turnId, agentId: step.agentId, step: step.step, chunkIndex: step.chunkIndex, chunk: step.chunk };
+        // Stamped as the machine's plane passes the bridge's stamp through: when it was taken, for the web's latency.
+        const body: SessionBodies['chunk'] = { turnId: step.turnId, agentId: step.agentId, step: step.step, chunkIndex: step.chunkIndex, chunk: step.chunk, t: Date.now() };
         this.fold(body);
         this.fanOut(step.agentId, { kind: 'chunk', body }, true);
         return;

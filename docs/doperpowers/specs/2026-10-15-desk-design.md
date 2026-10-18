@@ -2368,7 +2368,14 @@ post serially: two POSTs in flight are applied interleaved, which the handshake 
 round. A `409 stale-generation` or `503 delivery-failed` on any POST, an `hb-ack`'s included, means the stream the
 daemon holds is not the one the hub serves, even while it is still open and beating (after a deploy an old instance
 can keep it so, §2): the daemon drops it and reconnects (a new stream, `hello`, the handshake). [2026-10-15, DC3's
-M5; DC4's uplink already does this: a POST not answered 200 ends its stream.]
+M5; DC4's uplink already does this: a POST not answered 200 ends its stream.] The `409` carries `"replaced": true` when
+the POST names the generation the object last opened and the object holds no stream: Cloudflare replaced the object
+under the stream (a deploy's rollover about five minutes after it, a runtime update, a move). The instance holding a
+stream does not wait for that POST: every second it asks which instance the object's own id reaches, and ends its
+stream once it is another (the client reads the end as a clean end of stream), so the machine reconnects within about
+a second of the replacement. An exception out of an object call reaches the client as JSON (`503 {"error":
+"hub-unavailable"}` when Cloudflare marks it retryable or overloaded, `500 {"error": "hub-error"}` otherwise, each with
+the error's `message`), never as the runtime's bare `1101`. [2026-10-18, MAWS #57.]
 
 **The session plane, up.** Every frame below needs the project opened on the current stream (`not-open` otherwise),
 and one the hub cannot read is refused `bad-shape` down the stream and recorded in the audit record, as an upload's is.
@@ -2411,13 +2418,20 @@ never the hub's own heartbeat, so a suspended daemon or a half-open stream lapse
 naming another generation renews nothing. A renewal or close from an older generation is ignored, and a `hello` on a
 newer stream replaces the older stream's lease (its work ends as below). A close of a newer generation than the
 project's lease (the stream's first `hello` there still waits on the registry) leaves a closed lease of that
-generation, so the `hello` opens nothing. When the lease lapses (found by the project's alarm, and before anything
-else at each entry — a renewal, any frame a machine posts, a browser's request — whether or not the alarm ran yet), or
-the current generation's stream closes (the `Machine` object tells each project the stream opened, at once), the
-machine is offline: each of its subscriptions
-ends at its browser (`end {reason: "machine-offline"}`, numbered one past the last `n` relayed on it), its forwarded
-RPCs without a result become `uncertain` (DX6), DX3's `machines` shows it offline, and its sessions' stored presence is
-no longer handed to a browser as current (DX3). A later renewal of the same generation (a daemon back from a
+generation, so the `hello` opens nothing. When the current generation's stream closes (the `Machine` object tells each
+project the stream opened, at once), what the stream carried ends: each of its subscriptions ends at its browser
+(`end {reason: "machine-offline"}`, numbered one past the last `n` relayed on it) and its forwarded RPCs without a
+result become `uncertain` (DX6). The lease, closed (nothing of that generation renews it again), holds the machine
+online for a grace of one heartbeat period, no longer than the lease had left, for the machine's next stream to take it
+over at its `hello` without the machine ever reading offline. In the grace a browser's `subscribe`, and a new RPC
+(recorded `forwarded`), wait for that stream and are carried to it at its `hello`; a retry of an `uncertain` RPC is
+answered from its record. When the
+lease lapses (found by the project's alarm, and before anything else at each entry — a renewal, any frame a machine
+posts, a browser's request — whether or not the alarm ran yet; a closed lease lapses when its grace runs out), the
+machine is offline: what its stream carried ends as above, a subscription that waited ends too (at `n` 0), an RPC
+that waited fails `machine-offline` (it never reached the machine), DX3's
+`machines` shows it offline, and its sessions' stored presence is no longer handed to a browser as current (DX3).
+[2026-10-18, MAWS #57: the grace; before it a close put the machine offline at once.] A later renewal of the same generation (a daemon back from a
 suspension on a stream that held) puts it online again, after the lapse has ended the old work; its subscriptions do
 not come back, and browsers subscribe again. A session's `presence` the machine posts while its lease is not fresh is
 kept and not shown; when the machine is online again, each of its sessions' kept presence goes to the browsers.
@@ -2822,7 +2836,9 @@ socket that holds the `sub` as the machine numbered it, so `n` runs on unbroken 
 It keeps no reconnect buffer: every discontinuity is a fresh snapshot, which the rules above already make whole, so a
 buffer would only save a snapshot's cost (G6 measures whether that matters). The hub ends a subscription itself only
 when the machine can no longer serve it — its lease lapsed or its stream closed (`machine-offline`) — or when it cannot
-take it on (`machine-offline` for a machine without a fresh lease, `error` for a `sub` in use or a socket over 32);
+take it on (`machine-offline` for a machine without a fresh lease, `error` for a `sub` in use or a socket over 32); a
+`subscribe` that comes while the machine is between streams (its closed stream's grace, DX2) waits for the next stream
+and is carried to it at its `hello`, or ends `machine-offline` at `n` 0 if the grace runs out first;
 that `end` carries the next `n` the browser expects, 0 when nothing was relayed yet, so a client that checks `n`
 reads it as the end it is, not as a gap.
 
@@ -3450,7 +3466,8 @@ should act. Right after the code verifies, the daemon refuses an RPC whose `mach
 (`unknown-project`), or whose session is not a session of that project on this machine (`no-session`), before the
 ledger, before freshness, and before anything else. It never relies on the hub's routing for this.
 
-**Error codes.** The hub's: `machine-offline` (no fresh lease: fails at once, nothing queued), `stale` (older than 60
+**Error codes.** The hub's: `machine-offline` (no fresh lease: fails at once, nothing queued; an RPC that waited out a
+closed stream's grace for the next stream fails so too), `stale` (older than 60
 seconds), `not-member` (`member` is not the signed-in member), `bad-shape`. The daemon's, before it executes:
 `bad-code`, `wrong-machine`, `unknown-project`, `read-only`, `bad-shape` (arguments malformed, or a decision that does not
 fit its request: a deny on an async question, an `answer` to a permission prompt, an allow on a question without its
@@ -4908,6 +4925,37 @@ a hub that connects into machines (§2).
   own entry. Flags MAWS #52, the next phase, where the phone keeps this
   shape.
   Date/Author: 2026-10-18, the owner; folded by the design session.
+- Decision: A machine's reconnect is invisible to the reader (MAWS #57). The
+  two Macs' `daemon.log`s from 10-17 05:46Z to 10-18 19:13Z hold 53
+  hub-side drops. 27 came 298–313 s after a deploy, both machines within 9 s
+  of each other, and 2 more after a `wrangler tail`: Cloudflare keeps an
+  active object on its old code about five minutes, then routes new requests
+  to a successor while the old instance's in-flight request, the machine's
+  SSE stream, runs on and beats ("in-flight requests are allowed to finish if
+  they do not access a Durable Object's storage"). The next POST reached a
+  successor that held no stream, so the machine found out at its next `hb-ack`,
+  up to 15 s later. The other 24 hit one machine at a time with no trigger the
+  client could see (409s, and clean ends of stream, which is how workerd
+  delivers an errored body: workerd #6818); the hub now logs each stream's end
+  with its cause to tell them apart. One `1101` was an uncaught `stub.fetch`
+  exception in the Worker, a minute after a deploy. The fix, at each place
+  the reset was decided: the instance holding a stream asks every second
+  which instance its own id reaches and ends the stream once it is another;
+  a closed stream's lease holds the machine online for a grace of one
+  heartbeat, a `subscribe` or a new RPC in the grace waits for the next
+  stream (stored as generation 0 of its route or record, a new value in an
+  existing column, no new table, column or key); the Worker answers an
+  object's exception as JSON; and the web keeps what a subscription drew
+  through any disruption, merges the fresh snapshot into it, and says
+  nothing about a gap shorter than the same 15 s. Rejected then: persisting
+  the stream's state so a successor could serve it (an SSE stream is a
+  request of the old instance, and no successor can write to it); moving the
+  machine's link to hibernatable WebSockets, which survive an eviction but
+  not a code update and change DX2 and the uplink (deferred: the uplink is
+  frozen for the org directory); a 30 s gap as #57 proposed, longer than
+  every measured reconnect needs and a closed machine reading online that
+  much longer.
+  Date/Author: 2026-10-18, MAWS #57's executor.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or

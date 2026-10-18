@@ -5,6 +5,10 @@
 //   - a `Machine` whose heartbeat and lease are shortened, so a lease can lapse within a test;
 //   - a `Machine` the suite terminates (`ctx.abort()`), as a crash or a runtime's reset would: no `closed` reaches its
 //     projects, only the lease's lapse;
+//   - a `Machine` armed to find itself replaced at its next probe, as an instance Cloudflare replaced under its stream
+//     would (Miniflare cannot route an object's new requests to a successor while the old instance streams on), one
+//     that probes once and says which instance answered, and one armed to throw from its next request to a path, as a
+//     reset object's call fails at the Worker;
 //   - a `Machine` armed to hold its next revocation's answer until the suite releases it, or to lose it once the
 //     revocation is stored;
 //   - a `Project` that says which instance answers (a woken object is a new one), and takes a lease's renewal or close
@@ -29,6 +33,9 @@ import type { ProjectRecord } from '../../src/protocol/identity';
 import {
   ABORT_REASON,
   MACHINE_ABORT_PATH,
+  MACHINE_FETCH_FAULT_PATH,
+  MACHINE_PROBE_PATH,
+  MACHINE_REPLACE_PATH,
   MEMBER_PATH,
   ORG_ROW_PATH,
   PROJECT_ARCHIVE_HOLD_PATH,
@@ -95,6 +102,7 @@ export class Registry extends DeployedRegistry {
 
 export class Machine extends DeployedMachine {
   private release: (() => void) | undefined;
+  private replacedArmed = false;
   private revokeRelease: (() => void) | undefined;
 
   async fetch(request: Request): Promise<Response> {
@@ -125,15 +133,38 @@ export class Machine extends DeployedMachine {
       return new Response('armed');
     }
     if (url.pathname === TIMING_PATH) {
-      this.ctx.storage.kv.put('timing', { heartbeatMs: Number(url.searchParams.get('heartbeatMs')), leaseMs: Number(url.searchParams.get('leaseMs')) });
+      const number = (name: string) => (url.searchParams.has(name) ? { [name]: Number(url.searchParams.get(name)) } : {});
+      this.ctx.storage.kv.put('timing', { ...number('heartbeatMs'), ...number('leaseMs'), ...number('graceMs'), ...number('probeMs') });
       return new Response('timed');
+    }
+    if (url.pathname === MACHINE_REPLACE_PATH) {
+      this.replacedArmed = true;
+      return new Response('armed');
+    }
+    if (url.pathname === MACHINE_PROBE_PATH) return Response.json({ life: this.life, current: await this.current() });
+    if (url.pathname === MACHINE_FETCH_FAULT_PATH) {
+      this.ctx.storage.kv.put('fetch-fault', url.searchParams.get('path') ?? '');
+      return new Response('armed');
+    }
+    if (this.ctx.storage.kv.get<string>('fetch-fault') === url.pathname) {
+      this.ctx.storage.kv.delete('fetch-fault');
+      throw new Error(`a failure the suite injected into the object's ${url.pathname}`);
     }
     if (url.pathname === MACHINE_ABORT_PATH) this.ctx.abort(ABORT_REASON);
     return super.fetch(request);
   }
 
+  /** A suite's timing over the deployed one; a shortened heartbeat shortens the grace with it unless one is given. */
   protected timing(): Timing {
-    return this.ctx.storage.kv.get<Timing>('timing') ?? super.timing();
+    const set = this.ctx.storage.kv.get<Partial<Timing>>('timing');
+    return set ? { ...super.timing(), graceMs: set.heartbeatMs ?? super.timing().graceMs, ...set } : super.timing();
+  }
+
+  /** Armed, the next probe finds the object replaced, once: the stream the machine opens next is the successor's. */
+  protected async replaced(): Promise<boolean> {
+    if (!this.replacedArmed) return super.replaced();
+    this.replacedArmed = false;
+    return true;
   }
 
   async revoke(clientId: string | null): Promise<number> {
