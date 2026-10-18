@@ -4704,6 +4704,24 @@ a hub that connects into machines (§2).
   session stays 24 h, so an application token past 30 days needs a fresh
   sign-in. Rejected: 7 days, which leaves the weekly sign-in; keeping 24
   h with #33's banner alone.
+  2026-10-18, the owner, on what comes after phase 1 (MAWS #36, #37, #38,
+  all deferred until the walk ends):
+  - Hosting stays on Workers and Durable Objects. Cloud Run would need an
+    external store and cross-instance fan-out to rebuild what one object
+    per project gives, and its WebSockets end within 60 minutes.
+  - App-level Google sign-in is explored only if Access still causes
+    trouble after the 30-day session, and then only after a spike on the
+    installed iPhone app.
+  - Machines join with reusable, expiring tokens and name themselves.
+    A token grants membership only; an unlocked desk tab wraps the org key
+    to the new machine. Tokens carry a scope and distinct authorities:
+    projects, default policy, automatic key handover, expiry, a use cap,
+    ephemeral.
+  - The org key's authority is split so that machines verify RPCs but
+    cannot mint them.
+
+  Rejected: a join token that carries the org key, which would leave the
+  power to command every machine wherever the token is stored.
   2026-10-18, a delivery into a running turn (doperpowers #233, another
   session's): the bridge appends the owner's delivery as a row read at
   the loop's next request (`$.session.append`), not as a prompt queued
