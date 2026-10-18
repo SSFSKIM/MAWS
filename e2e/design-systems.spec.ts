@@ -24,7 +24,9 @@
 //   id; what the sheet submitted is asserted on the journal's own rows): the sheet lists the seeded systems with their
 //   swatches and origin, offers "Build one with me" where allowed, and answers `{designSystemId, name}` and
 //   `{create: true}` (14).
-// Not here: the document and deck restyle through B's and C's own editors (P3-F).
+// - P3-F's S-RESTYLE: B's real document page and C's real deck stage restyle with their system's live tokens, writing
+//   nothing, and a version of each saved before the recolour previews in the revision it pinned (10 and 11 on the real
+//   editors).
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,6 +37,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { ACCENT_DECK, deckHeadline, headerAction, openFromLibrary, pageAccent, paintedColor } from './support/design-restyle';
 import { allowNext, fixtureRows, mcpResultOf, ofKind, PASS3, resultText, scene, show, type Frame, type McpResult, type Scene } from './support/maws-tools';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; issues?: unknown } };
@@ -248,6 +251,67 @@ test('a document fixture restyles with its system, its retained version keeps th
   await mountFixture(page, 'retained', pin);
   await expect(fixture(page, 'retained')).toHaveAttribute('data-status', 'ready', { timeout: 15_000 });
   await expect.poll(() => fixtureAccent(page, 'retained')).toBe(rgbOf(BEFORE));
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// P3-F's S-RESTYLE (Acceptance 10 and 11 on the real editors, which the fixture above stands in for): B's document page
+// and C's deck stage, each governed by a system the owner then recolours on its page, restyle with the live tokens with
+// no write to either artifact, while a version saved before the recolour previews in the revision it pinned.
+test('the real document and deck editors restyle with their system’s live tokens, and their retained versions keep the pinned look', async () => {
+  test.setTimeout(180_000);
+  const page = await ready();
+  await launch!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1800, 1000));
+  await expect.poll(() => page.evaluate(() => typeof (window as unknown as { __maws_presentations?: unknown }).__maws_presentations), { message: 'the deck seam is installed' }).toBe('object');
+  const classroom = (await systems(page)).find((s) => s.title === 'Classroom')!;
+  const { artifact: system } = await ok<{ artifact: Row }>(page, 'artifacts.duplicate', { artifactId: classroom.id });
+  const { artifact: doc } = await ok<{ artifact: Row }>(page, 'artifacts.create', { kind: 'document', title: 'Reading list', designSystemId: system.id });
+  const { artifact: deck } = await ok<{ artifact: Row }>(page, 'artifacts.create', { kind: 'presentation', title: 'Lecture', designSystemId: system.id });
+  await page.evaluate(
+    ([id, files]) => (window as unknown as { __maws_presentations: { seed(id: string, files: Record<string, string>): Promise<unknown> } }).__maws_presentations.seed(id, files),
+    [deck.id, ACCENT_DECK] as const,
+  );
+  const BEFORE = rgbOf(bundledHex('classroom', 'accent'));
+  const AFTER_HEX = '#2e8b57';
+  const AFTER = rgbOf(AFTER_HEX);
+  expect(BEFORE).not.toBe(AFTER);
+  // each artifact's version now pins the system as it is (X29)
+  for (const artifactId of [doc.id, deck.id]) expect((await saveVersion(page, artifactId, 'Handed out')).designSystemRef).toEqual({ id: system.id, versionSeq: expect.any(Number) });
+  const revision = async (artifactId: string) => (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId })).artifact.revision;
+
+  // both real editors open in their main tabs, drawn in the system's accent
+  const DOC_DRAWN = '.ds-doc .ProseMirror';
+  const DECK_DRAWN = '[data-deck-editor] [data-stage-slide]';
+  const docTab = await openFromLibrary(page, 'Reading list', doc.id, DOC_DRAWN);
+  const docPage = docTab.locator('.ds-doc').first();
+  await expect.poll(() => pageAccent(docPage), { message: 'the document page draws the system’s accent' }).toBe(BEFORE);
+  const deckTab = await openFromLibrary(page, 'Lecture', deck.id, DECK_DRAWN);
+  await expect.poll(() => paintedColor(deckHeadline(deckTab)), { message: 'the deck’s title paints the system’s accent' }).toBe(BEFORE);
+  const before = { doc: await revision(doc.id), deck: await revision(deck.id) };
+
+  await test.step('the owner recolours the system; both editors restyle live, writing nothing', async () => {
+    await openSystemPage(page, 'Copy of Classroom', system.id);
+    expect(await recolourAccent(page, system.id, AFTER_HEX)).toEqual({ swatch: AFTER, property: AFTER_HEX });
+    await openFromLibrary(page, 'Reading list', doc.id, DOC_DRAWN);
+    await expect.poll(() => pageAccent(docPage), { timeout: 10_000, message: 'the document page restyles' }).toBe(AFTER);
+    await openFromLibrary(page, 'Lecture', deck.id, DECK_DRAWN);
+    await expect.poll(() => paintedColor(deckHeadline(deckTab)), { timeout: 10_000, message: 'the deck restyles' }).toBe(AFTER);
+    expect({ doc: await revision(doc.id), deck: await revision(deck.id) }).toEqual(before);
+  });
+
+  await test.step('the deck’s retained version previews in the accent it pinned', async () => {
+    await headerAction(page, 'Version history');
+    await deckTab.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Handed out/ }).click();
+    await expect(deckTab.getByRole('toolbar', { name: 'Version preview' })).toBeVisible({ timeout: 10_000 });
+    await expect.poll(() => paintedColor(deckHeadline(deckTab.locator('[data-history-stage]'))), { timeout: 10_000, message: 'the version keeps its accent' }).toBe(BEFORE);
+  });
+
+  await test.step('the document’s retained version previews in the accent it pinned', async () => {
+    await openFromLibrary(page, 'Reading list', doc.id, DOC_DRAWN);
+    await headerAction(page, 'Version history');
+    await docTab.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Handed out/ }).click();
+    await expect(docTab.getByRole('toolbar', { name: 'Version preview' })).toBeVisible({ timeout: 10_000 });
+    await expect.poll(() => pageAccent(docTab.locator('.ds-doc[data-preview]')), { timeout: 10_000, message: 'the version keeps its accent' }).toBe(BEFORE);
+  });
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
