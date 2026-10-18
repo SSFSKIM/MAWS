@@ -3609,19 +3609,25 @@ committed. The endpoints, the signed-in member's own (types `PushKey`, `PushSubs
 | `GET /api/push/subscriptions` | `200 {subscriptions: PushSubscriptionRecord[]}`: the member's own | |
 
 **When the hub pushes.** A `raised` request new to the hub (raised live, or first seen in a republished `pending`
-set), and a `message` log event uploaded by a machine and stored for the first time within ten minutes of its `ts` (so
-a machine's first sync of an old backlog pushes nothing), each push once to every subscribed device of every member
+set), and a `message` (**[2026-10-18]** or `question`) log event uploaded by a machine and stored for the first time
+within ten minutes of its `ts` (so a machine's first sync of an old backlog pushes nothing), each push once to every
+subscribed device of every member
 of the org who has no browser socket showing the project (DX3 `visibility`, kept in the socket's attachment, so a
 hibernated object still holds it) — and to none of a member who has one. The payload, `PushNotice` in `browser.ts`,
 carries only what points to a card, since the service worker holds no org key and could check nothing it drew:
 `{v: 1, project, name, session, alias, kind, request?, event?, waiting}` — `name` the project's name as the grid
 shows it, so a notification says where; `kind` `question` (an `AskUserQuestion`, the ask mod's tool, or an `async`
-request), `permission` (any other request), or `message`; `request` the raised request's id,
-or `event` the message's `{writer, seq}`; `alias` the session's, from its feed's latest event's `from` (null when the
+request, or a `question` event), `permission` (any other request), or `message`; `request` the raised request's id,
+or `event` the log event's `{writer, seq}` (a `message`'s, or a `question`'s); `alias` the session's, from its feed's latest event's `from` (null when the
 hub holds none); `waiting` the org's waiting count once the push's own event is counted, the sum of the grid's
 `ProjectSummary.waiting` over the org's projects, which the service worker sets as the app icon's badge (the app sets
 it again from the grid whenever it is open, so an answered request clears). A push service answering 404 or 410 has dropped the subscription, and the hub deletes it; any other
 failure is passed over (the push is not retried).
+**[2026-10-18]** A question pushes once per ask. A bridge's async ask reaches the hub twice, as a `raised` request and
+as the `question` event its log export writes (`src` the call's id: the request's `toolUseId` where it names one,
+else the request's id), on the uplink's two planes in either order; whichever the hub takes first pushes, and the other is passed over
+(the ask's id kept an hour, `session-store.ts` `asked`). MAWS's async ask (`mcp__maws__ask`) is never raised, so its
+event is its one push. Messages and permission requests are unaffected.
 
 **Wrapped keys** (§6; the hub stores them and never sees the org key). The browser draws the org key at random when the
 org's first method is set up, and for each unlock method derives a wrapping key (a passkey: from its PRF output; a

@@ -117,7 +117,9 @@ export type GridDown = { t: 'grid'; projects: ProjectSummary[] } | { t: 'summary
 /**
  * What a push carries (encrypted for the device, RFC 8291): only what points to a card, since the service worker holds
  * no org key and so cannot check anything it would draw. `alias` is the session's, from its feed's latest `from` (null
- * when the hub holds none); `request` names a raised request, `event` a `<message>`.
+ * when the hub holds none); `request` names a raised request, `event` a `<message>` or a `question` log event. A
+ * `permission` carries `request`, a `message` `event`, and a `question` either: `request` when a bridge raised the ask,
+ * `event` when the log's event reported it first, or alone (MAWS's async ask is never raised).
  */
 export type PushNotice = {
   v: 1;

@@ -6,12 +6,20 @@ const SESSION = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
 const question: Notice = { v: 1, project: PROJECT, session: SESSION, alias: 'maws-45', kind: 'question', request: 'toolu_01ABC' };
 const permission: Notice = { ...question, kind: 'permission', request: 'toolu_02DEF' };
 const message: Notice = { v: 1, project: PROJECT, session: SESSION, alias: 'maws-45', kind: 'message', event: { writer: `mini/${SESSION}`, seq: 42 } };
+// A question the hub pushed from the log's `question` event (MAWS's async ask, which nothing raises): its event, no request.
+const asked: Notice = { v: 1, project: PROJECT, session: SESSION, alias: 'maws-45', kind: 'question', event: { writer: `mini/${SESSION}`, seq: 43 } };
 
 describe('parseNotice', () => {
   it('takes the three kinds the hub sends', () => {
     expect(parseNotice(question)).toEqual(question);
     expect(parseNotice(permission)).toEqual(permission);
     expect(parseNotice(message)).toEqual(message);
+  });
+
+  it('takes a question that points to its log event instead of a request; a permission still needs its request', () => {
+    expect(parseNotice(asked)).toEqual(asked);
+    expect(parseNotice({ ...asked, kind: 'permission' })).toBeNull();
+    expect(parseNotice({ ...asked, event: { writer: `mini/${SESSION}`, seq: 0 } })).toBeNull();
   });
 
   it('takes a null alias', () => {
@@ -63,6 +71,12 @@ describe('noticeUrl and landingOf', () => {
     expect(landingOf(parsed.search)).toEqual({ kind: 'event', writer: `mini/${SESSION}`, seq: 42 });
   });
 
+  it("opens a question the log reported at its event, in its session's channel", () => {
+    const parsed = new URL(noticeUrl(asked), 'https://desk.example');
+    expect(parsed.pathname).toBe(`/p/${PROJECT}/s/${SESSION}`);
+    expect(landingOf(parsed.search)).toEqual({ kind: 'event', writer: `mini/${SESSION}`, seq: 43 });
+  });
+
   it('encodes ids that are not URL-safe and reads them back', () => {
     const odd: Notice = { ...question, project: 'a/b c', session: 's?1', request: 'r&x=1#y' };
     const parsed = new URL(noticeUrl(odd), 'https://desk.example');
@@ -89,6 +103,11 @@ describe('describeNotice', () => {
     expect(describeNotice(permission).options.body).toBe('Opens at the request');
     expect(describeNotice(message).title).toBe('maws-45 sent you a message');
     expect(describeNotice(message).options.body).toBe('Opens in maws-45’s channel');
+    // A question the log reported reads as any question, whichever pointer it carries.
+    const fromLog = describeNotice(parseNotice({ ...asked, name: 'MAWS' }));
+    expect(fromLog.title).toBe('maws-45 has a question for you');
+    expect(fromLog.options.body).toBe('MAWS · Opens at the question');
+    expect(fromLog.options.data).toEqual({ url: `/p/${PROJECT}/s/${SESSION}?writer=mini%2F${SESSION}&seq=43` });
   });
 
   it("puts the project's name before where the tap opens, when the hub sends it", () => {
@@ -107,6 +126,7 @@ describe('describeNotice', () => {
   it('tags one notification per card, so a repeat replaces it', () => {
     expect(describeNotice(question).options.tag).toBe(`${PROJECT}/request/toolu_01ABC`);
     expect(describeNotice(message).options.tag).toBe(`${PROJECT}/event/mini/${SESSION}/42`);
+    expect(describeNotice(asked).options.tag).toBe(`${PROJECT}/event/mini/${SESSION}/43`);
   });
 
   it('bounds an alias that is too long for a title', () => {
