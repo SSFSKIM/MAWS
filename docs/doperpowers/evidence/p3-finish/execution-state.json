@@ -1086,6 +1086,8 @@
       "MainArea": "88/88 named proof; full-unit obligation remains final hand-back",
       "fullSetCredit": false,
       "paidSpendUsd": 0
-    }
+    },
+    "queueThresholdTask": "b21w80pyy",
+    "queueThreshold": "single queue-age check at21:23:07Z, created+30min, not completion polling"
   }
 }
