@@ -29,11 +29,12 @@
 // either (a queued delivery is a synthetic peer message to it, its peer parser reading MAWS's own envelope, not sminos's
 // frame; an appended row is meta), so its drawing's copy takes the shape MAWS gives a prompt queued at the terminal
 // (`humanQueuedPrompt`). The text the session read is otherwise unchanged; only the drawing's copy of the row changes,
-// the held row stays verbatim for the tail. The owner's send whose words are the engine's interrupt marker whole keeps
-// its frame line: without it MAWS would read the bubble as the marker, drawing nothing and stopping the turn.
+// the held row stays verbatim for the tail. The owner's send whose words MAWS's backfill would read as an interrupt
+// marker (`[Request interrupted by user…]` whole) keeps its frame line: without it the bubble would be read as the
+// marker, drawing nothing and stopping the turn.
 import { parsePeerMessage, sminosFrameSender } from '@shared/engine/peer-envelope';
 import type { JsonObject } from 'desk-hub/protocol';
-import { isInterruptionMarker } from '../../../../src/renderer/src/transcript/model/user-text';
+import { INTERRUPT_MARKER } from '../../../../src/engine-host/normalizer-support';
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
 
@@ -136,7 +137,8 @@ export function deliveryAsDrawn(row: JsonObject): JsonObject {
   const frame = deliveryFrame(row);
   if (frame === null) return row;
   const drawnWords = (line: string, words: string) => {
-    if (frame.own && isInterruptionMarker(null, words)) return `${line}\n${words}`; // the engine's marker whole would read as one: kept framed
+    // Words MAWS's backfill would read as an interrupt marker (its rule, the renderer's two markers among them): kept framed.
+    if (frame.own && INTERRUPT_MARKER.test(words.trim())) return `${line}\n${words}`;
     return (frame.own ? '' : `*From ${literal(frame.from)}*\n\n`) + words;
   };
   const cut = (text: string) => drawnWords(firstLine(text), text.slice(text.indexOf('\n') + 1));

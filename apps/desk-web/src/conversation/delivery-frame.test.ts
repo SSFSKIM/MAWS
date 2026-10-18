@@ -248,4 +248,15 @@ describe('a delivered send’s frame line', () => {
       expect(drawnRows.flatMap((r) => (r.kind === 'divider' ? [r.state] : [])), marker).not.toContain('stopped');
     }
   });
+
+  it("keeps the frame on any words MAWS's backfill reads as a marker, idle through the inbox or as the user, so the owner's message stays drawn", async () => {
+    for (const marker of ['[Request interrupted by user]', '[Request interrupted by user from the desk]', '[Request interrupted by user from outside the terminal]', ' [Request interrupted by user for tool use] ']) {
+      for (const delivery of [inboxRow(`${OWN}\n${marker}`), row(`${OWN}\n${marker}`, BRIDGE)]) {
+        const drawnRows = await drawn([delivery]);
+        expect(users(drawnRows).map((u) => u.text), marker).toEqual([`${OWN}\n${marker}`]);
+      }
+    }
+    // Words that only begin with a marker are a prompt: drawn without the frame.
+    expect(text(deliveryAsDrawn(inboxRow(`${OWN}\n[Request interrupted by user] then carry on`)))).toBe('[Request interrupted by user] then carry on');
+  });
 });
