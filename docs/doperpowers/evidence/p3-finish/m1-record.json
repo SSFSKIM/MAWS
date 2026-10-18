@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 12,
-    "defer:pending": 111,
+    "defer:committed": 13,
+    "defer:pending": 110,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -386,7 +386,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L39; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "remainingClause": "Add the rewritten text/cursor to X2, reconcile async edits against the composer's edit revision and actual rich-editor selection, and prove it with a scratch-engine prompt.edit hook. Re-deferred 2026-10-07 (E11 1.6): an X2 change with a hook probe. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L41): an X2 change with a hook probe. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L39; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "72cb72a22c206e922f662c8adbc48da03c8ce360"
     },
     {
       "line": 40,
@@ -396,8 +396,8 @@
       "triageReason": "Requires a settings bump explicitly excluded from P3-F; preserve the next-bump closing clause.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L40; parent Decision Log 106): Requires a settings bump explicitly excluded from P3-F; preserve the next-bump closing clause. Owner: the next settings-version author.",
       "remainingClause": "Drop both at the next settings version bump, migrating old files without restoring banner behavior. Re-deferred 2026-10-07 (E11 1.6): the next settings version is P2's; E11 takes none (its Decision Log 7). Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L42): P2-F takes no settings version; the drop rides the next bump. Owner: P3 (the next settings version). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L40; parent Decision Log 106): Requires a settings bump explicitly excluded from P3-F; preserve the next-bump closing clause. Owner: the next settings-version author.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 41,
