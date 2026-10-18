@@ -126,15 +126,18 @@ describe('the packaged resolution script', () => {
 });
 
 describe('the packaged resolution probe’s environment', () => {
-  // The packaged binary is stood in for by a shell wrapper at the packaged path (Contents/MacOS/MAWS) that records the
-  // environment it was spawned with, then runs this Node over the same arguments: the check is at the spawn boundary.
-  it('is the packaged supervisor’s: no NODE_OPTIONS, MAWS_HOST_MODE, MAWS_RELAY_URL or CLAUDE variable reaches the child, Node mode set', () => {
+  // The packaged binary is stood in for by a shell wrapper at the packaged path (Contents/MacOS/MAWS) that records only
+  // the controlled fields it was spawned with (never the whole environment: a runner's holds unrelated secrets), then
+  // runs this Node over the same arguments: the check is at the spawn boundary. The scratch root, capture included, is
+  // removed by afterEach.
+  it('is the packaged supervisor’s: no NODE_OPTIONS, MAWS_HOST_MODE or MAWS_RELAY_URL reaches the child, Node mode and the scratch profile set', () => {
     pkg(app, 'sdk', {});
     chunk(['sdk']);
     const executable = join(resources, '..', 'MacOS', 'MAWS');
     const seen = join(root, 'child-env.txt');
     mkdirSync(dirname(executable), { recursive: true });
-    writeFileSync(executable, `#!/bin/sh\n/usr/bin/env > '${seen}'\nexec '${process.execPath}' "$@"\n`);
+    const probe = [...['NODE_OPTIONS', 'MAWS_HOST_MODE', 'MAWS_RELAY_URL'].map((name) => `echo "${name}=\${${name}+set}"`), ...['ELECTRON_RUN_AS_NODE', 'MAWS_USER_DATA', 'CLAUDE_CONFIG_DIR'].map((name) => `echo "${name}=$${name}"`)];
+    writeFileSync(executable, `#!/bin/sh\n{\n${probe.join('\n')}\n} > '${seen}'\nexec '${process.execPath}' "$@"\n`);
     chmodSync(executable, 0o755);
     for (const [name, value] of Object.entries({ NODE_OPTIONS: '--no-such-node-option', MAWS_HOST_MODE: 'detached', MAWS_RELAY_URL: 'http://127.0.0.1:1', CLAUDE_CONFIG_DIR: '/owner/.claude', ELECTRON_RUN_AS_NODE: '0' })) vi.stubEnv(name, value);
 
@@ -143,7 +146,6 @@ describe('the packaged resolution probe’s environment', () => {
     expect(result.error).toBeUndefined();
     expect(result.chunk).toBe(join(app, 'out', 'main', 'host.js'));
     const childEnv = Object.fromEntries(readFileSync(seen, 'utf8').trim().split('\n').map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
-    expect(childEnv).toMatchObject({ ELECTRON_RUN_AS_NODE: '1', MAWS_USER_DATA: join(root, 'profile'), CLAUDE_CONFIG_DIR: join(root, 'profile', 'claude-config'), PATH: process.env.PATH });
-    for (const name of ['NODE_OPTIONS', 'MAWS_HOST_MODE', 'MAWS_RELAY_URL']) expect(childEnv).not.toHaveProperty(name);
+    expect(childEnv).toEqual({ NODE_OPTIONS: '', MAWS_HOST_MODE: '', MAWS_RELAY_URL: '', ELECTRON_RUN_AS_NODE: '1', MAWS_USER_DATA: join(root, 'profile'), CLAUDE_CONFIG_DIR: join(root, 'profile', 'claude-config') });
   });
 });

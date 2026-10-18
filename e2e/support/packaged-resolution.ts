@@ -120,7 +120,7 @@ export const resourcesOf = (executable: string) => resolve(dirname(executable), 
 // preload, loader or inspector flag the actual supervisor never receives), no MAWS_HOST_MODE, no dev relay override.
 // Written out here, not imported: that module is main's, and the e2e project compiles only the files it names.
 export function packagedResolution(executable: string, userData: string): Resolution {
-  const env = { ...launchEnvironment(process.env, userData), ELECTRON_RUN_AS_NODE: '1' };
+  const env: Record<string, string> = { ...launchEnvironment(process.env, userData), ELECTRON_RUN_AS_NODE: '1' };
   delete env.NODE_OPTIONS;
   delete env.MAWS_HOST_MODE;
   delete env.MAWS_RELAY_URL;
