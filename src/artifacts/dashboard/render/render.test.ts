@@ -274,6 +274,19 @@ describe('renderView', () => {
     expect(repeatOf(renderView({ view: 'scatter', x: 'w', y: 'v' }, { columns: t.columns, rows: [['A', 1, 1, 's1'], ['A', 2, 1, 's1']] }, theme, 't').warnings)).toEqual([]);
   });
 
+  it('exempts bars of opposite sign at one category, which stand on either side of zero, from the overlap warning (P3-F L251)', () => {
+    const repeatOf = (warnings: string[]) => warnings.filter((w) => w.includes('bars overlap'));
+    const columns: ViewTable['columns'] = [{ name: 'k', type: 'string' }, { name: 'v', type: 'number' }];
+    const bar = (rows: [string, number][]) => repeatOf(renderView({ view: 'bar', x: 'k', y: 'v' }, { columns, rows }, theme, 't').warnings);
+    expect(bar([['A', 4], ['A', -3], ['B', 1]])).toEqual([]);
+    // a second bar on either side of zero still overlaps its own side's
+    expect(bar([['A', 4], ['A', -3], ['A', 2]])).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
+    expect(bar([['A', -1], ['A', -2]])).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
+    // a zero bar stands on the zero line with the positive bars, so it overlaps them and not a negative one
+    expect(bar([['A', 0], ['A', 5]])).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
+    expect(bar([['A', 0], ['A', -5]])).toEqual([]);
+  });
+
   it('keeps series identity from the unfiltered snapshot: a filter never changes a surviving series\' form', () => {
     const spec = { view: 'scatter', x: 'flipper_length_mm', y: 'body_mass_g', series: 'species_ko' };
     const three = renderView(spec, penguins, theme, 'penguins').svg!;

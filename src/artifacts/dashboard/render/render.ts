@@ -607,9 +607,11 @@ function cartesian(v: View): Rendered {
 }
 
 /**
- * An unaggregated bar view draws every row, so two drawable rows of one series and measure at one category stand on one
- * another: the warning names those categories (the first three as the axis names them, in its order, then how many
- * more) and points at `agg` (E2 panel). The same category in two series or two measures sits side by side, no overlap.
+ * An unaggregated bar view draws every row, so two drawable rows of one series and measure at one category on the same
+ * side of zero stand on one another: the warning names those categories (the first three as the axis names them, in
+ * its order, then how many more) and points at `agg` (E2 panel). The same category in two series or two measures sits
+ * side by side, no overlap; nor do a negative bar and a positive or zero one at one category, which stand on either
+ * side of the zero line (P3-F L251).
  */
 function repeatedBars(all: Series[], xCol: ViewColumn, xFormat: ValueFormat | undefined, warnings: string[]): void {
   const repeated = new Set<string>();
@@ -618,8 +620,9 @@ function repeatedBars(all: Series[], xCol: ViewColumn, xFormat: ValueFormat | un
     for (const m of s.marks) {
       if (m.y === null) continue;
       const key = typedKey(m.x);
-      if (seen.has(key)) repeated.add(key);
-      else seen.add(key);
+      const side = `${m.y < 0 ? '-' : '+'}${key}`;
+      if (seen.has(side)) repeated.add(key);
+      else seen.add(side);
     }
   }
   if (repeated.size === 0) return;
