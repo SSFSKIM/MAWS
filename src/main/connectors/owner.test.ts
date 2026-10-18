@@ -153,6 +153,19 @@ describe('the owner’s server rows', () => {
     expect(answer).toMatchObject({ saved: 'ok', withdrawnUnattributed: false });
   });
 
+  // P3-HD panel correction: a tool whose live listing requires task execution is shown unusable through MAWS, never
+  // as a row Connect could make usable or as a source still waiting for its listing
+  it('names a task-required tool a session’s alone, without falling back to its source', async () => {
+    selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo'), known));
+    selections.set(key('notes', 'export'), { ok: false, why: 'taskRequired' });
+    selections.set(key('notes'), ok(http(SRC_A, '/repo')));
+    const answer = await rows(ART, [{ server: 'notes', tool: 'search' }, { server: 'notes', tool: 'export' }]);
+    expect(answer.servers).toEqual([
+      expect.objectContaining({ kind: 'source', server: 'notes', tools: ['search'], needsDiscovery: false }),
+      { kind: 'engineOnly', server: 'notes', why: 'taskRequired', tools: ['export'] },
+    ]);
+  });
+
   it('unions the durable grants with the declared tools, and falls back to the source alone for a tool not yet listed', async () => {
     grants = [{ server: 'notes', tool: 'archive', fingerprint: FP, mode: 'read', grantedAt: 1 }];
     selections.set(key('notes', 'search'), { ok: false, why: 'toolMissing' });
