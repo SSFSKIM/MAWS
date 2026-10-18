@@ -88,6 +88,19 @@ describe('artifact_create of a document', () => {
     expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Once')).toHaveLength(1);
   });
 
+  // P3-F (artifact-protocol finding 2): the artifact and its first content commit together or not at all
+  it('takes back the whole create when writing its content fails: no empty artifact is left, and its handle stays free', async () => {
+    const create = documentCreateTool(deps());
+    const args = { kind: 'document', title: 'Atomic', handle: 'atomic', content: 'Text.' };
+    vi.spyOn(world.kind.adapter, 'afterUpdate').mockImplementationOnce(() => {
+      throw new Error('the hook broke');
+    });
+    const failed = await call(create, args).then(textOfResult, (error: unknown) => String(error));
+    expect(failed).toContain('the hook broke');
+    expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Atomic')).toEqual([]);
+    expect(json(await call(create, args))).toMatchObject({ status: 'created', handle: 'atomic' });
+  });
+
   it('hands every other kind to the tool it wraps', async () => {
     const fallback: McpToolDefinition = { name: 'artifact_create', title: 'A', description: 'A', inputSchema: {}, annotations: {}, call: async () => ({ content: [{ type: 'text', text: 'A answered' }] }) };
     expect(textOfResult(await call(documentCreateTool(deps(), fallback), { kind: 'html', title: 'x', content: '<p>x</p>' }))).toBe('A answered');

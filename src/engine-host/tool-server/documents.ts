@@ -698,29 +698,31 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
                 const taken = store.resolve(handle, [ctx.appSessionId]) ? 'this session' : deps.artifactScope?.length && store.resolve(handle, deps.artifactScope) ? 'the conversation this side thread was opened from' : null;
                 if (taken) return refusedAfterCommit(store, refuse(TOOL, { reason: 'handleTaken', handle }, `an artifact "${handle}" already exists in ${taken}; edit it with artifact_edit`));
               }
-              const made: { artifact?: Artifact; doc?: Doc; answer?: Record<string, unknown> & { artifactId: string }; viewWarnings?: ViewWarning[] /* P3-E */ } = {};
-              // `initial` given (empty), so the kind's seed hook writes no first tab: the content's is written below
-              const creating = store.create({ kind /* P3-E */, title: input.title, initial: () => {}, ...(handle !== undefined && { handle }) }, actor, (artifact) => (made.artifact = artifact));
-              // the first tab, written through the session's host replica in the batch that holds the entity row
-              const writing = made.artifact
-                ? store.service.writeAs(made.artifact.id, actor, (doc) => {
+              const made: { doc?: Doc; answer?: Record<string, unknown> & { artifactId: string }; viewWarnings?: ViewWarning[] /* P3-E */ } = {};
+              // The first tab is the create's `initial` (so the kind's seed hook writes none), written through the session's
+              // host replica in the savepoint of the entity row, the answer recorded in it too: the artifact commits with
+              // its content and its op row or not at all (P3-F, artifact-protocol finding 2)
+              await store.create(
+                {
+                  kind /* P3-E */, title: input.title, ...(handle !== undefined && { handle }),
+                  initial: (doc) => {
                     made.doc = doc;
                     createDocument(doc, { title: input.title, body });
                     if (kind === 'dashboard') made.viewWarnings = normalizeChartSpecs(doc, new Map()); // P3-E (E2 M3): in the create's frame
-                  }, {
-                    inFrame: (revision) => {
-                      made.answer = {
-                        status: 'created', kind /* P3-E */, artifactId: made.artifact!.id, title: made.artifact!.title, revision, ...(handle !== undefined && { handle }),
-                        ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
-                        ...(made.viewWarnings?.length && { viewWarnings: made.viewWarnings }), // P3-E (E2 M3)
-                      };
-                      if (made.doc) deps.session.views.record(made.doc, revision);
-                      op.record(made.answer);
-                    },
-                  })
-                : null;
-              await creating;
-              await writing;
+                  },
+                },
+                actor,
+                (artifact) => {
+                  const revision = store.revision(artifact.id);
+                  made.answer = {
+                    status: 'created', kind /* P3-E */, artifactId: artifact.id, title: artifact.title, revision, ...(handle !== undefined && { handle }),
+                    ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
+                    ...(made.viewWarnings?.length && { viewWarnings: made.viewWarnings }), // P3-E (E2 M3)
+                  };
+                  if (made.doc) deps.session.views.record(made.doc, revision);
+                  op.record(made.answer);
+                },
+              );
               return made.answer!;
             },
             { actor },
