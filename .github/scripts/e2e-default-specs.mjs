@@ -5,11 +5,15 @@
 // What a group collects is Playwright's own answer: its package script's selection (its env assignments, its spec
 // arguments, its --config) run as `playwright test --list`, which applies the configs' testMatch and testIgnore. A file
 // counts as claimed only when its group lists every test the bare set lists in it.
+// The groups of a `DefaultBeside:` trailer count as if they ran beside it too, so a relaunch of part of a set, naming
+// the whole set's other groups there, runs the own specs the whole set's `default` ran rather than every spec of the
+// groups it leaves out (Decision Log 66).
 // Prints the spec arguments for `pnpm e2e`, one per line, or nothing for the bare `pnpm e2e`: when no other e2e group
-// runs, and whenever the derivation cannot read a script's shape or a listing fails, saying why on stderr. The doubt
-// always falls on running more, never fewer.
-// Usage: E2E_PLAN=<the plan job's e2e matrix> node .github/scripts/e2e-default-specs.mjs, from the checkout's root
-// (with its node_modules). The derivation is exported for .github/scripts/e2e-default-specs.test.mjs.
+// runs or is named, and whenever the derivation cannot read a script's shape, a named group has no script or a listing
+// fails, saying why on stderr. The doubt always falls on running more, never fewer.
+// Usage: E2E_PLAN=<the plan job's e2e matrix> DEFAULT_BESIDE=<the plan job's default_beside> node
+// .github/scripts/e2e-default-specs.mjs, from the checkout's root (with its node_modules). The derivation is exported
+// for .github/scripts/e2e-default-specs.test.mjs.
 import { execFile } from 'node:child_process';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
@@ -75,9 +79,28 @@ const pool = async (jobs, width) => {
   return results;
 };
 
-// What `playwright test --list` collects for one selection: Map(spec path from the root -> Set of its tests, each by its
-// title path and location). Throws when the listing fails or reports an error.
-async function listSelection(root, { env, args }) {
+// What a `playwright test --list` JSON report collects: Map(spec path from the root -> Set of its tests, each by its title
+// path, which Playwright refuses to repeat within a file). Not by line and column: concurrent listings on a cold transform
+// cache can leave one without a spec's source map, so the same test reports its compiled position. The identity is the JSON
+// array of the title components, so two tests share one only when their arrays are equal; Playwright's own check (empty
+// describe titles dropped, then joined) is coarser and reports that as a duplicate title, which listSelection throws on.
+export function collected(report, root) {
+  const specs = new Map();
+  const walk = (suite, titles, tests) => {
+    for (const spec of suite.specs ?? []) tests.add(JSON.stringify([...titles, spec.title]));
+    for (const child of suite.suites ?? []) walk(child, [...titles, child.title], tests);
+  };
+  for (const suite of report.suites ?? []) {
+    const tests = new Set();
+    walk(suite, [], tests);
+    specs.set(relative(root, resolve(report.config.rootDir, suite.file)), tests);
+  }
+  return specs;
+}
+
+// Runs `playwright test --list` for one selection and returns collected(its report). Throws when the listing fails or
+// reports an error.
+export async function listSelection(root, { env, args }) {
   const dir = mkdtempSync(join(tmpdir(), 'e2e-default-'));
   const output = join(dir, 'list.json');
   try {
@@ -91,38 +114,32 @@ async function listSelection(root, { env, args }) {
     });
     const report = JSON.parse(readFileSync(output, 'utf8'));
     if (report.errors?.length > 0) throw new Error(`playwright test --list ${args.join(' ')} reported: ${report.errors.map((error) => error.message?.split('\n')[0]).join(' / ')}`);
-    const specs = new Map();
-    const walk = (suite, titles, tests) => {
-      for (const spec of suite.specs ?? []) tests.add(`${[...titles, spec.title].join(' › ')} @ ${spec.file}:${spec.line}:${spec.column}`);
-      for (const child of suite.suites ?? []) walk(child, [...titles, child.title], tests);
-    };
-    for (const suite of report.suites ?? []) {
-      const tests = new Set();
-      walk(suite, [], tests);
-      specs.set(relative(root, resolve(report.config.rootDir, suite.file)), tests);
-    }
-    return specs;
+    return collected(report, root);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
 // The derivation: { specs } for default's own specs, or { bare: reason } for the bare `pnpm e2e`, with `doubt` when the
-// bare set is a fallback rather than the answer. `groups` are the run's other e2e groups; `list` is listSelection for
-// this root, replaceable in a test.
-export async function defaultSpecs({ scripts, rootName, groups, list, width = 4 }) {
-  if (groups.length === 0) return { bare: 'no other e2e group runs beside it' };
+// bare set is a fallback rather than the answer. `groups` are the run's e2e groups, `beside` those of its DefaultBeside
+// trailer, both read alike (`default` itself in either is no other group); `list` is listSelection for this root,
+// replaceable in a test.
+export async function defaultSpecs({ scripts, rootName, groups, beside = [], list, width = 4 }) {
+  const others = [...new Set([...groups, ...beside])].filter((group) => group !== 'default');
+  if (others.length === 0) return { bare: 'no other e2e group runs beside it' };
   const doubt = (reason, notes) => ({ bare: reason, doubt: true, notes });
   const own = readScript(scripts.e2e ?? '', rootName);
   if (own === null || own.elsewhere || own.args.some((arg) => !arg.startsWith('-'))) return doubt(`cannot read the e2e script's shape (${scripts.e2e})`);
   const selections = [];
   const notes = [];
-  for (const group of groups) {
-    const script = scripts[`e2e:${group}`] ?? '';
+  for (const group of others) {
+    const named = groups.includes(group) ? '' : ' (named by DefaultBeside)';
+    if (!Object.hasOwn(scripts, `e2e:${group}`)) return doubt(`no package.json script e2e:${group}${named}`);
+    const script = scripts[`e2e:${group}`];
     const selection = readScript(script, rootName);
-    if (selection === null) return doubt(`cannot read e2e:${group}'s script shape (${script})`);
-    if (selection.elsewhere) notes.push(`e2e:${group} runs in ${selection.elsewhere} and collects nothing under e2e/`);
-    else selections.push({ group, selection });
+    if (selection === null) return doubt(`cannot read e2e:${group}'s script shape (${script})${named}`);
+    if (selection.elsewhere) notes.push(`e2e:${group}${named} runs in ${selection.elsewhere} and collects nothing under e2e/`);
+    else selections.push({ name: `e2e:${group}${named}`, selection });
   }
   let bare;
   let listed;
@@ -132,7 +149,7 @@ export async function defaultSpecs({ scripts, rootName, groups, list, width = 4 
     return doubt(error.message);
   }
   const claimed = new Map();
-  selections.forEach(({ group }, at) => {
+  selections.forEach(({ name }, at) => {
     const files = [];
     for (const [file, tests] of listed[at]) {
       if (!bare.has(file)) continue;
@@ -141,7 +158,7 @@ export async function defaultSpecs({ scripts, rootName, groups, list, width = 4 
       for (const test of tests) seen.add(test);
       claimed.set(file, seen);
     }
-    notes.push(`e2e:${group} collects ${files.length === 0 ? "none of the bare set's specs" : files.join(' ')}`);
+    notes.push(`${name} collects ${files.length === 0 ? "none of the bare set's specs" : files.join(' ')}`);
   });
   const specs = [];
   for (const [file, tests] of bare) {
@@ -170,22 +187,24 @@ export async function defaultSpecs({ scripts, rootName, groups, list, width = 4 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = process.cwd();
   const { name: rootName, scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  const groups = JSON.parse(process.env.E2E_PLAN ?? '[]')
-    .map((entry) => entry.group)
-    .filter((group) => group !== 'default');
+  const groups = JSON.parse(process.env.E2E_PLAN ?? '[]').map((entry) => entry.group);
+  const beside = JSON.parse(process.env.DEFAULT_BESIDE || '[]');
+  const others = new Set([...groups, ...beside].filter((group) => group !== 'default'));
+  const named = [...others].filter((group) => !groups.includes(group)).length;
+  const besideText = `beside ${others.size} other e2e groups${named > 0 ? `, ${named} of them named by DefaultBeside` : ''}`;
   const started = Date.now();
-  const result = await defaultSpecs({ scripts, rootName, groups, list: (selection) => listSelection(root, selection), width: Math.max(2, Math.min(8, availableParallelism())) });
+  const result = await defaultSpecs({ scripts, rootName, groups, beside, list: (selection) => listSelection(root, selection), width: Math.max(2, Math.min(8, availableParallelism())) });
   for (const note of result.notes ?? []) say(note);
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   const summary = (line) => process.env.GITHUB_STEP_SUMMARY && appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n\n`);
   if (result.specs) {
-    say(`default runs its own ${result.specs.length} of the bare set's ${result.total} specs, beside ${groups.length} other e2e groups (derived in ${seconds} s):`);
+    say(`default runs its own ${result.specs.length} of the bare set's ${result.total} specs, ${besideText} (derived in ${seconds} s):`);
     for (const spec of result.specs) say(`  ${spec}`);
-    summary(`#### e2e:default: its own ${result.specs.length} of the bare set's ${result.total} specs, beside ${groups.length} other e2e groups (Decision Log 60(2))`);
+    summary(`#### e2e:default: its own ${result.specs.length} of the bare set's ${result.total} specs, ${besideText} (Decision Log 60(2), 66)`);
     process.stdout.write(`${result.specs.join('\n')}\n`);
   } else {
     say(`default runs the bare pnpm e2e: ${result.bare}`);
     if (result.doubt) process.stderr.write(`::warning title=e2e:default runs the bare set::${result.bare}\n`);
-    if (groups.length > 0) summary(`#### e2e:default: the bare \`pnpm e2e\` (${result.bare})`);
+    if (others.size > 0) summary(`#### e2e:default: the bare \`pnpm e2e\` (${result.bare})`);
   }
 }

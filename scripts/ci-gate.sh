@@ -2,14 +2,15 @@
 # Runs MAWS's class-1 gates for one tree on GitHub Actions (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.4, §3.6).
 #
 #   scripts/ci-gate.sh <worktree-or-sha> [--gates static,unit,unit:darwin,probes,e2e:<group>,…] [--runner linux|macos]
-#                      [--class1a linux|macos|pool] [--evidence] [--label <name>] [--keep]
+#                      [--class1a linux|macos|pool] [--default-beside <groups>] [--evidence] [--label <name>] [--keep]
 #
 # Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
 # /tmp/maws-review/gates/ci-<short>/, keeps the whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the
 # ref (unless --keep) and exits with the run's status (0 green, 1 anything else). When the mini refused jobs (ci-kit's
 # job-started check: a dialog or the wrong app in front), the last line before the run's status names the refused, the
-# green and the red, and the --gates that relaunches the refused and the red on the same tree (Decision Log 58(c), 59(1)).
+# green and the red, and the --gates that relaunches the refused and the red on the same tree (Decision Log 58(c), 59(1)),
+# with --default-beside naming the run's other e2e groups when the relaunch takes e2e:default (Decision Log 66).
 #
 #   <worktree-or-sha>  a worktree path (its HEAD is tested) or a commit
 #   --gates            narrow to static, unit, unit:darwin, packaged (macOS), probes or e2e:<group>; default: class 1a
@@ -18,15 +19,19 @@
 #   --runner           the e2e lane, linux or macos (default: $MAWS_GATE_RUNNER, else the repository's variables)
 #   --class1a          class 1a's runner (static, unit, probes): linux, macos or pool, ci-kit's Hetzner box (default:
 #                      the repository's variable GATE_RUNNER, else linux)
+#   --default-beside   e2e groups, a comma list (side,library,…), that e2e:default subtracts the specs of as if they ran
+#                      beside it: a relaunch of part of a set names the whole set's other groups, so its default runs the
+#                      specs the whole set's default ran. A name with no script, or a script the derivation cannot read,
+#                      makes default the bare `pnpm e2e` with a warning (default: none)
 #   --evidence         upload e2e reports on success as well as failure for this run (default: failure only)
 #   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
 #   --keep             leave the ci/ ref in place
 #
 # Every invocation pushes a fresh empty commit on top of the sha: its message carries a unique nonce (so the push always
-# triggers a run of its own and the run found is this one's) and, when given, the `Gates:`, `Runner:`, `Class1a:` and `Evidence:`
-# trailers. The pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green
-# there (§3.1); the plan refuses the rest. The pool takes class 1a alone; the plan job, hosted, makes its box. Every gh
-# call names the repository, so the script runs from any directory.
+# triggers a run of its own and the run found is this one's) and, when given, the `Gates:`, `Runner:`, `Class1a:`,
+# `DefaultBeside:` and `Evidence:` trailers. The pushed tree is always the tested tree plus that one commit. A Linux
+# lane admits only the e2e groups green there (§3.1); the plan refuses the rest. The pool takes class 1a alone; the plan
+# job, hosted, makes its box. Every gh call names the repository, so the script runs from any directory.
 #
 # Before the push, a run that puts jobs on a Mac (resolved from the flags and the repository variables as the plan does)
 # reads ci-kit's open alerts (SSFSKIM/ci-kit-sandbox, label ci-kit-alert: a system dialog holds a Mac's front) and MAWS's
@@ -38,6 +43,9 @@
 set -uo pipefail
 
 REPO=SSFSKIM/MAWS
+# refusals: the refused against the finished, and the relaunch line, when the mini refused jobs (Decision Log 58(c), 66).
+# shellcheck source=scripts/ci-gate-refusals.sh
+source "$(dirname "$0")/ci-gate-refusals.sh" || exit 2
 usage() {
   awk 'NR > 1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "$0" >&2
   exit 2
@@ -48,6 +56,7 @@ target=''
 gates=''
 runner=${MAWS_GATE_RUNNER:-}
 class1a=''
+default_beside=''
 evidence=''
 label=''
 keep=false
@@ -56,6 +65,7 @@ while (($# > 0)); do
     --gates) gates=${2:?--gates needs a list}; shift 2 ;;
     --runner) runner=${2:?--runner needs linux or macos}; shift 2 ;;
     --class1a) class1a=${2:?--class1a needs linux, macos or pool}; shift 2 ;;
+    --default-beside) default_beside=${2:?--default-beside needs a list of e2e groups}; shift 2 ;;
     --evidence) evidence=yes; shift ;;
     --label) label=${2:?--label needs a name}; shift 2 ;;
     --keep) keep=true; shift ;;
@@ -67,6 +77,8 @@ done
 [[ -n $target ]] || usage
 case $runner in '' | linux | macos) ;; *) echo "ci-gate: --runner is linux or macos, not $runner" >&2; exit 2 ;; esac
 case $class1a in '' | linux | macos | pool) ;; *) echo "ci-gate: --class1a is linux, macos or pool, not $class1a" >&2; exit 2 ;; esac
+# The names land unquoted in a printed relaunch command, so only characters that are inert there pass.
+case $default_beside in *[!A-Za-z0-9._:,\ -]*) echo "ci-gate: --default-beside takes group names of letters, digits, . _ : - separated by commas, not $default_beside" >&2; exit 2 ;; esac
 
 # The repository the git commands run in: the worktree given, or this script's own checkout for a bare sha.
 if [[ -d $target ]]; then
@@ -109,6 +121,7 @@ trailers="Nonce: $(date +%s)-$$"
 [[ -n $gates ]] && trailers+=$'\n'"Gates: $gates"
 [[ -n $runner ]] && trailers+=$'\n'"Runner: $runner"
 [[ -n $class1a ]] && trailers+=$'\n'"Class1a: $class1a"
+[[ -n $default_beside ]] && trailers+=$'\n'"DefaultBeside: $default_beside"
 [[ -n $evidence ]] && trailers+=$'\n'"Evidence: $evidence"
 pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short" -m "$trailers") || exit 1
 
@@ -133,7 +146,7 @@ interrupted() {
 }
 trap interrupted INT TERM
 
-echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${evidence:+ (Evidence: $evidence)}"
+echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}"
 # The ref is this invocation's own and the commit fixed, so a forced re-push is idempotent: a transient rejection
 # (a remote index-pack race while another gate pushes, a "[remote rejected] (failed)") is retried twice; an
 # authentication failure is not (Decision Log 54).
@@ -181,33 +194,6 @@ rm -f "$view_err"
 conclusion=$(gh -R "$REPO" run view "$run_id" --json conclusion --jq .conclusion)
 jobs=$(gh -R "$REPO" run view "$run_id" --json jobs --jq '.jobs[] | "\(.conclusion // .status)\t\(.name)"' | sort -k2)
 printf '%s\n' "$jobs"
-
-# Decision Log 58(c), 59(1): when ci-kit's job-started check refused jobs on the mini (its `ci-kit: … rerun` line in a
-# job's log, before any of the job's steps ran), one line of the refused against the finished, green and red, and the
-# relaunch of the refused and the red on the same tree. Nothing when no job was refused.
-refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
-  local refused relaunch="scripts/ci-gate.sh $sha"
-  refused=$(printf '%s\n' "$2" | perl -ne 'print "$1\n" if /^([^\t]+)\t[^\t]*\t\S+ ci-kit: .*rerun\s*$/' | sort -u | tr '\n' ' ')
-  [[ -n $refused ]] || return 0
-  [[ -n $runner ]] && relaunch+=" --runner $runner"
-  [[ -n $class1a ]] && relaunch+=" --class1a $class1a"
-  printf '%s\n' "$1" | awk -F'\t' -v refused="$refused" -v relaunch="$relaunch" -v label="$label" -v asked="$gates" '
-    BEGIN { n = split(refused, names, " "); for (i = 1; i <= n; i++) isrefused[names[i]] = 1 }
-    # Under GATE_RUNNER=macos the plan runs on the mini too; refused, it ran nothing, so the relaunch is the whole run.
-    $2 == "plan" && $2 in isrefused { plan = 1 }
-    $2 == "plan" || $1 == "skipped" { next }
-    $2 in isrefused { r = r " " $2; gates = gates "," $2; nr++; next }
-    $1 == "success" { g = g " " $2; ng++; next }
-    { d = d " " $2 ($1 == "failure" ? "" : " (" $1 ")"); gates = gates "," $2; nd++ }
-    END {
-      if (plan) {
-        printf "ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: %s%s --label %s --evidence\n", relaunch, (asked ? " --gates " asked : ""), label
-        exit
-      }
-      printf "ci-gate: refused by the mini (%d):%s; green (%d):%s; red (%d):%s; relaunch the refused and the red (less any red baseline, Decision Log 58(c)): %s --gates %s --label %s --evidence\n",
-        nr, r, ng, (ng ? g : " none"), nd, (nd ? d : " none"), relaunch, substr(gates, 2), label
-    }'
-}
 
 if [[ $conclusion != success ]]; then
   rm -rf "$out/ci-$short"
