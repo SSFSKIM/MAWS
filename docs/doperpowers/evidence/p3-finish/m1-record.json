@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 23,
-    "defer:pending": 100,
+    "defer:committed": 24,
+    "defer:pending": 99,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -507,7 +507,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L50; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Closes when the record tracks the engine's current project root, or a probe shows `EnterWorktree` leaves `projectRoot` alone. Re-deferred 2026-10-07 (E11 1.6): needs a probe. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L54): needs a probe. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L50; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "ed749a951be6b6c158f51a238497dda541e4e723"
     },
     {
       "line": 51,
@@ -517,8 +517,8 @@
       "triageReason": "Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L51; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
       "remainingClause": "Closes when Electron offers a per-session or per-frame switch that disables WebRTC (or a TCP-relay policy) and the frame guard sets it, with the e2e's ICE probe extended to a TURN-over-TCP server. Re-deferred 2026-10-07 (E11 1.6): an Electron limit. Owner: P2 (re-checked on each Electron bump). Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L55): an Electron limit. Owner: each Electron bump. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L51; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 52,
