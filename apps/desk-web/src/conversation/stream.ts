@@ -63,6 +63,22 @@ export const writerSession = (writer: string): string | null => {
 const questionRef = (event: LogEvent): string =>
   requestKey({ machine: writerMachine(event.writer) ?? '', session: writerSession(event.writer) ?? '', request: str(event.src) });
 
+/**
+ * A cross-project message's other end (the org directory's §6): the sender's copy, told by its `copy` key, names its
+ * destination — the project of the delivering event its `copy` points at (`"<project id>:<writer>:<seq>"`), else its
+ * recipients' — and the delivering event names its origin by `from_project` when that is another project. An event of
+ * this project alone is neither.
+ */
+export function crossProject(event: LogEvent, here: string): { to: string } | { from: string } | null {
+  if (typeof event.copy === 'string') {
+    const at = event.copy.indexOf(':');
+    const to = at > 0 ? event.copy.slice(0, at) : recipients(event.to).map((r) => str((r as { project?: unknown }).project)).find(Boolean);
+    return to ? { to } : null;
+  }
+  const from = event.from_project;
+  return typeof from === 'string' && from !== '' && from !== here ? { from } : null;
+}
+
 /** A web member's id (DX7: 128 bits as 32 lowercase hex), which `retired` and spawn's `joined` record as `by`. */
 const MEMBER_ID = /^[0-9a-f]{32}$/;
 
@@ -73,11 +89,13 @@ export function byWhom(by: string, member: string | null): string {
   return by;
 }
 
-function systemText(event: LogEvent, alias: (id: unknown) => string, member: string | null): string | null {
+function systemText(event: LogEvent, alias: (id: unknown) => string, member: string | null, projectName: (id: string) => string): string | null {
   switch (event.kind) {
     case 'joined':
-      return `${alias(event.session)} joined on ${str(event.machine)}`;
+      // A relocated `joined` refreshes where a member works (the engine moved it within the project): no one joined.
+      return event.relocated === true ? null : `${alias(event.session)} joined on ${str(event.machine)}`;
     case 'retired':
+      if (event.reason === 'moved') return `${alias(event.session)} moved${str(event.project) ? ` to ${projectName(str(event.project))}` : ''}`;
       return `${alias(event.session)} ${event.reason === 'ended' ? 'ended' : 'retired'}${str(event.by) ? ` by ${byWhom(str(event.by), member)}` : ''}`;
     case 'renamed':
       return `${alias(event.session)} is now ${str(event.alias)}`;
@@ -118,14 +136,15 @@ const RUNNING = new Set(['busy', 'idle', 'waiting']);
 
 /**
  * `live`: the direct channel's session is running now, so its working record goes on past its last item. `member`: the
- * signed-in member, named "you" where an event records it as `by`.
+ * signed-in member, named "you" where an event records it as `by`. `projectName`: a project's name by its id, for the
+ * project a session moved to (by default the id's first eight characters).
  */
 export function buildStream(
   channel: Channel,
   entries: readonly Entry[],
   aliases: ReadonlyMap<string, string>,
   requests: readonly PlacedRequest[],
-  options: { live?: boolean; member?: string } = {},
+  options: { live?: boolean; member?: string; projectName?: (id: string) => string } = {},
 ): StreamItem[] {
   const alias = (id: unknown) => (typeof id === 'string' ? (aliases.get(id) ?? id.slice(0, 8)) : '');
   const shown = entries.filter((e) => inChannel(e.event, channel));
@@ -214,7 +233,7 @@ export function buildStream(
       }
       default: {
         if (event.kind === 'joined') running.set(str(event.session), true);
-        const text = systemText(event, alias, options.member ?? null);
+        const text = systemText(event, alias, options.member ?? null, options.projectName ?? ((id) => id.slice(0, 8)));
         if (text !== null) push({ kind: 'system', key, offset, event, text });
       }
     }

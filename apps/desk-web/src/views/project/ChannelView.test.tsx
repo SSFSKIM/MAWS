@@ -37,6 +37,7 @@ const session = (id: string, alias: string, title: string | null = null): DeskSe
   status: null,
   state: null,
   joinedAt: 1,
+  joinedTs: '',
   group: 'working',
   presence: { record: { status: 'busy' }, bridge: true },
   machineOnline: true,

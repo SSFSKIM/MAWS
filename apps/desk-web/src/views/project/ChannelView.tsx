@@ -31,6 +31,7 @@ import { useLanding } from '../../pwa/service-worker';
 import { useNarrow } from '../../shell/viewport';
 import type { Channel } from '../../shell/layout';
 import type { DeskSession } from '../../shell/sessions';
+import { useProjectName } from '../../state/grid';
 import { GroupComposer, SessionComposer } from '../composer/Composer';
 import { useConnected, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
@@ -56,12 +57,13 @@ export function ChannelView(props: {
   const { connection, sessions, member } = useDesk();
   const requests = useStore(connection.conversation.store, (s) => s.requests);
   const outboxAll = useStore(connection.conversation.store, (s) => s.outbox);
+  const projectName = useProjectName();
   const items = useMemo(() => {
     const aliases = new Map([...sessions.values()].map((s) => [s.session, s.alias]));
     const placed: PlacedRequest[] = Object.values(requests).map(placedRequest);
     const live = session !== null && ['bridged', 'seat', 'terminal'].includes(kindOf(session));
-    return buildStream(channel, events, aliases, placed, { live, member });
-  }, [channel, events, sessions, requests, session, member]);
+    return buildStream(channel, events, aliases, placed, { live, member, projectName });
+  }, [channel, events, sessions, requests, session, member, projectName]);
   const outbox = Object.values(outboxAll).filter((o) => channel.kind === 'group' || (o.to !== '*' && o.to.some((r) => r.session === channel.session)));
   const sessionView = channel.kind === 'session' && drawsSessionView(session) ? session : null;
   const landed = useLanded(channel, items, sessionView);

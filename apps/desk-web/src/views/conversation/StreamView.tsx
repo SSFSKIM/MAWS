@@ -11,9 +11,10 @@ import { useStore } from 'zustand';
 import { writerMachine, type LogEvent, type Recipient } from 'desk-hub/protocol';
 import { TranscriptActionsProvider, type TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdown/Markdown';
-import { byWhom, type StreamItem } from '../../conversation/stream';
+import { byWhom, crossProject, type StreamItem } from '../../conversation/stream';
 import { deliveryKey, type OutboxItem } from '../../project/conversation';
 import { DELIVERY_TEXT } from '../../conversation/words';
+import { useProjectName } from '../../state/grid';
 import { RequestCard } from '../requests/RequestCard';
 import { useDesk } from './desk-context';
 
@@ -131,7 +132,7 @@ function Item({ item, workLabel }: { item: StreamItem; workLabel: string }) {
       return (
         <Said who={who} machine={machine} ts={item.event.ts}>
           <Prose text={item.text} />
-          <Deliveries event={item.event} to={item.to} wake={item.wake} />
+          <HumanEnds event={item.event} to={item.to} wake={item.wake} />
         </Said>
       );
     }
@@ -206,6 +207,49 @@ function Prose({ text }: { text: string }) {
 }
 
 /**
+ * Where a message from or to another project went (the org directory's §6): the sender's copy names its destination
+ * (`→ <project>`), the delivering event its origin (`from <project>`), each by the name the grid shows.
+ */
+function CrossProject({ event }: { event: LogEvent }) {
+  const { connection } = useDesk();
+  const name = useProjectName();
+  const other = crossProject(event, connection.project);
+  if (other === null) return null;
+  return (
+    <span className="ml-1.5 rounded-sm border border-border px-1 text-fg-muted" data-testid="cross-project">
+      {'to' in other ? `→ ${name(other.to)}` : `from ${name(other.from)}`}
+    </span>
+  );
+}
+
+/**
+ * Where a `human` went: a copy of one sent into another project names that project and its recipients, and has no
+ * delivery outcome of its own (the delivering event in that project's log has them); any other, its recipients'
+ * outcomes, and its origin when it came from another project.
+ */
+function HumanEnds({ event, to, wake }: { event: LogEvent; to: '*' | Recipient[]; wake: boolean }) {
+  const { connection } = useDesk();
+  const name = useProjectName();
+  const other = crossProject(event, connection.project);
+  if (other !== null && 'to' in other)
+    return (
+      <p className="m-0 text-ui-sm text-fg-muted" data-testid="cross-project">
+        → {name(other.to)}: {to === '*' ? 'record' : to.map((r) => r.alias).join(', ')}
+      </p>
+    );
+  return (
+    <>
+      {other !== null && (
+        <p className="m-0 text-ui-sm text-fg-muted" data-testid="cross-project">
+          from {name(other.from)}
+        </p>
+      )}
+      <Deliveries event={event} to={to} wake={wake} />
+    </>
+  );
+}
+
+/**
  * Each recipient's DX4 delivery outcome for a `human` this browser can see, kept by the hub across a reload. An outcome
  * other than delivered carries the machine's reason on its line (why it was only recorded, held back, or failed); a
  * delivered one keeps it on hover.
@@ -267,6 +311,7 @@ function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }
     return (
       <>
         <span className="text-fg">{str(event.from)}</span> → <span>{to}</span>
+        <CrossProject event={event} />
         <span className="ml-1.5 text-fg-faint">{time(event.ts)}</span>
         <span className="ml-1.5 text-fg">{str(event.text)}</span>
       </>

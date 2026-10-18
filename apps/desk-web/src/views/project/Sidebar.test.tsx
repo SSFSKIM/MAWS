@@ -29,6 +29,7 @@ const row = (session: string, alias: string, title: string | null, group: Sessio
   status: null,
   state: null,
   joinedAt: 1,
+  joinedTs: '',
   group,
   presence: null,
   machineOnline,

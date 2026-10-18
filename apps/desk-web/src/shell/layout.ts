@@ -1,10 +1,10 @@
-// DX8 — the layout: where the owner is (the grid, or a project and one of its channels) and the depth column's state.
-// The route is the URL's (`/`, `/p/<project>`, `/p/<project>/s/<session>`), so a reload and a link land in the same
-// place; the depth column's open state and width are the browser's own and outlive a reload.
+// DX8 — the layout: where the owner is (the grid, every session of the org, or a project and one of its channels) and
+// the depth column's state. The route is the URL's (`/`, `/sessions`, `/p/<project>`, `/p/<project>/s/<session>`), so a
+// reload and a link land in the same place; the depth column's open state and width are the browser's own and outlive a reload.
 import { create } from 'zustand';
 
 export type Channel = { kind: 'group' } | { kind: 'session'; session: string };
-export type Route = { view: 'grid' } | { view: 'project'; project: string; channel: Channel };
+export type Route = { view: 'grid' } | { view: 'org' } | { view: 'project'; project: string; channel: Channel };
 
 export type DepthState = { open: boolean; width: number };
 const DEPTH_DEFAULT: DepthState = { open: true, width: 380 }; // MAWS's --panel-w
@@ -16,11 +16,13 @@ export function parseRoute(pathname: string): Route {
     if (parts[2] === 's' && parts[3]) return { view: 'project', project: parts[1], channel: { kind: 'session', session: parts[3] } };
     return { view: 'project', project: parts[1], channel: { kind: 'group' } };
   }
+  if (parts[0] === 'sessions' && parts.length === 1) return { view: 'org' };
   return { view: 'grid' };
 }
 
 export function routePath(route: Route): string {
   if (route.view === 'grid') return '/';
+  if (route.view === 'org') return '/sessions';
   const base = `/p/${encodeURIComponent(route.project)}`;
   return route.channel.kind === 'group' ? base : `${base}/s/${encodeURIComponent(route.channel.session)}`;
 }
