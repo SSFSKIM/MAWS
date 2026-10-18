@@ -156,6 +156,22 @@ describe('B7 follow-up: a drag measures the overlay once a frame', () => {
     pointer('pointerup', surface, 260, 205);
     expect([se().style.left, se().style.top]).toEqual(['400px', '250px']);
   });
+
+  // P3-F (L218): a capture lost with no release (the surface hidden, the system taking the pointer) ends the gesture as a
+  // release does: its step closed, the handles back with the layout pass it saw caught up, a later move writing nothing
+  it('a lost pointer capture ends the gesture as a release does', () => {
+    const { doc, canvas, se, pointer, surface } = mountOverlay();
+    const width = () => readFlat(doc, 's').find((e) => e.id === 'a')!.style.width;
+    pointer('pointerdown', se(), 250, 200);
+    pointer('pointermove', surface, 260, 205);
+    const dragged = width();
+    place(canvas, 'a', [600, 400, 200, 100]);
+    act(() => canvas.layoutNow());
+    pointer('lostpointercapture', surface, 260, 205);
+    expect([se()?.style.left, se()?.style.top]).toEqual(['400px', '250px']);
+    pointer('pointermove', surface, 300, 240);
+    expect(width()).toBe(dragged);
+  });
 });
 
 describe('B8: a flow drop lands in the slot under the pointer, its bar there', () => {
