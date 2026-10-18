@@ -769,4 +769,14 @@ describe('publishDeck: the P3-F slide-model panel', () => {
     expect(Y.readNotes(doc, 's1')).toBe('Say this and more');
     expect(Y.readText(doc, 's1', 't')).toEqual([{ type: 'p', inline: [{ text: 'Title of it', marks: {} }] }]);
   });
+
+  it('scalpel-2#1: an element removed since the read and re-created under force keeps the place it was sent with', () => {
+    const doc = small('<section id="s1"><p id="a">A</p><p id="b">B</p><p id="c">C</p><p id="d">D</p></section>');
+    const base = deckFiles(doc);
+    deleteElementTree(doc, 's1', 'b', 'human');
+    const sent = base[S]!.replace('>B<', '>Bee<');
+    expect(publish(doc, base, { [S]: sent }).conflicts).toEqual([{ path: S, detail: 'element b: removed since your read' }]);
+    expect(publish(doc, base, { [S]: sent }, true).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['a', 'b', 'c', 'd']);
+  });
 });

@@ -345,7 +345,9 @@ function mergeSequence(members: Set<string>, seqB: string[], seqA: string[], seq
   if (!reordered) {
     desired = [...l];
     a.forEach((k, i) => {
-      if (inB.has(k)) return;
+      // a member the agent read and live still holds keeps its live place; one removed since that the agent re-creates
+      // (under force) goes by its sent neighbours, as a new member does (P3-F slide-model scalpel-2#1)
+      if (inB.has(k) && inL.has(k)) return;
       if (desired.includes(k)) {
         if (!misplaced.has(k)) return;
         desired.splice(desired.indexOf(k), 1);
