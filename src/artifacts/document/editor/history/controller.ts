@@ -31,6 +31,12 @@ export interface Preview {
   carried: ReadonlyMap<string, Carry['kind']>;
   /** The version's pinned design-system tokens and its own overrides (empty for the live document). */
   tokens: TokenOverrides;
+  /**
+   * F (S-RESTYLE): the design system the shown version pinned (X29's `designSystemRef`; the floor for a version written
+   * with none, as C's deck preview draws it) with the version's own overrides, for the page's scope to draw the version
+   * in, faces included. Null for the live document.
+   */
+  pinned: PinnedScope | null;
   /** The version Restore and Make a copy act on; null when comparing. */
   versionId: number | null;
   /** The whole comparison's changes, tab by tab: the bar's "N changes" and ↑ ↓, the same list the pill counts. */
@@ -42,6 +48,12 @@ export interface Preview {
   focus: number | 'tab' | { extra: string } | null;
   /** P3-E (E2 M4): the kind's extra changes (`HistoryApi.extraChanges`), absent without the hook. */
   extras?: readonly ExtraChange[];
+}
+
+/** What a version's page is drawn in: the system it pinned (the revision, or the bundled floor) and its own overrides. */
+export interface PinnedScope {
+  system: NonNullable<ArtifactVersion['designSystemRef']> | { builtin: 'maws' };
+  overrides: TokenOverrides;
 }
 
 export interface Pill {
@@ -341,6 +353,7 @@ export class HistoryController {
         view: null,
         carried: new Map(),
         tokens: next ? { ...tokens, ...dsOverrides(diff.nextDoc) } : {},
+        pinned: next ? { system: next.designSystemRef ?? { builtin: 'maws' }, overrides: dsOverrides(diff.nextDoc) } : null, // F (S-RESTYLE)
         versionId: target.kind === 'version' ? target.versionId : null,
         changes: documentChanges(diff, extras), // P3-E: extras
         focus: null,

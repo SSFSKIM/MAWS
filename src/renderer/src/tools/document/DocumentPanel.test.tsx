@@ -18,7 +18,7 @@ import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
 import { useLayout } from '../../stores/layout';
 import { resetShellStores } from '../../test-support/shell-stores';
-import { provideDocumentDesignSystem, type DesignSystemScopeProps } from './design-system';
+import { PageSystemProvider, provideDocumentDesignSystem, SystemPage, type DesignSystemScopeProps } from './design-system';
 import { registerDocumentEditor } from './index';
 import type { DocumentTabDeps, DocumentTabState } from './tab-state';
 
@@ -226,5 +226,29 @@ describe('the document editor in L’s registry', () => {
     } finally {
       offSystem();
     }
+  });
+
+  // F's S-RESTYLE: a version the history shows is drawn in the system it pinned, with its own overrides, not the live one
+  it('draws a shown version in the system it pinned, with the version’s overrides', () => {
+    const scopes: Array<Omit<DesignSystemScopeProps, 'children'>> = [];
+    const Scope = ({ children, ...props }: DesignSystemScopeProps) => (scopes.push(props), <div data-testid="system-scope">{children}</div>);
+    const value = { system: { Scope, systemFor: () => ({ id: 'ds-1' }) }, governing: { id: 'ds-1' }, overrides: { '--ds-color-accent': '#111111' } };
+    const { rerender } = render(
+      <PageSystemProvider value={value}>
+        <SystemPage pinned={{ system: { id: 'ds-1', versionSeq: 4 }, overrides: { '--ds-color-accent': '#222222' } }}>
+          <p>page</p>
+        </SystemPage>
+      </PageSystemProvider>,
+    );
+    expect(scopes.at(-1)).toMatchObject({ system: { id: 'ds-1', versionSeq: 4 }, medium: 'document', overrides: { '--ds-color-accent': '#222222' } });
+    rerender(
+      <PageSystemProvider value={value}>
+        <SystemPage>
+          <p>page</p>
+        </SystemPage>
+      </PageSystemProvider>,
+    );
+    expect(scopes.at(-1)).toMatchObject({ system: { id: 'ds-1' }, overrides: { '--ds-color-accent': '#111111' } });
+    expect(scopes.at(-1)!.system).not.toHaveProperty('versionSeq');
   });
 });

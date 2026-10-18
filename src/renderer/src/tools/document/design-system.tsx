@@ -62,13 +62,17 @@ interface PageSystem {
 const PageSystemContext = createContext<PageSystem | null>(null);
 export const PageSystemProvider = PageSystemContext.Provider;
 
-/** The editor's `pageScope`: the page inside the governing system's scope, in the document medium. */
-export function SystemPage({ children }: { children: ReactNode }) {
+/**
+ * The editor's `pageScope`: the page inside the governing system's scope, in the document medium. F (S-RESTYLE): a
+ * version the history shows (`pinned`) is drawn in the system it pinned, with its own overrides, as C's deck preview is;
+ * the editors inside stay mounted, only the scope changes.
+ */
+export function SystemPage({ children, pinned }: { children: ReactNode; pinned?: { system: GoverningSystem; overrides: TokenOverrides } }) {
   const page = useContext(PageSystemContext);
   if (!page) return children;
   const { Scope } = page.system;
   return (
-    <Scope system={page.governing} medium="document" overrides={page.overrides} className="doc-page-system">
+    <Scope system={pinned?.system ?? page.governing} medium="document" overrides={pinned?.overrides ?? page.overrides} className="doc-page-system">
       {children}
     </Scope>
   );

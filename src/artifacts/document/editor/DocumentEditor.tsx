@@ -42,7 +42,7 @@ import { useOpenThreadCount } from './comments/use-threads';
 import { editorExtensions } from './extensions';
 import { FindBar } from './Find';
 import type { HistoryApi } from './history/api';
-import type { HistoryController, HistorySnapshot, Preview } from './history/controller';
+import type { HistoryController, HistorySnapshot, PinnedScope, Preview } from './history/controller';
 import { HistoryBar } from './history/HistoryBar';
 import { HistoryRail } from './history/HistoryRail';
 import { goToChange, setCarried, setExtra /* P3-E */ } from './history/paint';
@@ -83,8 +83,11 @@ export interface DocumentEditorProps {
   onRailChange?(rail: DocumentRail): void;
   /** A new value opens the history rail on its Save version form (the header's Save version); the value at mount is not new. */
   saveVersionRequest?: number;
-  /** What the page is drawn in: the governing design system's scope (D's `<DesignSystemScope>`); the page alone without. */
-  pageScope?: ComponentType<{ children: ReactNode }>;
+  /**
+   * What the page is drawn in: the governing design system's scope (D's `<DesignSystemScope>`); the page alone without.
+   * F (S-RESTYLE): while a version is shown, `pinned` is the system it pinned with its own overrides, to draw it in.
+   */
+  pageScope?: ComponentType<{ children: ReactNode; pinned?: PinnedScope }>;
   /** The page's element as it appears and goes (the shell's Mark-up surface). */
   onPage?(element: HTMLElement | null): void;
   /** Whether a version is shown in place of the live document (the header says read-only meanwhile). */
@@ -540,7 +543,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
   );
   return (
     <div ref={frame} className="doc-page-frame" onContextMenu={editors.onContextMenu}>
-      <div className="doc-page-scope">{Scope ? <Scope>{sheet}</Scope> : sheet}</div>
+      <div className="doc-page-scope">{Scope ? <Scope pinned={preview?.pinned ?? undefined}>{sheet}</Scope> : sheet}</div>
       {comments?.overlay({ ...reach, layoutKey: `${editor.instanceId}:${layout}` })}
       {pill && (
         <div className="doc-pill" data-markup-occluder>

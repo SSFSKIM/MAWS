@@ -5,7 +5,7 @@
 // and the banner; Make a copy; Compare by shift-click; the "See N new changes" pill; Show editors on a selection.
 import type { Editor } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { StrictMode, type ReactNode } from 'react';
+import { StrictMode, type ComponentProps, type ReactNode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -52,6 +52,7 @@ async function setup(
   prepare?: (world: Pick<Mounted, 'host' | 'history' | 'agentWrites'>) => Promise<void> | void,
   options: ConstructorParameters<typeof MemoryHistory>[1] = {},
   wrap: (node: ReactNode) => ReactNode = (node) => node,
+  pageScope?: ComponentProps<typeof DocumentEditor>['pageScope'],
 ): Promise<Mounted> {
   host = new MemoryDocumentHost();
   history = new MemoryHistory(host, { sessionTitles: { [SESSION]: 'Fix the build' }, ...options });
@@ -84,7 +85,7 @@ async function setup(
   await prepare?.({ host, history, agentWrites });
   const handle = await open(HUMAN);
   let editor: Editor | null = null;
-  render(wrap(<DocumentEditor artifactId="doc1" handle={handle} host={memoryEditorHost({ actor: HUMAN, name: 'Owner', color: '--author-2' })} history={history} onEditor={(e) => (editor = e)} />));
+  render(wrap(<DocumentEditor artifactId="doc1" handle={handle} host={memoryEditorHost({ actor: HUMAN, name: 'Owner', color: '--author-2' })} history={history} onEditor={(e) => (editor = e)} pageScope={pageScope} />));
   await until(() => editor !== null && editor.getText().length > 0, 'the editor to bind');
   return { host, history, agent, editor: () => editor!, agentWrites };
 }
@@ -309,6 +310,39 @@ describe('the preview', () => {
     await until(() => page().style.getPropertyValue('--ds-color-text') === 'rgb(4, 5, 6)', 'the new tokens');
     click(within(bar()).getByRole('button', { name: 'Back to document' }));
     await until(() => page().style.getPropertyValue('--ds-color-text') === '', 'the live tokens');
+  });
+
+  // F's S-RESTYLE: the page's scope draws a version in the system it pinned (the floor for one written with none), with
+  // the version's own overrides, as C's deck preview does; the live document again in the governing one
+  it('hands the page’s scope the system each version pinned, and nothing for the live document', async () => {
+    const system = '00000000-0000-4000-8000-0000000000d5';
+    const Scope = ({ children, pinned }: { children: ReactNode; pinned?: { system: { id: string; versionSeq: number } | { builtin: 'maws' }; overrides: Record<string, string> } }) => {
+      const key = !pinned ? 'live' : 'builtin' in pinned.system ? `floor ${JSON.stringify(pinned.overrides)}` : `${pinned.system.id}@${pinned.system.versionSeq} ${JSON.stringify(pinned.overrides)}`;
+      return <div data-scope-key={key}>{children}</div>;
+    };
+    await setup(
+      async ({ history: h, agentWrites }) => {
+        h.version('named', HUMAN, { label: 'Unpinned' });
+        await agentWrites(agentAppends(' More.'));
+        h.version('named', HUMAN, { label: 'Old look', designSystemRef: { id: system, versionSeq: 1 } });
+      },
+      {},
+      undefined,
+      Scope,
+    );
+    const scopeKey = () => document.querySelector<HTMLElement>('[data-scope-key]')!.dataset.scopeKey;
+    const liveEditor = document.querySelector('.ProseMirror:not([data-editor="preview"])');
+    expect(scopeKey()).toBe('live');
+    await openHistory();
+    click(row('Old look'));
+    await previewing();
+    await until(() => scopeKey() === `${system}@1 {}`, 'the pinned system');
+    click(row('Unpinned'));
+    await until(() => scopeKey() === 'floor {}', 'the floor for a version with no pin');
+    click(within(bar()).getByRole('button', { name: 'Back to document' }));
+    await until(() => scopeKey() === 'live', 'the live system');
+    // only the scope changed: the live editor is the one mounted before the preview
+    expect(document.querySelector('.ProseMirror:not([data-editor="preview"])')).toBe(liveEditor);
   });
 
   it('compares two versions picked by shift-click', async () => {
