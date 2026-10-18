@@ -7,8 +7,9 @@
 // additions, S5's comment mark), Tiptap 3.31.3 on `@y/prosemirror` 2.0.0-15; the attribution hardening adapted from
 // upstream's yhub-tiptap-demo/src/schema.js (MIT).
 import { getSchema, Mark, mergeAttributes, Node, type AnyExtension, type Extensions, type RawCommands } from '@tiptap/core';
-import type { Schema } from '@tiptap/pm/model';
+import type { Mark as PMMark, Schema, Slice } from '@tiptap/pm/model';
 import { Plugin, type EditorState } from '@tiptap/pm/state';
+import type { Step } from '@tiptap/pm/transform'; // F (L170)
 import { Blockquote } from '@tiptap/extension-blockquote';
 import { Bold } from '@tiptap/extension-bold';
 import { Code } from '@tiptap/extension-code';
@@ -287,6 +288,33 @@ const CONTROLS = /[\u0000-\u001F\u007F]/g;
 export const withoutControls = <T>(value: T): T => (typeof value === 'string' ? (value.replace(CONTROLS, '') as T) : value);
 const linkAttrs = <T extends object>(attrs: T): T =>
   Object.fromEntries(Object.entries(attrs).map(([key, value]) => [key, key === 'href' || key === 'title' ? withoutControls(value) : value])) as T;
+// F (L170): every other local write of a link (Tiptap's `updateAttributes`, a raw `tr.addMark`, content inserted as
+// JSON) is stored stripped too: a transaction bringing such a link gets a repair appended, applied before the binding
+// writes the state to Y (its pull runs in the view's update, after the appended transactions), and never a throw (a
+// `validate` would throw on remote content). What the binding brings is not repaired here (`guard`).
+const unsafeLink = (mark: PMMark): boolean => mark.type.name === 'link' && (withoutControls(mark.attrs.href) !== mark.attrs.href || withoutControls(mark.attrs.title) !== mark.attrs.title);
+function bringsUnsafeLink(step: Step): boolean {
+  const { mark, slice } = step as { mark?: PMMark; slice?: Slice };
+  if (mark) return unsafeLink(mark);
+  let found = false;
+  slice?.content.descendants((node) => {
+    found ||= node.marks.some(unsafeLink);
+    return !found;
+  });
+  return found;
+}
+const linkRepair = (): Plugin =>
+  new Plugin({
+    appendTransaction(trs, _old, state) {
+      if (!trs.some((tr) => tr.steps.some(bringsUnsafeLink))) return null;
+      const tr = state.tr;
+      state.doc.descendants((node, pos) => {
+        for (const mark of node.isInline ? node.marks : []) if (unsafeLink(mark)) tr.addMark(pos, pos + node.nodeSize, mark.type.create(linkAttrs(mark.attrs)));
+        return true;
+      });
+      return tr.docChanged ? tr : null;
+    },
+  });
 
 /** The binding's `attributedNodes`: a strict container holding a deletion renders as its `--attributed` variant. */
 export const attributedNodes = (name: string, kinds: { insert?: boolean; delete?: boolean; format?: boolean }): boolean =>
@@ -343,6 +371,9 @@ export const extensions = ({ generateID = (): string => nanoid8() }: { generateI
       const parent = this.parent?.() ?? {};
       const { setLink, toggleLink } = parent as Pick<RawCommands, 'setLink' | 'toggleLink'>;
       return { ...parent, setLink: (attrs) => setLink(linkAttrs(attrs)), toggleLink: (attrs) => toggleLink(attrs && linkAttrs(attrs)) };
+    },
+    addProseMirrorPlugins(this: { parent?: () => Plugin[] }) {
+      return [...(this.parent?.() ?? []), guard(linkRepair())]; // F (L170)
     },
   }),
   // a `<mark>` without a colour reads as no colour (Tiptap's rule reads the empty inline style as `''`), M6
