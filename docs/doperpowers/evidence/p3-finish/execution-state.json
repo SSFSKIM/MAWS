@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M1 pair2: MINI diagnostic candidate approved; fresh STORE fix wave before union gate",
+  "phase": "M1 pair2 source review corrections complete; preparing named union diagnostic gate",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -78,11 +78,14 @@
   },
   "M2-preparation": {
     "executor": "adeb9c47ffd6b1bc0",
-    "status": "draft independently approved after one fix; final-source recheck remains; no owner steps run",
+    "status": "draft plus side-by-side procedure prepared; final-source and exact Space-default labels recheck pending; no owner steps run",
     "commit": "b9551cab8",
     "reviewer": "adcc38ef2eb777453",
     "fixCommit": "0a64bcb47",
-    "reviewRounds": 2
+    "reviewRounds": 2,
+    "comparisonEditor": "adeb9c47ffd6b1bc0",
+    "comparisonSource": "25b29e64f; independent panel/main history controllers confirmed read-only",
+    "comparisonCommit": "b34c32786"
   },
   "W-MINI": {
     "status": "diagnostic candidate approved, not wave complete; native reading pending",
@@ -103,7 +106,7 @@
     "reviewFixCommit": "5f115a09d"
   },
   "W-STORE": {
-    "status": "four original plus two supplemental commits reviewed; four verified findings in fresh fix wave",
+    "status": "review findings addressed; final specified guard mechanically verified; remote gate pending",
     "executor": "a53b2ea8e3417bc02",
     "claims": "pair2-claims.json",
     "rowCommits": [
@@ -117,9 +120,15 @@
       "f71d7e046"
     ],
     "reviewer": "a64e6ed27a8f39b3f",
-    "reviewRounds": 1,
+    "reviewRounds": 2,
     "fixExecutor": "a9b6e9e5eb14418ce",
-    "checkpoint": "waves/W-STORE-checkpoint.json"
+    "checkpoint": "waves/W-STORE-checkpoint.json",
+    "fixCommits": [
+      "10c238a01",
+      "25b29e64f",
+      "15863818e"
+    ],
+    "finalGuardCommit": "5b5017f9d"
   },
   "baselineFold": {
     "merge": "25eb0e6a8",
@@ -137,5 +146,11 @@
     "at": "2026-10-18T12:00:00Z",
     "rule": "one notification; consider discriminator only with no wave gate pending",
     "status": "completed; no discriminator started because pair2 diagnostic gate pending"
+  },
+  "pair2GatePrepared": {
+    "launcher": "/tmp/maws-review/p3f-mini-store-diagnosis-launch.sh",
+    "label": "p3f-mini-store",
+    "status": "not launched",
+    "extraGroupReason": "dashboard shares document editor/history surface"
   }
 }
