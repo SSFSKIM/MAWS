@@ -4,7 +4,7 @@
 // deck's own keys, each with its author and time; "N changes" and the order ↑ ↓ visits them in; Show editors of a live
 // element.
 import { describe, expect, it } from 'vitest';
-import { applyV1, applyV2, attributionMap, contentIdsOf, mergeMaps, newDoc, onUpdate, stateV2, transact, type ContentMap, type Doc } from '../yjs';
+import { applyV1, applyV2, attributionMap, contentIdsOf, mergeMaps, newDoc, onUpdate, revertUpdate, stateV2, transact, type ContentMap, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { changeStops, deckChanges, elementEditors, openDeckDiff, type DeckChanges } from './history';
 import { deleteElementTree, importSlide, moveSlide, setNotes, setStyle, setText, slideOrder, writeDeckKeys } from './model';
@@ -403,6 +403,23 @@ describe('P3-F (L211): a restored slide’s notes deletions, each credited by it
     const v = restoredWithTransient(w, 'Keep notes.');
     const parts = changesOf(w, v).slides[0]!.notes.flatMap((r) => r.parts);
     expect(parts.map((p) => [p.kind, p.text, p.by, p.at])).toEqual([['del', 'these ', 'human:restore', T0 + 4 * MIN]]);
+  });
+
+  // fix wave: the restorer itself types into the restored notes and takes it back in the restore's minute (one actor,
+  // one minute: provenance alone cannot tell the two apart). The restore lands as the host writes it: the revert's own
+  // update, under the clientID of its scratch doc; the owner types from their replica.
+  it('credits a deletion of restored text to its deleter when the restorer typed and took back text there in the restore’s minute (gc on)', () => {
+    const w = world(['a']);
+    expect(w.host.gc).toBe(true);
+    w.land('human', (doc) => setNotes(doc, 'a', 'Keep these notes.')); // + 2 min: the version's notes
+    const v = w.mark();
+    w.land('human', (doc) => Y.deleteSlide(doc, 'a')); // + 3 min
+    w.land('human', (doc) => applyV2(doc, revertUpdate(v.state, stateV2(doc)))); // + 4 min: the restore
+    w.land('human', (doc) => setNotes(doc, 'a', 'Keep ZZthese notes.'), { sameMinute: true }); // + 4 min too
+    w.land('human', (doc) => setNotes(doc, 'a', 'Keep these notes.'), { sameMinute: true });
+    w.land('session:x', (doc) => setNotes(doc, 'a', 'Keep notes.')); // + 5 min
+    const parts = changesOf(w, v).slides[0]!.notes.flatMap((r) => r.parts);
+    expect(parts.map((p) => [p.kind, p.text, p.by, p.at])).toEqual([['del', 'these ', 'session:x', T0 + 5 * MIN]]);
   });
 });
 
