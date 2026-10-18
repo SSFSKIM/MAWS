@@ -613,6 +613,14 @@ describe('revoke', () => {
     expect(h.form(first)).toEqual({ token: 'rt-0', token_type_hint: 'refresh_token' });
   });
 
+  // P3-F F-connectors 3: RFC 6749 §2.3.1: each Basic component is form-encoded before Base64, so a secret's '+', '/', '='
+  // or '%' reaches a conforming endpoint as itself
+  it('form-encodes the client id and secret before Basic authentication', async () => {
+    const h = new Harness();
+    await h.flow.revoke(savedGrant({ client: { client_id: 'client 1', client_secret: 'se+c/r=t%', redirect_uris: [], token_endpoint_auth_method: 'client_secret_basic' }, authorizationServer: { ...METADATA, revocation_endpoint: `${AS}/revoke`, token_endpoint_auth_methods_supported: ['client_secret_basic'] } }), new AbortController().signal);
+    expect(h.posts('/revoke').map((post) => post.headers.get('authorization'))).toEqual([`Basic ${btoa('client+1:se%2Bc%2Fr%3Dt%25')}`, `Basic ${btoa('client+1:se%2Bc%2Fr%3Dt%25')}`]);
+  });
+
   it('is unsupported without an advertised endpoint, and a failing endpoint is reported, never thrown', async () => {
     const none = new Harness();
     expect(await none.flow.revoke(savedGrant({ authorizationServer: METADATA }), new AbortController().signal)).toBe('unsupported');

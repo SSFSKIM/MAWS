@@ -194,9 +194,13 @@ function callbackWaiter(issuer: string, issRequired: boolean) {
   };
 }
 
+// P3-F F-connectors 3: RFC 6749 §2.3.1: the client id and secret are each application/x-www-form-urlencoded before
+// they are joined and Base64-encoded, so a conforming endpoint decodes a '+', '/', '=' or '%' in either as itself.
+const formEncoded = (value: string): string => new URLSearchParams([['', value]]).toString().slice(1);
+
 function applyClientAuthentication(method: string, client: OAuthClientInformationFull, headers: Headers, params: URLSearchParams): void {
   if (method === 'client_secret_basic' && client.client_secret !== undefined) {
-    headers.set('Authorization', `Basic ${btoa(`${client.client_id}:${client.client_secret}`)}`);
+    headers.set('Authorization', `Basic ${btoa(`${formEncoded(client.client_id)}:${formEncoded(client.client_secret)}`)}`);
     return;
   }
   params.set('client_id', client.client_id);
