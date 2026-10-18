@@ -7,8 +7,13 @@
 //
 // What the session plane keeps survives an eviction while sockets stay open (§2): machines' leases and presence,
 // sessions' presence, the pending set, delivery outcomes, RPC records, and subscription routes (session-store.ts).
-// A machine is online while its lease is fresh; when the lease lapses, its stream closes, or it is revoked, the
-// machine's subscriptions end at the browsers and its forwarded RPCs without a result become `uncertain`.
+// A machine is online while its lease is fresh; when its stream closes, or a newer stream replaces it, the stream's
+// subscriptions end at the browsers and its forwarded RPCs without a result become `uncertain`. A stream's close does
+// not put the machine offline at once: its lease holds for a grace (`graceMs`, one heartbeat), long enough for the
+// machine's next stream to take it over, so a reconnect (the daemon's, or one the hub's own object forced) never flaps
+// the machine's presence. A subscription a browser asks for in that grace waits for the next stream (`PARKED`) and is
+// carried to it at its `hello`. When the lease lapses (the grace or the lease ran out) or the machine is revoked, the
+// machine is offline, and what still waited ends too.
 import { DurableObject } from 'cloudflare:workers';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
@@ -42,8 +47,13 @@ export type SocketAttachment = { id: string; member: string; visibleAt: number |
 export const VISIBLE_MS = 90_000;
 
 /** Who sent a machine's frame: its org, the project it names, the machine and the credential its stream was opened
- * with, the stream the POST belongs to, and how long a renewal on that stream keeps the machine online. */
-export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number };
+ * with, the stream the POST belongs to, how long a renewal on that stream keeps the machine online, and how long the
+ * lease holds after that stream closes (`graceMs`; absent from a `Machine` of an older deploy, whose closes lapse at
+ * once as before). */
+export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number; graceMs?: number };
+
+/** A route's generation while its subscription waits for the machine's next stream: no stream is generation 0. */
+const PARKED = 0;
 
 /** How many audit entries a browser that resumes is shown after `caught-up`. */
 const AUDIT_REPLAY = 100;
@@ -237,20 +247,30 @@ export class Project extends DurableObject<Env> {
     void this.schedule();
   }
 
-  /** The stream this lease belongs to closed: the machine is offline at once. A close of an older generation is
-   * ignored. A close of a newer one than the lease (its first `hello` here still waits on the Registry, or never came)
-   * ends the older stream's lease and leaves the closed generation's own, so that `hello` opens nothing. */
+  /** The stream this lease belongs to closed: what the stream carried ends at once, and the lease, closed (nothing of
+   * that generation renews it again), holds the machine online for the grace, for its next stream to take over; it
+   * lapses when the grace runs out. A close of an older generation is ignored. A close of a newer one than the lease
+   * (its first `hello` here still waits on the Registry, or never came) ends the older stream's work and leaves the
+   * closed generation's own lease, so that `hello` opens nothing, held through the grace as the older one was. */
   closed(ctx: MachineContext): void {
     this.remember(ctx.org, ctx.project);
+    this.sweepLeases();
     const lease = this.plane.lease(ctx.machine);
     if (lease && (lease.generation > ctx.generation || (lease.generation === ctx.generation && lease.closed))) return;
+    const holding = lease !== undefined && this.isFresh(lease);
+    if (lease && holding) this.endStreamWork(ctx.machine, lease.generation, false);
+    const grace = Math.min(lease?.expires ?? 0, Date.now() + (ctx.graceMs ?? 0));
     if (!lease || lease.generation < ctx.generation) {
-      if (lease?.online) this.lapse(lease);
-      this.plane.putLease({ machine: ctx.machine, client: ctx.client, generation: ctx.generation, expires: 0, online: false, closed: true, follow: false });
+      const held = holding && grace > Date.now();
+      this.plane.putLease({ machine: ctx.machine, client: ctx.client, generation: ctx.generation, expires: held ? grace : 0, online: held, closed: true, follow: lease?.follow ?? false });
+      if (holding && !held) this.lapsed(ctx.machine);
+      void this.schedule();
       return;
     }
-    if (lease.online) this.lapse({ ...lease, closed: true });
+    if (holding && grace > Date.now()) this.plane.putLease({ ...lease, expires: grace, closed: true });
+    else if (lease.online) this.lapse({ ...lease, closed: true });
     else this.plane.putLease({ ...lease, closed: true });
+    void this.schedule();
   }
 
   /**
@@ -576,11 +596,11 @@ export class Project extends DurableObject<Env> {
     const record = this.plane.rpc(nonce);
     if (record) {
       if (record.member !== member || canonicalize(record.rpc) !== canonicalize(rpc)) return fail('bad-shape', 'this nonce was sent with another RPC');
-      if (record.state === 'uncertain' && this.isOnline(record.machine)) return this.forward(record.rpc, member, true);
+      if (record.state === 'uncertain' && this.reachable(record.machine)) return this.forward(record.rpc, member, true);
       return this.toSocket(socket, rpcStateFrame(record));
     }
     if (!(Date.now() - Date.parse(rpc.created) <= RPC_FRESHNESS_MS)) return fail('stale', 'older than 60 seconds: issue it again');
-    if (!this.isOnline(rpc.machine)) return fail('machine-offline', `${rpc.machine} is offline`);
+    if (!this.reachable(rpc.machine)) return fail('machine-offline', this.isOnline(rpc.machine) ? `${rpc.machine} is reconnecting: try again in a moment` : `${rpc.machine} is offline`);
     this.forward(rpc, member);
   }
 
@@ -624,10 +644,16 @@ export class Project extends DurableObject<Env> {
     this.sweepLeases();
     const lease = this.plane.lease(machine as string);
     if (!lease || !this.isFresh(lease)) return end('machine-offline');
-    const route: Route = { sub: sub as string, socket: attachment.id, machine: machine as string, session: session as string, agentId: agentId as string | null, generation: lease.generation };
+    // A machine between streams (its lease closed, in the grace) takes the subscription with its next stream.
+    const route: Route = { sub: sub as string, socket: attachment.id, machine: machine as string, session: session as string, agentId: agentId as string | null, generation: lease.closed ? PARKED : lease.generation };
     this.plane.putRoute(route);
     this.routes.set(route.sub, route);
     this.attach(socket, (a) => ({ ...a, subs: { ...a.subs, [route.sub]: 0 } }));
+    if (route.generation !== PARKED) this.carry(route);
+  }
+
+  /** Carries a subscription to the stream of its route; one the stream cannot take ends. */
+  private carry(route: Route): void {
     this.toMachine(route.machine, route.generation, { t: 'subscribe', project: this.projectId, session: route.session, agentId: route.agentId, sub: route.sub }).then(
       (sent) => sent === 'offline' && this.endSub(route, 'machine-offline'),
       () => this.endSub(route, 'machine-offline'),
@@ -682,8 +708,8 @@ export class Project extends DurableObject<Env> {
   private startLease(ctx: MachineContext, follow: boolean): void {
     const old = this.plane.lease(ctx.machine);
     if (old && old.generation > ctx.generation) return;
-    // The older stream's subscriptions and unanswered RPCs went with it.
-    if (old && old.generation < ctx.generation) this.endStreamWork(ctx.machine, old.generation);
+    // The older stream's subscriptions and unanswered RPCs went with it; those waiting for a stream wait for this one.
+    if (old && old.generation < ctx.generation) this.endStreamWork(ctx.machine, old.generation, false);
     const wasOnline = old !== undefined && this.isFresh(old);
     // A second `hello` on a stream that already closed (it was on its way) opens nothing.
     if (old?.generation === ctx.generation && old.closed) return;
@@ -691,19 +717,36 @@ export class Project extends DurableObject<Env> {
     const presenceGone = follow && this.plane.deleteMachinePresence(ctx.machine);
     if (!wasOnline) this.cameOnline(ctx.machine);
     else if (old.generation !== ctx.generation || old.follow !== follow || presenceGone) this.machinesChanged();
+    for (const parked of [...this.routes.values()]) {
+      if (parked.machine !== ctx.machine || parked.generation !== PARKED) continue;
+      const route = { ...parked, generation: ctx.generation };
+      this.plane.deleteRoute(route.sub);
+      this.plane.putRoute(route);
+      this.routes.set(route.sub, route);
+      this.carry(route);
+    }
     void this.schedule();
   }
 
   private lapse(lease: Lease): void {
     this.plane.putLease({ ...lease, online: false });
-    this.endStreamWork(lease.machine, lease.generation);
+    this.lapsed(lease.machine, lease.generation);
+  }
+
+  /** The machine went offline: what its streams through `generation` carried ends, and what waited for a stream too. */
+  private lapsed(machine: string, generation = this.plane.lease(machine)?.generation ?? 0): void {
+    this.endStreamWork(machine, generation, true);
     this.machinesChanged();
   }
 
   /** What a machine's stream carried ends with it: its subscriptions end at their browsers, and its forwarded RPCs
-   * without a result become `uncertain`. */
-  private endStreamWork(machine: string, generation: number): void {
-    for (const route of [...this.routes.values()]) if (route.machine === machine && route.generation <= generation) this.endSub(route, 'machine-offline');
+   * without a result become `uncertain`. Subscriptions waiting for its next stream end too when `parked` (the machine is
+   * offline), and wait on otherwise. */
+  private endStreamWork(machine: string, generation: number, parked: boolean): void {
+    for (const route of [...this.routes.values()]) {
+      if (route.machine !== machine || route.generation > generation || (route.generation === PARKED && !parked)) continue;
+      this.endSub(route, 'machine-offline');
+    }
     for (const record of this.plane.forwarded(machine, generation)) this.updateRpc({ ...record, state: 'uncertain', outcome: null });
   }
 
@@ -738,6 +781,13 @@ export class Project extends DurableObject<Env> {
   private isOnline(machine: string): boolean {
     const lease = this.plane.lease(machine);
     return lease !== undefined && this.isFresh(lease);
+  }
+
+  /** Whether an RPC can be carried to the machine now: online on a stream that is open, not in a closed stream's grace
+   * (which holds its presence for the next stream, not its delivery). */
+  private reachable(machine: string): boolean {
+    const lease = this.plane.lease(machine);
+    return lease !== undefined && !lease.closed && this.isFresh(lease);
   }
 
   /** Whether the machine is online and holds the project: one that only follows it is none of its machines. */

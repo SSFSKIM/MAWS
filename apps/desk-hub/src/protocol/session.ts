@@ -179,8 +179,9 @@ export type SessionBodies = {
    */
   row: { row: JsonObject; agentId: string | null; offChain?: string[]; onChain?: string[] };
   /** A `turn.step` chunk object verbatim under `chunk`, nested beside its message's identity and its index in that
-   * message from 0 (DX5's chunk event). */
-  chunk: { turnId: string; agentId: string | null; step: number; chunkIndex: number; chunk: JsonObject };
+   * message from 0 (DX5's chunk event). `t`: when the session's bridge took the chunk (DX5's event stamp, ms since the
+   * epoch on the machine's clock), for the web's latency readout; absent from a producer older than MAWS #57. */
+  chunk: { turnId: string; agentId: string | null; step: number; chunkIndex: number; chunk: JsonObject; t?: number };
   'block-row': BlockRow;
   'step-end': StepEnd;
   /** Older rows of the sub's transcript, newest first, answering a browser's `rows` request; `offChain` as the snapshot's. */
