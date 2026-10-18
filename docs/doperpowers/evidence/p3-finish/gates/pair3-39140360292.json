@@ -1,0 +1,43 @@
+{
+  "runId": 39140360292,
+  "sourceCommit": "6d9a8242085a2b4214b5678951e91124f6309833",
+  "wrapperHead": "8e6c8f48b9f5a3b3bdd0f2648caa66f5cb81040d",
+  "createdAt": "2026-10-18T15:24:48Z",
+  "recordedAt": "2026-10-18T15:32:43Z",
+  "label": "p3f-doc-a-deck",
+  "groups": [
+    "static",
+    "unit",
+    "probes",
+    "unit:darwin",
+    "e2e:document-app",
+    "e2e:document",
+    "e2e:design",
+    "e2e:side",
+    "e2e:presentations",
+    "e2e:tools",
+    "e2e:artifacts",
+    "e2e:design-systems",
+    "e2e:dashboard"
+  ],
+  "status": "launched; jobs active",
+  "attempt": 1,
+  "conclusion": null,
+  "completionTask": "bt15x2m1r",
+  "completionMethod": "background Bash runs actual wrapper; automatic notification, no completion waiter",
+  "queueThresholdTask": "bcrpvzt6a",
+  "log": "/tmp/maws-review/gates/p3f-doc-a-deck-ci.log",
+  "integration": {
+    "master": "1f5cc7cd5",
+    "merge": "6d9a82420",
+    "tracker": "F tracker preserved except exact2upstream DC9 replacements/3new desk rows; folded aliases not resurrected"
+  },
+  "reviews": {
+    "DOC-A": "correct round1 a69c0ca8f5888e14f",
+    "DECK": "correct round2 a042b15ec9aa10fab aftera5359afa8/28f9eecb7; L211 partial carry"
+  },
+  "postGate": "report completion/result immediately to architect; maws-3f45\u201360minute lane hold follows; pair4 gate waits explicit release",
+  "notFinalSource": true,
+  "fullSetCounterAdvance": false,
+  "paidSpendUsd": 0
+}

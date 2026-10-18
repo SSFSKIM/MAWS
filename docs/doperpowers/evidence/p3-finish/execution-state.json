@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "DOC-A review-clean; DECK two-finding fix/recheck pending; no gate running; four-run discriminator completed",
+  "phase": "pair3 union39140360292 running; pair4 read-only preparation resumed, no edits yet",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -89,7 +89,10 @@
     "exactLabelsCommits": [
       "6d18c529a",
       "c73e78e8c"
-    ]
+    ],
+    "notesSceneCommit": "e98580866",
+    "notesScene": "source-derived5.1b,4000byte/0newline sample verified, select-all before paste corrected; owner unrun",
+    "notesSceneFixCommit": "f02852e10"
   },
   "W-MINI": {
     "status": "source frontier and documentary updates accepted; source TS4b0e1f1e3 mechanically verified, next normal union proves typecheck",
@@ -240,15 +243,16 @@
   },
   "W-DECK": {
     "executor": "a00549767dfb02089",
-    "status": "two verified review findings under fresh bounded fix wave; source closures not accepted",
+    "status": "round2 source review correct; L211 narrowed P4 carry restored; gate running",
     "claims": "pair3-claims.json",
     "reviewer": "a042b15ec9aa10fab",
     "checkpoint": "waves/W-DECK-checkpoint.json",
-    "fixExecutor": "a2097c2f1e042d41a"
+    "fixExecutor": "a2097c2f1e042d41a",
+    "L211CarryCommit": "3eca1ffff"
   },
   "pair3GatePrepared": {
     "launcher": "/tmp/maws-review/p3f-doc-a-deck-launch.sh",
-    "status": "not launched; DECK fix/recheck pending",
+    "status": "launched",
     "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:design,e2e:side,e2e:presentations,e2e:tools,e2e:artifacts,e2e:design-systems,e2e:dashboard"
   },
   "laneSchedule": {
@@ -261,5 +265,29 @@
     },
     "duringHold": "implement pair4 DOC-B+SHELL",
     "pair4GateRelease": "explicit architect lane-free message required; elapsed time alone never releases"
+  },
+  "pair3Gate": {
+    "runId": 39140360292,
+    "sourceCommit": "6d9a8242085a2b4214b5678951e91124f6309833",
+    "wrapperHead": "8e6c8f48b9f5a3b3bdd0f2648caa66f5cb81040d",
+    "completionTask": "bt15x2m1r",
+    "queueThresholdTask": "bcrpvzt6a",
+    "log": "/tmp/maws-review/gates/p3f-doc-a-deck-ci.log",
+    "status": "launched; jobs active"
+  },
+  "W-DOC-B": {
+    "executor": "afe4ec31e37c3925e",
+    "status": "read-only prep resumed once after provider HTTP400; no edit release"
+  },
+  "W-SHELL": {
+    "executor": "a87de8fe2228592d9",
+    "status": "read-only prep resumed once after provider HTTP400; no edit release"
+  },
+  "effectiveBins": {
+    "fix": 52,
+    "sitting": 10,
+    "close": 9,
+    "defer": 125,
+    "theirs": 42
   }
 }
