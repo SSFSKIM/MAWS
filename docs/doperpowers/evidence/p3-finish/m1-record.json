@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 108,
-    "defer:pending": 15,
+    "defer:committed": 109,
+    "defer:pending": 14,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1442,7 +1442,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L204; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "A per-slide accept and reject on the stage, a milestone of its own. Owner: P4. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L204; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "7ea3457c8a2e080f98c0cd2e6bbe01744da0ae4a"
     },
     {
       "line": 205,
@@ -1452,8 +1452,8 @@
       "triageReason": "Internal parser-hook dependency is a re-pin regression obligation, not a current defect.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L205; parent Decision Log 106): Internal parser-hook dependency is a re-pin regression obligation, not a current defect. Owner: P4; revalidated at each parse5 re-pin.",
       "remainingClause": "At any parse5 re-pin the hooks are kept or the loader moves to public ones; the regression says which. Owner: P3-F (at a re-pin). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L205; parent Decision Log 106): Internal parser-hook dependency is a re-pin regression obligation, not a current defect. Owner: P4; revalidated at each parse5 re-pin.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 207,
