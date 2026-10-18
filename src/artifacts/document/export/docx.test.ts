@@ -23,6 +23,16 @@ async function parts(bytes: Uint8Array): Promise<Record<string, string>> {
 }
 
 describe('exportDocx', () => {
+  // P3-F W-DOC-B (tracker L166, the architect's export condition): a line ending inside text is a line break in Word, as
+  // a hardBreak is, never a raw line feed inside a run's text (not a line break in WordprocessingML) nor `&#10;`
+  it('writes a line ending inside text as a Word line break', async () => {
+    const bytes = await exportDocx(sourceOf([{ type: 'paragraph', content: [{ type: 'text', text: 'Title\n# not a heading' }] }]));
+    const document = (await parts(bytes))['word/document.xml'];
+    expect(document).toMatch(/<w:t[^>]*>Title<\/w:t><\/w:r><w:r>(?:<w:rPr>.*?<\/w:rPr>)?<w:br\/><w:t[^>]*># not a heading<\/w:t>/s);
+    expect(document).not.toMatch(/<w:t[^>]*>[^<]*\n[^<]*<\/w:t>/);
+    expect(document).not.toContain('&amp;#10;');
+  });
+
   it('writes headings with Word’s heading styles, styled from the system', async () => {
     const xml = await parts(await exportDocx(everyKindSource(), { tab: 'tab-1' }));
     const document = xml['word/document.xml'];

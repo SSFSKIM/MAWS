@@ -158,7 +158,8 @@ class Writer {
     let runs: ParagraphChild[];
     switch (node.type.name) {
       case 'text':
-        runs = [new TextRun({ text: node.text ?? '', ...format })];
+        // a line ending inside text is a line break in Word, as a hardBreak is (P3-F, tracker L166)
+        runs = (node.text ?? '').split('\n').map((piece, k) => new TextRun({ text: piece, ...(k > 0 ? { break: 1 } : {}), ...format }));
         break;
       case 'hardBreak':
         runs = [new TextRun({ break: 1, ...format })];

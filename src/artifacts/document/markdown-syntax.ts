@@ -364,15 +364,16 @@ const parseOptions = (text: string | undefined): string[] => {
 
 /** The serializers and parsers, by extension name, that markdown.ts extends the schema's extensions with. */
 export const MARKDOWN: Record<string, object> = {
-  // The three entities the dialect writes for whitespace Markdown would drop (markdown.ts) read back as that whitespace;
-  // marked leaves character references in text, and Tiptap decodes only the four it writes itself.
+  // The entities the dialect writes for whitespace Markdown would drop or read as structure (markdown.ts; `&#10;`, a line
+  // ending inside text, P3-F tracker L166) read back as that whitespace; marked leaves character references in text,
+  // and Tiptap decodes only the four it writes itself.
   text: {
     markdownTokenizer: {
       name: 'whitespaceEntity',
       level: 'inline',
-      start: (src: string) => src.search(/&#(?:32|9|160);/),
+      start: (src: string) => src.search(/&#(?:32|9|160|10);/),
       tokenize: (src: string) => {
-        const match = /^&#(32|9|160);/.exec(src);
+        const match = /^&#(32|9|160|10);/.exec(src);
         return match ? { type: 'text', raw: match[0], text: String.fromCharCode(Number(match[1])) } : undefined;
       },
     },

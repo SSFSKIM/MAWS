@@ -323,6 +323,35 @@ describe('every stored state, one at a time', () => {
     highlightOnlySpace: p(t('a'), t(' ', [{ type: 'highlight', attrs: { color: null } }]), t('b')),
     headingBoldOnlySpace: { type: 'heading', attrs: { level: 2 }, content: [t('a'), t(' ', [{ type: 'bold' }]), t('b')] },
     itemBoldOnlySpace: { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('a'), t(' ', [{ type: 'bold' }]), t('b'))] }] },
+    // P3-F W-DOC-B (tracker L166): a bare line ending inside text (an agent's soft break; the editor writes hardBreak)
+    // reads back as itself, never as a heading, an underline, a list, a quote, code, a new paragraph or a hard break
+    newlineHeading: p(t('a\n# b')),
+    newlineSetext: p(t('Title\n---')),
+    newlineSetextEquals: p(t('Title\n=')),
+    newlineItem: p(t('a\n- b')),
+    newlineOrdered: p(t('a\n1. b')),
+    newlineQuote: p(t('a\n> b')),
+    newlineFence: p(t('a\n```\nb')),
+    newlineMarker: p(t('a\n^ab')),
+    newlineStructure: p(t('a\n:::callout')),
+    newlineTableRow: p(t('a|b\n-|-')),
+    newlineBlank: p(t('a\n\nb')),
+    newlineIndented: p(t('a\n    b')),
+    newlineTrailingSpaces: p(t('a  \nb')),
+    newlineEdges: p(t('\na\n')),
+    newlineOnly: p(t('\n')),
+    newlineBold: p(t('Title\n---', [{ type: 'bold' }])),
+    newlineBoldEdges: p(t('a'), t('\nb\n', [{ type: 'bold' }]), t('c')),
+    newlineLink: p(t('a\nb', [{ type: 'link', attrs: { href: 'https://a.com', title: null } }])),
+    newlineHighlightColor: p(t('a\nb', [{ type: 'highlight', attrs: { color: '#fde68a' } }])),
+    newlineBesideBreak: p(t('a\n'), { type: 'hardBreak' }, t('b')),
+    newlineInHeading: { type: 'heading', attrs: { level: 2 }, content: [t('a\n# b')] },
+    newlineInItem: { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('a\n# b'))] }] },
+    newlineInQuote: { type: 'blockquote', content: [p(t('a\n- b'))] },
+    newlineInCell: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t('a\n- b')))] }] },
+    // the escape beside text that spells it, and beside the content's own copy of its sentinel character
+    newlineLiteralEntity: p(t('&#10;\n&#10;')),
+    newlineLiteralSentinel: p(t('a\nb'), t('\n', [{ type: 'bold' }])),
     rowBoldOnlySpace: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t('H')))] }, { type: 'tableRow', content: [cell('tableCell', {}, p(t('a'), t(' ', [{ type: 'bold' }]), t('b')))] }] },
     literalInCode: { type: 'codeBlock', attrs: { language: null }, content: [t(SENTINEL_ALPHABET.join('1'))] },
     literalInInlineCode: p(t(`x ${SENTINEL_ALPHABET.join('')}`, [{ type: 'code' }])),
@@ -519,6 +548,76 @@ describe('text that reads as markup', () => {
     expect(shape(back.toJSON() as JSONContent)).toEqual(shape(table.toJSON() as JSONContent));
     expect(back.attrs.id).toBe('t1');
     expect([back.child(0).attrs.id, back.child(1).attrs.id]).toEqual(['r0', 'r1']);
+  });
+});
+
+// P3-F W-DOC-B (tracker L166): the canonical form (the agent's read, ids on or off) writes a bare line ending as `&#10;`,
+// code keeping its raw line ends; the agent's own soft break and that escape parse alike; a literal `&#10;` and a
+// hardBreak read as before. A reader's Markdown (an export) writes a hard line break instead, never the escape.
+describe('a line ending inside text', () => {
+  const para = (id: string, ...content: PMNode[]) => schema.nodes.paragraph.create({ id }, content);
+  const hardBreak = () => schema.nodes.hardBreak.create();
+
+  it('is written &#10; on its line in the canonical form, and code keeps its own line ends', () => {
+    const code = schema.nodes.codeBlock.create({ id: 'c1', language: null }, schema.text('x\n# y'));
+    const read = md.serialize(docOf([para('p1', schema.text('Title\n# not a heading')), code]));
+    expect(read).toContain('Title&#10;# not a heading ^p1');
+    expect(md.block(code)).toContain('x\n# y');
+    expect(md.block(code)).not.toContain('&#10;');
+    expect(md.serialize(docOf([para('p1', schema.text('a\nb'))]), { ids: false })).toBe('a&#10;b');
+  });
+
+  it('reads back alike from an agent’s soft break and from &#10;; a literal &#10; and a hardBreak read as before', () => {
+    const inline = (markdown: string) => md.parse(markdown)[0].toJSON().content;
+    expect(inline('one\ntwo ^p1')).toEqual([{ type: 'text', text: 'one\ntwo' }]);
+    expect(inline('one&#10;two ^p1')).toEqual([{ type: 'text', text: 'one\ntwo' }]);
+    expect(inline('one &amp;#10; two ^p1')).toEqual([{ type: 'text', text: 'one &#10; two' }]);
+    expect(md.serialize(docOf([para('p1', schema.text('a'), hardBreak(), schema.text('b'))]))).toBe('a  \nb ^p1');
+  });
+
+  it('is a hard line break in a reader’s Markdown, never the escape, and nothing after it reads as markup', () => {
+    const out = md.serialize(docOf([para('p1', schema.text('a\n# b\n\n- c\n'))]), { ids: false, forReaders: true });
+    expect(out).not.toContain('&#10;');
+    expect(out).toBe('a\\\n\\# b\\\n\\\n\\- c');
+    const back = md.parse(out);
+    expect(back).toHaveLength(1);
+    expect(back[0].toJSON().content).toEqual([
+      { type: 'text', text: 'a' },
+      { type: 'hardBreak' },
+      { type: 'text', text: '# b' },
+      { type: 'hardBreak' },
+      { type: 'hardBreak' },
+      { type: 'text', text: '- c' },
+    ]);
+    const heading = schema.nodes.heading.create({ id: 'h1', level: 2 }, schema.text('a\n# b'));
+    expect(md.serialize(docOf([heading]), { ids: false, forReaders: true })).toBe('## a # b');
+    const code = schema.nodes.codeBlock.create({ id: 'c1', language: null }, schema.text('x\n# y'));
+    expect(md.serialize(docOf([code]), { ids: false, forReaders: true })).toContain('x\n# y');
+  });
+
+  it('breaks a reader’s line inside a list item, a quote and bold text without leaving its container or its mark', () => {
+    const containers = schema.nodeFromJSON({
+      type: 'doc',
+      content: [
+        { type: 'bulletList', attrs: { id: 'l1' }, content: [{ type: 'listItem', attrs: { id: 'i1' }, content: [{ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'a\n# b' }] }] }] },
+        { type: 'blockquote', attrs: { id: 'q1' }, content: [{ type: 'paragraph', attrs: { id: 'p2' }, content: [{ type: 'text', text: 'c\n- d' }] }] },
+        { type: 'paragraph', attrs: { id: 'p3' }, content: [{ type: 'text', text: 'e\nf', marks: [{ type: 'bold' }] }] },
+      ],
+    });
+    const out = md.serialize(containers, { ids: false, forReaders: true });
+    expect(out).not.toContain('&#10;');
+    const back = docOf(md.parse(out)).toJSON() as JSONContent;
+    const broken = (first: string, second: string, marks?: JSONContent['marks']) => [
+      { type: 'text', text: first, ...(marks ? { marks } : {}) },
+      { type: 'hardBreak' },
+      { type: 'text', text: second, ...(marks ? { marks } : {}) },
+    ];
+    expect(back.content!.map((block) => block.type)).toEqual(['bulletList', 'blockquote', 'paragraph']);
+    expect(back.content![0].content).toHaveLength(1);
+    expect(back.content![0].content![0].content![0].content).toEqual(broken('a', '# b'));
+    expect(back.content![1].content).toHaveLength(1);
+    expect(back.content![1].content![0].content).toEqual(broken('c', '- d'));
+    expect(back.content![2].content).toEqual(broken('e', 'f', [{ type: 'bold' }]));
   });
 });
 

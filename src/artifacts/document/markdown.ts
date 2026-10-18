@@ -29,7 +29,9 @@
 //   code          fenced with more backticks than any run in the code
 //   whitespace    a space or tab at the edge of formatted text is written `&#32;` / `&#9;` (Markdown would move it out
 //                 of the mark); an empty paragraph or heading holds one no-break space, and a text of only no-break
-//                 spaces one more than it has
+//                 spaces one more than it has; a line ending inside text (not a hardBreak) is `&#10;`, so what follows
+//                 it never starts a line (P3-F, tracker L166). A reader's Markdown (`forReaders`, an export) writes it
+//                 as a hard line break instead
 //   comments      `<c:ID>` where an open thread's text starts and `</c:ID>` where it ends (each closing tag names its
 //                 thread, so overlapping comments need no nesting; S5's read format), inside code too; ignored on
 //                 parse. A literal `<c:x>` in code is written `<\c:x>` (one more backslash) and read back as written.
@@ -55,6 +57,12 @@ export interface SerializeOptions {
   /** P3-E (E2 M5; E's Decision Log 32): a chart block's drawn view as Markdown, by block id, written in its place
    * (nested where the block is) instead of the dialect's `:::chart`; an export's only, absent for the lossless dialect. */
   charts?: ReadonlyMap<string, string>;
+  /**
+   * P3-F (tracker L166): Markdown for people to read (an export; ids and milestones off): a line ending inside text is
+   * written as a hard line break (a backslash at the line's end; a space in a heading, which cannot break; none at a
+   * block's end), the next line's start escaped, never as the canonical `&#10;`. Code keeps its line ends either way.
+   */
+  forReaders?: boolean;
 }
 
 // P3-E start: the charts' Markdown carried in the temporary serialisation JSON (never the doc), for the chart's form
@@ -90,6 +98,7 @@ const CODE_OPEN = '\uE009'; // around inline code a single-backtick span cannot 
 const CODE_CLOSE = '\uE00A';
 const SPACE_HOLDER = '\uE00B'; // a no-break space the text holds or the placeholder of an empty block: `&#160;`
 const SEPARATOR = '\uE00C'; // `<!---->`: lets `*` and `**` close before, or open after, a letter (read as nothing)
+const NEWLINE = '\uE00E'; // a line ending inside text: `&#10;` (P3-F, tracker L166)
 // The content's own characters of this alphabet: each is written as LITERAL and a letter (`a` for U+E000 … `p` for
 // U+E00F) before the sentinels go in and restored after they are gone, so a generated sentinel and a literal character
 // are never confused (the whole-branch review's P6); a parse does the same around its own sentinels.
@@ -144,12 +153,16 @@ function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: b
   if (lineEnd) out = out.replace(new RegExp(`([ \\t])\\^(${ID})$`), `$1${ESC}^$2`);
   return out;
 }
+/** A reader's hard line break (`forReaders`): a backslash ending the line, unmarked so the marks close around it. */
+const READER_BREAK = `${ESC}\n`;
 const edges = (text: string): string =>
   text.replace(/^[ \t]+|[ \t]+$/g, (run) => run.replace(/ /g, EDGE_SPACE).replace(/\t/g, EDGE_TAB));
 
 interface Tables {
   ids: string[];
   threads: string[];
+  /** The call's `forReaders` (P3-F, tracker L166). */
+  forReaders: boolean;
 }
 
 type Json = JSONContent & { attrs?: Record<string, unknown> };
@@ -192,11 +205,27 @@ function prepareInline(content: Json[], parent: Json, show: ReadonlySet<string>,
       if (/`|^\s|\s$/.test(raw)) text = `${CODE_OPEN}${text}${CODE_CLOSE}`;
     } else {
       const before = content[i - 1];
-      text = escapeText(raw, { lineStart: i === 0 || before?.type === 'hardBreak', lineEnd: i === content.length - 1, inCell: cell });
-      if (marks.length > 0) text = edges(text);
+      const lineStart = i === 0 || before?.type === 'hardBreak' || (tables.forReaders && before?.type === 'text' && (before.text ?? '').endsWith('\n'));
+      const lineEnd = i === content.length - 1;
+      if (!tables.forReaders || !raw.includes('\n')) {
+        text = escapeText(raw.replace(/\n/g, NEWLINE), { lineStart, lineEnd, inCell: cell });
+        if (marks.length > 0) text = edges(text);
+      } else {
+        // a reader's line break: each line escaped where it starts
+        const lines = (parent.type === 'heading' ? raw.replace(/\n/g, ' ') : raw).split('\n');
+        lines.forEach((line, k) => {
+          if (k > 0) out.push({ type: 'text', text: READER_BREAK });
+          let piece = escapeText(line, { lineStart: lineStart || k > 0, lineEnd: lineEnd || k < lines.length - 1, inCell: cell });
+          if (marks.length > 0) piece = edges(piece);
+          if (piece) out.push({ ...node, text: piece, marks: marks.length ? marks : undefined });
+        });
+        return;
+      }
     }
     out.push({ ...node, text, marks: marks.length ? marks : undefined });
   });
+  // a hard line break ending a block would read as a backslash: a reader's block keeps none at its end
+  while (tables.forReaders && out.length > 0 && out[out.length - 1].text === READER_BREAK) out.pop();
   for (const id of active.reverse()) pushSentinel(CLOSE, id, restMarks(content[content.length - 1]));
   return code ? out : separate(out);
 }
@@ -329,7 +358,8 @@ function restore(markdown: string, tables: Tables): string {
     .replaceAll(EDGE_TAB, '&#9;')
     .replaceAll(BREAK, '')
     .replaceAll(SPACE_HOLDER, '&#160;')
-    .replaceAll(SEPARATOR, '<!---->');
+    .replaceAll(SEPARATOR, '<!---->')
+    .replaceAll(NEWLINE, '&#10;');
   const lines = text.split('\n').map((line, at) => {
     let row: string | null = null;
     let out = line.replace(SENTINEL, (match, index: string) => {
@@ -541,16 +571,16 @@ export class DocMarkdown {
   private readonly md = new MarkdownManager({ marked: new Marked() as unknown as typeof import('marked').marked, extensions: markdownExtensions() });
 
   /** A doc (a tab body) or one block as the dialect; blocks are separated by a blank line. */
-  serialize(node: PMNode, { ids = true, milestones = null, charts }: SerializeOptions = {}): string {
+  serialize(node: PMNode, { ids = true, milestones = null, charts, forReaders }: SerializeOptions = {}): string {
     const blocks: PMNode[] = [];
     if (node.type.name === 'doc') node.forEach((block) => blocks.push(block));
     else blocks.push(node);
-    return blocks.map((block) => this.block(block, { ids, milestones, charts })).join('\n\n');
+    return blocks.map((block) => this.block(block, { ids, milestones, charts, forReaders })).join('\n\n');
   }
 
   /** One top-level block as the dialect, its `^id` included when `ids` is on. */
-  block(block: PMNode, { ids = true, milestones = null, charts }: SerializeOptions = {}): string {
-    const tables: Tables = { ids: [], threads: [] };
+  block(block: PMNode, { ids = true, milestones = null, charts, forReaders = false }: SerializeOptions = {}): string {
+    const tables: Tables = { ids: [], threads: [], forReaders };
     const doc: Json = { type: 'doc', content: [] };
     const prepared = prepare(mapStrings(withCharts(block.toJSON() as Json, charts) /* P3-E */, toLiteral), doc, milestones ?? new Set(), tables, ids, {});
     const text = restore(this.md.serialize({ type: 'doc', content: [prepared] }).replace(/^\n+|\n+$/g, ''), tables);

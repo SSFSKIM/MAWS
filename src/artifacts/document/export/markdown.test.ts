@@ -1,7 +1,7 @@
 // The Markdown export (M6 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D12): the lossless dialect with ids
 // and comment milestones off, so a file read back gives the content it was written from.
 import { describe, expect, it } from 'vitest';
-import { comparable, everyKindSource } from '../convert.fixture';
+import { comparable, everyKindSource, sourceOf } from '../convert.fixture';
 import { importMarkdown } from '../import/markdown';
 import { exportMarkdown } from './markdown';
 
@@ -38,6 +38,27 @@ describe('exportMarkdown', () => {
     const md = exportMarkdown(source);
     const notes = importMarkdown(md).content.content.find((block) => block.textContent === '1. *Draft*');
     expect(notes?.type.name).toBe('heading');
+  });
+
+  // P3-F W-DOC-B (tracker L166, the architect's export condition): a line ending inside text reaches the reader as a
+  // line break, never as the agent read's `&#10;`, and nothing after it becomes structure; code keeps its raw line ends
+  it('writes a line ending inside text as a line break, never the escape, and makes no structure of what follows it', () => {
+    const md = exportMarkdown(
+      sourceOf([
+        { type: 'paragraph', content: [{ type: 'text', text: 'Title\n---\n\n# not a heading\n- not a list' }] },
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'One\nTwo' }] },
+        { type: 'codeBlock', attrs: { language: null }, content: [{ type: 'text', text: 'x\n# y' }] },
+      ]),
+    );
+    expect(md).not.toContain('&#10;');
+    expect(md).toContain('## One Two');
+    expect(md).toContain('```\nx\n# y\n```');
+    const back = importMarkdown(md);
+    expect(back.content.content.map((block) => block.type.name)).toEqual(['paragraph', 'heading', 'codeBlock']);
+    const lines: string[] = [];
+    back.child(0).forEach((node) => lines.push(node.type.name === 'hardBreak' ? '\n' : (node.text ?? '')));
+    expect(lines.join('')).toBe('Title\n---\n\n# not a heading\n- not a list');
+    expect(back.child(2).textContent).toBe('x\n# y');
   });
 
   it('refuses a tab the document does not have', () => {
