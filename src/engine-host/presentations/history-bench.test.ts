@@ -1,14 +1,15 @@
 // P3-C M8 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D11; M8's acceptance): the history preview of a
 // 3-month-old version of S7a's heavy deck, headless, on the soak's own data, and S7a's pitfall 10 on it. The soak
 // (P3-0's `spikes/p3-store/s7/soak`, run as `node soak/soak.mjs --kind deck --profile heavy --encoding delta --months 3`
-// with its month's preview inputs exported) writes, per month, the version's state as its store reconstructs it
+// with `--export <dir>` for the final month's preview inputs, P3-F) writes the version's state as its store reconstructs it
 // (`stateAt`, keyframe plus deltas), the live state and the merged provenance since the version (`attributions`); this
 // reads them and times what the deck's history controller does with them: the provenance decoded, the two gc-off docs
 // and the renderer (`openDeckDiff`), the per-slide change set (`deckChanges`). S7a's own walk (`s7/soak/deck/sim.ts`'s
 // `walk` phase, copied below) runs on the same delta beside it, and the slide ids the version and today share are
 // counted: pitfall 10's per-element 0 is the heavy profile's churn (no kept slide but a restore's) plus S7a's walk
 // skipping a slide a restore re-created under its id. Timing and external data, so it runs on request:
-// `MAWS_DECK_HISTORY=/tmp/s7a-repro/export/m3 pnpm exec vitest run src/engine-host/presentations/history-bench.test.ts`.
+// `node spikes/p3-store/s7/soak/soak.mjs --kind deck --profile heavy --encoding delta --months 3 --export <dir>`, then
+// `MAWS_DECK_HISTORY=<dir> pnpm exec vitest run src/engine-host/presentations/history-bench.test.ts`.
 import { existsSync, readFileSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import { join } from 'node:path';

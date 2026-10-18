@@ -5,6 +5,8 @@
 // clock, triggers and measurements as the document soak. Throwaway spike code.
 import * as Y from '@y/y'
 import { createHash } from 'node:crypto'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { Store, MIN, HOUR, DAY } from '../store.mjs'
 import { rng } from '../doc/corpus.mjs'
@@ -28,7 +30,7 @@ const filesView = (d: any) => { const f = deckFiles(d); return JSON.stringify(Ob
 const canon = (v: any): any => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canon(v[k])])) : v)
 const VOCAB = 'pipeline revenue onboarding retention latency quarter forecast margin cohort launch hiring roadmap growth churn pricing segment partner channel funnel conversion activation expansion region market share target plan review risk owner budget'.split(' ')
 
-export async function runDeck ({ profile = 'normal', months = 6, encoding = 'delta', policy = {}, dbDir = '/tmp/p3-s7a', seed = 11, log = console.log, truth = true, suffix = null }: any) {
+export async function runDeck ({ profile = 'normal', months = 6, encoding = 'delta', policy = {}, dbDir = '/tmp/p3-s7a', seed = 11, log = console.log, truth = true, suffix = null, exportDir = null }: any) {
   const P = PROFILES[profile]
   const r = rng(seed)
   const pick = <T>(a: T[]): T => a[Math.floor(r() * a.length)]
@@ -315,6 +317,14 @@ export async function runDeck ({ profile = 'normal', months = 6, encoding = 'del
       docs.renderer.destroy(); docs.p.destroy(); docs.n.destroy()
       ph.total = +Object.values(ph).reduce((s: number, x: any) => s + x, 0).toFixed(1)
       out.preview = { versionAt: ISO(target.at), kind: target.kind, enc: target.enc, chain, provenanceRows: attrs.rows, changed, ms: ph }
+      // P3-F (opt-in --export, the final month only): the preview's inputs for e2e/presentations-scale.spec.ts and src/engine-host/presentations/history-bench.test.ts
+      if (exportDir && m === months) {
+        const prev: any = new Y.Doc(); Y.applyUpdateV2(prev, prevState); const prevView = sha(filesView(prev)); prev.destroy()
+        mkdirSync(exportDir, { recursive: true })
+        writeFileSync(join(exportDir, 'prev.bin'), prevState); writeFileSync(join(exportDir, 'next.bin'), nextState); writeFileSync(join(exportDir, 'attrs.bin'), Y.encodeContentMap(attrs.map))
+        writeFileSync(join(exportDir, 'meta.json'), JSON.stringify({ month: m, versionAt: ISO(target.at), kind: target.kind, enc: target.enc, provenanceRows: attrs.rows, s7aWalk: changed, ms: ph, restores,
+          soak: { kind: 'deck', profile, encoding, months, month: m, seed }, workload: { counts: { ...counts }, updates: store.seq, slides: out.slides, versions: vs.length }, filesView: { prev: prevView, next: sha(filesView(doc)) } }))
+      }
       const t1 = performance.now(); const R = revertUpdate(prevState, nextState); const rms = performance.now() - t1
       out.restore = { ms: +rms.toFixed(1), bytes: R.length }
       if (m === months) {
