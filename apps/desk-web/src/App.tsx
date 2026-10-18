@@ -123,6 +123,7 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
   const name = useGrid((s) => (route.view === 'project' ? s.projects.find((p) => p.id === route.project)?.name : undefined));
   const title = route.view === 'project' ? (name ?? route.project.slice(0, 8)) : null;
   const groupChatOpen = usePhoneProject((s) => s.groupChatOpen);
+  const hubHealthy = useHubState().healthy;
   if (narrow) {
     // A phone's stack (05-phone.html, 3A): a channel goes back to the project's list, the list to the projects.
     const inChannel = route.view === 'project' && (route.channel.kind === 'session' || groupChatOpen);
@@ -135,7 +136,8 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
     // The project's name takes the room the controls leave, and never less than a readable floor: past it the key's
     // state truncates instead. The bar is `min-w-0`, so a long name truncates in it rather than widening the desk's
     // column, and the whole app with it, past the phone's edge.
-    const label = 'min-w-20 flex-1';
+    // While the hub link needs attention the phone's bar says so in a word, and the name's floor gives that word its room.
+    const label = `${hubHealthy ? 'min-w-20' : 'min-w-14'} flex-1`;
     return (
       <header className="flex h-[var(--toolbar-h)] min-w-0 items-center gap-2 border-b border-border bg-bg-raised px-3" data-testid="top-bar">
         {title === null ? (
@@ -214,14 +216,26 @@ function KeyButton({ open, compact = false }: { open: (panel: Panel) => void; co
   );
 }
 
-function GridStatus({ compact = false }: { compact?: boolean }) {
+/** What the hub link is doing: the word the bar says, the dot's color, and whether it is healthy (the phone's bar says the word only when it is not). */
+function useHubState(): { label: string; dot: string; healthy: boolean } {
   const status = useGrid((s) => s.status);
   const lapsed = useAccess((s) => s.lapsed);
-  const label = lapsed !== null ? 'Signed out' : status === 'open' ? 'Live' : 'Reconnecting';
+  if (lapsed !== null) return { label: 'Signed out', dot: 'bg-danger', healthy: false };
+  return status === 'open' ? { label: 'Live', dot: 'bg-success', healthy: true } : { label: 'Reconnecting', dot: 'bg-warning', healthy: false };
+}
+
+function GridStatus({ compact = false }: { compact?: boolean }) {
+  const { label, dot, healthy } = useHubState();
   return (
     <span className="flex items-center gap-1.5 text-ui-sm text-fg-muted" data-testid="grid-status" title={compact ? label : undefined}>
-      <span className={['h-1.5 w-1.5 rounded-full', lapsed !== null ? 'bg-danger' : status === 'open' ? 'bg-success' : 'bg-warning'].join(' ')} aria-hidden />
-      {compact ? <span className="sr-only">{label}</span> : label}
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden />
+      {compact ? (
+        <span className={healthy ? 'sr-only' : 'whitespace-nowrap'} data-testid="grid-status-word">
+          {label}
+        </span>
+      ) : (
+        label
+      )}
     </span>
   );
 }

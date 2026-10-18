@@ -138,6 +138,43 @@ test("@layout the top bar keeps a long project name readable beside its controls
   expect((await page.getByTestId('key-state').boundingBox())!.height).toBeLessThan(24); // one line
 });
 
+test('@layout the top bar is a bare dot while the hub is live, and says Reconnecting or Signed out beside it, whole at 390 and 320', async ({ page, hub }) => {
+  // The dot alone left an owner unable to tell what a red one meant: the state is spelled out only when it needs them.
+  const name = 'doperpowers-desk-residue-phone-walk';
+  await stageProject(hub);
+  hub.updateSummary(summary({ name }));
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}`);
+  await expect(page.getByTestId('project-view')).toHaveAttribute('data-connection', 'open');
+  const status = page.getByTestId('grid-status');
+  const word = page.getByTestId('grid-status-word');
+  /** The word beside the dot is drawn (or not), and at the phone's width and the narrowest nothing is pushed off. */
+  const bar = async (state: string, shown: boolean) => {
+    await expect(status).toHaveAttribute('title', state, { timeout: 15_000 });
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      if (shown) await expect(word).toBeVisible();
+      else expect((await word.boundingBox())!.width).toBeLessThanOrEqual(1); // there for a screen reader, not drawn
+      await expect(word).toHaveText(state);
+      const [held, controls] = [await page.getByTestId('top-bar-label').boundingBox(), await page.getByTestId('top-bar-controls').boundingBox()];
+      expect((await page.getByTestId('top-bar').boundingBox())!.width).toBeLessThanOrEqual(width);
+      expect(held!.width).toBeGreaterThanOrEqual(state === 'Live' ? 80 : 56); // the name's floor gives the word its room
+      expect(held!.x + held!.width).toBeLessThanOrEqual(controls!.x);
+      for (const control of ['grid-status', 'key-state', 'menu']) await expect(page.getByTestId(control)).toBeInViewport({ ratio: 1 });
+      await fitsTheWidth(page);
+    }
+  };
+  await bar('Live', false);
+  expect((await status.boundingBox())!.width).toBeLessThan(16); // the dot, and nothing beside it
+
+  hub.admit = 'unreachable';
+  hub.dropConnections();
+  await bar('Reconnecting', true);
+
+  hub.admit = 'signed-out';
+  await bar('Signed out', true);
+});
+
 test('@layout an ended session shows Resume in place of the composer, and a retired one who retired it', async ({ page, hub }) => {
   await stageProject(hub);
   hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session: S.rests, kind: 'presence', sub: null, n: null, body: { record: null, bridge: true } });
