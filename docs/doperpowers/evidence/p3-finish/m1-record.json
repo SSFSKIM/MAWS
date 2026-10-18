@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 76,
-    "defer:pending": 47,
+    "defer:committed": 77,
+    "defer:pending": 46,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1090,7 +1090,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L126; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
       "remainingClause": "The row reads `modelAsk` with the held request, as the chip and the selector do. Owner: P3 (session info). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L126; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "d951f688f36289edd88ed126fcf28851e6540a22"
     },
     {
       "line": 130,
@@ -1100,8 +1100,8 @@
       "triageReason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L130; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
       "remainingClause": "The reader's drop is written back once, or the warning is deduplicated per launch. Owner: P3-F or P3-L's cutover. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L130; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 133,
