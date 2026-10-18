@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 109,
-    "defer:pending": 14,
+    "defer:committed": 110,
+    "defer:pending": 13,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1453,7 +1453,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L205; parent Decision Log 106): Internal parser-hook dependency is a re-pin regression obligation, not a current defect. Owner: P4; revalidated at each parse5 re-pin.",
       "remainingClause": "At any parse5 re-pin the hooks are kept or the loader moves to public ones; the regression says which. Owner: P3-F (at a re-pin). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L205; parent Decision Log 106): Internal parser-hook dependency is a re-pin regression obligation, not a current defect. Owner: P4; revalidated at each parse5 re-pin.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "fc930bd3597dca3593362087a5429927e5e97b5a"
     },
     {
       "line": 207,
@@ -1463,8 +1463,8 @@
       "triageReason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L207; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "A one-time host download into the deck's assets if the owner wants it. Owner: P4. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L207; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 208,
