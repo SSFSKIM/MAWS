@@ -53,17 +53,18 @@
 // is held the result is the held rows before it, its own rows, then any held row newer than its newest (one the old
 // subscription delivered past the new snapshot's cut, which arrives again live and is one row by its uuid), and `more`
 // stays as held — the older pages the reader loaded stay drawn. A snapshot that marks (`offChain`) is merged only where
-// its marks agree with the held ones on every row both hold: a /rewind in the gap can leave held rows older than the
-// snapshot off the chain with nothing but their own page to say so, and the overlap disagreeing is how it shows; then,
-// as when the snapshot overlaps nothing held, it replaces the held rows, the older ones paging back in with their own
-// marks. An older producer's, which marks nothing, is merged wherever it overlaps. Either way the transcript is rebuilt
-// under a new source, which MAWS's store installs staged, so the old rows stay drawn until the new state is whole; a
-// block the snapshot no longer streams (its row written, or its step ended, in the gap) stays drawn until the rows the
-// snapshot brought have landed, so it never leaves before its row is drawn.
+// its marks agree with the held ones on every row both hold, and both hold one of them on the chain (not a progress row,
+// which the machine never marks): a /rewind in the gap can leave held rows older than the snapshot off the chain with
+// nothing but their own page to say so, and the overlap disagreeing, or holding no row on the chain to vouch for them,
+// is how it shows; then, as when the snapshot overlaps nothing held, it replaces the held rows, the older ones paging
+// back in with their own marks. An older producer's, which marks nothing, is merged wherever it overlaps. Either way the
+// transcript is rebuilt under a new source, which MAWS's store installs staged, so the old rows stay drawn until the new
+// state is whole; a block the snapshot no longer streams (its row written, or its step ended, in the gap) stays drawn
+// until the rows the snapshot brought have landed, so it never leaves before its row is drawn.
 //
 // Latency (desk ticket #57). The hops this transcript sees are timed for `latency/latency.ts`: a main thread's first rows
-// (subscribe, snapshot, drawn), each live row and each of its own chunks from the machine's stamp until drawn, the
-// owner's own send until its row, each tool call's time (a raised request's anchor), and each resume's gap.
+// (subscribe, snapshot, drawn), each live row that draws and each of its own chunks from the machine's stamp until
+// drawn, the owner's own send until its row, each tool call's time (a raised request's anchor), and each resume's gap.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, TranscriptRecordSchema } from '@shared/wire/transcript';
@@ -136,6 +137,8 @@ export type DeskTranscriptOptions = {
 const PAGE = 100;
 
 type Row = JsonObject & { uuid: string };
+/** The row types the machine marks on or off the session's chain; it never marks another (a progress row). */
+const CHAIN_TYPES: ReadonlySet<string> = new Set(['user', 'assistant', 'system', 'attachment']);
 const hasUuid = (row: JsonObject): row is Row => typeof row.uuid === 'string' && row.uuid !== '';
 /** The model a response row was answered by; the engine's own rows (`<synthetic>`) name none. */
 const modelOf = (row: JsonObject): string | null => {
@@ -252,11 +255,17 @@ class RowsSource implements TranscriptSource {
     return events;
   }
 
-  /** A row after the snapshot, under the snapshot's context; before it, the snapshot will hold the row. */
+  /**
+   * A row after the snapshot, under the snapshot's context; before it, the snapshot will hold the row. Its hop from its
+   * engine timestamp until drawn (`latency.ts`) is timed once the store has applied its events: a row that draws nothing
+   * (a progress row, a row off the chain) or reaches no store yet gives no sample.
+   */
   live(row: Row): void {
     if (this.ctx === null) return;
     const events = this.owner.mapRow(row, this.ctx);
-    if (events.length > 0) this.listener?.(events);
+    if (events.length === 0 || this.listener === null) return;
+    this.listener(events);
+    latency.drawn('stream.row', Date.parse(String(row.timestamp)), true);
   }
 }
 
@@ -530,7 +539,7 @@ export class DeskTranscript {
       this.rows.push(row);
       const model = modelOf(row);
       if (model !== null && model !== this.state.getState().model) this.setModel(model);
-      this.timeRow(row);
+      this.noteRow(row);
     }
     // What is drawn of the rows already mapped changes only with the marks, an owner input (it may repeat an undone one's
     // words), a delivery (a later copy of a held one), or, while an input draws as undone, a response (the session read
@@ -590,11 +599,11 @@ export class DeskTranscript {
   }
 
   /**
-   * A live row's hops (`latency.ts`): from its engine timestamp until it is drawn; a tool call's time, for the request it
-   * may raise; and, for the owner's own send delivered here, from its sending until its row was written.
+   * What a live row tells `latency.ts` as it is received: a tool call's time, for the request it may raise, and, for the
+   * owner's own send delivered here, from its sending until its row was written. Its hop until drawn is the source's to
+   * time (`RowsSource.live`), once its events are in the store.
    */
-  private timeRow(row: Row): void {
-    latency.drawn('stream.row', Date.parse(String(row.timestamp)), true);
+  private noteRow(row: Row): void {
     noteCalls(row);
     if (this.target.agentId !== null || deliveryFrame(row)?.own !== true) return;
     const lines = deliveredLines(row);
@@ -617,14 +626,20 @@ export class DeskTranscript {
 
   /**
    * The held rows with a fresh snapshot's (oldest first) merged in, or null when it replaces them: it overlaps nothing
-   * held, or it marks a row both hold otherwise than the held marks do.
+   * held, or it marks a row both hold otherwise than the held marks do, or none of the rows both hold is one the chain
+   * carries on it.
    */
   private merged(fresh: readonly Row[], offChain: readonly string[] | undefined): Row[] | null {
     const at = fresh.length === 0 ? -1 : this.rows.findIndex((row) => row.uuid === fresh[0].uuid);
     if (at < 0) return null;
     if (offChain !== undefined) {
       const off = new Set(offChain);
-      if (fresh.some((row) => this.uuids.has(row.uuid) && this.off.has(row.uuid) !== off.has(row.uuid))) return null;
+      const overlap = fresh.filter((row) => this.uuids.has(row.uuid));
+      if (overlap.some((row) => this.off.has(row.uuid) !== off.has(row.uuid))) return null;
+      // Agreeing marks vouch for the held rows older than the snapshot only through a row both hold on the chain: each of
+      // those the held marks put on the chain is that row's ancestor, so on it still, and each they put off is no ancestor
+      // of it, so off it still. A row the producer never marks (a progress row) vouches for nothing.
+      if (!overlap.some((row) => CHAIN_TYPES.has(row.type as string) && !off.has(row.uuid))) return null;
     }
     const inSnapshot = new Set(fresh.map((row) => row.uuid));
     return [...this.rows.slice(0, at), ...fresh, ...this.rows.slice(at).filter((row) => !inSnapshot.has(row.uuid))];

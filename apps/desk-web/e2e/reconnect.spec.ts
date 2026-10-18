@@ -90,9 +90,13 @@ async function pageInAndReturn(hub: HubDouble, view: Locator): Promise<void> {
     .toBe(false);
 }
 
-/** Plays into the `<message>` answer until some of it is drawn as streaming text. */
+/**
+ * Plays into the `<message>` answer until some of it is drawn as streaming text. The session was run up to the answer's
+ * first chunk, so no streaming row may be drawn yet: the last one's text is read without waiting for one.
+ */
 async function midAnswer(replay: FakeMachineReplay, view: Locator): Promise<void> {
-  for (let i = 0; i < 40 && !((await streamingRows(view).last().textContent()) ?? '').includes('You chose'); i++) {
+  const lastStreamed = () => streamingRows(view).evaluateAll((els) => els.at(-1)?.textContent ?? '');
+  for (let i = 0; i < 40 && !(await lastStreamed()).includes('You chose'); i++) {
     replay.step(1);
     await view.page().waitForTimeout(20);
   }

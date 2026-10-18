@@ -2,10 +2,11 @@
 // hops one transcript records into it — its first rows, a chunk's stamp, a resume's gap.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTranscriptStore } from '../../../../src/renderer/src/stores/transcript';
+import { Chain, SESSION } from '../../test/double/chain-rows';
 import { FakePlane, mount, settle } from '../../test/double/fake-plane';
 import { readRecording, scriptOf } from '../../test/double/session-stream';
 import { DeskTranscript } from '../depth/source/desk-transcript';
-import { latency, LatencyRecorder, percentile, RING, type LatencyPath } from './latency';
+import { latency, LatencyRecorder, PENDING, percentile, RING, type LatencyPath } from './latency';
 
 afterEach(() => vi.useRealTimers());
 
@@ -57,6 +58,27 @@ describe('the recorder', () => {
     expect(paths['stream.row']).toMatchObject({ n: 1, max: 300 });
   });
 
+  it('queues at most PENDING samples for one frame, and none while the page is hidden', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date', 'performance'] });
+    const lines: string[] = [];
+    const recorder = new LatencyRecorder((line) => lines.push(line));
+    recorder.on = true;
+    for (let i = 0; i < PENDING + 10; i++) recorder.drawn('stream.chunk', Date.now(), true); // frames suspended, chunks still coming
+    vi.runAllTimers();
+    expect(lines).toHaveLength(PENDING);
+
+    lines.length = 0;
+    vi.stubGlobal('document', { visibilityState: 'hidden' }); // a background tab: nothing is drawn
+    try {
+      recorder.drawn('stream.row', Date.now(), true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    vi.runAllTimers();
+    expect(lines).toEqual([]);
+  });
+
   it('measures an owner’s send to its acknowledgement, its delivery, and its row, each once', () => {
     const recorder = new LatencyRecorder(() => {});
     recorder.humanSent('n1', false);
@@ -102,6 +124,32 @@ describe('one transcript’s hops', () => {
     plane.snapshot(script, held);
     expect(samples('resume.gap')).toBe(before.gap + 1);
     expect(latency.report().counts['subscription.resumes']).toBe(before.resumes + 1);
+    unmount();
+    controller.close();
+  });
+
+  it('times a live row from its stamp only once its events reach the store: a progress row or a row off the chain gives no sample', async () => {
+    const plane = new FakePlane('proj');
+    const store = createTranscriptStore();
+    const controller = new DeskTranscript({ plane, project: 'proj', target: { machine: 'mini', session: SESSION, agentId: null }, store });
+    controller.open();
+    const unmount = mount(controller, store);
+    const c = new Chain();
+    c.prompt('Name a colour.');
+    c.answer('Red.');
+    plane.send('snapshot', { rows: [...c.rows].reverse(), more: false, subagents: [], presence: { record: { status: 'busy' }, bridge: true } as never, streaming: [], offChain: [] });
+    await settle();
+    await settle();
+    const before = samples('stream.row');
+    const progress = c.row('progress', { data: { type: 'hook_progress', hookEvent: 'Stop', hookName: 'Stop', command: 'notify' }, parentToolUseID: 'toolu_h1', toolUseID: 'toolu_h1' });
+    plane.send('row', { row: progress, agentId: null });
+    const dropped = c.answer('Blue, or');
+    plane.send('row', { row: dropped, agentId: null, offChain: [dropped.uuid as string] });
+    await settle();
+    expect(samples('stream.row')).toBe(before);
+    plane.send('row', { row: c.answer('Blue.', progress), agentId: null });
+    await settle();
+    expect(samples('stream.row')).toBe(before + 1);
     unmount();
     controller.close();
   });

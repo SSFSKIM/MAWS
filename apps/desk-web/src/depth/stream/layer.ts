@@ -86,6 +86,8 @@ export class StreamingLayer {
    * down: it stays drawn, taking no more chunks, until the row its `block-row` named lands, or, when none was named in
    * time, until `landing` does (the newest row the snapshot brought, in the store once the transcript rebuilt from the
    * snapshot is installed), so a block never leaves before its row is drawn. With neither, its step ended, and it goes.
+   * A snapshot cut before a `block-row` the old subscription delivered still streams the block that row named: its copy
+   * is dropped, and the block takes no more chunks, whether it was settled already or is still drawn awaiting its row.
    * `held` says whether a named row is among the rows held now.
    */
   resume(streaming: readonly Streaming[], landing: string | null, held: (uuid: string) => boolean): void {
@@ -96,6 +98,12 @@ export class StreamingLayer {
     // The requests in the order they first appeared: those drawn before, then those the gap started.
     for (const [key, old] of before) {
       const request = loaded.get(key);
+      if (request) {
+        for (const index of old.named) {
+          request.blocks.delete(index);
+          request.named.add(index);
+        }
+      }
       for (const [index, block] of old.blocks) {
         const fresh = request?.blocks.get(index);
         if (fresh) {

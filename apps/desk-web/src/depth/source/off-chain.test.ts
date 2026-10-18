@@ -572,6 +572,38 @@ describe('the marks as the subscription carries them', () => {
     view.close();
   });
 
+  it('a snapshot after an interruption that overlaps the held rows only at rows the chain does not carry replaces them: a response a /rewind undid in the gap is not drawn', async () => {
+    const c = new Chain();
+    const prompt = c.prompt('Name a colour.');
+    const response = c.answer('Red.');
+    const hook = (n: number) => c.row('progress', { data: { type: 'hook_progress', hookEvent: 'Stop', hookName: 'Stop', command: `notify ${n}` }, parentToolUseID: `toolu_h${n}`, toolUseID: `toolu_h${n}` });
+    const progress = hook(1);
+    hook(2);
+    const view = open();
+    view.plane.send('snapshot', snapshot(c.rows, []));
+    await settled();
+    expect(answers(view.drawnRows())).toEqual(['Red.']);
+    view.plane.current.listener.interrupted();
+    // In the gap a /rewind sent the prompt again edited, from before it: the prompt and its response are off the chain.
+    // The fresh snapshot overlaps the held rows at the progress rows alone, which the producer never marks, so its marks
+    // agree with the held ones there and say nothing of the response.
+    c.prompt('Name a warm colour.', null);
+    c.answer('Orange.');
+    c.end();
+    const split = c.rows.indexOf(progress);
+    view.plane.send('snapshot', snapshot(c.rows.slice(split), [], true));
+    await settled();
+    expect(bubbles(view.drawnRows())).toEqual(['Name a warm colour.']);
+    expect(answers(view.drawnRows())).toEqual(['Orange.']);
+    expect(view.controller.state.getState().more).toBe(true);
+    view.controller.loadOlder();
+    view.plane.send('rows', { rows: c.rows.slice(0, split).reverse(), before: progress.uuid as string, more: false, offChain: [prompt.uuid as string, response.uuid as string] });
+    await settled();
+    expect(view.drawnRows()).toEqual(await view.fresh(c.rows, [prompt, response]));
+    expect(answers(view.drawnRows())).toEqual(['Orange.']);
+    view.close();
+  });
+
   it('an older producer’s snapshot after an end continues the held rows where it overlaps them', async () => {
     const c = new Chain();
     c.prompt('Plan the migration.');

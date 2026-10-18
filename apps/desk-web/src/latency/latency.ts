@@ -11,7 +11,8 @@
 //
 // "Drawn" is the next animation frame after the store the view reads has applied the change: React commits a store's
 // update before the frame, and the frame is the one that paints it. Samples that wait for a frame are batched into one
-// frame callback.
+// frame callback. A hidden page paints nothing and its browser suspends the frames while rows and chunks keep coming, so
+// nothing waits for a frame while the page is hidden, and at most `PENDING` samples wait for any one frame.
 
 /** How many samples each path keeps: its last ones. */
 export const RING = 200;
@@ -77,7 +78,12 @@ type Send = { sentPerf: number; sentWall: number; wake: boolean; ref: SendRef | 
 /** How many sends, calls and awaited draws are remembered at most: older ones are forgotten unmeasured. */
 const REMEMBERED = 64;
 
+/** How many samples wait for one frame at most: those past it are not taken. */
+export const PENDING = 512;
+
 const now = () => performance.now();
+/** The page is hidden (a background tab): nothing it draws is painted. Under Node there is no page. */
+const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
 const nextFrame = (callback: () => void) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(callback) : setTimeout(callback, 0));
 
 export class LatencyRecorder {
@@ -109,9 +115,12 @@ export class LatencyRecorder {
     this.changed();
   }
 
-  /** Records `path` at the next frame, from `start` on the browser's clock (`performance.now()`), or on the wall clock (`Date.now()`) when `wall`. */
+  /**
+   * Records `path` at the next frame, from `start` on the browser's clock (`performance.now()`), or on the wall clock
+   * (`Date.now()`) when `wall`; not while the page is hidden, nor past the `PENDING` samples already waiting for it.
+   */
   drawn(path: LatencyPath, start: number, wall = false): void {
-    if (!Number.isFinite(start)) return;
+    if (!Number.isFinite(start) || hidden() || this.framePaths.length >= PENDING) return;
     this.framePaths.push(path);
     this.frameStarts.push(start);
     this.frameWall.push(wall);

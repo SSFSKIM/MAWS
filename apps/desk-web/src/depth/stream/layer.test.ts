@@ -190,4 +190,26 @@ describe('the streaming layer', () => {
     quiet.resume([], null, () => false);
     expect(drawn(quiet)).toEqual([]);
   });
+
+  it('drops what a fresh snapshot cut before a block-row still streams of the block that row named, and takes none of its later chunks', () => {
+    const layer = new StreamingLayer();
+    layer.chunk(text(0, 0, 0, 'Settled'));
+    layer.blockRow(blockRow(0, 0, 'r-settled'));
+    layer.settle('r-settled');
+    layer.chunk(text(0, 1, 1, 'Named'));
+    layer.blockRow(blockRow(0, 1, 'r-named'));
+    // The fresh snapshot was cut before both block-rows: it streams both blocks, partly.
+    const blocks = [
+      { index: 0, kind: 'text' as const, text: 'Sett', upTo: 0 },
+      { index: 1, kind: 'text' as const, text: 'Nam', upTo: 1 },
+    ];
+    layer.resume([{ turnId: 't1', agentId: null, step: 0, upTo: 1, blocks }], null, (uuid) => uuid === 'r-settled' || uuid === 'r-named');
+    // The settled block is not drawn beside its row; the named one stays as drawn, awaiting its row.
+    expect(drawn(layer)).toEqual([['text', 'Named']]);
+    expect(layer.chunk(text(0, 2, 0, 'led'))).toBe(false);
+    expect(layer.chunk(text(0, 3, 1, 'd'))).toBe(false);
+    expect([...layer.awaited()]).toEqual(['r-named']);
+    layer.settle('r-named');
+    expect(drawn(layer)).toEqual([]);
+  });
 });
