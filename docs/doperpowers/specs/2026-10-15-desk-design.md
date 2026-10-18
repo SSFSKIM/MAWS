@@ -481,10 +481,11 @@ unavailable; everything they sent the human is still in the log.
   after it, and under it, muted, its alias, the name `@` addresses (alias
   and machine on one line while it has no title); then its in-charge line;
   "+ Session". Center: the selected
-  channel — on a desktop browser whose machine is online, the session view
-  (§9). Right: the selected session's depth (subagents, background jobs,
-  diff, session info: machine, cwd, worktree, model, context, cost;
-  amended 2026-10-17, §9: the transcript tab moved to the center).
+  channel — wherever its machine is online, the session view (§9; on the
+  phone too since 2026-10-18). Right, on a desktop: the selected session's
+  depth (subagents, background jobs, diff, session info: machine, cwd,
+  worktree, model, context, cost; amended 2026-10-17, §9: the transcript
+  tab moved to the center).
 - **The group chat** shows what is addressed to the human: messages,
   questions (answerable in place), permission prompts while pending
   (decidable in place), lifecycle as system lines, and what humans posted.
@@ -494,11 +495,13 @@ unavailable; everything they sent the human is still in the log.
 - **A direct channel** is one session's exchange with the human — its
   messages, questions, and permission prompts, and what the human sent it —
   with the working record between them folded. **Amended 2026-10-17 (§9):**
-  on a desktop browser whose machine is online it is the session view, the
-  MAWS report over the session's own transcript, folded per turn, with a
-  Report · Transcript toggle; the channel built from the log, as the
-  to-human mod draws a session in the terminal, remains for a machine that
-  is offline and for the phone, and the group chat is unchanged. An ended
+  wherever its machine is online it is the session view, the MAWS report
+  over the session's own transcript, folded per turn, with a Report ·
+  Transcript toggle; the channel built from the log, as the to-human mod
+  draws a session in the terminal, remains for a machine that is offline
+  or serves no transcript, and the group chat is unchanged. **Amended
+  2026-10-18:** this holds on the phone too (the phone, below); until then
+  the phone drew only the log-built channel. An ended
   session's channel keeps its history, back to its first line, and offers
   Resume. A message the bridge submitted as the human's words is drawn as
   the human's.
@@ -513,11 +516,16 @@ unavailable; everything they sent the human is still in the log.
   service worker). On a phone it draws the loop of seeing what needs the
   owner and answering it: the grid with its waiting counts, the group chat,
   a direct channel, and request cards answerable in place. Session depth
-  (the transcript stream, the subagent tree, the diff) stays desktop-only.
-  **[binding — owner, 2026-10-17]** Reaffirmed when the session view was
-  designed (§9): the phone keeps messages only — the log-built channel with
-  its folds as the label "Working record · on a computer" — and never
-  mounts the transcript.
+  (the subagent tree, the background jobs, the diff) stays desktop-only.
+  **[binding — owner, 2026-10-18]** A direct channel on the phone is the
+  session view, as on a desktop (§9.1): the report with its per-turn
+  working records unfolding in place, each tool call opening on a tap, the
+  running turn streaming, the sends and request cards at its tail, and the
+  desktop's fallbacks. This reverses the transcript clause above and its
+  2026-10-17 reaffirmation, under which the phone kept messages only, its
+  folds the label "Working record · on a computer", and never mounted the
+  transcript: after a working day from the desk, that working record was
+  the one thing that still sent the owner to a terminal (Decision Log).
 - **Notifications are Web Push.** A push fires when a question or a
   permission prompt is raised, or a `<message>` arrives, and no browser of
   that member has the project open and visible. Each member device's push
@@ -774,8 +782,8 @@ door shape it:
    (`task-graph.ts:314-320`).
 5. **Closed:** the desk as a remote mod surface (9.6).
 
-**9.1 The session view.** Opening a session on a desktop browser whose
-machine is online shows MAWS's report: `<Transcript>` over the session's
+**9.1 The session view.** Opening a session whose machine is online, on
+a desktop or (since 2026-10-18, §4) a phone, shows MAWS's report: `<Transcript>` over the session's
 main subscription with its owner lane on, so `<message>` spans and
 questions by default, one "Working record · N tool calls · M messages" row
 per marked turn right after its prompt, with running dots while the turn
@@ -876,7 +884,8 @@ What only the log or the hub knows joins the transcript:
   working record in the report, so the request a turn is blocked on could
   sit folded; making it persistent is a change to MAWS's own report view
   with no evidence behind it. The cards are the channel's own, so the
-  fallback channel and the phone draw them unchanged.
+  fallback channel draws them unchanged, and the phone draws them at the
+  session view's tail as a desktop does.
 - **An async question** (the ask mod's, `mcp__doperpowers__AskUserQuestion`)
   draws from its transcript row once classified; the log's `question` and
   `answered` events overlay it, joined by the event's `src`, the call's
@@ -896,8 +905,9 @@ What only the log or the hub knows joins the transcript:
   <machine> is offline"), never as buttons. A subscription that ends at
   `n` 0 (no transcript for the session on that machine: a daemon older
   than DC8, a `/clear` that left the history under an old id) falls back
-  the same way and says why. The phone always draws the log-built stream
-  with "Working record · on a computer" (§4 [binding]); the group chat is
+  the same way and says why. The phone has these two fallbacks and no
+  other (§4 [binding], 2026-10-18; until then it always drew the log-built
+  stream with "Working record · on a computer"); the group chat is
   unchanged.
 
 **Streaming in the report** (the review, 2026-10-17). DC6 draws a
@@ -1356,7 +1366,10 @@ predates the module has no evidence while it runs.
 - **Status:** merged (2026-10-16; MAWS PR #13, `76b1de782`). Amended
   2026-10-17: on a desktop browser whose machine is online the direct
   channel's center becomes DC9's session view; the log-built channel stays
-  for the phone, an offline machine, and the group chat (§9).
+  for the phone, an offline machine, and the group chat (§9). Amended
+  2026-10-18 (MAWS #55): the phone takes the session view too; the
+  log-built channel stays for an offline machine, a subscription that ends
+  at `n` 0, and the group chat (§4).
 
 ### DC6: The web — session depth — plan
 
@@ -1541,7 +1554,8 @@ predates the module has no evidence while it runs.
 - **Purpose:** Opening a session shows the MAWS report over its own
   transcript: the session view with its toggle, the sends not yet
   delivered as tail rows, pending requests answerable in place, the
-  log-built channel as the fallback for an offline machine and the phone;
+  log-built channel as the fallback for an offline machine (and, until the
+  owner's reversal of 2026-10-18, MAWS #55, for the phone);
   the main subscription lifted into a per-session owner shared with the
   depth column, whose Transcript tab goes and whose Subagents gain real
   status and a jobs view; the hub's `output` frame and kind and the fake
@@ -1583,13 +1597,16 @@ predates the module has no evidence while it runs.
     `n` 0 only), with no stall of the view; a session whose subscription
     ends at `n` 0 falls back to the log-built channel with the reason.
   - **G3 (fallbacks):** with the fake machine disconnected the channel is
-    the log-built stream with its folds as labels; on the phone layout the
-    channel is the log-built stream with "Working record · on a computer"
-    and no transcript chunk is loaded (the phone loads no script holding
-    MAWS's Transcript, SessionView or TranscriptPane; MAWS's Markdown,
-    with its KaTeX and shiki chunks, stays, since the log-built channel
+    the log-built stream with its folds as labels; on the phone layout no
+    transcript chunk loads until a session channel opens, and never the
+    depth column's (the grid and the group chat load no script holding
+    MAWS's Transcript, SessionView or TranscriptPane; a session channel
+    then loads the session view's; MAWS's Markdown, with its KaTeX and
+    shiki chunks, stays with the project view, since the log-built channel
     has drawn `<message>` bodies through it since DC5; amended 2026-10-17,
-    DC9's M6); the group chat is unchanged against DC5's tests.
+    DC9's M6, and 2026-10-18, MAWS #55, `e2e/phone-load.spec.ts`); the
+    phone's channel is the session view with the desktop's fallbacks; the
+    group chat is unchanged against DC5's tests.
   - **G4 (the column):** the Transcript tab is gone; Subagents shows the
     nested agent under its parent and every recorded agent with the
     status DX4 carries, none under "On disk / status unavailable"; an
@@ -1625,7 +1642,8 @@ predates the module has no evidence while it runs.
   frames; the module is in MAWS), DX4 (consumer; the hub's kind list and
   the fake machine), DX1 and DX6 (as DC5).
 - **Design inheritance:** §9.1, 9.3 (the web's half), 9.4 (the view and
-  the hub's frame), 9.5; §4 as amended [binding: the phone]; §5 table
+  the hub's frame), 9.5; §4 as amended [binding: the phone, its direct
+  channel the session view since 2026-10-18]; §5 table
   (what a session cannot do stays shown as disabled). Advisory:
   `apps/desk-web/src/depth/` and `views/`; the per-session owner is a small
   store, the toggle about twenty lines calling the transcript store's
@@ -4514,7 +4532,8 @@ a hub that connects into machines (§2).
   terminal's cross-turn folds that the log-built channel mimicked; and
   (2) **[binding — owner, 2026-10-17]** the phone keeps messages only, the
   log-built channel with "Working record · on a computer", reaffirming §4's
-  2026-10-15 decision. From the survey: the report already ships inside
+  2026-10-15 decision (**superseded 2026-10-18** by the owner: the phone's
+  direct channel is the session view, below). From the survey: the report already ships inside
   the component the desk renders and was off only for want of `ownerLane`;
   history stopped at the join (the log) and, through the plane, at an
   ended session's newest 512 KB, each page re-parsing the whole file on
@@ -4548,7 +4567,8 @@ a hub that connects into machines (§2).
   view (a work row in MAWS's derivation, folded under a closed record);
   patching agent status inside MAWS's `mergeSidecars` (the desktop app's
   semantics); a hub-side history buffer (§3 [binding]); the transcript on
-  the phone (§4 [binding]; it also pulls MAWS's Markdown and shiki chunk).
+  the phone (§4 [binding]; it also pulls MAWS's Markdown and shiki chunk;
+  taken on 2026-10-18, below).
   Flags DC3 (DX2, DX3, DX4's module and the fake machine, now edited by
   DC9), DC5 (DX8, the channel's fallback), DC6 (its depth column and fold
   are what DC9 reshapes), DC7 (DX4's producer, extended by DC8).
@@ -4696,7 +4716,9 @@ a hub that connects into machines (§2).
   to loading no transcript chunk. Rejected: plain-text messages on the
   phone, which would make its report worse to meet a measuring line
   that overreached. A follow-up loads shiki and KaTeX only when a
-  message holds code or math.
+  message holds code or math. (On 2026-10-18 the phone took the session
+  view, and G3 became "no transcript chunk until a session channel opens,
+  never the depth column's"; below.)
   2026-10-18, DC10's machine half (doperpowers #232, 7.172.0): a stopped
   job learns it from a note. `TaskStop` through `$.tool.call` writes no
   transcript row, and for a main-loop task the engine queues no
@@ -4853,6 +4875,33 @@ a hub that connects into machines (§2).
     aside. Rejected: tech debt for the third, because hiding a live
     agent for the rest of a session is worse than the accepted seed
     residual.
+- Decision: **The phone's direct channel is the session view** (the
+  owner, 2026-10-18). This supersedes §4's 2026-10-15 transcript clause and
+  its 2026-10-17 reaffirmation, ruling (2) of the session view's entry
+  above. The evidence is acceptance 11: about 18 hours of work from the
+  desk, and the one thing that still sent the owner to a terminal was the
+  working record, which the phone drew only as the label "Working record ·
+  on a computer". The owner pointed to Claude's mobile Remote Control,
+  which draws it on the phone. So a direct channel is the session view
+  wherever its machine is online (`ChannelView`'s `drawsSessionView` no
+  longer reads the layout), with the desktop's fallbacks: an offline
+  machine ("Working record · <machine> is offline") and a subscription
+  that ends at `n` 0. The depth column (subagents, jobs, diff) stays
+  desktop-only, and an Agent row is a plain row on the phone. DC9.G3
+  becomes "no transcript chunk until a session channel opens, never the
+  depth column's" (`e2e/phone-load.spec.ts`); the Markdown carve-out
+  holds. One taste call was made in the build and told to the owner: below
+  768 px the session view drops M3's 56 px gutter for "Jump to latest",
+  and the control floats over the rows' end while the reader is away from
+  the tail, as MAWS draws it in a narrow pane. Rejected: keeping the
+  binding, which leaves the phone's report sending the owner to a terminal
+  for the one thing they needed; a separate full-screen working-record
+  view, a second drawing of what the session view already draws, with its
+  own tests and its own gaps. Built as MAWS #55 (`8c06f1b9`, deployed
+  `hub@8c06f1b9 web@master.8c06f1b9`); the layout detail is in DC9's plan's
+  own entry. Flags MAWS #52, the next phase, where the phone keeps this
+  shape.
+  Date/Author: 2026-10-18, the owner; folded by the design session.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
@@ -5809,6 +5858,8 @@ the Tracking Map and the Decision Log:
 - the owner's message after an Esc (#238), and the live chain's off-chain marks (#239, MAWS #48);
 - the steer's own line (#240, MAWS #49);
 - the async answer drawn as the answer, and the phone's top bar (MAWS #49, #51);
+- the phone's direct channel as the session view, so the working record that sent the owner to a terminal draws on
+  the phone (MAWS #55, reversing §4's phone binding);
 - Access lapse detection and a 30-day session (MAWS #33, #35).
 
 **Left for later.**

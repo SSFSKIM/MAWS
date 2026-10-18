@@ -70,9 +70,14 @@
   and presenters with their sanitization; an output tail renders as plain
   text, never as Markdown or HTML; nothing from a row or a file reaches
   `innerHTML`, a URL that navigates this page, or a script.
-- **The phone never mounts the transcript** (§4 [binding — owner,
+- ~~**The phone never mounts the transcript** (§4 [binding — owner,
   2026-10-17]): the phone's route loads no chunk of MAWS's transcript,
-  Markdown or shiki; the narrow layout draws the log-built channel.
+  Markdown or shiki; the narrow layout draws the log-built channel.~~
+  **Reversed by the owner, 2026-10-18** (Decision Log): the phone's
+  direct channel is the session view a desktop draws, its fallbacks the
+  desktop's (an offline machine, a subscription ended at `n` 0); no chunk
+  of MAWS's transcript loads until a session channel first opens, never
+  for the grid or the group chat; the depth column stays desktop-only.
 - **Visual design** is MAWS's tokens and density, light first. The four
   taste surfaces — the tail row's delivery line, the request band, the end
   marker, the jobs view — go to the owner as mockups before polish (T0),
@@ -350,7 +355,8 @@ session view beside them; `apps/desk-web/e2e/`.
   phone layout draw the log-built stream (`buildStream`, DC5's), whose
   folds are labels, never buttons: "Working record · <machine> is offline"
   and, on the phone, "Working record · on a computer". The group chat is
-  unchanged.
+  unchanged. (Since 2026-10-18 the phone draws the session view and keeps
+  only the desktop's two fallbacks; Decision Log.)
 - **The retirements.** `FoldTranscript`, `depth/source/range.ts`,
   `export-marks.ts`, `depth/view/unfold-turns.ts`, DX8's `transcript` slot
   (its props type, its fallback, its registration in `connectDepth()`),
@@ -421,7 +427,8 @@ subagent, diff and info suites pass over the shared subscription.
 **At its end:** DC9's acceptance, G1 to G5 every clause, passes in a real
 browser against the fake machine replaying `session-view` (G6 is S1 and
 S2's PRs); the phone's route measured (`e2e/phone-load.spec.ts` or its
-successor) loading no chunk carrying MAWS's transcript, Markdown or shiki;
+successor) loading no chunk carrying MAWS's transcript, Markdown or shiki
+(since 2026-10-18: none until a session channel opens; Decision Log);
 DC5's group-chat tests unchanged; the gate green (`static,unit` and
 `e2e:desk-web` on the Linux lane); the taste surfaces polished to the
 owner's verdict on T0. A screenshot set of the session view, the inline requests,
@@ -1018,6 +1025,41 @@ in their own worktrees.
   a reader once from a place chosen while it paged.
   Date/Author: 2026-10-17, M6 executor, folded by the controller.
 
+- Decision: **The phone draws the session view** (the owner, 2026-10-18,
+  reversing §4's two phone bindings after a day worked from the desk: the
+  working record, which the phone drew only as "Working record · on a
+  computer", was the one thing that still sent them to a terminal; Claude's
+  mobile Remote Control draws it). A direct channel is the session view
+  wherever its machine is online, phone or desktop (`ChannelView`'s
+  `drawsSessionView` no longer reads the layout): the report with its
+  per-turn records unfolding in place (the desktop's shape: the record, then
+  MAWS's "Worked for" divider, then the turn's group line), each tool call
+  MAWS's one-line cell that opens its input and output on a tap, the
+  running turn streaming, the
+  tail's sends and request cards. The fallbacks are the desktop's: an
+  offline machine and a subscription ended at `n` 0 draw the log-built
+  stream, saying why. Unchanged: the grid, the group chat, and the depth
+  column, which stays desktop-only (an Agent row is a plain row on the
+  phone, since there is no column to open it in; the ⋯ note now says
+  subagents, jobs and diff open on a computer). The session view's chunk
+  still loads through `module-loader.ts` the first time one is drawn, so
+  DC9.G3's phone check becomes "no transcript chunk until a session channel
+  opens" (`e2e/phone-load.spec.ts`: the grid and the group chat fetch none,
+  a session channel then fetches the session view's, never the depth
+  column's). MAWS's Markdown still loads with the project view, as it has
+  since DC5, for the group chat's message bodies. Two narrow-width rules in
+  `styles/app.css`: below 768 px the session view drops M3's 56 px gutter
+  for "Jump to latest" (a sixth of a 320 px screen; the control floats over
+  the rows' end there, as MAWS draws it in any narrow pane, and only while
+  the reader is away from the tail), and an opened shell call's command
+  wraps across the detail's width with Copy command under it. The phone's
+  layout cases (`e2e/phone.spec.ts`, @layout, also in WebKit) pin the loop at 390 and
+  320 px against the fake machine: records unfolding, one-line tool rows
+  with long inputs truncated, a tool row opened, a running turn, Steer and
+  Send, request cards answered at the tail, the offline fallback.
+  Date/Author: 2026-10-18, the owner via the composite's writer; built on
+  `desk-phone-record`.
+
 ## Surprises & Discoveries
 - 2026-10-17: an idle session's last turn reads "working" only when the
   transcript never ended it. The engine writes a `system/turn_duration`
@@ -1087,7 +1129,8 @@ report:
 - paging to the first row across a compaction, live and after the
   session ended;
 - the fallbacks;
-- the phone loading no transcript chunk;
+- the phone loading no transcript chunk (until 2026-10-18, when the
+  phone took the session view: none until a session channel opens);
 - the column's DX4 statuses, jobs, `output` and MCP names;
 - the hub's `output` frame and kind.
 

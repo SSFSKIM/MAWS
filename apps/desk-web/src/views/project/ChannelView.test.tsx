@@ -113,6 +113,32 @@ it("draws a direct channel's session view on a desktop while its machine is onli
   expect(screen.getByTestId('channel-events')).toBeTruthy();
 });
 
+it("draws a direct channel's session view on a phone too while its machine is online, its status word beside ⋯; the log-built stream once it is offline", async () => {
+  // The owner, 2026-10-18: the phone's direct channel is the session view a desktop draws (§4's old binding reversed).
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('max-width'), addEventListener() {}, removeEventListener() {} }));
+  try {
+    const online = session(A, 'maws-45');
+    const view = (s: DeskSession) => (
+      <DeskContext.Provider value={{ connection, member: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', sessions: new Map([[A, s]]) }}>
+        <ChannelView name="MAWS" channel={{ kind: 'session', session: A }} session={s} events={[]} />
+      </DeskContext.Provider>
+    );
+    const { rerender } = render(view(online));
+    const more = () => screen.getByRole('button', { name: 'maws-45: Retire, and what opens on a computer' });
+    expect((await screen.findByTestId('session-view')).dataset.session).toBe(A);
+    expect(screen.getByTestId('session-status').parentElement?.contains(more())).toBe(true);
+    expect(screen.queryByTestId('channel-events')).toBeNull();
+    fireEvent.click(more());
+    expect(screen.getByTestId('channel-header').textContent).toContain("maws-45's subagents, jobs and diff open on a computer.");
+
+    rerender(view({ ...online, machineOnline: false }));
+    expect(screen.queryByTestId('session-view')).toBeNull();
+    expect(screen.getByTestId('channel-events')).toBeTruthy();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("draws each item of a session's stream once as it changes (the stream and the composer each keep their own key)", () => {
   const sessions = new Map([[A, { ...session(A, 'maws-45'), machineOnline: false }]]);
   const mac = { nonce: 'n', value: 'v' };

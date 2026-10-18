@@ -3,9 +3,9 @@
 // pending — and its answer, lifecycle as system lines, agent-to-agent traffic folded into one row per run (a run of one
 // drawn whole on one line), a direct channel's working record as a label saying where it is (`workLabel`), the
 // requests in place, and this tab's sends on their way to the log. The item a tapped notification landed on is marked
-// and scrolled to once it is drawn. A direct channel is drawn here only where the session view is not: on the phone
-// (the transcript is desktop-only, §4), for a machine that is offline, and for a session whose machine serves no
-// transcript (the composite's §9.1).
+// and scrolled to once it is drawn. A direct channel is drawn here only where the session view is not, on a phone as
+// on a desktop: for a machine that is offline, and for a session whose machine serves no transcript (the composite's
+// §9.1; the phone draws the session view too since 2026-10-18).
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import { writerMachine, type LogEvent, type Recipient } from 'desk-hub/protocol';
@@ -298,8 +298,8 @@ function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }
 }
 
 /**
- * A direct channel's working record where this stream is drawn — the phone, a machine that is offline, a session whose
- * machine serves no transcript — as a label, never a button: on a desktop whose machine serves the transcript the
+ * A direct channel's working record where this stream is drawn — a machine that is offline, a session whose machine
+ * serves no transcript — as a label, never a button: wherever the machine serves the transcript, phone or desktop, the
  * channel is the session view, where the working record is MAWS's own per turn (the composite's §9.1).
  */
 function WorkingRecord({ label }: { label: string }) {
