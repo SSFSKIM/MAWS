@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 98,
-    "defer:pending": 25,
+    "defer:committed": 99,
+    "defer:pending": 24,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1332,7 +1332,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L162; parent Decision Log 106): Loaded-only suggestion attribution is a cross-lifetime contract question; documentation alone cannot prove stored provenance correctness. Owner: P4.",
       "remainingClause": "Combine from storage as well, or document the loaded-only contract. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L162; parent Decision Log 106): Loaded-only suggestion attribution is a cross-lifetime contract question; documentation alone cannot prove stored provenance correctness. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "414e5eda06bff1bced18b94cd12f72acac948ac4"
     },
     {
       "line": 163,
@@ -1342,8 +1342,8 @@
       "triageReason": "Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L163; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
       "remainingClause": "Re-check at the re-pin; a public hook upstream. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L163; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 164,
