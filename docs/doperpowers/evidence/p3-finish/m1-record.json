@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 52,
-    "defer:pending": 71,
+    "defer:committed": 53,
+    "defer:pending": 70,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -826,7 +826,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L80; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "Closes when (owner P2, E7's disk path) the backfill reads a `<teammate-message>` envelope record as the teammate's message (a peer- or teammate-origin row, no owner prompt and no prompt turn), pinned over the `e7-team-terminal` fixture. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L94): only a terminal team session read from disk; MAWS forms no team. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L80; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "0d8b843409cc4381b34074b49180dd6c293af7af"
     },
     {
       "line": 82,
@@ -836,8 +836,8 @@
       "triageReason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L82; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "The Files route opens the kinds the deliverables viewer renders (PDF, image, video, audio) in that viewer, or a ruling records why a file outside a delivery opens externally. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L100): opening undelivered files in the deliverable frames needs a serving route beside `maws-deliverable:` (an admission boundary); feature-sized. Owner: P3 (the co-work layer). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L82; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 84,
