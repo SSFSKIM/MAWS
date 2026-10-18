@@ -1070,8 +1070,10 @@ parked on `desk-backfill-jobs` as the MAWS app's own follow-up. The
 whole-branch xhigh panel (`d9466376..79a8c812`, run by the composite's
 writer) found four P2s and confirmed nothing in its delivery-truth or
 status/jobs/output lenses. All four were fixed in one wave, with the `$`
-escape and three tech-debt rows, and the delta was re-checked at the high
-rung.
+escape and three tech-debt rows. The delta was re-checked at the high
+rung, which found one more P2: a pending landing did not yield to the
+reader. That was fixed through a shared `reader-intent.ts`, closing one
+debt row, and re-reviewed clean (`79a8c812..13ff05e7`).
 
 DC9's acceptance passes against the fake machine replaying
 `session-view` with the DC8 producer, mapped clause by clause in M6's
