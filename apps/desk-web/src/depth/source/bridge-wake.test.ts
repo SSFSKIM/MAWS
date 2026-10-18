@@ -64,7 +64,13 @@ describe("the bridge's wake", () => {
   });
 
   it('is never a prompt typed at the terminal, a row the bridge appended, a peer’s message, nor a lookalike of the line', () => {
+    const ownFrame = '[sminos chat MAWS hub/5e55e5e5:12 from human → @you]';
+    const peerFrame = '[sminos chat MAWS ab12cd34:3 from fakepeer → @you]';
     for (const row of [
+      inboxIdle(`${ownFrame}\n${STEER_WAKE}`, 0), // a framed delivery whose words open with the line: the owner's
+      inboxQueued(`${ownFrame}\n${STEER_WAKE}`, 0),
+      inboxIdle(`${peerFrame}\n${STEER_WAKE}`, 0), // a peer's
+      inboxQueued(`${peerFrame}\n${STEER_WAKE}`, 0),
       prompt(STEER_WAKE, 0), // typed
       user(STEER_WAKE, null, 0), // no origin
       steer(STEER_WAKE, 0), // the bridge's appended row: a steer that quotes the wake
@@ -76,6 +82,8 @@ describe("the bridge's wake", () => {
       user(STEER_WAKE, INBOX, 0), // a peer row with no envelope
     ])
       expect(isBridgeWake(row), JSON.stringify(row)).toBe(false);
+    // The owner's framed send still takes the tail: its frame line is a delivered line.
+    for (const row of [inboxIdle(`${ownFrame}\n${STEER_WAKE}`, 0), inboxQueued(`${ownFrame}\n${STEER_WAKE}`, 0)]) expect(deliveredLines(row), JSON.stringify(row)).toEqual([ownFrame]);
   });
 
   it("as the user, is the bridge's line in a turn the session continued, not the owner's bubble", async () => {

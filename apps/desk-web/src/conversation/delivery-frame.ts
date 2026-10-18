@@ -171,10 +171,10 @@ export function isBridgeWake(row: JsonObject): boolean {
   return text !== null && firstLine(text) === BRIDGE_WAKE_LINE;
 }
 
-/** The body of a message from another session, as the engine's envelope carries it; null for any other text. */
+/** The body of an unframed message from another session, as the engine's envelope carries it (the wake carries no sminos frame); null for any other text. */
 function envelopeBody(text: string): string | null {
   const envelope = parsePeerMessage(text);
-  return envelope?.kind === 'cross-session' ? envelope.body : null;
+  return envelope?.kind === 'cross-session' && envelope.frame === null ? envelope.body : null;
 }
 
 /** A sender's name as Markdown text: every character Markdown could read as syntax escaped, math's `$` included. */
