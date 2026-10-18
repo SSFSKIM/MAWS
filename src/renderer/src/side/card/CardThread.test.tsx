@@ -110,10 +110,10 @@ afterEach(() => {
 
 const FRAME: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: 'k1', showVersion };
 
-function mount() {
+function mount(frame: CardFrame = FRAME) {
   return render(
     <div className="relative">
-      <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={FRAME} visible />
+      <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={frame} visible />
     </div>,
   );
 }
@@ -125,8 +125,8 @@ const replyField = () => screen.getByRole('textbox', { name: 'Reply' }) as HTMLT
 const push = (events: SessionEvent[]) => act(() => fake.event('session.eventBatch', { appSessionId: child, events }));
 
 // Pick, type the comment, Enter: the fork answers at once and the card turns into the thread.
-async function intoThread() {
-  mount();
+async function intoThread(frame?: CardFrame) {
+  mount(frame);
   act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'h1', rect: { x: 24, y: 0, width: 300, height: 90 } } }));
   await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), `${COMMENT}{Enter}`);
   await waitFor(() => expect(card()?.dataset.cardPhase).toBe('thread'));
@@ -204,12 +204,40 @@ describe('the card becomes the thread', () => {
 });
 
 describe('Reply through the human send seam', () => {
-  async function ready() {
+  async function ready(frame?: CardFrame) {
     snapshot = threadTurn().events;
-    await intoThread();
+    await intoThread(frame);
     withRecord();
     await waitFor(() => expect(within(card()!).getByText(REPLY)).toBeTruthy());
   }
+
+  // P3-F (L154): a host's `onSending` (a document's card, which records what was sent in its thread) is told of a reply
+  // as it sets out and then whether it went, as it is of the comment
+  it('tells the host’s onSending as a reply sets out, then whether it went', async () => {
+    const settle = vi.fn<(went: boolean) => void>();
+    const onSending = vi.fn<NonNullable<CardFrame['onSending']>>(() => settle);
+    await ready({ ...FRAME, onSending });
+    onSending.mockClear(); // the comment's own send, the composer's
+    settle.mockClear();
+    seam.mockImplementationOnce(async () => {
+      expect(onSending, 'told before the seam answers').toHaveBeenCalledTimes(1);
+      expect(settle).not.toHaveBeenCalled();
+      return { disposition: 'sent', started: false };
+    });
+    await userEvent.type(replyField(), 'Also the subtitle{Enter}');
+    await waitFor(() => expect(replyField().value).toBe(''));
+    expect(onSending).toHaveBeenCalledWith(useCommentCard.getState().open, { text: 'Also the subtitle', destination: 'thread' });
+    expect(settle.mock.calls).toEqual([[true]]);
+
+    seam.mockResolvedValueOnce({ disposition: 'refused', started: false, reason: 'The session is starting' });
+    await userEvent.type(replyField(), 'Again{Enter}');
+    await waitFor(() => expect(within(card()!).getByRole('alert').textContent).toContain('The session is starting'));
+    seam.mockRejectedValueOnce(new Error('host write failed'));
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(within(card()!).getByRole('alert').textContent).toContain('host write failed'));
+    expect(onSending.mock.calls.map(([, sending]) => sending.text)).toEqual(['Also the subtitle', 'Again', 'Again']);
+    expect(settle.mock.calls).toEqual([[true], [false], [false]]);
+  });
 
   it('sends with origin comment; sent, steered and queued clear the field', async () => {
     await ready();

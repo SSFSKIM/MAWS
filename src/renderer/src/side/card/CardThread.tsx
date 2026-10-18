@@ -7,7 +7,8 @@
 // the card keeps no delivery state of its own (since P2-A the seam starts a released thread before it sends). One
 // strip above Reply names what waits on the person, with one click to the Side pane or a tab. The card yields when the
 // Side pane or a main tab draws the thread (one place draws a session with an input), and publishes its thread while on
-// screen, so the unread rule and attention navigation count it as the Side pane's.
+// screen, so the unread rule and attention navigation count it as the Side pane's. P3-F (L154): a reply sets out through
+// the host's `onSending` as the comment's send does, so a document's card records it as its thread's next message.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
@@ -79,7 +80,10 @@ export function CardThread({ card, child, echo, frame, visible }: Props) {
 
   const replies = useDeliveredReplies(child); // P2-F L121
   const actions = useCardActions(card, child, frame, replies.delivered);
-  const reply = useReply(serial, child, replies.track);
+  // P3-F (L154): a reply sets out through the host's `onSending` as the comment did, so a document's card records it in
+  // the document's thread once it went (B's artifact-comment host; other hosts offer none)
+  const { onSending } = frame;
+  const reply = useReply(serial, child, replies.track, onSending && ((text: string) => onSending(card, { text, destination: 'thread' })));
 
   const setupCard = useSetup((s) => s.cards.get(child));
   const setupFailed = useSetup((s) => failureOf(s, child) !== null);
@@ -198,7 +202,7 @@ function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, d
 // the seam took is handed to `delivered` to watch (P2-F L121). A refusal arriving after the card went (closed, or its
 // thread opened elsewhere) is a toast offering the reply to the clipboard, as the comment form's is, so it is never lost
 // unseen (P2-F F-C1).
-function useReply(serial: number, child: AppSessionId, delivered: (result: HumanPromptResult) => void) {
+function useReply(serial: number, child: AppSessionId, delivered: (result: HumanPromptResult) => void, onSending?: (text: string) => (went: boolean) => void /* P3-F (L154) */) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -209,6 +213,7 @@ function useReply(serial: number, child: AppSessionId, delivered: (result: Human
     const content = text.trim();
     setSending(true);
     setRefusal(null);
+    const settled = onSending?.(content); // P3-F (L154): told as it sets out, then whether it went, the card gone or not
     let result: HumanPromptResult;
     try {
       result = await sendHumanPrompt(child, content, { origin: 'comment' });
@@ -216,6 +221,7 @@ function useReply(serial: number, child: AppSessionId, delivered: (result: Human
       result = { disposition: 'refused', started: false, reason: error instanceof Error ? error.message : String(error) };
     }
     const outcome = replyOutcomeOf(result);
+    settled?.(outcome.kind !== 'refused'); // P3-F (L154)
     if (outcome.kind === 'refused' && cardGone(serial)) {
       toast({ level: 'warning', text: COPY.replyRefusedAfterClose(outcome.reason), actions: [{ label: COPY.copyReply, run: () => void navigator.clipboard.writeText(content) }], dismissible: true });
       return;

@@ -37,7 +37,8 @@ export interface CardFrame {
   // P3-B start (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): a document's own card controls, drawn in the
   // card's header before Close (its Resolve or Reopen), and a send of the card's composer as it sets out; the call it
   // returns is told whether the send went, before the card turns into its thread or closes, and also after the card went
-  // (a send completes after its card is dismissed or replaced): the document records the comment in its thread
+  // (a send completes after its card is dismissed or replaced): the document records the comment in its thread.
+  // P3-F (L154): the card's thread's Reply sets out through it too, so a later reply is recorded the same way
   actions?(card: OpenCard): ReactNode;
   onSending?(card: OpenCard, sending: { text: string; destination: 'thread' | 'main' }): (went: boolean) => void;
   // P3-B end
