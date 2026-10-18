@@ -161,7 +161,7 @@
   },
   "viewerConfound": {
     "record": "viewer-confound.json",
-    "note": "Screen Sharing attached during this run or its known17:45Z interval; not a cause inferred, native focus snapshots and existing diagnoses stand. remote=none is unreliable (ci-kit#50).",
+    "note": "Confirmed attached interval12:49:09Z-19:33:02Z includes this run; old remote=none lines inside it are wrong (ci-kit#50, fixed#53/26d1033 at19:56Z). Context only; native traces, diagnoses and acceptance remain unchanged.",
     "knownInputOverlap": "no input overlap established for this specific reading"
   }
 }

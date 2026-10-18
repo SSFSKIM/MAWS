@@ -52,7 +52,15 @@
   "nativeGreen": "pending",
   "fullSetCounterAdvance": false,
   "paidSpendUsd": 0,
-  "viewerContext": "viewer-confound.json: custody after17:45Z unknown; remote=none not proof; no failure cause inferred",
+  "viewerContext": {
+    "record": "viewer-confound.json",
+    "provenance": "CI-opt custody correction relayed by architect",
+    "attachedWindow": "2026-10-18T12:49:09Z through19:33:02Z",
+    "during": "union Mac groups before disconnect inside attached window, old remote=none wrong",
+    "after": "document-scale, presentations-scale, dashboard-scale, artifacts-perf running after disconnect are viewer-free",
+    "detector": "fixed19:56Z,ci-kit#53/26d1033; screensharingd up to15s lag, ps failure unknown",
+    "causality": "no causal relabeling or bound waiver"
+  },
   "newMasterUnitReading": "Only all tests passing with hover-card Timeout._onTimeout after MainArea.test.tsx teardown and ReferenceError window is not defined reads against b1110be77 master row, one DL59 relaunch, no new row.",
   "queueThresholdTask": "bb4lghff2",
   "queueThreshold": "one queue-age check at19:26:55Z (created+30min), not a completion waiter",

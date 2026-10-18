@@ -291,6 +291,6 @@
   ],
   "viewerContext": {
     "record": "viewer-confound.json",
-    "note": "job falls within reported attached-viewer interval; shared A/B context, no extra causal claim or bound waiver; accepted no-discernible-gap reading retained"
+    "note": "All four jobs inside confirmed attached interval12:49:09Z-19:33:02Z; shared A/B context, old remote=none wrong. Accepted no-discernible-gap reading retained; no extra bisect, causal claim or bound waiver."
   }
 }

@@ -535,7 +535,7 @@
     "nextGate": "Architect ruled one current-source26-group combined pair4+pair5 union after bounded fixes/diagnoses, not artificial fix-only pin; its own reds use DL59 afterward",
     "localGreenOmissionReading": "L166 named unit suites427+9 passed in this run, despite overall unit job red on unrelated snapshots; local GREEN omission remains explicit and no overall gate GREEN claimed"
   },
-  "nativeViewerContext": "viewer-confound.json; CI-opt reported attached since12:49:09Z through17:45Z, remote=none unreliable; no failure cause inferred",
+  "nativeViewerContext": "viewer-confound.json: confirmed attached12:49:09Z-19:33:02Z; old remote=none wrong inside window, detector fixed19:56Z; union four scale groups afterward viewer-free; no causal relabeling",
   "pair4RepairFrontier": {
     "mechanical": "f4f6a0b69f21da20e32be2ce7367f911b662358d, five exact test/snapshot paths; medium a3683858e23dbb112 correct/no material findings",
     "L242": "3c475c9ed41a96d38c766c007f0eb6168679dd36 test-only fixture correction; production unchanged; closure attribution in waves/W-SHELL-checkpoint.json rowResults242",
@@ -602,7 +602,15 @@
     "nativeGreen": "pending",
     "fullSetCounterAdvance": false,
     "paidSpendUsd": 0,
-    "viewerContext": "viewer-confound.json: custody after17:45Z unknown; remote=none not proof; no failure cause inferred",
+    "viewerContext": {
+      "record": "viewer-confound.json",
+      "provenance": "CI-opt custody correction relayed by architect",
+      "attachedWindow": "2026-10-18T12:49:09Z through19:33:02Z",
+      "during": "union Mac groups before disconnect inside attached window, old remote=none wrong",
+      "after": "document-scale, presentations-scale, dashboard-scale, artifacts-perf running after disconnect are viewer-free",
+      "detector": "fixed19:56Z,ci-kit#53/26d1033; screensharingd up to15s lag, ps failure unknown",
+      "causality": "no causal relabeling or bound waiver"
+    },
     "newMasterUnitReading": "Only all tests passing with hover-card Timeout._onTimeout after MainArea.test.tsx teardown and ReferenceError window is not defined reads against b1110be77 master row, one DL59 relaunch, no new row.",
     "queueThresholdTask": "bb4lghff2",
     "queueThreshold": "one queue-age check at19:26:55Z (created+30min), not a completion waiter",
