@@ -1,0 +1,57 @@
+{
+  "executor": "a40d9b1903ee4f68d",
+  "base": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+  "reviewedHead": "4c4f435f99b05fc5a0af7f3bbb73534b6f3eb8a7",
+  "paths": [
+    "src/artifacts/design/export.ts",
+    "src/artifacts/design/export.test.ts",
+    "src/artifacts/dashboard/render/render.ts",
+    "src/artifacts/dashboard/render/render.test.ts",
+    "src/engine-host/documents/loop-delay.ts",
+    "src/engine-host/documents/loop-delay.test.ts",
+    "src/engine-host/documents/register.ts",
+    "src/engine-host/documents/register.test.ts",
+    "e2e/document-scale.spec.ts",
+    "src/engine-host/dashboards/e2e-seam.test.ts",
+    "e2e/dashboard-scale.spec.ts",
+    "e2e/support/dashboard-scale.ts",
+    "test/support/dashboard-scale.test.ts",
+    "package.json",
+    "e2e/presentations-scale.spec.ts",
+    "spikes/p3-store/s7/soak/soak.mjs",
+    "spikes/p3-store/s7/soak/deck/sim.ts",
+    "src/engine-host/presentations/history-bench.test.ts",
+    "e2e/support/deck-history.ts",
+    "test/support/deck-history.test.ts"
+  ],
+  "rowCommits": {
+    "227": "eb48a5cb73dbd4fc74beb2b245dc13ccb345a79f",
+    "251": "bf42822f4f00f99ce8f1b58e6bb7d55fdc3cf3ea",
+    "158": "23948e37acab665ea8a03f7c9cdbbef2e1118969",
+    "247": "2bb021a5c69b0edcca9799175cf23888afede8ff",
+    "249": "48e35c98f418c862976126c73abced7555af417c"
+  },
+  "supplements": {
+    "activation": "259f984e848bd6fbc3c6071078a4158493321ee7",
+    "generator": "9c15baa578baf0d32d49ef5cd854f855cf06c9ee",
+    "heavyStep": "4c4f435f99b05fc5a0af7f3bbb73534b6f3eb8a7"
+  },
+  "diff": "20files,704insert/95delete",
+  "controllerRead": "/private/tmp/we-run/final.log136/136 across7namedfiles,EXIT0 at17:51:42Z; no lint/typecheck/e2e/generator locally",
+  "honestRed": "L227/L251 behavior red; L158 module-missing only and register case already green in Node, not Electron reproduction; L247 stronger already-correct write-attribution test; L249 initial missing-constant red; source/gate distinction retained",
+  "reviews": {
+    "measurement": "a93edc63de6472590 high16paths correct/no material findings, no execution",
+    "scaleAndBars": "afc2bee7c0ba99d11 medium4paths correct/no material findings, retained136-pass log inspected"
+  },
+  "limits": "L158 native row5 pending; heavy generated once in job,6min budget, about5min deterministic-workload acceptance/carry decision, raw loads/fingerprints; no generator run yet",
+  "L251": "only closing cell narrowed; original first4cells retained; owner layout remainder",
+  "batchDisposition": "shared-batch own-revision announcement absence is honest approved behavior, not timing from another producer; no new source repair or automatic P4 defect label",
+  "readReplayNote": "possible stale non-writing-call annotation from prior pending announcement is code-reading-only/out-of-scope; not reproduced or claimed fixed",
+  "processDeviation": {
+    "command": "cd W && node --check spikes/p3-store/s7/soak/soak.mjs && node --check spikes/p3-store/s7/soak/deck/sim.ts && echo SYNTAX-OK; git diff --stat",
+    "slot": "not through with-slot",
+    "evidence": "worker-reported SYNTAX-OK on Node22.23.2/typescript strip; no retained log, tool stdout only",
+    "disposition": "not a compliant named check; parses only, no generator run, no repeat authorized"
+  },
+  "gate": "combined26-group union pending"
+}

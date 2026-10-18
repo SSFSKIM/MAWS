@@ -79,8 +79,8 @@
     "258": "generic tool-use-id task mapping, actual Bash linkage only; Monitor wire remains unrecorded/P4 capture recipe"
   },
   "processDeviation": "SHELL added rollback.test.ts, service-register.test.ts, index.ts and replay-transcript.ts/test before acknowledgment; ipc.ts absent from prior claim, disclosed at handback. Included in exact independent review, not retrospectively compliant.",
-  "replayBoundary": "existing C10 seam only; first accepted replay user record, canonical scratch config home under OS tmp, exclusive wx; independent safety review pending",
-  "acceptance": "not accepted; bounded fix/recheck and pair4 gate pending",
+  "replayBoundary": "C10 only; canonical owned scratch home with checked ordinary parent directories and wx, awaited first-user seed; concurrent malicious same-UID directory substitution is outside the owned scratch model",
+  "acceptance": "source fix/recheck correct; pair4 red; test-only fixture corrections awaiting focused review and combined26 default/browser-comment GREEN",
   "fix": {
     "executor": "a669c1af09b6dc634",
     "commit": "e0bb59c878e1525e133af0a8867ad88f1cda8a98",
@@ -89,5 +89,19 @@
     "logs": "/tmp/maws-review/w-shell-fix/",
     "recheck": "af5a8d2e5227da2f7 correct, no material findings; immutable five-path range only",
     "remainingModelBoundary": "non-atomic malicious/same-uid concurrent directory substitution not prevented; fresh owned scratch store, ordinary pre-existing symlink redirection is checked; not claimed an observed owner-store write"
+  },
+  "rowResults242": {
+    "source": "1cc84bf04 and e0bb59c87 product unchanged",
+    "status": "test-only3c475c9ed, focused review and combined26 default/browser-comment GREEN pending",
+    "observed": "empty default source produced no fork intent/child record; browser cards remained composing with an alert/refused form phase; alert words and host log absent",
+    "inferred": "no_engine_session refusal reason, and random-pin seed followed by record rebinding to PARENT; neither is an artifact-observed refusal code",
+    "fixtureMismatches": [
+      "default fork starts without the recorded first prompt",
+      "browser2b/2c never send parent prompt",
+      "all three browser direct launches unpinned while journal reports PARENT"
+    ],
+    "correction": "faithful first parent turn and settled result/idle; matching sessionId pin; no forged transcript or product change",
+    "processDeviation": "worker committed under legacy /tmp/maws-review/p2f-wt.lock, not /private/tmp/maws-p3f-commit.lock; controller release said shared lock without identifier. Exact commit is only the approved two specs, no absorbed files; empty index worker-reported. No amendment; required lock restated explicitly.",
+    "decisionLog": "none; bounded replay seam unchanged"
   }
 }

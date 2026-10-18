@@ -1,0 +1,82 @@
+{
+  "status": "INTERIM tooling preparation for the final scale-review partition and pairs; no final clone was rebuilt and no pair id here is final. Controller commits.",
+  "auditedAt": "218491b4d06ac421e89025fcdc146141a7fb86b2",
+  "rangeBase": "5ad08789cc0f4e564091cdb2f5224026304fb889",
+  "helper": {
+    "path": "/private/tmp/p3f-final-pairs.py",
+    "sha256": "b6019ca8e191dfe9460ef0b23d2df2408c17611c974be187cda9f663917b4abc",
+    "supersedes": "197e517aad70146fc5c8b3737fe6b6ab914640d2890299140d5c476b75dc2a01 (accepted any builder-shaped base/review-head by message prefix and parent shape, so an amended tip would be discarded by the build)",
+    "usage": [
+      "python3 -I /private/tmp/p3f-final-pairs.py audit --source <40-hex committed post-debt head> [--decisions FILE] [--assign P=AREA] [--move P=AREA] [--drop P] [--out FILE]",
+      "python3 -I /private/tmp/p3f-final-pairs.py preflight --source <sha> [same decisions] [--out-dir DIR, to recognize DIR/pairs.json from a completed build]",
+      "python3 -I /private/tmp/p3f-final-pairs.py build --source <sha> [same decisions] --out-dir docs/doperpowers/evidence/p3-finish/scale-review"
+    ],
+    "partition": "areas.json, pair1 (newAssignments, sameTierRebalance, removedFromRange), pair2 (assignments, incomingMaster782bbf83c), pair4 (assignments), all read from the source commit, then explicit controller decisions only",
+    "fails_on": "unassigned non-excluded path, overlap, obsolete assignment, area > 15000, cross-tier move, any change to the 20 areas' tier/effort or the eight exclusion rules, assigned rule-excluded path, uncommitted manifest in build",
+    "exclusions": "recomputed by rule at the source; e2e/fixtures only as e2e/fixtures/<family>/run-<id>/**.json|jsonl, everything else there must be assigned",
+    "git": "literal pathspecs, GIT_* environment stripped, no optional locks, hooks off; diff --no-renames --no-ext-diff --no-textconv --diff-algorithm=myers",
+    "pairContract": "unchanged from /private/tmp/p3f-make-pairs.py: one --shared clone per area at /private/tmp/maws-p3f-review/<area>; base = source with the area paths restored to the range base, review-head = source tree on top; same commit messages",
+    "pairProof": "per area: --stat summary equal, full numstat equal and path set exact, base content of the paths equals the range base, review-head tree equals the source tree, parents as contracted, on review-head, zero status entries including ignored",
+    "cloneSafety": "preflight of all 20 clones before any mutation; refuses on a non-plain clone, wrong origin or alternates, an operation in progress, attached linked worktrees, any modified/untracked/ignored entry, any other ref or detached HEAD holding clone-local commits, and any existing clone whose (base, review-head) ids are not exactly a pair recorded for that area in pairs-preliminary.json or a final pairs.json committed at the source, or in --out-dir/pairs.json from a completed build (message prefix and parent shape are still checked but never prove ownership; malformed or wrong-status pair evidence fails the run); drag-a and drag-b are never touched",
+    "stoppedBuild": "pair ids are recorded only when all 20 pairs pass; a build that stops midway names the stopped area and those already rebuilt, and the next preflight refuses every clone it changed. Recovery is manual: confirm the clone holds no review work, remove it, rerun (it is rebuilt as absent). No journal",
+    "writes": "build only, after all 20 pairs pass: partition-final.json, pairs.json, pairs.txt in --out-dir; never areas.json, area-stats.txt, pairs-preliminary.*, pair*-adjustments.json or this file"
+  },
+  "smoke": {
+    "path": "/private/tmp/p3f-final-smoke/smoke.py",
+    "sha256": "4abcb445d97b2dfaad85aaac1ccefc238e73f733c459ea75fc54865fcd54f17e",
+    "inputs": "/private/tmp/p3f-final-smoke/capture/: the audit's own git calls at 218491b4d, captured with plain git commands in the worktree and replayed (the worktree guard refuses script-driven git); for clone ownership, pairs-preliminary.json (its git blob id checked equal to the one committed at 218491b4d) and simulated clone metadata under a scratch directory the smoke removes",
+    "result": "57/57 checks passed, exit 0 (log /private/tmp/p3f-final-smoke/smoke-run.log, sha256 09eef1cd465a29b5d52ebb0c4b431cd8087f8ccef93b454811ba54085454c5c2)",
+    "ownershipCases": "unchanged preliminary pair reusable; amended review-head with the same message and parent refused (ownership the only reason); amended base plus a builder-shaped child refused; unknown builder-shaped pair refused with and without evidence; another area's recorded ids do not recognize a clone; final pair recognized from --out-dir/pairs.json and from a pairs.json committed at the source, refused without either; non-final or malformed pairs.json fails the run; base-only and pairless clones refused; dirty tree, private ref, wrong origin, wrong alternates, linked worktree still refuse a recognized pair; main preflight with 20 recognized clones exits 0; main build with one amended clone exits 2 with zero clone mutations and nothing written; a build stopped at its first mutation names manual recovery, touched only that clone and wrote nothing. Against 197e517a the amended, amended-base and unknown cases were all 'reusable'",
+    "reproduced": "2830 changed = 1598 assigned + 1232 excluded; 234841 assigned lines; all 20 area sizes equal pair4 areaSizes; path-to-area map equal to the independent pair4 audit; [Content_Types].xml assigned literally",
+    "negativeCases": "missing committed pair4; 13 unseen paths fail with sibling hints and pass once explicitly assigned; cross-tier move; same-tier send-to spill gives 13603/11808; in-range drop; obsolete path and its explicit drop; assignment outside the range; store-versions over 15000; tier change; exclusion-policy change; non-evidence e2e fixture paths; rule-excluded assignment; implicit move; committed-manifest override; short sha; CLI audit output, protected-name refusal, non-final build refusal"
+  },
+  "notExercised": [
+    "actual pair build and final committed post-debt audit/preflight"
+  ],
+  "cloneMetadataReadOnly": "file reads only: all 20 area clones have HEAD on review-head, branches base, review-head and worktree-agent-af4cd2993bc56e015, base/review-head equal to the pairs-preliminary.json ids, alternates on /Users/new/Developer/GitHub/MAWS/.git/objects, no stash or in-progress markers; working-tree cleanliness is checked only by preflight",
+  "supersededHelpersLeftUntouched": {
+    "/private/tmp/p3f-area-stats.py": "1f4cb9d16a71cf4f7417ee35ef7573bf2910f42160737e226f0c569b9123aecb (overwrites areas.json; do not run)",
+    "/private/tmp/p3f-make-pairs.py": "0297f487727745192a969886013c3274171208638377f9564cd5a03291f96291 (M0 head and unadjusted paths; do not run)"
+  },
+  "informalAtCommittedHead259f984e8": {
+    "how": "/private/tmp/p3f-final-smoke/peek-head.py: the replayed audit with the base..259f984e8 numstat (manifests as at 218491b4d plus pair4); informal, not a final audit",
+    "unassigned": {
+      "src/engine-host/documents/loop-delay.ts": 70,
+      "src/engine-host/documents/loop-delay.test.ts": 112,
+      "e2e/support/packaged-resolution.ts": 158,
+      "test/support/packaged-resolution.test.ts": 149
+    },
+    "suggested": {
+      "loop-delay pair": "store-versions (W-E L158, beside register.ts; max)",
+      "packaged-resolution pair": "composition (W-PKG L255; lens X15 dependency/bundle truthfulness; max)"
+    },
+    "withSuggested": "2869 changed = 1602 assigned + 1267 excluded; 235772 assigned lines; store-versions 14948 (52 headroom), slide-model 14416, editor-proof 14253, design-systems 14123; none over 15000",
+    "recommendation": "apply the connector-grants.test.ts spill (598 lines, store-versions -> connectors-host, both max) in the final decisions: store-versions 14350, connectors-host 11754"
+  },
+  "finalOnlySteps": [
+    "commit this file; pair4-adjustments.json is already committed (verified at 259f984e8: sha256 ac488e8907f9150b528c4b0baaa9e14a6835862308e5de1c5f82549c54e99d75, identical to the audited file)",
+    "pin the committed post-debt head after W-E, W-PKG and the fix waves",
+    "audit at that head; supply explicit --assign/--move/--drop for any new, spilled or departed path and keep the decisions file as evidence",
+    "preflight, then build with --out-dir the scale-review directory; commit partition-final.json, pairs.json and pairs.txt"
+  ],
+  "independentReview": {
+    "reviewer": "aeb491faefff61246",
+    "round1": "P1: builder-shaped amended tips could pass and be overwritten",
+    "fix": "b6019ca8e191dfe9460ef0b23d2df2408c17611c974be187cda9f663917b4abc exact recorded pair identity",
+    "recheck": "correct/no material findings, static only",
+    "controllerSmokeReceipt": "57/57,1203replayed calls,exit0 log inspected"
+  },
+  "controllerRealAudit": {
+    "source": "218491b4d06ac421e89025fcdc146141a7fb86b2",
+    "override": "pair4-adjustments.json only (absent at that old source), explicitly NON-FINAL",
+    "receipt": "/private/tmp/p3f-final-real-audit.4En6yb/audit.json",
+    "result": "actual subprocess Git succeeded;2830changed=1598assigned+1232excluded,234841assigned lines;20 area sizes match prioraudit;0omission/overlap/obsolete",
+    "notDone": "final post-debt audit/preflight and actual pair build remain"
+  },
+  "controllerRealPreflight": {
+    "source": "218491b4d06ac421e89025fcdc146141a7fb86b2",
+    "mode": "explicit NON-FINAL pair4 manifest override",
+    "result": "Prior controller tool result: all20 existing clones reusable, exact preliminary tuples recognized; no mutation. No durable preflight.json exists in the audit directory; do not cite it as a receipt.",
+    "remaining": "current post-debt audit/preflight and actual final pair build"
+  }
+}

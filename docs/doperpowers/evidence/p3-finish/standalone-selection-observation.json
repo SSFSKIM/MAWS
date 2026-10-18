@@ -1,0 +1,16 @@
+{
+  "recordedAt": "2026-10-18T18:53:44Z",
+  "run": 39149994319,
+  "source": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+  "case": "e2e/document-standalone.spec.ts:107, helper51 invoked115",
+  "observed": "35 typed chars visible (toHaveText passed); one DOM range write18:03:34.938Z taking13ms; page selection empty at first poll about5ms later and through5s; no snapshot naming changer",
+  "classification": "cause undetermined; neither branch defect nor baseline; no product-fix claim",
+  "readinessCommit": "fdfe73c312347e957e4019da0bfb4fc99a49e451",
+  "readiness": "L277 selectIn precedent: model paragraph equals shown paragraph and hold.base.state().unsaved===0, at default expect timeout; one existing DOM-range write unchanged; then model and DOM selected quote checked",
+  "boundaries": "no timeout increase, repeated range write, model-selection command, product change or document-narrow change; no local check",
+  "review": "ad7e512b27334234f running on three-spec frontier",
+  "nativeStatus": "RED retained; combined26 pending",
+  "recurrence": "If same signature recurs after this readiness with precondition met and selection still vanishing, its own DL59 red; master reproduction with same foreground flag owed before further repair.",
+  "decisionLog": "none",
+  "M0": "supplemental observation outside immutable denominator"
+}

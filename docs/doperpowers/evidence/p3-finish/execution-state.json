@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "pair4 union39149994319 running at fixed reviewed/master-integrated pin; W-E/W-PKG released disjoint implementation",
+  "phase": "pair4 mechanical correction f4f6a0b69 reviewed; L242 test-only3c475c9ed and cause-undetermined standalone readiness fdfe73c31 in focused review; combined26 gate pending",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -113,14 +113,15 @@
     "reviewFixCommit": "5f115a09d",
     "nativeReadings": "gates/pair2-diagnostic-39130559347.json",
     "L277SceneStreak": {
-      "passed": 3,
+      "passed": 4,
       "required": 10,
       "runs": [
         39130559347,
         39133832247,
-        39140360292
+        39140360292,
+        39149994319
       ],
-      "proof": "document-app restore native=true/pass in pair3 raw log; full gate not required by this scene clause"
+      "latestProof": "native=true18:03:55.542Z, scene passed; tracker documentary count update still pending"
     },
     "repairAssessment": "a788b678f28592255",
     "diagnosticSupplement": "14c3e6fd6",
@@ -132,11 +133,13 @@
     ],
     "nativeRepairReviewer": "afefa3ce1540fa23a",
     "L199MustReadSceneStreak": {
-      "passed": 1,
+      "passed": 2,
       "required": 10,
       "runs": [
-        39133832247
-      ]
+        39133832247,
+        39149994319
+      ],
+      "latestProof": "native=true18:00:33.375Z and case passed; tracker documentary count update still pending"
     },
     "tsFixLint": {
       "task": "bgmopgt3v",
@@ -336,7 +339,7 @@
     "defer": 125,
     "theirs": 42
   },
-  "checkpointAt": "2026-10-18T17:35:17Z",
+  "checkpointAt": "2026-10-18T18:30:12Z",
   "checkpointHead": "e631209455f1439cf29a22ec4292b20dc9d71c27",
   "pair3Retry": {
     "runId": 39145946170,
@@ -373,14 +376,19 @@
   },
   "W-E": {
     "executor": "a40d9b1903ee4f68d",
-    "status": "source edits released after pair4 fixed pin; implementation running",
+    "status": "all5rows/3supplements committed; high measurement and medium scale/bar reviews correct, remote measured/native proof pending",
     "claims": "pair5-claims.json",
     "assessment": "reviews/W-E-preflight-assessment.txt",
-    "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a"
+    "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+    "reviewers": {
+      "measurement": "a93edc63de6472590",
+      "scaleAndBars": "afc2bee7c0ba99d11"
+    },
+    "checkpoint": "waves/W-E-checkpoint.json"
   },
   "W-PKG": {
     "executor": "af1eb156dd5f3f542",
-    "status": "probe environment fix24c606c90 plus allowlisted-test supplement4463dcac6 single recheck closed scrub; mechanical wrapper quoting correction running",
+    "status": "original scrub finding closed; allowlisted capture accepted; final POSIX test-path quote correction0ba7596c controller-verified with6/6 exit0, native packaged proof pending",
     "claims": "pair5-claims.json",
     "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
     "rowCommit": "f58b9736b7512a097c86a7dbf48cbcd8913d1c9d",
@@ -388,7 +396,8 @@
     "checkpoint": "waves/W-PKG-checkpoint.json",
     "fixExecutor": "aa596e346b79e8587",
     "fixCommit": "24c606c906ab55dfd4ea2b41b80e7f6282abc213",
-    "fixSupplement": "4463dcac6d06e8802af0f42347ef215cd4d7599b"
+    "fixSupplement": "4463dcac6d06e8802af0f42347ef215cd4d7599b",
+    "mechanicalQuoteFix": "0ba7596c73c891dd90c2860d4be72ef24653687e"
   },
   "pair4GatePrepared": {
     "launcher": "/tmp/maws-review/p3f-doc-b-shell-launch.sh",
@@ -429,10 +438,10 @@
     "sourceCommit": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
     "wrapperHead": "b9b499efaa70f3b1a68f1e157f8c9d4564e36494",
     "createdAt": "2026-10-18T17:31:39Z",
-    "recordedAt": "2026-10-18T17:35:17Z",
+    "recordedAt": "2026-10-18T18:30:12Z",
     "attempt": 1,
-    "status": "launched; last dispatch metadata queued",
-    "conclusion": null,
+    "status": "completed",
+    "conclusion": "failure",
     "groups": [
       "static",
       "unit",
@@ -472,7 +481,71 @@
     "consumerScope": "C10 nonempty fixture users covered by side,to-human,browser-comment,available,library and sessions through default; shared HTML frame/Document CardHost, browser cover, panel/transcript and agent graph included. c12 has empty fixture list and does not seed.",
     "notFinalSource": true,
     "fullSetCounterAdvance": false,
-    "paidSpendUsd": 0
+    "paidSpendUsd": 0,
+    "viewerConfound": {
+      "record": "viewer-confound.json",
+      "note": "Screen Sharing attached during this run or its known17:45Z interval; not a cause inferred, native focus snapshots and existing diagnoses stand. remote=none is unreliable (ci-kit#50).",
+      "knownInputOverlap": "no input overlap established for this specific reading"
+    },
+    "completedAt": "2026-10-18T18:05:19Z",
+    "exit": 1,
+    "rawLogs": "/private/tmp/p3f-pair4-logs.uKa0I8/logs.zip",
+    "rawLogsSha256": "b33b2ef4e696bf37e8bcd40a7abcdcab3c7abd48b07a23ffebc200342925d5d0",
+    "results": {
+      "static": "TS2322 bridge-script.test.ts199 plain fakeDOMRect; lint and47gate-script tests passed",
+      "unit": "20535passed,3intended L260 name snapshots failed,73skipped;1528files passed,1failed,7skipped",
+      "probes": "219passed",
+      "unit:darwin": "282passed,14files",
+      "e2e:document-app": "9passed,1new standalone-selection failure (document-standalone.spec.ts51/115), not :436/:519 signature",
+      "e2e:document": "9passed",
+      "e2e:panel": "26passed",
+      "e2e:side": "12passed",
+      "e2e:to-human": "2passed, must-read entry native=true",
+      "e2e:transcript": "35passed",
+      "e2e:default": "102passed,1fork-without-child failure sessions.spec.ts300,185skipped",
+      "e2e:browser": "11passed",
+      "e2e:browser-comment": "13passed,3Side-thread cards stay composing at552/657/727; attribution pending",
+      "e2e:deliverables": "11passed,1reply-order assertion id4/id3 reversed after intentional L198 missing-anchor wait",
+      "e2e:library": "5passed",
+      "e2e:available": "2passed",
+      "e2e:terminal": "15passed",
+      "e2e:agents": "23passed"
+    },
+    "queueThresholdResult": {
+      "at": "2026-10-18T18:01:39Z",
+      "queued": [
+        {
+          "group": "e2e:side",
+          "job": 117741524819
+        },
+        {
+          "group": "e2e:document-app",
+          "job": 117741524842
+        }
+      ],
+      "reportedToArchitect": true,
+      "oneShotExit": 0
+    },
+    "evidenceStatusAfterGate": "only untracked p3-finish/scale-review/tooling-preparation.json; nothing outside p3-finish",
+    "counterEffects": {
+      "L277": "4/10; restore native=true18:03:55.542Z and scene passed",
+      "L199": "must-read2/10; native=true18:00:33.375Z and case passed; paste intended caret73/73/native=true and copy/cut pass",
+      "fullSet": false
+    },
+    "nextGate": "Architect ruled one current-source26-group combined pair4+pair5 union after bounded fixes/diagnoses, not artificial fix-only pin; its own reds use DL59 afterward",
+    "localGreenOmissionReading": "L166 named unit suites427+9 passed in this run, despite overall unit job red on unrelated snapshots; local GREEN omission remains explicit and no overall gate GREEN claimed"
   },
-  "nativeViewerContext": "viewer-confound.json; CI-opt reported attached since12:49:09Z through17:45Z, remote=none unreliable; no failure cause inferred"
+  "nativeViewerContext": "viewer-confound.json; CI-opt reported attached since12:49:09Z through17:45Z, remote=none unreliable; no failure cause inferred",
+  "pair4RepairFrontier": {
+    "mechanical": "f4f6a0b69f21da20e32be2ce7367f911b662358d, five exact test/snapshot paths; medium a3683858e23dbb112 correct/no material findings",
+    "L242": "3c475c9ed41a96d38c766c007f0eb6168679dd36 test-only fixture correction; production unchanged; closure attribution in waves/W-SHELL-checkpoint.json rowResults242",
+    "standalone": "fdfe73c312347e957e4019da0bfb4fc99a49e451; cause undetermined, neither branch defect nor baseline; observational readiness then one unchanged range write and model+DOM checks; no timeout increase",
+    "recurrence": "Same signature after readiness met is a DL59 red of its own; same-foreground master reproduction owed before further repair.",
+    "focusedReview": "ad7e512b27334234f, f4f6a0b69..fdfe73c31 exactly three specs, running; no local checks",
+    "decisionLog": "no new entry for either attribution/readiness ruling"
+  },
+  "nextCombinedGate": {
+    "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:panel,e2e:side,e2e:to-human,e2e:transcript,e2e:default,e2e:browser,e2e:browser-comment,e2e:deliverables,e2e:library,e2e:available,e2e:terminal,e2e:agents,e2e:document-scale,e2e:design,e2e:dashboard-scale,e2e:dashboard,e2e:presentations-scale,e2e:artifacts-perf,packaged,e2e:connectors-direct",
+    "status": "held for pair4 fixes/attribution; all reviewed current source, latest-master integration; no old-green credit on a changed tree"
+  }
 }

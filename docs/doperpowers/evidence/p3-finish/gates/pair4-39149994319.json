@@ -3,10 +3,10 @@
   "sourceCommit": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
   "wrapperHead": "b9b499efaa70f3b1a68f1e157f8c9d4564e36494",
   "createdAt": "2026-10-18T17:31:39Z",
-  "recordedAt": "2026-10-18T17:35:17Z",
+  "recordedAt": "2026-10-18T18:30:12Z",
   "attempt": 1,
-  "status": "launched; last dispatch metadata queued",
-  "conclusion": null,
+  "status": "completed",
+  "conclusion": "failure",
   "groups": [
     "static",
     "unit",
@@ -51,5 +51,52 @@
     "record": "viewer-confound.json",
     "note": "Screen Sharing attached during this run or its known17:45Z interval; not a cause inferred, native focus snapshots and existing diagnoses stand. remote=none is unreliable (ci-kit#50).",
     "knownInputOverlap": "no input overlap established for this specific reading"
-  }
+  },
+  "completedAt": "2026-10-18T18:05:19Z",
+  "exit": 1,
+  "rawLogs": "/private/tmp/p3f-pair4-logs.uKa0I8/logs.zip",
+  "rawLogsSha256": "b33b2ef4e696bf37e8bcd40a7abcdcab3c7abd48b07a23ffebc200342925d5d0",
+  "results": {
+    "static": "TS2322 bridge-script.test.ts199 plain fakeDOMRect; lint and47gate-script tests passed",
+    "unit": "20535passed,3intended L260 name snapshots failed,73skipped;1528files passed,1failed,7skipped",
+    "probes": "219passed",
+    "unit:darwin": "282passed,14files",
+    "e2e:document-app": "9passed,1new standalone-selection failure (document-standalone.spec.ts51/115), not :436/:519 signature",
+    "e2e:document": "9passed",
+    "e2e:panel": "26passed",
+    "e2e:side": "12passed",
+    "e2e:to-human": "2passed, must-read entry native=true",
+    "e2e:transcript": "35passed",
+    "e2e:default": "102passed,1fork-without-child failure sessions.spec.ts300,185skipped",
+    "e2e:browser": "11passed",
+    "e2e:browser-comment": "13passed,3Side-thread cards stay composing at552/657/727; attribution pending",
+    "e2e:deliverables": "11passed,1reply-order assertion id4/id3 reversed after intentional L198 missing-anchor wait",
+    "e2e:library": "5passed",
+    "e2e:available": "2passed",
+    "e2e:terminal": "15passed",
+    "e2e:agents": "23passed"
+  },
+  "queueThresholdResult": {
+    "at": "2026-10-18T18:01:39Z",
+    "queued": [
+      {
+        "group": "e2e:side",
+        "job": 117741524819
+      },
+      {
+        "group": "e2e:document-app",
+        "job": 117741524842
+      }
+    ],
+    "reportedToArchitect": true,
+    "oneShotExit": 0
+  },
+  "evidenceStatusAfterGate": "only untracked p3-finish/scale-review/tooling-preparation.json; nothing outside p3-finish",
+  "counterEffects": {
+    "L277": "4/10; restore native=true18:03:55.542Z and scene passed",
+    "L199": "must-read2/10; native=true18:00:33.375Z and case passed; paste intended caret73/73/native=true and copy/cut pass",
+    "fullSet": false
+  },
+  "nextGate": "Architect ruled one current-source26-group combined pair4+pair5 union after bounded fixes/diagnoses, not artificial fix-only pin; its own reds use DL59 afterward",
+  "localGreenOmissionReading": "L166 named unit suites427+9 passed in this run, despite overall unit job red on unrelated snapshots; local GREEN omission remains explicit and no overall gate GREEN claimed"
 }

@@ -37,7 +37,9 @@
     ],
     "controllerVerified": "final two-file supplement diff; red2.exit1,green3.exit0;6/6 green3.log",
     "logs": "/tmp/maws-review/wpkg-fix/",
-    "recheck": "a28c0a091cef6f3c5 closed original scrub and allowlisted capture; mechanical test-path quoting correction pending, no third review",
-    "testBoundaryDeviation": "24c606c90 regression temporarily wrote full child environment to owned scratch file. Controller caught it before recheck and notified architect. Actual sensitive-value presence unknown; neither controller nor worker opened that capture afterward. afterEach removes scratch root and GREEN completed.4463dcac6 records only six controlled fields/presence; no complete environment dump. No claim earlier capture safe."
+    "recheck": "original environment/capture issues closed; sole test-path quoting finding mechanically corrected0ba7596c and controller-verified",
+    "testBoundaryDeviation": "24c606c90 regression temporarily wrote full child environment to owned scratch file. Controller caught it before recheck and notified architect. Actual sensitive-value presence unknown; neither controller nor worker opened that capture afterward. afterEach removes scratch root and GREEN completed.4463dcac6 records only six controlled fields/presence; no complete environment dump. No claim earlier capture safe.",
+    "mechanicalQuoteFix": "0ba7596c73c891dd90c2860d4be72ef24653687e",
+    "quoteProof": "green4.log6/6,green4.exit0,apostrophe scratch path; no observed quote RED"
   }
 }
