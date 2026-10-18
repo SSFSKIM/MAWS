@@ -16,8 +16,8 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 5,
-    "preclosed:pending": 11,
+    "preclosed:committed": 6,
+    "preclosed:pending": 10,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -59,15 +59,15 @@
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at E2's M6 tick ba05e4680 (on master).",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "cfb32e8b2c3852cedc8eb8ea3c03c2c450965d9c"
     },
     {
       "line": 224,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at E2's M6 tick ba05e4680 (on master).",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 225,
