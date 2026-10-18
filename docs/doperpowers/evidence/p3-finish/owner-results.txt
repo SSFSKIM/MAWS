@@ -28,6 +28,9 @@ Declaring HTML artifact (id/title) and the route label it shows:
 Server source eligible (literal user/local scope, no ${…}, normal directory, DCR and S256 sign-in): [ ] yes [ ] no, reason:
 Write-capable Drive connector and destination:
 Write-capable Notion connector and destination:
+Disposable design-system copy (name) assigned as the P3 sitting Space's default before 2.1 and 5.1: [ ] yes [ ] no
+Named document version saved before the recolour: [ ] yes [ ] no   Accent link and marked passage in the sample: [ ] yes [ ] no
+6.2b: recoloured system was the disposable copy [ ] yes [ ] no; main tab (old version) showed the old accent [ ] yes [ ] no; panel (live) showed the new accent [ ] yes [ ] no; any crossing or switch-away loss:
 
 step | surface/clause | pass | fail | note | owner: not run | what was seen | screenshot
 PRE.1 | all items: development-signed landed build | [ ] | [ ] | [ ] | [ ] | | |
@@ -54,6 +57,7 @@ PRE.2 | all items: evidence provenance | [ ] | [ ] | [ ] | [ ] | | |
 5.4 | item 5: export choices | [ ] | [ ] | [ ] | [ ] | | |
 6.1 | item 6: defaults and authoring | [ ] | [ ] | [ ] | [ ] | | |
 6.2 | item 6: live restyle | [ ] | [ ] | [ ] | [ ] | | |
+6.2b | item 6/4: old preview in a main tab beside the restyled live panel (source-derived procedure, not executed; recheck at M4.2) | [ ] | [ ] | [ ] | [ ] | | |
 6.3 | item 6: default authority and ask | [ ] | [ ] | [ ] | [ ] | | |
 7.1 | item 7: artboards | [ ] | [ ] | [ ] | [ ] | | |
 7.2 | item 7: file-backed data | [ ] | [ ] | [ ] | [ ] | | |
