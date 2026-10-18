@@ -63,10 +63,10 @@ export function ChannelView(props: {
     return buildStream(channel, events, aliases, placed, { live, member });
   }, [channel, events, sessions, requests, session, member]);
   const outbox = Object.values(outboxAll).filter((o) => channel.kind === 'group' || (o.to !== '*' && o.to.some((r) => r.session === channel.session)));
-  const landed = useLanded(channel, items);
+  const sessionView = channel.kind === 'session' && drawsSessionView(session) ? session : null;
+  const landed = useLanded(channel, items, sessionView);
   const landedRequest = useLanding((s) => (s.landed?.landing.kind === 'request' && s.landed.project === connection.project && channel.kind === 'session' && s.landed.session === channel.session ? s.landed.landing.request : null));
   const landedMessage = useLandedMessage(channel, events);
-  const sessionView = channel.kind === 'session' && drawsSessionView(session) ? session : null;
   // Keyed by channel, so each opens at its own tail (the composer beside it is keyed by the session alone).
   const stream = (workLabel: string) => (
     <StreamView key={channel.kind === 'group' ? 'stream:group' : `stream:${channel.session}`} items={items} outbox={outbox} landed={landed.item} workLabel={workLabel} />
@@ -169,8 +169,12 @@ export function ChannelView(props: {
   );
 }
 
-/** The card a tapped notification named, if this channel is the one it opened: its item, or why it is not drawn. */
-function useLanded(channel: Channel, items: ReturnType<typeof buildStream>) {
+/**
+ * The card a tapped notification named, if this channel is the one it opened: its item, or why it is not drawn. In the
+ * session view (`sessionView`) a request's card is drawn only while the request is pending, at the transcript's tail,
+ * so a settled one, which the log-built stream also draws, is not there to be found and the notice says why.
+ */
+function useLanded(channel: Channel, items: ReturnType<typeof buildStream>, sessionView: DeskSession | null) {
   const { connection } = useDesk();
   const landed = useLanding((s) => s.landed);
   const here = landed !== null && landed.project === connection.project && channel.kind === 'session' && channel.session === landed.session;
@@ -181,15 +185,20 @@ function useLanded(channel: Channel, items: ReturnType<typeof buildStream>) {
   const caughtUp = useStore(connection.live, (s) => s.caughtUp);
   const checked = useStore(connection.conversation.store, (s) => s.checked);
   const unverified = useStore(connection.conversation.store, (s) => s.unverified);
+  const requests = useStore(connection.conversation.store, (s) => s.requests);
   const failed = useStore(connection.log.store, (s) => s);
   if (!landed || !here) return { item: null, notice: null };
   const item = landedItem(landed.landing, items);
   const { landing } = landed;
+  const found =
+    sessionView !== null && landing.kind === 'request'
+      ? Object.values(requests).some((r) => r.pending && r.machine === sessionView.machine && r.raised.session === sessionView.session && r.request === landing.request)
+      : item !== null;
   const bad =
     landing.kind === 'request'
       ? unverified.some((u) => u.what === 'request' && u.id === landing.request && u.session === landed.session)
       : refused(failed).some((e) => e.event?.writer === landing.writer && e.event?.seq === landing.seq);
-  const status = landingStatus({ landing, found: item !== null, ready: landingReady(caughtUp, { checked }, failed), unverified: bad });
+  const status = landingStatus({ landing, found, ready: landingReady(caughtUp, { checked }, failed), unverified: bad });
   return { item, notice: status.kind === 'shown' ? null : status };
 }
 

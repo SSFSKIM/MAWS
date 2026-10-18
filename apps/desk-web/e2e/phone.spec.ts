@@ -40,14 +40,17 @@ async function emptyTranscript(hub: HubDouble, session: string, status: string |
 const SIDEWAYS = 'pre, code, .transcript-output, .transcript-diff, table';
 /**
  * Nothing on the page is wider than the phone: nothing drawn past its edge, and nothing inside it scrolling sideways.
- * What a component clips inside the screen (a truncated line's text) is not drawn past the edge; a block of code or
- * output may scroll sideways inside its own box (`SIDEWAYS`), as it does on a desktop.
+ * Only truncated text may run past the edge: an element whose nearest clipping ancestor is a truncating box (clipped,
+ * `text-overflow: ellipsis`) that ends inside the screen. Any other clipping box (a bordered panel, a header row)
+ * would hide a control that ran off the screen, so it excuses nothing. A scroller holds what is past its own edge, and
+ * only code and output blocks (`SIDEWAYS`) may scroll sideways, as they do on a desktop.
  */
 async function fitsTheWidth(page: Page) {
   const overflow = await page.evaluate((sideways) => {
     const width = document.documentElement.clientWidth;
     const root = document.getElementById('root');
     const style = (el: Element) => getComputedStyle(el).overflowX;
+    const truncates = (el: Element) => ['hidden', 'clip'].includes(style(el)) && getComputedStyle(el).textOverflow === 'ellipsis';
     // The nearest ancestor below the app's root that clips or scrolls `el`, if any (the root itself clips everything).
     const container = (el: HTMLElement) => {
       for (let up = el.parentElement; up && up !== root && up !== document.body; up = up.parentElement) if (style(up) !== 'visible') return up;
@@ -56,7 +59,9 @@ async function fitsTheWidth(page: Page) {
     const wide = [...document.querySelectorAll<HTMLElement>('body *')].filter((el) => {
       if (el.getBoundingClientRect().right <= width + 1 || getComputedStyle(el).position === 'fixed') return false;
       const box = container(el);
-      return box === null || ((style(box) === 'hidden' || style(box) === 'clip') && box.getBoundingClientRect().right > width + 1);
+      if (box === null) return true;
+      if (['auto', 'scroll'].includes(style(box))) return false; // a scroller holds what is past its edge; `scrolling` checks it
+      return !truncates(box) || box.getBoundingClientRect().right > width + 1;
     });
     const scrolling = [...document.querySelectorAll<HTMLElement>('body *')].filter((el) => ['auto', 'scroll'].includes(style(el)) && el.scrollWidth > el.clientWidth + 1 && !el.closest(sideways));
     return { wide: wide.map((el) => `${el.tagName}.${el.className}`.slice(0, 80)), scrolling: scrolling.map((el) => `${el.tagName}.${el.className}`.slice(0, 80)) };
@@ -376,6 +381,8 @@ test("@layout a session's channel on the phone is its session view: its working 
   await expect(detail).toContainText(LONG_COMMAND);
   await expect(detail).toContainText('2 passed');
   await fitsTheWidth(page);
+  const copy = await detail.getByRole('button', { name: 'Copy command' }).boundingBox(); // the heading wraps the command, not the button
+  expect(copy!.x + copy!.width).toBeLessThanOrEqual(320);
   await bash.click();
   await expect(bash).toHaveAttribute('aria-expanded', 'false');
 
@@ -671,6 +678,15 @@ test('a card the push named says why it is not drawn: settled before the tap, or
   await seedKey(page, hub);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?request=toolu_settled_hours_ago`);
   await expect(page.getByTestId('landing')).toHaveText(/This request is no longer waiting: it was answered or withdrawn before you opened it\./);
+
+  // A request settled before the tap is in the conversation's store (the audit record's `decided`, replayed after
+  // caught-up, carries its `raised`), yet the session view draws only pending cards at its tail: the tap says why.
+  await hub.raise(PROJECT, 'mini', { request: 'toolu_settled_before', session: S.asks, tool: 'Bash', input: { command: 'pnpm e2e', description: 'Run the e2e suite' } });
+  await hub.settle(PROJECT, 'mini', S.asks, { request: 'toolu_settled_before', winner: 'web', outcome: 'allow', by: DOUBLE_MEMBER.id });
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?request=toolu_settled_before`);
+  await expect(center(page).getByTestId('session-view')).toHaveAttribute('data-session', S.asks);
+  await expect(page.getByTestId('landing')).toHaveText(/This request is no longer waiting: it was answered or withdrawn before you opened it\./);
+  await expect(center(page).locator('[data-request="toolu_settled_before"]')).toHaveCount(0);
 
   const forged: Raised = { ...(await seal(await importOrgKey(VECTOR_KEY), 'raised', PROJECT, { request: 'toolu_forged', session: S.asks, tool: 'AskUserQuestion', input: { questions: QUESTIONS } })) };
   hub.raiseRaw(PROJECT, 'mini', { ...forged, input: { questions: [{ ...QUESTIONS[0], question: 'Delete the database?' }] } });
