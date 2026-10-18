@@ -23,6 +23,7 @@ import { loadavg } from 'node:os';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
 import { ScratchRepo } from '../test/support/scratch-repo';
+import { traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { withNativeClipboard } from './support/clipboard';
 import { newChatIn, openProject } from './support/sidebar';
@@ -246,17 +247,35 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   // reorder by the keyboard: the cover lifted, moved down one, dropped
   const before = await order(page, id);
   const cover = inMain.getByRole('button', { name: 'Slide 1', exact: true });
+  const trace = await traceForeground(app, page); // P3-F (tracker row 217): a failure reports the keys, focus and frames
   await cover.focus();
   await page.keyboard.press('Space');
   const lifted = inMain.locator(`[data-slide-thumb="${before[0]}"]`);
-  await expect(lifted).toHaveAttribute('data-dragging', 'true'); // the sensor listens from the next tick on
-  // the sensor starts listening a tick after the lift: an arrow pressed before that moves nothing, so press until it moves
-  await expect(async () => {
-    if (!/translate3d\(0px, [1-9]/.test((await lifted.getAttribute('style')) ?? '')) await page.keyboard.press('ArrowDown');
-    await expect(lifted).toHaveAttribute('style', /translate3d\(0px, [1-9]/, { timeout: 250 });
-  }).toPass();
+  await expect(lifted).toHaveAttribute('data-dragging', 'true');
+  // dnd-kit's keyboard sensor adds its keydown listener in a timer it queues at the lift (`setTimeout` in its `attach`).
+  // A page timer queued after the lift was seen runs after it (timers of equal delay run in the order they were set),
+  // so once it has run the sensor takes the one arrow. An arrow pressed before that is not the sensor's (the browser may
+  // scroll the filmstrip with it, under the droppables measured at the lift), and the old press-until-it-moves loop could
+  // press again after a slow first move and move the cover a second slot.
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  await page.keyboard.press('ArrowDown');
   // dropped once the sensor has the next slide under it (its announcement says so)
-  await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: `over droppable area ${before[1]}.` })).toHaveCount(1);
+  await trace.step(
+    'filmstrip-reorder',
+    async () => {
+      await expect(lifted).toHaveAttribute('style', /translate3d\(0px, [1-9]/);
+      await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: `over droppable area ${before[1]}.` })).toHaveCount(1);
+    },
+    () =>
+      inMain.locator('.deck-filmstrip-list').evaluate((list) => ({
+        list: { top: Math.round(list.getBoundingClientRect().top), client: list.clientHeight, scrollTop: list.scrollTop, scrollHeight: list.scrollHeight },
+        thumbs: Array.from(list.querySelectorAll<HTMLElement>('[data-slide-thumb]')).map((t) => {
+          const r = t.getBoundingClientRect();
+          return [t.dataset.slideThumb, Math.round(r.top), Math.round(r.height), t.style.transform, t.dataset.dragging ?? null];
+        }),
+        live: Array.from(document.querySelectorAll('[id^="DndLiveRegion"]')).map((n) => n.textContent),
+      })),
+  );
   await page.keyboard.press('Space');
   await expect.poll(() => order(page, id)).toEqual([before[1], before[0], ...before.slice(2)]);
   await expect(thumbs(inPanel).first()).toHaveAttribute('data-slide-thumb', before[1]!);
