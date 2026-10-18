@@ -41,5 +41,17 @@
     "testBoundaryDeviation": "24c606c90 regression temporarily wrote full child environment to owned scratch file. Controller caught it before recheck and notified architect. Actual sensitive-value presence unknown; neither controller nor worker opened that capture afterward. afterEach removes scratch root and GREEN completed.4463dcac6 records only six controlled fields/presence; no complete environment dump. No claim earlier capture safe.",
     "mechanicalQuoteFix": "0ba7596c73c891dd90c2860d4be72ef24653687e",
     "quoteProof": "green4.log6/6,green4.exit0,apostrophe scratch path; no observed quote RED"
-  }
+  },
+  "rowResult255": {
+    "status": "closing condition achieved in packaged job117760724566 of39156492025; parent accepted closure despite unrelated Side red",
+    "source": "55d012a2e1245a872cf44764842fc155e3276aef",
+    "controllerVerified": "decoded transition-packaged3868bytes/SHA9b9b0c189e5f3069f8dd5e451c4efca7b01e528a3f8cf3d514d6b5b4e8f8ba79 and transition4859bytes/SHA98db04c7839871c1e291e7d01fc17bd876286decf9593580cfcd786d9ba7289b; transition case685 passed and smoke23 passed",
+    "proof": "connected bundled supervisor72496 owns direct server74225 (parent match true); host imports/closure withinResources; SDK1.32.1 pin,zod4.6.5,92closure identities,missing[],truncatedfalse,problems[]",
+    "raw": [
+      "gates/pair45-transition-packaged.json",
+      "gates/pair45-transition.json"
+    ],
+    "boundary": "overall packaged136passed/1Sideapprovalfailed/184skipped; standalone connectors-direct15/15 not used as packaged proof; no claim whole job green"
+  },
+  "acceptance": "L255 proof achieved, parent closure accepted; overall packaged job remains red on cause-undetermined Side approval path"
 }
