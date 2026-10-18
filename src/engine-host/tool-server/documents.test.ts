@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { charSlots } from '@artifacts/document/structs';
 import { insertedBy, carriedBy } from '@artifacts/yjs';
 import { DocIndex } from '@artifacts/document/block-index';
+import { carriedBlocks } from '@artifacts/document/history';
 import { fingerprint } from '@artifacts/document/fingerprint';
 import { schemaFor } from '@artifacts/document/schema';
 import { getThread, locate, liveThreadIds } from '@artifacts/document/threads';
@@ -378,6 +379,8 @@ describe('suggestions (D14)', () => {
     const [client, clock] = charSlots(nodeOf(live(id), 'proposal'))[0].slot;
     expect(insertedBy(world.service.provenance(id), { client, clock })?.actor).toBe(`session:${SELF}`);
     expect(carriedBy(world.service.provenance(id), { client, clock })).toBe('accept');
+    // F's L160: the history preview labels the accepted copy (Accepted), not as the suggester's plain insertion
+    expect(carriedBlocks(body(live(id)), world.service.provenance(id)).get('proposal')).toBe('accept');
     expect(world.store.storage.clientActor(id, client)).toEqual({ kind: 'session', appSessionId: SELF });
   });
   it('clears direct and suggestion presence independently when a session switches write modes', async () => {

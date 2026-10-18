@@ -105,7 +105,7 @@ export function changesOf(state: EditorState): { changes: Change[]; current: num
   return { changes: value?.changes ?? [], current: value?.current ?? null };
 }
 
-/** The blocks to label as moved or retyped (the controller's, for the version shown). */
+/** The blocks to label as carried: moved, retyped, accepted or restored (the controller's, for the version shown). */
 export function setCarried(editor: Editor, carried: ReadonlyMap<string, Carry['kind']>): void {
   if (!editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(historyPaintKey, { carried } satisfies PaintMeta).setMeta('addToHistory', false));
 }

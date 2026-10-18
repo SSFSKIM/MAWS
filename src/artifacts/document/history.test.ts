@@ -312,6 +312,21 @@ describe('moved and retyped blocks', () => {
     const runs = attributedRuns(render(before, after, hub.attributions()));
     expect(runs.filter((run) => run.kind === 'ins' && run.who === AGENT_1 && !run.node && run.text.length > 1)).toEqual([]);
   });
+
+  // F's L160 (B's M9 addendum): the host's suggestion copies carry as moves do (an accepted proposal's copy `accept`, a
+  // rejected deletion's restored copy `reject`), so the preview labels them rather than showing the suggester's insertion
+  it('names an accepted or a restored copy by its carry kind', () => {
+    const hub = new HistoryHub();
+    hub.write(HUMAN, (doc) => createDocument(doc, { title: 'Main', id: TAB, body: schemaFor().nodeFromJSON(seed) }));
+    const agent = hub.connect(AGENT_1);
+    const copied = applyEdit(agent, [{ op: 'move', id: 'p1', after: 'p3' }]);
+    hub.carryLast(copied.carries.map((carry) => ({ ...carry, kind: 'accept' })));
+    const restored = applyEdit(agent, [{ op: 'move', id: 'p2', after: 'p1' }]);
+    hub.carryLast(restored.carries.map((carry) => ({ ...carry, kind: 'reject' })));
+    const nextDoc = newDoc();
+    applyV2(nextDoc, hub.version('after', AGENT_1).state);
+    expect(Object.fromEntries(carriedBlocks(tabBody(nextDoc, TAB)!, hub.attributions()))).toEqual({ p1: 'accept', p2: 'reject' });
+  });
 });
 
 // M5 fix wave 1 (the review's finding 1): a tab the later state no longer has is part of the comparison, inspectable

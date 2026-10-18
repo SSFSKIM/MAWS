@@ -376,10 +376,12 @@ export function showEditors({ doc, from, to, liveRoot, provenance }: { doc: PMNo
 }
 
 /**
- * The blocks under `root` that a move or a type change re-inserted (parent Decision Log 34; D8b), by block id: a block
- * whose own content carries a `carry` kind in provenance (A's `carryAttribution` marks every carried character and
- * child element of the re-inserted copy). The diff draws that copy as inserted by the original author and the old one
- * as deleted; these are what the preview labels Moved or Retyped. A carried block's children are not listed again.
+ * The blocks under `root` that a carry re-inserted (parent Decision Log 34; D8b), by block id: a block whose own content
+ * carries a `carry` kind in provenance (A's `carryAttribution` marks every carried character and child element of the
+ * re-inserted copy). A move or a type change, and the host's suggestion copies alike (Decision Log 45: an accepted
+ * proposal's copy, a rejected deletion's restored one; F's L160). The diff draws that copy as inserted by the original
+ * author and the old one as deleted; these are what the preview labels Moved, Retyped, Accepted or Restored. A carried
+ * block's children are not listed again.
  */
 export function carriedBlocks(root: YType, attributions: ContentMap): Map<string, Carry['kind']> {
   const carried = new Map<string, Carry['kind']>();
@@ -388,7 +390,7 @@ export function carriedBlocks(root: YType, attributions: ContentMap): Map<string
       if (item.deleted || !item.countable) continue;
       for (const range of attributions.inserts.slice(item.id.client, item.id.clock, item.length)) {
         const kind = range.attrs?.find((attr) => attr.name === 'carry')?.val;
-        if (kind === 'move' || kind === 'retype') return kind;
+        if (kind === 'move' || kind === 'retype' || kind === 'accept' || kind === 'reject') return kind;
       }
     }
     return null;
