@@ -166,7 +166,9 @@ describe('Transcript', () => {
         return next;
       });
       vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => void frames.delete(id));
-      onTestFinished(() => vi.restoreAllMocks());
+      onTestFinished(() => {
+        vi.restoreAllMocks();
+      });
       return {
         run: () =>
           act(() => {
