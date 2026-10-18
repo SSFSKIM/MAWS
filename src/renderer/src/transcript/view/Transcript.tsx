@@ -324,7 +324,10 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   // Whether the reader has scrolled, clicked, typed in the transcript or put focus elsewhere since the last jump they
   // asked for: a jump re-resolved when a staged restart installs (`reissued`) then leaves them where they are. Only
   // when this view handled that jump itself (`handledFocus`, the id it focused): a jump whose target the old rows did
-  // not hold (a notification opening an item the fresh history brings) was never shown, so it is performed.
+  // not hold (a notification opening an item the fresh history brings) was never shown, so it is performed. P3-F
+  // (tracker row 199, the must-read): `handledFocus` names a focus actually given for the current request, recorded
+  // when its target takes focus and cleared by each new request, so a request whose frame the install cancelled (or an
+  // earlier focus of the same target) does not count as shown.
   const readerMoved = useRef(false);
   const handledFocus = useRef<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -338,7 +341,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     if (!jump) return;
     if (!jump.reissued) {
       readerMoved.current = false;
-      handledFocus.current = jump.focus;
+      handledFocus.current = null;
     } else if (handledFocus.current === jump.focus && (readerMoved.current || !focusIsHereOrNowhere(rootRef.current))) {
       useTranscriptStore.getState().jumpHandled(storeKey, jump.nonce);
       return;
@@ -353,7 +356,9 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
       // (M4's denied cell), else through its own disclosure button; any other row focuses its wrapper.
       const cell = element?.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(jump.focus)}"]`);
       const target = cell ? (cell.hasAttribute('tabindex') ? cell : cell.querySelector<HTMLElement>('button')) : element;
-      (target ?? element)?.focus({ preventScroll: true });
+      const focused = target ?? element;
+      focused?.focus({ preventScroll: true });
+      if (focused && document.activeElement === focused) handledFocus.current = jump.focus;
       useTranscriptStore.getState().jumpHandled(storeKey, jump.nonce);
     });
     return () => cancelAnimationFrame(frame);
