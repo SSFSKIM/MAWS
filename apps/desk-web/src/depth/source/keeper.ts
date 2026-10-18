@@ -26,8 +26,15 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { DeskSession } from '../../shell/sessions';
 import type { DeskTranscript, DepthTranscriptState, TranscriptStoreApi } from './desk-transcript';
 
-/** A transcript is live while its session has a live process and its machine's lease holds (DX8). */
-export const reachable = (session: DeskSession) => session.presence?.record != null && session.machineOnline !== false;
+/**
+ * What the session's presence says now (DX8): reachable — a live process, its machine's lease holding — and so its
+ * transcript live; unreachable — no process, or the machine offline; or unknown — no presence since the project socket's
+ * last welcome, which clears what was known (`project/connection.ts`) until the hub sends it again, as after every
+ * reconnect.
+ */
+export type Reach = 'reachable' | 'unreachable' | 'unknown';
+export const reachOf = (session: DeskSession): Reach =>
+  session.machineOnline === false ? 'unreachable' : session.presence == null ? 'unknown' : session.presence.record != null ? 'reachable' : 'unreachable';
 
 /** The first retry after an end while the session stays reachable, doubling up to the cap. */
 const RETRY_FIRST_MS = 1000;
@@ -49,6 +56,7 @@ const disrupted = ({ phase, ended }: Pick<DepthTranscriptState, 'phase' | 'ended
 export class TranscriptKeeper {
   readonly notice: StoreApi<KeeperNotice> = createStore<KeeperNotice>(() => ({ retryIn: null, quiet: false }));
   private live: boolean | null = null;
+  private reach: Reach | null = null;
   private phase: DepthTranscriptState['phase'] | null = null;
   private unreachableSince = false;
   private attempts = 0;
@@ -84,12 +92,19 @@ export class TranscriptKeeper {
     this.store.getState().drop(this.controller.key);
     this.store.getState().setLive(this.controller.key, null);
     this.live = null;
+    this.reach = null;
     this.phase = null;
   }
 
-  /** The session's liveness as its presence says it now. */
-  reachable(live: boolean): void {
-    if (live === this.live) return;
+  /** The session's reach as its presence says it now: live only while reachable; not known is not live. */
+  reachable(reach: Reach): void {
+    const known = this.reach;
+    this.reach = reach;
+    const live = reach === 'reachable';
+    if (live === this.live) {
+      if (reach !== known) this.quietFor(this.controller.state.getState());
+      return;
+    }
     if (this.live === null) this.unreachableSince = !live;
     else if (!live) this.unreachableSince = true;
     this.live = live;
@@ -131,7 +146,8 @@ export class TranscriptKeeper {
   /**
    * The quiet window: opened by the first disruption since the last snapshot of a transcript that holds rows, and closed
    * by the next snapshot, by `QUIET_MS` passing, or early, for good until that snapshot, once the session is known
-   * unreachable or the transcript is no longer in a disruption (it ended for another reason).
+   * unreachable or the transcript is no longer in a disruption (it ended for another reason). Presence not known is no
+   * reason: a socket's reconnect clears it until the hub sends it again, and that is the gap the window hides.
    */
   private quietFor(state: DepthTranscriptState): void {
     if (state.phase === 'live') {
@@ -141,7 +157,7 @@ export class TranscriptKeeper {
       this.disruption = true;
       if (this.controller.heldRows().length > 0) this.quietTimer = setTimeout(() => this.unquiet(), QUIET_MS);
     }
-    if (!disrupted(state) || this.live === false) this.unquiet();
+    if (!disrupted(state) || this.reach === 'unreachable') this.unquiet();
     if (this.quietTimer !== null && !this.notice.getState().quiet) this.notice.setState({ quiet: true });
   }
 

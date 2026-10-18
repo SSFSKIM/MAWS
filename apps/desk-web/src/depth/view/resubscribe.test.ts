@@ -179,6 +179,16 @@ describe('what the views say of a disruption', () => {
     expect(said(hook)).toEqual({ quiet: false, status: 'Reconnecting…' });
   });
 
+  it('stays quiet while the session’s presence is not known: a socket’s reconnect clears it until the hub sends it again', () => {
+    const { plane, hook } = mount();
+    act(() => plane.current.snapshot(script, held));
+    interrupt(plane);
+    hook.rerender({ s: { ...session(true), presence: null } }); // the welcome cleared presence
+    expect(said(hook)).toEqual({ quiet: true, status: '' });
+    hook.rerender({ s: session(true) });
+    expect(said(hook)).toEqual({ quiet: true, status: '' });
+  });
+
   it('says it at once, and until the next snapshot, once the session goes unreachable', () => {
     const { plane, hook } = mount();
     act(() => plane.current.snapshot(script, held));

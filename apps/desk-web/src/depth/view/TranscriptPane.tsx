@@ -14,7 +14,7 @@ import { Transcript, type TranscriptListHandle, type TranscriptProps } from '../
 import { useAccess } from '../../hub/access';
 import type { DeskSession } from '../../shell/sessions';
 import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
-import { reachable, TranscriptKeeper } from '../source/keeper';
+import { reachOf, TranscriptKeeper } from '../source/keeper';
 import type { StreamBlock } from '../stream/layer';
 import { drawnRows } from './drawn-rows';
 import { useKeepPlaceThroughOlderRows } from './keep-place';
@@ -65,12 +65,12 @@ export function useKeptTranscript(keeper: TranscriptKeeper): PaneState {
  */
 export function useDeskTranscript(controller: DeskTranscript, session: DeskSession): PaneState {
   const [keeper] = useState(() => new TranscriptKeeper(controller, useTranscriptStore));
-  const live = reachable(session);
+  const reach = reachOf(session);
   useEffect(() => {
     keeper.start();
     return () => keeper.stop();
   }, [keeper]);
-  useEffect(() => keeper.reachable(live), [keeper, live]);
+  useEffect(() => keeper.reachable(reach), [keeper, reach]);
   return useKeptTranscript(keeper);
 }
 
