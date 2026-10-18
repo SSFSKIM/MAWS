@@ -20,16 +20,21 @@
 //   reconciles the whole directory once it loads again; the linked directory itself is never created, and no write or
 //   removal passes through a link inside it.
 // - At start every linked directory is reconciled against its manifest: what changed while the host was down.
+// - P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): a writer
+//   that declares `inputs` (what its output depends on beyond the revision) has them kept in the entry beside the
+//   revision, and the entry is current only while both match (an entry without them is rewritten once); `refresh`
+//   schedules artifacts as their own change does, for a change elsewhere that their `inputs` may tell.
 //
 // Reads go through P3-A's public store methods behind the commit barrier (the mirror never writes a row its batch may
 // yet take back); the only durable state is the manifest in the linked directory (ruling 18(a)).
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { mirrorSlug, mirrorWriterFor } from '@artifacts/library/mirror';
+import { isMirrorCopy, mirrorSlug, mirrorWriterFor, type MirrorOutput } from '@artifacts/library/mirror';
 import { applyV2, newDoc } from '@artifacts/yjs';
 import { isDocKind, type Artifact, type Space } from '@shared/artifacts/entity';
 import { byteContentOf, fileBytes, type LibraryDocuments } from './reads';
+import { datasetRefsOf } from '../documents/retention'; // E3
 
 export const MIRROR_SETTLE_MS = 1_000;
 export const MIRROR_MAX_WAIT_MS = 10_000;
@@ -39,6 +44,7 @@ const MIRROR_DIR = 'artifacts';
 
 interface ManifestEntry {
   revision: number;
+  inputs?: string; // P3-C: the writer's `inputs` it was written at, when its kind declares them (version 1, optional)
   slug: string;
   files: string[]; // relative to `<linkedDir>/artifacts/`
 }
@@ -58,6 +64,8 @@ export interface MirrorOptions {
 type ContentRead = { state: Uint8Array } | { bytes: Uint8Array; name: string } | { path: string; name: string } | null;
 // M6b: the artifact's assets as the store listed them inside the barrier; their bytes are read only when a writer asks.
 type AssetsRead = { ref: string; name: string; mime: string; size: number; sha256: string }[];
+// What one artifact's mirror pass read inside the barrier, or null when its entry is current or it is gone (E3: named).
+type MirrorRead = { artifact: Artifact; revision: number; inputs: string | undefined; content: ContentRead; assets: AssetsRead } | null;
 
 export class LibraryMirror {
   private readonly log: (line: string) => void;
@@ -103,6 +111,12 @@ export class LibraryMirror {
       await chain;
       if (chain === this.chain && this.timers.size === 0) return;
     }
+  }
+
+  // P3-C (Decision Log 29): schedules each artifact as its change would; one whose entry is current (its revision and its
+  // writer's `inputs` unchanged) is not rewritten, so a caller may name more than changed.
+  refresh(artifactIds: Iterable<string>): void {
+    for (const artifactId of artifactIds) this.schedule(artifactId);
   }
 
   close(): void {
@@ -260,23 +274,44 @@ export class LibraryMirror {
   }
 
   // Writes the artifact's files as it stands now unless its entry is current; removes the files it no longer produces.
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): the dashboard snapshots the read state names are
+  // held from that read until the files are written (`captureWithAssets`: the read and its hold in one synchronous turn,
+  // released only after writing), so a refresh's collection meanwhile never leaves a half-written mirror.
   private async upsert(dir: string, manifest: Manifest, artifactId: string): Promise<void> {
-    const { store, service } = this.documents;
     const root = join(dir, MIRROR_DIR);
-    const read = await store.readCommitted((): { artifact: Artifact; revision: number; content: ContentRead; assets: AssetsRead } | null => {
-      const artifact = store.get(artifactId);
-      if (!artifact) return null; // deleted since: its event removes it
-      const revision = store.revision(artifactId);
-      const entry = manifest.artifacts[artifactId];
-      if (entry && entry.revision === revision && entry.slug === mirrorSlug(artifact) && entry.files.every((file) => existsSync(join(root, file)))) return null; // current
-      if (!mirrorWriterFor(artifact.kind)) return { artifact, revision, content: null, assets: [] };
-      const assets = store.listAssets(artifactId).map(({ ref, name, mime, size, sha256 }) => ({ ref, name, mime, size, sha256 }));
-      if (isDocKind(artifact.kind)) return { artifact, revision, content: { state: service.readState(artifactId).state }, assets };
-      return { artifact, revision, content: byteContentOf(store, artifactId), assets };
+    const captured = await this.documents.store.captureWithAssets(artifactId, () => {
+      const value = this.readNow(root, manifest, artifactId);
+      const listed = new Set(value?.assets.map((asset) => asset.ref));
+      return { value, refs: value?.content && 'state' in value.content ? datasetRefsOf(value.content.state).filter((ref) => listed.has(ref)) : [] };
     });
+    try {
+      this.write(root, manifest, artifactId, captured.value);
+    } finally {
+      captured.release();
+    }
+  }
+
+  // What `upsert` writes from, read inside the barrier: null when the entry is current or the artifact is gone.
+  private readNow(root: string, manifest: Manifest, artifactId: string): MirrorRead {
+    const { store, service } = this.documents;
+    const artifact = store.get(artifactId);
+    if (!artifact) return null; // deleted since: its event removes it
+    const revision = store.revision(artifactId);
+    const writer = mirrorWriterFor(artifact.kind);
+    const inputs = writer?.inputs?.(artifact); // P3-C (Decision Log 29)
+    const entry = manifest.artifacts[artifactId];
+    if (entry && entry.revision === revision && entry.inputs === inputs && entry.slug === mirrorSlug(artifact) && entry.files.every((file) => existsSync(join(root, file)))) return null; // current
+    if (!writer) return { artifact, revision, inputs, content: null, assets: [] };
+    const assets = store.listAssets(artifactId).map(({ ref, name, mime, size, sha256 }) => ({ ref, name, mime, size, sha256 }));
+    if (isDocKind(artifact.kind)) return { artifact, revision, inputs, content: { state: service.readState(artifactId).state }, assets };
+    return { artifact, revision, inputs, content: byteContentOf(store, artifactId), assets };
+  }
+
+  // The files of what `readNow` read, written synchronously.
+  private write(root: string, manifest: Manifest, artifactId: string, read: MirrorRead): void {
     const entry = manifest.artifacts[artifactId];
     if (!read || (read.content === null && !entry)) return; // current, gone, or nothing to write and nothing written
-    const { artifact, revision, content } = read;
+    const { artifact, revision, inputs, content } = read;
     const files = content === null ? {} : this.produce(artifact, content, read.assets);
     const owned = new Set(Object.values(manifest.artifacts).flatMap((other) => other.files));
     const mine = new Set(entry?.files ?? []);
@@ -299,8 +334,14 @@ export class LibraryMirror {
           this.log(`${artifactId}: ${target} lies under a link; not written`);
           continue;
         }
+        // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 37 (1)): a copy already in place keeps
+        // its bytes (they never change under its name); one the mirror lacks is read now
+        if (isMirrorCopy(data) && mine.has(file) && existsSync(target)) {
+          written.push(file);
+          continue;
+        }
         if (sameAs !== undefined) renameSync(join(root, sameAs), target); // the entry takes the new name's case first
-        writeReadOnly(root, file, data);
+        writeReadOnly(root, file, isMirrorCopy(data) ? data.read() : data);
       } catch (error) {
         failure ??= { error };
         break;
@@ -325,7 +366,7 @@ export class LibraryMirror {
       }
     }
     const kept = [...new Set([...written, ...leftover])].sort();
-    if (kept.length > 0) manifest.artifacts[artifactId] = { revision: failure ? -1 : revision, slug: mirrorSlug(artifact), files: kept };
+    if (kept.length > 0) manifest.artifacts[artifactId] = { revision: failure ? -1 : revision, ...(inputs !== undefined && { inputs }), slug: mirrorSlug(artifact), files: kept }; // P3-C: inputs
     else delete manifest.artifacts[artifactId];
     if (failure) throw failure.error;
   }
@@ -333,7 +374,7 @@ export class LibraryMirror {
   // The kind's writer over what was read; a document's replica lives only for the call. M6b: the assets listed, each
   // read from the store's content-addressed file when the writer asks (a failed read fails this artifact's write, which
   // the next change retries, as any write does).
-  private produce(artifact: Artifact, content: Exclude<ContentRead, null>, listed: AssetsRead): Record<string, string | Uint8Array> {
+  private produce(artifact: Artifact, content: Exclude<ContentRead, null>, listed: AssetsRead): MirrorOutput['files'] {
     const writer = mirrorWriterFor(artifact.kind)!;
     const byRef = new Map(listed.map((asset) => [asset.ref, asset]));
     const assets = {
@@ -459,7 +500,7 @@ function readManifest(path: string): Manifest {
   const entries: Record<string, ManifestEntry> = {};
   for (const [artifactId, entry] of Object.entries(artifacts as Record<string, Partial<ManifestEntry>>)) {
     if (typeof entry?.revision !== 'number' || typeof entry.slug !== 'string' || !Array.isArray(entry.files)) continue;
-    entries[artifactId] = { revision: entry.revision, slug: entry.slug, files: entry.files.filter((file): file is string => typeof file === 'string' && isMirrorPath(file)) };
+    entries[artifactId] = { revision: entry.revision, ...(typeof entry.inputs === 'string' && { inputs: entry.inputs }) /* P3-C */, slug: entry.slug, files: entry.files.filter((file): file is string => typeof file === 'string' && isMirrorPath(file)) };
   }
   return { version: 1, artifacts: entries };
 }

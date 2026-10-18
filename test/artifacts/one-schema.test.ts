@@ -35,7 +35,8 @@ describe('the one-schema rule', () => {
   });
 
   it('leaves the schema module and the composer\'s own schema alone', async () => {
-    for (const file of ['src/artifacts/document/schema.ts', 'src/renderer/src/composer/editor/__lint_fixture__.ts']) {
+    // P3-C: the deck's slide-text schema module is the slides' own, as the composer's is
+    for (const file of ['src/artifacts/document/schema.ts', 'src/renderer/src/composer/editor/__lint_fixture__.ts', 'src/artifacts/slides/editor/text-schema.ts']) {
       for (const code of SECOND_SCHEMA) expect(await rulesFired(code, file)).toEqual([]);
     }
   });

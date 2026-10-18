@@ -62,9 +62,11 @@ import { ARTIFACT_REFUSALS, artifactRefusalOf } from './schema/artifacts';
 // P3-A end
 import * as library from './schema/library'; // P3-L M1
 import * as designSystems from './schema/design-systems'; // P3-D (the P3 spec's Decision Log 61)
+import * as presentations from './schema/presentations'; // P3-C M6
+import * as connectors from './schema/connectors'; // P3-H H3b
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -600,7 +602,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -913,11 +915,11 @@ describe('ipc schema validates both directions', () => {
   // E5 end
   // E1 start: the maws tool server's commands and its pane request (P1 ledger §5)
   describe('E1 entries', () => {
-    it('adds the maws namespace: three engine-host commands and the pane request, all bridged', () => {
-      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */, 'maws.artifact.exported' /* P3-A M7 */]);
+    it('adds the maws namespace: three engine-host commands and the pane request, all bridged but E3’s main-only datasetRefreshed', () => {
+      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */, 'maws.artifact.exported' /* P3-A M7 */, 'maws.artifact.datasetRefreshed' /* E3 */]);
       for (const spec of Object.values(maws.commands)) expect(spec.owner).toBe('engine-host');
-      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */, 'maws.artifact.export' /* P3-A M7 */]);
-      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
+      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */, 'maws.artifact.export' /* P3-A M7 */, 'maws.artifact.datasetRefresh' /* E3 */]);
+      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands).filter((name) => !MAIN_ONLY_COMMANDS.includes(name as never))); // E3
     });
 
     it('validates the asks, an answer, a pane request and its answer', () => {
@@ -1497,7 +1499,7 @@ describe('ipc schema validates both directions', () => {
     it('the browser tools\' bridge left with the tools', () => {
       expect(Object.keys(commands).filter((name) => name.startsWith('maws.browser.'))).toEqual([]);
       expect(Object.keys(events).filter((name) => name.startsWith('maws.browser.'))).toEqual([]);
-      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
+      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands).filter((name) => !MAIN_ONLY_COMMANDS.includes(name as never))); // E3
       expect([...NAMES.maws.events]).toEqual(Object.keys(maws.events));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });
@@ -1644,7 +1646,7 @@ describe('ipc schema validates both directions', () => {
 
     it('owns artifacts.* in the engine host but artifacts.open (main), keeps setDefaults and content main-only, and emits both events across the host wire', () => {
       const owners = Object.fromEntries(Object.entries({ ...artifacts.commands, ...spaces.commands }).map(([name, spec]) => [name, spec.owner]));
-      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open', 'artifacts.export' /* M7 */]);
+      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open', 'artifacts.export' /* M7 */, 'artifacts.downloadAsset' /* P3-E (E2 M3): main's, E's Decision Log 18 */, 'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool' /* P3-H H3b: main's, the route's fingerprint and the revoke's abort */, 'artifacts.holdDatasets', 'artifacts.releaseDatasets' /* E3: main's, a window's holds (E's Decision Log 48 (3)) */]);
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['artifacts.setDefaults', 'artifacts.content']));
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.setDefaults');
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.content');
@@ -1672,6 +1674,19 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('artifacts.console', { artifactId: id, revision: 4, level: 'info', message: 'x', line: null, source: null }).ok).toBe(false);
       expect(HOST_EVENTS).not.toContain('artifacts.console');
       expect(ARTIFACT_REFUSALS).toContain('exportUnavailable');
+    });
+
+    // P3 Decision Log 91 (the X31 `ownFile` row) and E's Decision Log 33: an export of its own file, named by the id main
+    // minted, answered beside its path
+    it('takes ownFile only as true, and answers an exportId only as a UUID, on the library’s export and the bridge’s answer', () => {
+      const exportId = '0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a';
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'pdf', ownFile: true }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'pdf', ownFile: false }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'pdf', exportId }).ok, 'the caller names no id').toBe(false);
+      expect(validateCommandOutput('artifacts.export', { path: `/u/artifacts/x/exports/4-pdf-${exportId}.pdf`, revision: 4, exportId }).ok).toBe(true);
+      expect(validateCommandOutput('artifacts.export', { path: '/u/artifacts/x/exports/4-pdf-x.pdf', revision: 4, exportId: 'x' }).ok).toBe(false);
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, revision: 4, path: `/u/x/exports/4-png-${exportId}.png`, exportId } }).ok).toBe(true);
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, revision: 4, path: '/u/x/exports/4-png.png', exportId: '../x' } }).ok).toBe(false);
     });
 
     it('answers artifacts with their revision and the agent-suggestions flag, and refuses a row without either', () => {
@@ -1864,4 +1879,69 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // P3-D end
+  // P3-C start (M6): the presenter (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D13)
+  describe('P3-C presentations.present', () => {
+    it('is main’s, takes a deck and an optional slide id of the dialect’s form, and answers which windows opened', () => {
+      expect(commands['presentations.present'].owner).toBe('main');
+      const artifactId = '00000000-0000-4000-8000-000000000001';
+      expect(validateCommandInput('presentations.present', { artifactId }).ok).toBe(true);
+      expect(validateCommandInput('presentations.present', { artifactId, slideId: 'intro_2-a' }).ok).toBe(true);
+      expect(validateCommandInput('presentations.present', { artifactId, slideId: '../x' }).ok).toBe(false);
+      expect(validateCommandInput('presentations.present', { artifactId: 'deck' }).ok).toBe(false);
+      expect(validateCommandOutput('presentations.present', { opened: 'audience+presenter' }).ok).toBe(true);
+      expect(validateCommandOutput('presentations.present', { opened: 'presenter' }).ok).toBe(false);
+    });
+  });
+  // P3-C end
+  // P3-H H3b start: an artifact page's connector leases (main's, bridged), the grant store and route E's engine leg (the
+  // engine host's, main's alone), the owner's grant commands (main's), and the events' payloads
+  describe('P3-H connectors', () => {
+    const ID = '00000000-0000-4000-8000-000000000001';
+    it('bridges the page-lease commands, which are main’s, and never the store’s or the engine leg’s', () => {
+      const owners = Object.fromEntries(Object.entries(connectors.commands).map(([name, spec]) => [name, spec.owner]));
+      for (const name of NAMES.connectors.commands) expect(owners[name], name).toBe('main');
+      const hidden = ['connectors.grants', 'connectors.grant', 'connectors.revoke', 'connectors.check', 'connectors.resolve', 'connectors.start', 'connectors.take', 'connectors.cancel'];
+      for (const name of hidden) {
+        expect(owners[name], name).toBe('engine-host');
+        expect(MAIN_ONLY_COMMANDS, name).toContain(name);
+        expect([...NAMES.connectors.commands], name).not.toContain(name);
+      }
+      for (const name of ['artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool'] as const) {
+        expect(commands[name].owner, name).toBe('main');
+        expect([...NAMES.artifacts.commands], name).toContain(name);
+      }
+      expect(HOST_EVENTS).toContain('connectors.operation');
+      expect(HOST_EVENTS).toContain('connectors.grantChanged');
+      expect(HOST_EVENTS).not.toContain('connectors.watchUpdate'); // main's, to one window
+    });
+
+    it('passes a page’s own payload to the broker as it came, and answers a page only states and closed reasons', () => {
+      expect(validateCommandInput('connectors.call', { leaseId: ID, request: { anything: [1] } }).ok).toBe(true);
+      expect(validateCommandInput('connectors.call', { leaseId: 'lease', request: {} }).ok).toBe(false);
+      expect(validateCommandOutput('connectors.call', { ok: false, state: 'paused', reason: 'noRoute' }).ok).toBe(true);
+      expect(validateCommandOutput('connectors.call', { ok: false, state: 'paused', reason: 'noRoute', message: 'MCP server not connected' }).ok, 'no message').toBe(false);
+      expect(validateCommandOutput('connectors.call', { ok: false, state: 'paused', reason: 'toolError' }).ok, 'a reason of another state').toBe(false);
+      expect(validateCommandOutput('connectors.call', { ok: true, result: { rows: [1] }, fetchedAt: 1, via: { route: 'engine', sessionId: 'app-1' } }).ok).toBe(true);
+      expect(validateCommandOutput('connectors.watch', { ok: false, state: 'revoked', reason: 'notGranted' }).ok, 'a watch start refuses only as invalid').toBe(false);
+      expect(validateCommandOutput('artifacts.grantConnectorTool', { ok: false, state: 'invalid', reason: 'notReadOnly' }).ok).toBe(true);
+    });
+
+    it('carries only ids and tools on the events every window receives', () => {
+      expect(validateEventPayload('connectors.operation', { operationId: ID }).ok).toBe(true);
+      expect(validateEventPayload('connectors.operation', { operationId: ID, outcome: { ok: true, result: 1 } }).ok).toBe(false);
+      expect(validateEventPayload('connectors.grantChanged', { artifactId: ID, server: 'fixture', tool: 'rows', change: 'consumed' }).ok).toBe(true);
+      expect(validateEventPayload('connectors.grantChanged', { artifactId: ID, server: 'fixture', tool: 'rows', change: 'granted', fingerprint: 'x' }).ok).toBe(false);
+    });
+
+    it('bounds what main hands the host for a call: the session it found, the grant it checked', () => {
+      const start = { operationId: ID, artifactId: ID, appSessionId: 'app-1', launchId: 'L1', cwd: '/repo', server: 'fixture', tool: 'rows', arguments: {}, fingerprint: 'f', mode: 'read' };
+      expect(validateCommandInput('connectors.start', start).ok).toBe(true);
+      expect(validateCommandInput('connectors.start', { ...start, mode: 'write' }).ok).toBe(false);
+      expect(validateCommandInput('connectors.start', { ...start, config: {} }).ok).toBe(false);
+      expect(validateCommandOutput('connectors.take', { outcome: { ok: false, failure: 'refused', refusal: 'wrongMode', message: 'x' } }).ok).toBe(true);
+      expect(validateCommandOutput('connectors.take', { outcome: null }).ok).toBe(true);
+      expect(validateCommandOutput('connectors.resolve', { ready: true, fingerprint: 'f', readOnly: true, config: { headers: {} } }).ok).toBe(false);
+    });
+  });
+  // P3-H H3b end
 });

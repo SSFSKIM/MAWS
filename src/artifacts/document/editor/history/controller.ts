@@ -10,7 +10,7 @@ import type { ArtifactVersion } from '@shared/artifacts/version';
 import { decodeMap, stateV2, type Carry, type ContentMap } from '../../../yjs';
 import type { DocumentHandle } from '../../../host';
 import type { VersionView } from '../../collab';
-import { carriedBlocks, countChanges, diffBody, diffTabs, documentChanges, openDiff, showEditors, type Diff, type DiffTab, type TabChanges } from '../../history';
+import { carriedBlocks, countChanges, diffBody, diffTabs, documentChanges, openDiff, showEditors, type Diff, type DiffTab, type ExtraChange /* P3-E */, type TabChanges } from '../../history';
 import { dsOverrides, type TokenOverrides } from '../../meta';
 import { tabBody } from '../../tabs';
 import type { Node as PMNode } from '@tiptap/pm/model';
@@ -35,8 +35,13 @@ export interface Preview {
   versionId: number | null;
   /** The whole comparison's changes, tab by tab: the bar's "N changes" and ↑ ↓, the same list the pill counts. */
   changes: TabChanges[];
-  /** What ↑ ↓ reached in the shown tab when it is not a body change: the tab's own change, or a body change to reach. */
-  focus: number | 'tab' | null;
+  /**
+   * What ↑ ↓ reached in the shown tab when it is not a body change: the tab's own change, or a body change to reach;
+   * P3-E: or an unbound extra change, by its key.
+   */
+  focus: number | 'tab' | { extra: string } | null;
+  /** P3-E (E2 M4): the kind's extra changes (`HistoryApi.extraChanges`), absent without the hook. */
+  extras?: readonly ExtraChange[];
 }
 
 export interface Pill {
@@ -100,6 +105,8 @@ export class HistoryController {
     return () => this.listeners.delete(listener);
   };
   getSnapshot = (): HistorySnapshot => this.snapshot;
+  /** The time the list's days are named against: the history's clock, else the wall clock. */
+  now = (): number => this.api.now?.() ?? Date.now();
 
   /**
    * The editor opened: follow restores (the banner) and new versions; the first time, read the list and the last view,
@@ -322,6 +329,7 @@ export class HistoryController {
       const provenance = decodeMap(attributions);
       const diff = openDiff({ prevState, nextState, attributions: provenance });
       this.diffs.add(diff);
+      const extras = this.api.extraChanges?.(diff.prevDoc, diff.nextDoc, provenance); // P3-E
       const tabs = diffTabs(diff);
       const tabId = tabs.some((tab) => tab.id === this.liveTab) ? this.liveTab : (tabs[0]?.id ?? null);
       const preview: Preview = {
@@ -334,8 +342,9 @@ export class HistoryController {
         carried: new Map(),
         tokens: next ? { ...tokens, ...dsOverrides(diff.nextDoc) } : {},
         versionId: target.kind === 'version' ? target.versionId : null,
-        changes: documentChanges(diff),
+        changes: documentChanges(diff, extras), // P3-E: extras
         focus: null,
+        ...(extras && { extras }), // P3-E
       };
       this.loaded = { preview, diff, attributions: provenance };
       this.show(this.loaded, preview, true);
@@ -364,10 +373,11 @@ export class HistoryController {
     };
     try {
       const [prevState, attributions] = await Promise.all([since ? this.api.versionState(since.id) : Promise.resolve(null), this.api.attributions(since?.seq ?? 0, LIVE)]);
-      const diff = openDiff({ prevState, nextState: stateV2(this.handle.doc), attributions: decodeMap(attributions) });
+      const provenance = decodeMap(attributions);
+      const diff = openDiff({ prevState, nextState: stateV2(this.handle.doc), attributions: provenance });
       let count: number;
       try {
-        count = countChanges(diff);
+        count = countChanges(diff, this.api.extraChanges?.(diff.prevDoc, diff.nextDoc, provenance)); // P3-E: the kind's extras too
       } finally {
         diff.destroy();
       }

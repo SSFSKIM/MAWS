@@ -20,7 +20,15 @@ function lazyHost(get: () => ArtifactHost): ArtifactHost {
     acceptSuggestion: (artifactId, ranges) => get().acceptSuggestion(artifactId, ranges), // A's required members (P3-D re-merge)
     rejectSuggestion: (artifactId, ranges) => get().rejectSuggestion(artifactId, ranges),
     uploadAsset: (artifactId, bytes, meta) => get().uploadAsset(artifactId, bytes, meta),
+    copyAsset: (from, ref, to) => get().copyAsset(from, ref, to), // P3-C (Decision Log 25)
+    readDataset: (artifactId, ref, options) => get().readDataset(artifactId, ref, options), // P3-E (E2 M2)
+    downloadAsset: (artifactId, ref, options) => get().downloadAsset(artifactId, ref, options), // P3-E (E2 M3)
+    holdDatasets: (artifactId, refs) => get().holdDatasets(artifactId, refs), // E3: a window's snapshot holds
     identity: () => get().identity(),
+    openConnectors: (artifactId) => get().openConnectors(artifactId), // P3-H H4: the connector family
+    connectorGrants: (artifactId) => get().connectorGrants(artifactId),
+    grantConnectorTool: (artifactId, tool) => get().grantConnectorTool(artifactId, tool),
+    revokeConnectorTool: (artifactId, tool) => get().revokeConnectorTool(artifactId, tool),
   };
 }
 

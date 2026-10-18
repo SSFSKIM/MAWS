@@ -1,0 +1,157 @@
+[
+  {
+    "at": "2026-10-16T19:15:43.893Z",
+    "event": "launched window",
+    "detail": {
+      "native": {
+        "visible": true,
+        "minimized": false
+      },
+      "documentVisibility": "visible",
+      "switches": {
+        "disable-renderer-backgrounding": true,
+        "disable-background-timer-throttling": true,
+        "disable-backgrounding-occluded-windows": true
+      }
+    }
+  },
+  {
+    "at": "2026-10-16T19:15:43.908Z",
+    "event": "launched",
+    "detail": {
+      "pid": 35892
+    }
+  },
+  {
+    "at": "2026-10-16T19:15:43.937Z",
+    "event": "artifact",
+    "detail": {
+      "id": "712a10b5-64e0-48ed-ada4-6ef23f2078b7"
+    }
+  },
+  {
+    "at": "2026-10-16T19:15:45.451Z",
+    "event": "owner start",
+    "detail": {
+      "appSessionId": "89872f2c-6f76-42be-a265-12b51b14f043",
+      "launchId": "zo7vupra",
+      "pid": 36121
+    }
+  },
+  {
+    "at": "2026-10-16T19:15:45.579Z",
+    "event": "pids",
+    "detail": {
+      "supervisor": 36056,
+      "engine": 36121,
+      "server": 36194,
+      "launchId": "zo7vupra"
+    }
+  },
+  {
+    "at": "2026-10-16T19:15:45.591Z",
+    "event": "hidden",
+    "detail": {
+      "native": {
+        "visible": false,
+        "minimized": false
+      },
+      "documentVisibility": "visible",
+      "switches": {
+        "disable-renderer-backgrounding": true,
+        "disable-background-timer-throttling": true,
+        "disable-backgrounding-occluded-windows": true
+      }
+    }
+  },
+  {
+    "at": "2026-10-16T19:20:45.608Z",
+    "event": "shown",
+    "detail": {
+      "native": {
+        "visible": true,
+        "minimized": false
+      },
+      "documentVisibility": "visible",
+      "switches": {
+        "disable-renderer-backgrounding": true,
+        "disable-background-timer-throttling": true,
+        "disable-backgrounding-occluded-windows": true
+      }
+    }
+  },
+  {
+    "at": "2026-10-16T19:20:50.695Z",
+    "event": "hidden span",
+    "detail": {
+      "from": "2026-10-16T19:15:45.591Z",
+      "to": "2026-10-16T19:20:45.592Z"
+    }
+  },
+  {
+    "at": "2026-10-16T19:20:50.716Z",
+    "event": "app killed"
+  },
+  {
+    "at": "2026-10-16T19:25:50.719Z",
+    "event": "closed span",
+    "detail": {
+      "from": "2026-10-16T19:20:50.716Z",
+      "to": "2026-10-16T19:25:50.717Z"
+    }
+  },
+  {
+    "at": "2026-10-16T19:25:51.710Z",
+    "event": "launched window",
+    "detail": {
+      "native": {
+        "visible": true,
+        "minimized": false
+      },
+      "documentVisibility": "visible",
+      "switches": {
+        "disable-renderer-backgrounding": true,
+        "disable-background-timer-throttling": true,
+        "disable-backgrounding-occluded-windows": true
+      }
+    }
+  },
+  {
+    "at": "2026-10-16T19:25:51.713Z",
+    "event": "launched",
+    "detail": {
+      "pid": 75896
+    }
+  },
+  {
+    "at": "2026-10-16T19:25:51.719Z",
+    "event": "restored page"
+  },
+  {
+    "at": "2026-10-16T19:27:07.368Z",
+    "event": "app quit"
+  },
+  {
+    "at": "2026-10-16T19:27:08.338Z",
+    "event": "launched window",
+    "detail": {
+      "native": {
+        "visible": true,
+        "minimized": false
+      },
+      "documentVisibility": "visible",
+      "switches": {
+        "disable-renderer-backgrounding": true,
+        "disable-background-timer-throttling": true,
+        "disable-backgrounding-occluded-windows": true
+      }
+    }
+  },
+  {
+    "at": "2026-10-16T19:27:08.340Z",
+    "event": "launched",
+    "detail": {
+      "pid": 80835
+    }
+  }
+]

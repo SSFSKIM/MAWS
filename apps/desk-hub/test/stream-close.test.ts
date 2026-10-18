@@ -126,34 +126,43 @@ describe("a dropped machine's stream, on the suites' runtime with the deployed h
   });
 });
 
-/** A free port n with n + 1 free too: the local command takes n for the stand-in and n + 1 for wrangler dev. */
+/**
+ * A port n with n and n + 1 free: the local command takes n for the stand-in and n + 1 for wrangler dev. n is drawn from
+ * 20000-32000, below the ephemeral range of Linux (32768-60999) and macOS (49152-65535), so no other process's outgoing
+ * connection, in this suite's other workers included, is handed n + 1 between this check and the command's bind. The
+ * check still catches a listener that holds one of them.
+ */
 async function freePorts(): Promise<number> {
   const free = (port: number) =>
-    new Promise<number | null>((done) => {
+    new Promise<boolean>((done) => {
       const server = createServer();
-      server.once('error', () => done(null));
-      server.listen(port, '127.0.0.1', () => {
-        const { port: bound } = server.address() as { port: number };
-        server.close(() => done(bound));
-      });
+      server.once('error', () => done(false));
+      server.listen(port, '127.0.0.1', () => server.close(() => done(true)));
     });
   for (;;) {
-    const port = await free(0);
-    if (port !== null && port < 65535 && (await free(port + 1)) !== null) return port;
+    const port = 20_000 + Math.floor(Math.random() * 12_000);
+    if ((await free(port)) && (await free(port + 1))) return port;
   }
 }
+
+/** A bind lost to another process, by the command's refusal or by the stand-in's or wrangler's own error. */
+const PORT_TAKEN = /address already in use|EADDRINUSE|port \d+ is in use/i;
+class PortTaken extends Error {}
+const ATTEMPTS = 3;
 
 describe("a dropped machine's stream, on the local command, as DC4 and DC5 run it", () => {
   let child: ChildProcess | undefined;
   let state: string | undefined;
   let url: string;
-  beforeAll(async () => {
+
+  /** Starts the command on a fresh pair of ports and waits until the hub answers through the stand-in. */
+  async function start(): Promise<void> {
     const port = await freePorts();
     url = `http://127.0.0.1:${port}`;
-    state = mkdtempSync(join(tmpdir(), 'desk-hub-local-'));
-    const command = spawn(process.execPath, ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', 'local/run.ts', '--port', String(port), '--state', state], {
+    const command = spawn(process.execPath, ['--experimental-strip-types', '--disable-warning=ExperimentalWarning', 'local/run.ts', '--port', String(port), '--state', state!], {
       cwd: resolve(import.meta.dirname, '..'),
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
     });
     child = command;
     const output: string[] = [];
@@ -162,14 +171,44 @@ describe("a dropped machine's stream, on the local command, as DC4 and DC5 run i
     // The command prints its banner before wrangler dev is ready, so the hub is ready once it answers through the
     // stand-in.
     const deadline = Date.now() + 120_000;
+    try {
+      await ready(command, output, deadline);
+    } catch (error) {
+      // The command may have died with wrangler dev still running (the stand-in lost its bind after wrangler started):
+      // end its whole group before another attempt shares its state directory.
+      try {
+        process.kill(-command.pid!, 'SIGKILL');
+      } catch {
+        // the group is already gone
+      }
+      throw error;
+    }
+  }
+
+  async function ready(command: ChildProcess, output: string[], deadline: number): Promise<void> {
     for (;;) {
-      if (command.exitCode !== null) throw new Error(`the local command exited (${command.exitCode}):\n${output.join('')}`);
+      if (command.exitCode !== null) {
+        const message = `the local command exited (${command.exitCode}):\n${output.join('')}`;
+        throw PORT_TAKEN.test(message) ? new PortTaken(message) : new Error(message);
+      }
       if (Date.now() > deadline) throw new Error(`the local hub did not answer within 120 s:\n${output.join('')}`);
       const answered = await fetch(`${url}/api/me`, { headers: AS_ADMIN }).then((r) => r.status === 200, () => false);
       if (answered) break;
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-  }, 150_000);
+  }
+
+  beforeAll(async () => {
+    state = mkdtempSync(join(tmpdir(), 'desk-hub-local-'));
+    // Even a port that was free when picked can be taken before the command binds it; start again on fresh ones.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await start();
+      } catch (error) {
+        if (!(error instanceof PortTaken) || attempt >= ATTEMPTS) throw error;
+      }
+    }
+  }, 450_000);
   afterAll(async () => {
     if (child && child.exitCode === null) {
       const exited = new Promise((resolve) => child!.once('exit', resolve));

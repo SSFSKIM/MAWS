@@ -1,0 +1,189 @@
+{
+  "session": "ac0d9312-d6f9-46c7-93d6-a137164c2e41",
+  "cwd": "/tmp/fmr.wd4sp6__/work",
+  "member": "00000000000000000000000000000000",
+  "prompts": [
+    "Do these four steps in order, and nothing else. 1) In one message, launch two subagents in parallel with the Agent tool (subagent_type general-purpose, run_in_background false, so you wait for both). The first is told: 'Reply with exactly: alpha done. Use no tools.' The second is told: 'Write one short sentence about the sea, then reply with exactly: beta done. Use no tools.' 2) After both return, run this Bash command: python3 -c \"open('recorded.txt', 'w').write('blue')\" 3) Then ask me with the AskUserQuestion tool which color to use, with the options red and blue. 4) Finally write one short paragraph to me about the chosen color, wrapped in <message></message> tags.",
+    "Count from one to three hundred in English words, one number per line, with no other text."
+  ],
+  "annotated": {
+    "events.jsonl n=281": "the ask mod's question, raised under the dialog's toolu_plugin_… id, carries toolUseId: the transcript's call toolu_01YLTbS83Smb5RvQKJwQtK2S (the tool call at n=276), as DX4's raised now names it; the bridge that recorded it predates the field"
+  },
+  "synthesized": {
+    "log/SK.local.5e0c1f2a-7b3d-4e8f-9a6b-1c2d3e4f5a6b.jsonl": "a peer session on the same machine, joined, saying two things to the recorded session",
+    "deliveries.jsonl": "the send's recorded outcome (sminos_outcomes.py's words for a closed session)",
+    "built by": "fake-machine/session-view.py from recordings/two-subagents",
+    "rows": {
+      "older history": {
+        "source": "the recording's own user prompt and assistant text rows; a real 2.1.300 Read call and its result (toolUseResult {type: text, file}), contents generated; the compaction's boundary and summary from MAWS's committed disk fixture test/fixtures/transcripts/w1-compact.jsonl (lines 28-29), trigger auto, summary text generated",
+        "uuids": [
+          "d26aa443-b8f9-54a3-9994-b48a7abed810",
+          "0ff4397e-484a-518f-9653-5a81c8291837",
+          "c6556aac-fcf8-5c61-b593-69ddcb547beb",
+          "776f20d9-53bf-54ba-a5fd-b53ba1d306ff",
+          "2878b610-0f01-5f05-a1f3-0c09f5135208",
+          "65d9afd9-5027-5e78-8553-27f4b9d29b5f",
+          "5e19aa48-4efa-588e-9532-a9831b616aee",
+          "37e7d17b-c683-5c1b-ae63-6c6f3d4a2ea3",
+          "ed87ff86-12e8-5192-b46b-143a21281df5",
+          "ba2240ea-9a8a-5e74-9037-dc8c5fd89529",
+          "486c38b2-8d7a-5a36-84ab-3fdb9975bdf7",
+          "0692625d-fd5e-5ec3-a99c-1173990ae222",
+          "4404d6b7-5632-5f37-8c79-590b5b243963",
+          "f4fd83b0-7156-597b-b7fd-0d95911a9c61",
+          "29da956d-c418-5c67-bd40-61b6a23911c4",
+          "2f6110ec-b080-5a40-a78c-02c8ef22b6c9",
+          "db1dd406-c0bf-501d-9b4c-bf89db19eaba",
+          "4bed72b9-f2bf-54e4-b1f4-a0801906d569",
+          "dab87dee-02ca-5ae7-b3fd-d40729cf9926",
+          "516380ba-0591-5b5b-a8d4-f83f081efecc",
+          "f87490d3-35d0-5c07-9d6b-8010affe5c3c",
+          "2fd64a96-7b57-55db-9c4a-d3936b106f37",
+          "df2bdd87-79ce-5dbf-b9af-4a17df5b6b3a",
+          "2a6c3afd-e867-559f-aff8-7252c0fbfc6c",
+          "58643cd8-050f-5300-8f4e-2b09f0fdd094",
+          "b8533d75-7aab-54be-bf0f-284860691e85",
+          "1c33bb25-8e47-59f3-ba9c-b7c55e7826b1",
+          "082a7115-646d-5e5d-8775-ca32e19c379e",
+          "84b2071c-a626-5dd8-99bc-fe051d29be7b",
+          "cfc9e447-ae64-52dc-a153-1e4c99e7e05f",
+          "e827e639-e5b2-5cf3-af4f-2064dfa84545",
+          "52a7fb06-581e-5a01-85bd-4e5bc4290b14",
+          "1ae63083-2ee0-5dcd-83cb-91df7e2d7a37",
+          "05a93613-9540-5e45-8833-3721db9db882",
+          "49ebc45d-b93a-5af9-870d-ca70ba168380",
+          "3daf6556-8957-5ae5-abfb-16b418b0b99c",
+          "bd10ff5c-690d-5f52-9c02-f981137c5f66",
+          "3280f729-8e77-5702-96f9-b0c6df2be225",
+          "37b30e45-c696-5b2f-b3fd-7e240470cf48",
+          "7824d934-605e-50a8-9764-32055c185fa4",
+          "24d2bd6b-d815-5806-beba-2446ed8a8c5f",
+          "8d33f120-a464-575d-8fb0-72038b60c81a",
+          "7b99ad22-01df-5f7d-a292-e39285d86909",
+          "2afa96d5-7693-53a0-83ce-5c727c5f2c4f",
+          "6a70cb54-c579-5a4b-980f-91f26e793eed",
+          "444b0522-c7cf-53fa-84ed-d0192864306a",
+          "8f68e265-17d9-5a96-a7ab-ffc36609df04",
+          "1e3cfe1b-d4b4-5661-9eb4-72e08878a32e",
+          "90a2f174-794b-5664-8a21-3025940e19ca",
+          "7df6bd7b-0d80-5dca-a3a0-dac9e2688e74",
+          "24f06ead-294d-5822-a3d7-2df14206582d",
+          "3dcc55ce-890a-529f-aac0-dd9a46eed548",
+          "d72f80eb-f2f7-5b3c-b5a8-86f2e7f58e2a",
+          "28fe5a07-240a-5f80-a79b-5c5cdd535c3c",
+          "adbb4458-0a14-5ff6-99c1-e36b09584b34",
+          "ea3b9936-cc5f-5868-b85f-eb191bea10ec",
+          "bbc7085d-419e-5f48-9ab6-0c69cd51a5ff",
+          "7241d751-fa04-505c-aa7a-e485f37e6d2a",
+          "a46916ae-037f-5c71-826e-f103637e01db",
+          "dd85893d-03a9-5132-a901-b3408a2208d1",
+          "5194da9b-3781-503d-8ef2-1b511fe361da",
+          "0e10e31d-cb94-5bed-bca8-7342b648cb61",
+          "5b43bcb1-ab84-5a77-8c7b-b69dc04b4525",
+          "0b65b863-cc3d-5e60-8d15-920412b40ae6",
+          "850def84-d6ae-5fd2-9421-6ee2993286a0",
+          "670e49dd-0a2e-513a-bd4b-dc1f37464473",
+          "b3f0d90c-3387-5e19-b1f0-a47c4d992c92",
+          "0b6e529f-e668-5569-9c42-ba5f94f72f7f",
+          "2bdba868-a881-519d-883f-1cd32cc8f31e",
+          "ab7f125a-6f12-555e-9477-bd90a309940d",
+          "16908ff7-e6b4-5a56-84ea-295ab7b1631a",
+          "4a27d2f3-e9a5-5308-922c-60e44655049e",
+          "8e48740b-800a-52f7-9396-9220ead428a5",
+          "bb440eec-609e-5121-8177-1df2a7871f10",
+          "28ebfb03-b550-5ca4-87d4-849db1893510",
+          "62d8f850-dcb9-5c98-87aa-5fcea4105a5f",
+          "3c37b7a8-08a6-5024-885c-e353fbad1fef",
+          "f10ac02e-7fc7-576b-89f1-9abc2abaebbb",
+          "4e62302b-b954-5438-b53c-5f1dbac6b1cb",
+          "abe5a65f-c0f2-50bb-9a1f-0a4cb6bca01e",
+          "491330ab-84ca-5009-8426-443eaaaad3eb",
+          "b5cfdf0b-b79d-57cc-a333-bf6d31fc736e",
+          "7ec16d5e-e24c-502f-b6ad-cc30543d1d33",
+          "3ac6ef74-a9e2-58a7-b667-694513d37952",
+          "30bd9d68-f26e-5be8-9fb7-308d917e4898",
+          "2089dd23-5de9-5622-90f2-7145c7b8caf3",
+          "e1071bee-1466-5923-99cc-56a0035a85c4",
+          "b954d112-e971-566d-84e8-17783c2df75c",
+          "d60a913a-9964-55ae-9fd9-8db92e8da555",
+          "d86be4c1-3eff-55fc-b7fe-4c2c2e2ac522",
+          "d06f1ef8-37a1-50ff-9399-04a806852667",
+          "8a5ea41d-0d9a-5382-861f-8e5103ab2941",
+          "c070a928-fa8e-5dac-98e7-7ff65bf5a459",
+          "0a220365-93f2-5d5f-ae20-f198c1808784",
+          "d628f64b-a589-5de9-b052-ef7b300b72f1",
+          "6c80a322-3002-557e-a7cd-73cf50be765a",
+          "c7298c06-902c-530a-8cb2-c77275ab7270",
+          "16df01b2-9e9b-5a59-acf9-a826611bd10f"
+        ]
+      },
+      "background shells and a monitor": {
+        "source": "dx4-jobs.json case 'background shells and monitors' (Bash run_in_background, its result's backgroundTaskId and 'Output is being written to:' text, Monitor and its result's {taskId, timeoutMs, persistent}); the envelope of the recording's own rows",
+        "uuids": [
+          "4c021d3b-6e58-509b-94a6-fc19ea96320d",
+          "c47abdbf-c5c7-5512-9c89-9ba5d4a977d1",
+          "63f4b111-0f38-5507-9f7e-a5d069b25801",
+          "8bc891a0-7e69-589d-9957-8e3deb19bb60",
+          "336a1ddb-53c4-5e44-bab4-dbd00312b3dc",
+          "d85b8e40-aac0-5f12-939b-91f4737c1006",
+          "fd5bdb1a-7508-5374-a667-0b8d928912f8",
+          "96480aa6-2f66-5ae9-b050-e24f32bc2c28"
+        ]
+      },
+      "the ask mod's async question": {
+        "source": "a real 2.1.300 mcp__doperpowers__AskUserQuestion call with async true and its accepted result (sminos.py ASYNC_RESULT); the raised event's form as DX4 and the recording's own raised lines carry it",
+        "uuids": [
+          "7211e2d3-6f46-54c1-8729-c5d36ff0f84a",
+          "0e11057e-7707-518e-b1b6-a724619cdf54"
+        ]
+      },
+      "the nested agent, in its parent's transcript": {
+        "source": "the recording's own Agent call and async_launched result in alpha's envelope; dx4-jobs.json's nested metas (parentAgentId, spawnDepth 2) and queued_command notification; DX5 agent spawn and stop as the recording's bridge wrote them",
+        "uuids": [
+          "625b045b-bb52-57cc-bbe1-4ce3cfdbf7ee",
+          "ebdfcc0a-40e4-5665-a5ab-aeb66fae75a5",
+          "9a1431b2-a356-521c-8b5d-668f066b7d72"
+        ]
+      },
+      "the nested agent's own transcript": {
+        "source": "alpha's own prompt and reply rows",
+        "uuids": [
+          "733ada52-51d9-5b6b-8b15-3395f8f4caa6",
+          "c64b3e9e-6d21-53ce-9c00-366c3bdc2af2"
+        ]
+      },
+      "a shell's completion, a monitor's event, a task_status": {
+        "source": "dx4-jobs.json case 'background shells and monitors' (completion notice, statusless monitor event, task_status with outputFilePath and shell); real 2.1.300 queued_command and task_status attachments for source_uuid, origin and rendered",
+        "uuids": [
+          "10083614-2056-5a9a-8956-9d8ad99004ed",
+          "4aa6760a-1513-5469-bf64-f87375491d30",
+          "4d54f043-7c2f-55cf-a320-d8b749673b9a"
+        ]
+      },
+      "the answer delivered, and its turn": {
+        "source": "a real 2.1.300 plugin prompt delivering an async answer (origin plugin, its framing); a real TaskStop call and success result; dx4-jobs.json's killed notice; the recording's own mcp_instructions_delta",
+        "uuids": [
+          "2af10e67-7983-5051-a772-c848bdee7dd6",
+          "b1d6724c-8c7d-50e6-bd32-3f82aeee6b0e",
+          "7e42f176-b7b5-5d22-bfb2-9342c7de8864",
+          "a486beb5-0724-5f4d-a431-8e4fe3605106",
+          "48aa3468-210c-59e1-b9d0-33f5c7208930",
+          "405e71ff-37e2-50b6-be0c-062b3909f085"
+        ]
+      },
+      "MCP servers added and removed": {
+        "source": "the recording's own mcp_instructions_delta (addedNames, addedBlocks, removedNames)",
+        "uuids": [
+          "b1d6724c-8c7d-50e6-bd32-3f82aeee6b0e",
+          "00308571-5243-5471-b978-170052531cd8"
+        ]
+      }
+    },
+    "events.jsonl": "lines marked _synth: the synthesized rows' row-seen, the nested agent's spawn and stop, the async question's raised and settled, the plugin prompt's turn",
+    "presence.jsonl": "the plugin prompt's turn (busy, then idle), and the session's end (record null) after its last turn",
+    "log/SK.local.ac0d9312-d6f9-46c7-93d6-a137164c2e41.jsonl": "the async question's question and answered events (sminos.py host_events)",
+    "log/SK.local.human.jsonl": "a send from the human on the machine (sminos.py record_message), after the session ended",
+    "tasks/": "bsuite7k2.output (the suites' log) and bmon3x7a0.output (the monitor's): present; bserve4q9.output is named and absent; bwatch8m1's row names a path under another session",
+    "subagents/agent-a17e5e0b93f96ed5a.*": "the nested agent (parent ad435b3acfda88bfa), its transcript and meta"
+  }
+}

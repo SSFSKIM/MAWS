@@ -217,6 +217,40 @@ describe('the anchored message (X10)', () => {
     it('leaves every other kind’s tag as it was', () => {
       for (const anchor of ANCHORS) expect(anchorTag(anchor)).not.toMatch(/artifactId|threadId/);
     });
+
+    // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, M7 fix wave 1; Decision Log 33, 35, 36): the lead by the
+    // commented artifact's kind; a document's, with or without the field, is B's to the byte
+    it('writes a deck element’s lead from the kind’s entry, with no slide number, and round-trips it (Decision Log 36)', () => {
+      const deck: Anchor = { kind: 'artifact-comment', locator: 'One path', label: 'Q3 review, slide 3: Plan', artifactId: 'art-9', threadId: 't1', artifactKind: 'presentation' };
+      expect(anchorTag(deck)).toBe('<maws_anchor kind="artifact-comment" label="Q3 review, slide 3: Plan" locator="One path" artifactId="art-9" threadId="t1" artifactKind="presentation"/>');
+      expect(anchorLead(deck, false)).toBe('Comment on "Q3 review, slide 3: Plan" (element "One path" in presentation art-9, thread t1):');
+      const message = anchoredMessage({ anchor: deck, text: 'Shorter?', destination: 'thread', screenshot: false });
+      expect(parseAnchoredText(message)).toEqual({ anchor: deck, text: 'Shorter?', destination: 'thread' });
+      const long = { ...deck, label: `${'T'.repeat(190)}, slide 3: Plan`.slice(0, 200) };
+      expect(anchorLead(long, false)).toBe(`Comment on "${long.label}" (element "One path" in presentation art-9, thread t1):`); // nothing read from the label
+      expect(anchorLead({ ...comment, artifactKind: 'document' }, false)).toBe(anchorLead(comment, false));
+      expect(anchorLead(comment, false)).toBe('Comment on "Q3 plan, Main" (passage "ships quarterly with "design" review" in document art-7f3a, thread k2m9x0qa):');
+      expect(anchorTag(comment)).toBe(TAG); // a document's anchor carries no field
+    });
+
+    // P3-E (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, M4; the P3-E spec's Decision Log 12): a design's
+    // comment names its target, a board or an element, through the anchor's `artifactTarget`; absent, an element's
+    it('writes a design board’s and element’s leads from `artifactTarget`, round-trips both, and leaves every other tag unchanged', () => {
+      const board: Anchor = { kind: 'artifact-comment', locator: 'Phone', label: 'Launch screens, Phone', artifactId: 'art-d1', threadId: 't2', artifactKind: 'design', artifactTarget: 'board' };
+      expect(anchorTag(board)).toBe('<maws_anchor kind="artifact-comment" label="Launch screens, Phone" locator="Phone" artifactId="art-d1" threadId="t2" artifactKind="design" artifactTarget="board"/>');
+      expect(anchorLead(board, false)).toBe('Comment on "Launch screens, Phone" (board "Phone" in design art-d1, thread t2):');
+      const element: Anchor = { ...board, locator: 'Ship the first week.', artifactTarget: 'element' };
+      expect(anchorLead(element, false)).toBe('Comment on "Launch screens, Phone" (element "Ship the first week." in design art-d1, thread t2):');
+      const unnamed: Anchor = { kind: 'artifact-comment', locator: element.locator, label: element.label, artifactId: 'art-d1', threadId: 't2', artifactKind: 'design' };
+      expect(anchorLead(unnamed, false)).toBe(anchorLead(element, false)); // absent: an element's
+      for (const anchor of [board, element, unnamed]) {
+        const message = anchoredMessage({ anchor, text: 'Tighter?', destination: 'main', screenshot: false });
+        expect(parseAnchoredText(message)).toEqual({ anchor, text: 'Tighter?', destination: 'main' });
+      }
+      expect(AnchorSchema.safeParse({ ...board, artifactTarget: 'slide' }).success).toBe(false);
+      expect(anchorTag(comment)).toBe(TAG);
+      for (const anchor of ANCHORS) expect(anchorTag(anchor)).not.toMatch(/artifactTarget/);
+    });
   });
   // P3-B end
 

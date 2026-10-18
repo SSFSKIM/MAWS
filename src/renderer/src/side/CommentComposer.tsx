@@ -24,6 +24,7 @@ interface OpenComposer {
   anchor: Anchor;
   appSessionId: AppSessionId;
   serial: number; // a new anchor is a new form
+  destination?: CommentContext['destination']; // P3-F1: the one the form starts on
 }
 
 export const useCommentComposer = create<{ open: OpenComposer | null }>()(() => ({ open: null }));
@@ -33,7 +34,7 @@ let serial = 0;
 // The sheet's opener (the seam's, for every placement but a card: `register.ts`): one sheet at a time, the latest
 // anchor winning.
 export function openComposer(anchor: Anchor, context: CommentContext): void {
-  useCommentComposer.setState({ open: { anchor, appSessionId: context.appSessionId, serial: ++serial } });
+  useCommentComposer.setState({ open: { anchor, appSessionId: context.appSessionId, serial: ++serial, ...(context.destination && { destination: context.destination }) /* P3-F1 */ } });
 }
 
 const close = () => useCommentComposer.setState({ open: null });
@@ -42,12 +43,12 @@ const close = () => useCommentComposer.setState({ open: null });
 export function CommentComposerHost() {
   const open = useCommentComposer((s) => s.open);
   if (open === null) return null;
-  return <CommentSheet key={open.serial} anchor={open.anchor} parent={open.appSessionId} />;
+  return <CommentSheet key={open.serial} anchor={open.anchor} parent={open.appSessionId} destination={open.destination} /* P3-F1 */ />;
 }
 
-function CommentSheet({ anchor, parent }: { anchor: Anchor; parent: AppSessionId }) {
+function CommentSheet({ anchor, parent, destination }: { anchor: Anchor; parent: AppSessionId; destination?: CommentContext['destination'] /* P3-F1 */ }) {
   // closed, or replaced by another comment, while a send was on its way
-  const form = useCommentForm({ anchor, parent, gone: () => useCommentComposer.getState().open?.anchor !== anchor, onSent: close });
+  const form = useCommentForm({ anchor, parent, gone: () => useCommentComposer.getState().open?.anchor !== anchor, onSent: close, destination }); // P3-F1: destination
   return (
     <Sheet title={COPY.title(anchor.kind === 'none' ? null : anchor.label)} width="w-[min(560px,90vw)]" onClose={close} data-comment-composer="" data-anchor-kind={anchor.kind} data-anchor-locator={anchor.locator}>
       <SheetForm canSubmit={form.canSend(form.destination)} onSubmit={() => void form.send(form.destination)} submitLabel={form.submitLabel} submitClass={PRIMARY}>

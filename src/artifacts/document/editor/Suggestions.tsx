@@ -12,6 +12,7 @@ import { attributedRuns, changeList, renderDiff } from '../history';
 import { coreExtensionOptions } from '../ids';
 import { tabBody } from '../tabs';
 import { editorExtensions } from './extensions';
+import { displayedDocument, type ViewEnvironment } from './nodes/views'; // P3-E
 import type { EditorHost } from './host-types';
 import { useReadOnly } from './read-only';
 
@@ -31,6 +32,11 @@ export interface SuggestionsProps {
   editorHost: EditorHost;
   onPending(pending: boolean): void;
   pageScope?: ComponentType<{ children: ReactNode }>;
+  // P3-E start (E2 M3): a dashboard's charts in the review, drawn from the suggestion replica's doc, which is told while
+  // the review shows
+  renderChart?: ViewEnvironment['renderChart'];
+  onDisplayedDocument?(doc: Doc): void;
+  // P3-E end
 }
 interface View {
   handle: DocumentHandle;
@@ -78,7 +84,7 @@ function suggestedBlocks(editor: Editor, doc: Doc): BlockSuggestion[] {
   return [...blocks.values()];
 }
 
-export function Suggestions({ artifactId, tabId, base, hold, typing, host, editorHost, onPending, pageScope }: SuggestionsProps) {
+export function Suggestions({ artifactId, tabId, base, hold, typing, host, editorHost, onPending, pageScope, renderChart, onDisplayedDocument }: SuggestionsProps) {
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
@@ -169,21 +175,25 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
       onPending(false);
     };
   }, [artifactId, tabId, base, hold, host, onPending, retry]);
+  const shownDoc = view?.handle.doc ?? null; // P3-E
+  useEffect(() => {
+    if (shownDoc) onDisplayedDocument?.(shownDoc);
+  }, [shownDoc, onDisplayedDocument]);
   return <>
     {error && <div className="doc-banner" role="alert">Suggestions could not be loaded: {error}<button type="button" className="doc-tool" onClick={() => setRetry((n) => n + 1)}>Retry</button></div>}
-    {view && <Review key={`${artifactId}:${tabId}:${view.serial}`} view={view} artifactId={artifactId} tabId={tabId} host={host} editorHost={editorHost} pageScope={pageScope} readOnly={readOnly} />}
+    {view && <Review key={`${artifactId}:${tabId}:${view.serial}`} view={view} artifactId={artifactId} tabId={tabId} host={host} editorHost={editorHost} pageScope={pageScope} readOnly={readOnly} renderChart={renderChart} /* P3-E */ />}
   </>;
 }
 
 // `readOnly`: the store is read-only (the base's state, followed), so nothing is accepted or rejected.
-function Review({ view, artifactId, tabId, host, editorHost, pageScope: Scope, readOnly }: { view: View; artifactId: string; tabId: string; host: SuggestionHost; editorHost: EditorHost; pageScope: SuggestionsProps['pageScope']; readOnly: boolean }) {
+function Review({ view, artifactId, tabId, host, editorHost, pageScope: Scope, readOnly, renderChart }: { view: View; artifactId: string; tabId: string; host: SuggestionHost; editorHost: EditorHost; pageScope: SuggestionsProps['pageScope']; readOnly: boolean; renderChart?: SuggestionsProps['renderChart'] /* P3-E */ }) {
   const body = tabBody(view.handle.doc, tabId)!;
   const editor = useEditor({
     coreExtensionOptions,
     extensions: editorExtensions({
       collaboration: { ytype: body, awareness: null, user: null, hold: null, onRestored: null, version: { ytype: body, renderer: view.renderer } },
       comments: { doc: view.handle.doc, tabId, onComment: () => false },
-      env: { artifactId, host: editorHost },
+      env: { artifactId, host: editorHost, ...(renderChart ? { renderChart, displayed: displayedDocument(view.handle.doc) } : {}) /* P3-E */ },
     }),
     editable: false,
     shouldRerenderOnTransaction: false,

@@ -6,6 +6,7 @@
 // imports only the leaf `./artifact-id`, so the two never import each other. The read and create fields live in `./tools`.
 import * as z from 'zod';
 import { ARTIFACT_ID } from './artifact-id';
+import type { DashboardDatasetSummary, DashboardViewWarning } from './dashboard-tools'; // P3-E
 
 export const DOCUMENT_TOOL_NAMES = ['artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve'] as const;
 export type DocumentToolName = (typeof DOCUMENT_TOOL_NAMES)[number];
@@ -76,6 +77,7 @@ export interface ArtifactEditResult {
   results: EditOpResultLine[];
   orphaned: string[]; // open threads no live text carries after the batch
   answered?: { threadId: string; messageId: string };
+  viewWarnings?: DashboardViewWarning[]; // P3-E (E's Decision Log 9): a dashboard's, the specs this batch wrote
 }
 export interface DocumentTab {
   id: string;
@@ -85,10 +87,12 @@ export interface DocumentTab {
 export interface DocumentReadResult {
   status: 'read';
   artifactId: string;
-  kind: 'document';
+  kind: 'document' | 'dashboard'; // P3-E: a dashboard is read as a document
   title: string;
   handle?: string;
   revision: number;
+  datasets?: DashboardDatasetSummary[]; // P3-E: a dashboard's, as the read doc holds them
+  viewWarnings?: DashboardViewWarning[]; // P3-E (E's Decision Log 9): a dashboard's retained specs' problems, read only
   tabs: DocumentTab[];
   tab: string;
   markdown: string;
@@ -168,19 +172,21 @@ export const DOCUMENT_TOOLS = {
   artifact_comments: {
     title: 'List document comments',
     description:
-      "List a MAWS document's comment threads with their quoted passage, the block it is on and their messages; without this tool, read the comments footer of artifact_read. status: open (the default, including orphaned threads whose passage is gone), resolved or all.",
+      "List a MAWS document's comment threads with their quoted passage, the block it is on and their messages; without this tool, read the comments footer of artifact_read. status: open (the default, including orphaned threads whose passage is gone), resolved or all." +
+      // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D9): a deck's threads, by the commented element
+      " On a presentation, each thread names the commented element by slideId and elementId (in place of tab and block) and quotes its text; orphaned means the element was deleted.",
     input: ArtifactCommentsInputSchema,
     annotations: READ_ONLY,
   },
   artifact_reply: {
     title: 'Reply to a document comment',
-    description: "Post a reply as this session to a comment thread of a MAWS document; without this tool, answer in the conversation. To answer with an edit, give artifact_edit's answering instead.",
+    description: "Post a reply as this session to a comment thread of a MAWS document; without this tool, answer in the conversation. To answer with an edit, give artifact_edit's answering instead." + ' It works the same on a presentation’s comment threads.' /* P3-C (D9) */,
     input: ArtifactReplyInputSchema,
     annotations: WRITER,
   },
   artifact_resolve: {
     title: 'Resolve a document comment',
-    description: 'Resolve a comment thread of a MAWS document once it is addressed, or reopen it with reopen: true; without this tool, tell the user it is addressed.',
+    description: 'Resolve a comment thread of a MAWS document once it is addressed, or reopen it with reopen: true; without this tool, tell the user it is addressed.' + ' It works the same on a presentation’s comment threads.' /* P3-C (D9) */,
     input: ArtifactResolveInputSchema,
     annotations: WRITER,
   },

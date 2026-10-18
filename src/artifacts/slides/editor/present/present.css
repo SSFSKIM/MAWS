@@ -1,0 +1,153 @@
+/* The show (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D13; M6). The audience view is the slide alone on
+   black, as a projector shows it; the presenter view is app chrome (the app's tokens) around slides drawn in their own
+   design system. */
+
+.present-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+}
+.present-ds-scope {
+  display: contents;
+}
+.present-stage-box {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.present-stage {
+  transform-origin: 0 0;
+}
+
+/* audience */
+.present-audience {
+  position: absolute;
+  inset: 0;
+  background: #000000;
+  cursor: none;
+}
+.present-black {
+  position: absolute;
+  inset: 0;
+  background: #000000;
+}
+.present-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  margin: 0;
+  color: var(--fg-muted);
+}
+
+/* presenter */
+.present-presenter {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.present-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.present-bar-spacer {
+  flex: 1;
+}
+.present-timer {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.present-count {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.present-black-badge {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--fg);
+  color: var(--bg);
+  font-size: var(--text-ui-sm);
+}
+.present-button {
+  height: 28px;
+  min-width: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+.present-button:hover {
+  background: var(--bg-hover);
+}
+.present-button[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.present-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.present-end {
+  color: var(--danger);
+}
+.present-panes {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+  gap: 16px;
+  min-height: 0;
+  padding: 16px;
+}
+.present-current {
+  min-height: 0;
+  border-radius: var(--radius);
+  background: #000000;
+}
+.present-side {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+.present-next .present-stage-box {
+  aspect-ratio: 16 / 9;
+  height: auto;
+  border-radius: var(--radius-sm);
+  background: #000000;
+}
+.present-heading {
+  margin: 0 0 6px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+}
+.present-end-note {
+  margin: 0;
+  color: var(--fg-muted);
+}
+.present-notes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.present-notes-text {
+  flex: 1;
+  margin: 0;
+  overflow-y: auto;
+  font-size: 22px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}

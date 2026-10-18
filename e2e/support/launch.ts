@@ -13,6 +13,12 @@ import { launchEnvironment } from './scratch-env';
 
 export const REPO_ROOT = resolve(__dirname, '../..');
 
+// Every e2e launch runs the app in en-US, whatever the machine's languages (gate-offload §3.6: the Mac mini's are
+// Korean). Chromium's application locale, which the renderer's Intl default and so the app's dates follow, is Cocoa's
+// preferred language unless `--lang` names one (Electron 44 resolves it on macOS too). The specs' expectations come from
+// the test process's Intl default, which playwright.config.ts pins to the same locale.
+export const E2E_APP_ARGS = ['--lang=en-US'];
+
 export interface MawsLaunch {
   app: ElectronApplication;
   page: Page; // the first window
@@ -113,12 +119,14 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
     const launchedAt = Date.now();
     app = executable
-      ? await _electron.launch({ executablePath: executable, env, cwd: REPO_ROOT })
-      : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), main], env, cwd: REPO_ROOT });
+      ? await _electron.launch({ executablePath: executable, args: E2E_APP_ARGS, env, cwd: REPO_ROOT })
+      : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...E2E_APP_ARGS, main], env, cwd: REPO_ROOT });
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();
     const consoleErrors = await collectConsoleErrors(page);
+    await sizeForGroup(app, page); // P3-F1
+    await reportForeground(app);
     return { app, page, consoleErrors, userData, shellHome: shellHome.dir, packaged: executable !== null, launchedAt, cleanup };
   } catch (error) {
     await cleanup().catch((cleanupError) => console.error('[e2e] cleanup after a failed launch also failed', cleanupError));
@@ -139,6 +147,37 @@ export const test = base.extend<{ maws: MawsLaunch; mawsEnv: Record<string, stri
     }
   },
 });
+
+// P3-F1 (docs/doperpowers/ledgers/2026-10-17-P3-F1.md): a group whose fixture needs a bigger first window than the
+// default 1280 × 820 names it in its package script as `MAWS_E2E_WINDOW_SIZE=<width>x<height>` (the test process's
+// environment, so the app runs as it always does): `e2e:document`'s two replicas side by side need 720 px each to keep the
+// document editor's rail beside the page. The window's content is set to that size before the launch returns.
+async function sizeForGroup(app: ElectronApplication, page: Page): Promise<void> {
+  const value = process.env.MAWS_E2E_WINDOW_SIZE;
+  if (!value) return;
+  const size = /^(\d+)x(\d+)$/.exec(value);
+  if (!size) throw new Error(`MAWS_E2E_WINDOW_SIZE is <width>x<height>, not ${value}`);
+  const [width, height] = [Number(size[1]), Number(size[2])];
+  await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(w, h), [width, height] as const);
+  await page.waitForFunction(([w, h]) => window.innerWidth === w && window.innerHeight === h, [width, height] as const);
+}
+
+// Under MAWS_E2E_FOREGROUND=1 (src/main/window-show.ts) the app activates and its window
+// becomes key. Whether macOS granted that is said once per worker in the run's output, so a run on a desktop where
+// another app holds focus shows it.
+let foregroundReported = false;
+async function reportForeground(app: ElectronApplication): Promise<void> {
+  if (process.env.MAWS_E2E_FOREGROUND !== '1' || foregroundReported) return;
+  foregroundReported = true;
+  const keyed = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some((win) => win.isFocused())).catch(() => false);
+  const until = Date.now() + 3_000;
+  let key = await keyed();
+  while (!key && Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    key = await keyed();
+  }
+  console.log(`[e2e] MAWS_E2E_FOREGROUND: the first window ${key ? 'is key' : 'is not key after 3 s (another app holds focus)'}`);
+}
 
 // Playwright keeps a page's console messages and page errors from before anyone listened (Electron is attached from
 // launch), so the first load is covered by seeding from those buffers. Listeners go on first; whatever they received

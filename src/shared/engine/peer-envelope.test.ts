@@ -25,7 +25,7 @@ describe('parsePeerMessage', () => {
   it('reads the idle form: the header, the envelope attributes, the body inside the tags, the default trailer', () => {
     expect(parsePeerMessage(IDLE.message.content)).toEqual({
       kind: 'cross-session', from: 'uds:/tmp/cc-socks/10562.sock', fromSession: null, fromName: 'repo-b-gen1il-79', fromMode: 'prompting', fromPlugin: null,
-      hopChain: [], body: 'E7 probe: hello from B', midTurn: false, lineage: 'peer', replyable: true,
+      hopChain: [], body: 'E7 probe: hello from B', frame: null, midTurn: false, lineage: 'peer', replyable: true,
     });
   });
 
@@ -42,7 +42,7 @@ describe('parsePeerMessage', () => {
     const text = `Another Claude session sent a message:\n${ENVELOPE('from="uds:/tmp/cc-socks/1.sock" from-session="local_0a1b2c3d-1111" hop-chain="aaaaaaaaaaaaaaaaaaaaaaaa,bbbbbbbbbbbbbbbbbbbbbbbb" from-name="worker" from-mode="bypass" from-plugin="sminos"', 'line one\nline two')}\n\n${DEFAULT_TRAILER}`;
     expect(parsePeerMessage(text)).toEqual({
       kind: 'cross-session', from: 'uds:/tmp/cc-socks/1.sock', fromSession: 'local_0a1b2c3d-1111', fromName: 'worker', fromMode: 'bypass', fromPlugin: 'sminos',
-      hopChain: ['aaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbb'], body: 'line one\nline two', midTurn: false, lineage: 'peer', replyable: true,
+      hopChain: ['aaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbb'], body: 'line one\nline two', frame: null, midTurn: false, lineage: 'peer', replyable: true,
     });
   });
 
@@ -68,6 +68,43 @@ describe('parsePeerMessage', () => {
   it('reads an empty body and an envelope with no from attribute', () => {
     expect(parsePeerMessage('<cross-session-message from="a">\n\n</cross-session-message>')).toMatchObject({ body: '' });
     expect(parsePeerMessage('<cross-session-message>\nhi\n</cross-session-message>')).toMatchObject({ from: '', body: 'hi' });
+  });
+
+  it("drops sminos's reply line, the body's whole last line, and keeps any line that only resembles it or stands elsewhere", () => {
+    const SMINOS = '/Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.175.0/skills/sminos/scripts/sminos';
+    const reply = (address: string, path = SMINOS) => `[To reply, run in Bash: ${path} say "@${address} <your reply>"]`;
+    for (const address of ['0b9e3a52-5d1e-4c55-9c3f-2f0e6c1a7d44/maws-fe', 'MAWS/5e0c1f2a']) {
+      expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', `Rebase on main.\n\nThen tell me.\n${reply(address)}`))).toMatchObject({ body: 'Rebase on main.\n\nThen tell me.' });
+    }
+    expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', reply('MAWS/maws-fe')))).toMatchObject({ body: '' });
+    for (const body of [
+      `${reply('MAWS/maws-fe')}\nRebase on main.`, // not the last line
+      `Rebase on main.\n${reply('MAWS/maws-fe')} thanks`, // more on its line
+      `Rebase on main.\n${reply('MAWS/maws-fe', 'skills/sminos/scripts/sminos')}`, // no absolute path
+      `Rebase on main.\n${reply('MAWS/maws-fe', '/usr/local/bin/other')}`, // not sminos
+      `Rebase on main.\n[To reply, run in Bash: ${SMINOS} say "@MAWS/maws-fe on it"]`, // a reply written out
+      `Rebase on main.\n[To reply, run in Bash: ${SMINOS} say "@maws-fe <your reply>"]`, // no project
+      `Rebase on main. ${reply('MAWS/maws-fe')}`, // mid-line
+    ])
+      expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', body)), body).toMatchObject({ body });
+    // An in-process agent's message is not sminos's: its body is left whole.
+    expect(parsePeerMessage(`<agent-message from="a1b2">\nhi\n${reply('MAWS/maws-fe')}\n</agent-message>`)).toMatchObject({ body: `hi\n${reply('MAWS/maws-fe')}` });
+  });
+
+  it("cuts sminos's frame line, the body's whole first line with the text after it, and keeps it as the message's frame", () => {
+    const SMINOS = '/Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.175.0/skills/sminos/scripts/sminos';
+    const reply = `[To reply, run in Bash: ${SMINOS} say "@MAWS/maws-fe <your reply>"]`;
+    for (const frame of ['[sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you | unread 2]', '[sminos chat MAWS hub/5e55e5e5:12 from human → @all]', '[sminos message from human id=5e551e17]']) {
+      expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', `${frame}\nRebase on main.\n${reply}`)), frame).toMatchObject({ frame, body: 'Rebase on main.' });
+    }
+    for (const body of [
+      'Rebase on main.', // no frame
+      '[sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you]', // a frame with no text after it
+      'Look: [sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you]\nhi', // not the whole line
+      'hi\n[sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you]\nthere', // not the first line
+      '[sminos wake from Cloud Infra id=383323af]\nhi', // no frame sminos writes now
+    ])
+      expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', body)), body).toMatchObject({ frame: null, body });
   });
 
   it('reads an in-process agent\'s <agent-message> wrapper, a hand-back among them', () => {
@@ -125,6 +162,17 @@ describe('peerEventsOf', () => {
     expect(peerEventsOf('<cross-session-message>\nhi\n</cross-session-message>', null, origin)).toMatchObject({ from: 'uds:/tmp/cc-socks/9.sock', fromName: 'origin-name', fromMode: 'bypass', fromPlugin: 'origin-plugin', replyable: true });
     expect(peerEventsOf(IDLE.message.content, null, origin)).toMatchObject({ from: 'uds:/tmp/cc-socks/10562.sock', fromName: 'repo-b-gen1il-79', fromMode: 'prompting', fromPlugin: 'origin-plugin' });
     expect(peerEventsOf('<cross-session-message>\nhi\n</cross-session-message>', null)).toMatchObject({ from: '', replyable: false }); // nothing to answer
+  });
+
+  it("reads the engine's `unknown` sender as no address: sminos's delivery, idle or queued into a running turn, is not replyable", () => {
+    // The engine's origin for a peer frame whose envelope names no sender (sminos's), as it keeps it on the user row
+    // (idle) and on the queued_command attachment (busy).
+    const origin = { kind: 'peer', from: 'unknown', verifiedPeerPid: 4242, name: 'maws-fe', body: 'Rebase on main.' };
+    const idle = `Another Claude session sent a message:\n${ENVELOPE('from-name="maws-fe"', 'Rebase on main.')}\n\n${DEFAULT_TRAILER}`;
+    const busy = '<cross-session-message from-name="maws-fe">\nRebase on main.\n</cross-session-message>';
+    for (const text of [idle, busy]) expect(peerEventsOf(text, null, origin)).toMatchObject({ kind: 'peer.message', from: '', fromName: 'maws-fe', text: 'Rebase on main.', replyable: false });
+    // The same stand-in in the envelope itself is no address either.
+    expect(peerEventsOf(ENVELOPE('from="unknown"', 'hi'), null, origin)).toMatchObject({ from: '', replyable: false });
   });
 
   it('gives the same payload for the live mid-turn frame and the disk attachment, prompt or rendered text', () => {

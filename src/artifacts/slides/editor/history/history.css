@@ -1,0 +1,186 @@
+/* The deck's version history (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D11; M8): the preview's bar,
+   the filmstrip's edges, the stage's change marks and ghosts, the notes diff, the pill and the restore banner. App
+   chrome over and around the slides, so it reads the app's tokens; an author's colour is B's `--author-N`, passed in as
+   `--deck-history-author`. */
+
+.deck-history-bar {
+  background: var(--bg-raised);
+}
+.deck-history-heading {
+  overflow: hidden;
+  max-width: 40%;
+  font-weight: 600;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck-history-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-muted);
+}
+.deck-history-count {
+  padding: 0 4px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.deck-history-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.deck-history-confirm p {
+  margin: 0;
+  color: var(--fg);
+}
+.deck-history-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.deck-history-name {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+/* the filmstrip: a changed slide edged in its author's colour */
+.deck-thumb[data-history-change] .deck-thumb-button {
+  border-color: var(--deck-history-author, var(--accent));
+  box-shadow: 0 0 0 1px var(--deck-history-author, var(--accent));
+}
+.deck-thumb[data-history-change='removed'] .deck-slide-frame {
+  opacity: 0.4;
+}
+.deck-thumb[data-history-change='removed'] .deck-thumb-button {
+  border-style: dashed;
+}
+.deck-history-badge {
+  background: var(--deck-history-author, var(--accent));
+}
+
+/* the stage: the slide read-only, the marks over it */
+.deck-history-ghosts {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.45;
+}
+.deck-history-ghosts .maws-slide,
+.deck-history-ghosts [data-eid] {
+  visibility: hidden;
+}
+.deck-history-ghosts [data-ghost],
+.deck-history-ghosts [data-ghost] * {
+  visibility: visible;
+}
+.deck-history-mark {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--deck-history-author, var(--accent));
+  border-radius: 2px;
+  pointer-events: auto;
+}
+.deck-history-mark[data-kind='removed'] {
+  border-style: dashed;
+}
+.deck-history-mark[data-focused] {
+  outline: 2px solid var(--deck-history-author, var(--accent));
+  outline-offset: 3px;
+}
+.deck-stage-frame[data-history-slide='removed'] .maws-slide {
+  opacity: 0.5;
+}
+.deck-history-deck,
+.deck-history-slide-note {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}
+.deck-history-deck[data-focused] {
+  color: var(--fg);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* the notes: inserts in the author's colour, deletions struck */
+.deck-history-notes {
+  max-height: 120px;
+  overflow-y: auto;
+}
+.deck-history-notes-text {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--fg);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.deck-quiet-text {
+  color: var(--fg-muted);
+}
+.deck-history-ins {
+  color: var(--deck-history-author, var(--accent));
+  text-decoration: underline;
+  text-decoration-color: var(--deck-history-author, var(--accent));
+}
+.deck-history-del {
+  color: var(--deck-history-author, var(--accent));
+  text-decoration: line-through;
+}
+.deck-history-ins[data-focused],
+.deck-history-del[data-focused] {
+  outline: 2px solid var(--deck-history-author, var(--accent));
+  outline-offset: 1px;
+}
+
+/* the live deck: the pill, the banner, Show editors' frame */
+.deck-history-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--fg);
+}
+.deck-history-banner span {
+  flex: 1;
+}
+.deck-history-pill {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-float);
+}
+.deck-history-pill .deck-button {
+  border-radius: 999px;
+}
+.deck-editor-main[data-show-editors] {
+  position: relative; /* Show editors' menu is placed in it */
+}
+.deck-history-rail {
+  display: flex;
+  flex-shrink: 0;
+  min-height: 0;
+}

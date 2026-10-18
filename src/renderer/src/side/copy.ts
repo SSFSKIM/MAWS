@@ -31,6 +31,7 @@ export const SIDE_COPY = {
   // P2-E1: the comment card beside the element (P2-E1 document, D12); its form's words are the composer's above
   card: {
     title: (label: string) => `Comment on ${label}`, // the dialog's accessible name, the sheet's own
+    parent: (title: string) => `Session: ${title}`, // P3-F1: the session a card with no chat beside it goes to
     close: 'Close',
     // the thread phase
     replyField: 'Reply',

@@ -21,6 +21,7 @@ import { AppSessionIdSchema } from '../graph/ids'; // P2-E1
 import { ARTIFACT_ID } from './artifact-id';
 import { CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PANE_NAMES, PaneSchema } from './panes';
 import { DOCUMENT_TOOL_NAMES, DOCUMENT_TOOLS } from './document-tools'; // P3-B (M7)
+import { DASHBOARD_TOOL_NAMES, DASHBOARD_TOOLS } from './dashboard-tools'; // P3-E (E2 M2)
 
 export { ARTIFACT_ID } from './artifact-id';
 
@@ -29,6 +30,8 @@ export const MAWS_TOOL_NAMES = [
   'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
   // P3-A (M6)
   'artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export',
+  // P3-E (E2 M2): the dashboard's `artifact_dataset` (`./dashboard-tools`), after A's namespace; B's tools close the list
+  ...DASHBOARD_TOOL_NAMES,
   // P3-B (M7): the document tools (`./document-tools`: their schemas, descriptions, limits and refusals)
   ...DOCUMENT_TOOL_NAMES,
 ] as const;
@@ -182,7 +185,7 @@ export const ArtifactCreateInputSchema = z
     const path = input.path ?? input.html_path;
     if (kind === 'html' && (path === undefined) === (input.content === undefined)) issue('path', 'an html artifact takes path or content, one of them');
     if (kind === 'file' && path === undefined) issue('path', 'a file artifact takes the path of the file');
-    if (kind !== 'html' && kind !== 'document' && input.content !== undefined) issue('content', `a ${kind} artifact takes no content`);
+    if (kind !== 'html' && kind !== 'document' && kind !== 'dashboard' /* P3-E: B's markdown */ && input.content !== undefined) issue('content', `a ${kind} artifact takes no content`);
     if (kind !== 'html' && kind !== 'file' && path !== undefined) issue('path', `a ${kind} artifact takes files, not a path`);
     if ((kind === 'html' || kind === 'file' || kind === 'document') && input.files !== undefined) issue('files', `a ${kind} artifact takes no files`);
   });
@@ -245,17 +248,29 @@ export type ArtifactExportFormat = (typeof ARTIFACT_EXPORT_FORMATS)[number];
 // The paper an export prints on when asked (P3-A Decision Log 42, P3-B's M8); omitted, the exporter's own default.
 export const ARTIFACT_EXPORT_PAGE_SIZES = ['letter', 'a4'] as const;
 export type ArtifactExportPageSize = (typeof ARTIFACT_EXPORT_PAGE_SIZES)[number];
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D12, H2-4; the parent's Decision Log 53 (4)): a deck's
+// PPTX faces: named (the default), basic faces, slides as pictures, or uploaded faces embedded where their licence allows.
+export const ARTIFACT_EXPORT_FONTS = ['named', 'basic', 'pictures', 'embedded'] as const; // P3-C
+export type ArtifactExportFonts = (typeof ARTIFACT_EXPORT_FONTS)[number]; // P3-C
 export const ArtifactExportInputSchema = z.strictObject({
   artifact: ArtifactIdSchema, format: z.enum(ARTIFACT_EXPORT_FORMATS), version: z.number().int().min(1).optional(), to: PathSchema.optional(),
   pageSize: z.enum(ARTIFACT_EXPORT_PAGE_SIZES).optional(),
+  fonts: z.enum(ARTIFACT_EXPORT_FONTS).optional(), // P3-C: a presentation's PPTX faces; omitted, named
+  // P3-E (E1 M5; X23): a design's PNG board (the first by default), its PDF's boards (all by default), the output's scale
+  board: z.string().min(1).max(64).optional(),
+  boards: z.array(z.string().min(1).max(64)).max(200).optional(),
+  scale: z.number().min(0.1).max(4).optional(),
 });
 export type ArtifactExportInput = z.infer<typeof ArtifactExportInputSchema>;
 // How long the host waits for main's export service to answer (P3-A M7, X31) before the call answers an error; main's
 // own guard and queue keep its answer inside it.
 export const EXPORT_ANSWER_MS = 60_000;
 const EXPORT_EXTENSIONS: Record<ArtifactExportFormat, string> = { pdf: 'pdf', png: 'png', docx: 'docx', pptx: 'pptx', md: 'md', html: 'html', claude: 'zip' /* P3-D */ };
-// An export's file name under `<userData>/artifacts/<id>/exports/` (the tool's and the library's alike).
-export const artifactExportName = (revision: number, format: ArtifactExportFormat): string => `${revision}-${format}.${EXPORT_EXTENSIONS[format]}`;
+// An export's file name under `<userData>/artifacts/<id>/exports/` (the tool's and the library's alike). P3-E (E1 M5;
+// E's Decision Log 33) and P3-H (P3 Decision Log 91): an export that is a file of its own (a design's, or one asked as
+// `ownFile`) names the opaque `exportId` main minted for it, so no later export of the same revision and format
+// replaces it; absent, the revision-and-format cache name.
+export const artifactExportName = (revision: number, format: ArtifactExportFormat, exportId?: string): string => `${revision}-${format}${exportId !== undefined ? `-${exportId}` : ''}.${EXPORT_EXTENSIONS[format]}`;
 // P3-A (M6) end
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -316,6 +331,11 @@ export const ArtifactDeliverySchema = z.object({
 });
 export type ArtifactDelivery = z.infer<typeof ArtifactDeliverySchema>;
 
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D3; the parent's Decision Log 53 (3)): what a kind's
+// loader said of the files, on a create, a read and a publish: its warnings (what it dropped, each naming the file and, where it
+// can, the slide, the element and the property), and the files it held with their reasons
+const FileWarningSchema = z.strictObject({ path: z.string(), slide: z.string().optional(), element: z.string().optional(), property: z.string().optional(), message: z.string() });
+const HeldFileSchema = z.strictObject({ path: z.string(), reasons: z.array(z.string()) });
 // P3-A (M6): the kind's guide, attached once per session to the first create of that kind (§4.3).
 const KindGuideSchema = z.strictObject({ guide: z.string(), format: z.string() });
 // An `html` create also answers E2's fields (`id`, `deliverableId`, `version` 1,
@@ -326,6 +346,8 @@ export const ArtifactCreateResultSchema = z.strictObject({
   id: z.string().optional(), deliverableId: z.uuid().optional(), version: z.literal(1).optional(), externalReferences: z.number().int().min(0).optional(),
   guide: KindGuideSchema.optional(),
   designSystem: z.string().optional(), // the governing design system's DESIGN.md (Decision Log 22d)
+  // P3-C (M3 fix wave 1): a file kind created from files answers what its loader said of them, as a publish does
+  warnings: z.array(FileWarningSchema).optional(), notes: z.number().int().min(1).optional(), held: z.array(HeldFileSchema).optional(),
 });
 export type ArtifactCreateResult = z.infer<typeof ArtifactCreateResultSchema>;
 // Who wrote an artifact last: the user, the calling session, or another session (named).
@@ -353,7 +375,8 @@ export type ArtifactDescribeTypeResult = z.infer<typeof ArtifactDescribeTypeResu
 const VersionSummarySchema = z.strictObject({ id: z.number().int().min(1), kind: z.string(), revision: z.number().int().min(0), at: IsoTimeSchema, by: ArtifactEditorSchema.shape.by, label: z.string().optional() });
 export type VersionSummary = z.infer<typeof VersionSummarySchema>;
 // A file kind's and an `html` artifact's `files`; a Y kind's other root types as `json` (the generic reader, until the
-// kind registers its own); a `file` artifact's `file`. `versions`: the latest ones, newest first (ids `version` takes).
+// kind registers its own; P3-C: a kind with its own `readFiles` answers none); a `file` artifact's `file`. `versions`:
+// the latest ones, newest first (ids `version` takes).
 export const ArtifactReadResultSchema = z.strictObject({
   status: z.literal('read'), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
   handle: z.string().optional(),
@@ -361,6 +384,8 @@ export const ArtifactReadResultSchema = z.strictObject({
   files: z.record(z.string(), z.string()).optional(),
   missing: z.array(z.string()).optional(), // named paths the artifact has no file at
   json: z.record(z.string(), z.unknown()).optional(),
+  warnings: z.array(FileWarningSchema).optional(), // P3-C
+  held: z.array(HeldFileSchema).optional(), // P3-C
   file: z.strictObject({ name: z.string(), path: z.string(), size: z.number().int().min(0), sha256: z.string(), text: z.string().optional(), exists: z.boolean() }).optional(),
   versions: z.array(VersionSummarySchema),
 });
@@ -371,6 +396,9 @@ export type ArtifactReadResult = z.infer<typeof ArtifactReadResultSchema>;
 export const ArtifactPublishResultSchema = z.strictObject({
   status: z.enum(['published', 'suggested']), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
   changed: z.array(z.string()), kept: z.array(z.string()), removed: z.array(z.string()),
+  // P3-C: the files the publish created (among `changed`), the loader's warnings, its notes (heals to an equivalent,
+  // counted) and the files it held
+  added: z.array(z.string()).optional(), warnings: z.array(FileWarningSchema).optional(), notes: z.number().int().min(1).optional(), held: z.array(HeldFileSchema).optional(),
   id: z.string().optional(), deliverableId: z.uuid().optional(), version: z.number().int().min(1).optional(), externalReferences: z.number().int().min(0).optional(),
   ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1: the page is its creator's
 });
@@ -387,7 +415,7 @@ export const ArtifactExportResultSchema = z.strictObject({
 export type ArtifactExportResult = z.infer<typeof ArtifactExportResultSchema>;
 
 // A refusal an agent can act on: the `isError` text is `<tool>: <sentence> <this JSON>` (`artifactRefusalOf` reads it).
-export const ARTIFACT_REFUSAL_REASONS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'staleBase', 'conflict', 'exportUnavailable', 'unavailable'] as const;
+export const ARTIFACT_REFUSAL_REASONS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'staleBase', 'conflict', 'exportUnavailable', 'unavailable', 'exportTooLarge' /* P3-E (E1 M5; Decision Log 26) */] as const;
 export type ArtifactRefusalReason = (typeof ARTIFACT_REFUSAL_REASONS)[number];
 export const ArtifactRefusalSchema = z.looseObject({ reason: z.enum(ARTIFACT_REFUSAL_REASONS) });
 export type ArtifactRefusal = z.infer<typeof ArtifactRefusalSchema>;
@@ -422,7 +450,7 @@ export const MAWS_TOOLS = {
   artifact_create: {
     title: 'Create artifact',
     description:
-      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content; presentation, design, design_system and dashboard start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Returns the artifact's id and revision, and the first time this session creates a kind, that kind's guide and format reference.",
+      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Returns the artifact's id and revision, and the first time this session creates a kind, that kind's guide and format reference.",
     input: ArtifactCreateInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
@@ -479,11 +507,12 @@ export const MAWS_TOOLS = {
   artifact_export: {
     title: 'Export artifact',
     description:
-      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default. Needs the MAWS app open.',
+      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default; fonts chooses a presentation\'s pptx faces: named (the default: the deck\'s faces by name), basic (faces every Office has) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (its cover slide) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Needs the MAWS app open.', // P3-C: fonts and the deck's formats; P3-E (E1 M5): the design's
     input: ArtifactExportInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
   // P3-A (M6) end
+  ...DASHBOARD_TOOLS, // P3-E (E2 M2)
   // P3-B (M7)
   ...DOCUMENT_TOOLS,
 } as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean } }>;

@@ -1,0 +1,3 @@
+{"_ms":20400,"event":{"writer":"SK.local/5e0c1f2a-7b3d-4e8f-9a6b-1c2d3e4f5a6b","seq":2},"session":"ac0d9312-d6f9-46c7-93d6-a137164c2e41","outcome":"delivered","reason":"submitted to the session"}
+{"_ms":25400,"event":{"writer":"SK.local/5e0c1f2a-7b3d-4e8f-9a6b-1c2d3e4f5a6b","seq":3},"session":"ac0d9312-d6f9-46c7-93d6-a137164c2e41","outcome":"uncertain","reason":"the frame was taken and never answered"}
+{"_ms":31100,"event":{"writer":"SK.local/human","seq":1},"session":"ac0d9312-d6f9-46c7-93d6-a137164c2e41","outcome":"recorded","reason":"the session is not running here (closed, or its membership ended): it is pushed nothing, and reads the log when it is back"}

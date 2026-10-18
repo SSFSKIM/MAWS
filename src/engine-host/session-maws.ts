@@ -26,6 +26,7 @@ import { mawsTools } from './tool-server/tools';
 import { ArtifactSession } from './tool-server/artifact-context'; // P3-A
 import type { ArtifactExportAnswer, ArtifactExportRequest, ExportBridge } from './tool-server/artifact-export'; // P3-A M7
 import type { ArtifactStore } from './documents/store'; // P3-A
+import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 
 type AppSessionIdOf = LaunchSpec['appSessionId'];
 
@@ -42,6 +43,7 @@ export interface SessionMawsHost {
   hasClient?: () => boolean; // E10: whether an app is connected
   artifactScope?: readonly AppSessionIdOf[]; // P2-E1: EngineSessionOptions.artifactScope, handed to the artifact tools
   artifacts?: () => ArtifactStore | null; // P3-A (M6): EngineSessionOptions.artifacts
+  datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>; // E3: EngineSessionOptions.datasetRefresh
   emit<K extends keyof MawsListeners>(name: K, payload: Parameters<MawsListeners[K]>[0]): void;
   respond(requestId: RequestId, response: unknown, opts?: WriteOptions): Promise<void>;
   cwd(): string; // the engine's working directory as the frames report it, else the launch's
@@ -83,6 +85,7 @@ export class SessionMaws {
         artifactScope: host.artifactScope, // P2-E1
         artifacts: host.artifacts, session: new ArtifactSession(), log: host.log, // P3-A (M6)
         exporter: this.exports, // P3-A M7
+        datasetRefresh: host.datasetRefresh, // E3
       }),
       respond: (requestId, response, writeOpts) => host.respond(requestId, response, writeOpts),
       cwd: () => host.cwd(),

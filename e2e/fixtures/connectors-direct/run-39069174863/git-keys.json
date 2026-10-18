@@ -1,0 +1,10 @@
+{
+  "root": {
+    "rootkey": "connected",
+    "childkey": null
+  },
+  "child": {
+    "rootkey": "connected",
+    "childkey": null
+  }
+}

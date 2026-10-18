@@ -1,0 +1,52 @@
+{
+  "starts": [
+    {
+      "server": "owna",
+      "cwd": "<scratch>/project",
+      "argv": [
+        "stdio",
+        "--id",
+        "owna",
+        "--log",
+        "<scratch>/calls.jsonl",
+        "an arg with spaces",
+        "$NOT_EXPANDED"
+      ],
+      "env": {
+        "MAWS_PROBE_WRAPPER_LOG": "<scratch>/wrapper.log",
+        "MAWS_PROBE_PLAIN": "plain-owna"
+      },
+      "sdk": {
+        "HOME": "<scratch>/home",
+        "PATH": "/usr/bin:/bin"
+      }
+    },
+    {
+      "server": "ownb",
+      "cwd": "<scratch>/project",
+      "argv": [
+        "stdio",
+        "--id",
+        "ownb",
+        "--log",
+        "<scratch>/calls.jsonl",
+        "an arg with spaces",
+        "$NOT_EXPANDED"
+      ],
+      "env": {
+        "MAWS_PROBE_WRAPPER_LOG": "<scratch>/wrapper.log",
+        "MAWS_PROBE_PLAIN": "plain-ownb"
+      },
+      "sdk": {
+        "HOME": "<scratch>/home",
+        "PATH": "/usr/bin:/bin"
+      }
+    }
+  ],
+  "wrappers": 2,
+  "sleepers": 2,
+  "calls": [
+    "owna",
+    "ownb"
+  ]
+}

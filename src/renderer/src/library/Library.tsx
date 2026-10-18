@@ -18,6 +18,7 @@ import { dateGroups, spaceGroups, type RowGroup } from './groups';
 import { LibraryHeader } from './LibraryHeader';
 import { DeleteSheet, InUseSheet, RenameSheet } from './RowMenu';
 import { Rows, type Line } from './Rows';
+import { SendToSheet } from './SendToSheet';
 import { DeleteSpaceSheet, NewSpaceSheet, RenameSpaceSheet, SpaceMenu } from './SpaceDialogs';
 import { refreshLibrary, useLibraryList, useLibrarySpaces, type LibraryList, type LibraryRead } from './store';
 import { currentSpaceOf, filterOf, setLibraryView, useLibraryView, type LibraryViewState } from './view';
@@ -113,6 +114,8 @@ function LibraryDialogs() {
       return <RenameSpaceSheet key={open.space.id} dialog={open} />;
     case 'deleteSpace':
       return <DeleteSpaceSheet key={open.space.id} dialog={open} />;
+    case 'sendTo':
+      return <SendToSheet key={`${open.artifact.id}:${open.target}`} dialog={open} />;
   }
 }
 

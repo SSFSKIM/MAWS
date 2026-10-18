@@ -18,19 +18,16 @@ import { PortProvider, type PortLike, type Restored, type SaveState } from '@art
 import { newDoc, newSuggestionDoc, type Doc } from '@artifacts/yjs';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import { artifactUrl } from '@shared/artifacts/scheme';
-import type { CommandInput, CommandName, CommandOutput, IpcError, MawsBridge } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
+import { ArtifactCommandError } from './command-error';
+import { createConnectorHost } from './connectors';
 
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 3_000] as const;
 export const AWARENESS_THROTTLE_MS = 50; // Decision Log 31c (parent 37's advisory)
 
-// A command the store refused; `error` is the IpcError (its `issues` an ArtifactRefusal when the store named why).
-export class ArtifactCommandError extends Error {
-  constructor(readonly error: IpcError) {
-    super(error.message);
-    this.name = 'ArtifactCommandError';
-  }
-}
+// A command the store refused (P3-H H4: defined in ./command-error.ts, shared with the connector family).
+export { ArtifactCommandError };
 
 // The ports the preload posts to the page, awaited by channel. A port can arrive before or after the open's answer.
 // The window's own are `windowDocPorts` (window-ports.ts); this module touches no DOM type, so a Node test can drive the
@@ -57,6 +54,15 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     if (!result.ok) throw new ArtifactCommandError(result.error);
     return result.value;
   };
+
+  // E3: the window's dataset holds the host's restart takes away (holdDatasets below)
+  let resyncs = 0;
+  const lostOnResync = new Set<() => void>();
+  ipc.on('artifacts.resync', () => {
+    resyncs += 1;
+    for (const invalidate of [...lostOnResync]) invalidate();
+    lostOnResync.clear();
+  });
 
   ipc.on('engine.hostState', (state) => {
     if (state.revision <= hostRevision) return;
@@ -222,7 +228,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     // kind and format no exporter serves, rejects (`exportUnavailable` for the latter).
     export: async (artifactId, format, version, options) => {
       const { path } = await call('artifacts.export', {
-        artifactId, format: format as CommandInput<'artifacts.export'>['format'], ...(version !== undefined && { versionId: version }), ...(options?.pageSize !== undefined && { pageSize: options.pageSize }),
+        artifactId, format: format as CommandInput<'artifacts.export'>['format'], ...(version !== undefined && { versionId: version }), ...(options?.pageSize !== undefined && { pageSize: options.pageSize }), ...(options?.fonts !== undefined && { fonts: options.fonts }) /* P3-C */,
+        ...(options?.board !== undefined && { board: options.board }), ...(options?.boards !== undefined && { boards: options.boards }), ...(options?.scale !== undefined && { scale: options.scale }), // P3-E (E1 M5)
       });
       return { path };
     },
@@ -231,6 +238,33 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     acceptSuggestion: (artifactId, ranges) => call('artifacts.acceptSuggestion', { artifactId, ranges }),
     rejectSuggestion: (artifactId, ranges) => call('artifacts.rejectSuggestion', { artifactId, ranges }),
     uploadAsset: (artifactId, bytes, { name, mime }) => call('artifacts.uploadAsset', { artifactId, bytes, name, mime }),
+    copyAsset: (from, ref, to) => call('artifacts.copyAsset', { from, ref, to }), // P3-C (Decision Log 25)
+    // P3-E (E2 M2): a page of a dataset snapshot, read by the host
+    readDataset: (artifactId, ref, { format, offset, limit }) => call('artifacts.readDataset', { artifactId, ref, format, ...(offset !== undefined && { offset }), ...(limit !== undefined && { limit }) }),
+    // P3-E (E2 M3): the source sheet's Download, main's Save dialog over the artifact's own asset
+    downloadAsset: (artifactId, ref, options) => call('artifacts.downloadAsset', { artifactId, ref, ...(options?.name !== undefined && { name: options.name }) }),
+    // E3: main's window-bound hold over snapshot bytes, its release sent once. `invalidated`: the host's hold behind it is
+    // gone (main's `artifacts.resync`, each time the host's connection streams again); a resync while it was being asked
+    // for invalidates it as soon as it is answered (the generation is read before asking), and a release stops listening.
+    holdDatasets: async (artifactId, refs) => {
+      const asked = resyncs;
+      const { holdId } = await call('artifacts.holdDatasets', { artifactId, refs: [...refs] });
+      let invalidate!: () => void;
+      const invalidated = new Promise<void>((resolve) => (invalidate = resolve));
+      if (resyncs !== asked) invalidate();
+      else lostOnResync.add(invalidate);
+      let released = false;
+      return {
+        invalidated,
+        release: () => {
+          if (released) return;
+          released = true;
+          lostOnResync.delete(invalidate);
+          call('artifacts.releaseDatasets', { holdId }).catch((error: unknown) => log(`a dataset hold was not released: ${error instanceof Error ? error.message : String(error)}`));
+        },
+      };
+    },
     identity: () => ({ actor: HUMAN, ...actorDisplay(HUMAN) }),
+    ...createConnectorHost(ipc), // P3-H H4: a page's connector surface and the owner's grants
   };
 }

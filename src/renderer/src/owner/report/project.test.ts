@@ -122,6 +122,24 @@ describe('the report projection (the P2-C document, Design §7)', () => {
     expect(kinds(project(stateOf(b.events)))).toEqual(['time', 'user', 'text:<to-human>Done.</to-human>']);
   });
 
+  // DC9 (the desk, 2026-10-17): doperpowers' ask tool is a question, so it stays in view at level 0 as the built-in's
+  // does, and as a row of its own it is not one of the record's tool calls (the built-in's is not either).
+  it('a question asked through doperpowers’ ask tool stays in view in a folded marked turn', () => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m1', 0, 'Checking. <message>One question first.</message>');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    b.toolUse('q1', 'mcp__doperpowers__AskUserQuestion', { questions: [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red' }, { label: 'Blue' }] }], async: true });
+    const waiting = 'Your questions are waiting for the human; this call does not wait for them. Their answer will reach you in a later message that quotes each question. Go on with work that does not depend on it.';
+    b.result('q1', waiting, { structured: waiting });
+    b.text('m2', 0, 'Going on meanwhile.');
+    b.end(['u1']);
+    const rows = project(stateOf(b.events));
+    expect(kinds(rows)).toEqual(['time', 'user', 'owner_record', 'text:Checking. <message>One question first.</message>', 'question']);
+    expect(rows[2]).toMatchObject({ toolCalls: 1 });
+  });
+
   it('a text-only turn with unmarked words keeps them in a record of their own', () => {
     const b = builder();
     b.turn('u1');

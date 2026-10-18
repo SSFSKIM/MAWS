@@ -23,6 +23,12 @@
 // publication all end at its deadline, after which nothing is written and the answer is the timeout. It is shorter than
 // the host's EXPORT_ANSWER_MS by a margin, so an export the bridge gave up on never later lands. At most
 // EXPORT_CONCURRENCY exports run at once, and one still waiting for a slot after EXPORT_QUEUE_MS is answered busy.
+//
+// P3-H (P3 Decision Log 91, the interface ledger's X31 `ownFile` row; E's Decision Log 33): an export asked for as a
+// file of its own (the library's `ownFile`, Send to's) or of a design names the opaque `exportId` main mints as it is
+// taken, before its snapshot and rendering, in its file's name (`<revision>-<format>-<exportId>.<ext>`, in the directory
+// asked) and answers it: no later export of the same revision and format, whatever its options, can replace the file
+// its caller still holds. Every other export keeps the revision-and-format cache name.
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -34,9 +40,9 @@ import { artifactUrl } from '@shared/artifacts/scheme';
 import { mimeOf } from '@shared/files/mime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
-import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
+import { artifactRefusalOf, type ArtifactRefusal } from '@shared/ipc/schema/artifacts'; // P3-E: artifactRefusalOf
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
-import { artifactExportName, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
+import { artifactExportName, type ArtifactExportFonts /* P3-C */, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
 import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from './capture';
 import { restrictRequests, type SeamEnv } from './policies';
 import { CommandFailure } from '../ipc/router';
@@ -60,8 +66,16 @@ export interface ExportRequest {
   versionId?: number;
   path: string;
   pageSize?: ArtifactExportPageSize;
+  fonts?: ArtifactExportFonts; // P3-C (H2-4): a presentation's PPTX faces; omitted, named
   width?: number;
   height?: number;
+  // P3-E (E1 M5; X23): a design's PNG board, its PDF's boards, the output's scale
+  board?: string;
+  boards?: string[];
+  scale?: number;
+  // P3-E (E1 M5; Decision Log 33) and P3-H (Decision Log 91): a file of its own (a design's export, or `ownFile`), minted
+  // by the service as it takes the request, its id in `path`'s name
+  exportId?: string;
 }
 
 // What the service gives an exporter (A's side of P3-B's `DocumentExportContext`).
@@ -137,8 +151,10 @@ export class ExportBudget {
   private timer!: ReturnType<typeof setTimeout>;
   private readonly expiry: Promise<never>;
   private timedOut = false;
+  readonly deadline: number; // E3: the epoch ms it ends at, so what is left of it can be handed on (a retry's allowance)
 
   constructor(readonly ms: number) {
+    this.deadline = Date.now() + ms;
     this.expiry = new Promise<never>((_, reject) => {
       this.timer = setTimeout(() => {
         this.timedOut = true;
@@ -229,9 +245,11 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
       await rename(temp, path);
       temps.delete(temp);
     }
-    return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }) };
+    return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }), ...(request.exportId !== undefined && { exportId: request.exportId }) /* P3-E, P3-H */ };
   } catch (error) {
-    return { ok: false, error: messageOf(error) };
+    // P3-E (E1 M5; Decision Log 26): a refusal the exporter named (A's command failure) is kept for the caller
+    const refusal = error instanceof CommandFailure ? artifactRefusalOf(error.error) : null;
+    return { ok: false, error: messageOf(error), ...(refusal && { refusal }) };
   } finally {
     time.end(); // the exporter is done or abandoned: anything it still writes is refused
     for (const temp of temps) await rm(temp, { force: true }).catch(() => {});
@@ -245,13 +263,16 @@ export interface ExportServiceDeps {
   onEvent(name: 'maws.artifact.export', listener: (request: MawsArtifactExport) => void): () => void;
   answer(input: CommandInput<'maws.artifact.exported'>): Promise<unknown>;
   print?: PdfPrinter; // printHtmlToPdf in the app; a test's stand-in
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b, the restart ruling): how many times the engine
+  // host's connection has gone, so a dashboard export whose snapshot holds a restart took captures once more
+  hostGeneration?: () => number;
 }
 
 const refusal = (reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}) =>
   new CommandFailure(ipcError('invalid_input', message, { reason, data } satisfies ArtifactRefusal));
 
 // Main's side of the export bridge and the library's command over one queue. Answers the library's export and `stop`.
-export function startExportService({ registry, root, call, onEvent, answer, print = printHtmlToPdf }: ExportServiceDeps): {
+export function startExportService({ registry, root, call, onEvent, answer, print = printHtmlToPdf, hostGeneration }: ExportServiceDeps): {
   exportForLibrary(input: CommandInput<'artifacts.export'>): Promise<CommandOutput<'artifacts.export'>>;
   stop(): void;
 } {
@@ -266,18 +287,37 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   // The export's snapshot, taken as it starts: its title, and a document's state with the revision it is at (the
   // version's, else the live doc's read with its revision), which then names the file. A byte kind's content at the
   // request's revision is immutable, so its request stands as it was asked.
-  const snapshot = async (request: ExportRequest, time: ExportBudget): Promise<{ request: ExportRequest; sources: ExportSources }> => {
-    const { artifact } = await time.within(required('artifacts.get', { artifactId: request.artifactId }));
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): a dashboard's state is captured with a hold over
+  // every snapshot it names, in one host read (`artifacts.captureDatasetState`), so a refresh retiring one meanwhile
+  // never takes its bytes before the exporter reads them; `release` ends the hold when the run does.
+  const snapshot = async (request: ExportRequest, time: ExportBudget): Promise<{ request: ExportRequest; sources: ExportSources; release?: () => Promise<void> }> => {
+    // P3-E (Decision Log 22): a retained version's export reads the row alone, never preparing the live document
+    const { artifact } = await time.within(required('artifacts.get', { artifactId: request.artifactId, ...(request.versionId !== undefined && { prepare: false }) }));
     if (!artifact) throw new Error(`no artifact ${request.artifactId}`);
     let state: Uint8Array | null = null;
     let taken = request;
-    if (isDocKind(request.kind)) {
+    let release: (() => Promise<void>) | undefined; // E3
+    if (request.kind === 'dashboard') {
+      // E3: the state and its snapshots' hold in one read; the live one names the file by its revision as below
+      const unhold = (assetHoldId: string) => call('artifacts.releaseAssets', { assetHoldId }).then(() => {}, (error: unknown) => console.warn(`[artifacts] an export's hold was not released: ${messageOf(error)}`));
+      const capturing = required('artifacts.captureDatasetState', { artifactId: request.artifactId, ...(request.versionId !== undefined && { versionId: request.versionId }) });
+      let captured: CommandOutput<'artifacts.captureDatasetState'>;
+      try {
+        captured = await time.within(capturing);
+      } catch (error) {
+        capturing.then((late) => unhold(late.assetHoldId), () => {}); // past the budget: a capture landing later is let go
+        throw error;
+      }
+      release = () => unhold(captured.assetHoldId);
+      state = captured.bytes;
+      if (request.versionId === undefined) taken = { ...request, revision: captured.revision, path: join(dirname(request.path), artifactExportName(captured.revision, request.format, request.exportId)) };
+    } else if (isDocKind(request.kind)) {
       if (request.versionId !== undefined) {
         state = (await time.within(required('artifacts.versionState', { artifactId: request.artifactId, versionId: request.versionId }))).bytes;
       } else {
         const live = await time.within(required('artifacts.state', { artifactId: request.artifactId }));
         state = live.bytes;
-        taken = { ...request, revision: live.revision, path: join(dirname(request.path), artifactExportName(live.revision, request.format)) };
+        taken = { ...request, revision: live.revision, path: join(dirname(request.path), artifactExportName(live.revision, request.format, request.exportId /* P3-E, P3-H */)) };
       }
     }
     return {
@@ -307,23 +347,49 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
         },
         print,
       },
+      ...(release && { release }), // E3
     };
   };
   // A request run in its turn within `time`, the budget its receipt started (a kind and format no exporter serves is
-  // answered at once). Never rejects; ends the budget.
-  const queued = async (request: ExportRequest, time: ExportBudget): Promise<MawsArtifactExportAnswer> => {
-    if (!registry.get(request.kind, request.format)) {
+  // answered at once). Never rejects; ends the budget. P3-E (E1 M5; Decision Log 33) and P3-H (Decision Log 91): a
+  // design, or `ownFile`, takes a file of its own here, its id minted before anything is read or rendered, in the
+  // directory asked, so another export of the same revision and format never replaces it before it is read.
+  const queued = async (asked: ExportRequest, time: ExportBudget, ownFile = false): Promise<MawsArtifactExportAnswer> => {
+    if (!registry.get(asked.kind, asked.format)) {
       time.end();
-      return { ok: false, unavailable: true, error: unavailableMessage(request.kind, request.format) };
+      return { ok: false, unavailable: true, error: unavailableMessage(asked.kind, asked.format) };
     }
-    const answered = await slot(async () => {
+    const exportId = ownFile || asked.kind === 'design' ? randomUUID() : undefined;
+    const request = exportId === undefined ? asked : { ...asked, exportId, path: join(dirname(asked.path), artifactExportName(asked.revision, asked.format, exportId)) };
+    // One capture and its run, the dashboard's snapshot holds released when the run ends (E3).
+    const attempt = async (budget: ExportBudget): Promise<MawsArtifactExportAnswer> => {
       let taken: Awaited<ReturnType<typeof snapshot>>;
       try {
-        taken = await snapshot(request, time);
+        taken = await snapshot(request, budget);
       } catch (error) {
+        budget.end();
         return { ok: false, error: messageOf(error) } satisfies MawsArtifactExportAnswer;
       }
-      return runExport(registry, taken.request, taken.sources, time);
+      try {
+        return await runExport(registry, taken.request, taken.sources, budget);
+      } finally {
+        await taken.release?.();
+      }
+    };
+    const answered = await slot(async () => {
+      // E3 (the architect's restart ruling): the engine host's restart between a dashboard's capture and its run's end
+      // left the capture's holds to a host that is gone, whatever the run answered: one fresh capture (the latest live
+      // state, or the same version) and run within what is left of the same budget; a second restart is a failure
+      const watched = request.kind === 'dashboard' && hostGeneration !== undefined;
+      const before = hostGeneration?.();
+      const first = await attempt(time);
+      if (!watched || hostGeneration!() === before) return first;
+      const again = hostGeneration!();
+      // the retry has what is left of the export's one budget, counted from its receipt (the first run ended `time`)
+      const left = time.deadline - Date.now();
+      if (left <= 0) return { ok: false, error: `the engine host restarted during the dashboard's export and no time was left within its ${time.ms / 1000} s to capture it again; try again` } satisfies MawsArtifactExportAnswer;
+      const retried = await attempt(new ExportBudget(left));
+      return hostGeneration!() === again ? retried : ({ ok: false, error: 'the engine host restarted twice while the dashboard was exported; try again' } satisfies MawsArtifactExportAnswer);
     }, busy);
     time.end();
     return answered;
@@ -337,11 +403,11 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   });
 
   return {
-    async exportForLibrary({ artifactId, format, versionId, pageSize, width, height }) {
+    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height, board, boards, scale /* P3-E */, ownFile /* P3-H */ }) {
       const time = new ExportBudget(EXPORT_BUDGET_MS);
       let artifact: CommandOutput<'artifacts.get'>['artifact'];
       try {
-        ({ artifact } = await time.within(required('artifacts.get', { artifactId })));
+        ({ artifact } = await time.within(required('artifacts.get', { artifactId, ...(versionId !== undefined && { prepare: false }) /* P3-E: Decision Log 22 */ })));
       } catch (error) {
         time.end();
         throw error;
@@ -365,10 +431,11 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
         revision = version.seq;
       }
       const path = join(root, artifactId, 'exports', artifactExportName(revision, format));
-      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(width !== undefined && { width }), ...(height !== undefined && { height }) };
-      const result = await queued(request, time);
+      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }), ...(board !== undefined && { board }), ...(boards !== undefined && { boards }), ...(scale !== undefined && { scale }) /* P3-E */ };
+      const result = await queued(request, time, ownFile === true); // P3-H: ownFile
+      if (!result.ok && result.refusal) throw new CommandFailure(ipcError('invalid_input', result.error, result.refusal)); // P3-E (Decision Log 26): the exporter's refusal, as named
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
-      return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }) };
+      return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }), ...(result.exportId !== undefined && { exportId: result.exportId }) /* P3-E, P3-H */ };
     },
     stop,
   };

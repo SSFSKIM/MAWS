@@ -50,11 +50,15 @@ export function popupBounds(anchor: Rect, preferred: { width: number; height: nu
 }
 
 // The popup's view in the partition's session: MAWS's tab preferences (sandboxed, isolated, no Node) and the preferred
-// size the page lays out at.
+// size the page lays out at. P3-F1: its page runs the extension's script with WebRtcHideLocalIpsWithMdns off app-wide
+// (../../chromium-features.ts), so, as a tab's (../view.ts), it gathers WebRTC candidates only on the default public
+// interface, set before anything loads in it.
 export function createPopupView(partition: string): WebContentsView {
-  return new WebContentsView({
+  const view = new WebContentsView({
     webPreferences: { partition, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, enablePreferredSizeMode: true },
   });
+  view.webContents.setWebRTCIPHandlingPolicy('default_public_interface_only'); // P3-F1
+  return view;
 }
 
 type View = Pick<WebContentsView, 'setBounds'> & { webContents: WebContents };

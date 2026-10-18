@@ -5,10 +5,15 @@
 // savepoint of the write that commits it; a read captures the session's base for its next publish (Decision Log 9).
 // An `html` create also answers E2's fields (`id`, `deliverableId`, `version` 1), which the transcript's artifact row is
 // drawn from (P3-L's cutover keeps their names; the deliverable id is the artifact's id).
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md; the parent's Decision Log 53 (3) and 58): a read of a
+// kind with its own `readFiles` answers no generic `json`; a deck's read names its held slides and the pictures its
+// assets do not hold; the session's base keeps the files it read.
 import { readFile, stat } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readRoots } from '@artifacts/files';
+import { assetWarnings, heldSlides } from '@artifacts/slides/answer'; // P3-C
+import { boardAssetWarnings, heldBoards } from '@artifacts/design/answer'; // P3-E
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import { isDocKind, type Artifact, type ArtifactKind } from '@shared/artifacts/entity';
 import type { ArtifactVersion } from '@shared/artifacts/version';
@@ -31,6 +36,7 @@ import {
   editorOf,
   filesOf,
   lineageOf,
+  loaderFields,
   opIdOf,
   publisherOf,
   readSourceFile,
@@ -109,6 +115,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
 
       // What the artifact starts from, read and checked before anything is written
       let content: ByteContent | undefined;
+      let loaded: Pick<ArtifactCreateResult, 'warnings' | 'notes' | 'held'> = {}; // P3-C: what the kind's loader said of the files
       let page: { bytes: Buffer } | null = null;
       if (kind === 'html') {
         if (path !== undefined) {
@@ -133,7 +140,8 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
         return toolError(TOOL_ERRORS.refused('artifact_create', { reason: 'invalid', kind: 'document' }, "a document's markdown content is read by P3-B's document create, which this build does not have; create it empty"));
       } else if (input.files) {
         // a dry run on an empty doc: files the kind cannot hold are refused before the artifact exists
-        withDoc(null, (scratch) => publisherOf(store, kind)(scratch, {}, input.files!, false));
+        const { warnings, notes, held } = loaderFields(withDoc(null, (scratch) => publisherOf(store, kind)(scratch, {}, input.files!, false)));
+        loaded = { ...(warnings && { warnings }), ...(notes && { notes }), ...(held && { held }) }; // P3-C
       }
 
       // E2 and P2-E1: a handle the session, or a session it was opened from, already holds is refused
@@ -165,7 +173,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
               answer = {
                 status: 'created', artifactId: artifact.id, kind, title: artifact.title, revision, ...(handle !== undefined && { handle }),
                 ...(page !== null && { id: handle ?? artifact.id, deliverableId: artifact.id, version: 1 as const, externalReferences: externalReferenceCount(page.bytes.toString('utf8')) }),
-                ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
+                ...(guide && { guide }), ...(designSystem !== null && { designSystem }), ...loaded, // P3-C: recorded with the op, so a replay says it too
               };
               if (isDocKind(kind)) base = { revision, state: store.service.readState(artifact.id).state };
               op.record(answer);
@@ -203,6 +211,9 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
       const input = parsed.data;
       const store = storeOf('artifact_read', deps);
       const artifactId = await resolveArtifact('artifact_read', store, input.artifact, lineageOf(ctx, deps));
+      // P3-E (E1's M2; Decision Log 11 (1)): a live read answers from the kind's model, an earlier build's shape migrated
+      // first as this session (a version is read as it was)
+      if (input.version === undefined) await store.ensureMigrated(artifactId, actorOf(ctx));
       const read = await store.readCommitted(() => {
         const artifact = store.get(artifactId);
         if (!artifact) throw new ToolRefusal(TOOL_ERRORS.noArtifact('artifact_read', input.artifact));
@@ -213,8 +224,14 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
         if (isDocKind(artifact.kind)) {
           if (input.revision !== undefined) throw new ToolRefusal(TOOL_ERRORS.refused('artifact_read', { reason: 'invalid' }, `a ${artifact.kind} artifact is read live or by version, not by revision`));
           const { revision, state } = version ? { revision: version.seq, state: store.versionState(artifactId, version.id) } : store.service.readState(artifactId);
-          const body = withDoc(state, (doc) => ({ files: filesOf(store, artifact.kind, doc), json: readRoots(doc) }));
-          return { kind: 'doc' as const, head: { ...head, revision }, body, base: version ? null : { revision, state } };
+          const ownFiles = store.service.adapterFor(artifact.kind)?.readFiles !== undefined; // P3-C: its roots are its files
+          const assets = artifact.kind === 'presentation' || artifact.kind === 'design' ? new Set(store.listAssets(artifactId).map((asset) => asset.ref)) : null; // P3-C; P3-E: a design's too
+          const body = withDoc(state, (doc) => ({
+            files: filesOf(store, artifact.kind, doc), json: ownFiles ? {} : readRoots(doc),
+            ...(assets && artifact.kind === 'presentation' && { warnings: assetWarnings(doc, assets), held: heldSlides(doc) }), // P3-C
+            ...(assets && artifact.kind === 'design' && { warnings: boardAssetWarnings(doc, assets), held: heldBoards(doc) }), // P3-E: by board path
+          }));
+          return { kind: 'doc' as const, head: { ...head, revision }, body, base: version ? null : { revision, state, files: body.files /* P3-C */ } };
         }
         const ref = version ? { revision: version.seq, ref: JSON.parse(store.versions.get(artifactId, version.id)!.content!) as ReturnType<typeof store.contentRef>['ref'] } : store.contentRef(artifactId, input.revision);
         const path = store.files.resolve(artifactId, ref.ref);
@@ -225,9 +242,15 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
       let result: ArtifactReadResult;
       if (read.kind === 'doc') {
         const { files, json } = read.body;
+        const shown = (entry: { path: string }) => !input.paths || input.paths.includes(entry.path); // P3-C: of the files returned
+        const warnings = read.body.warnings?.filter(shown);
+        const held = read.body.held?.filter(shown);
         const named = input.paths ? Object.fromEntries(input.paths.filter((p) => p in files).map((p) => [p, files[p]!])) : files;
         const missing = input.paths?.filter((p) => !(p in files)) ?? [];
-        result = { ...read.head, ...(Object.keys(named).length > 0 || input.paths ? { files: named } : {}), ...(missing.length > 0 && { missing }), ...(Object.keys(json).length > 0 && !input.paths && { json }) };
+        result = {
+          ...read.head, ...(Object.keys(named).length > 0 || input.paths ? { files: named } : {}), ...(missing.length > 0 && { missing }), ...(Object.keys(json).length > 0 && !input.paths && { json }),
+          ...(warnings && warnings.length > 0 && { warnings }), ...(held && held.length > 0 && { held }), // P3-C
+        };
         if (read.base) store.service.replica(ctx.appSessionId, artifactId).base = read.base;
       } else if (read.bytes !== null) {
         result = { ...read.head, files: { 'index.html': read.bytes.toString('utf8') } };

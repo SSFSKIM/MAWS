@@ -1,6 +1,6 @@
 // A question option's `preview`, rendered as the model wrote it inside an isolated frame (§5.3): `<iframe sandbox
 // srcdoc>` with no `allow-scripts` and no `allow-same-origin`, so the content runs nothing and reaches nothing of the
-// app; C1's CSP applies inside. The frame cannot read the app's CSS variables, so its colours are the current theme's
+// app; C1's CSP applies inside (and a host's own policy, where one sets it: `setPreviewPolicy`). The frame cannot read the app's CSS variables, so its colours are the current theme's
 // token values, read from the document (no literal colour here, X7). The theme is followed through the root's
 // `data-theme` attribute, which App sets from the settings store's resolved theme (and the harness sets directly):
 // observing the attribute rather than the store means the token values are read after the switch has applied.
@@ -21,9 +21,19 @@ function subscribeTheme(onChange: () => void): () => void {
 }
 const currentTheme = () => document.documentElement.dataset.theme ?? null;
 
+/**
+ * A host's own policy for the frame, put ahead of the preview: null (the desktop's) adds none, the frame inheriting the
+ * app's. A host with no app-wide policy to inherit (the desk's web app) sets one once, at start.
+ */
+let previewPolicy: string | null = null;
+export function setPreviewPolicy(policy: string | null): void {
+  previewPolicy = policy;
+}
+const policyMeta = () => (previewPolicy === null ? '' : `<meta http-equiv="Content-Security-Policy" content="${previewPolicy.replace(/"/g, '')}">`);
+
 export function SandboxedPreview({ preview, title }: { preview: string; title: string }) {
   const theme = useSyncExternalStore(subscribeTheme, currentTheme);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the theme is what changes the token values themeCss reads
-  const srcDoc = useMemo(() => `<!doctype html><meta charset="utf-8"><style>${themeCss()}</style>${preview}`, [preview, theme]);
+  const srcDoc = useMemo(() => `<!doctype html><meta charset="utf-8">${policyMeta()}<style>${themeCss()}</style>${preview}`, [preview, theme]);
   return <iframe sandbox="" srcDoc={srcDoc} title={title} className="h-36 w-full min-w-0 rounded-sm border border-border bg-bg" />;
 }

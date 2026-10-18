@@ -73,6 +73,38 @@ CREATE TABLE artifact_ops (opId TEXT PRIMARY KEY, artifactId TEXT, tool TEXT NOT
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `,
   },
+  // P3-H start (docs/doperpowers/plans/2026-10-12-p3-co-work.md, P3-H and Decision Log 80; the X15 slot "host artifacts
+  // store schema 2"): the owner's connector grants, one per artifact and tool (@shared/artifacts/connectors). Beside the
+  // artifact and never content: no version, copy, export or restore carries one. The foreign key cascades a hard
+  // delete; an artifact's soft delete removes its grants explicitly in its own transaction (store.ts).
+  {
+    version: 2,
+    sql: `
+CREATE TABLE artifact_connector_grants (artifactId TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE, server TEXT NOT NULL,
+  tool TEXT NOT NULL, fingerprint TEXT NOT NULL, mode TEXT NOT NULL CHECK (mode IN ('read','once')), grantedAt INTEGER NOT NULL,
+  PRIMARY KEY (artifactId, server, tool));
+`,
+  },
+  // P3-H end
+  // E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1; E's Decision Log 48 (1), the schema slot 3 it
+  // allocates): the query snapshots' retention. `querySnapshot` 1 marks an asset E3 registered as a query's snapshot
+  // (every other asset, and every row this migration finds, stays 0: never collected); `retiredAt` set takes such an
+  // asset out of every later version's asset refs, the versions already written untouched. `artifact_query_snapshots`
+  // is each live query's membership, at most two rows per query kept by the publication's own write frame (never a
+  // trigger, which could drop another query's shared row); `lastUsedSeq` the revision that last published the snapshot.
+  {
+    version: 3,
+    sql: `
+ALTER TABLE artifact_assets ADD COLUMN querySnapshot INTEGER NOT NULL DEFAULT 0 CHECK (querySnapshot IN (0, 1));
+ALTER TABLE artifact_assets ADD COLUMN retiredAt INTEGER;
+CREATE TABLE artifact_query_snapshots (
+  artifactId TEXT NOT NULL, datasetId TEXT NOT NULL, assetId TEXT NOT NULL, lastUsedSeq INTEGER NOT NULL,
+  PRIMARY KEY (artifactId, datasetId, assetId),
+  FOREIGN KEY (artifactId, assetId) REFERENCES artifact_assets(artifactId, assetId) ON DELETE CASCADE
+);
+`,
+  },
+  // E3 end
 ];
 
 // `ok`; `readOnly`: a newer app's file, every write refused with `storeTooNew`; `recovered`: the file at the path was

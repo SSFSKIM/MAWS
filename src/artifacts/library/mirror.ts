@@ -34,10 +34,24 @@ export interface MirrorInput {
 // Paths relative to `<linkedDir>/artifacts/`, `/`-separated (a deck is a folder); each one named by the artifact's
 // `mirrorSlug`, so two artifacts never claim one file.
 export interface MirrorOutput {
-  files: Record<string, string | Uint8Array>;
+  files: Record<string, string | Uint8Array | MirrorCopy>;
 }
 
-export type MirrorWriter = (input: MirrorInput) => MirrorOutput;
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 37 (1); the final review's A14): a copy, a
+// file whose bytes never change under its name (a content-addressed asset: a ref names one content for good). The host
+// keeps one already in place and calls `read` only to write one the mirror lacks, so a large asset is not read and
+// rewritten at every change of the artifact.
+export interface MirrorCopy {
+  read(): Uint8Array;
+}
+export const isMirrorCopy = (data: unknown): data is MirrorCopy => typeof data === 'object' && data !== null && !(data instanceof Uint8Array) && typeof (data as MirrorCopy).read === 'function';
+
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): `inputs`,
+// a writer's dependency fingerprint beyond the artifact's revision (a deck's: the governing design system and that
+// system's revision, whose tokens its files resolve). The host keeps it in the artifact's manifest entry and holds the
+// entry current only while both match; a kind without it is current on its revision alone. Read inside the host's
+// commit barrier, so it is a pure function of committed state.
+export type MirrorWriter = ((input: MirrorInput) => MirrorOutput) & { inputs?(artifact: Artifact): string };
 
 const SLUG_MAX = 64; // characters of the title kept
 
@@ -50,6 +64,9 @@ function segment(text: string): string {
     .replace(/-{2,}/g, '-')
     .replace(/^[.-]+|[.-]+$/g, '');
 }
+
+/** P3-E (E2 M5; E's Decision Log 32): the same sanitiser for a writer's own segments (a dashboard's snapshot names). */
+export const mirrorSegment = segment;
 
 // The title made path-safe, suffixed with the id's first 8 characters: what every writer names an artifact's files by.
 export function mirrorSlug(artifact: Pick<Artifact, 'id' | 'title'>): string {

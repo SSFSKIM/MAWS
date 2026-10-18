@@ -1,0 +1,14 @@
+{
+  "last": "paused:noRoute",
+  "serverPids": 1,
+  "toolCalls": 1,
+  "journals": [
+    {
+      "spawns": 1,
+      "exits": 1,
+      "userFrames": 0,
+      "modelFrames": 0,
+      "needsAuth": 0
+    }
+  ]
+}

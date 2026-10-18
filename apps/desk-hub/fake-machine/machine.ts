@@ -4,13 +4,14 @@
 //   - syncs one project's log (the recordings' log events, sealed with the org key, under its own writers) and imports
 //     the hub's, refusing what does not verify and reporting it up (`rejected`);
 //   - publishes its presence, each session's presence, pending requests, settlements, and delivery outcomes;
-//   - serves subscriptions (session.ts), and the depth's `rows` and `diff`;
+//   - serves subscriptions (session.ts), and the depth's `rows`, `diff`, and (as DC8's producer) `output`;
 //   - answers RPCs from a script, with a ledger of its own: a nonce is claimed before the effect and its outcome recorded
 //     before the result, and a nonce the ledger knows is never executed again;
 //   - can drop its connection, crash after an RPC's effect and before recording its outcome, end its subscriptions as
 //     the bridge's discontinuity does, refuse a subscribe before its snapshot, and race a snapshot with the replay.
 import { randomUUID } from 'node:crypto';
 import { base64urlDecode } from '../src/protocol/base64url';
+import { isTaskId } from '../src/protocol/browser';
 import { canonicalize } from '../src/protocol/canonical';
 import { deriveLogNonce, importOrgKey, inputSha256, seal, verify, verifyRpc, type OrgKey } from '../src/protocol/codes';
 import { decodeEnrollmentCode, type Redeemed } from '../src/protocol/identity';
@@ -22,7 +23,7 @@ import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from 
 import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
-import { SessionDepth, type SnapshotOptions } from './session';
+import { SessionDepth, type Producer, type SnapshotOptions } from './session';
 
 /** What a script answers an RPC with: an outcome, or undefined for the fake machine's own default. */
 export type RpcScript = { [N in RpcName]?: (rpc: Rpc<N>, machine: FakeMachine) => RpcOutcome<N> | undefined | Promise<RpcOutcome<N> | undefined> };
@@ -70,7 +71,7 @@ export type FakeMachineOptions = {
   /**
    * Whether its sessions have the bridge (default true). Without it, as §5's table has it: presence says so, no chunk,
    * `block-row`, `step-end`, or `usage` is sent (rows only), a steer goes out as a seat's `reply` and names no row
-   * (`{row: null}`), and interrupt, decisions, answers, model, and compact fail `unsupported`.
+   * (`{row: null}`), and interrupt, decisions, answers, model, compact, and stop fail `unsupported`.
    */
   bridge?: boolean;
   /** Reconnects by itself, with backoff, whenever the stream ends (as the daemon does; a redeploy ends every stream).
@@ -78,13 +79,18 @@ export type FakeMachineOptions = {
   reconnect?: boolean;
   /** The branch each session's working-tree diff is against (DX4 `diff`'s `base`); `main` when this gives none. */
   diffBase?: (session: string) => string | undefined;
+  /**
+   * The daemon it stands for (`Producer`): `dc8` carries DX4's widened `subagents` body, `jobs` and `mcp`, and answers
+   * `output`; `dc3` (the default, as DC3 built it) sends each agent's id and meta alone and passes `output` by.
+   */
+  producer?: Producer;
 };
 
 /** What happened to an RPC this machine received, for a test to read. */
 export type RpcRecord = { nonce: string; rpc: RpcName; outcome: RpcOutcome | null; executed: boolean };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume']);
+const SESSION_RPCS = new Set<RpcName>(['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume', 'stop']);
 const fail = (code: RpcError['code'], message: string, extra: Partial<RpcError> = {}): RpcOutcome => ({ state: 'failed', error: { code, message, ...extra } });
 const done = (result: object): RpcOutcome => ({ state: 'done', result }) as RpcOutcome;
 
@@ -139,15 +145,16 @@ export class FakeMachine {
     );
     const where = { project: this.project, machine: this.name };
     for (const recording of options.recordings ?? []) {
-      const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false, this.diffBase(recording.session));
+      const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false, this.diffBase(recording.session), this.producer);
       this.sessions.set(recording.session, depth);
       for (const step of recording.steps) this.timeline.push({ session: depth, step });
     }
     this.timeline.sort((a, b) => a.step.at - b.step.at);
-    // A steer the machine ran before a crash left its row in the transcript (DX6's trace).
+    // A steer the machine ran before a crash left its row in the transcript, and a stop its TaskStop rows (DX6's trace).
     for (const trace of Object.values(this.memory.trace)) {
       if (trace.rpc === 'steer' && trace.row && trace.session) this.sessions.get(trace.session)?.appendRow(null, trace.row as Row);
-      else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where, true, this.diffBase(trace.session)));
+      else if (trace.rpc === 'stop' && trace.session && typeof trace.result.taskId === 'string') this.sessions.get(trace.session)?.restoreStop(trace.result.taskId);
+      else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where, true, this.diffBase(trace.session), this.producer));
     }
   }
 
@@ -169,6 +176,10 @@ export class FakeMachine {
 
   private diffBase(session: string): string {
     return this.options.diffBase?.(session) ?? 'main';
+  }
+
+  private get producer(): Producer {
+    return this.options.producer ?? 'dc3';
   }
 
   // The connection.
@@ -646,6 +657,13 @@ export class FakeMachine {
       const misfit = held && decisionMisfit(rpc as Rpc<'decide' | 'answer'>, held.raised);
       if (misfit) return answer(misfit);
     }
+    // A stop needs the bridge and a running session, then names a job the session's own jobs index holds as running,
+    // or it is refused before the claim, in that order (DC10, the machine half's DX6).
+    if (rpc.rpc === 'stop') {
+      const depth = this.sessions.get(rpc.args.session)!;
+      if (this.options.bridge === false || depth.presence === null) return answer(fail('unsupported', 'the session has no bridge, or has ended'));
+      if (!depth.runningJob(rpc.args.taskId)) return answer(fail('unknown-task', `${rpc.args.taskId} is not a running job of ${rpc.args.session}`));
+    }
     this.memory.ledger[rpc.nonce] = { rpc: rpc.rpc, session: session ?? null, claimed: Date.now(), outcome: null };
     this.remember();
     // Every effect is complete (and its trace kept) when this returns; only progress notices follow the result.
@@ -689,7 +707,9 @@ export class FakeMachine {
       case 'steer': {
         const depth = this.sessions.get(rpc.args.session)!;
         if (depth.mainTurn === null) return fail('idle', 'no turn is running to steer: send it instead');
-        const row = userRow(depth.id, rpc.args.text);
+        // The bridge appends a steer (`$.session.append`), which the engine keeps meta with the plugin's origin: the
+        // owner's words under the steer's own first line (doperpowers 7.180.0, DX5 `steer` [steer-line]).
+        const row = { ...userRow(depth.id, `[sminos steer from human]\n${rpc.args.text}`), isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' } } as Row;
         const outcome = this.traced(rpc, record, depth.id, { row: row.uuid }, row);
         depth.appendRow(null, row);
         return outcome;
@@ -743,7 +763,7 @@ export class FakeMachine {
         if (!checkouts.some((c) => c.path === rpc.args.checkout)) return fail('unknown-checkout', `${rpc.args.checkout} is not a known checkout here`);
         const session = randomUUID();
         const alias = `fake-${session.slice(0, 4)}`;
-        const depth = new SessionDepth(session, null, (m) => this.queue({ t: 'session', message: m }), { project: this.project, machine: this.name }, true, this.diffBase(session));
+        const depth = new SessionDepth(session, null, (m) => this.queue({ t: 'session', message: m }), { project: this.project, machine: this.name }, true, this.diffBase(session), this.producer);
         this.sessions.set(session, depth);
         await this.write(`rpc:${rpc.nonce}:joined`, `${this.name}/${session}`, {
           kind: 'joined', session, alias, name_source: 'seat', machine: this.name, cwd: rpc.args.checkout, worktree: rpc.args.worktree ?? '', role: rpc.args.brief, seat: alias, by: member,
@@ -767,6 +787,13 @@ export class FakeMachine {
         this.sendPresence(depth);
         await this.flush();
         return this.traced(rpc, record, depth.id, { session: depth.id });
+      }
+      case 'stop': {
+        // TaskStop through the bridge, then its note in the transcript, from which the job reads stopped.
+        const depth = this.sessions.get(rpc.args.session)!;
+        if (!depth.stopJob(rpc.args.taskId)) return fail('failed', `Task ${rpc.args.taskId} is not running (status: killed)`);
+        await this.flush();
+        return this.traced(rpc, record, depth.id, { taskId: rpc.args.taskId });
       }
     }
   }
@@ -828,6 +855,9 @@ export class FakeMachine {
       case 'diff':
         this.sessions.get(frame.session)?.diff(frame.sub);
         return;
+      case 'output':
+        this.sessions.get(frame.session)?.output(frame.sub, frame.taskId, frame.tail);
+        return;
       default:
         return;
     }
@@ -865,7 +895,7 @@ export class FakeMachine {
   }
 }
 
-/** A user row with the human's text, as the engine writes a prompt the bridge submitted or a steer it appended. */
+/** A user row with the human's text: a delivered prompt, kept without its frame or origin (the fake's simplification). */
 function userRow(session: string, text: string): Row {
   return { type: 'user', uuid: randomUUID(), sessionId: session, timestamp: new Date().toISOString(), isSidechain: false, message: { role: 'user', content: [{ type: 'text', text }] } } as Row;
 }
@@ -903,6 +933,8 @@ function argumentProblem(rpc: Rpc): string | null {
     }
     case 'model':
       return needs(str('session') && optStr('model') && optStr('effort') && (a.model !== undefined || a.effort !== undefined), '{session, model?, effort?} with at least one');
+    case 'stop':
+      return needs(str('session') && isTaskId(a.taskId), '{session, taskId}, taskId as the engine spells it');
     case 'spawn':
       return needs(str('checkout') && str('brief') && ['worktree', 'model', 'effort', 'permission_mode'].every(optStr), '{checkout, brief, worktree?, model?, effort?, permission_mode?}');
     default:

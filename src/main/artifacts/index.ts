@@ -27,6 +27,7 @@ import { ExporterRegistry, printHtmlToPdf, registerHtmlExporters, startExportSer
 import { openDocument } from './open';
 import { appOriginOf, guardPermissions, installFramePolicies } from './policies';
 import { serveArtifacts, type ContentLookup } from './protocol';
+import { presentationEmbeds } from '../presentations/present-embeds'; // P3-C M6
 
 export { registerStoreSchemes } from './protocol';
 export type { ExportContext, Exporter, ExporterRegistry, ExportRequest } from './export';
@@ -57,15 +58,22 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
   // P3-A M7: the scheme and the export service
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const content: ContentLookup = (input) => call('artifacts.content', input);
-  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content);
+  const embeds = presentationEmbeds(call); // P3-C M6: the presenter's live embeds, under their own policy (Decision Log 18)
+  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content, embeds);
   const exporters = new ExporterRegistry();
   const stopHtml = registerHtmlExporters(exporters, { content, env });
+  // E3: the engine host's connection losses, counted for a dashboard export's one recapture across a restart
+  let hostLosses = 0;
+  const stopLosses = hosts.onState('engine-host', (state) => {
+    if (state.state !== 'ready') hostLosses += 1;
+  });
   const exports = startExportService({
     registry: exporters,
     root,
     call,
     onEvent: (name, listener) => hosts.onEvent(name, listener),
     answer: (input) => call('maws.artifact.exported', input),
+    hostGeneration: () => hostLosses,
   });
   register('artifacts.export', (input) => exports.exportForLibrary(input));
   // P3-L M6b: `artifact_screenshot`'s captures, answered to the requesting session
@@ -105,6 +113,7 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
     stop: () => {
       stopDefaults();
       stopResync();
+      stopLosses(); // E3
       stopCaptures();
       exports.stop();
       stopHtml();

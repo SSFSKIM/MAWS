@@ -33,9 +33,13 @@ describe('HOST_EVENTS', () => {
         'maws.pane.show',
         'maws.artifact.capture',
         'maws.artifact.export', // P3-A M7
+        'maws.artifact.datasetRefresh', // E3: an agent's refresh request, its id alone
         'host.supervisorStatus', // E10 M2
         'artifacts.changed', // P3-A M4
         'spaces.changed', // P3-A M4
+        'connectors.operation', // P3-H H3b: an operation's end, its id alone
+        'connectors.grantChanged', // P3-H H3b: a committed grant change, the tool and the change alone
+        'connectors.directOperation', // P3-HD M2: a direct operation's end, its id alone
         // E4c's `maws.browser.request` and `maws.browser.cancel` left with the browser tools (P1 A-54)
       ].sort(),
     );
@@ -43,6 +47,7 @@ describe('HOST_EVENTS', () => {
     expect(HOST_EVENTS).not.toContain('engine.hostState'); // main's own snapshot of the host
     expect(HOST_EVENTS).not.toContain('artifacts.console'); // main's
     expect(HOST_EVENTS).not.toContain('host.status'); // main's composition of the supervisor's status and its own facts
+    expect(HOST_EVENTS).not.toContain('connectors.watchUpdate'); // P3-H H3b: main's, to one window
   });
 });
 

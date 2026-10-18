@@ -11,6 +11,7 @@ import {
   ArtifactListInputSchema,
   ArtifactListResultSchema,
   ArtifactDeliverySchema,
+  artifactExportName,
   ArtifactPublishInputSchema,
   ArtifactPublishResultSchema,
   ArtifactReadInputSchema,
@@ -46,6 +47,7 @@ describe('X9: the maws server and its twelve tools', () => {
       'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
       // E4c's six browser tools left on 2026-10-08 (P1 A-54): none of them, and no other tool moved
       'artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export',
+      'artifact_dataset', // P3-E (E2 M2): the dashboard's tool, before B's
       // P3-B (M7): the document tools, appended after A's
       'artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve',
     ]);
@@ -91,6 +93,7 @@ describe('X9: the maws server and its twelve tools', () => {
       ['artifact_upload_asset', { readOnlyHint: false, openWorldHint: false, title: 'Upload artifact asset' }],
       ['artifact_list_assets', { readOnlyHint: true, openWorldHint: false, title: 'List artifact assets' }],
       ['artifact_export', { readOnlyHint: false, openWorldHint: false, title: 'Export artifact' }],
+      ['artifact_dataset', { readOnlyHint: false, openWorldHint: false, title: 'Bind dashboard dataset' }], // P3-E (E2 M2): a writer
       // P3-B (M7): the document tools; the three writers are not read-only
       ['artifact_edit', { readOnlyHint: false, openWorldHint: false, title: 'Edit document' }],
       ['artifact_comments', { readOnlyHint: true, openWorldHint: false, title: 'List document comments' }],
@@ -377,3 +380,14 @@ describe('P3-D: the design_system ask', () => {
   });
 });
 // P3-D end
+
+// P3 Decision Log 91 / E's Decision Log 33: an export's managed name, the cache's by revision and format, or a file of
+// its own that also names the id main minted for it
+describe('an export’s file name', () => {
+  it('is the revision and format, and the export’s own id beside them when it has one', () => {
+    expect(artifactExportName(4, 'pdf')).toBe('4-pdf.pdf');
+    expect(artifactExportName(7, 'claude')).toBe('7-claude.zip');
+    expect(artifactExportName(4, 'pdf', '0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a')).toBe('4-pdf-0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a.pdf');
+    expect(artifactExportName(3, 'pptx', '0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a')).not.toBe(artifactExportName(3, 'pptx'));
+  });
+});

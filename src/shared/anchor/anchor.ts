@@ -4,6 +4,7 @@
 // Design §9, so the renderer and main validate with the one schema; `screenshot` is a MAWS-private file main reads
 // (never written into the text the agent receives).
 import * as z from 'zod';
+import { ArtifactKindSchema } from '../artifacts/entity'; // P3-C
 
 export const ANCHOR_KINDS = ['browser-element', 'artifact-element', 'file-line', 'pr-line', 'none', 'artifact-comment' /* P3-B */] as const;
 export type AnchorKind = (typeof ANCHOR_KINDS)[number];
@@ -72,6 +73,13 @@ export const AnchorSchema = z.strictObject({
   artifactId: z.string().min(1).max(200).regex(ONE_LINE).optional(),
   threadId: z.string().min(1).max(200).regex(ONE_LINE).optional(),
   // P3-B end
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, M7 fix wave 1; Decision Log 33, 35): the commented
+  // artifact's kind, which picks the lead's wording; additive, an artifact-comment without it reads as a document's
+  artifactKind: ArtifactKindSchema.optional(),
+  // P3-E (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, M4; the P3-E spec's Decision Log 12): what a design's
+  // comment is on, a board or one of its elements; additive, absent meaning an element's for a design, every other lead
+  // unchanged
+  artifactTarget: z.enum(['board', 'element']).optional(),
 });
 export type Anchor = z.infer<typeof AnchorSchema>;
 export type FileLineAnchor = Anchor & { kind: 'file-line'; path: string; line: number }; // E5's shape, now the union's member

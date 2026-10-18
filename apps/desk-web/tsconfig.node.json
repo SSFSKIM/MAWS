@@ -1,0 +1,10 @@
+{
+  // What runs under Node: the build and test configs, the unit suites (which also reach the app's modules), the DX3
+  // protocol double, and the browser suites that drive it.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"]
+  },
+  "include": ["*.config.ts", "src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "e2e/**/*.ts", "e2e-hub/**/*.ts", "../../src/renderer/src/env.d.ts"],
+  "exclude": []
+}

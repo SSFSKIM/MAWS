@@ -1,0 +1,8 @@
+{"at":"2026-10-16T19:15:44.547Z","server":"series","pid":36194,"method":"server/discover"}
+{"at":"2026-10-16T19:15:44.558Z","server":"series","pid":36194,"method":"initialize"}
+{"at":"2026-10-16T19:15:44.574Z","server":"series","pid":36194,"method":"notifications/initialized"}
+{"at":"2026-10-16T19:15:44.574Z","server":"series","pid":36194,"method":"tools/list"}
+{"at":"2026-10-16T19:15:45.522Z","server":"series","pid":36194,"method":"tools/call","tool":"read_series","arguments":{"series":"signups"}}
+{"at":"2026-10-16T19:20:45.646Z","server":"series","pid":36194,"method":"tools/call","tool":"read_series","arguments":{"series":"signups"}}
+{"at":"2026-10-16T19:25:51.709Z","server":"series","pid":36194,"method":"tools/call","tool":"read_series","arguments":{"series":"signups"}}
+{"at":"2026-10-16T19:26:31.937Z","server":"series","pid":36194,"method":"tools/call","tool":"read_series","arguments":{"series":"signups"}}

@@ -1,0 +1,45 @@
+P3-E2 M1 renderer comparison: the three real datasets, their provenance and licences.
+
+Downloaded 2026-10-16 10:00 UTC by the M1 executor. raw/ holds each download byte for byte; derive.mjs turns them
+into the four tables beside this file (reshaping, `***`/`NA` to an empty cell, and Korean names added for labels).
+No observation is invented, rounded or filled. The 10,000-point stress input is synthetic and lives only in
+src/fixtures.ts, named as such.
+
+1. Time series: NASA GISS Surface Temperature Analysis (GISTEMP v4), global land-ocean temperature index.
+   URL: https://data.giss.nasa.gov/gistemp/tabledata_v4/GLB.Ts+dSST.csv
+   Values: monthly and seasonal anomalies in degrees C against the 1951-1980 mean, 1880 to September 2026.
+   They include negatives (before about 1940), and `***` where a month or season is not yet available.
+   Licence: a US Government (NASA) work, freely available. GISS asks to be cited as: GISTEMP Team, 2026: GISS Surface
+   Temperature Analysis (GISTEMP), version 4. NASA Goddard Institute for Space Studies. Dataset accessed 2026-10-16
+   at https://data.giss.nasa.gov/gistemp/. Lenssen, N., et al., 2024: A GISTEMPv4 observational uncertainty ensemble.
+   J. Geophys. Res. Atmos., 129, e2023JD040179.
+   raw/gistemp-v4-GLB.Ts+dSST.csv  sha256 4c64eda288bce32b8d76926278f346ecea1e53506df8ee72a3d5accb0657c416
+   gistemp-monthly.csv (date, anomaly_c; 1,764 rows, the last 3 empty)
+                                   sha256 67230cf0fa2f7ae8ac68ef543a03a4cf3391126aa0a6e03e3ed9de02a92e1db7
+   gistemp-annual.csv (year, annual_c, djf_c, jja_c; 147 rows)
+                                   sha256 dadf674a9a8786527992721363041f8bb055a0544e991ac0c95f7844cc43beb9
+
+2. Categorical comparison: World Bank, World Development Indicators, NY.GDP.MKTP.KD.ZG "GDP growth (annual %)" for
+   KOR, JPN, USA, DEU, GBR, FRA, ITA and CAN, 2019 to 2024 (the API's lastupdated is 2026-10-08).
+   URL: https://api.worldbank.org/v2/country/KOR;JPN;USA;DEU;GBR;FRA;ITA;CAN/indicator/NY.GDP.MKTP.KD.ZG?format=json&date=2019:2024&per_page=200
+   Values: annual percentage growth. Negative in 2020 for all eight, for DEU in 2023 and 2024, and for JPN in 2019 and 2024.
+   Licence: Creative Commons Attribution 4.0 (the WDI catalogue entry,
+   https://datacatalog.worldbank.org/search/dataset/0037712, "License: Creative Commons Attribution 4.0").
+   Attribution: The World Bank, World Development Indicators (2026).
+   The Korean country names (대한민국, 일본, 미국, 독일, 영국, 프랑스, 이탈리아, 캐나다) are this spike's derivative labels.
+   raw/worldbank-NY.GDP.MKTP.KD.ZG-2019-2024.json
+                                   sha256 c9dd471689bcf02e8b98d31d83a690db1f3969b605fa3e1e4cfbb70b49ce406e
+   gdp-growth.csv (country, country_ko, iso3, year, growth_pct; 48 rows)
+                                   sha256 873b79479d7a689b99a14f351b1ffb867334dabe5c14ca7716d27eab7ab9b515
+
+3. Scatter: palmerpenguins, the Palmer Archipelago (Antarctica) penguin data, 344 penguins, 2007 to 2009.
+   URL: https://raw.githubusercontent.com/allisonhorst/palmerpenguins/main/inst/extdata/penguins.csv
+   Licence: CC0 1.0 Universal (raw/palmerpenguins-LICENSE.md, from the same repository). Original data: Gorman K.B.,
+   Williams T.D., Fraser W.R. (2014), PLoS ONE 9(3): e90081; Palmer Station Antarctica LTER and K. Gorman.
+   Values: bill, flipper and body-mass measurements with `NA` for unmeasured penguins (2 with no measurements at all,
+   11 with no sex).
+   The Korean species and island names (아델리펭귄, 젠투펭귄, 턱끈펭귄; 토르게르센섬, 비스코섬, 드림섬) are the spike's derivative.
+   raw/palmerpenguins-penguins.csv sha256 f204db2c753b0937caac3cb35258562c14f073e4bbc76be24b4c51ce22767a93
+   raw/palmerpenguins-LICENSE.md   sha256 8e2c443dd9aea6fcd6c293dbf66935bd5ef502fc0ca9b466c773cf9316d5e04c
+   penguins.csv (species, species_ko, island, island_ko, 4 measures, sex, year; 344 rows)
+                                   sha256 a67cd305dcc2db6d7e0c8dfac090ca88d65bf4c3b7f7d95a2848a0865070ac53

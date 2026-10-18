@@ -7,12 +7,12 @@
 //
 // What the session plane keeps survives an eviction while sockets stay open (§2): machines' leases and presence,
 // sessions' presence, the pending set, delivery outcomes, RPC records, and subscription routes (session-store.ts).
-// A machine is online while its lease is fresh; when the lease lapses or its stream closes, the machine's
-// subscriptions end at the browsers and its forwarded RPCs without a result become `uncertain`.
+// A machine is online while its lease is fresh; when the lease lapses, its stream closes, or it is revoked, the
+// machine's subscriptions end at the browsers and its forwarded RPCs without a result become `uncertain`.
 import { DurableObject } from 'cloudflare:workers';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
-import type { AuditEntry, PendingRequest, ProjectDown, PushNotice } from '../protocol/browser';
+import { isOutputTail, isTaskId, OUTPUT_TAIL_MAX, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice } from '../protocol/browser';
 import { canonicalize } from '../protocol/canonical';
 import { isMemberId, type ProjectRecord } from '../protocol/identity';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
@@ -155,6 +155,8 @@ export class Project extends DurableObject<Env> {
         return this.rows(socket, frame);
       case 'diff':
         return this.diff(socket, frame.sub);
+      case 'output':
+        return this.output(socket, frame);
       case 'visibility':
         if (typeof frame.visible !== 'boolean') return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'visibility is {visible: boolean}' });
         return this.attach(socket, (a) => ({ ...a, visibleAt: frame.visible ? Date.now() : null }));
@@ -192,7 +194,7 @@ export class Project extends DurableObject<Env> {
     this.remember(ctx.org, ctx.project);
     let applied = 0;
     for (const frame of frames) {
-      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation) return { applied, stale: true, failed: false };
+      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || this.isRevoked(ctx.machine, ctx.generation)) return { applied, stale: true, failed: false };
       try {
         if ((await this.fromMachineFrame(ctx, frame)) === 'stale') return { applied, stale: true, failed: false };
         // Settled at once for a frame that owes no reply, which most of a stream's frames are.
@@ -227,7 +229,7 @@ export class Project extends DurableObject<Env> {
     this.remember(ctx.org, ctx.project);
     this.sweepLeases();
     const lease = this.plane.lease(ctx.machine);
-    if (!lease || lease.generation !== ctx.generation || lease.closed) return;
+    if (!lease || lease.generation !== ctx.generation || lease.closed || this.isRevoked(ctx.machine, ctx.generation)) return;
     const wasOnline = this.isFresh(lease);
     this.plane.putLease({ ...lease, expires: Date.now() + ctx.leaseMs, online: true });
     if (!wasOnline) this.cameOnline(ctx.machine);
@@ -248,6 +250,23 @@ export class Project extends DurableObject<Env> {
     }
     if (lease.online) this.lapse({ ...lease, closed: true });
     else this.plane.putLease({ ...lease, closed: true });
+  }
+
+  /**
+   * The machine was revoked from the org (DX7), its streams through `generation` with it: from now on the grid does not
+   * count it, and a frame those streams still carry (a POST the Worker admitted before the revocation) is refused as
+   * stale. Its sessions keep their history and read as on a machine that is offline. A machine enrolled again under the
+   * name opens a newer stream, and counts again once it opens the project.
+   *
+   * A revoked stream's lease ends here, as that stream's close would end it: the close may never come (a Machine object
+   * that restarted holds no stream to end, and the close is sent unawaited). A newer stream's lease is the name's anew.
+   */
+  forget(org: string, project: string, machine: string, generation: number): void {
+    this.remember(org, project);
+    this.plane.revoke(machine, generation);
+    const lease = this.plane.lease(machine);
+    if (lease?.online && lease.generation <= generation) this.lapse({ ...lease, closed: true });
+    this.reportSummary();
   }
 
   /** Leases that lapsed with no close, and background requests whose window closed. */
@@ -636,6 +655,17 @@ export class Project extends DurableObject<Env> {
     if (this.leaseServes(route)) this.toMachine(route.machine, route.generation, { t: 'diff', project: this.projectId, session: route.session, sub: route.sub });
   }
 
+  /** A task's output tail, carried to the sub's machine with its route; on a main or an agent sub alike. */
+  private output(socket: WebSocket, frame: Record<string, unknown>): void {
+    const { taskId, tail } = frame;
+    if (!isTaskId(taskId) || !isOutputTail(tail)) {
+      return this.refuseBrowser(socket, { reason: 'bad-shape', message: `output is {sub, taskId: [A-Za-z0-9_-]{1,64}, tail: 1 to ${OUTPUT_TAIL_MAX} bytes}` });
+    }
+    const route = this.ownRoute(socket, frame.sub);
+    if (!route || !this.leaseServes(route)) return;
+    this.toMachine(route.machine, route.generation, { t: 'output', project: this.projectId, session: route.session, agentId: route.agentId, sub: route.sub, taskId, tail });
+  }
+
   /** The route of a sub this socket holds; a sub it does not (one that just ended, say) is passed over quietly. */
   private ownRoute(socket: WebSocket, sub: unknown): Route | undefined {
     const route = typeof sub === 'string' ? this.routes.get(sub) : undefined;
@@ -693,6 +723,12 @@ export class Project extends DurableObject<Env> {
     this.reportSummary();
   }
 
+  /** Whether `generation` of the machine's streams was revoked. */
+  private isRevoked(machine: string, generation: number): boolean {
+    const through = this.plane.revokedThrough(machine);
+    return through !== null && generation <= through;
+  }
+
   private isOnline(machine: string): boolean {
     const lease = this.plane.lease(machine);
     return lease !== undefined && this.isFresh(lease);
@@ -740,8 +776,10 @@ export class Project extends DurableObject<Env> {
 
   /** The project's line on the org's grid, sent to the registry when it changes. */
   private reportSummary(): void {
-    const leased = this.plane.leases();
-    const machines = new Set([...leased.map((l) => l.machine), ...this.plane.machinePresence().map((p) => p.machine)]);
+    // A revoked machine is no machine of the project, unless its name was enrolled anew and opened the project since.
+    const leased = this.plane.leases().filter((l) => !this.isRevoked(l.machine, l.generation));
+    const revoked = (machine: string) => this.isRevoked(machine, this.plane.lease(machine)?.generation ?? 0);
+    const machines = new Set([...leased.map((l) => l.machine), ...this.plane.machinePresence().map((p) => p.machine).filter((m) => !revoked(m))]);
     const online = new Set(leased.filter((l) => this.isFresh(l)).map((l) => l.machine));
     let working = 0;
     for (const { machine, message } of this.plane.presence()) {

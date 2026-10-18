@@ -70,6 +70,11 @@ export type DownFrame =
   | { t: 'rows'; project: string; session: string; agentId: string | null; sub: string; before: string; limit: number }
   /** The session's working-tree diff against its base branch, answered as DX4 `diff` on the sub (a main-scope sub's). */
   | { t: 'diff'; project: string; session: string; sub: string }
+  /**
+   * The browser's `output` (DX3), carried with the sub's route: answer DX4 `output` on the sub with the last `tail`
+   * bytes of the task's output file, under DX4's containment rule. A daemon older than DC8 passes it by.
+   */
+  | { t: 'output'; project: string; session: string; agentId: string | null; sub: string; taskId: string; tail: number }
   | Part;
 
 /**

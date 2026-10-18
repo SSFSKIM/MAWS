@@ -1,11 +1,12 @@
 // The user's message: a bubble with the text through the shared markdown pipeline, its attachments (images inline from
 // their data URLs, files as chips, pasted blocks as chips that expand to their text), a collapse past 19 rendered
 // lines, and copy and edit affordances (residues *Images and attachments*, *Bounded surfaces and truncation*, *Copy and
-// export*; *Pasted content* under Derivation). A dropped prompt carries a quiet `Not sent`. W1: a message waiting for
-// the engine (a `next` steer, or one held in MAWS's queue) is dimmed with what it waits for, and a steer the engine took
-// says it was sent during the turn it sits in. W2 (B2, Codex's bubble): the time, Copy and Edit overlay beside the
-// bubble on hover or focus instead of reserving a line under it, and the collapse follows the rendered height (a long
-// paragraph folds as a long list does), measured while folded and again whenever the content's size changes. W3 (B6):
+// export*; *Pasted content* under Derivation). A dropped prompt carries a quiet `Not sent`, or why it never ran when its
+// mount knows (`droppedRowMark`). W1: a message waiting for the engine (a `next` steer, or one held in MAWS's queue) is
+// dimmed with what it waits for, and a steer the engine took says it was sent during the turn it sits in. W2 (B2,
+// Codex's bubble): the time, Copy and Edit overlay beside the bubble on hover or focus instead of reserving a line under
+// it, and the collapse follows the rendered height (a long paragraph folds as a long list does), measured while folded
+// and again whenever the content's size changes. W3 (B6):
 // Edit edits the bubble in place: C7's registered editor stands in the bubble's place while its session edits it.
 // E3: an anchored comment opens with a chip naming what it is about (its kind's glyph and label; a chip with a path
 // opens the file at the line), above the comment, its screenshot drawn as the image attachment it is.
@@ -52,6 +53,7 @@ export function UserRow({ row }: { row: UserRowData }) {
   const files = row.attachments.filter((a) => a.kind !== 'text');
   // P2-F L121: the mount's own mark (the card's "Sent to Claude") stands where no caption already says the row's state
   const caption = row.pending ? PENDING_CAPTION[row.pending] : row.steer ? STEERED_CAPTION : row.dropped ? null : (actions.userRowMark?.(row) ?? null);
+  const notSent = row.dropped ? (actions.droppedRowMark?.(row) ?? NOT_SENT) : null;
 
   // Measured while folded only: an open bubble has no bound. Open stays in the transcript-wide disclosures while the
   // measurement is this mount's, so an open bubble always offers Show less (a virtualiser remount resets the
@@ -115,11 +117,11 @@ export function UserRow({ row }: { row: UserRowData }) {
     </div>
   );
   return (
-    <section className="transcript-user" aria-label="Your message" data-pending={row.pending} data-steer={row.steer ? '' : undefined}>
+    <section className="transcript-user" aria-label="Your message" data-pending={row.pending} data-steer={row.steer ? '' : undefined} data-dropped={row.dropped ? '' : undefined}>
       {renderEditor && variant === 'session' ? renderEditor({ storeKey, row, children: body }) : body}
-      {(row.dropped || caption !== null) && (
+      {(notSent !== null || caption !== null) && (
         <div className="transcript-user-meta">
-          {row.dropped && <span className="transcript-not-sent">{NOT_SENT}</span>}
+          {notSent !== null && <span className="transcript-not-sent">{notSent}</span>}
           {caption !== null && <span className="transcript-user-caption">{caption}</span>}
         </div>
       )}

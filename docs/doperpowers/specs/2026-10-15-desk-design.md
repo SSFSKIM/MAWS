@@ -379,7 +379,8 @@ control stays bound to the moment it was given]**
 **The log plane** is durable and replicated: the `.smns` log (smns §3),
 with the hub as its mirror. It carries what crosses between sessions and
 humans: `human`, `say`, `message`, `question`, `answered`, and the
-lifecycle (`joined`, `retired`, `in-charge`, `status`, `renamed`, `state`).
+lifecycle (`joined`, `retired`, `in-charge`, `status`, `renamed`, `state`,
+`titled`).
 The group chat and the direct channels are drawn from it.
 
 - **Sync** between a daemon and the hub is a version-vector handshake:
@@ -474,8 +475,12 @@ unavailable; everything they sent the human is still in the log.
 
 - **Projects.** The home is the grid of the org's projects.
 - **A project.** Left: `# <project>`, then the sessions as direct
-  channels, grouped by waiting on you / working / idle / ended, each with
-  its machine and its in-charge line; "+ Session". Center: the selected
+  channels, grouped by waiting on you / working / idle / ended, each named
+  by its title — the harness's "Session name", which its machine publishes
+  as `titled` (smns §3, §5) — with its machine and whether that is online
+  after it, and under it, muted, its alias, the name `@` addresses (alias
+  and machine on one line while it has no title); then its in-charge line;
+  "+ Session". Center: the selected
   channel — on a desktop browser whose machine is online, the session view
   (§9). Right: the selected session's depth (subagents, background jobs,
   diff, session info: machine, cwd, worktree, model, context, cost;
@@ -4931,6 +4936,19 @@ a hub that connects into machines (§2).
   gate-offload plan §3.5–3.6). Rejected: a shorter local heartbeat (DC3's to set, and nothing needs it); keeping
   the MacBook pass at `3de8a15e` (it predates the panel's fixes to resume and routing, and passed by timing).
   Date/Author: 2026-10-16, design session (DC5).
+- Decision: The web names a session by its title (§4): the harness's "Session name" (`/rename`'s `custom-title`,
+  else the generated `ai-title`), carried through the log as sminos's `titled` (smns §3, §5, §8), which the session's
+  machine writes into its file when the value changes. The owner, working a day from the desk, could not tell sessions
+  apart as "maws-4d @macbook"; they know that one as "cua_repl". A sidebar row takes the owner's layout: the title
+  truncated to fit, then `@machine` and whether the machine is online, and under it the alias, muted, because `@alias`
+  is still how the composer addresses it; a session with no title keeps its one line. The direct channel's and the
+  depth column's headers follow it; a message's author and a request card, one line each, name it by the title with
+  the alias muted beside `@machine`; `@` completion finds a member by its title too and inserts the alias's tag.
+  Lifecycle system lines and delivery outcomes keep the alias: they record what was addressed. Rejected: carrying the
+  title in session presence (DX4), which an ended session and an offline
+  machine's sessions do not have; a field on `renamed` or a new `in-charge` source, which this projection would read
+  as an alias or an in-charge line. Older readers pass over the new kind, and the hub verifies any kind.
+  Date/Author: 2026-10-17, the desk's session-title change (owner's request; the delegating session's design).
 - Decision: A Linux machine is a desk machine, built alongside Phase 1 (Arkho #85): `sminos daemon install`
   writes a systemd user service on Linux (restart on new code, lingering for a machine without a login session),
   and the process-identity check holds on Linux, where `ps -o lstart` reads up to a second early. The owner asked

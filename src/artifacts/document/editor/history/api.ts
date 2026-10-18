@@ -4,6 +4,8 @@
 // the harness page over an in-memory host (memory-history.ts).
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { TokenOverrides } from '../../meta';
+import type { ContentMap, Doc } from '../../../yjs'; // P3-E
+import type { ExtraChange } from '../../history'; // P3-E
 
 export interface HistoryApi {
   /** Every retained version (`artifacts.versions`), in any order. */
@@ -34,8 +36,16 @@ export interface HistoryApi {
   designTokens?(ref: { id: string; versionSeq: number }): Promise<TokenOverrides>;
   /** A session's title for its author chip; "Claude" without one (§4.7). */
   sessionTitle?(appSessionId: string): string | undefined;
+  /** The clock (epoch ms) the list's days are named by (Today, Yesterday); the wall clock without it. */
+  now?(): number;
   /** New versions exist (an automatic or turn version, another window's save or restore): the list re-reads. */
   onVersions?(listener: () => void): () => void;
   /** Where the rail logs a failure it shows (the surface's log). */
   log?(line: string): void;
+  /**
+   * P3-E (E2 M4; E's Decision Log 8 and 28): the changes of a comparison its tab bodies cannot show (a dashboard's
+   * datasets), from its two states and their provenance, merged into the one list the pill, the bar and the paint use.
+   * Absent for documents and decks: their history is unchanged.
+   */
+  extraChanges?(prevDoc: Doc, nextDoc: Doc, attributions: ContentMap): readonly ExtraChange[];
 }

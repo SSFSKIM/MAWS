@@ -1,0 +1,24 @@
+{
+  "runId": 38953445238,
+  "sourceCommit": "d5e39b2f52b89d3a1a202dc81871ebfb258c0190",
+  "suite": "e2e:connectors-soak",
+  "result": "passed",
+  "testsPassed": 1,
+  "artifact": "e2e-connectors-soak",
+  "files": [
+    {
+      "path": "fixture-calls.jsonl",
+      "bytes": 924,
+      "sha256": "17330b6e7d857566169a766e76b69513cc0dad234bcf5c8eeb8d59da24912528",
+      "source": "playwright-report/data/6e31c42727b8ee79e24449960987b8ff0799f61c.jsonl",
+      "normalization": "none"
+    },
+    {
+      "path": "timeline.json",
+      "bytes": 3460,
+      "sha256": "c827b176404829d8c8ad57af5fda2791323eeee915f53699054b498ba4a4c34b",
+      "source": "inline timeline.json attachment in playwright-report/index.html embedded report archive",
+      "normalization": "one final newline added to attachment body"
+    }
+  ]
+}

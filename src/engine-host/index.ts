@@ -35,6 +35,17 @@ import { documentPerfSeamRequested, startDocumentPerfSeam } from './documents/ki
 // P3-D start
 import { registerDesignSystems } from './design-systems'; // M6
 // P3-D end
+// P3-C start
+import { registerPresentations } from './presentations'; // M3
+import { presentationsScaleSeamRequested, startPresentationsScaleSeam } from './presentations/scale-seam'; // M10: the scale gate's seam (e2e only)
+// P3-C end
+import { registerDashboards } from './dashboards'; // P3-E (E2 M2)
+import { dashboardE2eSeamRequested, startDashboardE2eSeam } from './dashboards/e2e-seam'; // P3-E (E2 M6): the acceptance seam (e2e only)
+// P3-E start
+import { registerDesigns } from './designs'; // E1's M2
+// P3-E end
+import { registerConnectors } from './connectors/register'; // P3-H H3b
+import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -73,28 +84,45 @@ const register: HostRegister = (on, emit, client) => {
   documents = openDocuments(userData);
   if (documents) registerDocumentKind(documents.store); // P3-B: the document kind's hooks on every document update
   if (documents && documentPerfSeamRequested(process.env)) startDocumentPerfSeam(documents.store, join(userData, 'document-perf')); // P3-B M9: the scale gate's seam, MAWS_E2E=1 and MAWS_DOCUMENT_PERF=1 only
-  const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): agents' dataset refreshes, asked of main by id alone;
+  // the sessions' tools ask, main reads (artifacts.*) and answers (maws.*), route E's starts claim; main's going ends them
+  const datasetRefresh = hostDatasetRefresh(emit, client);
+  const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env, datasetRefresh });
   const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
   // P3-L: main's library reads, the linked-directory mirror and (M6b) the X12 import at store open
   const library = registerLibrary(on, { documents, deliverablesDir: join(userData, 'deliverables'), e2e: process.env.MAWS_E2E === '1' });
   const designSystems = registerDesignSystems({ on, documents }); // P3-D: the kind's adapter, its mirror writer, the create context, the seeded defaults and the windows' designSystems.* reads
+  const presentations = registerPresentations({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-C: the deck's adapter and its mirror writer, kept fresh under its governing system (Decision Log 29)
+  if (documents && presentationsScaleSeamRequested(process.env)) startPresentationsScaleSeam(documents.store, join(userData, 'presentations-scale')); // P3-C M10: the scale gate's seam, MAWS_E2E=1 and MAWS_PRESENTATIONS_SCALE=1 only
+  const dashboards = registerDashboards({ documents }); // P3-E (E2 M2): the dashboard kind's adapter and its derived change index
+  if (documents && dashboardE2eSeamRequested(process.env)) startDashboardE2eSeam(documents.store, join(userData, 'dashboard-e2e'), undefined, datasetRefresh); // P3-E (E2 M6): the agent's tools for the dashboard e2e groups, MAWS_E2E=1 and MAWS_DASHBOARD_E2E=1 only; E3 M4: with the host's refresh registry
+  const designs = registerDesigns({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-E (E1's M2): the design's adapter (its legacy migration among its hooks) and its mirror writer, kept fresh under its governing system
+  let connectors: { close(): void; closeDirect(): Promise<void> } | null = null; // P3-H H3b: below, over the process table
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
+      connectors?.close(); // P3-H H3b: no connector operation or outcome outlives the sessions
       artifacts.close(); // P3-A
       library.close(); // P3-L
       designSystems.close(); // P3-D
+      presentations.close(); // P3-C
+      dashboards.close(); // P3-E
+      designs.close(); // P3-E
       documents?.close(); // P3-A
     },
+    duringShutdown: async () => connectors?.closeDirect(), // P3-HD M2: route D's owned processes, ended beside the sessions
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
     replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
     onConnect: client.onConnect, hasClient: client.hasClient, // E10: the connect burst; a refused batch told from a client gone
     artifacts: () => store, // P3-A (M6)
+    datasetRefresh, // E3
   });
   ({ table } = ipc);
   table.startSampling();
   // C3 end
+  // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when main's client goes
+  connectors = registerConnectors(on, emit, client, { sessions: table, store, datasetRefresh }); // E3: its registry
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
   // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
   const rows = table;

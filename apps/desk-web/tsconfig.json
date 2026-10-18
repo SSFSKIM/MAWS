@@ -1,0 +1,26 @@
+{
+  // The web app, typed against the browser: no Node, no Electron. The protocol module comes in through
+  // `desk-hub/protocol` and is checked here as the app imports it. Its configs, the tests, the double, and the browser
+  // suites are tsconfig.node.json's. The depth column (DC6) imports MAWS's transcript view, model, and backfill as they
+  // stand, so their modules are checked here too, under MAWS's own `@shared` and `@artifacts` aliases; the view's
+  // closure reaches MAWS's bridge client, which reads `window.maws` per call and is never called on the desk (no bridge
+  // exists here), so MAWS's declaration of it (`env.d.ts`) is included for that module to typecheck.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    "strict": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    // MAWS's renderer modules the desk imports as they stand (the renderer survey) name src/shared as `@shared`, and
+    // the depth column's (DC6) reach src/artifacts as `@artifacts`.
+    "paths": { "@shared/*": ["../../src/shared/*"], "@artifacts/*": ["../../src/artifacts/*"] }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../../src/renderer/src/env.d.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

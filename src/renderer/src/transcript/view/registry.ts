@@ -5,7 +5,8 @@
 // the same key if one remains.
 import { useSyncExternalStore, type ReactNode } from 'react';
 import type { Row } from '../model/rows';
-import { DEFAULT_ACTIONS, type TranscriptActions } from './context';
+import type { TranscriptActions } from './context';
+import { DEFAULT_ACTIONS } from './default-actions';
 import type { TranscriptProps } from './Transcript';
 
 const registrations: Partial<TranscriptActions>[] = [];

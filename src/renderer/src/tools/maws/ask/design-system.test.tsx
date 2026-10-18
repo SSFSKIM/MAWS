@@ -62,7 +62,18 @@ const host: ArtifactHost = {
   acceptSuggestion: async () => ({ revision: 0 }), // P3-D re-merge: A's landed required members
   rejectSuggestion: async () => ({ revision: 0 }),
   uploadAsset: async () => ({ assetId: '', ref: '' }),
+  copyAsset: async () => ({ assetId: '', ref: '' }), // P3-C (Decision Log 25)
+  readDataset: async () => ({ columns: [], rows: [], total: 0, truncated: false }), // P3-E (E2 M2)
+  downloadAsset: async () => ({ path: null }), // P3-E (E2 M3)
+  holdDatasets: async () => ({ release: () => {}, invalidated: new Promise<void>(() => {}) }), // E3: A's landed required member
   identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: 'var(--author-1)' }),
+  // P3-H H4: the connector family, which these tests never reach
+  openConnectors: () => {
+    throw new Error('no connectors here');
+  },
+  connectorGrants: async () => [],
+  grantConnectorTool: async () => ({ ok: false, state: 'paused', reason: 'noRoute' }),
+  revokeConnectorTool: async () => false,
 };
 
 // Rows as main's index answers them (the client validates answers), out of title order.

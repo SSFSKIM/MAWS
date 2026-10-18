@@ -7,6 +7,7 @@
   },
   "include": [
     "playwright.config.ts",
+    "playwright.dashboard.config.ts", // P3-E (E2 M6): the dashboard acceptance invocation's own config
     "e2e/**/*",
     "src/renderer/src/env.d.ts",
     "src/shared/**/*",
@@ -22,7 +23,30 @@
     "src/artifacts/design-system/roles.ts",
     "src/artifacts/design-system/tokens.ts",
     "src/artifacts/design-system/values.ts",
+    // P3-C (M4): the presentations spec seeds S6's 100-slide bench deck
+    "src/artifacts/slides/fixtures/bench.ts",
+    "src/artifacts/slides/fixtures/s6.ts",
+    // P3-E1 (M6): the design scale gate seeds the 24-board bench design
+    "src/artifacts/design/fixtures/bench.ts",
+    // P3-C at the merge of B: B's `src/artifacts/yjs/*.ts` takes in C's seams (slides.ts, slide-text.ts, slides-undo.ts),
+    // whose seam imports the dialect's IR
+    "src/artifacts/slides/ir.ts",
     "src/engine-host/binary-info.ts",
+    // P3-H: the connector runs drive a scratch engine through the host's control client and route E's call
+    "src/engine-host/controls.ts",
+    // P3-HD: the direct-route probe observes real reports through route D's cache and compares H's fingerprint
+    "src/engine-host/connectors/local-key.ts",
+    // P3-HD M2: the transport scenes drive MAWS's own connections
+    "src/engine-host/connectors/direct-client.ts",
+    "src/engine-host/connectors/direct-http.ts",
+    "src/engine-host/connectors/direct-stdio.ts",
+    "src/engine-host/connectors/direct-wire.ts",
+    "src/engine-host/connectors/provenance.ts",
+    "src/engine-host/connectors/source-entry.ts",
+    "src/engine-host/connectors/status.ts",
+    "src/engine-host/mcp-call.ts",
+    "src/engine-host/outbound-writer.ts",
+    "src/engine-host/rpc.ts",
     "src/engine-host/engine-compat.ts",
     "src/engine-host/fs/paths.ts",
     "src/engine-host/journal.ts",
@@ -46,6 +70,7 @@
     "src/renderer/src/tools/agents/model/relay.ts",
     "src/renderer/src/tools/agents/model/task-graph.ts",
     "src/renderer/src/tools/browser/comment/copy.ts",
+    "src/renderer/src/tools/artifacts/viewers/connectors/copy.ts", // P3-HD M4b: route D's scenes read the sheet's own words
     "src/renderer/src/widgets/plugins/browse.ts",
     "src/renderer/src/widgets/plugins/library.ts",
     "test/live/support/live.ts",
@@ -79,7 +104,14 @@
     "src/artifacts/document/ids.ts",
     "src/artifacts/document/schema.ts",
     "src/artifacts/document/tabs.ts",
-    "src/artifacts/document/threads.ts"
+    "src/artifacts/document/threads.ts",
+    // P3-E (E2 M3): e2e/dashboard.spec.ts binds M1's vendored tables, parsed by the host's own parser
+    "src/artifacts/dashboard/fixtures/datasets.ts",
+    "src/artifacts/dashboard/parse.ts",
+    "src/artifacts/dashboard/datasets.ts",
+    "src/artifacts/dashboard/states.ts",
+    // P3-E (E2 M6): e2e/dashboard-scale.spec.ts binds and draws the scale bench
+    "src/artifacts/dashboard/fixtures/bench.ts"
   ],
   "exclude": ["src/shared/**/*.test.ts", "src/shared/**/*.test-d.ts", "src/artifacts/**/*.test.ts"]
 }

@@ -11,18 +11,23 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { basename, isAbsolute } from 'node:path';
 import type { KindAdapter } from '@artifacts/host';
-import { applyV2, bindingVersion, decodeMap, encodeMap, mergeMaps, type Doc } from '@artifacts/yjs';
+import { applyV2, bindingVersion, decodeMap, encodeMap, mergeMaps, newDoc, type Doc } from '@artifacts/yjs';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
+// P3-H start
+import * as z from 'zod';
+import { ConnectorCallRefSchema, ConnectorGrantRequestSchema, ConnectorToolRefSchema, type ConnectorAuthorization, type ConnectorCallRef, type ConnectorGrant, type ConnectorGrantChange, type ConnectorGrantMode, type ConnectorGrantRequest, type ConnectorToolRef, connectorToolKey } from '@shared/artifacts/connectors';
+// P3-H end
 import { isDocKind, type Artifact, type ArtifactKind, type ArtifactSessionLink, type Space } from '@shared/artifacts/entity';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ARTIFACT_ID, ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 import { ArtifactFiles, safeName, type ContentRef } from './bytes';
-import { ArtifactStoreError } from './errors';
+import { ArtifactStoreError, StoreTooNewError } from './errors'; // P3-H: StoreTooNewError
 import { Maintenance } from './maintenance';
 import { OpLedger, type OpScope } from './ops';
 import { restoreArtifact } from './restore';
-import type { Committed, DocumentService } from './service';
+import { datasetRefsOf, isQuerySnapshotName, SnapshotRetention, type AssetHold } from './retention'; // E3
+import type { Committed, DocumentService, WriteOptions } from './service';
 import type { SqliteDocumentStorage } from './storage';
 import { actorFromKey, VersionStore, type DesignSystemRef, type VersionKind } from './versions';
 
@@ -163,6 +168,9 @@ export class ArtifactStore {
   private readonly log: (line: string) => void;
   private readonly changeListeners = new Set<(change: ArtifactChanged) => void>();
   private readonly spaceListeners = new Set<(change: SpaceChanged) => void>();
+  private readonly defaultsListeners = new Set<() => void>(); // P3-C (Decision Log 29)
+  private readonly grantListeners = new Set<(change: ConnectorGrantChange) => void>(); // P3-H
+  private readonly fences = new Map<string, Set<ConnectorFence>>(); // P3-H H3b: per artifact, the dispatch fences held now
   private readonly coalescing = new Map<string, { timer: ReturnType<typeof setTimeout>; pending: number | null }>();
   private readonly creating = new Set<string>(); // artifacts whose first content is committing: `created` announces them
   private readonly schedule = new Map<string, { idle?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setTimeout> }>();
@@ -174,6 +182,10 @@ export class ArtifactStore {
   private designSystemChain: DesignSystemChain = { governing: (target) => this.ownGoverning(target) };
   private readonly unsubscribe: (() => void)[] = [];
   private closed = false;
+  // P3-E (ensureMigrated): the artifacts this run found in their kind's current model, and the migrations under way
+  private readonly migrated = new Set<string>();
+  private readonly migrating = new Map<string, Promise<void>>();
+  private readonly retention: SnapshotRetention; // E3: the query snapshots' retention and the readers' holds
 
   constructor(
     readonly service: DocumentService,
@@ -192,6 +204,7 @@ export class ArtifactStore {
       inBatch: (write) => service.inBatch(write),
     });
     this.maintenance = new Maintenance(this, { now: this.now, log: this.log });
+    this.retention = new SnapshotRetention(this, { now: this.now, log: this.log, closed: () => this.closed }); // E3
     this.unsubscribe.push(service.onCommitted((change) => this.committed(change)));
     this.unsubscribe.push(service.onBeforeCommit((ids) => this.stamp(ids)));
     // the last version's state is kept only while its doc is loaded (versionInFrame): it goes when the doc does
@@ -210,6 +223,14 @@ export class ArtifactStore {
   onSpaceChange(listener: (change: SpaceChanged) => void): () => void {
     this.spaceListeners.add(listener);
     return () => this.spaceListeners.delete(listener);
+  }
+
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): told
+  // once main's relay of the design-system defaults (`setDefaults`) has committed, so what the default chain feeds (the
+  // deck's mirror) can follow it.
+  onDefaultsChange(listener: () => void): () => void {
+    this.defaultsListeners.add(listener);
+    return () => this.defaultsListeners.delete(listener);
   }
 
   // A read whose answer reveals store state (an IPC answer, a tool's result), released only once it may be revealed
@@ -393,7 +414,8 @@ export class ArtifactStore {
     return this.get(artifactId)!;
   }
 
-  // A soft delete (`deletedAt`); a design system still governing a live artifact is refused (Decision Log 22a).
+  // A soft delete (`deletedAt`); a design system still governing a live artifact is refused (Decision Log 22a). P3-H:
+  // its connector grants go in the same savepoint (a soft delete fires no cascade), each announced as revoked.
   async delete(artifactId: string, inFrame?: InFrame<void>): Promise<void> {
     const row = this.requireLive(artifactId);
     if (row.kind === 'design_system') {
@@ -401,11 +423,16 @@ export class ArtifactStore {
       if (users.length > 0) throw new ArtifactStoreError('designSystemInUse', `the design system governs ${users.length} artifact(s)`, { artifactIds: users });
     }
     const at = this.now();
-    await this.service.inBatch(() => {
+    this.breakFences(artifactId, null); // P3-H H3b: no connector call fenced before the delete writes
+    const revoked = await this.service.inBatch(() => {
       this.storage.db.prepare('UPDATE artifacts SET deletedAt = ?, updatedAt = ? WHERE id = ?').run(at, at, artifactId);
+      const grants = this.grantRows(artifactId); // P3-H
+      this.storage.db.prepare('DELETE FROM artifact_connector_grants WHERE artifactId = ?').run(artifactId); // P3-H
       inFrame?.();
+      return grants;
     });
     this.versions.forget(artifactId); // a deleted artifact writes no more versions
+    for (const grant of revoked) this.emitGrant(artifactId, grant, 'revoked'); // P3-H
     this.emit(artifactId, 'deleted');
   }
 
@@ -424,7 +451,8 @@ export class ArtifactStore {
     const at = this.now();
     const content = isDocKind(source.kind) ? null : this.byteContentOf(source, version ? (JSON.parse(version.content!) as ContentRef) : this.contentRef(artifactId).ref);
     const state = !isDocKind(source.kind) ? null : version ? this.versions.state(artifactId, version.id) : this.service.readState(artifactId).state;
-    const assets = version ? (JSON.parse(version.assetRefs) as string[]) : this.assetIds(artifactId);
+    const pinned = version ? (JSON.parse(version.assetRefs) as string[]) : this.assetIds(artifactId);
+    const assets = state ? this.retention.copiedAssets(artifactId, pinned, state) : pinned; // E3: never a snapshot its state cannot name
     const entity = () => {
       this.storage.actorInBatch(actor, at);
       this.storage.db
@@ -508,10 +536,12 @@ export class ArtifactStore {
   // order kept.
   private copyAssetsInFrame(fromId: string, toId: string, assetIds: string[]): void {
     const wanted = new Set(assetIds);
-    const rows = (this.storage.db.prepare('SELECT * FROM artifact_assets WHERE artifactId = ? ORDER BY createdAt, rowid').all(fromId) as unknown as { assetId: string; name: string; mime: string; size: number; sha256: string; createdAt: number; createdBy: string }[]).filter((row) =>
+    const rows = (this.storage.db.prepare('SELECT * FROM artifact_assets WHERE artifactId = ? ORDER BY createdAt, rowid').all(fromId) as unknown as { assetId: string; name: string; mime: string; size: number; sha256: string; createdAt: number; createdBy: string; querySnapshot: number }[]).filter((row) =>
       wanted.has(row.assetId),
     );
-    const insert = this.storage.db.prepare('INSERT INTO artifact_assets (artifactId, assetId, name, mime, size, sha256, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    // E3: a copy keeps each asset's classification, every copied row active; the copy's own frame (the dashboard kind's
+    // hook) starts its membership with the snapshots its state names and retires the copied candidates it does not need
+    const insert = this.storage.db.prepare('INSERT INTO artifact_assets (artifactId, assetId, name, mime, size, sha256, createdAt, createdBy, querySnapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     for (const row of rows) {
       const path = ArtifactFiles.assetPath(row.sha256);
       if (!this.files.exists(toId, path)) {
@@ -522,7 +552,7 @@ export class ArtifactStore {
           this.files.discard(stage.temp);
         }
       }
-      insert.run(toId, row.assetId, row.name, row.mime, row.size, row.sha256, row.createdAt, row.createdBy);
+      insert.run(toId, row.assetId, row.name, row.mime, row.size, row.sha256, row.createdAt, row.createdBy, row.querySnapshot);
     }
   }
 
@@ -653,40 +683,154 @@ export class ArtifactStore {
   }
 
   // An asset (Decision Log 25l and M6's `artifact_upload_asset`): content-addressed, deduplicated per artifact, named by
-  // the ref a format uses (`assets/<name>`, made unique within the artifact).
+  // the ref a format uses (`assets/<name>`, made unique within the artifact). E3 panel wave: a name in the query-snapshot
+  // namespace is the refresh sink's alone, refused here (a copy carries its source asset's own name and bytes instead).
   async uploadAsset(artifactId: string, bytes: Uint8Array, meta: { name: string; mime: string }, actor: Actor, inFrame?: InFrame<{ assetId: string; ref: string }>): Promise<{ assetId: string; ref: string }> {
+    const name = safeName(meta.name); // E3 panel
+    if (name && isQuerySnapshotName(name)) throw reservedName(name); // E3 panel
+    return this.placeUpload(artifactId, bytes, meta, actor, inFrame);
+  }
+
+  private async placeUpload(artifactId: string, bytes: Uint8Array, meta: { name: string; mime: string }, actor: Actor, inFrame?: InFrame<{ assetId: string; ref: string }>): Promise<{ assetId: string; ref: string }> {
     this.requireLive(artifactId);
     if (bytes.length > ARTIFACT_MAX_BYTES) throw new ArtifactStoreError('tooLarge', `the asset is ${bytes.length} bytes; the limit is ${ARTIFACT_MAX_BYTES}`, { size: bytes.length, limit: ARTIFACT_MAX_BYTES });
     const name = safeName(meta.name);
     if (!name) throw new ArtifactStoreError('invalid', `the asset name ${JSON.stringify(meta.name)} is not usable`);
     const stage = this.files.stage(artifactId, bytes);
     try {
-      const existing = this.storage.db.prepare('SELECT assetId, name FROM artifact_assets WHERE artifactId = ? AND sha256 = ?').get(artifactId, stage.sha256) as { assetId: string; name: string } | undefined;
+      const existing = this.existingAsset(artifactId, stage.sha256);
       if (existing) {
-        const same = { assetId: existing.assetId, ref: `assets/${existing.name}` };
         // Nothing to write, yet the answer names a row that may still sit in the open batch (a concurrent upload of the
         // same bytes): it waits for that batch's commit, and fails with it. The seam still runs, in a frame of its own.
-        if (inFrame) await this.service.inBatch(() => inFrame(same));
+        // E3: an upload answered with a managed query snapshot adopts it (whatever the uploader does with the ref, it is
+        // ordinary now, never collected), in a frame of its own too.
+        const adopt = this.retention.isManaged(artifactId, existing.assetId);
+        if (inFrame || adopt)
+          await this.service.inBatch(() => {
+            if (adopt) this.retention.adoptInFrame(artifactId, existing.assetId);
+            inFrame?.(existing);
+          });
         else await this.service.whenCommitted();
-        return same;
+        return existing;
       }
-      const taken = new Set((this.storage.db.prepare('SELECT name FROM artifact_assets WHERE artifactId = ?').all(artifactId) as { name: string }[]).map((row) => row.name));
-      const unique = uniqueName(name, taken);
-      const assetId = randomUUID();
+      const unique = uniqueName(name, this.assetNames(artifactId));
       const at = this.now();
-      await this.service.inBatch(() => {
+      const asset = await this.service.inBatch(() => {
         this.storage.actorInBatch(actor, at);
-        if (!this.files.exists(artifactId, ArtifactFiles.assetPath(stage.sha256))) this.files.place(artifactId, stage.temp, ArtifactFiles.assetPath(stage.sha256));
-        this.storage.db
-          .prepare('INSERT INTO artifact_assets (artifactId, assetId, name, mime, size, sha256, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-          .run(artifactId, assetId, unique, meta.mime, stage.size, stage.sha256, at, actorKey(actor));
-        inFrame?.({ assetId, ref: `assets/${unique}` });
+        const placed = this.placeAssetInFrame(artifactId, stage, { name: unique, mime: meta.mime }, actor, at);
+        inFrame?.(placed);
+        return placed;
       });
       this.emit(artifactId, 'updated');
-      return { assetId, ref: `assets/${unique}` };
+      return asset;
     } finally {
       this.files.discard(stage.temp);
     }
+  }
+
+  // P3-E start (docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md M2; ledger X23, the parent's Decision Log 6): a
+  // document write and the assets it names as one operation (E2's `artifact_dataset`, E3's refresh). The bytes are
+  // staged before the frame (a staged or placed file no row names is not live state: a later write of the same bytes
+  // reuses it). Inside the write's one savepoint, in order: `options.prepare` (the caller's final check), each asset's
+  // row (identical bytes answer the ref the artifact already holds, a new name is made unique, within this call too),
+  // the session's `edited` link, `edit` given the refs in the order of `assets`, the kind's hooks, `afterWrite`, then
+  // `options.inFrame`. A `prepare` that throws refuses the write: nothing else of it is written (it must write nothing
+  // before it throws), the document stays loaded, and the promise rejects with its error once the batch open then has
+  // committed. A throw anywhere later takes the whole frame back, as `writeAs` does. Resolves with the revision.
+  // E3: an asset marked `querySnapshot` is registered as a query's snapshot (retention.ts), and an identical one already
+  // held keeps its classification; an unmarked asset answered with a managed snapshot adopts it.
+  async writeWithAssets(
+    artifactId: string,
+    actor: Actor,
+    assets: { bytes: Uint8Array; name: string; mime: string; querySnapshot?: boolean }[],
+    edit: (doc: Doc, assets: { assetId: string; ref: string }[]) => void,
+    options?: WriteOptions,
+  ): Promise<number> {
+    const row = this.requireLive(artifactId);
+    if (!isDocKind(row.kind)) throw new ArtifactStoreError('invalid', `a ${row.kind} artifact has no document to write`);
+    const named = assets.map((asset) => {
+      if (asset.bytes.length > ARTIFACT_MAX_BYTES) throw new ArtifactStoreError('tooLarge', `the asset is ${asset.bytes.length} bytes; the limit is ${ARTIFACT_MAX_BYTES}`, { size: asset.bytes.length, limit: ARTIFACT_MAX_BYTES });
+      const name = safeName(asset.name);
+      if (!name) throw new ArtifactStoreError('invalid', `the asset name ${JSON.stringify(asset.name)} is not usable`);
+      if (!asset.querySnapshot && isQuerySnapshotName(name)) throw reservedName(name); // E3 panel: the refresh sink's namespace
+      return { ...asset, name };
+    });
+    const stages: ReturnType<ArtifactFiles['stage']>[] = [];
+    try {
+      for (const asset of named) stages.push(this.files.stage(artifactId, asset.bytes));
+      const refs: { assetId: string; ref: string }[] = [];
+      let refused: { error: unknown } | null = null;
+      const at = this.now();
+      const revision = await this.service.writeAs(artifactId, actor, (doc) => (refused ? undefined : edit(doc, refs)), {
+        prepare: () => {
+          try {
+            options?.prepare?.();
+          } catch (error) {
+            refused = { error };
+            return;
+          }
+          this.storage.actorInBatch(actor, at);
+          const taken = this.assetNames(artifactId);
+          named.forEach((asset, k) => {
+            const existing = this.existingAsset(artifactId, stages[k]!.sha256);
+            if (existing) {
+              if (!asset.querySnapshot && this.retention.isManaged(artifactId, existing.assetId)) this.retention.adoptInFrame(artifactId, existing.assetId); // E3
+              return void refs.push(existing);
+            }
+            const unique = uniqueName(asset.name, taken);
+            taken.add(unique);
+            refs.push(this.placeAssetInFrame(artifactId, stages[k]!, { name: unique, mime: asset.mime }, actor, at, asset.querySnapshot === true));
+          });
+          if (actor.kind === 'session') this.linkInFrame(artifactId, actor.appSessionId, 'edited', at);
+        },
+        afterWrite: options?.afterWrite && ((doc) => (refused ? undefined : options.afterWrite!(doc))),
+        inFrame: (reached) => {
+          if (!refused) options?.inFrame?.(reached);
+        },
+      });
+      if (refused) throw (refused as { error: unknown }).error;
+      this.emit(artifactId, 'updated');
+      if (actor.kind === 'session') this.emit(artifactId, 'linked');
+      return revision;
+    } finally {
+      for (const stage of stages) this.files.discard(stage.temp);
+    }
+  }
+
+  // The asset of `artifactId` holding these bytes, if any (assets are deduplicated by content within an artifact).
+  private existingAsset(artifactId: string, sha256: string): { assetId: string; ref: string } | undefined {
+    const row = this.storage.db.prepare('SELECT assetId, name FROM artifact_assets WHERE artifactId = ? AND sha256 = ?').get(artifactId, sha256) as { assetId: string; name: string } | undefined;
+    return row && { assetId: row.assetId, ref: `assets/${row.name}` };
+  }
+
+  private assetNames(artifactId: string): Set<string> {
+    return new Set((this.storage.db.prepare('SELECT name FROM artifact_assets WHERE artifactId = ?').all(artifactId) as { name: string }[]).map((row) => row.name));
+  }
+
+  // Inside a savepoint: one new asset's file in place (an orphan of a crash replaced or reused) and its row, under the
+  // unique name given.
+  private placeAssetInFrame(artifactId: string, stage: { temp: string; sha256: string; size: number }, meta: { name: string; mime: string }, actor: Actor, at: number, querySnapshot = false): { assetId: string; ref: string } {
+    const assetId = randomUUID();
+    if (!this.files.exists(artifactId, ArtifactFiles.assetPath(stage.sha256))) this.files.place(artifactId, stage.temp, ArtifactFiles.assetPath(stage.sha256));
+    this.storage.db
+      .prepare('INSERT INTO artifact_assets (artifactId, assetId, name, mime, size, sha256, createdAt, createdBy, querySnapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(artifactId, assetId, meta.name, meta.mime, stage.size, stage.sha256, at, actorKey(actor), querySnapshot ? 1 : 0); // E3: querySnapshot
+    return { assetId, ref: `assets/${meta.name}` };
+  }
+  // P3-E end
+
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, Decision Log 25; the parent's 65): an asset of one
+  // artifact copied into another, generic (a deck's pasted picture, a document's): the source's bytes written through
+  // `uploadAsset` on the target, so the bytes and mime arrive unchanged, identical bytes answer the target's existing ref
+  // and a name taken there is made unique. Both artifacts must be live; a deleted or missing one is refused by name.
+  // E3 panel wave: written as an upload is, past the query-snapshot namespace's refusal: the name it carries is its
+  // source asset's own, with that asset's own bytes, so it recreates no other bytes under a snapshot's ref.
+  async copyAsset(from: string, ref: string, to: string, actor: Actor): Promise<{ assetId: string; ref: string }> {
+    this.requireLive(from);
+    this.requireLive(to);
+    const asset = this.listAssets(from).find((candidate) => candidate.ref === ref);
+    if (!asset) throw new ArtifactStoreError('notFound', `no asset ${ref} in ${from}`, { artifactId: from, ref });
+    return this.placeUpload(to, this.files.readAsset(from, asset.sha256), { name: asset.name, mime: asset.mime }, actor); // E3 panel
   }
 
   listAssets(artifactId: string): Asset[] {
@@ -694,9 +838,64 @@ export class ArtifactStore {
     return rows.map((row) => ({ assetId: row.assetId, ref: `assets/${row.name}`, name: row.name, mime: row.mime, size: row.size, sha256: row.sha256, createdAt: row.createdAt, createdBy: actorFromKey(row.createdBy) }));
   }
 
+  // The asset ids a version written now pins. E3: a retired query snapshot is left out (earlier versions keep theirs).
   private assetIds(artifactId: string): string[] {
-    return (this.storage.db.prepare('SELECT assetId FROM artifact_assets WHERE artifactId = ? ORDER BY assetId').all(artifactId) as { assetId: string }[]).map((row) => row.assetId);
+    return (this.storage.db.prepare('SELECT assetId FROM artifact_assets WHERE artifactId = ? AND retiredAt IS NULL ORDER BY assetId').all(artifactId) as { assetId: string }[]).map((row) => row.assetId);
   }
+
+  // ── E3 start: query snapshots' retention and the readers' holds (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md
+  // R1 and R1b; E's Decision Log 48 (1) and (3); retention.ts) ──
+
+  /** In a publication's frame (its `inFrame`): `ref`, the snapshot `datasetId` just published at `revision`, is kept
+   * as that query's latest use; the query keeps its latest two distinct snapshots and what nothing protects any more is
+   * retired in the same frame. An ordinary asset is never enrolled. Refused outside a write frame. */
+  retainQuerySnapshots(artifactId: string, datasetId: string, ref: string, revision: number): void {
+    this.retention.retain(artifactId, datasetId, ref, revision);
+  }
+
+  /** The dashboard kind's hook in each write's frame (src/engine-host/dashboards): membership follows `doc`'s datasets
+   * (`restored`: a restore's, each query reset to the snapshot it names), a file dataset adopts a managed snapshot it
+   * names, and every managed snapshot is active exactly while a membership or a current descriptor names it. */
+  reconcileQuerySnapshots(artifactId: string, doc: Doc, options?: { restored?: boolean }): void {
+    this.retention.reconcile(artifactId, doc, options);
+  }
+
+  /** Retires a managed snapshot no current descriptor names and collects it unless a version or a hold protects it:
+   * `removed` once its row and bytes are gone, `retained` while something still protects its bytes (an ordinary
+   * asset always), `notFound` for a ref the artifact does not hold. */
+  removeAsset(artifactId: string, ref: string): Promise<{ status: 'removed' | 'retained' | 'notFound' }> {
+    return this.retention.remove(artifactId, ref);
+  }
+
+  /** Post-commit: the retired snapshots of `artifactId` (every artifact's when omitted) that no current descriptor,
+   * retained version or hold names lose their rows, then their bytes. Asked while a batch is open, it runs after it. */
+  collectRetiredAssets(artifactId?: string): void {
+    this.retention.collect(artifactId);
+  }
+
+  /** A hold over one of the artifact's assets: its bytes stay until `release`, whatever retires it meanwhile. */
+  holdAsset(artifactId: string, ref: string): AssetHold {
+    return this.retention.hold(artifactId, [ref]);
+  }
+
+  /** `capture` read from the store and the refs it answers held in the same synchronous turn, all or none (the hold
+   * bounds of retention.ts, an unavailable ref refused), answered once the batch its read may have seen has committed
+   * (Decision Log 33's barrier; a lost batch releases the hold and fails the capture). */
+  async captureWithAssets<T>(artifactId: string, capture: () => { value: T; refs: readonly string[] }): Promise<{ value: T; release(): void }> {
+    let hold: AssetHold | null = null;
+    try {
+      const value = await this.readCommitted(() => {
+        const captured = capture();
+        hold = this.retention.hold(artifactId, captured.refs);
+        return captured.value;
+      });
+      return { value, release: hold!.release };
+    } catch (error) {
+      (hold as AssetHold | null)?.release();
+      throw error;
+    }
+  }
+  // ── E3 end ──
 
   // ── versions ──
 
@@ -819,6 +1018,7 @@ export class ArtifactStore {
     const plan = targets.map((row) => ({ row, ids: this.versions.prunable(row.id, olderThan, pinned, !isDocKind(row.kind)) })).filter((p) => p.ids.length > 0);
     const files = await this.service.inBatch(() => plan.flatMap(({ row, ids }) => this.versions.drop(row.id, ids).map((ref) => ({ artifactId: row.id, ref }))));
     this.removeUnreferenced(files);
+    this.collectRetiredAssets(artifactId ?? undefined); // E3: what only the pruned versions pinned
     for (const { row } of plan) this.emit(row.id, 'updated');
     return plan.reduce((n, p) => n + p.ids.length, 0);
   }
@@ -836,9 +1036,18 @@ export class ArtifactStore {
   async restore(artifactId: string, versionId: number, actor: Actor, inFrame?: InFrame<{ revision: number; versionId: number }>): Promise<{ revision: number; versionId: number }> {
     const row = this.requireLive(artifactId);
     const version = this.requireVersion(artifactId, versionId);
-    const result = await restoreArtifact(this, row, version, actor, inFrame);
-    this.emit(artifactId, 'updated');
-    return result;
+    // E3 (the M1 review): the query snapshots the version's state names are held from here, before the first await, until
+    // the restore has published or refused, so a prune or a thinning dropping the version meanwhile never takes their
+    // bytes; nothing else is collectible, so a file's ref is neither held nor checked (E2's restore unchanged)
+    const hold = isDocKind(row.kind) && version.enc ? this.retention.hold(artifactId, this.retention.collectible(artifactId, datasetRefsOf(this.versions.state(artifactId, version.id)))) : null;
+    try {
+      this.migrated.delete(artifactId); // P3-E: a restore may bring back an earlier shape (its kind's `afterRestore` migrates it)
+      const result = await restoreArtifact(this, row, version, actor, inFrame);
+      this.emit(artifactId, 'updated');
+      return result;
+    } finally {
+      hold?.release();
+    }
   }
 
   // The merged attribution (encoded ContentMap) of every row overlapping [fromSeq, toSeq] (Decision Log 23a); the
@@ -847,6 +1056,54 @@ export class ArtifactStore {
     if (this.service.loaded(artifactId) && fromSeq <= 1 && toSeq >= this.service.revision(artifactId)) return encodeMap(this.service.provenance(artifactId));
     return encodeMap(mergeMaps(this.storage.attributions(artifactId, fromSeq, toSeq).map(decodeMap)));
   }
+
+  // P3-E start (docs/doperpowers/plans/2026-10-16-p3-e-design-dashboard.md Decision Log 11 (1); E1's M2): a document an
+  // earlier build stored in another shape is brought into its kind's model (`KindAdapter.migrate`) before a live open,
+  // read or write answers from it. The live state is tested on a scratch copy first, so a document already in the model
+  // costs no write (and, once found so, nothing more this run); one that needs it is migrated in one `writeAs` credited
+  // to `actor`, the actor whose access triggered it, rechecked inside the write, and this resolves once that write
+  // committed; a state found already in the model is remembered only once the batch it was read in has committed.
+  // Concurrent calls share the first one's migration and its actor. Input the kind cannot migrate, and a
+  // read-only store when a migration is needed, refuse `invalid` naming the artifact, with nothing written. Retained
+  // versions are never migrated; a restore forgets what this run found (`restore` above). A kind without the hook, a
+  // byte kind, a deleted or unknown artifact: nothing to do.
+  ensureMigrated(artifactId: string, actor: Actor): Promise<void> {
+    const row = this.entity(artifactId);
+    if (!row || row.deletedAt !== null || !isDocKind(row.kind) || this.migrated.has(artifactId)) return Promise.resolve();
+    const adapter = this.service.adapterFor(row.kind);
+    if (!adapter?.migrate) return Promise.resolve();
+    const running = this.migrating.get(artifactId);
+    if (running) return running;
+    const migration = this.migrate(row, adapter.migrate.bind(adapter), actor).finally(() => this.migrating.delete(artifactId));
+    this.migrating.set(artifactId, migration);
+    return migration;
+  }
+
+  private async migrate(row: EntityRow, migrate: (doc: Doc) => boolean, actor: Actor): Promise<void> {
+    const refused = (why: string, data: Record<string, unknown> = {}) => new ArtifactStoreError('invalid', `the ${row.kind} ${row.id} cannot be opened: ${why}`, { artifactId: row.id, ...data });
+    let needed: boolean;
+    const scratch = newDoc();
+    try {
+      applyV2(scratch, this.service.readState(row.id).state);
+      needed = migrate(scratch);
+    } catch (error) {
+      const coded = error as { data?: unknown };
+      throw refused(`it was stored by an earlier build of MAWS and cannot be brought into the ${row.kind} model (${error instanceof Error ? error.message : String(error)}); its earlier versions still read as they were`, typeof coded.data === 'object' && coded.data !== null ? (coded.data as Record<string, unknown>) : {});
+    } finally {
+      scratch.destroy();
+    }
+    if (!needed) {
+      // certified only once committed: the live state read may hold rows of an open batch (a restore's in-frame migration)
+      // that a failed commit takes back, its rejection then this call's
+      if (this.storage.batchOpen) await this.service.whenCommitted();
+      this.migrated.add(row.id);
+      return;
+    }
+    if (this.storage.readOnly) throw refused(`it was stored by an earlier build of MAWS and must be migrated, and this artifact store is read-only (a newer MAWS wrote it)`);
+    await this.service.writeAs(row.id, actor, (doc) => void migrate(doc));
+    this.migrated.add(row.id);
+  }
+  // P3-E end
 
   // ── turns, idempotency and the test writer ──
 
@@ -939,6 +1196,14 @@ export class ArtifactStore {
   // Main's relay of the owner's and the Spaces' defaults, kept so a detached host with main absent still honours them.
   async setDefaults(defaults: DesignSystemDefaults): Promise<void> {
     await this.service.inBatch(() => this.storage.setMeta(DEFAULTS_KEY, JSON.stringify({ owner: defaults.owner, spaces: defaults.spaces })));
+    // P3-C (Decision Log 29): the listeners, after the commit
+    for (const listener of this.defaultsListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.log(`an onDefaultsChange listener threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   registerDesignSystemContext(provider: (system: Artifact) => Promise<string | null>): void {
@@ -968,6 +1233,165 @@ export class ArtifactStore {
     if (lostMeanwhile) throw new Error('a batch the design system’s context was read from was lost; ask again');
     return context;
   }
+
+  // ── P3-H start: connector grants (docs/doperpowers/plans/2026-10-12-p3-co-work.md, P3-H and Decision Log 24 and 80;
+  // @shared/artifacts/connectors) ──
+  // The owner's per-artifact, per-tool permission, the only gate on a connector call: main checks it before routing a
+  // call (`checkConnectorCall`) and the host again just before writing mcp_call (`authorizeConnectorCall`, which takes
+  // an Allow once's one use). Grants live beside the artifact, never in its content: no revision, version, change-feed
+  // entry or `updatedAt` moves with one, and no copy, restore, import or export carries one. Each operation answers,
+  // and announces through `onConnectorGrantChange`, only once its rows have committed (Decision Log 33's barrier), so a
+  // listener stopping watches acts on durable state.
+
+  onConnectorGrantChange(listener: (change: ConnectorGrantChange) => void): () => void {
+    this.grantListeners.add(listener);
+    return () => this.grantListeners.delete(listener);
+  }
+
+  // The artifact's grants, committed, ordered by server and tool.
+  connectorGrants(artifactId: string): Promise<ConnectorGrant[]> {
+    return this.readCommitted(() => {
+      this.requireLive(artifactId);
+      return this.grantRows(artifactId);
+    });
+  }
+
+  // The owner's grant of one tool to one artifact; a grant already held for the tool is replaced whole (a re-grant under
+  // a changed fingerprint, or Allow once again). H3b: asked for, it breaks every fence of the tool taken for another
+  // fingerprint or mode, as a revoke would (the authority that call was admitted under is withdrawn, its row present or
+  // already consumed); one taken for this very fingerprint and mode stays held, so a second Allow once does not stop
+  // the call the first admitted.
+  grantConnectorTool(artifactId: string, request: ConnectorGrantRequest): Promise<ConnectorGrant> {
+    return this.writeCommitted(async () => {
+      const { server, tool, fingerprint, mode } = connectorInput(GRANT_INPUT, request, 'grant');
+      this.requireLive(artifactId);
+      this.breakFences(artifactId, { server, tool }, (fence) => fence.fingerprint === fingerprint && fence.mode === mode);
+      const grant: ConnectorGrant = { server, tool, fingerprint, mode, grantedAt: this.now() };
+      await this.service.inBatch(() =>
+        this.storage.db
+          .prepare(
+            'INSERT INTO artifact_connector_grants (artifactId, server, tool, fingerprint, mode, grantedAt) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (artifactId, server, tool) DO UPDATE SET fingerprint = excluded.fingerprint, mode = excluded.mode, grantedAt = excluded.grantedAt',
+          )
+          .run(artifactId, server, tool, fingerprint, mode, grant.grantedAt),
+      );
+      this.emitGrant(artifactId, grant, 'granted');
+      return grant;
+    });
+  }
+
+  // Answers whether a grant was there to revoke; once it resolves, no call under it is authorized.
+  revokeConnectorTool(artifactId: string, ref: ConnectorToolRef): Promise<boolean> {
+    return this.writeCommitted(async () => {
+      const tool = connectorInput(TOOL_INPUT, ref, 'tool');
+      this.requireLive(artifactId);
+      this.breakFences(artifactId, tool); // H3b: asked for, so no call fenced before it writes
+      const removed = await this.service.inBatch(() => Number(this.storage.db.prepare('DELETE FROM artifact_connector_grants WHERE artifactId = ? AND server = ? AND tool = ?').run(artifactId, tool.server, tool.tool).changes) > 0);
+      if (removed) this.emitGrant(artifactId, tool, 'revoked');
+      return removed;
+    });
+  }
+
+  // Whether `call` may run, consuming nothing: main's check before it routes a call. Answers behind the read barrier.
+  checkConnectorCall(artifactId: string, call: ConnectorCallRef): Promise<ConnectorAuthorization> {
+    return this.readCommitted(() => this.connectorDecision(artifactId, call));
+  }
+
+  // Whether `call` may run now, the use taken: the host's check immediately before it writes mcp_call. A `read` grant
+  // answers behind the read barrier. A `once` grant is consumed in the same synchronous step that found it and answered
+  // only after that consumption commits, so of any number of concurrent calls one is granted, and a lost batch grants
+  // none and leaves the grant for the next; a call that then fails has still used it (at most once, never twice).
+  // H3b: `expected`, the mode the caller's own check admitted, is compared before anything is consumed: a read grant
+  // swapped for an Allow once since (or the reverse) answers `wrongMode` and takes nothing. The answer is a snapshot
+  // across the commit barrier, so the write still waits on `connectorFenceHolds`.
+  authorizeConnectorCall(artifactId: string, call: ConnectorCallRef, expected?: ConnectorGrantMode): Promise<ConnectorAuthorization> {
+    return this.writeCommitted(async () => {
+      const found = this.connectorDecision(artifactId, call);
+      const decision: ConnectorAuthorization = found.granted && expected !== undefined && found.mode !== expected ? { granted: false, refusal: 'wrongMode' } : found;
+      if (!decision.granted || decision.mode === 'read') return this.readCommitted(() => decision);
+      const { server, tool } = connectorInput(CALL_INPUT, call, 'call');
+      await this.service.inBatch(() => this.storage.db.prepare('DELETE FROM artifact_connector_grants WHERE artifactId = ? AND server = ? AND tool = ?').run(artifactId, server, tool));
+      this.emitGrant(artifactId, { server, tool }, 'consumed');
+      return decision;
+    });
+  }
+
+  // H3b: the dispatch fence. Taken for a call's fingerprint and expected mode before the authorization and held until
+  // the call it guards has ended: a revoke of the tool, a grant replacing it under another fingerprint or mode
+  // (`grantConnectorTool`) or a delete of the artifact asked for meanwhile — committed, still in its batch, or later
+  // rolled back — breaks it at once, synchronously, and calls its `onBreak` (the holder aborts its operation there, so a
+  // write still queued behind the engine's stdin is dropped by the transport before it starts). A read call also needs its grant
+  // still there as authorized (the same fingerprint, still `read`); an Allow once's own consumption is the use it
+  // authorized, so its fence needs no row. The holder releases it when its work ends (P3 Decision Log 91: the host's
+  // connector calls when the call's outcome is taken, cancelled or expired), so nothing is retained past that bound.
+  connectorFence(artifactId: string, call: ConnectorCallRef, mode: ConnectorGrantMode, onBreak?: () => void): ConnectorFence {
+    const fence: ConnectorFence = { artifactId, key: connectorToolKey(call), fingerprint: call.fingerprint, mode, broken: false, onBreak };
+    let held = this.fences.get(artifactId);
+    if (!held) this.fences.set(artifactId, (held = new Set()));
+    held.add(fence);
+    return fence;
+  }
+
+  releaseConnectorFence(fence: ConnectorFence): void {
+    const held = this.fences.get(fence.artifactId);
+    if (!held?.delete(fence)) return;
+    if (held.size === 0) this.fences.delete(fence.artifactId);
+  }
+
+  connectorFenceHolds(fence: ConnectorFence, call: ConnectorCallRef, mode: ConnectorGrantMode): 'held' | 'revoked' | 'fingerprintChanged' | 'wrongMode' {
+    const { artifactId } = fence;
+    if (fence.broken || fence.key !== connectorToolKey(call) || !this.fences.get(artifactId)?.has(fence)) return 'revoked';
+    const row = this.closed || this.storage.readOnly ? undefined : this.entity(artifactId);
+    if (!row || row.deletedAt !== null) return 'revoked';
+    if (mode === 'once') return 'held';
+    const grant = this.grantRows(artifactId).find((row) => row.server === call.server && row.tool === call.tool);
+    if (!grant) return 'revoked';
+    if (grant.fingerprint !== call.fingerprint) return 'fingerprintChanged';
+    return grant.mode === 'read' ? 'held' : 'wrongMode';
+  }
+
+  // A revoke of `tool` (null: a delete of the artifact), or a grant replacing it, asked for: every fence held of it
+  // breaks now, but those the replacing grant still `admits`.
+  private breakFences(artifactId: string, tool: ConnectorToolRef | null, admits?: (fence: ConnectorFence) => boolean): void {
+    const key = tool && connectorToolKey(tool);
+    for (const fence of [...(this.fences.get(artifactId) ?? [])]) {
+      if ((key !== null && fence.key !== key) || admits?.(fence)) continue;
+      fence.broken = true;
+      this.releaseConnectorFence(fence);
+      try {
+        fence.onBreak?.();
+      } catch (error) {
+        this.log(`a connector fence's onBreak threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  // What the artifact's grant says of `call`, read now. A store a newer MAWS wrote authorizes nothing: its grant rows
+  // may mean more than this app reads.
+  private connectorDecision(artifactId: string, call: ConnectorCallRef): ConnectorAuthorization {
+    const ref = connectorInput(CALL_INPUT, call, 'call');
+    if (this.storage.readOnly) throw new StoreTooNewError(this.storage.statusReason ?? 'a newer app wrote this store');
+    this.requireLive(artifactId);
+    const grant = this.grantRows(artifactId).find((row) => row.server === ref.server && row.tool === ref.tool);
+    if (!grant) return { granted: false, refusal: 'notGranted' };
+    if (grant.fingerprint !== ref.fingerprint) return { granted: false, refusal: 'fingerprintChanged' };
+    return { granted: true, mode: grant.mode };
+  }
+
+  private grantRows(artifactId: string): ConnectorGrant[] {
+    return this.storage.db.prepare('SELECT server, tool, fingerprint, mode, grantedAt FROM artifact_connector_grants WHERE artifactId = ? ORDER BY server, tool').all(artifactId) as unknown as ConnectorGrant[];
+  }
+
+  private emitGrant(artifactId: string, { server, tool }: ConnectorToolRef, change: ConnectorGrantChange['change']): void {
+    if (this.closed) return;
+    for (const listener of this.grantListeners) {
+      try {
+        listener({ artifactId, server, tool, change });
+      } catch (error) {
+        this.log(`an onConnectorGrantChange listener threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+  // ── P3-H end ──
 
   close(): void {
     if (this.closed) return;
@@ -1176,6 +1600,34 @@ function toArtifact(row: EntityRow): Artifact {
 function toSpace(row: { id: string; name: string; linkedDir: string | null; createdAt: number }): Space {
   return { id: row.id, name: row.name, ...(row.linkedDir === null ? {} : { linkedDir: row.linkedDir }), createdAt: row.createdAt };
 }
+
+// P3-H start: a grant operation's input, its known fields taken and checked (an extra field, a grant's `mode` passed
+// to a revoke, is dropped), else refused as `invalid`.
+const GRANT_INPUT = z.object(ConnectorGrantRequestSchema.shape);
+const TOOL_INPUT = z.object(ConnectorToolRefSchema.shape);
+const CALL_INPUT = z.object(ConnectorCallRefSchema.shape);
+
+// H3b: a connector call's dispatch fence (`connectorFence`): its tool and authority, and whether a revoke, a replacing
+// grant or a delete broke it.
+export interface ConnectorFence {
+  readonly artifactId: string;
+  readonly key: string;
+  readonly fingerprint: string; // the authority it was taken for: the call's fingerprint and the mode its check admitted
+  readonly mode: ConnectorGrantMode;
+  broken: boolean;
+  readonly onBreak?: () => void;
+}
+
+function connectorInput<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new ArtifactStoreError('invalid', `not a connector ${what}: ${z.prettifyError(parsed.error)}`);
+  return parsed.data;
+}
+// P3-H end
+
+// E3 panel wave (retention.ts `isQuerySnapshotName`): a name only the refresh sink mints, so a collected snapshot's ref is
+// never recreated by an ordinary upload.
+const reservedName = (name: string) => new ArtifactStoreError('invalid', `the asset name ${JSON.stringify(name)} is reserved for live query snapshots; choose another name`, { name });
 
 function uniqueName(name: string, taken: Set<string>): string {
   if (!taken.has(name)) return name;

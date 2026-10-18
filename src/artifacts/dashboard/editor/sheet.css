@@ -1,0 +1,345 @@
+/* A dashboard's views in the page and its source sheet (P3-E2 M3). The views are document content, in the design
+   system's `--ds-*` tokens with the app's as fallbacks (as theme.css reads them); the sheet is MAWS's own transient UI
+   over the page, in the app's tokens, raised as the app's floating surfaces are (the house law, §3: shadow.md and
+   shadow.lg belong to MAWS's own floating UI). No literal colour, no new type size, nothing that slides. */
+
+/* ── a view in the page ── */
+/* B's chart atom is a placeholder box until E draws it (theme.css `.doc-chart`: a dashed flex row); a drawn view is the
+   block itself, the column's full width */
+.ds-doc .doc-chart:has(> .doc-atom-view > .dash-view) {
+  display: block;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
+.ds-doc .dash-view {
+  display: block;
+  margin: 0;
+  min-width: 0;
+}
+.ds-doc .dash-view[aria-busy='true'] .dash-figure > svg {
+  opacity: 0.5; /* a replacement's rows are being read: the earlier figure holds its place, dimmed */
+  transition: opacity 120ms;
+}
+.ds-doc .dash-caption {
+  font-family: var(--ds-font-display, var(--font-prose));
+  font-size: var(--ds-type-h3-size, var(--text-prose));
+  line-height: var(--ds-type-h3-line, var(--lh-prose));
+  font-weight: var(--ds-type-h3-weight, 600);
+  color: var(--ds-color-text, var(--fg));
+  margin-bottom: var(--ds-space-2, calc(var(--space) * 2));
+}
+.ds-doc .dash-figure {
+  position: relative;
+  overflow-x: auto; /* a narrow column scrolls the figure rather than shrinking its text below legibility */
+}
+.ds-doc .dash-figure > svg {
+  /* the figure names its system's families as authored (one SVG for the editor and every export, P3-E Decision Log 37);
+     the page draws it in the scope's faces, declared under their private names: a property beats its attribute */
+  font-family: var(--ds-font-body, var(--font-prose));
+  display: block;
+  width: 100%;
+  min-width: 480px;
+  height: auto;
+}
+/* a table view is the document's own table (the system's `.ds-doc table` rules: the head's rule, the rows' hairlines),
+   its numbers right-aligned in tabular figures, its preview note under it */
+.ds-doc .dash-figure > table.dash-table {
+  table-layout: auto;
+  margin: 0;
+}
+.ds-doc .dash-table .dash-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ds-doc .dash-table td.dash-num {
+  font-family: var(--ds-font-mono, var(--font-mono));
+}
+.ds-doc .dash-table-note {
+  caption-side: bottom;
+  text-align: left;
+  padding-top: var(--ds-space-2, calc(var(--space) * 2));
+  font-size: var(--ds-type-caption-size, var(--text-ui-sm));
+  color: var(--ds-color-text-muted, var(--fg-muted));
+}
+.ds-doc .dash-view[aria-busy='true'] .dash-figure > table {
+  opacity: 0.5;
+}
+.ds-doc .dash-loading {
+  font-size: var(--ds-type-caption-size, var(--text-ui-sm));
+  color: var(--ds-color-text-muted, var(--fg-muted));
+  padding: var(--ds-space-3, calc(var(--space) * 3)) 0;
+}
+.ds-doc .dash-tip {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  max-width: 320px;
+  padding: var(--space) calc(var(--space) * 2);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-float);
+}
+.ds-doc .dash-tip[hidden] {
+  display: none;
+}
+.ds-doc .dash-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--ds-space-2, calc(var(--space) * 2));
+  margin-top: var(--ds-space-2, calc(var(--space) * 2));
+  font-size: var(--ds-type-caption-size, var(--text-ui-sm));
+  line-height: var(--ds-type-caption-line, 1.55);
+  color: var(--ds-color-text-muted, var(--fg-muted));
+}
+.ds-doc .dash-source-label {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.ds-doc button.dash-source-label {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--ds-color-border, var(--border-strong));
+  text-underline-offset: 3px;
+}
+.ds-doc button.dash-source-label:hover {
+  color: var(--ds-color-text, var(--fg));
+  transition: color 120ms;
+}
+.ds-doc button.dash-source-label:focus-visible {
+  outline: 2px solid var(--ds-color-accent, var(--accent));
+  outline-offset: 2px;
+  border-radius: var(--ds-radius-sm, var(--radius-sm));
+}
+.ds-doc .dash-notes {
+  flex-basis: 100%;
+}
+
+/* ── the source sheet ── */
+.dash-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.dash-sheet {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(calc(var(--space) * 120), 100%);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  color: var(--fg);
+  background: var(--bg-raised);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-float);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+}
+.dash-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--space) * 2);
+  padding: var(--space) calc(var(--space) * 3);
+  border-bottom: 1px solid var(--border);
+}
+.dash-sheet-title {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 600;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.dash-sheet-picker {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--space) * 2);
+  padding: calc(var(--space) * 2) calc(var(--space) * 3) 0;
+  color: var(--fg-muted);
+}
+.dash-sheet-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: calc(var(--space) * 2) calc(var(--space) * 3) 0;
+  gap: var(--space);
+}
+.dash-sheet-label,
+.dash-sheet-description,
+.dash-sheet-note,
+.dash-sheet-status,
+.dash-sheet-empty,
+.dash-sheet-loading {
+  margin: 0;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+.dash-sheet-label,
+.dash-sheet-status,
+.dash-sheet-loading,
+.dash-sheet-count {
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}
+.dash-sheet-empty {
+  padding: calc(var(--space) * 3);
+  color: var(--fg-muted);
+}
+.dash-sheet-status:empty {
+  display: none;
+}
+.dash-sheet-columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space) calc(var(--space) * 3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dash-sheet-column {
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+}
+.dash-sheet-type {
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}
+.dash-sheet-shown {
+  display: flex;
+  gap: var(--space);
+}
+.dash-sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space);
+}
+.dash-sheet-count {
+  margin-right: auto;
+}
+.dash-sheet-table {
+  position: relative;
+  flex: 1;
+  min-height: calc(var(--space) * 40);
+  margin: 0 calc(var(--space) * -3);
+  border-top: 1px solid var(--border);
+  overflow: auto; /* one scroller both ways: the head (sticky) and the rows line up */
+}
+.dash-sheet-table:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.dash-sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-strong);
+}
+.dash-sheet-rows {
+  position: relative;
+}
+.dash-sheet-row {
+  display: grid;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border);
+}
+.dash-sheet-cell {
+  box-sizing: border-box;
+  padding: 0 calc(var(--space) * 3);
+  line-height: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+.dash-sheet-cell[data-numeric] {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  font-variant-numeric: tabular-nums;
+}
+.dash-sheet-sort {
+  font: inherit;
+  font-weight: 600;
+  width: 100%;
+  text-align: left;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.dash-sheet-sort:hover {
+  color: var(--fg);
+}
+.dash-sheet-sort:focus-visible,
+.dash-sheet-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+/* E3 M3: a query's live block, between the captured label and the snapshot's columns: hairlines part it from the
+   capture (tonal, no panel), its state in words beside its schedule, its gestures as the sheet's own quiet tools */
+.dash-sheet-live {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 0.5);
+  padding: calc(var(--space) * 2) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.dash-sheet-live-heading {
+  margin: 0;
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.dash-sheet-live-tool {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-sheet-live-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 calc(var(--space) * 3);
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}
+.dash-sheet-live-actions {
+  display: flex;
+  flex-wrap: wrap; /* a narrow sheet wraps its gestures rather than clipping them */
+  align-items: center;
+  gap: var(--space);
+  margin-left: calc(var(--space) * -1.5); /* the tools' own padding aligns their words with the text above */
+}
+.dash-sheet-live .doc-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-doc .dash-view[aria-busy='true'] .dash-figure > svg,
+  .ds-doc button.dash-source-label:hover {
+    transition: none;
+  }
+}

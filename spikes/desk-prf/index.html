@@ -1,0 +1,81 @@
+<!doctype html>
+<!--
+  The desk, DC5 M2: probe for §8 unknown 4's first half (docs/doperpowers/specs/2026-10-15-desk-design.md).
+  Does the WebAuthn PRF extension work with an iCloud Keychain passkey in Safari and in Chrome on this Mac, and does
+  every browser holding the passkey get the same PRF output? The passkey made here is a throwaway for this page's
+  origin; nothing here is the org key, and nothing leaves the page.
+  Serve: python3 -m http.server 8765 --bind 127.0.0.1 -d spikes/desk-prf   then open http://localhost:8765/
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>desk — PRF probe</title>
+<style>
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; max-width: 760px; margin: 32px auto; padding: 0 16px; color: #1f2328; }
+  button { font: inherit; padding: 6px 14px; margin: 4px 8px 4px 0; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; cursor: pointer; }
+  pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 12px; white-space: pre-wrap; word-break: break-all; }
+  .note { color: #59636e; }
+</style>
+</head>
+<body>
+<h1>PRF probe</h1>
+<p class="note">Step 1, once, in one browser: <b>Create passkey</b> (save it to iCloud Keychain / Passwords when asked).
+Step 2, in each browser: <b>Get PRF output</b> and choose that same passkey. Then <b>Copy results</b> and paste them back.</p>
+<button id="create">1. Create passkey</button>
+<button id="get">2. Get PRF output</button>
+<button id="copy">Copy results</button>
+<pre id="out"></pre>
+<script type="module">
+const out = document.getElementById('out');
+const lines = [];
+const log = (line) => { lines.push(line); out.textContent = lines.join('\n'); };
+const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const salt = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('desk-prf-probe-v1'));
+
+log(`browser: ${navigator.userAgent}`);
+log(`origin: ${location.origin}  secure context: ${window.isSecureContext}`);
+try {
+  log(`platform authenticator available: ${await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()}`);
+  if (PublicKeyCredential.getClientCapabilities) {
+    const caps = await PublicKeyCredential.getClientCapabilities();
+    log(`client capabilities: ${JSON.stringify(caps)}`);
+  } else log('client capabilities: (getClientCapabilities not available)');
+} catch (error) { log(`capabilities: error ${error.name}: ${error.message}`); }
+
+document.getElementById('create').onclick = async () => {
+  try {
+    const credential = await navigator.credentials.create({ publicKey: {
+      rp: { name: 'desk PRF probe', id: location.hostname },
+      user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'desk-prf-probe', displayName: 'desk PRF probe' },
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
+      extensions: { prf: { eval: { first: salt } } },
+    } });
+    const prf = credential.getClientExtensionResults().prf;
+    log(`create: credential ${b64u(credential.rawId).slice(0, 12)}…  attachment ${credential.authenticatorAttachment}`);
+    log(`create: prf ${prf ? JSON.stringify({ enabled: prf.enabled, results: prf.results ? 'present' : 'absent' }) : 'no prf result (extension not supported here)'}`);
+    if (prf?.results?.first) log(`create: prf output fingerprint ${hex(await crypto.subtle.digest('SHA-256', prf.results.first)).slice(0, 16)}`);
+  } catch (error) { log(`create: error ${error.name}: ${error.message}`); }
+};
+
+document.getElementById('get').onclick = async () => {
+  try {
+    const assertion = await navigator.credentials.get({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rpId: location.hostname,
+      userVerification: 'required',
+      extensions: { prf: { eval: { first: salt } } },
+    } });
+    const prf = assertion.getClientExtensionResults().prf;
+    log(`get: credential ${b64u(assertion.rawId).slice(0, 12)}…  attachment ${assertion.authenticatorAttachment}`);
+    if (prf?.results?.first) log(`get: prf output fingerprint ${hex(await crypto.subtle.digest('SHA-256', prf.results.first)).slice(0, 16)}  (${prf.results.first.byteLength} bytes)`);
+    else log(`get: no prf output (${JSON.stringify(prf ?? null)})`);
+  } catch (error) { log(`get: error ${error.name}: ${error.message}`); }
+};
+
+document.getElementById('copy').onclick = () => navigator.clipboard.writeText(lines.join('\n')).then(() => log('(copied)'), (error) => log(`copy failed: ${error.message}`));
+</script>
+</body>
+</html>

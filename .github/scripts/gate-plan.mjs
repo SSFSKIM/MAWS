@@ -1,10 +1,22 @@
 // The gate set of one run of .github/workflows/gate.yml (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.1, §3.2,
-// §3.6) and the runner its e2e jobs take. The set: a manual run's `gates` input, else the pushed commit's `Gates:`
-// trailer (scripts/ci-gate.sh writes it when its caller narrows the set), else class 1a, with unit:darwin and class 1's
-// e2e groups added when the e2e lane is a macOS runner. Explicit unit:darwin runs on macOS regardless of the e2e lane.
+// §3.6) and the runners its jobs take. The set: a manual run's `gates` input, else the pushed commit's `Gates:` trailer
+// (scripts/ci-gate.sh writes it when its caller narrows the set), else class 1a, with unit:darwin and class 1's e2e
+// groups added when the e2e lane is a macOS runner. Explicit unit:darwin runs on macOS regardless of the e2e lane, and so
+// does `packaged` (the unsigned app built once, then its checks; Decision Log 35), which is only ever explicit.
+// Class 1a's runner (static, unit, probes): the `class1a` input or the `Class1a:` trailer (`linux`, `macos` or `pool`),
+// else the repository variable GATE_RUNNER, else `linux`. `pool` is ci-kit's pool, each job in a container of its own
+// size (Decision Log 35; on GCE spot VMs since Decision Log 52); `pool=true` when a job runs there, for the plan job's
+// pool-ensure.
 // The e2e lane: the `runner` input or the `Runner:` trailer (`linux` or `macos`), else the repository variable
-// GATE_E2E_RUNNER, else GATE_RUNNER, else `linux`; a Linux lane takes only the groups that run green there (LINUX_E2E).
-// Writes the switches, the e2e matrix and its runner to the job's outputs and the set to its summary. Run from the
+// GATE_E2E_RUNNER, else GATE_RUNNER unless it is `pool` (Electron would lose its sandbox in the pool's containers), else
+// `linux`; a Linux lane takes only the groups that run green there (LINUX_E2E). The groups that drive no Electron
+// (POOL_E2E) never take the Mac, whatever the lane: they run on the pool when class 1a does, else on the hosted Linux
+// runner, so `Class1a:` and GATE_RUNNER place them (Decision Log 68; on a Mac desk-web's suite drives the system Google
+// Chrome, whose TCC prompts held the mini, Decision Log 72); every other e2e job takes the lane's runner.
+// `DefaultBeside:` (a push only): e2e groups that `default` treats as if they ran beside it, so a relaunch of part of a
+// set narrows `default` to the specs the whole set's `default` ran (Decision Log 66). Passed through unchecked: a name
+// the derivation cannot use makes `default` the bare set, never smaller (e2e-default-specs.mjs).
+// Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
 import process from 'node:process';
@@ -12,7 +24,8 @@ import process from 'node:process';
 const env = process.env;
 const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
 const words = (text = '') => text.split(/[\s,]+/).filter(Boolean);
-// `default` is the bare `pnpm e2e` set (after `pnpm build`, as `verify` orders them); every other group is `e2e:<group>`.
+// `default` is the bare `pnpm e2e` set (after `pnpm build`, as `verify` orders them), which the e2e job narrows to the specs
+// no other e2e group of the run collects (e2e-default-specs.mjs, Decision Log 60(2)); every other group is `e2e:<group>`.
 const scriptOf = (group) => (group === 'default' ? 'e2e' : `e2e:${group}`);
 const refuse = (message) => {
   process.stderr.write(`gate-plan: ${message}\n`);
@@ -29,16 +42,31 @@ const trailer = (key) =>
     ?.slice(key.length + 1)
     .trim();
 
-const lane = ((dispatched ? env.INPUT_RUNNER : trailer('Runner')) || env.GATE_E2E_RUNNER || env.GATE_RUNNER || 'linux').toLowerCase();
-if (lane !== 'linux' && lane !== 'macos') refuse(`no such runner: ${lane} (linux or macos)`);
 const RUNNERS = { linux: 'ubuntu-24.04', macos: ['self-hosted', 'macOS', 'ARM64'] };
+const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
+const CLASS1A_RUNNERS = {
+  linux: { static: RUNNERS.linux, unit: RUNNERS.linux, probes: RUNNERS.linux },
+  macos: { static: RUNNERS.macos, unit: RUNNERS.macos, probes: RUNNERS.macos },
+  // unit at 8 cores leaves one 16-core box room for static's 4 and probes' 2, so the three start together.
+  pool: { static: poolBox(4), unit: poolBox(8), probes: poolBox(2) },
+};
+const gateRunner = (env.GATE_RUNNER ?? '').toLowerCase();
+const class1a = ((dispatched ? env.INPUT_CLASS1A : trailer('Class1a')) || gateRunner || 'linux').toLowerCase();
+if (!Object.hasOwn(CLASS1A_RUNNERS, class1a)) refuse(`no such class-1a runner: ${class1a} (linux, macos or pool)`);
 
+const lane = ((dispatched ? env.INPUT_RUNNER : trailer('Runner')) || env.GATE_E2E_RUNNER || (gateRunner === 'pool' ? '' : gateRunner) || 'linux').toLowerCase();
+if (lane !== 'linux' && lane !== 'macos') refuse(`no such runner: ${lane} (linux or macos; the pool takes class 1a and the POOL_E2E groups, through Class1a: pool)`);
+
+const evidence = dispatched ? env.INPUT_EVIDENCE === 'true' : trailer('Evidence')?.toLowerCase() === 'yes';
 const asked = dispatched ? env.INPUT_GATES : trailer('Gates');
 const defaults = ['static', 'unit', 'probes', ...(lane === 'macos' ? ['unit:darwin', ...words(env.CLASS1_E2E).filter((group) => scriptOf(group) in scripts).map((group) => `e2e:${group}`)] : [])];
 const gates = new Set(words(asked).length > 0 ? words(asked) : defaults);
 
-const unknown = [...gates].filter((gate) => !['static', 'unit', 'unit:darwin', 'probes'].includes(gate) && !(gate.startsWith('e2e:') && scriptOf(gate.slice(4)) in scripts));
-if (unknown.length > 0) refuse(`no such gate: ${unknown.join(', ')} (static, unit, unit:darwin, probes, e2e:default or e2e:<group> with a package.json script)`);
+const unknown = [...gates].filter((gate) => !['static', 'unit', 'unit:darwin', 'probes', 'packaged'].includes(gate) && !(gate.startsWith('e2e:') && scriptOf(gate.slice(4)) in scripts));
+if (unknown.length > 0) refuse(`no such gate: ${unknown.join(', ')} (static, unit, unit:darwin, probes, packaged, e2e:default or e2e:<group> with a package.json script)`);
+// The packaged app's e2e scripts read dist/, which only the packaged job builds.
+const packagedOnly = [...gates].filter((gate) => gate.startsWith('e2e:') && /(^|:)packaged$/.test(gate.slice(4)));
+if (packagedOnly.length > 0) refuse(`${packagedOnly.join(', ')} run inside the packaged gate, after its build: ask with Gates: packaged`);
 
 // A Linux lane runs only the groups §3.1's table found green there; the rest are macOS work, refused here rather than
 // scheduled to fail.
@@ -47,15 +75,34 @@ const macOnly = lane === 'linux' ? [...gates].filter((gate) => gate.startsWith('
 if (macOnly.length > 0) refuse(`${macOnly.join(', ')} run on the macOS runner (§3.1): ask with Runner: macos (ci-gate.sh --runner macos)`);
 
 const libreoffice = new Set(words(env.LIBREOFFICE_E2E));
+// desk-web, the one POOL_E2E group, is one Playwright worker; a cpus-4 box is a c3d-highcpu-4 with 8 GB, where cpus-2's
+// e2-highcpu-2 has 2 GB for the build, two browsers and the hub double, at about the same price (Decision Log 68).
+const offMac = new Set(words(env.POOL_E2E));
+const placed = (group) => (!offMac.has(group) ? RUNNERS[lane] : class1a === 'pool' ? poolBox(4) : RUNNERS.linux);
 const e2e = [...gates]
   .filter((gate) => gate.startsWith('e2e:'))
   .map((gate) => {
     const group = gate.slice(4);
-    return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group) };
+    const runner = JSON.stringify(placed(group));
+    return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), runner };
   });
 
+// Group names; an `e2e:` prefix, as --gates writes them, is read as the group.
+const defaultBeside = dispatched ? [] : [...new Set(words(trailer('DefaultBeside')).map((name) => name.replace(/^e2e:/, '')))].filter((group) => group !== 'default');
+
 const has = (gate) => String(gates.has(gate));
-appendFileSync(env.GITHUB_OUTPUT, `static=${has('static')}\nunit=${has('unit')}\nunit_darwin=${has('unit:darwin')}\nprobes=${has('probes')}\ne2e=${JSON.stringify(e2e)}\ne2e_runner=${JSON.stringify(RUNNERS[lane])}\n`);
+const runners = CLASS1A_RUNNERS[class1a];
+const pool = class1a === 'pool' && (['static', 'unit', 'probes'].some((gate) => gates.has(gate)) || e2e.some((entry) => offMac.has(entry.group)));
+appendFileSync(
+  env.GITHUB_OUTPUT,
+  `static=${has('static')}\nunit=${has('unit')}\nunit_darwin=${has('unit:darwin')}\nprobes=${has('probes')}\ne2e=${JSON.stringify(e2e)}\n` +
+    `static_runner=${JSON.stringify(runners.static)}\nunit_runner=${JSON.stringify(runners.unit)}\nprobes_runner=${JSON.stringify(runners.probes)}\npool=${pool}\n`,
+);
+appendFileSync(env.GITHUB_OUTPUT, `packaged=${has('packaged')}\nevidence=${evidence}\ndefault_beside=${JSON.stringify(defaultBeside)}\n`);
 const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
-appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. E2e lane: ${lane}.\n`);
-process.stdout.write(`${[...gates].join('\n')}\nlane: ${lane}\n`);
+const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join(', ')}.` : '';
+// The groups placed off the lane's runner: on the pool, or on the hosted Linux runner beside a macOS lane.
+const moved = e2e.filter((entry) => offMac.has(entry.group) && entry.runner !== JSON.stringify(RUNNERS[lane])).map((entry) => entry.group);
+const pooledNote = moved.length > 0 ? ` (${class1a === 'pool' ? 'on the pool' : 'on the hosted Linux runner'}: ${moved.join(', ')})` : '';
+appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${beside}\n`);
+process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}`);

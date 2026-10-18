@@ -265,6 +265,50 @@ describe('group state machine', () => {
   });
 });
 
+// DC9 (the desk, 2026-10-17): doperpowers' ask tool is a question as the built-in is. Its input is the built-in's plus
+// `async`; its result carries no structured answers, only the engine's summary text, which the row reads back.
+describe('doperpowers’ ask tool (mcp__doperpowers__AskUserQuestion)', () => {
+  const ASK = 'mcp__doperpowers__AskUserQuestion';
+  const QUESTIONS = [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red' }, { label: 'Blue' }] }];
+  const ASYNC_RESULT = 'Your questions are waiting for the human; this call does not wait for them. Their answer will reach you in a later message that quotes each question. Go on with work that does not depend on it.';
+  function asked(input: Record<string, unknown>, content: string, options: { isError?: boolean } = {}) {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'a' });
+    b.result('t1', 'ok');
+    b.toolUse('q1', ASK, input);
+    b.result('q1', content, { structured: content, ...options }); // a plugin tool's toolUseResult is its text
+    b.end(['u1']);
+    return b.events;
+  }
+
+  it('a blocking ask is a question row with the summary’s answers, in view when its turn folds', () => {
+    const events = asked({ questions: QUESTIONS }, 'Your questions have been answered: "Which colour?"="Red". You can now continue with these answers in mind.');
+    const list = rowsOf(reduce(events));
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'question']);
+    expect(find(list, 'question')).toMatchObject({ id: rowId.question(tool('q1')), toolUseId: 'q1', answers: { 'Which colour?': 'Red' }, error: null });
+    expect(find(list, 'question').questions).toEqual([{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red', description: null, preview: null }, { label: 'Blue', description: null, preview: null }] }]);
+    expect(kinds(rows(events))).toEqual(['time', 'user', 'divider', 'cell', 'question']);
+  });
+
+  it('an async ask is a question row awaiting its answer: no answers, no refusal', () => {
+    const list = rowsOf(reduce(asked({ questions: QUESTIONS, async: true }, ASYNC_RESULT)));
+    expect(find(list, 'question')).toMatchObject({ answers: null, error: null });
+  });
+
+  it('a declined ask reads as skipped, not as a refusal', () => {
+    const decline = "<tool_use_error>The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.</tool_use_error>";
+    const list = rowsOf(reduce(asked({ questions: QUESTIONS }, decline, { isError: true })));
+    expect(find(list, 'question')).toMatchObject({ answers: {}, error: null });
+  });
+
+  it('an ask refused before it reached the human shows the refusal', () => {
+    const invalid = '<tool_use_error>InputValidationError: AskUserQuestion failed due to the following issue:\nThe parameter `questions` is missing</tool_use_error>';
+    const list = rowsOf(reduce(asked({}, invalid, { isError: true })));
+    expect(find(list, 'question')).toMatchObject({ questions: [], answers: null, error: 'InputValidationError: AskUserQuestion failed due to the following issue:\nThe parameter `questions` is missing' });
+  });
+});
+
 describe('receipt counts', () => {
   it('aggregates files cells, counting + and - lines of the structured patch', () => {
     const b = builder();

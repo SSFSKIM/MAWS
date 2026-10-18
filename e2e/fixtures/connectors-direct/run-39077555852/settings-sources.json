@@ -1,0 +1,17 @@
+[
+  {
+    "name": "envtoy",
+    "status": "connected",
+    "scope": "user",
+    "source": "user",
+    "configFields": [
+      "args",
+      "command",
+      "type"
+    ],
+    "cache": {
+      "ok": false,
+      "why": "unattested"
+    }
+  }
+]

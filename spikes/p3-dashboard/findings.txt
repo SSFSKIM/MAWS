@@ -1,0 +1,246 @@
+P3-E2 M1: renderer comparison findings
+
+Parent: docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md, milestone M1. The design it serves is
+docs/doperpowers/plans/2026-10-16-p3-e-design-dashboard.md, child E2 (§2 "Views", the renderer's binding grade; §4).
+This is a spike: everything under spikes/p3-dashboard/ is experimental evidence, not production code. M3 promotes the
+winning approach into src/artifacts/dashboard/ with its own tests, and the losing implementation is removed before the
+final landing.
+
+Status (2026-10-16, after the task review's fix wave): every hard gate passes for both candidates on the completing
+gate, run 38894315752. By the plan's ordering rule the verdict is candidate A, d3's DOM-free helpers. The verdict is
+reported to the controller for review. It is not promoted by this file. Items that were not proved are listed under
+"Unproved", explicitly.
+
+The first hand-back (ede04feb6) overstated two grades; the task review found both, and both are fixed:
+- Hover reached only the first 1,000 points: 761 GISTEMP months, and 9,000 of each synthetic view, had no hover value.
+- Grouped bars and their legend keys differed by fill opacity alone, colour-only identity.
+The fix is 52e2f343b; the rows below are re-proved on it.
+
+QUESTION
+
+Can a DOM-free rendering function meet the grade more simply than an unassisted in-house renderer?
+
+Candidate A: exact-pinned d3-array 3.2.4, d3-scale 4.0.2, d3-shape 3.2.0 and d3-path 3.1.0 (all ISC). It uses
+d3-scale's `nice`/`ticks`, `scaleBand` and `scaleUtc`, and d3-shape's line, area, arc, pie and symbol generators with a
+null context and `digits(2)`. Those generators return path strings, as https://d3js.org/d3-shape/line documents.
+Candidate B: small in-house arithmetic and path writing, no dependency.
+
+METHOD
+
+One shared layout (src/render.ts, text.ts, svg.ts, transform.ts, spec.ts) writes the SVG: frame, legend, axes, labels,
+table, the error states and escaping. Everything numerical or geometric goes through one seam, the Kit (src/kit.ts):
+nice domains, ticks, bands, lines, areas, pie angles, arcs and markers. kit-d3.ts implements it with d3 and
+kit-house.ts in-house. Both candidates therefore receive the same closed input and theme and differ only where the
+question asks. Data semantics (filter, then group and aggregate, then a stable sort, then limit; missing values counted,
+never zero) are shared, because neither route changes them.
+
+Theme: the house system's resolved document-medium values (HOUSE_TOKENS of
+src/artifacts/document/export/design-system.ts), validated before any value enters an attribute.
+The MAWS law (src/artifacts/types/design_system/defaults/maws/DESIGN.md) has no categorical palette, so:
+- figures are drawn in text ink;
+- series are told apart by form, always with a legend (two or more series) or a direct end label:
+  - lines by dash and marker shape (circle, square, triangle, diamond, cross, wye);
+  - scatter by marker shape;
+  - bars by treatment: solid, hollow, 45° or 135° hatch, cross-hatch, dashed hollow;
+  - pie wedges by their number in the list beside the pie, with tint as a second cue;
+- status colours are never used and the accent is never used;
+- gridlines are rule-colour hairlines, and the zero line is one step darker;
+- type uses only the caption role (13 px, axes, legend, labels) and the body role (16 px, table cells); mono is used for
+  measured values in tables.
+
+Datasets (datasets/SOURCES.txt has URLs, licences, citations and sha256 of the raw and derived files):
+- time series: NASA GISTEMP v4 global monthly and annual anomalies, 1880 to September 2026 (public US Government work;
+  GISS's citation recorded). Includes negatives and three months not yet available.
+- categorical comparison: World Bank WDI NY.GDP.MKTP.KD.ZG, GDP growth of eight economies, 2019 to 2024 (CC BY 4.0).
+  Negatives in 2020; the quoted "Korea, Rep." exercises RFC quoting.
+- scatter: palmerpenguins, 344 penguins (CC0). NA cells: 2 penguins unmeasured, 11 with no sex.
+- Korean country, species and island names are this spike's stated derivative labels. The only synthetic input is the
+  10,000-point stress walk in src/fixtures.ts, a seeded LCG, named as synthetic.
+
+Cases (src/fixtures.ts, 26):
+- nine real views covering all six kinds: line ×3, area, bar ×2 (one grouped by sex with mean aggregation), scatter,
+  pie (count), table;
+- edge cases: empty bar, line and table; one row (line, pie, scatter); negative bars; null gaps; missing column; no
+  dataset; unknown view kind; hostile labels and spec keys; extreme magnitudes (±1.8e308, 5e-324); long Korean labels
+  in a bar chart and a table;
+- the two synthetic 10,000-point views (line, and scatter in 3 series).
+
+RUNS (the Mac mini lane, `scripts/ci-gate.sh <wt> --gates e2e:dashboard-spike,e2e:dashboard-spike-scale`)
+
+- 38890516278 at fcd11592d (e2afc56fe plus master 1dfe24eb1). spike-scale green but measured at a one-minute load of
+  10.2, reported NOT QUIET, so its timings do not count. spike red: 3 passed, 1 failed, 2 not run. The geometry proof
+  found SF Pro digits at 0.63 em against the estimate's 0.62, and the screenshots showed a negative bar's value printed
+  over its category label. Both were fixed in cbb32731a, each with a unit test (the collision test seen failing first:
+  "expected 284.72 to be less than 276").
+- 38891409293 at cbb32731a. Both green: spike 6/6 Playwright tests, plus the spike's vitest project (2 files); scale
+  measured at load 4.41/4.69/4.57, quiet. Its long-Korean screenshot showed the middle category's name dropped: the
+  thinning meant for continuous axes also ran on the band axis. Fixed in 1a4b6e340 with a unit test, seen failing first
+  ("expected '…' to contain '부산광역시 해운대구'").
+- 38892044284 at 1a4b6e340: the final evidence run (the settle wait of f96b2172a is in it). Both green:
+  - spike: 6/6 Playwright tests, and the spike's vitest project 2 files and 37/37 on the mini;
+  - scale: the load was 3.96/4.23/4.40 at the start (the settle wait passed at its first reading) and 3.96 after.
+- The task review found the two overstated grades of the status above; fixed in 52e2f343b.
+  - The new tests were seen failing first against the old renderer: 6 failed. The hover layer was absent, the
+    male/female legend keys had one signature, and the pie had no numbers.
+- 38894046237 at 52e2f343b: a diagnostic run, before master was merged. Both green, spike 7/7.
+- 38894315752 at e4e6ecde4 (52e2f343b plus master f0c5fffa4, merged by the controller): the COMPLETING GATE, with
+  `--evidence`. Both green:
+  - spike: 7/7 Playwright tests, and the spike's vitest project 2 files and 41/41 on the mini;
+  - scale: load 4.22/3.94/4.05 at the start and the same after.
+  - Evidence artifact: `e2e-dashboard-spike`, id 12042574803, 2.9 MB, kept until 2026-10-23. It holds 71 files under
+    test-results/dashboard-spike-proof/:
+    - every view's page HTML, PDF and capture PNG for both candidates;
+    - d3.docx and house.docx;
+    - the three LibreOffice pages;
+    - the Chromium long-Korean screenshot.
+    Download with `gh run download 38894315752 -D <dir>`.
+  Every number below is from this run unless it names another.
+- The CI log carries the shared setup action's inherited warning: "This project is configured to use pnpm because
+  …package.json has a "packageManager" field". It is in both jobs of every run and is infrastructure, not the spike's
+  output. "Clean" below means the spike's own tests and output, not the job log.
+
+Locally (named-file vitest via /tmp/maws-review/with-slot.sh, macOS Node 22.23.2):
+`pnpm exec vitest run --config spikes/p3-dashboard/vitest.config.ts`, 2 files, 41/41. `tsc -p
+spikes/p3-dashboard/tsconfig.json` and `tsc -p spikes/p3-dashboard/e2e/tsconfig.main.json` are clean. spikes/ is outside
+the repository's eslint (eslint.config.js ignores it), so no lint applies.
+
+HARD GATES (P pass, F fail; the evidence is the run's `SPIKE ` lines)
+
+| Grade dimension | A d3 | B house | Evidence |
+|---|---|---|---|
+| Deterministic bytes: twice in Node, Node v22.23.3 against Chromium (Electron 44.4.5), all 26 cases | P | P | per-case sha256 equal; 1,583,973 (A) and 1,582,419 (B) bytes |
+| Deterministic across time zones (UTC, Asia/Seoul, America/Los_Angeles) | P | P | unit test, local and on the mini |
+| No script, event attribute, href, id, url() reference or external resource in output | P | P | unit `grade` (XML-parsed whitelist of 9 elements and their attributes, with a negative control), all 26 cases, hostile inputs and hostile theme included |
+| Zero network from the output in MAWS's PDF printer and capture window | P | P | printHtmlToPdf's `blocked` and the capture's filter empty for all 18 pages; positive control: a page naming https://example.invalid was blocked twice in both |
+| Named SVG and description | P | P | role="img" aria-label = caption, <title>, <desc> naming the source table; Chromium's aria snapshot: `img "2024년 실질 GDP 성장률 (%)"` |
+| Keyboard and source-table reach (around the figure, the host's) | P | P | Tab reaches the source label button, Enter opens the table (8 rows); shared layout, so equal |
+| Hover values, every value | P | P | Discrete marks (bars, wedges) carry `data-tip`. Every drawable point of a line, area or scatter sits in one empty `<g data-hover="nearest" data-xy data-tips>` layer, with no cap: units count 1,761 GISTEMP months (the last 2026-09-01) and 10,000 for each synthetic view. In Chromium a host's nearest-point handler showed the target's own value: the last month `2026-09-01 · anomaly_c: 1.38`, month 1,500, synthetic line point 9,999, and scatter points 5,000 and 8,765. A bar's pointerover showed `미국 · growth_pct: 2.79`. The figure carries no handler. (First hand-back: a 1,000-target cap, F.) |
+| Series identity not by colour alone | P | P | A unit asserts the legend keys of the four multi-series views are pairwise distinct with opacity ignored, and that every grouped bar wears its own series' treatment; the pie wedges are numbered as their list. The screenshots show male solid and female hollow, and wedges 1 to 3. (First hand-back: opacity alone on bars and wedges, F.) |
+| Korean label geometry: in the frame, no overlap, never wider than estimated | P | P | Chromium getBBox and getComputedTextLength over 13 cases × 2 candidates (26 measured pages), 0 outside, 0 overlaps, 0 wider; widest real/estimate 0.986 |
+| Every category labelled (wrap, never drop) | P | P | unit, after the 1a4b6e340 fix |
+| Same SVG in standalone HTML (inlined byte for byte) | P | P | the page contains the canonical string; captured with JavaScript off |
+| Same picture in PDF | P | P | MAWS's printHtmlToPdf, one page per view; pdftoppm raster against the page capture, mean absolute difference 0.0078 to 0.0198 (gate < 0.03); captions, Korean labels and the label time in pdftotext; SF Pro and Apple SD Gothic Neo embedded |
+| Same SVG in DOCX | P | P | docx 9.10.0 ImageRun type svg with PNG fallback: the 9 word/media/*.svg sha256-equal to the canonical SVGs, 9 PNG fallbacks, captions in document.xml; LibreOffice renders 5 pages with every caption and the Korean axis labels |
+| A and B draw the same picture | n/a | n/a | page captures compared: mean difference 0 for all 9 views (the path strings are byte-identical except d3's pie wedges, which start on the rim, and its area baselines, which are written under every point) |
+
+PREFERENCE AXES (the rule: among passing routes prefer less custom numerical/geometry code, then lower shipped bytes)
+
+1. Custom numerical/geometry code (non-blank, non-comment lines): A's Kit is 56 lines, B's 176. The shared layout is
+   the same for both: render.ts 461, text 48, svg 81, transform 77, spec 70.
+   - B reached parity only by porting d3's algorithms. A first, naive version (1-2-5 steps, two `nice` passes, an
+     approximate interval table) disagreed with d3 on 5 of 2,000 generated linear domains through float drift (for
+     example [0.000413, 0.001026] ×10 lost its first tick, 0.0004) and on 60 of 240 time spans.
+   - Agreement came only after porting d3-array's tickSpec (integer indexes over an inverse increment below 1), d3-scale's
+     `nice` loop, and d3-time's UTC intervals: field-based `every`, Sunday weeks, d3's interval table and its geometric
+     choice.
+   - After the port: 2,000/2,000 linear domains, 240/240 time spans, and byte-equal lines, markers, bands and pie angles.
+   - So B is a re-implementation of d3's numerics. M3 would own it and test it against d3 indefinitely.
+2. Shipped bytes (esbuild production minify, the minifier electron-vite runs; ESM browser bundle; gzip -9):
+
+   | | raw | gzip | brotli |
+   |---|---|---|---|
+   | A renderer (layout + d3 Kit) | 72,214 | 26,964 | 24,001 |
+   | B renderer (layout + house Kit) | 27,031 | 10,981 | 10,094 |
+   | A Kit alone | 49,451 | 17,913 | 15,754 |
+   | B Kit alone | 4,415 | 1,971 | 1,816 |
+
+   - A adds about 45 KB raw and 16 KB gzip. Of that, d3-scale brings d3-format 4.9 KB, d3-time-format 9.0 KB,
+     d3-color 7.3 KB and d3-interpolate 3.1 KB, which the layout never calls. tickFormat and interpolation are
+     reachable from the scales, so tree-shaking keeps them.
+3. Performance (Node v22.23.3 on the mini: Apple M2 Pro, 10 cores, 16 GiB; load 4.22 before and after; minified
+   bundle, 5 warm-up runs then 30 timed runs, median/p95 ms; run 38894315752, with the complete hover layer):
+
+   | view | A median | A p95 | B median | B p95 |
+   |---|---|---|---|---|
+   | GISTEMP monthly, 1,764 points | 5.16 | 6.25 | 4.91 | 5.16 |
+   | penguin scatter | 0.69 | 2.52 | 0.58 | 0.78 |
+   | every other real view | ≤ 0.29 | ≤ 0.34 | ≤ 0.23 | ≤ 0.25 |
+   | synthetic line, 10,000 points | 16.22 | 18.55 | 15.63 | 18.11 |
+   | synthetic scatter, 10,000 points | 23.39 | 30.50 | 17.04 | 20.46 |
+
+   - The complete hover layer costs about 4 ms on 10,000 points (the capped version, run 38892044284: 11.69 and
+     19.19 ms medians for A).
+   - It also grows the SVG: the 10,000-point line from 236,983 to 511,689 bytes, the scatter from 558,020 to 863,446.
+     GISTEMP monthly shrank from 137,835 to 108,167, because one layer replaces 1,000 circles.
+
+   - Heap 41 MiB, RSS 206 MiB.
+   - Both are far inside the candidate of 10,000 points ≤ 200 ms. A's scatter costs more through d3's per-point
+     symbol generator and context.
+
+VERDICT (for review)
+
+Both candidates pass every hard gate, so the rule's first preference decides: candidate A, d3's DOM-free helpers under
+the in-house layout. B is the smaller bundle, the rule's second preference, about 16 KB gzip less. It earns that with
+3× the custom numerical code: code that turned out to be d3's algorithms re-derived, and wrong in its first honest form.
+A third route was not built or measured. M3 may weigh it: the scales could be replaced by d3-array's ticks/nice and
+d3-time's UTC intervals (dropping d3-scale, d3-format, d3-time-format, d3-color and d3-interpolate) with a three-line
+linear map.
+Promote into M3: the shared layout's approach (closed spec, one Kit seam, ink with shapes and dashes, data-tip, no ids,
+no references, the error states drawn in place) with kit-d3's d3 usage; exact pins as here.
+Discard: kit-house.ts and its parity tests, before the final landing.
+
+UNPROVED (explicitly not shown here)
+
+- The integrated export path. No dashboard kind exists yet, so B's four exporters with a renderView hook did not run.
+  The proof drove MAWS's real primitives directly: printHtmlToPdf and installFramePolicies/restrictRequests on the
+  capture partition, bundled into the spike's own Electron main (e2e/main.ts). The HTML page was a bounded fixture
+  styled from the house tokens, not B's HTML exporter. The DOCX was built with the docx package directly, not B's DOCX
+  writer. M5 owns proving the real path.
+- Word. No Word on the runner: the svgBlip and its fallback are proved present and byte-equal, not rendered by Word.
+  The run did not establish whether LibreOffice drew the SVG or the PNG fallback. LibreOffice set the unstyled label
+  runs in its default serif (the fixture did not style them), and B's styles must carry the caption face.
+- The hover layer at M6's scale. On 10,000 points the layer adds about 30 bytes and 0.4 µs per point. At 50,000 rows ×
+  12 views it would be about 1.5 MB of attributes per view; that is neither measured nor bounded here. M3 may move the
+  tips to a host-side lookup by index, keeping only the coordinates in the figure, if the scale run says so.
+- The editor. The ProseMirror node view injecting the SVG, async replacement and subscriptions are M3's. The hover and
+  source table here are a host fixture page around the figure.
+- Fonts other than the Mac's. Geometry was measured with SF Pro Text and Apple SD Gothic Neo only. The estimate is
+  calibrated wide of SF Pro; Segoe UI and Malgun Gothic were not measured.
+- Bundle bytes are standalone esbuild bundles of each candidate, not the delta in MAWS's renderer chunk.
+- Timings are Node in one process on the mini. The Electron renderer's render time and the 12-view/50,000-row scale
+  rows are M6's.
+- Determinism was shown on Node 22.23.x (macOS) and Chromium in Electron 44.4.5. Linux Node was not run.
+
+DISCOVERIES
+
+- Real datasets do not use empty cells for missing values. GISTEMP writes `***`, palmerpenguins writes `NA`, and
+  GISTEMP writes decimals with a leading dot (`-.19`). Under M2's rules ("empty values are null", strict finite
+  numbers), the raw files would infer as text with mixed-type warnings unless the strict number grammar accepts a
+  leading dot. The spike's derive.mjs maps `***` and `NA` to empty and keeps `-.19` verbatim; the spike's parser
+  accepts it.
+- A nice() time axis wastes the plot: 1880 to 2026 extends to 2040 at a 20-year step. X axes are therefore never niced
+  (y axes are), in both candidates.
+- Thinning labels on a band axis drops a category's identity (fixed). Thinning is for continuous axes only.
+- A negative bar's value label needs room between the scale's bottom and the category row (fixed).
+- d3's area writes the baseline under every point and its wedges start on the rim. The bytes differ from B's while the
+  pixels are equal, so byte-identity between candidates is no criterion. Byte-identity within one candidate across
+  runtimes held.
+- The mini's capture scale changed between runs (1 in 38890516278, 2 in 38891409293). Picture comparisons must resample
+  to one size (main's nativeImage does).
+- `role="img"` with aria-label gives the figure its name in Chromium; its tree still lists the figure's text as the
+  image's content, so the source table stays the accessible data path.
+- docx 9.10.0 already writes SVG pictures with a raster fallback (`asvg:svgBlip`). The fallback raster must come from a
+  window, as the plan's "picture fallback produced in the capture route" expects.
+- d3-shape 3.2.0's `digits` and d3-path 3.1.0's `pathRound` give fixed-precision path strings, so neither candidate
+  needs number formatting of its own inside paths.
+
+HOW TO RUN
+
+- Units: `pnpm exec vitest run --config spikes/p3-dashboard/vitest.config.ts`
+- Export proof (CI, the Mac lane): `pnpm e2e:dashboard-spike`. It builds out/ with e2e/build.mjs, runs the units, then
+  `playwright test -c spikes/p3-dashboard/e2e/playwright.config.ts`. Evidence prints as `SPIKE {json}` lines; pictures
+  print as `SPIKE-PNG <name> <i>/<n> <base64>` chunks, decoded from `gh run view <id> --log`.
+- Measurement (CI): `pnpm e2e:dashboard-spike-scale`, with MAWS_DASHBOARD_SCALE=1 set inline. It waits up to 5 min for
+  the one-minute load to fall below 10 and records each reading; a load still at or above 10 is reported NOT QUIET.
+- Data: `node spikes/p3-dashboard/datasets/derive.mjs` regenerates the four tables from raw/ and prints their sha256.
+
+PROMOTION (P3-E2 M3, 2026-10-16)
+
+Candidate A's approach is promoted into src/artifacts/dashboard/ with its own production tests: spec.ts (the grammar),
+render/geometry.ts (d3's helpers, one implementation, no Kit seam), render/{render,svg,text,transform}.ts (the shared
+layout), states.ts (the wording). The spike's code, both kits, its parity tests, its Electron proof harness and its
+measurement script are removed, with the package scripts `e2e:dashboard-spike` and `e2e:dashboard-spike-scale`; this
+file and datasets/ (the raw downloads, derive.mjs, SOURCES.txt and the derived tables) stay as the evidence above. The
+production tests vendor two of the derived tables byte for byte (src/artifacts/dashboard/fixtures/datasets.ts). The
+review's decorative-hatch debt is closed there: a bar's hatching is drawn `pointer-events="none"`, a pie's wedge numbers
+too, so the mark beneath is the hit target. The commits before this one hold the removed files.

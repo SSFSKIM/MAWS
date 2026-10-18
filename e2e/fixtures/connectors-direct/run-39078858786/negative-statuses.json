@@ -1,0 +1,38 @@
+{
+  "negative-positive": [
+    {
+      "name": "usertoy",
+      "status": "connected"
+    },
+    {
+      "name": "steady",
+      "status": "connected"
+    }
+  ],
+  "negative-absent": [
+    {
+      "name": "steady",
+      "status": "connected"
+    }
+  ],
+  "negative-fresh": [
+    {
+      "name": "usertoy",
+      "status": "connected"
+    },
+    {
+      "name": "steady",
+      "status": "connected"
+    }
+  ],
+  "negative-disabled": [
+    {
+      "name": "usertoy",
+      "status": "disabled"
+    },
+    {
+      "name": "steady",
+      "status": "connected"
+    }
+  ]
+}

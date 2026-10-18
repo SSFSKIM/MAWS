@@ -66,7 +66,18 @@ function fakeHost(systems: Record<string, Doc>, versions: Record<string, Uint8Ar
     acceptSuggestion: async () => ({ revision: 0 }), // P3-D re-merge: A's landed required members
     rejectSuggestion: async () => ({ revision: 0 }),
     uploadAsset: async () => ({ assetId: '', ref: '' }),
+    copyAsset: async () => ({ assetId: '', ref: '' }), // P3-C (Decision Log 25)
+    readDataset: async () => ({ columns: [], rows: [], total: 0, truncated: false }), // P3-E (E2 M2)
+    downloadAsset: async () => ({ path: null }), // P3-E (E2 M3)
+    holdDatasets: async () => ({ release: () => {}, invalidated: new Promise<void>(() => {}) }), // E3: A's landed required member
     identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '#000000' }),
+    // P3-H H4: the connector family, which these tests never reach
+    openConnectors: () => {
+      throw new Error('no connectors here');
+    },
+    connectorGrants: async () => [],
+    grantConnectorTool: async () => ({ ok: false, state: 'paused', reason: 'noRoute' }),
+    revokeConnectorTool: async () => false,
   };
   return { host, open, closed, versionState };
 }

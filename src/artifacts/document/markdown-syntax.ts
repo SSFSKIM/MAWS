@@ -286,6 +286,8 @@ export function gfmTable(table: Json): boolean {
 
 /** Marks a table (in prepared JSON) to be written as structure blocks. */
 export const BLOCKS_TABLE = '__blocks';
+/** P3-E (E2 M5): carries a chart's drawn view's Markdown (in prepared JSON), written in place of its dialect form. */
+export const CHART_MARKDOWN = '__chartMarkdown';
 
 function renderBlocksTable(node: Json, h: Render): string {
   const rows = ((node.content ?? []) as Json[]).map((row) => {
@@ -409,6 +411,8 @@ export const MARKDOWN: Record<string, object> = {
       return { type: 'chart', attrs: { source: token.body as string, spec } };
     },
     renderMarkdown: (node: Json) => {
+      const drawn = node.attrs?.[CHART_MARKDOWN]; // P3-E: an export's drawn view (`SerializeOptions.charts`)
+      if (typeof drawn === 'string') return drawn;
       const spec = node.attrs?.spec;
       return rawFenced('chart', { spec: typeof spec === 'string' ? spec : null, 'spec-json': spec == null || typeof spec === 'string' ? null : JSON.stringify(spec) }, str(node.attrs?.source));
     },

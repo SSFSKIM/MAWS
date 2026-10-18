@@ -1,0 +1,238 @@
+{
+  "run": 39069174863,
+  "source": "f32bcc621533a95c6812949ee83965f3457628ff",
+  "result": "partial: direct 14/15, OAuth 1/2; H and Darwin passed",
+  "files": [
+    {
+      "file": "direct-main-loss.json",
+      "bytes": 94,
+      "sourceSha256": "4837607c45110ddde23fb05b04dab03ff6cd755fc91ceafffdda06d528cc3149",
+      "retainedSha256": "4837607c45110ddde23fb05b04dab03ff6cd755fc91ceafffdda06d528cc3149",
+      "scrubs": []
+    },
+    {
+      "file": "engine-only.json",
+      "bytes": 206,
+      "sourceSha256": "cac9f5a39f534e3d4ce2d9de7b61920393c357741110883603f1c7625cc04764",
+      "retainedSha256": "cac9f5a39f534e3d4ce2d9de7b61920393c357741110883603f1c7625cc04764",
+      "scrubs": []
+    },
+    {
+      "file": "git-child/engine-wire.jsonl",
+      "bytes": 2713,
+      "sourceSha256": "b34b4ec9f216ef1ec96b44bac29f7af36e6320a741adf852eab0232a997cfa90",
+      "retainedSha256": "b34b4ec9f216ef1ec96b44bac29f7af36e6320a741adf852eab0232a997cfa90",
+      "scrubs": []
+    },
+    {
+      "file": "git-child-sources.json",
+      "bytes": 452,
+      "sourceSha256": "fade0d38d0616a718561398d0b4f51809e08e50ff600dac1a12a89b78dc85593",
+      "retainedSha256": "fade0d38d0616a718561398d0b4f51809e08e50ff600dac1a12a89b78dc85593",
+      "scrubs": []
+    },
+    {
+      "file": "git-keys.json",
+      "bytes": 136,
+      "sourceSha256": "c262cef3212ad980c99b831667c08d8de1cfff1e9a5feaf626f2034f6ec582a3",
+      "retainedSha256": "c262cef3212ad980c99b831667c08d8de1cfff1e9a5feaf626f2034f6ec582a3",
+      "scrubs": []
+    },
+    {
+      "file": "git-root/engine-wire.jsonl",
+      "bytes": 2709,
+      "sourceSha256": "dfa2ba475a87d118caef98f03b419619ca84ea03faf7bce4975c61a5d0c8512d",
+      "retainedSha256": "dfa2ba475a87d118caef98f03b419619ca84ea03faf7bce4975c61a5d0c8512d",
+      "scrubs": []
+    },
+    {
+      "file": "git-root-sources.json",
+      "bytes": 377,
+      "sourceSha256": "d267bea410dfed3b8b910f36cd2bbbe427190bc3a520901e8086dce9ff4513d2",
+      "retainedSha256": "d267bea410dfed3b8b910f36cd2bbbe427190bc3a520901e8086dce9ff4513d2",
+      "scrubs": []
+    },
+    {
+      "file": "home/engine-wire.jsonl",
+      "bytes": 2694,
+      "sourceSha256": "f4f671daf6adb59033b9337e858e1a398c6ee3c5563e765cc7723b0d350a21e1",
+      "retainedSha256": "f4f671daf6adb59033b9337e858e1a398c6ee3c5563e765cc7723b0d350a21e1",
+      "scrubs": []
+    },
+    {
+      "file": "home-sources.json",
+      "bytes": 339,
+      "sourceSha256": "fa3bbde0300160d094db5a7697a38b3fe017c04a82b3d065a86349b04506b135",
+      "retainedSha256": "fa3bbde0300160d094db5a7697a38b3fe017c04a82b3d065a86349b04506b135",
+      "scrubs": []
+    },
+    {
+      "file": "lifecycle.json",
+      "bytes": 869,
+      "sourceSha256": "b276f27a5b9183d65f30a74a6db014e2ed7fa2d672c768280be85fe81623ae7d",
+      "retainedSha256": "b276f27a5b9183d65f30a74a6db014e2ed7fa2d672c768280be85fe81623ae7d",
+      "scrubs": []
+    },
+    {
+      "file": "negative-absent/engine-wire.jsonl",
+      "bytes": 2706,
+      "sourceSha256": "8d3d007ebbd8570bc8bd172298f98c620f7129c977cb69ae0cce539688e9cb2e",
+      "retainedSha256": "8d3d007ebbd8570bc8bd172298f98c620f7129c977cb69ae0cce539688e9cb2e",
+      "scrubs": []
+    },
+    {
+      "file": "negative-disabled/engine-wire.jsonl",
+      "bytes": 3120,
+      "sourceSha256": "cffafa72fa25f6a868d5b07698088e0db02141207fb3b2053cb9070e7044e07d",
+      "retainedSha256": "cffafa72fa25f6a868d5b07698088e0db02141207fb3b2053cb9070e7044e07d",
+      "scrubs": []
+    },
+    {
+      "file": "negative-fresh/engine-wire.jsonl",
+      "bytes": 3240,
+      "sourceSha256": "864bcc61f3f728d7a6998af0fc5f77edfc2979148668f3b1968c4a4e0c34cc15",
+      "retainedSha256": "864bcc61f3f728d7a6998af0fc5f77edfc2979148668f3b1968c4a4e0c34cc15",
+      "scrubs": []
+    },
+    {
+      "file": "negative-positive/engine-wire.jsonl",
+      "bytes": 3234,
+      "sourceSha256": "04cb63e74ac8d753660ae5439f112ee5e86b9258435cfa80b3657633c0cfcdea",
+      "retainedSha256": "04cb63e74ac8d753660ae5439f112ee5e86b9258435cfa80b3657633c0cfcdea",
+      "scrubs": []
+    },
+    {
+      "file": "negative-statuses.json",
+      "bytes": 571,
+      "sourceSha256": "067c13804bafae58b3e2f314b821b2085e877ab834c4e37f574b5e785e19e99f",
+      "retainedSha256": "067c13804bafae58b3e2f314b821b2085e877ab834c4e37f574b5e785e19e99f",
+      "scrubs": []
+    },
+    {
+      "file": "oauth-connect-secret-scan.json",
+      "bytes": 126,
+      "sourceSha256": "b360afdc60e7dfabf3a268fae48852767398c7b7a19555a49ac862f1e3a9d766",
+      "retainedSha256": "b360afdc60e7dfabf3a268fae48852767398c7b7a19555a49ac862f1e3a9d766",
+      "scrubs": []
+    },
+    {
+      "file": "oauth-connect.json",
+      "bytes": 2441,
+      "sourceSha256": "58318c7ed27999fa750949b05cf525256f2a5621226a3550fe4f62cbc01eca84",
+      "retainedSha256": "58318c7ed27999fa750949b05cf525256f2a5621226a3550fe4f62cbc01eca84",
+      "scrubs": []
+    },
+    {
+      "file": "settings/engine-wire.jsonl",
+      "bytes": 2914,
+      "sourceSha256": "43692a5c7f32e71ff81f4824fc8a143b4579f4b3255e206c4c2d6ba68093b2ef",
+      "retainedSha256": "43692a5c7f32e71ff81f4824fc8a143b4579f4b3255e206c4c2d6ba68093b2ef",
+      "scrubs": []
+    },
+    {
+      "file": "settings-observed.json",
+      "bytes": 1636,
+      "sourceSha256": "04cf47f23a8eda7a381e2acd3a7a5f8b8fd7324c24eb248918402026435ae40a",
+      "retainedSha256": "04cf47f23a8eda7a381e2acd3a7a5f8b8fd7324c24eb248918402026435ae40a",
+      "scrubs": []
+    },
+    {
+      "file": "settings-sdk/engine-wire.jsonl",
+      "bytes": 2706,
+      "sourceSha256": "149b7e465117f846ace23f4933d9de4a64266aea39459c4b57101fb6e5131c04",
+      "retainedSha256": "149b7e465117f846ace23f4933d9de4a64266aea39459c4b57101fb6e5131c04",
+      "scrubs": []
+    },
+    {
+      "file": "settings-sdk-observed.json",
+      "bytes": 2031,
+      "sourceSha256": "3d5d1ebcaa8ec5d7632e46b099ca14305e2800922e55a1c3bc2c4b2de6225549",
+      "retainedSha256": "3d5d1ebcaa8ec5d7632e46b099ca14305e2800922e55a1c3bc2c4b2de6225549",
+      "scrubs": []
+    },
+    {
+      "file": "settings-sdk-sources.json",
+      "bytes": 335,
+      "sourceSha256": "ec6b9df677d17dcdd63e34adf2b608933613abdbcb4407cebb70be69980084bf",
+      "retainedSha256": "ec6b9df677d17dcdd63e34adf2b608933613abdbcb4407cebb70be69980084bf",
+      "scrubs": []
+    },
+    {
+      "file": "settings-sources.json",
+      "bytes": 243,
+      "sourceSha256": "7327a1ea9dce4bd56f501258a24668afc4e1ef090047455a51e575d7173d86f8",
+      "retainedSha256": "7327a1ea9dce4bd56f501258a24668afc4e1ef090047455a51e575d7173d86f8",
+      "scrubs": []
+    },
+    {
+      "file": "sources/engine-wire.jsonl",
+      "bytes": 5687,
+      "sourceSha256": "58d7aa8679755e5fdeaab1dc99b2ff333a44c510b443309347f74446820c95bf",
+      "retainedSha256": "58d7aa8679755e5fdeaab1dc99b2ff333a44c510b443309347f74446820c95bf",
+      "scrubs": []
+    },
+    {
+      "file": "sources-sources.json",
+      "bytes": 1781,
+      "sourceSha256": "9bfd89362266c91fb8cf1c0c8259d4d38fab44ea011aeb932ea3bda80f881ded",
+      "retainedSha256": "9bfd89362266c91fb8cf1c0c8259d4d38fab44ea011aeb932ea3bda80f881ded",
+      "scrubs": []
+    },
+    {
+      "file": "transport-host-death.json",
+      "bytes": 37,
+      "sourceSha256": "24d07afb7269329f76178fcfc95f452a6f9d4960d57a6c65b5304be88abc2435",
+      "retainedSha256": "24d07afb7269329f76178fcfc95f452a6f9d4960d57a6c65b5304be88abc2435",
+      "scrubs": []
+    },
+    {
+      "file": "transport-http.json",
+      "bytes": 510,
+      "sourceSha256": "8a4973a41c5a7f26b6a5321ec658a5537b6c675ff16880b8b0d3926a99487b03",
+      "retainedSha256": "8a4973a41c5a7f26b6a5321ec658a5537b6c675ff16880b8b0d3926a99487b03",
+      "scrubs": []
+    },
+    {
+      "file": "transport-idle.json",
+      "bytes": 37,
+      "sourceSha256": "e8eb33682edf1758ad1fcbebebfa718afe82bdf3d4856942be6b256737fd040b",
+      "retainedSha256": "e8eb33682edf1758ad1fcbebebfa718afe82bdf3d4856942be6b256737fd040b",
+      "scrubs": []
+    },
+    {
+      "file": "transport-stdio-close.json",
+      "bytes": 52,
+      "sourceSha256": "e262b38fdf7662a62e781e341c13ef02dc32b77b196acc9f4df4cfacbfe5955c",
+      "retainedSha256": "e262b38fdf7662a62e781e341c13ef02dc32b77b196acc9f4df4cfacbfe5955c",
+      "scrubs": []
+    },
+    {
+      "file": "transport-stdio-instances.json",
+      "bytes": 1020,
+      "sourceSha256": "e5cf294b889416a2cc8378a9624e02dd8ea2492d7c7dcf6d2adc6185c54906d7",
+      "retainedSha256": "e5cf294b889416a2cc8378a9624e02dd8ea2492d7c7dcf6d2adc6185c54906d7",
+      "scrubs": []
+    },
+    {
+      "file": "worktree/engine-wire.jsonl",
+      "bytes": 2713,
+      "sourceSha256": "069c9e09a7d7f666afc177bf58e848c9dd1c24643437ad3afae4472019868258",
+      "retainedSha256": "069c9e09a7d7f666afc177bf58e848c9dd1c24643437ad3afae4472019868258",
+      "scrubs": []
+    },
+    {
+      "file": "worktree-keys.json",
+      "bytes": 50,
+      "sourceSha256": "a06d7b356a371f92096ed4cd91de5e3ae265af6e2229acacf12b519d1ea6b6bf",
+      "retainedSha256": "a06d7b356a371f92096ed4cd91de5e3ae265af6e2229acacf12b519d1ea6b6bf",
+      "scrubs": []
+    },
+    {
+      "file": "worktree-sources.json",
+      "bytes": 248,
+      "sourceSha256": "987c78515abc1ea2615f9212f660b89ffb1df9d0581ad3db7b155cc40ebf6b53",
+      "retainedSha256": "987c78515abc1ea2615f9212f660b89ffb1df9d0581ad3db7b155cc40ebf6b53",
+      "scrubs": []
+    }
+  ]
+}

@@ -6,7 +6,6 @@ import { createContext, useContext, useState, useSyncExternalStore, type ReactNo
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import type { AskRowData, Cell, Row, Spill, SubagentRef, TurnId } from '../model/rows';
-import { ipcLoadSpill, ipcOpenExternal } from '../source/ipc';
 import { WorkMotion } from './motion';
 
 export interface TranscriptActions {
@@ -17,7 +16,7 @@ export interface TranscriptActions {
   openExternal(url: string): void; // C5: layout.openExternal
   editAndResubmit(row: Extract<Row, { kind: 'user' }>): void; // C7: prefill the composer; forks history (§4.2)
   editPrompt(row: Extract<Row, { kind: 'user' }>): void; // C7 (W1): a prompt that never reached the model (a hook blocked it) back into the composer, as a new message
-  loadSpill(spill: Spill): Promise<string>; // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS)
+  loadSpill(spill: Spill): Promise<string>; // C4: fs.readSpill; default adapter provided (DEFAULT_ACTIONS, ./default-actions.ts)
   // E1 start: the `maws` server's rows (tools/maws/actions.ts, registered from App.tsx's E1 block)
   openAsk(appSessionId: AppSessionId, ask: AskRowData): void; // the Question sheet with this ask, from the capsule's own data (residue 14)
   openDelivered(appSessionId: AppSessionId, path: string): Promise<string | null>; // files.openExternal; what to show inline when it was refused, null when opened
@@ -42,6 +41,9 @@ export interface TranscriptActions {
   // P2-F L121: a mark under a user row that its mount knows of (the comment card's "Sent to Claude" on a reply the engine
   // took); none when omitted
   userRowMark?(row: Extract<Row, { kind: 'user' }>): string | null;
+  // Why a dropped prompt never ran, when its mount knows (the desk: its turn was undone before the session read it), said
+  // in place of Not sent; Not sent when omitted or null
+  droppedRowMark?(row: Extract<Row, { kind: 'user' }>): string | null;
 }
 
 // E7 start: who a Reply or a Message goes to, and what became of the last one to that address (E7 execution document,
@@ -85,9 +87,14 @@ export const NO_ACTIONS: TranscriptActions = {
   openBrowserTab: noop,
   // E4c end
 };
-// What a Transcript does for an action its caller did not supply: the two X2 commands C6 can call itself (a spilled
-// result through fs.readSpill, a link through layout.openExternal); the rest belong to C5, C7 and C8 and do nothing.
-export const DEFAULT_ACTIONS: TranscriptActions = { ...NO_ACTIONS, loadSpill: ipcLoadSpill, openExternal: ipcOpenExternal };
+// The actions a row reads outside any Transcript (a standalone Markdown surface, the row tests): the host's defaults.
+// MAWS's (`DEFAULT_ACTIONS`: fs.readSpill and layout.openExternal over IPC) live in ./default-actions.ts, which installs
+// them here when it loads, so this module and everything that reads it — the rows, Markdown, the to-human presenter —
+// import without MAWS's IPC client (the desk's web app imports them; docs/doperpowers/specs/2026-10-15-desk-design.md).
+let hostActions: TranscriptActions = NO_ACTIONS;
+export function setHostActions(actions: TranscriptActions): void {
+  hostActions = actions;
+}
 
 // Open/closed flags by id, kept per mounted transcript rather than in a row's own state.
 export class Disclosures {
@@ -121,7 +128,7 @@ export interface TranscriptContextValue {
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({
-  storeKey: '', variant: 'session', actions: DEFAULT_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'transcript',
+  storeKey: '', variant: 'session', get actions() { return hostActions; }, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'transcript',
 });
 
 export const TranscriptProvider = TranscriptContext.Provider;

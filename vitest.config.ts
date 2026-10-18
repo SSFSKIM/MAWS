@@ -41,7 +41,8 @@ const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',
   'src/renderer/src/sessions/resource.test.tsx', // a whole-tree mount switched across 20 sessions (gate offload, Decision Log 11)
 ];
-// P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md).
+// P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md); P3-C M4 shares the
+// project (the slide canvas, the deck editor).
 const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
 
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay
@@ -77,8 +78,8 @@ export default defineConfig({
           include: ['src/{shared,main,preload,engine-host,pty-host}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS],
           exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
           css: { include: [/\/design_system\/defaults\/.+\.css/] }, // P3-D: the defaults' `document.css` as text (`?raw`) for the host's and main's tests, as in `artifacts`
-          // The compile-time suites (`identifiers are not interchangeable`) run through tsc on the node tsconfig.
-          typecheck: { enabled: true, include: ['src/**/*.test-d.ts'], tsconfig: './tsconfig.node.json' },
+          // The compile-time suites (`src/**/*.test-d.ts`) are checked by `pnpm typecheck` alone, tsconfig.node.json
+          // including them; a second pass here only re-checked them (gate-offload Decision Log 35, P5).
         },
       },
       { resolve: { alias }, test: { name: 'node-timing', environment: 'node', include: TIMING_NODE_TESTS, ...TIMING_TIMEOUTS } },
@@ -143,6 +144,14 @@ export default defineConfig({
             // P3-D (the P3 spec's Decision Log 61): B's page bound to D's scope as built, where the compiler would memoize a hook
             // B called inside a memo
             'src/renderer/src/artifacts/design-system/documents.test.tsx',
+            // P3-H (the P3 spec's Decision Log 92): the library's components as built, where the first Export of a kind
+            // never showed (its formats read from the module's cache in render, memoized on the kind)
+            'src/renderer/src/library/**/*.test.tsx',
+            // P3-F1 (fix 2): the standalone tab's comment target and its pending notice, whose renders select the library,
+            // layout and pending stores through hooks
+            'src/renderer/src/tools/document/comment-session.test.tsx',
+            // E3 M3: the dashboard's live datasets as built, its editor rendering from its tab's live store
+            'src/renderer/src/tools/dashboard/live.compiled.test.tsx',
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },
@@ -151,6 +160,7 @@ export default defineConfig({
       // The desk's hub (apps/desk-hub, DC3 of docs/doperpowers/specs/2026-10-15-desk-design.md): its own config, under
       // this vitest, so `pnpm test` and the unit job's `--maxWorkers` reach it as they reach every project above.
       'apps/desk-hub/vitest.config.ts',
+      'apps/desk-web/vitest.config.ts', // DC5: the web app's client, log, and key, against the DX3 double
     ],
   },
 });

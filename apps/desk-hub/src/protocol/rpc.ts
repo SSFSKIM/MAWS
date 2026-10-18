@@ -28,11 +28,16 @@ export type RpcArgs = {
   retire: { session: string };
   /** Bring an ended session back on its machine with the same id. */
   resume: { session: string };
+  /**
+   * Stop one background shell or monitor of a bridged session (DC10): `TaskStop` through the bridge. `taskId` as the
+   * engine spells it, `[A-Za-z0-9_-]{1,64}`.
+   */
+  stop: { session: string; taskId: string };
 };
 
 export type RpcName = keyof RpcArgs;
 
-export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume'] as const satisfies readonly RpcName[];
+export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume', 'stop'] as const satisfies readonly RpcName[];
 
 export type RpcResults = {
   /**
@@ -54,6 +59,8 @@ export type RpcResults = {
   spawn: { session: string; alias: string };
   retire: Record<string, never>;
   resume: { session: string };
+  /** The task asked to stop. Its `stopped` arrives on the session's DX4 body (the `TaskStop` row), not here. */
+  stop: { taskId: string };
 };
 
 /**
@@ -95,6 +102,7 @@ export type RpcErrorCode =
   | 'unsupported'
   | 'session-live'
   | 'idle' // a steer while no turn is running: the web offers Send instead
+  | 'unknown-task' // a stop naming a task the session's jobs index does not hold as running (before the claim)
   // The daemon's, after a claim
   | 'copy-started'
   | 'interrupted'

@@ -15,8 +15,8 @@
     "src/artifacts/**/*", // P3-A: the portable artifact layer, typechecked as the host will import it
     "test/**/*",
     // C8a start: test/support/panel-child-fixture.ts measures its fixture through C6's pure model (createState,
-    // applyEvents, rowsOf) and journalToEvents; vitest's typecheck runs this project composite, which refuses a file
-    // the include does not list
+    // applyEvents, rowsOf) and journalToEvents; the project is composite (tsconfig.base.json), which refuses a file the
+    // include does not list
     "src/renderer/src/transcript/model/*.ts",
     "src/renderer/src/transcript/dev/journal.ts",
     // C8a end
@@ -42,17 +42,45 @@
     "e2e/support/live-budget.ts",
     // P2-F F-E: test/support/live-turns.test.ts runs the live specs' wait for a submitted turn
     "e2e/support/live-turns.ts",
+    // P3-C M9: test/support/text-run.test.ts runs the LibreOffice compare's text matcher
+    "e2e/support/text-run.ts",
+    // P3-C M10: test/support/live-lifecycle.test.ts runs the live runs' end (the stop, the cleanup, the engine's survival, the spend)
+    "e2e/support/live-lifecycle.ts",
+    // P3-E1 M6: test/support/design-bundle.test.ts runs the Design final run's bundle checks
+    "e2e/support/design-bundle.ts",
+    "e2e/support/design-final-reporter.ts", // P3-E1 M6: test/support/design-final-reporter.test.ts drives it at its boundary
+    "e2e/support/design-geometry.ts", // P3-E1 M6: test/support/design-geometry.test.ts runs the evidence probe's hidden-node rule
+    // P3-E1 M6: test/support/design-frames.test.ts runs the design scale gate's frame readings
+    "e2e/support/design-frames.ts",
+    // P3-H: test/support/final-bundle.test.ts runs the final run's build bundle and its reporter (gate-offload Decision Log 50)
+    "e2e/support/final-bundle.ts",
+    "e2e/support/final-bundle-reporter.ts",
+    // P3-H: test/support/send-to-approval.test.ts runs the Send to live run's approval predicate
+    "e2e/support/send-to-approval.ts",
+    // P3-HD M4a: test/support/connector-oauth*.test.ts run the toy OAuth fixture's logic, its scene support and fake browser
+    "e2e/support/connector-oauth-core.d.mts",
+    "e2e/support/connector-oauth.ts",
+    "e2e/support/connector-oauth-browser.ts",
+    "e2e/support/connector-direct-checks.ts", // P3-HD M4b: test/support/connector-direct-checks.test.ts runs the integrated scenes' pure checks
     // P2-F S-locale: the transcript model's day words and the agent tools' ages write through the renderer's date
     // formats (D2 widened), and the agent models' tests read the system locale's relative times; listed for the same
     // reason as C8a's
     "src/renderer/src/app/date-format.ts",
     "src/renderer/src/test-support/relative-time.ts",
     "src/renderer/src/artifacts/host.ts", // P3-A M5: the detached-channel test drives the real ArtifactHost under Node
+    "src/renderer/src/artifacts/command-error.ts", // P3-H H4: host.ts's error, shared with its connector family
+    "src/renderer/src/artifacts/connectors.ts", // P3-H H4: host.ts's connector family
     // P3-B: test/artifacts/document-writer-bench.test.ts benches the patch writer on the 200-page seed M9's gate uses
-    "e2e/support/document-seed.ts"
+    "e2e/support/document-seed.ts",
+    // P3-E (E2 M6): test/support/dashboard-bundle.test.ts runs the dashboard acceptance run's final bundle checks
+    "e2e/support/dashboard-bundle.ts",
+    "e2e/support/dashboard-acceptance.ts",
+    "e2e/support/dashboard-scale.ts", // P3-E (E2 M6): test/support/dashboard-scale.test.ts runs the scale gate's judging
+    "e2e/support/live-data-bounds.ts" // E3 M4: test/support/live-data-bounds.test.ts runs the live block's on-screen judgement
   ],
   // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
-  // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise.
+  // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:
+  // the slide canvas and the deck editor, likewise (M9: `canvas/css.ts` stays in, since the exporters in main write it).
   "exclude": [
     "src/main/artifacts/*.dom.test.tsx",
     "src/artifacts/document/editor/**/*",
@@ -61,6 +89,14 @@
     "src/artifacts/design-system/apply.ts", // P3-D
     "src/artifacts/design-system/scope-style.ts", // P3-D
     "src/artifacts/design-system/page/**/*", // P3-D
-    "src/artifacts/design-system/**/*.test.tsx" // P3-D
+    "src/artifacts/design-system/**/*.test.tsx", // P3-D
+    "src/artifacts/slides/canvas/slide-canvas.ts", // P3-C
+    "src/artifacts/slides/canvas/elements.ts", // P3-C
+    "src/artifacts/slides/canvas/fit.ts", // P3-C
+    "src/artifacts/slides/canvas/index.ts", // P3-C
+    "src/artifacts/slides/editor/**/*", // P3-C
+    "src/artifacts/design/editor/**/*.tsx", // P3-E1 M3: the workbench's React and DOM (its pure modules beside them stay in)
+    "src/artifacts/**/*.dom.test.tsx", // P3-C
+    "src/artifacts/dashboard/editor/**/*" // P3-E (E2 M3): the dashboard's node views and source sheet, typechecked by tsconfig.web.json
   ]
 }

@@ -1,8 +1,9 @@
 import { guardStdio } from './stdio-guard'; // cua board #97
+import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
 import { totalmem } from 'node:os'; // C12: the default memory budget
-import { app, BrowserWindow, dialog, screen } from 'electron';
+import { app, BrowserWindow, dialog, screen, type WebContents } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
@@ -128,7 +129,18 @@ import { registerDocumentExporters } from './artifacts/export-document'; // P3-B
 // P3-D start
 import { engineHostCall, governDocumentExporter } from './design-systems/documents';
 import { registerDesignSystemExporters } from './design-systems/export';
+import { registerPresentationExporters } from './presentations/export'; // P3-C M9
+import { registerDesignExporters } from './design/export'; // P3-E (E1's M5)
+import { registerPresenter } from './presentations/present'; // P3-C M6
 // P3-D end
+// P3-E start
+import { registerAssetDownload } from './dashboard/download';
+import { holdAsset, registerDatasetHolds } from './dashboard/holds'; // E3
+import { registerDashboardExporters } from './dashboard/export'; // E2 M5
+// P3-E end
+import { startConnectors } from './connectors'; // P3-H H3b
+import { createDirectRoute } from './connectors/direct-route'; // P3-HD: route D, MAWS's own MCP connections
+import { productionConnectorOAuth } from './connectors/oauth-root'; // P3-HD M3c2: MAWS's own OAuth beside route D
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -142,6 +154,8 @@ if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DA
 // The smoke runs unattended, so nothing may wait on a person: Chromium keeps its storage key in a mock keychain
 // instead of asking the login keychain, whose access prompt an unsigned or re-signed build can raise.
 if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
+// P3-F1 fix 3: no mDNS responder on *:5353 when a frame gathers ICE candidates (see chromium-features.ts); one merged switch.
+disableChromiumFeatures(app.commandLine, STARTUP_DISABLED_FEATURES);
 // E2: the store's scheme is privileged before the app is ready (protocol.registerSchemesAsPrivileged); P3-A M7: the
 // artifact store's; P3-L M6b: the deliverable store's no more
 registerStoreSchemes();
@@ -581,9 +595,22 @@ void startWithProfileLock(app, () => {
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
   });
   shutdown.add('artifacts', artifacts.stop);
+  // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
+  // engine host's main-only commands). Its stop runs before the hosts' (steps run in the order added): every lease,
+  // watch and pending operation ends, each operation withdrawn from the host, while the host can still hear it.
+  // P3-H H4: a page's owner window, read by main, vetoes its pages while hidden or minimized (P3 Decision Log 89)
+  // P3-HD (Decision Log 14): the root supplies route D, which the service composes after route E; the engine stays preferred.
+  // P3-HD M3c2: with it, MAWS's own OAuth provider (sealed under userData, safeStorage asked only on demand)
+  const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents), direct: createDirectRoute, oauth: productionConnectorOAuth });
+  shutdown.add('connectors', connectors.stop);
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
+  registerPresentationExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude; the governing system from D's `designSystems.governing` (Decision Log 27 (2))
+  // P3-E (E2 M5; E's Decision Log 32): `dashboard` as md, html, docx, pdf: B's four, governed by D, over the captured views
+  shutdown.add('dashboard-exporters', registerDashboardExporters((exporter) => artifacts.exporters.register(exporter), { call: engineHostCall(hosts.dispatch), env: process.env }));
+  registerDesignExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-E (E1's M5): `design` as png and pdf over C's capture window, never cropped (XE9)
+  shutdown.add('presenter', registerPresenter({ register: registerMainHandler, appUrl, env: process.env }).end); // P3-C M6: `presentations.present`, the show's windows
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
   // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the
   // same will-quit pass as the index's close, so no sync step runs between them, and after it applies nothing.
@@ -610,6 +637,28 @@ void startWithProfileLock(app, () => {
     },
   });
   shutdown.add('library', library.stop);
+  // P3-E start (E2 M3; E's Decision Log 18): a dashboard source sheet's Download, the artifact's own asset saved through
+  // main's dialog under Downloads
+  registerAssetDownload(registerMainHandler, {
+    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+    hold: (artifactId, ref) => holdAsset((name, input) => hosts.dispatch('engine-host', name, input) as never, artifactId, ref), // E3: its own hold through the dialog and the copy
+    downloads: () => app.getPath('downloads'),
+    showSaveDialog: (options, sender) => {
+      const win = sender ? BrowserWindow.fromWebContents(sender) : null;
+      return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+    },
+    env: process.env,
+  });
+  // P3-E end
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): a window's holds over a dashboard's snapshots, each
+  // released by its window alone or with it; the host's going takes the host's holds with it
+  shutdown.add(
+    'dataset-holds',
+    registerDatasetHolds(registerMainHandler, {
+      call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+      onHostLost: (listener) => hosts.onState('engine-host', (state) => (state.state === 'ready' ? undefined : listener())),
+    }),
+  );
   openWindow();
 
   // E5 start: each window's unsaved editor files for the quit guard (E5 execution document, M5): the page pushes its

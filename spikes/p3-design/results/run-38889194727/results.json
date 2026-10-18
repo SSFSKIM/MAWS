@@ -1,0 +1,2920 @@
+{
+  "g2.edit": [
+    {
+      "size": [
+        1080,
+        32768
+      ],
+      "scale": 0.25,
+      "markerScreen": [
+        34,
+        34
+      ],
+      "picked": true,
+      "before": "945px",
+      "after": "785px",
+      "movedBy": -160,
+      "wanted": -160
+    },
+    {
+      "size": [
+        65536,
+        1080
+      ],
+      "scale": 0.5,
+      "markerScreen": [
+        68,
+        68
+      ],
+      "picked": true,
+      "before": "65401px",
+      "after": "65321px",
+      "movedBy": -80,
+      "wanted": -80
+    },
+    {
+      "size": [
+        32768,
+        32768
+      ],
+      "scale": 0.75,
+      "markerScreen": [
+        3072,
+        3072
+      ],
+      "picked": false,
+      "error": "\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mnot\u001b[2m.\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: not \u001b[32m\"28672px\"\u001b[39m\n\nCall Log:\n- Timeout 10000ms exceeded while waiting on the predicate"
+    }
+  ],
+  "g2.consoleErrors": [],
+  "e2.capture": [
+    {
+      "board": [
+        16384,
+        4096
+      ],
+      "mpx": 67.1,
+      "ok": true,
+      "ms": 697,
+      "content": [
+        16384,
+        4096
+      ],
+      "size": {
+        "width": 16384,
+        "height": 4096
+      },
+      "empty": false,
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        1080,
+        24576
+      ],
+      "mpx": 26.5,
+      "ok": true,
+      "ms": 513,
+      "content": [
+        1080,
+        24576
+      ],
+      "size": {
+        "width": 1080,
+        "height": 16384
+      },
+      "empty": false,
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#ffffff",
+        "#ffffff"
+      ]
+    },
+    {
+      "board": [
+        24576,
+        1080
+      ],
+      "mpx": 26.5,
+      "ok": true,
+      "ms": 534,
+      "content": [
+        24576,
+        1080
+      ],
+      "size": {
+        "width": 16384,
+        "height": 1080
+      },
+      "empty": false,
+      "corners": [
+        "#ff0000",
+        "#ffffff",
+        "#0000ff",
+        "#ffffff"
+      ]
+    },
+    {
+      "board": [
+        1080,
+        32768
+      ],
+      "mpx": 35.4,
+      "ok": true,
+      "ms": 530,
+      "content": [
+        1080,
+        32768
+      ],
+      "size": {
+        "width": 1080,
+        "height": 16384
+      },
+      "empty": false,
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#ffffff",
+        "#ffffff"
+      ]
+    },
+    {
+      "board": [
+        12000,
+        12000
+      ],
+      "mpx": 144,
+      "ok": true,
+      "ms": 1082,
+      "content": [
+        12000,
+        12000
+      ],
+      "size": {
+        "width": 12000,
+        "height": 12000
+      },
+      "empty": false,
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        16384,
+        8192
+      ],
+      "mpx": 134.2,
+      "ok": true,
+      "ms": 608,
+      "content": [
+        16384,
+        8192
+      ],
+      "size": {
+        "width": 16384,
+        "height": 8192
+      },
+      "empty": false,
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    }
+  ],
+  "e2.real.png.tall": {
+    "ms": 380,
+    "want": [
+      1080,
+      16384
+    ],
+    "bytes": 87004,
+    "size": {
+      "width": 1080,
+      "height": 16384
+    },
+    "corners": [
+      "#ff0000",
+      "#00c000",
+      "#0000ff",
+      "#ff00ff"
+    ],
+    "wantCorners": [
+      "#ff0000",
+      "#00c000",
+      "#0000ff",
+      "#ff00ff"
+    ]
+  },
+  "e2.real.png.wide": {
+    "ms": 683,
+    "want": [
+      16384,
+      4096
+    ],
+    "bytes": 203566,
+    "size": {
+      "width": 16384,
+      "height": 4096
+    },
+    "corners": [
+      "#ff0000",
+      "#00c000",
+      "#0000ff",
+      "#ff00ff"
+    ],
+    "wantCorners": [
+      "#ff0000",
+      "#00c000",
+      "#0000ff",
+      "#ff00ff"
+    ]
+  },
+  "e2.real.pdf": {
+    "ms": 246,
+    "raw": {
+      "typePage": 2,
+      "mediaBoxesPx": [
+        [
+          1080,
+          20000
+        ],
+        [
+          16384,
+          16384
+        ]
+      ],
+      "objStm": false
+    },
+    "pages": [
+      {
+        "px": [
+          1080,
+          20000
+        ],
+        "cm": [
+          0.23999999,
+          0,
+          0,
+          -0.23999999,
+          0,
+          15000
+        ],
+        "rects": [
+          [
+            0,
+            0,
+            3375,
+            62500
+          ],
+          [
+            0,
+            0,
+            1080,
+            20000
+          ],
+          [
+            0,
+            0,
+            3375,
+            62500
+          ],
+          [
+            0,
+            0,
+            135,
+            135
+          ]
+        ]
+      },
+      {
+        "px": [
+          16384,
+          16384
+        ],
+        "cm": [
+          0.23999999,
+          0,
+          0,
+          -0.23999999,
+          0,
+          12288
+        ],
+        "rects": [
+          [
+            0,
+            0,
+            51200,
+            51200
+          ],
+          [
+            0,
+            20000,
+            16384,
+            16384
+          ],
+          [
+            0,
+            0,
+            51200,
+            51200
+          ],
+          [
+            0,
+            20000,
+            2048,
+            2048
+          ]
+        ]
+      }
+    ]
+  },
+  "e2.consoleErrors": [],
+  "b2.idleFrameMs": 16.7,
+  "b2.24.all": {
+    "pan": {
+      "interval": {
+        "n": 180,
+        "p50": 16.6,
+        "p95": 18.3,
+        "max": 18.6,
+        "mean": 16.67
+      },
+      "dropped": 0,
+      "work": {
+        "n": 180,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 0.4,
+        "mean": 0.22
+      },
+      "loaf": {
+        "count": 1,
+        "totalMs": 137.3,
+        "maxMs": 137.3,
+        "renderMaxMs": 88.1
+      },
+      "mounted": {
+        "min": 24,
+        "max": 24,
+        "mean": 24
+      },
+      "trace": {
+        "events": 72296,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 184
+        },
+        "dropped": 0,
+        "drawFrame": 132,
+        "beginFrame": 182,
+        "raster": [
+          {
+            "name": "RendererRasterWorker",
+            "n": 187,
+            "durMs": 51.7
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 179,
+            "durMs": 1
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 179,
+            "durMs": 22
+          },
+          {
+            "name": "RasterTask",
+            "n": 179,
+            "durMs": 21.3
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 179,
+            "durMs": 20.9
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 179,
+            "durMs": 19.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 179,
+            "durMs": 13.6
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 179,
+            "durMs": 9.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 179,
+            "durMs": 9.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 179,
+            "durMs": 26.4
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 179,
+            "durMs": 24.5
+          }
+        ],
+        "top": [
+          {
+            "name": "Graphics.Pipeline",
+            "n": 5746,
+            "durMs": 219.3
+          },
+          {
+            "name": "RunTask",
+            "n": 4728,
+            "durMs": 647.3
+          },
+          {
+            "name": "UpdateLayer",
+            "n": 4476,
+            "durMs": 5.2
+          },
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 4299,
+            "durMs": 5.1
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 1323,
+            "durMs": 131
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 1209,
+            "durMs": 1.1
+          },
+          {
+            "name": "CommandBuffer::OrderingBarrier",
+            "n": 930,
+            "durMs": 0.4
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 725,
+            "durMs": 0.9
+          },
+          {
+            "name": "AnimationFrame",
+            "n": 724,
+            "durMs": 0
+          },
+          {
+            "name": "CommandBuffer::Flush",
+            "n": 561,
+            "durMs": 51.5
+          },
+          {
+            "name": "AnimationHost::TickAnimations",
+            "n": 546,
+            "durMs": 1
+          },
+          {
+            "name": "ScheduledTasksState",
+            "n": 546,
+            "durMs": 0
+          },
+          {
+            "name": "SendBeginMainFrame",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame",
+            "n": 543,
+            "durMs": 283.6
+          },
+          {
+            "name": "Commit",
+            "n": 540,
+            "durMs": 23.2
+          },
+          {
+            "name": "LayerTreeHostImpl::CommitComplete",
+            "n": 540,
+            "durMs": 31.8
+          },
+          {
+            "name": "LayerTreeHostImpl::ActivateSyncTree",
+            "n": 538,
+            "durMs": 13.2
+          },
+          {
+            "name": "ScrollTree::SetScrollOffset",
+            "n": 537,
+            "durMs": 1.1
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame::commit",
+            "n": 537,
+            "durMs": 1.4
+          },
+          {
+            "name": "ProxyImpl::ReadyToCommit",
+            "n": 537,
+            "durMs": 55.5
+          },
+          {
+            "name": "ProxyImpl::Commit",
+            "n": 537,
+            "durMs": 20.6
+          },
+          {
+            "name": "ProxyImpl::ReadyToActivate",
+            "n": 537,
+            "durMs": 0
+          },
+          {
+            "name": "GpuChannel::Flush",
+            "n": 447,
+            "durMs": 0.1
+          },
+          {
+            "name": "TileTaskManagerImpl::CheckForCompletedTasks",
+            "n": 412,
+            "durMs": 1.2
+          },
+          {
+            "name": "TileManager::CheckPendingGpuWorkAndIssueSignals",
+            "n": 412,
+            "durMs": 18.5
+          }
+        ]
+      }
+    },
+    "zoom": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.3,
+        "max": 18.5,
+        "mean": 16.67
+      },
+      "dropped": 0,
+      "work": {
+        "n": 180,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 0.5,
+        "mean": 0.22
+      },
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 24,
+        "max": 24,
+        "mean": 24
+      },
+      "trace": {
+        "events": 86871,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":true": 1,
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 181
+        },
+        "dropped": 0,
+        "drawFrame": 179,
+        "beginFrame": 182,
+        "raster": [
+          {
+            "name": "RendererRasterWorker",
+            "n": 311,
+            "durMs": 83.3
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 541,
+            "durMs": 12.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 541,
+            "durMs": 20.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 541,
+            "durMs": 19.8
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 541,
+            "durMs": 46.8
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 541,
+            "durMs": 43.9
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 266,
+            "durMs": 1.2
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 266,
+            "durMs": 37.7
+          },
+          {
+            "name": "RasterTask",
+            "n": 266,
+            "durMs": 36.9
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 266,
+            "durMs": 36.3
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 266,
+            "durMs": 34.7
+          },
+          {
+            "name": "RasterImplementation::SetAggressivelyFreeResources",
+            "n": 2,
+            "durMs": 0.4
+          }
+        ],
+        "top": [
+          {
+            "name": "RunTask",
+            "n": 7856,
+            "durMs": 791.5
+          },
+          {
+            "name": "Graphics.Pipeline",
+            "n": 6692,
+            "durMs": 340.1
+          },
+          {
+            "name": "UpdateLayer",
+            "n": 4475,
+            "durMs": 4.8
+          },
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 4296,
+            "durMs": 4.4
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 2304,
+            "durMs": 220.7
+          },
+          {
+            "name": "IOSurfaceImageBacking::WaitForCommandsToBeScheduled",
+            "n": 1616,
+            "durMs": 21.9
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 933,
+            "durMs": 1.5
+          },
+          {
+            "name": "CommandBuffer::Flush",
+            "n": 915,
+            "durMs": 82.9
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 815,
+            "durMs": 0.9
+          },
+          {
+            "name": "Scheduler::FinishTask",
+            "n": 748,
+            "durMs": 0.4
+          },
+          {
+            "name": "AnimationFrame",
+            "n": 724,
+            "durMs": 0
+          },
+          {
+            "name": "Scheduler::SequenceUnblocked",
+            "n": 666,
+            "durMs": 0.1
+          },
+          {
+            "name": "LayerTreeHostImpl::NotifyTileStateChanged",
+            "n": 615,
+            "durMs": 0.4
+          },
+          {
+            "name": "CommandBuffer::OrderingBarrier",
+            "n": 603,
+            "durMs": 0.3
+          },
+          {
+            "name": "ScheduledTasksState",
+            "n": 549,
+            "durMs": 0
+          },
+          {
+            "name": "SendBeginMainFrame",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame",
+            "n": 543,
+            "durMs": 251.9
+          },
+          {
+            "name": "DisplayScheduler::ScheduleBeginFrameDeadline",
+            "n": 542,
+            "durMs": 3.1
+          },
+          {
+            "name": "AnimationHost::TickAnimations",
+            "n": 542,
+            "durMs": 0.9
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 541,
+            "durMs": 12.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 541,
+            "durMs": 20.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 541,
+            "durMs": 19.8
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 541,
+            "durMs": 46.8
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 541,
+            "durMs": 43.9
+          },
+          {
+            "name": "Commit",
+            "n": 541,
+            "durMs": 21.7
+          }
+        ]
+      }
+    },
+    "pan100": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.3,
+        "max": 18.7,
+        "mean": 16.66
+      },
+      "dropped": 0,
+      "work": {
+        "n": 180,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 0.4,
+        "mean": 0.23
+      },
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 24,
+        "max": 24,
+        "mean": 24
+      },
+      "trace": {
+        "events": 66617,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 180
+        },
+        "dropped": 0,
+        "drawFrame": 147,
+        "beginFrame": 182,
+        "raster": [
+          {
+            "name": "RasterImplementation::SetAggressivelyFreeResources",
+            "n": 2,
+            "durMs": 0.1
+          },
+          {
+            "name": "RendererRasterWorker",
+            "n": 4,
+            "durMs": 0.2
+          }
+        ],
+        "top": [
+          {
+            "name": "Graphics.Pipeline",
+            "n": 6009,
+            "durMs": 176.4
+          },
+          {
+            "name": "RunTask",
+            "n": 5233,
+            "durMs": 553.9
+          },
+          {
+            "name": "UpdateLayer",
+            "n": 4475,
+            "durMs": 5.9
+          },
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 4296,
+            "durMs": 5.4
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 735,
+            "durMs": 1.2
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 735,
+            "durMs": 40.7
+          },
+          {
+            "name": "AnimationFrame",
+            "n": 724,
+            "durMs": 0
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 543,
+            "durMs": 0.9
+          },
+          {
+            "name": "SendBeginMainFrame",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame",
+            "n": 543,
+            "durMs": 280.7
+          },
+          {
+            "name": "ScheduledTasksState",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "AnimationHost::TickAnimations",
+            "n": 542,
+            "durMs": 1
+          },
+          {
+            "name": "Commit",
+            "n": 537,
+            "durMs": 25.9
+          },
+          {
+            "name": "ScrollTree::SetScrollOffset",
+            "n": 537,
+            "durMs": 1.3
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame::commit",
+            "n": 537,
+            "durMs": 1.5
+          },
+          {
+            "name": "ProxyImpl::ReadyToCommit",
+            "n": 537,
+            "durMs": 54.9
+          },
+          {
+            "name": "ProxyImpl::Commit",
+            "n": 537,
+            "durMs": 22.2
+          },
+          {
+            "name": "LayerTreeHostImpl::CommitComplete",
+            "n": 537,
+            "durMs": 28.8
+          },
+          {
+            "name": "ProxyImpl::ReadyToActivate",
+            "n": 537,
+            "durMs": 0
+          },
+          {
+            "name": "LayerTreeHostImpl::ActivateSyncTree",
+            "n": 537,
+            "durMs": 13.2
+          },
+          {
+            "name": "DisplayScheduler::ScheduleBeginFrameDeadline",
+            "n": 443,
+            "durMs": 3.1
+          },
+          {
+            "name": "ExternalBeginFrameSource::OnBeginFrame",
+            "n": 366,
+            "durMs": 34.3
+          },
+          {
+            "name": "auto cc::SchedulerStateMachine::ShouldThrottleSendBeginMainFrame()::(lambda)::operator()(uint32_t) const",
+            "n": 363,
+            "durMs": 0
+          },
+          {
+            "name": "TaskSetFinishedTaskImpl::RunOnWorkerThread",
+            "n": 362,
+            "durMs": 0.5
+          },
+          {
+            "name": "ScheduledTasks",
+            "n": 362,
+            "durMs": 0
+          }
+        ]
+      }
+    }
+  },
+  "b2.24.visible": {
+    "pan": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.3,
+        "max": 18.6,
+        "mean": 16.67
+      },
+      "dropped": 0,
+      "work": {
+        "n": 180,
+        "p50": 0.3,
+        "p95": 0.8,
+        "max": 12.8,
+        "mean": 0.42
+      },
+      "loaf": {
+        "count": 1,
+        "totalMs": 55.9,
+        "maxMs": 55.9,
+        "renderMaxMs": 7.5
+      },
+      "mounted": {
+        "min": 0,
+        "max": 20,
+        "mean": 5.1
+      },
+      "trace": {
+        "events": 71577,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 182
+        },
+        "dropped": 0,
+        "drawFrame": 132,
+        "beginFrame": 182,
+        "raster": [
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 267,
+            "durMs": 13.6
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 267,
+            "durMs": 13.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 267,
+            "durMs": 34.6
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 267,
+            "durMs": 32.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 266,
+            "durMs": 4.2
+          },
+          {
+            "name": "RendererRasterWorker",
+            "n": 95,
+            "durMs": 53.6
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 182,
+            "durMs": 1
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 182,
+            "durMs": 24.5
+          },
+          {
+            "name": "RasterTask",
+            "n": 182,
+            "durMs": 23.8
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 182,
+            "durMs": 23.4
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 182,
+            "durMs": 22.3
+          }
+        ],
+        "top": [
+          {
+            "name": "Graphics.Pipeline",
+            "n": 5701,
+            "durMs": 239
+          },
+          {
+            "name": "RunTask",
+            "n": 4753,
+            "durMs": 626.6
+          },
+          {
+            "name": "UpdateLayer",
+            "n": 4475,
+            "durMs": 4.9
+          },
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 4344,
+            "durMs": 4.2
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 1188,
+            "durMs": 134.3
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 1056,
+            "durMs": 1.3
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 728,
+            "durMs": 1
+          },
+          {
+            "name": "AnimationFrame",
+            "n": 724,
+            "durMs": 0
+          },
+          {
+            "name": "UpdateCounters",
+            "n": 567,
+            "durMs": 0
+          },
+          {
+            "name": "SendBeginMainFrame",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame",
+            "n": 543,
+            "durMs": 243
+          },
+          {
+            "name": "AnimationHost::TickAnimations",
+            "n": 542,
+            "durMs": 0.8
+          },
+          {
+            "name": "ScheduledTasksState",
+            "n": 540,
+            "durMs": 0
+          },
+          {
+            "name": "Commit",
+            "n": 539,
+            "durMs": 22.4
+          },
+          {
+            "name": "ScrollTree::SetScrollOffset",
+            "n": 537,
+            "durMs": 1
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame::commit",
+            "n": 537,
+            "durMs": 1.3
+          },
+          {
+            "name": "ProxyImpl::ReadyToCommit",
+            "n": 537,
+            "durMs": 61.4
+          },
+          {
+            "name": "ProxyImpl::Commit",
+            "n": 537,
+            "durMs": 24.4
+          },
+          {
+            "name": "LayerTreeHostImpl::CommitComplete",
+            "n": 537,
+            "durMs": 33.3
+          },
+          {
+            "name": "ProxyImpl::ReadyToActivate",
+            "n": 537,
+            "durMs": 0
+          },
+          {
+            "name": "LayerTreeHostImpl::ActivateSyncTree",
+            "n": 537,
+            "durMs": 18
+          },
+          {
+            "name": "IOSurfaceImageBacking::WaitForCommandsToBeScheduled",
+            "n": 514,
+            "durMs": 0.9
+          },
+          {
+            "name": "LayerTreeHostImpl::NotifyTileStateChanged",
+            "n": 452,
+            "durMs": 0.3
+          },
+          {
+            "name": "CommandBuffer::OrderingBarrier",
+            "n": 450,
+            "durMs": 0.3
+          },
+          {
+            "name": "TileTaskManagerImpl::CheckForCompletedTasks",
+            "n": 408,
+            "durMs": 1.3
+          }
+        ]
+      }
+    },
+    "zoom": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.2,
+        "max": 18.7,
+        "mean": 16.67
+      },
+      "dropped": 0,
+      "work": {
+        "n": 180,
+        "p50": 0.3,
+        "p95": 3.9,
+        "max": 11,
+        "mean": 0.72
+      },
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 3,
+        "max": 24,
+        "mean": 13.2
+      },
+      "trace": {
+        "events": 99327,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 183,
+          "{\"frame_reporter\":{\"affects_smoothness\":true,\"checkerboarded_needs_raster\":false": 3
+        },
+        "dropped": 3,
+        "drawFrame": 179,
+        "beginFrame": 182,
+        "raster": [
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 684,
+            "durMs": 13.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 684,
+            "durMs": 15.7
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 684,
+            "durMs": 15.1
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 684,
+            "durMs": 37.6
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 684,
+            "durMs": 35
+          },
+          {
+            "name": "RendererRasterWorker",
+            "n": 413,
+            "durMs": 69.4
+          },
+          {
+            "name": "RasterImplementation::SetAggressivelyFreeResources",
+            "n": 2,
+            "durMs": 0.2
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 415,
+            "durMs": 0.8
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 406,
+            "durMs": 22.1
+          },
+          {
+            "name": "RasterTask",
+            "n": 406,
+            "durMs": 21.5
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 406,
+            "durMs": 21
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 406,
+            "durMs": 19.7
+          }
+        ],
+        "top": [
+          {
+            "name": "RunTask",
+            "n": 6743,
+            "durMs": 837.9
+          },
+          {
+            "name": "Graphics.Pipeline",
+            "n": 6688,
+            "durMs": 264.7
+          },
+          {
+            "name": "UpdateLayer",
+            "n": 4241,
+            "durMs": 3.7
+          },
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 4177,
+            "durMs": 2.9
+          },
+          {
+            "name": "Paint",
+            "n": 3136,
+            "durMs": 124
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 2778,
+            "durMs": 179.9
+          },
+          {
+            "name": "UpdateCounters",
+            "n": 2193,
+            "durMs": 0
+          },
+          {
+            "name": "ParseHTML",
+            "n": 1988,
+            "durMs": 3.1
+          },
+          {
+            "name": "IOSurfaceImageBacking::WaitForCommandsToBeScheduled",
+            "n": 1761,
+            "durMs": 18
+          },
+          {
+            "name": "CommandBuffer::Flush",
+            "n": 1221,
+            "durMs": 69.1
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 1065,
+            "durMs": 1.4
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 955,
+            "durMs": 0.7
+          },
+          {
+            "name": "CommandBuffer::OrderingBarrier",
+            "n": 938,
+            "durMs": 0.3
+          },
+          {
+            "name": "Scheduler::FinishTask",
+            "n": 894,
+            "durMs": 0.3
+          },
+          {
+            "name": "LayerTreeHostImpl::NotifyTileStateChanged",
+            "n": 887,
+            "durMs": 0.4
+          },
+          {
+            "name": "Scheduler::SequenceUnblocked",
+            "n": 834,
+            "durMs": 0.1
+          },
+          {
+            "name": "AnimationFrame",
+            "n": 724,
+            "durMs": 0
+          },
+          {
+            "name": "GpuChannel::ExecuteDeferredRequest",
+            "n": 690,
+            "durMs": 82.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 684,
+            "durMs": 13.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 684,
+            "durMs": 15.7
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 684,
+            "durMs": 15.1
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 684,
+            "durMs": 37.6
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 684,
+            "durMs": 35
+          },
+          {
+            "name": "ScheduledTasksState",
+            "n": 549,
+            "durMs": 0
+          },
+          {
+            "name": "DisplayScheduler::ScheduleBeginFrameDeadline",
+            "n": 544,
+            "durMs": 2.7
+          }
+        ]
+      }
+    },
+    "pan100": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.2,
+        "max": 18.7,
+        "mean": 16.66
+      },
+      "dropped": 0,
+      "work": {
+        "n": 180,
+        "p50": 0.3,
+        "p95": 0.5,
+        "max": 11.9,
+        "mean": 0.37
+      },
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 0,
+        "max": 4,
+        "mean": 2.2
+      },
+      "trace": {
+        "events": 61651,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 180
+        },
+        "dropped": 0,
+        "drawFrame": 147,
+        "beginFrame": 182,
+        "raster": [
+          {
+            "name": "RendererRasterWorker",
+            "n": 25,
+            "durMs": 9.9
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 34,
+            "durMs": 0.2
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 31,
+            "durMs": 2.7
+          },
+          {
+            "name": "RasterTask",
+            "n": 31,
+            "durMs": 2.5
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 31,
+            "durMs": 2.3
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 31,
+            "durMs": 2
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 31,
+            "durMs": 0.9
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 31,
+            "durMs": 2.1
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 31,
+            "durMs": 2
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 31,
+            "durMs": 6.3
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 31,
+            "durMs": 5.8
+          }
+        ],
+        "top": [
+          {
+            "name": "Graphics.Pipeline",
+            "n": 6009,
+            "durMs": 184.2
+          },
+          {
+            "name": "RunTask",
+            "n": 4643,
+            "durMs": 480.7
+          },
+          {
+            "name": "UpdateLayer",
+            "n": 1781,
+            "durMs": 2.8
+          },
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 1623,
+            "durMs": 2.3
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 879,
+            "durMs": 54.8
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 852,
+            "durMs": 1.5
+          },
+          {
+            "name": "AnimationFrame",
+            "n": 724,
+            "durMs": 0
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 574,
+            "durMs": 1.1
+          },
+          {
+            "name": "SendBeginMainFrame",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame",
+            "n": 543,
+            "durMs": 203.9
+          },
+          {
+            "name": "ScheduledTasksState",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "AnimationHost::TickAnimations",
+            "n": 542,
+            "durMs": 1.1
+          },
+          {
+            "name": "Commit",
+            "n": 537,
+            "durMs": 20.1
+          },
+          {
+            "name": "ScrollTree::SetScrollOffset",
+            "n": 537,
+            "durMs": 1.2
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame::commit",
+            "n": 537,
+            "durMs": 1.6
+          },
+          {
+            "name": "ProxyImpl::ReadyToCommit",
+            "n": 537,
+            "durMs": 51.3
+          },
+          {
+            "name": "ProxyImpl::Commit",
+            "n": 537,
+            "durMs": 17.5
+          },
+          {
+            "name": "LayerTreeHostImpl::CommitComplete",
+            "n": 537,
+            "durMs": 29.4
+          },
+          {
+            "name": "ProxyImpl::ReadyToActivate",
+            "n": 537,
+            "durMs": 0
+          },
+          {
+            "name": "LayerTreeHostImpl::ActivateSyncTree",
+            "n": 537,
+            "durMs": 12.8
+          },
+          {
+            "name": "DisplayScheduler::ScheduleBeginFrameDeadline",
+            "n": 445,
+            "durMs": 3.2
+          },
+          {
+            "name": "UpdateCounters",
+            "n": 392,
+            "durMs": 0
+          },
+          {
+            "name": "TileTaskManagerImpl::CheckForCompletedTasks",
+            "n": 372,
+            "durMs": 0.9
+          },
+          {
+            "name": "TileManager::CheckPendingGpuWorkAndIssueSignals",
+            "n": 372,
+            "durMs": 18.6
+          },
+          {
+            "name": "ExternalBeginFrameSource::OnBeginFrame",
+            "n": 366,
+            "durMs": 34.9
+          }
+        ]
+      }
+    }
+  },
+  "b2.100.all": {
+    "pan": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.3,
+        "max": 18.7,
+        "mean": 16.66
+      },
+      "dropped": 0,
+      "work": {
+        "n": 180,
+        "p50": 0.2,
+        "p95": 0.3,
+        "max": 0.3,
+        "mean": 0.15
+      },
+      "loaf": {
+        "count": 1,
+        "totalMs": 249,
+        "maxMs": 249,
+        "renderMaxMs": 99.4
+      },
+      "mounted": {
+        "min": 100,
+        "max": 100,
+        "mean": 100
+      },
+      "trace": {
+        "events": 123729,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 193
+        },
+        "dropped": 0,
+        "drawFrame": 176,
+        "beginFrame": 182,
+        "raster": [
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 1277,
+            "durMs": 29
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 1277,
+            "durMs": 27.9
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 1277,
+            "durMs": 71.4
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 1277,
+            "durMs": 66.1
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 1276,
+            "durMs": 19.7
+          },
+          {
+            "name": "RendererRasterWorker",
+            "n": 522,
+            "durMs": 124.4
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 1255,
+            "durMs": 2.3
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 1245,
+            "durMs": 108.5
+          },
+          {
+            "name": "RasterTask",
+            "n": 1245,
+            "durMs": 106.6
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 1245,
+            "durMs": 105.2
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 1245,
+            "durMs": 100.6
+          }
+        ],
+        "top": [
+          {
+            "name": "RunTask",
+            "n": 9484,
+            "durMs": 802.9
+          },
+          {
+            "name": "UpdateLayer",
+            "n": 8396,
+            "durMs": 6.7
+          },
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 8382,
+            "durMs": 3.7
+          },
+          {
+            "name": "Graphics.Pipeline",
+            "n": 6625,
+            "durMs": 230.2
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 3411,
+            "durMs": 238.7
+          },
+          {
+            "name": "CommandBuffer::OrderingBarrier",
+            "n": 3283,
+            "durMs": 0.9
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 3060,
+            "durMs": 1.3
+          },
+          {
+            "name": "IOSurfaceImageBacking::WaitForCommandsToBeScheduled",
+            "n": 2715,
+            "durMs": 3.7
+          },
+          {
+            "name": "LayerTreeHostImpl::NotifyTileStateChanged",
+            "n": 2382,
+            "durMs": 0.9
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 1857,
+            "durMs": 0.9
+          },
+          {
+            "name": "CommandBuffer::Flush",
+            "n": 1554,
+            "durMs": 124
+          },
+          {
+            "name": "IOSurfaceImageBacking::WaitForCommandsToBeScheduled::Dawn",
+            "n": 1280,
+            "durMs": 2.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 1277,
+            "durMs": 29
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 1277,
+            "durMs": 27.9
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 1277,
+            "durMs": 71.4
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 1277,
+            "durMs": 66.1
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 1276,
+            "durMs": 19.7
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 1255,
+            "durMs": 2.3
+          },
+          {
+            "name": "CommandBufferProxyImpl::OrderingBarrier",
+            "n": 1249,
+            "durMs": 1.7
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 1245,
+            "durMs": 108.5
+          },
+          {
+            "name": "RasterTask",
+            "n": 1245,
+            "durMs": 106.6
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 1245,
+            "durMs": 105.2
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 1245,
+            "durMs": 100.6
+          },
+          {
+            "name": "GpuChannel::Flush",
+            "n": 1206,
+            "durMs": 0.1
+          },
+          {
+            "name": "auto cc::ResourcePool::OnResourceReleased(size_t, const gpu::SyncToken &, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 1118,
+            "durMs": 0.9
+          }
+        ]
+      }
+    },
+    "zoom": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.4,
+        "max": 100.1,
+        "mean": 17.31
+      },
+      "dropped": 7,
+      "work": {
+        "n": 180,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 0.5,
+        "mean": 0.22
+      },
+      "loaf": {
+        "count": 2,
+        "totalMs": 159,
+        "maxMs": 101.3,
+        "renderMaxMs": 0.6
+      },
+      "mounted": {
+        "min": 100,
+        "max": 100,
+        "mean": 100
+      },
+      "trace": {
+        "events": 137819,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":true": 2,
+          "{\"frame_reporter\":{\"affects_smoothness\":true,\"checkerboarded_needs_raster\":false": 9,
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 360
+        },
+        "dropped": 9,
+        "drawFrame": 180,
+        "beginFrame": 189,
+        "raster": [
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 974,
+            "durMs": 120.4
+          },
+          {
+            "name": "RasterTask",
+            "n": 974,
+            "durMs": 119
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 974,
+            "durMs": 117.9
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 974,
+            "durMs": 114.5
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 899,
+            "durMs": 1.9
+          },
+          {
+            "name": "RendererRasterWorker",
+            "n": 357,
+            "durMs": 247.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 977,
+            "durMs": 21.8
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 977,
+            "durMs": 60.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 977,
+            "durMs": 59.4
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 977,
+            "durMs": 160.1
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 977,
+            "durMs": 154.4
+          }
+        ],
+        "top": [
+          {
+            "name": "UpdateLayer",
+            "n": 18079,
+            "durMs": 10.6
+          },
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 17900,
+            "durMs": 9.8
+          },
+          {
+            "name": "Graphics.Pipeline",
+            "n": 6716,
+            "durMs": 529
+          },
+          {
+            "name": "RunTask",
+            "n": 6562,
+            "durMs": 1443.6
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 2967,
+            "durMs": 470.7
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 2922,
+            "durMs": 1.7
+          },
+          {
+            "name": "CommandBuffer::OrderingBarrier",
+            "n": 2704,
+            "durMs": 0.6
+          },
+          {
+            "name": "LayerTreeHostImpl::NotifyTileStateChanged",
+            "n": 2545,
+            "durMs": 1.3
+          },
+          {
+            "name": "IOSurfaceImageBacking::WaitForCommandsToBeScheduled",
+            "n": 2367,
+            "durMs": 73.5
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 1589,
+            "durMs": 1
+          },
+          {
+            "name": "CommandBuffer::Flush",
+            "n": 1071,
+            "durMs": 247.3
+          },
+          {
+            "name": "GpuChannel::Flush",
+            "n": 1026,
+            "durMs": 0.1
+          },
+          {
+            "name": "SyncToken::Wait",
+            "n": 1011,
+            "durMs": 0.1
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 977,
+            "durMs": 21.8
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 977,
+            "durMs": 60.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 977,
+            "durMs": 59.4
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 977,
+            "durMs": 160.1
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 977,
+            "durMs": 154.4
+          },
+          {
+            "name": "CommandBufferProxyImpl::OrderingBarrier",
+            "n": 975,
+            "durMs": 1.2
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 974,
+            "durMs": 120.4
+          },
+          {
+            "name": "RasterTask",
+            "n": 974,
+            "durMs": 119
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 974,
+            "durMs": 117.9
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 974,
+            "durMs": 114.5
+          },
+          {
+            "name": "Scheduler::FinishTask",
+            "n": 974,
+            "durMs": 0.4
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 899,
+            "durMs": 1.9
+          }
+        ]
+      }
+    },
+    "pan100": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.4,
+        "max": 18.6,
+        "mean": 16.66
+      },
+      "dropped": 0,
+      "work": {
+        "n": 180,
+        "p50": 0.2,
+        "p95": 0.3,
+        "max": 0.4,
+        "mean": 0.21
+      },
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 100,
+        "max": 100,
+        "mean": 100
+      },
+      "trace": {
+        "events": 91150,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 180
+        },
+        "dropped": 0,
+        "drawFrame": 147,
+        "beginFrame": 182,
+        "raster": [],
+        "top": [
+          {
+            "name": "UpdateLayer",
+            "n": 18079,
+            "durMs": 13.1
+          },
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 17900,
+            "durMs": 12.7
+          },
+          {
+            "name": "Graphics.Pipeline",
+            "n": 6009,
+            "durMs": 178.6
+          },
+          {
+            "name": "RunTask",
+            "n": 4365,
+            "durMs": 836.5
+          },
+          {
+            "name": "AnimationFrame",
+            "n": 724,
+            "durMs": 0
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 543,
+            "durMs": 0.6
+          },
+          {
+            "name": "SendBeginMainFrame",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame",
+            "n": 543,
+            "durMs": 554.8
+          },
+          {
+            "name": "ScheduledTasksState",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "AnimationHost::TickAnimations",
+            "n": 542,
+            "durMs": 0.7
+          },
+          {
+            "name": "Commit",
+            "n": 537,
+            "durMs": 38.4
+          },
+          {
+            "name": "ScrollTree::SetScrollOffset",
+            "n": 537,
+            "durMs": 0.9
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame::commit",
+            "n": 537,
+            "durMs": 1.3
+          },
+          {
+            "name": "ProxyImpl::ReadyToCommit",
+            "n": 537,
+            "durMs": 88.2
+          },
+          {
+            "name": "ProxyImpl::Commit",
+            "n": 537,
+            "durMs": 46.4
+          },
+          {
+            "name": "LayerTreeHostImpl::CommitComplete",
+            "n": 537,
+            "durMs": 38.6
+          },
+          {
+            "name": "ProxyImpl::ReadyToActivate",
+            "n": 537,
+            "durMs": 0
+          },
+          {
+            "name": "LayerTreeHostImpl::ActivateSyncTree",
+            "n": 537,
+            "durMs": 22.3
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 453,
+            "durMs": 0.9
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 453,
+            "durMs": 26.1
+          },
+          {
+            "name": "DisplayScheduler::ScheduleBeginFrameDeadline",
+            "n": 443,
+            "durMs": 2.3
+          },
+          {
+            "name": "ExternalBeginFrameSource::OnBeginFrame",
+            "n": 366,
+            "durMs": 27
+          },
+          {
+            "name": "auto cc::SchedulerStateMachine::ShouldThrottleSendBeginMainFrame()::(lambda)::operator()(uint32_t) const",
+            "n": 363,
+            "durMs": 0
+          },
+          {
+            "name": "TaskSetFinishedTaskImpl::RunOnWorkerThread",
+            "n": 362,
+            "durMs": 0.3
+          },
+          {
+            "name": "ScheduledTasks",
+            "n": 362,
+            "durMs": 0
+          }
+        ]
+      }
+    }
+  },
+  "b2.100.visible": {
+    "pan": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.3,
+        "max": 18.6,
+        "mean": 16.67
+      },
+      "dropped": 0,
+      "work": {
+        "n": 180,
+        "p50": 0.2,
+        "p95": 8.8,
+        "max": 14.5,
+        "mean": 1.03
+      },
+      "loaf": {
+        "count": 1,
+        "totalMs": 139.1,
+        "maxMs": 139.1,
+        "renderMaxMs": 4.6
+      },
+      "mounted": {
+        "min": 1,
+        "max": 19,
+        "mean": 7.4
+      },
+      "trace": {
+        "events": 137267,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 184
+        },
+        "dropped": 0,
+        "drawFrame": 177,
+        "beginFrame": 182,
+        "raster": [
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 1663,
+            "durMs": 89.6
+          },
+          {
+            "name": "RasterTask",
+            "n": 1663,
+            "durMs": 87
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 1663,
+            "durMs": 85
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 1663,
+            "durMs": 79.5
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 1923,
+            "durMs": 2.8
+          },
+          {
+            "name": "RendererRasterWorker",
+            "n": 443,
+            "durMs": 167.8
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 1669,
+            "durMs": 17.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 1669,
+            "durMs": 37
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 1669,
+            "durMs": 35.3
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 1669,
+            "durMs": 106.6
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 1669,
+            "durMs": 99
+          }
+        ],
+        "top": [
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 8652,
+            "durMs": 3.9
+          },
+          {
+            "name": "UpdateLayer",
+            "n": 8424,
+            "durMs": 4.9
+          },
+          {
+            "name": "Graphics.Pipeline",
+            "n": 6646,
+            "durMs": 250
+          },
+          {
+            "name": "RunTask",
+            "n": 6398,
+            "durMs": 868.6
+          },
+          {
+            "name": "UpdateCounters",
+            "n": 5580,
+            "durMs": 0
+          },
+          {
+            "name": "ParseHTML",
+            "n": 5380,
+            "durMs": 4.9
+          },
+          {
+            "name": "LayerTreeHostImpl::NotifyTileStateChanged",
+            "n": 3511,
+            "durMs": 1.4
+          },
+          {
+            "name": "CommandBuffer::OrderingBarrier",
+            "n": 3276,
+            "durMs": 1
+          },
+          {
+            "name": "IOSurfaceImageBacking::WaitForCommandsToBeScheduled",
+            "n": 3108,
+            "durMs": 3.4
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 2931,
+            "durMs": 288
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 2571,
+            "durMs": 1.5
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 2350,
+            "durMs": 1.2
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 1923,
+            "durMs": 2.8
+          },
+          {
+            "name": "CommandBufferProxyImpl::OrderingBarrier",
+            "n": 1670,
+            "durMs": 2.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 1669,
+            "durMs": 17.2
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 1669,
+            "durMs": 37
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 1669,
+            "durMs": 35.3
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 1669,
+            "durMs": 106.6
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 1669,
+            "durMs": 99
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 1663,
+            "durMs": 89.6
+          },
+          {
+            "name": "RasterTask",
+            "n": 1663,
+            "durMs": 87
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 1663,
+            "durMs": 85
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 1663,
+            "durMs": 79.5
+          },
+          {
+            "name": "auto cc::ResourcePool::OnResourceReleased(size_t, const gpu::SyncToken &, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 1497,
+            "durMs": 1.4
+          },
+          {
+            "name": "CommandBuffer::Flush",
+            "n": 1308,
+            "durMs": 167.3
+          }
+        ]
+      }
+    },
+    "zoom": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.2,
+        "max": 66.8,
+        "mean": 16.94
+      },
+      "dropped": 3,
+      "work": {
+        "n": 180,
+        "p50": 0.4,
+        "p95": 10.8,
+        "max": 26.1,
+        "mean": 1.39
+      },
+      "loaf": {
+        "count": 2,
+        "totalMs": 241.7,
+        "maxMs": 174.2,
+        "renderMaxMs": 28.8
+      },
+      "mounted": {
+        "min": 3,
+        "max": 75,
+        "mean": 25.3
+      },
+      "trace": {
+        "events": 141919,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 307,
+          "{\"frame_reporter\":{\"affects_smoothness\":true,\"checkerboarded_needs_raster\":false": 15
+        },
+        "dropped": 15,
+        "drawFrame": 180,
+        "beginFrame": 185,
+        "raster": [
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 995,
+            "durMs": 79.7
+          },
+          {
+            "name": "RasterTask",
+            "n": 995,
+            "durMs": 78.5
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 995,
+            "durMs": 77.6
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 995,
+            "durMs": 74.7
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 1045,
+            "durMs": 14.1
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 1047,
+            "durMs": 45.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 1047,
+            "durMs": 44.7
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 1045,
+            "durMs": 115.7
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 1045,
+            "durMs": 111.5
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 1006,
+            "durMs": 1.6
+          },
+          {
+            "name": "RendererRasterWorker",
+            "n": 332,
+            "durMs": 177.7
+          }
+        ],
+        "top": [
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 12301,
+            "durMs": 5.5
+          },
+          {
+            "name": "UpdateLayer",
+            "n": 11946,
+            "durMs": 6.6
+          },
+          {
+            "name": "UpdateCounters",
+            "n": 6720,
+            "durMs": 0
+          },
+          {
+            "name": "Graphics.Pipeline",
+            "n": 6703,
+            "durMs": 338.2
+          },
+          {
+            "name": "ParseHTML",
+            "n": 6512,
+            "durMs": 6.3
+          },
+          {
+            "name": "Paint",
+            "n": 6410,
+            "durMs": 186.6
+          },
+          {
+            "name": "RunTask",
+            "n": 5842,
+            "durMs": 1240.8
+          },
+          {
+            "name": "LayerTreeHostImpl::NotifyTileStateChanged",
+            "n": 2637,
+            "durMs": 1.1
+          },
+          {
+            "name": "CommandBuffer::OrderingBarrier",
+            "n": 2573,
+            "durMs": 0.6
+          },
+          {
+            "name": "IOSurfaceImageBacking::WaitForCommandsToBeScheduled",
+            "n": 2474,
+            "durMs": 25.7
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 2304,
+            "durMs": 313
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 2235,
+            "durMs": 1.9
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 1592,
+            "durMs": 0.9
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 1047,
+            "durMs": 45.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 1047,
+            "durMs": 44.7
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 1045,
+            "durMs": 14.1
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 1045,
+            "durMs": 115.7
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 1045,
+            "durMs": 111.5
+          },
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 1006,
+            "durMs": 1.6
+          },
+          {
+            "name": "CommandBufferProxyImpl::OrderingBarrier",
+            "n": 999,
+            "durMs": 1
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 995,
+            "durMs": 79.7
+          },
+          {
+            "name": "RasterTask",
+            "n": 995,
+            "durMs": 78.5
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 995,
+            "durMs": 77.6
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 995,
+            "durMs": 74.7
+          },
+          {
+            "name": "CommandBuffer::Flush",
+            "n": 984,
+            "durMs": 177.4
+          }
+        ]
+      }
+    },
+    "pan100": {
+      "interval": {
+        "n": 180,
+        "p50": 16.7,
+        "p95": 18.2,
+        "max": 18.6,
+        "mean": 16.66
+      },
+      "dropped": 0,
+      "work": {
+        "n": 180,
+        "p50": 0.4,
+        "p95": 0.7,
+        "max": 11.4,
+        "mean": 0.47
+      },
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 0,
+        "max": 4,
+        "mean": 2.2
+      },
+      "trace": {
+        "events": 61579,
+        "frameStates": {
+          "{\"frame_reporter\":{\"affects_smoothness\":false,\"checkerboarded_needs_raster\":fals": 182,
+          "{\"frame_reporter\":{\"affects_smoothness\":true,\"checkerboarded_needs_raster\":false": 1
+        },
+        "dropped": 1,
+        "drawFrame": 147,
+        "beginFrame": 182,
+        "raster": [
+          {
+            "name": "RasterSource::PerformSolidColorAnalysis",
+            "n": 34,
+            "durMs": 0.2
+          },
+          {
+            "name": "RasterizerTaskImpl::RunOnWorkerThread",
+            "n": 31,
+            "durMs": 2.1
+          },
+          {
+            "name": "RasterTask",
+            "n": 31,
+            "durMs": 1.9
+          },
+          {
+            "name": "GpuRasterBuffer::Playback",
+            "n": 31,
+            "durMs": 1.8
+          },
+          {
+            "name": "RasterImplementation::RasterCHROMIUM",
+            "n": 31,
+            "durMs": 1.6
+          },
+          {
+            "name": "RendererRasterWorker",
+            "n": 25,
+            "durMs": 11.8
+          },
+          {
+            "name": "RasterDecoderImpl::DoBeginRasterCHROMIUM",
+            "n": 31,
+            "durMs": 0.8
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM",
+            "n": 31,
+            "durMs": 2.6
+          },
+          {
+            "name": "RasterDecoderImpl::DoRasterCHROMIUM::Deserializing",
+            "n": 31,
+            "durMs": 2.5
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM",
+            "n": 31,
+            "durMs": 8
+          },
+          {
+            "name": "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush",
+            "n": 31,
+            "durMs": 7.5
+          }
+        ],
+        "top": [
+          {
+            "name": "Graphics.Pipeline",
+            "n": 6009,
+            "durMs": 175.4
+          },
+          {
+            "name": "RunTask",
+            "n": 4638,
+            "durMs": 483.5
+          },
+          {
+            "name": "UpdateLayer",
+            "n": 1781,
+            "durMs": 2.2
+          },
+          {
+            "name": "auto cc::LayerTreeHost::SetNeedsCommit(bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 1623,
+            "durMs": 1.8
+          },
+          {
+            "name": "Scheduler::RunTask",
+            "n": 822,
+            "durMs": 59.2
+          },
+          {
+            "name": "Scheduler::ScheduleTask",
+            "n": 792,
+            "durMs": 1.5
+          },
+          {
+            "name": "AnimationFrame",
+            "n": 724,
+            "durMs": 0
+          },
+          {
+            "name": "auto cc::(anonymous namespace)::InsertNodeForTask(TaskGraph *, TileTask *, uint16_t, uint16_t, size_t, bool)::(lambda)::operator()()::(lambda)::operator()(uint32_t) const",
+            "n": 574,
+            "durMs": 0.8
+          },
+          {
+            "name": "SendBeginMainFrame",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame",
+            "n": 543,
+            "durMs": 219.6
+          },
+          {
+            "name": "ScheduledTasksState",
+            "n": 543,
+            "durMs": 0
+          },
+          {
+            "name": "AnimationHost::TickAnimations",
+            "n": 542,
+            "durMs": 0.9
+          },
+          {
+            "name": "Commit",
+            "n": 539,
+            "durMs": 18.5
+          },
+          {
+            "name": "ScrollTree::SetScrollOffset",
+            "n": 537,
+            "durMs": 1.1
+          },
+          {
+            "name": "ProxyMain::BeginMainFrame::commit",
+            "n": 537,
+            "durMs": 1.3
+          },
+          {
+            "name": "ProxyImpl::ReadyToCommit",
+            "n": 537,
+            "durMs": 45.5
+          },
+          {
+            "name": "ProxyImpl::Commit",
+            "n": 537,
+            "durMs": 16.6
+          },
+          {
+            "name": "LayerTreeHostImpl::CommitComplete",
+            "n": 537,
+            "durMs": 25.1
+          },
+          {
+            "name": "ProxyImpl::ReadyToActivate",
+            "n": 537,
+            "durMs": 0
+          },
+          {
+            "name": "LayerTreeHostImpl::ActivateSyncTree",
+            "n": 537,
+            "durMs": 10.8
+          },
+          {
+            "name": "DisplayScheduler::ScheduleBeginFrameDeadline",
+            "n": 445,
+            "durMs": 2.9
+          },
+          {
+            "name": "UpdateCounters",
+            "n": 392,
+            "durMs": 0
+          },
+          {
+            "name": "TileTaskManagerImpl::CheckForCompletedTasks",
+            "n": 372,
+            "durMs": 0.6
+          },
+          {
+            "name": "TileManager::CheckPendingGpuWorkAndIssueSignals",
+            "n": 372,
+            "durMs": 15.7
+          },
+          {
+            "name": "ExternalBeginFrameSource::OnBeginFrame",
+            "n": 366,
+            "durMs": 37.6
+          }
+        ]
+      }
+    }
+  }
+}

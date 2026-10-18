@@ -5,6 +5,7 @@
 // strips the lead and the preamble only on an exact match, so the transcript draws the same row from the live prompt,
 // the queued steer and the engine's JSONL, and nothing a human typed in that shape is taken for MAWS's framing.
 import { AnchorSchema, type Anchor, type AnchorBox /* E4d */ } from './anchor';
+import type { ArtifactKind } from '../artifacts/entity'; // P3-C
 
 export type Destination = 'thread' | 'main';
 
@@ -31,12 +32,28 @@ function leadParts(anchor: Anchor): string[] {
       return [`element ${anchor.locator}${pageUrl !== undefined ? ` on ${pageUrl}` : ''}`];
     case 'artifact-element':
       return present(`element ${anchor.locator} in the artifact`, pageUrl);
-    case 'artifact-comment': // P3-B: the passage, then the ids the agent's document tools take
-      return present(`passage "${anchor.locator}"${anchor.artifactId !== undefined ? ` in document ${anchor.artifactId}` : ''}`, anchor.threadId !== undefined && `thread ${anchor.threadId}`);
+    case 'artifact-comment': // P3-B: the passage, then the ids the agent's document tools take; P3-C: by the artifact's kind
+      return present((ARTIFACT_COMMENT_LEADS[anchor.artifactKind ?? 'document'] ?? ARTIFACT_COMMENT_LEADS.document)(anchor), anchor.threadId !== undefined && `thread ${anchor.threadId}`);
     case 'none':
       return [];
   }
 }
+
+// P3-C start (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, M7 fix wave 1; Decision Log 33, 35, 36): what an
+// artifact comment is on, by the commented artifact's kind (`artifactKind`; absent, a document's, as before). B's
+// document entry is its wording to the byte; a deck's names the element and the presentation, no slide number (the
+// lead is a function of the anchor alone and the anchor carries none: the architect's ruling, Decision Log 36). A kind
+// with no entry reads as a document's.
+type CommentLead = (anchor: Anchor) => string;
+const ARTIFACT_COMMENT_LEADS: { document: CommentLead } & Partial<Record<ArtifactKind, CommentLead>> = {
+  document: (anchor) => `passage "${anchor.locator}"${anchor.artifactId !== undefined ? ` in document ${anchor.artifactId}` : ''}`,
+  presentation: (anchor) => `element "${anchor.locator}"${anchor.artifactId !== undefined ? ` in presentation ${anchor.artifactId}` : ''}`,
+  // P3-E (E2 M4; E's Decision Log 28 (5)): prose and chart blocks alike; a block's locator is `<view>: <caption or dataset id>`
+  dashboard: (anchor) => `content "${anchor.locator}"${anchor.artifactId !== undefined ? ` in dashboard ${anchor.artifactId}` : ''}`,
+  // P3-E (E1 M4; the P3-E spec's Decision Log 12): a design's board or element, by the anchor's target (absent, an element)
+  design: (anchor) => `${anchor.artifactTarget === 'board' ? 'board' : 'element'} "${anchor.locator}"${anchor.artifactId !== undefined ? ` in design ${anchor.artifactId}` : ''}`,
+};
+// P3-C end
 
 // `Comment on "<label>" (<parts>):`, or `Comment:` for the anchorless kind; with a screenshot the final colon becomes
 // `. A screenshot of it is attached:`. The label is always quoted, so it is never read as part of the sentence.
@@ -54,7 +71,7 @@ const unescapeAttribute = (value: string) => value.replace(/&(amp|quot|lt|gt);/g
 
 // The tag's attributes, in the order they are written (Interfaces): the tag is byte-stable, and the parse accepts it
 // only when re-writing the anchor it read gives the same bytes.
-const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */, 'artifactId', 'threadId' /* P3-B */] as const;
+const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */, 'artifactId', 'threadId' /* P3-B */, 'artifactKind' /* P3-C */, 'artifactTarget' /* P3-E */] as const;
 const NUMERIC_FIELDS: ReadonlySet<string> = new Set(['line', 'prNumber']);
 
 // E4d start: the browser-element box (E4d execution document, Design §6) is one attribute, `x,y,width,height`; any other

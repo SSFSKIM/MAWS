@@ -6,11 +6,11 @@
 // bar counts and steps through. Outside a diff it draws nothing.
 import { Extension, type Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
+import { NodeSelection /* P3-E */, Plugin, PluginKey, Selection /* P3-E */, TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { Carry } from '../../../yjs';
 import { ySyncPluginKey } from '../../../yjs/prosemirror';
-import { attributedRuns, changeList, type Change } from '../../history';
+import { attributedRuns, changeList, mergeExtraChanges /* P3-E */, type Change, type ExtraChange /* P3-E */ } from '../../history';
 import { authorOf } from './model';
 
 interface PaintState {
@@ -18,11 +18,14 @@ interface PaintState {
   changes: Change[];
   current: number | null;
   carried: ReadonlyMap<string, Carry['kind']>;
+  /** P3-E: the shown tab's extra changes, merged into `changes` (`mergeExtraChanges`). */
+  extra: readonly ExtraChange[];
   decorations: DecorationSet;
 }
 interface PaintMeta {
   current?: number | null;
   carried?: ReadonlyMap<string, Carry['kind']>;
+  extra?: readonly ExtraChange[]; // P3-E
 }
 
 export const historyPaintKey = new PluginKey<PaintState>('historyPaint');
@@ -52,8 +55,10 @@ function paint(doc: PMNode, changes: Change[], current: number | null, carried: 
       decorations.push(Decoration.node(offset, end, { 'data-change-block': '', style: authorStyle(change.who[0] ?? null) }));
     }
   });
+  // P3-E: an extra change (no attributed run made it) is drawn on its block as an attribute change is
+  for (const change of changes) if (change.runs === 0) decorations.push(Decoration.node(change.from, change.to, { class: 'doc-change doc-change-attrs', style: authorStyle(change.who[0] ?? null) }));
   const reached = current === null ? undefined : changes[current];
-  if (reached) decorations.push(Decoration.inline(reached.from, reached.to, { class: 'doc-change-current' }));
+  if (reached) decorations.push(reached.runs === 0 ? Decoration.node(reached.from, reached.to, { class: 'doc-change-current' }) /* P3-E */ : Decoration.inline(reached.from, reached.to, { class: 'doc-change-current' }));
   if (carried.size > 0) {
     doc.descendants((node, pos) => {
       const kind = carried.get(node.attrs.id as string);
@@ -64,16 +69,18 @@ function paint(doc: PMNode, changes: Change[], current: number | null, carried: 
   return DecorationSet.create(doc, decorations);
 }
 
-const IDLE: PaintState = { active: false, changes: [], current: null, carried: new Map(), decorations: DecorationSet.empty };
+const IDLE: PaintState = { active: false, changes: [], current: null, carried: new Map(), extra: [], decorations: DecorationSet.empty };
 
 function next(tr: Transaction | null, value: PaintState, state: EditorState): PaintState {
   const meta = tr?.getMeta(historyPaintKey) as PaintMeta | undefined;
   const carried = meta?.carried ?? value.carried;
-  if (!drawing(state)) return value.active || carried !== value.carried ? { ...IDLE, carried } : value;
+  const extra = meta?.extra ?? value.extra; // P3-E
+  if (!drawing(state)) return value.active || carried !== value.carried || extra !== value.extra ? { ...IDLE, carried, extra } : value;
   if (tr && !tr.docChanged && !meta && value.active) return value;
-  const changes = !tr || tr.docChanged || !value.active ? changeList(state.doc) : value.changes;
+  const fresh = !tr || tr.docChanged || !value.active || extra !== value.extra; // P3-E: new extras recount
+  const changes = fresh ? (extra.length > 0 ? mergeExtraChanges(state.doc, changeList(state.doc), extra) : changeList(state.doc)) : value.changes;
   const current = meta && 'current' in meta ? (meta.current ?? null) : tr?.docChanged ? null : value.current;
-  return { active: true, changes, current, carried, decorations: paint(state.doc, changes, current, carried) };
+  return { active: true, changes, current, carried, extra, decorations: paint(state.doc, changes, current, carried) };
 }
 
 export const HistoryPaint = Extension.create({
@@ -103,12 +110,26 @@ export function setCarried(editor: Editor, carried: ReadonlyMap<string, Carry['k
   if (!editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(historyPaintKey, { carried } satisfies PaintMeta).setMeta('addToHistory', false));
 }
 
+/** P3-E (E2 M4): the shown tab's extra changes (the controller's, for the tab shown), merged into its change list. */
+export function setExtra(editor: Editor, extra: readonly ExtraChange[]): void {
+  if (!editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(historyPaintKey, { extra } satisfies PaintMeta).setMeta('addToHistory', false));
+}
+
 /** Selects the shown tab's change `index` and scrolls it into view; null clears what ↑ ↓ reached. */
 export function goToChange(editor: Editor, index: number | null): void {
   if (editor.isDestroyed) return;
-  const { changes } = changesOf(editor.state);
+  const { changes, current } = changesOf(editor.state);
   const change = index === null ? undefined : changes[index];
   let tr = editor.state.tr.setMeta(historyPaintKey, { current: change ? index : null } satisfies PaintMeta).setMeta('addToHistory', false);
-  if (change) tr = tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(change.from + 1, tr.doc.content.size)))).scrollIntoView();
+  // P3-E: an extra change is its whole block, selected as such
+  const block = change?.runs === 0 ? tr.doc.nodeAt(change.from) : null;
+  if (change) tr = tr.setSelection(block && NodeSelection.isSelectable(block) ? NodeSelection.create(tr.doc, change.from) : TextSelection.near(tr.doc.resolve(Math.min(change.from + 1, tr.doc.content.size)))).scrollIntoView();
+  // P3-E (E2 M6): leaving a reached block for no change (an unbound entry, the tab) lets go of its block selection too
+  const left = !change && current !== null ? changes[current] : undefined;
+  if (left?.runs === 0 && tr.selection instanceof NodeSelection && tr.selection.from === left.from) {
+    // a caret in the text before the block, else after it (Selection.near would pick the block again)
+    const caret = Selection.findFrom(tr.doc.resolve(tr.selection.from), -1, true) ?? Selection.findFrom(tr.doc.resolve(tr.selection.to), 1, true);
+    if (caret) tr = tr.setSelection(caret);
+  }
   editor.view.dispatch(tr);
 }

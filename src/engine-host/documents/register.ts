@@ -28,21 +28,29 @@ import { fromMessagePortMain } from './ports';
 import { suggestionKey, type DocumentService } from './service';
 import type { Documents } from '.';
 import type { ArtifactStore, ByteContent } from './store';
+import { datasetReaderOf } from '../dashboards/read'; // P3-E
+import { ConnectionHolds } from '../dashboards/holds'; // E3
+import type { DatasetRefreshRequests } from '../connectors/dataset-requests'; // E3
 
-type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.open' | 'artifacts.export'> | keyof typeof SpaceCommands;
+type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.open' | 'artifacts.export' | 'artifacts.downloadAsset' /* P3-E: main's */ | 'artifacts.connectorGrants' | 'artifacts.grantConnectorTool' | 'artifacts.revokeConnectorTool' /* P3-H H3b: main's */ | 'artifacts.holdDatasets' | 'artifacts.releaseDatasets' /* E3: main's */> | keyof typeof SpaceCommands;
 
 export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShape> = {
   'artifacts.list': 'immediate', 'artifacts.get': 'immediate', 'artifacts.create': 'immediate', 'artifacts.update': 'immediate',
   'artifacts.delete': 'immediate', 'artifacts.duplicate': 'immediate', 'artifacts.search': 'immediate', 'artifacts.versions': 'immediate',
   'artifacts.saveVersion': 'immediate', 'artifacts.nameVersion': 'immediate', 'artifacts.restore': 'immediate', 'artifacts.markViewed': 'immediate', 'artifacts.pruneVersions': 'immediate',
-  'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.testLoopDelay': 'immediate',
+  'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.copyAsset': 'immediate' /* P3-C */, 'artifacts.readDataset': 'immediate' /* P3-E */, 'artifacts.testLoopDelay': 'immediate',
   'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.assets': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
+  'artifacts.captureDatasetState': 'immediate', 'artifacts.holdAssets': 'immediate', 'artifacts.releaseAssets': 'immediate', 'artifacts.datasetRefreshRequest': 'immediate', // E3
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
 };
 
 export interface ArtifactsSurfaceDeps {
   documents: Documents | null; // null: the store failed to open this run (`openDocuments` logged why)
   env: Record<string, string | undefined>; // MAWS_E2E=1 opens the test writer and the loop delay
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): the host's registry of agents' dataset refreshes,
+  // which main reads a pending request from. Absent only where the host runs no sessions' tools (a test of this surface
+  // alone): every request then reads null.
+  datasetRefresh?: Pick<DatasetRefreshRequests, 'read'>;
 }
 
 const HUMAN: Actor = { kind: 'human' };
@@ -58,7 +66,8 @@ function typed(error: unknown): unknown {
   return error;
 }
 
-export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onDocPort'>, { documents, env }: ArtifactsSurfaceDeps): { close(): void } {
+// E3: `onClientGone` releases the holds main's connection took (its absence: a test's surface, holds released at close)
+export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onDocPort'> & Partial<Pick<HostClientHooks, 'onClientGone'>>, { documents, env, datasetRefresh }: ArtifactsSurfaceDeps): { close(): void } {
   const e2e = env.MAWS_E2E === '1';
   const loopDelay: ReturnType<typeof monitorEventLoopDelay> | null = e2e ? monitorEventLoopDelay({ resolution: 10 }) : null;
   loopDelay?.enable();
@@ -95,6 +104,13 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     if (!found) throw new ArtifactStoreError('notFound', `no space ${spaceId}`);
     return found;
   };
+  // P3-E (docs/doperpowers/plans/2026-10-16-p3-e-design-dashboard.md Decision Log 11 (1); E1's M2): before a live read
+  // that answers from a document, an earlier build's shape is migrated by the human (`ArtifactStore.ensureMigrated`),
+  // or the read is refused naming why; a kind without the hook goes on at once.
+  const prepared = async (store: ArtifactStore, artifactId: string) => {
+    const kind = store.get(artifactId)?.kind;
+    if (kind && isDocKind(kind) && store.service.adapterFor(kind)?.migrate) await store.ensureMigrated(artifactId, HUMAN);
+  };
   // A write's answer: the row as it stands, read once the write committed, released after any batch open at that read.
   const written = (store: ArtifactStore, artifactId: string) => store.readCommitted(() => ({ artifact: required(store, artifactId) }));
 
@@ -102,8 +118,11 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     const store = storeOf();
     return store.readCommitted(() => ({ artifacts: store.list(filter).map((artifact) => ({ ...artifact, revision: store.revision(artifact.id) })) }));
   });
-  serve('artifacts.get', ({ artifactId, includeDeleted }) => {
+  serve('artifacts.get', async ({ artifactId, includeDeleted, prepare = true }) => {
     const store = storeOf();
+    // P3-E: main's open preflight, so a document that cannot be opened is refused by name; `prepare: false` (Decision Log
+    // 22) is a retained version's reader, which never touches the live document
+    if (prepare) await prepared(store, artifactId);
     return store.readCommitted(() => ({ artifact: row(store, artifactId, includeDeleted) }));
   });
   serve('artifacts.create', async ({ content, ...input }) => {
@@ -187,6 +206,12 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   serve('artifacts.acceptSuggestion', ({ artifactId, ranges }) => settle(artifactId, (service) => service.acceptSuggestion(artifactId, ranges, HUMAN)));
   serve('artifacts.rejectSuggestion', ({ artifactId, ranges }) => settle(artifactId, (service) => service.rejectSuggestion(artifactId, ranges, HUMAN)));
   serve('artifacts.uploadAsset', ({ artifactId, name, mime, bytes }) => storeOf().uploadAsset(artifactId, bytes, { name, mime }, HUMAN));
+  serve('artifacts.copyAsset', ({ from, ref, to }) => storeOf().copyAsset(from, ref, to, HUMAN)); // P3-C (Decision Log 25)
+  // P3-E (E2 M2): a page of a dataset snapshot by its immutable ref and format, ownership checked on every call
+  serve('artifacts.readDataset', ({ artifactId, ref, format, offset, limit }) => {
+    const store = storeOf();
+    return store.readCommitted(() => datasetReaderOf(store).read(artifactId, ref, { format, offset, limit }));
+  });
   serve('artifacts.testLoopDelay', ({ reset }) => {
     e2eOnly('artifacts.testLoopDelay');
     const histogram = loopDelay!;
@@ -226,8 +251,9 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
       return { assets: store.listAssets(artifactId).map(({ ref, name, mime, size }) => ({ ref, name, mime, size })) };
     });
   });
-  serve('artifacts.state', ({ artifactId }) => {
+  serve('artifacts.state', async ({ artifactId }) => {
     const store = storeOf();
+    await prepared(store, artifactId); // P3-E: the live state is the kind's model
     return store.readCommitted(() => {
       const { kind } = required(store, artifactId);
       if (!isDocKind(kind)) throw new ArtifactStoreError('invalid', `a ${kind} artifact has no document state`);
@@ -235,6 +261,19 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
       return { revision, bytes: state };
     });
   });
+  // E3 start: main's holds over snapshot bytes (src/engine-host/dashboards/holds.ts), its connection's alone
+  const holds = new ConnectionHolds();
+  const stopGone = client.onClientGone?.(() => holds.releaseAll());
+  serve('artifacts.captureDatasetState', async ({ artifactId, versionId }) => {
+    const store = storeOf();
+    if (versionId === undefined) await prepared(store, artifactId); // the live state is the kind's model, as `artifacts.state`'s
+    return holds.capture(store, artifactId, versionId);
+  });
+  serve('artifacts.holdAssets', async ({ artifactId, refs }) => ({ assetHoldId: await holds.hold(storeOf(), artifactId, refs) }));
+  serve('artifacts.releaseAssets', ({ assetHoldId }) => ({ released: holds.release(assetHoldId) }));
+  // E3: an agent's pending dataset refresh, as main reads it once its id was announced (main-only)
+  serve('artifacts.datasetRefreshRequest', ({ requestId }) => ({ request: datasetRefresh?.read(requestId) ?? null }));
+  // E3 end
   serve('artifacts.status', () => {
     if (!documents) return { status: 'unavailable' as const, reason: 'the artifact store could not be opened this run (the host log says why)' };
     return { status: documents.storage.status, reason: documents.storage.statusReason };
@@ -276,13 +315,29 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
       port.close();
       return;
     }
-    documents.service.attach(doc === 'suggestions' ? documents.service.suggestionDoc(artifactId) : artifactId, fromMessagePortMain(port), actor);
+    const open = () => documents.service.attach(doc === 'suggestions' ? documents.service.suggestionDoc(artifactId) : artifactId, fromMessagePortMain(port), actor);
+    if (!documents.service.adapterFor(artifact.kind)?.migrate) return void open();
+    // P3-E (E1's M2): a kind with a migration is brought into its model first, as the port's actor; the port's close is
+    // watched before that wait, so a port its window closed meanwhile is never attached, and a refusal closes it
+    let closed = false;
+    port.on('close', () => void (closed = true));
+    documents.store
+      .ensureMigrated(artifactId, actor)
+      .then(() => {
+        if (!closed) open();
+      })
+      .catch((error: unknown) => {
+        console.error(`[artifacts] closed document channel ${channel}: ${error instanceof Error ? error.message : String(error)}`);
+        port.close();
+      });
   });
 
   return {
     close: () => {
       for (const off of offs.splice(0)) off();
       loopDelay?.disable();
+      stopGone?.(); // E3
+      holds.releaseAll(); // E3
     },
   };
 }

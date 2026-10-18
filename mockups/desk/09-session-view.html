@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The desk · The session view</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../tokens-light.css" id="theme-light">
+<script>
+/* Light is the default (D-4). `?theme=dark` drops the light override so the dark tokens under :root apply. */
+if (new URLSearchParams(location.search).get('theme') === 'dark') { document.getElementById('theme-light').remove(); document.documentElement.style.colorScheme = 'dark'; }
+</script>
+<style>
+/* DC9's four taste surfaces (the DC9 plan's T0; the composite's §9.1 and §9.4), drawn in the desk as DC5 and DC6 built
+   it: the channel's header and composer (ChannelView, Composer), DC5's request card (RequestCard), the depth column's
+   tabs (DepthColumn), and MAWS's pieces the session view imports as they stand: the report (owner/report: the Message
+   card, OwnerRecordRow), the user bubble and its held caption (rows/User.tsx, derive.ts heldRow), the boundary row
+   (rows/Boundary.tsx), the question receipt (rows/Question.tsx), and the background rows (background/TaskRows.tsx:
+   ShellRow, MonitorRow; Group.tsx). Tokens only. The prose scale is the renderer's own (styles/tokens.css: 14px at
+   1.625), which the shared mockup kit predates. */
+* { box-sizing: border-box; }
+:root { --text-prose: 14px; --lh-prose: 1.625; --radius-2xl: 22px; --bg-user-message: color-mix(in oklab, var(--fg) 5%, transparent); }
+body { padding: 40px 24px 72px; }
+main { width: 1392px; max-width: 100%; margin: 0 auto; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 21px; font-weight: 600; letter-spacing: -.45px; }
+h2 { font-size: 13px; font-weight: 550; }
+a { color: inherit; text-decoration: none; }
+button, textarea { font: inherit; color: inherit; }
+button { border: 0; background: none; cursor: pointer; border-radius: var(--radius-sm); }
+button:disabled { cursor: default; }
+a:focus-visible, button:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font: 12px var(--font-mono); }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+[hidden] { display: none !important; }
+
+/* The page around the figures (as 02 and 04) */
+.page-head { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.eyebrow { display: flex; gap: 12px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 10px; }
+.eyebrow a { margin-left: auto; text-transform: none; letter-spacing: 0; text-decoration: underline; text-underline-offset: 3px; }
+.page-head p { margin-top: 9px; color: var(--fg-muted); line-height: 1.6; max-width: 92ch; }
+.page-head p strong, .rationale strong { color: var(--fg); font-weight: 550; }
+.surface { padding: 4px 0 40px; background: var(--bg); }
+.section-rule { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); }
+.section-rule::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.section-rule b { color: var(--fg); font-weight: 600; }
+.vignette { margin: 0 0 28px; }
+figure { margin: 0; }
+figcaption { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
+figcaption .number { color: var(--fg-muted); font: 11px var(--font-mono); }
+figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.pick.chosen { color: var(--bg); background: var(--success); border-color: var(--success); }
+.pick { font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 2px 6px; }
+.rationale { margin: 0 0 12px; font-size: 11.5px; color: var(--fg-muted); line-height: 1.55; max-width: 100ch; }
+.frame { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
+.trio { display: grid; grid-template-columns: 380px 380px minmax(0, 1fr); gap: 24px; align-items: start; }
+.annot { margin-top: 10px; padding-left: 10px; border-left: 2px solid var(--border-strong); font-size: 11.5px; color: var(--fg-muted); line-height: 1.55; max-width: 80ch; }
+.annot b { color: var(--fg); font-weight: 550; }
+.annot + .annot { margin-top: 6px; }
+
+/* The three regions (02-project) */
+.desk { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--panel-w); height: 1010px; }
+.sidebar { background: var(--bg-raised); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.sb-head { height: 44px; flex-shrink: 0; display: flex; align-items: center; gap: 4px; padding: 0 10px 0 6px; border-bottom: 1px solid var(--border); }
+.back { display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 8px 0 4px; color: var(--fg-muted); font-size: 12px; }
+.back svg { width: 14px; height: 14px; }
+.proj { font-weight: 600; font-size: 14px; padding-left: 8px; border-left: 1px solid var(--border); }
+.proj-mach { margin-left: auto; font-size: 11px; color: var(--fg-muted); }
+.sb-scroll { flex: 1; overflow: hidden; padding: 10px; }
+.chan { display: flex; align-items: center; gap: 7px; width: 100%; height: var(--row-h); padding: 0 9px; font-size: 13px; font-weight: 550; }
+.chan svg { width: 14px; height: 14px; color: var(--fg-muted); }
+.section-heading { font-size: 10px; font-weight: 650; letter-spacing: 1px; height: 22px; display: flex; align-items: center; padding: 0 9px; color: var(--fg-muted); margin: 14px 0 2px; text-transform: uppercase; }
+.section-heading.attention { color: var(--warning); }
+.session { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 7px; align-items: start; width: 100%; padding: 7px 9px; text-align: left; }
+.session.selected { background: var(--bg-active); }
+.session-glyph { line-height: 17px; text-align: center; font-size: 12px; }
+.session-title { display: flex; align-items: baseline; gap: 6px; line-height: 17px; font-size: 12px; white-space: nowrap; }
+.alias { font-weight: 550; }
+.at { color: var(--fg-muted); font-size: 11px; }
+.session-sub { display: block; color: var(--fg-muted); font-size: 11px; margin-top: 3px; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-ended { color: var(--fg-faint); }
+
+/* Center: the channel's header (ChannelView), the desk's Report · Transcript bar, the transcript, the composer */
+.center { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.chead { height: 44px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.chead .name { font-size: var(--text-ui); font-weight: 600; }
+.chead .at, .chead .charge { font-size: var(--text-ui-sm); color: var(--fg-muted); }
+.chead .charge { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.status-word { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-ui-sm); color: var(--fg-muted); }
+.status-word .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.status-word.ended .dot { background: var(--border-strong); }
+.hbtn { flex-shrink: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 2px 8px; font-size: var(--text-ui-sm); }
+.hbtn:hover { background: var(--bg-hover); }
+.hnote { font-size: var(--text-ui-sm); color: var(--fg-muted); }
+/* MAWS's .owner-bar, the desk's own toggle (§9.1: ReportBar returns null off its IPC store) */
+.owner-bar { display: flex; align-items: center; gap: 12px; min-height: 32px; padding: 4px 12px 4px 16px; border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: var(--text-ui-sm); flex-shrink: 0; }
+.owner-bar .notes { flex: 1; min-width: 0; }
+.toggle { display: inline-flex; padding: 2px; border-radius: var(--radius-sm); background: var(--bg-active); }
+.toggle > button { padding: 2px 10px; border-radius: calc(var(--radius-sm) - 2px); color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.toggle > button[aria-pressed="true"] { background: var(--bg-raised); color: var(--fg); box-shadow: 0 0 0 1px var(--border); }
+
+.scroll { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+.column { width: 100%; max-width: 768px; margin: 0 auto; padding: 12px 16px 8px; font-size: var(--text-prose); line-height: var(--lh-prose); }
+.older { display: flex; justify-content: center; padding: 4px 0 14px; font-size: var(--text-ui-sm); color: var(--fg-faint); }
+
+/* MAWS's user bubble (rows/User.tsx; transcript.css): right-aligned, 70 percent, 22px corners */
+.user { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding-bottom: 16px; }
+.bubble { max-width: 70%; padding: 10px 16px; border-radius: var(--radius-2xl); background: var(--bg-user-message); overflow-wrap: anywhere; }
+.user-meta { display: flex; align-items: center; gap: 8px; color: var(--fg-muted); font-size: var(--text-ui-sm); line-height: 1.4; max-width: 70%; text-align: right; justify-content: flex-end; }
+/* MAWS's report: the Message card (owner-card), the working record row (OwnerRecordRow) */
+.ocard { padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); margin-bottom: 8px; }
+.ocard-label { margin-bottom: 4px; color: var(--fg-muted); font-size: var(--text-ui-sm); font-weight: 600; }
+.ocard p + p { margin-top: 8px; }
+.ocard code { font-size: 12px; padding: 0 3px; border-radius: 4px; background: var(--bg-active); }
+.record { padding: 2px 0 10px; }
+.disclosure { display: inline-flex; align-items: center; gap: 7px; padding: 3px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.disclosure svg { width: 12px; height: 12px; }
+.disclosure .counts { color: var(--fg-faint); }
+.dots { display: inline-flex; gap: 2px; margin-left: 2px; }
+.dots span { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); animation: dot 1.2s infinite ease-in-out; }
+.dots span:nth-child(2) { animation-delay: .15s; } .dots span:nth-child(3) { animation-delay: .3s; }
+@keyframes dot { 0%, 80%, 100% { opacity: .3 } 40% { opacity: 1 } }
+/* MAWS's question receipt (rows/Question.tsx), with the log's overlay */
+.qrow { width: fit-content; min-width: 200px; max-width: min(480px, 100%); margin: 4px 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); }
+.qrow ul { margin: 0; padding: 6px 12px; list-style: none; display: grid; gap: 2px; }
+.qrow li { display: flex; gap: 7px; align-items: baseline; }
+.qrow .ql { color: var(--fg-muted); }
+.qrow .qa { color: var(--fg); }
+.qrow .qfoot { padding: 5px 12px; border-top: 1px solid var(--border); font-size: var(--text-ui-sm); color: var(--fg-muted); }
+.qrow .qfoot.wait { color: var(--warning); }
+/* MAWS's boundary row (rows/Boundary.tsx): a rule, its words, a rule */
+.boundary { display: flex; align-items: center; gap: 10px; padding: 8px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.boundary .rule { flex: 1; height: 1px; background: var(--border); }
+
+/* ── Surface 1: the tail row's delivery line ─────────────────────────────────────────────── */
+/* 1A: MAWS's held caption, under the bubble. Still on its way: dimmed as MAWS's held bubble (0.55). An outcome that
+   ends the journey without a row: full strength, the caption in its tone. */
+.tail[data-way] .bubble { opacity: .55; }
+.dl { display: inline-flex; align-items: baseline; gap: 6px; }
+.dl .g { font-size: 11px; width: 12px; text-align: center; }
+.why-line { color: var(--fg-faint); margin-top: -2px; }
+.tail[data-state="uncertain"] .dl { font-style: italic; }
+.tail[data-state="recorded"] .dl, .tail[data-state="refused-read-only"] .dl { color: var(--warning); }
+.tail[data-state="failed"] .dl { color: var(--danger); }
+.tail .verb { font-style: normal; color: var(--fg-faint); }
+/* 1B: in the bubble, as its foot */
+.tail-b .bubble { padding-bottom: 8px; }
+.tail-b .foot { display: flex; align-items: baseline; gap: 6px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); font-size: var(--text-ui-sm); line-height: 1.45; color: var(--fg-muted); }
+.tail-b .foot .why { color: var(--fg-faint); }
+.tail-b[data-way] .bubble .txt { opacity: .6; }
+.tail-b[data-state="uncertain"] .foot { font-style: italic; }
+.tail-b[data-state="recorded"] .bubble, .tail-b[data-state="refused-read-only"] .bubble { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 45%, transparent); background: color-mix(in srgb, var(--warning) 6%, transparent); }
+.tail-b[data-state="recorded"] .foot, .tail-b[data-state="refused-read-only"] .foot { color: var(--warning); border-top-color: color-mix(in srgb, var(--warning) 30%, transparent); }
+.tail-b[data-state="failed"] .bubble { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 5%, transparent); }
+.tail-b[data-state="failed"] .foot { color: var(--danger); border-top-color: color-mix(in srgb, var(--danger) 30%, transparent); }
+.state-key { display: grid; grid-template-columns: 150px 1fr; gap: 3px 12px; margin-top: 12px; font-size: 11.5px; color: var(--fg-muted); line-height: 1.5; max-width: 96ch; }
+.state-key code { font-size: 11px; color: var(--fg); }
+
+/* ── Surface 2: the request band, DC5's request card (04-request-cards; RequestCard.tsx) ─── */
+.band { flex-shrink: 0; border-top: 1px solid var(--border); background: var(--bg); padding: 10px 16px 2px; }
+.band-head { display: flex; align-items: center; gap: 8px; max-width: 736px; margin: 0 auto 6px; font-size: var(--text-ui-sm); color: var(--warning); font-weight: 600; }
+.band-head .pager { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-weight: 400; color: var(--fg-muted); }
+.band-head .pager button { width: 22px; height: 22px; display: inline-grid; place-items: center; border: 1px solid var(--border); }
+.band-head .pager svg { width: 12px; height: 12px; }
+.band-cards { display: flex; flex-direction: column; gap: 8px; max-width: 736px; margin: 0 auto; }
+.rc { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); line-height: 1.45; }
+.inline .rc { max-width: 640px; margin: 4px 0 12px; }
+.rc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; font-size: var(--text-ui-sm); }
+.rc-head b { font-weight: 600; }
+.rc-head .m { color: var(--fg-muted); }
+.rc-head .f { color: var(--fg-faint); }
+.rc-head .tool { margin-left: auto; font: 11px var(--font-mono); color: var(--fg-muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.mono { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); font: 12px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.why { font-size: 12px; color: var(--fg-muted); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.cb { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 3px 10px; font-size: var(--text-ui-sm); white-space: nowrap; }
+.cb:hover { background: var(--bg-hover); }
+.cb.primary { border-color: var(--fg); background: var(--fg); color: var(--bg); }
+.cb.ghost { border-color: transparent; color: var(--fg-muted); margin-right: auto; }
+.muted-line { font-size: 12px; color: var(--fg-faint); }
+.hchip { font-size: 11px; color: var(--fg-muted); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 6px; align-self: flex-start; }
+.q { font-size: 14px; line-height: 1.5; }
+.opts { display: flex; flex-direction: column; gap: 4px; }
+.opt { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.opt.on { border-color: var(--border-strong); background: var(--bg-active); }
+.opt .n { width: 12px; flex-shrink: 0; color: var(--fg-muted); }
+.opt .ot { display: flex; flex-direction: column; min-width: 0; }
+.opt .od { font-size: 12px; color: var(--fg-muted); }
+/* A request folded to one line in the band (2A, many) */
+.stub { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui-sm); }
+.stub .g { color: var(--warning); width: 12px; text-align: center; }
+.stub .what { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-muted); }
+.stub .what b { color: var(--fg); font-weight: 550; }
+.stub .what code { font-size: 11px; }
+.stub .open { color: var(--fg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 1px 8px; }
+.jump { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin: 0 auto 8px; padding: 3px 10px; border-radius: 999px; background: var(--bg-raised); border: 1px solid var(--border-strong); box-shadow: 0 2px 8px rgba(0,0,0,.08); font-size: var(--text-ui-sm); color: var(--warning); font-weight: 600; }
+.jump svg { width: 12px; height: 12px; }
+
+/* The composer (DC5's SessionComposer) */
+.composer { flex-shrink: 0; border-top: 1px solid var(--border); padding: 10px 16px 12px; }
+.band + .composer { border-top: 0; }
+.box { width: 100%; height: 58px; resize: none; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg); padding: 8px 12px; font-size: var(--text-ui); line-height: 1.45; display: block; }
+.box::placeholder { color: var(--fg-muted); }
+.box:disabled { background: var(--bg-raised); }
+.verbs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.vb { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 3px 10px; font-size: var(--text-ui-sm); }
+.vb.primary { border-color: var(--fg); background: var(--fg); color: var(--bg); }
+.vb:disabled { color: var(--fg-faint); border-color: var(--border); }
+.vb.primary:disabled { background: var(--fg-faint); border-color: var(--fg-faint); color: var(--bg); }
+.vsep { width: 1px; height: 16px; background: var(--border); margin: 0 4px; }
+.cnote { margin-top: 5px; font-size: var(--text-ui-sm); color: var(--fg-faint); }
+
+/* ── Surface 3: the end marker (a boundary row with an action) ────────────────────────────── */
+.endmark { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0 18px; }
+.endmark .boundary { width: 100%; padding: 0; }
+.endmark .boundary .txt { color: var(--fg); font-weight: 550; }
+.endmark .sub { font-size: var(--text-ui-sm); color: var(--fg-muted); text-align: center; max-width: 60ch; line-height: 1.5; }
+.endmark .acts { display: flex; align-items: center; gap: 8px; }
+.endmark .resume { border: 1px solid var(--fg); background: var(--fg); color: var(--bg); border-radius: var(--radius-sm); padding: 4px 14px; font-size: var(--text-ui-sm); font-weight: 550; }
+
+/* ── Surface 4: the column and its jobs view (DepthColumn; Group.tsx; TaskRows.tsx) ────────── */
+.depth { border-left: 1px solid var(--border); background: var(--bg-raised); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.solo .depth { border-left: 0; height: 720px; }
+.dhead { display: flex; align-items: baseline; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.dhead .name { font-size: var(--text-ui); font-weight: 550; }
+.dhead .at { font-size: var(--text-ui-sm); }
+.tabs { display: flex; gap: 4px; padding: 0 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.tab { height: 32px; margin-bottom: -1px; padding: 0 10px; border-bottom: 2px solid transparent; border-radius: 0; font-size: var(--text-ui-sm); color: var(--fg-muted); white-space: nowrap; }
+.tab[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--fg); font-weight: 550; }
+.pane { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.grp { border-bottom: 1px solid var(--border); padding-bottom: 8px; flex-shrink: 0; }
+.grp:last-child { border-bottom: 0; }
+.grp h3 { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; font-size: var(--text-ui); font-weight: 600; }
+.grp h3 .suffix { font-size: var(--text-ui-sm); font-weight: 400; color: var(--fg-muted); }
+.trow { margin: 0 12px; padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: 4px; }
+.trow.sel { border-color: var(--accent); }
+.tline { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.tdot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); flex-shrink: 0; }
+.tdot.on { background: var(--success); }
+.ttext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui-sm); font-variant-numeric: tabular-nums; }
+.act { flex-shrink: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 8px; font-size: var(--text-ui-sm); }
+.act[aria-expanded="true"], .act.pressed { background: var(--bg-active); border-color: var(--border-strong); }
+.act:disabled { color: var(--fg-faint); border-color: var(--border); cursor: help; }
+.tsub { padding-left: 14px; font-size: 11.5px; color: var(--fg-muted); line-height: 1.45; }
+.tsub code { font-size: 11px; }
+/* The output, inline (4A) and drilled into (4B): a plain-text tail, never Markdown */
+.out { margin: 2px 0 2px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); overflow: hidden; }
+.out-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); font-size: 11px; color: var(--fg-muted); }
+.out-head .path { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
+.out-head button { color: var(--fg-muted); font-size: 11px; padding: 0 4px; }
+.out pre { margin: 0; padding: 6px 8px; font: 11px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); max-height: 190px; overflow: hidden; }
+.out .before { padding: 4px 8px 0; font-size: 11px; color: var(--fg-faint); }
+.out.big pre { max-height: none; }
+.mcp { list-style: none; margin: 0; padding: 0 14px 4px 26px; display: flex; flex-direction: column; gap: 2px; font: 12px/1.7 var(--font-mono); }
+.mcp-note { padding: 2px 14px 4px 26px; font-size: 11px; color: var(--fg-faint); line-height: 1.45; }
+.drill-head { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border-bottom: 1px solid var(--border); font-size: var(--text-ui-sm); flex-shrink: 0; }
+.drill-head .backb { display: inline-flex; align-items: center; gap: 2px; color: var(--fg-muted); padding: 2px 6px 2px 2px; }
+.drill-head .backb svg { width: 14px; height: 14px; }
+.drill-head .t { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drill-meta { padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 11.5px; color: var(--fg-muted); line-height: 1.55; }
+.drill-meta code { font-size: 11px; color: var(--fg); }
+.drill-body { flex: 1; min-height: 0; padding: 10px 12px; display: flex; flex-direction: column; }
+.drill-body .out { margin: 0; flex: 1; display: flex; flex-direction: column; }
+.drill-body .out pre { flex: 1; max-height: none; }
+/* The output's answers by variant (DX4 `output`) */
+.variants { display: flex; flex-direction: column; gap: 10px; }
+.variant { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); padding: 8px 10px 10px; }
+.variant .vh { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; font-size: 11px; color: var(--fg-muted); }
+.variant .vh code { font-size: 11px; color: var(--fg); }
+.variant .out { margin: 0; }
+.vmsg { font-size: var(--text-ui-sm); line-height: 1.5; padding: 6px 8px; border-radius: var(--radius-sm); }
+.vmsg.quiet { color: var(--fg-muted); background: var(--bg); border: 1px solid var(--border); }
+.vmsg.warn { color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, transparent); border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent); }
+.vmsg .faint { color: var(--fg-faint); }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+<symbol id="back" viewBox="0 0 16 16"><path d="m10 4-4 4 4 4"/></symbol>
+<symbol id="chev" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4"/></symbol>
+<symbol id="down" viewBox="0 0 16 16"><path d="M8 3v10M4 9l4 4 4-4"/></symbol>
+<symbol id="hash" viewBox="0 0 16 16"><path d="M6 2.5 5 13.5M11 2.5l-1 11M3 6h10.5M2.5 10H13"/></symbol>
+<symbol id="up" viewBox="0 0 16 16"><path d="m4 10 4-4 4 4"/></symbol>
+<symbol id="dn" viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></symbol>
+</defs></svg>
+<main>
+<header class="page-head">
+  <div class="eyebrow">The desk / The session view / 09 <a href="?theme=dark" id="theme-link">View in dark</a></div>
+  <h1>The session view: what the transcript does not know yet, and what runs beside it.</h1>
+  <p>On a desktop browser whose machine is online, a direct channel's center is MAWS's report over the session's own transcript (§9.1): <code>&lt;message&gt;</code> spans as Message cards, one “Working record” row per marked turn, a Report · Transcript toggle. Around it, four surfaces are the desk's own and are this document's subject: <strong>the tail row's delivery line</strong> for a send the transcript has not shown yet, <strong>the request band</strong> above the composer, <strong>the end marker</strong> of an ended or retired session, and <strong>the jobs view</strong> in the column. Where a surface has a real choice, two alternatives stand side by side, named, with the owner's choice of 2026-10-17 marked.</p>
+</header>
+
+<!-- ═══════════════════════════════ 0. The whole view ═══════════════════════════════ -->
+<section class="surface" id="s0">
+<div class="section-rule"><b>0</b> The session view, assembled</div>
+<section class="vignette"><figure>
+  <figcaption><span class="number">0</span><h2>maws-45 on mini, working; two sends at the tail, two requests waiting inline, the Jobs tab open</h2><span class="dimension">300 · fluid · 380 px</span></figcaption>
+  <p class="rationale">Every surface in its place, as the owner chose on 2026-10-17 (1B, 2B, 4A, Stop disabled with its reason on hover). The center's header carries the status word (moved from the column, M3). The column has lost its Transcript tab; Subagents, Jobs, Diff and Info read the one shared subscription.</p>
+  <div class="frame"><div class="desk">
+    <aside class="sidebar" aria-label="MAWS channels and sessions">
+      <div class="sb-head"><a class="back" href="02-project.html"><svg><use href="#back"/></svg>Projects</a><span class="proj">MAWS</span><span class="proj-mach">2 of 3 machines</span></div>
+      <nav class="sb-scroll">
+        <button class="chan"><svg><use href="#hash"/></svg>MAWS</button>
+        <h2 class="section-heading attention">Waiting on you · 2</h2>
+        <button class="session selected"><span class="session-glyph" style="color:var(--warning)">◐</span><span><span class="session-title"><span class="alias">maws-45</span><span class="at">@mini</span></span><span class="session-sub">desk session view and jobs</span></span></button>
+        <button class="session"><span class="session-glyph" style="color:var(--warning)">?</span><span><span class="session-title"><span class="alias">maws-fe</span><span class="at">@SK.local</span></span><span class="session-sub">owner artifacts page</span></span></button>
+        <h2 class="section-heading">Working · 2</h2>
+        <button class="session"><span class="session-glyph g-working">●</span><span><span class="session-title"><span class="alias">maws</span><span class="at">@mini</span></span><span class="session-sub">GUI AI agent workspace: main app architect</span></span></button>
+        <button class="session"><span class="session-glyph g-working">●</span><span><span class="session-title"><span class="alias">maws-hub</span><span class="at">@SK.local</span></span><span class="session-sub">hub output frame and kind</span></span></button>
+        <h2 class="section-heading">Idle · 1</h2>
+        <button class="session"><span class="session-glyph g-idle">○</span><span><span class="session-title"><span class="alias">maws-qa</span><span class="at">@mini</span></span><span class="session-sub">release QA checklist for 0.9</span></span></button>
+        <h2 class="section-heading">Ended · 2</h2>
+        <button class="session"><span class="session-glyph g-ended">✓</span><span><span class="session-title"><span class="alias">maws-44</span><span class="at">@mini</span></span><span class="session-sub">desk hub API: project list endpoint</span></span></button>
+        <button class="session"><span class="session-glyph g-ended">✓</span><span><span class="session-title"><span class="alias">maws-docs</span><span class="at">@studio</span></span><span class="session-sub">charter and research index</span></span></button>
+      </nav>
+    </aside>
+    <section class="center inline" aria-label="maws-45">
+      <header class="chead"><span class="name">maws-45</span><span class="at">@mini</span><span class="charge">· desk session view and jobs</span><span class="status-word"><span class="dot"></span>Working · turn 14</span><button class="hbtn">Retire…</button></header>
+      <div class="owner-bar"><span class="notes">Report: what maws-45 sent you, each turn's work folded</span><span class="toggle" role="group" aria-label="Session view"><button aria-pressed="true">Report</button><button aria-pressed="false">Transcript</button></span></div>
+      <div class="scroll"><div class="column">
+        <div class="user"><div class="bubble">Wire the jobs tab against the fake machine's recording. Keep the output tail plain text.</div></div>
+        <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="counts"> · 23 tool calls · 4 messages</span></button></div>
+        <div class="ocard"><div class="ocard-label">Message</div><p>The jobs tab reads the widened <code>subagents</code> body now: two shells, one monitor, three MCP names. Output asks <code>output(taskId, 4096)</code> and draws each variant; <code>unknown-task</code> waits one <code>subagents</code> message before it says so.</p></div>
+        <div class="qrow"><ul><li><span class="ql">Tail size</span><span aria-hidden="true">→</span><span class="qa">waiting</span></li></ul><div class="qfoot wait">Waiting for your answer · below</div></div>
+        <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="dots" role="img" aria-label="Working"><span></span><span></span><span></span></span><span class="counts"> · 6 tool calls</span></button></div>
+        <div class="user tail-b" data-state="delivered" data-way><div class="bubble"><div class="txt">Also list the MCP servers under the jobs, names only.</div><div class="foot">✓ Delivered · waiting in maws-45's queue</div></div></div>
+        <div class="user tail-b" data-state="queued" data-way><div class="bubble"><div class="txt">When that lands, run the desk-web e2e lane once.</div><div class="foot">◷ Queued · delivers when maws-45 is idle</div></div></div>
+        <article class="rc"><div class="rc-head"><span class="m">Wants to run a command, through its subagent</span><b>a7c1e2</b><span class="tool">Bash</span></div><pre class="mono">pnpm --filter desk-web exec playwright test e2e/jobs.spec.ts</pre><div class="controls"><button class="cb ghost">Deny… with a reason</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></article>
+        <article class="rc"><div class="rc-head"><span class="m">Asks</span><span class="f">· it keeps working while it waits</span></div><span class="hchip">Tail size</span><p class="q">How much of a shell's output should one Output press ask for?</p><div class="opts"><div class="opt on"><span class="n">1</span><span class="ot"><span>4 KB</span><span class="od">One screen of a log; asks again for more.</span></span></div><div class="opt"><span class="n">2</span><span class="ot"><span>64 KB</span><span class="od">A build's whole tail in one answer.</span></span></div></div><div class="controls"><button class="cb">Skip</button><button class="cb primary">Submit</button></div></article>
+      </div></div>
+      <div class="composer"><textarea class="box" placeholder="Steer maws-45 (Enter), or Send to queue it" aria-label="Message maws-45"></textarea><div class="verbs"><button class="vb">Send</button><button class="vb primary">Steer</button><button class="vb">Interrupt</button><span class="vsep"></span><button class="vb">Model</button><button class="vb">Compact</button></div></div>
+    </section>
+    <aside class="depth" aria-label="maws-45 in depth">
+      <header class="dhead"><span class="name">maws-45</span><span class="at">@mini</span></header>
+      <div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="false">Subagents · 1 running</button><button class="tab" role="tab" aria-selected="true">Jobs · 2 running</button><button class="tab" role="tab" aria-selected="false">Diff</button><button class="tab" role="tab" aria-selected="false">Info</button></div>
+      <div class="pane" role="tabpanel" aria-label="Jobs">
+        <section class="grp"><h3>Shells · 1 running</h3>
+          <div class="trow sel"><div class="tline"><span class="tdot on"></span><span class="ttext">vite dev server · running 18m 04s</span><button class="act" aria-expanded="true">Output</button><button class="act" disabled title="Stopping a job from the web is not available yet: stop it from the session's terminal">Stop</button></div>
+            <div class="out"><div class="out-head"><span class="path">/private/tmp/claude-501/…/3f2a9c1e/tasks/bq81x2kd.output</span><button>Refresh</button><button>Close</button></div><p class="before">1.1 MB before this, not shown</p><pre>[vite] hmr update /src/depth/view/JobsPane.tsx
+[vite] hmr update /src/depth/view/JobsPane.tsx
+  ➜  Local:   http://localhost:5174/
+[vite] page reload src/views/project/SessionView.tsx
+[vite] hmr update /src/depth/agents/task-feed.ts
+[vite] hmr update /src/depth/agents/task-feed.ts</pre></div>
+          </div>
+          <div class="trow"><div class="tline"><span class="tdot"></span><span class="ttext">desk-web unit tests · completed 4m ago</span><button class="act">Output</button></div></div>
+        </section>
+        <section class="grp"><h3>Monitors · 1</h3>
+          <div class="trow"><div class="tline"><span class="tdot on"></span><span class="ttext">watch CI on desk-dc9 · running 2m 10s</span><button class="act" disabled title="Stopping a job from the web is not available yet: stop it from the session's terminal">Stop</button></div></div>
+        </section>
+        <section class="grp"><h3>MCP servers · 3</h3>
+          <ul class="mcp"><li>doperpowers</li><li>playwright</li><li>openaiDeveloperDocs</li></ul>
+          <p class="mcp-note">Names from the session's rows. Whether each is connected is not known to the web.</p>
+        </section>
+      </div>
+    </aside>
+  </div></div>
+</figure></section>
+</section>
+
+<!-- ═══════════════════════════════ 1. The delivery line ═══════════════════════════════ -->
+<section class="surface" id="s1">
+<div class="section-rule"><b>1</b> The tail row's delivery line · one send in each state</div>
+<p class="rationale">A send the transcript has not shown yet is a tail row in MAWS's held-prompt shape (<code>heldRow</code>). It stays, whatever its delivery says, until its own framed user row arrives, then gives way to it. <strong>The choice is where the delivery line sits.</strong> Both columns hold the same six sends, oldest first: a Send queued for idle, one delivered whose row has not arrived, one recorded for a session not running, one refused by a read-only machine, one that failed with the bridge's reason, and a Steer whose RPC never answered.</p>
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">1A</span><h2>Under the bubble: MAWS's held caption</h2><span class="dimension">Center · 684 px</span></figcaption>
+  <p class="rationale">The line sits where MAWS writes “Sends when this turn ends” under a held bubble, so the desk's tail reads as MAWS's does. A send still on its way is dimmed as MAWS dims a held one; a send whose journey ended without its row is drawn at full strength, the caption in its tone, so it does not read as “still coming”. Buildable on MAWS's <code>UserRow</code> as it stands: the caption is the row's mount mark.</p>
+  <div class="frame"><div class="center" style="height:auto">
+    <header class="chead"><span class="name">maws-45</span><span class="at">@mini</span><span class="status-word"><span class="dot"></span>Working</span></header>
+    <div class="column" style="padding-top:16px">
+      <div class="ocard"><div class="ocard-label">Message</div><p>Pushed the matcher; frame first, then the row id when the bridge names one.</p></div>
+      <div class="user tail" data-state="queued" data-way><div class="bubble">Run the matcher's tests once more on the mini.</div><div class="user-meta"><span class="dl"><span class="g">◷</span>Queued · delivers when maws-45 is idle</span></div></div>
+      <div class="user tail" data-state="delivered" data-way><div class="bubble">And add the case where two identical sends race.</div><div class="user-meta"><span class="dl"><span class="g">✓</span>Delivered · waiting in maws-45's queue</span></div></div>
+      <div class="user tail" data-state="recorded"><div class="bubble">Pick this up after lunch: the end marker copy.</div><div class="user-meta"><span class="dl"><span class="g">◇</span>Recorded, not delivered · maws-45 is not running; Resume delivers it</span></div></div>
+      <div class="user tail" data-state="refused-read-only"><div class="bubble">Stop the dev server before the e2e run.</div><div class="user-meta"><span class="dl"><span class="g">⊘</span>Not delivered · mini is read-only: only its terminal reaches maws-45</span></div></div>
+      <div class="user tail" data-state="failed"><div class="bubble">Then open the PR as a draft.</div><div class="user-meta"><span class="dl"><span class="g">!</span>Not delivered · the session refused the prompt</span></div><div class="user-meta"><span class="why-line">“dropped: a compaction was running”</span></div></div>
+      <div class="user tail" data-state="uncertain" data-way><div class="bubble">Keep the band above the composer, not in the scroll.</div><div class="user-meta"><span class="dl"><span class="verb">Steer ·</span>&nbsp;Possibly delivered · mini took it and never answered</span></div></div>
+    </div>
+  </div></div>
+  <p class="annot"><b>Each line is a fact about the send, never about the row.</b> “Delivered” says the text entered maws-45's queue (§9.1); the bubble stays dimmed until its own framed row arrives, then that row replaces it in place.</p>
+</figure></section>
+<section class="vignette"><figure>
+  <figcaption><span class="number">1B</span><h2>In the bubble, as its foot</h2><span class="pick chosen">Chosen (owner, 2026-10-17)</span><span class="dimension">Center · 684 px</span></figcaption>
+  <p class="rationale">The state rides inside the bubble under a hairline, and a send that will not arrive tints the whole bubble: a failure is visible from a scroll away and cannot be read as a sent message. It costs MAWS's shape: the desk draws its own tail bubble instead of <code>UserRow</code>, and the tail no longer looks like MAWS's held messages.</p>
+  <div class="frame"><div class="center" style="height:auto">
+    <header class="chead"><span class="name">maws-45</span><span class="at">@mini</span><span class="status-word"><span class="dot"></span>Working</span></header>
+    <div class="column" style="padding-top:16px">
+      <div class="ocard"><div class="ocard-label">Message</div><p>Pushed the matcher; frame first, then the row id when the bridge names one.</p></div>
+      <div class="user tail-b" data-state="queued" data-way><div class="bubble"><div class="txt">Run the matcher's tests once more on the mini.</div><div class="foot">◷ Queued · delivers when maws-45 is idle</div></div></div>
+      <div class="user tail-b" data-state="delivered" data-way><div class="bubble"><div class="txt">And add the case where two identical sends race.</div><div class="foot">✓ Delivered · waiting in maws-45's queue</div></div></div>
+      <div class="user tail-b" data-state="recorded"><div class="bubble"><div class="txt">Pick this up after lunch: the end marker copy.</div><div class="foot">◇ Recorded, not delivered · Resume delivers it</div></div></div>
+      <div class="user tail-b" data-state="refused-read-only"><div class="bubble"><div class="txt">Stop the dev server before the e2e run.</div><div class="foot">⊘ Not delivered · mini is read-only</div></div></div>
+      <div class="user tail-b" data-state="failed"><div class="bubble"><div class="txt">Then open the PR as a draft.</div><div class="foot"><span>! Not delivered · <span class="why">“dropped: a compaction was running”</span></span></div></div></div>
+      <div class="user tail-b" data-state="uncertain" data-way><div class="bubble"><div class="txt">Keep the band above the composer, not in the scroll.</div><div class="foot">Steer · possibly delivered</div></div></div>
+    </div>
+  </div></div>
+  <p class="annot"><b>Shorter words fit the bubble's width</b>; the reason a read-only machine or a recorded send carries moves to the bubble's tooltip.</p>
+</figure></section>
+</div>
+<div class="state-key">
+  <code>queued</code><span>A Send logged, no outcome yet: the daemon delivers it when the session is idle (§4's Send). An outbox item not yet in the log reads “Sending…”, as DC5's stream says.</span>
+  <code>delivered</code><span>DX4 <code>delivered</code>: in the session's queue. Waiting for its framed row; if the session ends first it stays, “Delivered · not seen in the transcript”, ahead of the end marker (3A).</span>
+  <code>recorded</code><span>The session was not running. A later <code>delivered</code> for the same key, after Resume, replaces it.</span>
+  <code>refused-read-only</code><span>The machine's policy runs nothing from outside it. Final.</span>
+  <code>failed</code><span>With the reason the machine gave; a <code>failed</code> after <code>delivered</code> (the engine's later drop) replaces it.</span>
+  <code>uncertain</code><span>A push or a Steer RPC whose frame was taken and never answered: neither delivered nor not.</span>
+</div>
+</section>
+
+<!-- ═══════════════════════════════ 2. The request band ═══════════════════════════════ -->
+<section class="surface" id="s2">
+<div class="section-rule"><b>2</b> The request band · a permission and a question</div>
+<p class="rationale">The hub's pending requests for the session, as DC5's request cards, answerable in place; a card leaves when its request settles. The band is not in the scroll, so a request the turn is blocked on can never sit folded inside a closed working record (§9.1's reason for rejecting <code>request_slot</code> rows). <strong>The choice is what happens when many are waiting</strong>: the band, which keeps the oldest open and folds the rest to one line each, or the cards inline at the transcript's tail.</p>
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">2A</span><h2>The band above the composer</h2><span class="dimension">Center · 684 px</span></figcaption>
+  <p class="rationale">Two waiting: both open. The answer is under the reader's hands, beside the composer, whatever they have scrolled to. The cost shows at a laptop's 900 px: two open cards take about 560 px of the center. With three or more, below, the oldest stays open and the rest fold to a line each; folding from two is the stricter variant of the same rule.</p>
+  <div class="frame"><div class="center" style="height:900px">
+    <header class="chead"><span class="name">maws-45</span><span class="at">@mini</span><span class="status-word"><span class="dot"></span>Waiting on you</span></header>
+    <div class="owner-bar"><span class="notes"></span><span class="toggle"><button aria-pressed="true">Report</button><button aria-pressed="false">Transcript</button></span></div>
+    <div class="scroll"><div class="column">
+      <div class="ocard"><div class="ocard-label">Message</div><p>The jobs tab is drawn. Before I wire Output I need one answer about its size, and a subagent wants to run the e2e spec.</p></div>
+      <div class="qrow"><ul><li><span class="ql">Tail size</span><span aria-hidden="true">→</span><span class="qa">waiting</span></li></ul><div class="qfoot wait">Waiting for your answer · in the band below</div></div>
+      <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="dots"><span></span><span></span><span></span></span><span class="counts"> · 3 tool calls</span></button></div>
+    </div></div>
+    <section class="band">
+      <div class="band-head">2 waiting on you</div>
+      <div class="band-cards">
+        <article class="rc"><div class="rc-head"><span class="m">Wants to run a command, through its subagent</span><b>a7c1e2</b><span class="tool">Bash</span></div><pre class="mono">pnpm --filter desk-web exec playwright test e2e/jobs.spec.ts</pre><div class="controls"><button class="cb ghost">Deny… with a reason</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div><p class="muted-line">The decision carries a digest of exactly this request: if it changed, nothing is decided.</p></article>
+        <article class="rc"><div class="rc-head"><span class="m">Asks</span><span class="f">· it keeps working while it waits</span></div><span class="hchip">Tail size</span><p class="q">How much of a shell's output should one Output press ask for?</p><div class="opts"><div class="opt on"><span class="n">1</span><span class="ot"><span>4 KB</span><span class="od">One screen of a log; asks again for more.</span></span></div><div class="opt"><span class="n">2</span><span class="ot"><span>64 KB</span><span class="od">A build's whole tail in one answer.</span></span></div><div class="opt"><span class="n">3</span><span class="ot"><span>Other…</span></span></div></div><div class="controls"><button class="cb">Skip</button><button class="cb primary">Submit</button></div></article>
+      </div>
+    </section>
+    <div class="composer"><textarea class="box" placeholder="Steer maws-45 (Enter), or Send to queue it"></textarea><div class="verbs"><button class="vb">Send</button><button class="vb primary">Steer</button><button class="vb">Interrupt</button><span class="vsep"></span><button class="vb">Model</button><button class="vb">Compact</button></div></div>
+  </div></div>
+  <p class="annot"><b>The ask mod's question is in two places by construction</b>: its transcript row (S1's classify entry) and the hub's pending request. While pending, the row says where to answer; once answered, the band's card leaves and the row is MAWS's receipt, with the log's <code>answered</code> overlaid.</p>
+</figure></section>
+<section class="vignette"><figure>
+  <figcaption><span class="number">2B</span><h2>Inline, at the transcript's tail</h2><span class="pick chosen">Chosen (owner, 2026-10-17)</span><span class="dimension">Center · 684 px</span></figcaption>
+  <p class="rationale">The cards are the transcript's last rows, after any tail sends, and scroll with it, as DC5's channel draws them in its stream today. The composer stays clear, but a reader scrolled up gets an “N waiting ↓” pill, and a long card pushes the session's own latest words off screen.</p>
+  <div class="frame"><div class="center inline" style="height:900px">
+    <header class="chead"><span class="name">maws-45</span><span class="at">@mini</span><span class="status-word"><span class="dot"></span>Waiting on you</span></header>
+    <div class="owner-bar"><span class="notes"></span><span class="toggle"><button aria-pressed="true">Report</button><button aria-pressed="false">Transcript</button></span></div>
+    <div class="scroll"><div class="column">
+      <div class="ocard"><div class="ocard-label">Message</div><p>The jobs tab is drawn. Before I wire Output I need one answer about its size, and a subagent wants to run the e2e spec.</p></div>
+      <div class="qrow"><ul><li><span class="ql">Tail size</span><span aria-hidden="true">→</span><span class="qa">waiting</span></li></ul><div class="qfoot wait">Waiting for your answer · below</div></div>
+      <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="dots"><span></span><span></span><span></span></span><span class="counts"> · 3 tool calls</span></button></div>
+      <article class="rc"><div class="rc-head"><span class="m">Wants to run a command, through its subagent</span><b>a7c1e2</b><span class="tool">Bash</span></div><pre class="mono">pnpm --filter desk-web exec playwright test e2e/jobs.spec.ts</pre><div class="controls"><button class="cb ghost">Deny… with a reason</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></article>
+      <article class="rc"><div class="rc-head"><span class="m">Asks</span><span class="f">· it keeps working while it waits</span></div><span class="hchip">Tail size</span><p class="q">How much of a shell's output should one Output press ask for?</p><div class="opts"><div class="opt on"><span class="n">1</span><span class="ot"><span>4 KB</span><span class="od">One screen of a log; asks again for more.</span></span></div><div class="opt"><span class="n">2</span><span class="ot"><span>64 KB</span><span class="od">A build's whole tail in one answer.</span></span></div><div class="opt"><span class="n">3</span><span class="ot"><span>Other…</span></span></div></div><div class="controls"><button class="cb">Skip</button><button class="cb primary">Submit</button></div></article>
+    </div></div>
+    <div class="composer"><textarea class="box" placeholder="Steer maws-45 (Enter), or Send to queue it"></textarea><div class="verbs"><button class="vb">Send</button><button class="vb primary">Steer</button><button class="vb">Interrupt</button><span class="vsep"></span><button class="vb">Model</button><button class="vb">Compact</button></div></div>
+  </div></div>
+</figure></section>
+</div>
+
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">2A · many</span><h2>Four waiting, in the band</h2><span class="dimension">Center · 684 px · band bottom</span></figcaption>
+  <p class="rationale">The oldest request stays open (it has waited longest, and is usually what the turn blocks on); the rest are one line each, opened in place. The band never takes more than about half the center; the transcript keeps the rest.</p>
+  <div class="frame"><div class="center" style="height:auto">
+    <div class="scroll" style="height:120px"><div class="column"><div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="dots"><span></span><span></span><span></span></span><span class="counts"> · 11 tool calls</span></button></div></div></div>
+    <section class="band">
+      <div class="band-head">4 waiting on you<span class="pager">oldest first</span></div>
+      <div class="band-cards">
+        <article class="rc"><div class="rc-head"><span class="m">Wants to run a command, through its subagent</span><b>a7c1e2</b><span class="tool">Bash</span></div><pre class="mono">pnpm --filter desk-web exec playwright test e2e/jobs.spec.ts</pre><div class="controls"><button class="cb ghost">Deny… with a reason</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></article>
+        <div class="stub"><span class="g">?</span><span class="what"><b>Asks</b> · Tail size: how much of a shell's output should one Output press ask for?</span><button class="open">Open</button></div>
+        <div class="stub"><span class="g">◐</span><span class="what"><b>Wants to edit a file</b> · <code>apps/desk-web/src/depth/view/JobsPane.tsx</code></span><button class="open">Open</button></div>
+        <div class="stub"><span class="g">◐</span><span class="what"><b>Wants to run a command, through its subagent b90d44</b> · <code>git push origin desk-dc9</code></span><button class="open">Open</button></div>
+      </div>
+    </section>
+    <div class="composer"><textarea class="box" placeholder="Steer maws-45 (Enter), or Send to queue it"></textarea><div class="verbs"><button class="vb">Send</button><button class="vb primary">Steer</button><button class="vb">Interrupt</button></div></div>
+  </div></div>
+</figure></section>
+<section class="vignette"><figure>
+  <figcaption><span class="number">2B · many</span><h2>Four waiting, inline</h2><span class="dimension">Center · 684 px · scrolled back</span></figcaption>
+  <p class="rationale">Four full cards are the transcript's last screen and more. Scrolled back to read what the session did, the reader has a pill to jump down, and loses their place to answer.</p>
+  <div class="frame"><div class="center inline" style="height:auto">
+    <div class="scroll" style="height:auto"><div class="column">
+      <div class="ocard"><div class="ocard-label">Message</div><p>Earlier: the matcher consumes one row per send, by frame first.</p></div>
+      <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="counts"> · 31 tool calls · 2 messages</span></button></div>
+      <div class="ocard"><div class="ocard-label">Message</div><p>The end marker reads the session's presence, never the subscription.</p></div>
+      <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="counts"> · 9 tool calls</span></button></div>
+      <button class="jump">4 waiting<svg><use href="#down"/></svg></button>
+    </div></div>
+    <div class="composer"><textarea class="box" placeholder="Steer maws-45 (Enter), or Send to queue it"></textarea><div class="verbs"><button class="vb">Send</button><button class="vb primary">Steer</button><button class="vb">Interrupt</button></div></div>
+  </div></div>
+</figure></section>
+</div>
+</section>
+
+<!-- ═══════════════════════════════ 3. The end marker ═══════════════════════════════ -->
+<section class="surface" id="s3">
+<div class="section-rule"><b>3</b> The end marker · ended, and retired · <span class="pick chosen">Chosen (owner, 2026-10-17)</span> as drawn</div>
+<p class="rationale">One row at the tail of an ended or retired session's view, in MAWS's boundary shape (a rule, its words, a rule), with what the channel's header offers: Resume, or who retired it. The history above stays pageable to the first line; whether the session runs is read from presence, never from the subscription. The header keeps its own Resume, so the marker's is a second door at the place the eye ends.</p>
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">3A</span><h2>Ended, with Resume</h2><span class="dimension">Center · 684 px</span></figcaption>
+  <p class="rationale">A send that was delivered but whose row never reached the transcript before the end stays visible, ahead of the marker, never silently hidden (§9.1). The composer stays: what is sent now is recorded, and Resume delivers it.</p>
+  <div class="frame"><div class="center" style="height:auto">
+    <header class="chead"><span class="name">maws-44</span><span class="at">@mini</span><span class="charge">· desk hub API: project list endpoint</span><span class="status-word ended"><span class="dot"></span>Ended</span><button class="hbtn">Resume</button></header>
+    <div class="owner-bar"><span class="notes"></span><span class="toggle"><button aria-pressed="true">Report</button><button aria-pressed="false">Transcript</button></span></div>
+    <div class="column" style="padding-top:16px">
+      <div class="ocard"><div class="ocard-label">Message</div><p>The list endpoint is merged and deployed to staging. Nothing else is open on my side.</p></div>
+      <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="counts"> · 12 tool calls</span></button></div>
+      <div class="user tail" data-state="delivered"><div class="bubble">Write the handoff note before you stop.</div><div class="user-meta"><span class="dl"><span class="g">✓</span>Delivered · not seen in the transcript before the session ended</span></div></div>
+      <div class="endmark"><div class="boundary"><span class="rule"></span><span class="txt">maws-44 ended · 16:42</span><span class="rule"></span></div><p class="sub">Its process on mini is gone. Everything above stays here.</p><div class="acts"><button class="resume">Resume maws-44</button></div></div>
+    </div>
+    <div class="composer"><textarea class="box" placeholder="Message maws-44"></textarea><div class="verbs"><button class="vb primary">Send</button></div><p class="cnote">maws-44 is not running: Send records it, and Resume delivers it.</p></div>
+  </div></div>
+</figure></section>
+<section class="vignette"><figure>
+  <figcaption><span class="number">3B</span><h2>Retired</h2><span class="dimension">Center · 684 px</span></figcaption>
+  <p class="rationale">Retired is the owner taking it out of the project: the machine refuses Resume, so none is offered (DC5's header). The marker says who, and the composer says why it is closed.</p>
+  <div class="frame"><div class="center" style="height:auto">
+    <header class="chead"><span class="name">maws-docs</span><span class="at">@studio</span><span class="charge">· charter and research index</span><span class="status-word ended"><span class="dot"></span>Retired by you</span></header>
+    <div class="owner-bar"><span class="notes"></span><span class="toggle"><button aria-pressed="true">Report</button><button aria-pressed="false">Transcript</button></span></div>
+    <div class="column" style="padding-top:16px">
+      <div class="ocard"><div class="ocard-label">Message</div><p>The research index is regenerated and committed. The charter's open questions are listed at its end.</p></div>
+      <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="counts"> · 7 tool calls · 1 message</span></button></div>
+      <div class="user"><div class="bubble">Thanks, that's all for this one.</div></div>
+      <div class="record"><button class="disclosure"><svg><use href="#chev"/></svg>Working record<span class="counts"> · 1 tool call</span></button></div>
+      <div class="endmark"><div class="boundary"><span class="rule"></span><span class="txt">Retired by you · 17:05</span><span class="rule"></span></div><p class="sub">maws-docs left the project. Everything above stays here; it cannot be resumed.</p></div>
+    </div>
+    <div class="composer"><textarea class="box" placeholder="maws-docs is retired" disabled></textarea><div class="verbs"><button class="vb primary" disabled>Send</button></div></div>
+  </div></div>
+</figure></section>
+</div>
+</section>
+
+<!-- ═══════════════════════════════ 4. The jobs view ═══════════════════════════════ -->
+<section class="surface" id="s4">
+<div class="section-rule"><b>4</b> The jobs view · shells, a monitor, the MCP names</div>
+<p class="rationale">A tab beside Subagents, Diff and Info, drawn with MAWS's <code>ShellRow</code> and <code>MonitorRow</code> under MAWS's Background work headings, over the widened <code>subagents</code> body's <code>jobs</code> and <code>mcp</code>. A shell's Output asks the machine for the file's tail (<code>output(taskId, tail)</code>) and draws it as plain text. <strong>The choice is where the output opens</strong> in a 380 px column: under its row, or as the column's whole pane.</p>
+<div class="trio">
+<section class="vignette"><figure>
+  <figcaption><span class="number">4A</span><h2>Output under its row</h2><span class="pick chosen">Chosen (owner, 2026-10-17)</span></figcaption>
+  <p class="rationale">The list stays in view: a second shell's Output opens beside the first, and the monitor stays visible. The tail is bounded to a few lines' height.</p>
+  <div class="frame solo"><aside class="depth">
+    <header class="dhead"><span class="name">maws-45</span><span class="at">@mini</span></header>
+    <div class="tabs"><button class="tab" aria-selected="false">Subagents · 1 running</button><button class="tab" aria-selected="true">Jobs · 2 running</button><button class="tab" aria-selected="false">Diff</button><button class="tab" aria-selected="false">Info</button></div>
+    <div class="pane">
+      <section class="grp"><h3>Shells · 1 running</h3>
+        <div class="trow sel"><div class="tline"><span class="tdot on"></span><span class="ttext">vite dev server · running 18m 04s</span><button class="act" aria-expanded="true">Output</button><button class="act" disabled title="Stopping a job from the web is not available yet: stop it from the session's terminal">Stop</button></div>
+          <div class="out"><div class="out-head"><span class="path">/private/tmp/claude-501/…/3f2a9c1e/tasks/bq81x2kd.output</span><button>Refresh</button><button>Close</button></div><p class="before">1.1 MB before this, not shown</p><pre>[vite] hmr update /src/depth/view/JobsPane.tsx
+  ➜  Local:   http://localhost:5174/
+[vite] page reload src/views/project/SessionView.tsx
+[vite] hmr update /src/depth/agents/task-feed.ts
+[vite] hmr update /src/depth/agents/task-feed.ts</pre></div>
+        </div>
+        <div class="trow"><div class="tline"><span class="tdot"></span><span class="ttext">desk-web unit tests · completed 4m ago</span><button class="act">Output</button></div></div>
+        <div class="trow"><div class="tline"><span class="tdot"></span><span class="ttext" style="color:var(--danger)">pnpm typecheck · failed 22m ago</span><button class="act">Output</button></div></div>
+      </section>
+      <section class="grp"><h3>Monitors · 1</h3>
+        <div class="trow"><div class="tline"><span class="tdot on"></span><span class="ttext">watch CI on desk-dc9 · running 2m 10s</span><button class="act" disabled title="Stopping a job from the web is not available yet: stop it from the session's terminal">Stop</button></div><p class="tsub">No output file yet: a monitor names none at its start.</p></div>
+      </section>
+      <section class="grp"><h3>MCP servers · 3</h3>
+        <ul class="mcp"><li>doperpowers</li><li>playwright</li><li>openaiDeveloperDocs</li></ul>
+        <p class="mcp-note">Names from the session's rows. Whether each is connected is not known to the web.</p>
+      </section>
+    </div>
+  </aside></div>
+</figure></section>
+<section class="vignette"><figure>
+  <figcaption><span class="number">4B</span><h2>Output as the column's pane</h2></figcaption>
+  <p class="rationale">Output drills in, as an agent does in the Subagents tab (<code>SubagentDetail</code>, with Back): the tail gets the column's whole height, and the list is one press away. One output at a time.</p>
+  <div class="frame solo"><aside class="depth">
+    <header class="dhead"><span class="name">maws-45</span><span class="at">@mini</span></header>
+    <div class="tabs"><button class="tab" aria-selected="false">Subagents · 1 running</button><button class="tab" aria-selected="true">Jobs · 2 running</button><button class="tab" aria-selected="false">Diff</button><button class="tab" aria-selected="false">Info</button></div>
+    <div class="pane">
+      <div class="drill-head"><button class="backb"><svg><use href="#back"/></svg>Jobs</button><span class="t">vite dev server</span><button class="act" style="margin-left:auto">Refresh</button><button class="act" disabled title="Stopping a job from the web is not available yet: stop it from the session's terminal">Stop</button></div>
+      <div class="drill-meta">Running 18m 04s · <code>pnpm --filter desk-web dev</code><br>Last 4 KB of 1.1 MB · <code>…/3f2a9c1e/tasks/bq81x2kd.output</code></div>
+      <div class="drill-body"><div class="out big"><pre>  VITE v6.2.0  ready in 412 ms
+
+  ➜  Local:   http://localhost:5174/
+  ➜  press h + enter to show help
+[vite] hmr update /src/depth/view/JobsPane.tsx
+[vite] hmr update /src/depth/view/JobsPane.tsx
+[vite] page reload src/views/project/SessionView.tsx
+[vite] hmr update /src/depth/agents/task-feed.ts
+[vite] hmr update /src/depth/agents/task-feed.ts
+[vite] hmr update /src/depth/view/JobsPane.tsx
+[vite] hmr update /src/views/requests/RequestBand.tsx
+[vite] hmr update /src/views/requests/RequestBand.tsx
+[vite] page reload src/views/project/SessionView.tsx
+[vite] hmr update /src/depth/agents/task-feed.ts</pre></div></div>
+    </div>
+  </aside></div>
+</figure></section>
+<section class="vignette"><figure>
+  <figcaption><span class="number">4C</span><h2>What Output draws, by the machine's answer</h2></figcaption>
+  <p class="rationale">DX4's four variants, as the consumer paragraph says, drawn in either alternative's place. Only <code>ok</code> draws text; every other answer leaves the row's own line standing.</p>
+  <div class="variants">
+    <div class="variant"><div class="vh"><code>ok</code><span>truncated: the tail and how much precedes it</span></div><div class="out"><div class="out-head"><span class="path">…/tasks/bq81x2kd.output</span><button>Refresh</button></div><p class="before">1.1 MB before this, not shown</p><pre>[vite] hmr update /src/depth/agents/task-feed.ts</pre></div></div>
+    <div class="variant"><div class="vh"><code>ok</code><span>the whole file</span></div><div class="out"><pre>✓ 214 tests passed (38 files) in 9.82s</pre></div></div>
+    <div class="variant"><div class="vh"><code>missing</code><span>with its path: the file is gone</span></div><p class="vmsg quiet">The output file is gone from mini. <span class="faint">The engine keeps it under the machine's temporary directory.</span></p></div>
+    <div class="variant"><div class="vh"><code>missing</code><span>with <code>path: null</code>: no file named yet</span></div><p class="vmsg quiet">No output file yet. <span class="faint">Output asks again when the session names one.</span></p></div>
+    <div class="variant"><div class="vh"><code>refused</code><span>with its reason; no retry</span></div><p class="vmsg warn">mini would not read it: the path the session named is outside its tasks directory.</p></div>
+    <div class="variant"><div class="vh"><code>unknown-task</code><span>the request raced the index</span></div><p class="vmsg quiet">Checking with mini… <span class="faint">then, if the next update does not carry it:</span> mini does not know this task.</p></div>
+  </div>
+</figure></section>
+</div>
+<p class="annot"><b>Stop is MAWS's row as it stands</b>: <code>ShellRow</code> and <code>MonitorRow</code> draw it on every running task. Stopping from the web is optional in §9.4 (an RPC through the bridge's <code>TaskStop</code>); the owner chose (2026-10-17) to draw it disabled, its reason on hover, until that RPC exists.</p>
+</section>
+
+</main>
+<script>
+const dark = new URLSearchParams(location.search).get('theme') === 'dark';
+const tl = document.getElementById('theme-link');
+tl.href = dark ? '?' : '?theme=dark'; tl.textContent = dark ? 'View in light' : 'View in dark';
+</script>
+</body>
+</html>

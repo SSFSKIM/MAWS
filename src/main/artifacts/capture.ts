@@ -103,11 +103,21 @@ async function render(win: BrowserWindow, url: string, consoleErrors: string[]):
 // load's failure. The export service's renders wait the same way.
 export async function loadSettled(win: BrowserWindow, url: string): Promise<void> {
   const contents = win.webContents;
+  // P3-E (E2 M5 correction; P3-E Decision Log 33): both callbacks are removed once the load ends either way, so a window
+  // reused for many pages (a dashboard export's pictures) does not gather one per page; others' listeners stay
   const loaded = new Promise<void>((resolve, reject) => {
-    contents.once('did-finish-load', () => resolve());
-    contents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
-      if (isMainFrame) reject(new CaptureFailure(`the page did not load (${code} ${description})`));
-    });
+    const finished = () => {
+      contents.off('did-fail-load', failed);
+      resolve();
+    };
+    const failed = (_event: unknown, code: number, description: string, _url: string, isMainFrame: boolean) => {
+      if (!isMainFrame) return;
+      contents.off('did-finish-load', finished);
+      contents.off('did-fail-load', failed);
+      reject(new CaptureFailure(`the page did not load (${code} ${description})`));
+    };
+    contents.once('did-finish-load', finished);
+    contents.on('did-fail-load', failed);
   });
   contents.loadURL(url).catch(() => {}); // the load events above decide
   await loaded;
@@ -117,11 +127,16 @@ export async function loadSettled(win: BrowserWindow, url: string): Promise<void
 // The window's next paint, or CAPTURE_SETTLE_MS.
 export function settled(win: BrowserWindow): Promise<void> {
   return new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, CAPTURE_SETTLE_MS);
-    win.webContents.once('paint', () => {
+    const painted = () => {
       clearTimeout(timer);
       resolve();
-    });
+    };
+    // P3-E (E2 M5 correction): a timeout removes the paint callback it no longer waits for
+    const timer = setTimeout(() => {
+      win.webContents.off('paint', painted);
+      resolve();
+    }, CAPTURE_SETTLE_MS);
+    win.webContents.once('paint', painted);
   });
 }
 

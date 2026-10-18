@@ -39,7 +39,7 @@ const LOOP_TICK_MS = 1;
  * same pass of the loop as its own sampling timer (an 80 ms synchronous call read as 1.3 ms), so the gaps are measured
  * here directly; a gap includes the tick itself (about 1 to 1.5 ms when idle).
  */
-class LoopSampler {
+export class LoopSampler { // P3-C M10: exported for the deck's scale seam (src/engine-host/presentations/scale-seam.ts)
   private last = performance.now();
   private gaps: number[] = [];
   private readonly timer = setInterval(() => {
@@ -61,6 +61,12 @@ class LoopSampler {
     if (this.gaps.length === 0) return { max: 0, p99: 0, mean: 0 };
     const sorted = [...this.gaps].sort((a, b) => a - b);
     return { max: sorted[sorted.length - 1]!, p99: sorted[Math.min(sorted.length - 1, Math.ceil(0.99 * sorted.length) - 1)]!, mean: sorted.reduce((sum, gap) => sum + gap, 0) / sorted.length };
+  }
+
+  // P3-C M10: the loop's busy time since the reset, the sum of every gap's excess over the tick (a gap within twice the
+  // tick is the timer's own idle jitter, not work). Event-loop utilization reads 0 in Electron's utility process.
+  busy(): number {
+    return this.gaps.reduce((sum, gap) => (gap > 2 * LOOP_TICK_MS ? sum + gap - LOOP_TICK_MS : sum), 0);
   }
 
   close(): void {
@@ -212,11 +218,18 @@ export class DocumentPerfSeam {
 
 /** The seam over the file channel in `dir` (`in`, `out`); `close` stops it. */
 export function startDocumentPerfSeam(store: ArtifactStore, dir: string, log: (line: string) => void = (line) => console.warn(`[document-perf] ${line}`)): { close(): void } {
+  const seam = new DocumentPerfSeam(store);
+  return serveCommandFiles(dir, (command: PerfCommand) => seam.run(command), log, () => seam.close()); // P3-C M10: the channel shared with the deck's scale seam
+}
+
+// P3-C M10 start: the file channel, moved out of startDocumentPerfSeam unchanged so the deck's scale seam serves its
+// commands the same way.
+/** Serves the command files arriving in `<dir>/in` through `run`, one at a time in name order, answering in `<dir>/out`. */
+export function serveCommandFiles<C, A>(dir: string, run: (command: C) => Promise<A>, log: (line: string) => void, onClose: () => void = () => {}): { close(): void } {
   const inbox = join(dir, 'in');
   const outbox = join(dir, 'out');
   mkdirSync(inbox, { recursive: true });
   mkdirSync(outbox, { recursive: true });
-  const seam = new DocumentPerfSeam(store);
   let running = false;
   let again = false;
   let closed = false;
@@ -232,13 +245,13 @@ export function startDocumentPerfSeam(store: ArtifactStore, dir: string, log: (l
         for (const name of readdirSync(inbox).filter((file) => file.endsWith('.json')).sort()) {
           if (closed) return;
           const path = join(inbox, name);
-          let command: PerfCommand;
+          let command: C;
           try {
-            command = JSON.parse(readFileSync(path, 'utf8')) as PerfCommand;
+            command = JSON.parse(readFileSync(path, 'utf8')) as C;
           } finally {
             rmSync(path, { force: true });
           }
-          const answer = await seam.run(command);
+          const answer = await run(command);
           writeFileSync(join(outbox, `${name}.tmp`), JSON.stringify(answer));
           renameSync(join(outbox, `${name}.tmp`), join(outbox, name));
         }
@@ -261,7 +274,8 @@ export function startDocumentPerfSeam(store: ArtifactStore, dir: string, log: (l
       closed = true;
       watcher.close();
       clearInterval(poll);
-      seam.close();
+      onClose();
     },
   };
 }
+// P3-C M10 end

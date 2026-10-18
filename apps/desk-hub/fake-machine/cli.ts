@@ -27,7 +27,8 @@ const USAGE = `usage:
       --decisions <how>        recorded (default) | wait: hold at a recorded settlement until the web answers
       --member <id>            the member a recorded web answer names (default: the recording's placeholder)
       --read-only              refuse every RPC and deliver nothing from outside
-      --keep-times             log events keep their recorded ts (default: when first written)`;
+      --keep-times             log events keep their recorded ts (default: when first written)
+      --producer <daemon>      dc3 (default) | dc8: DX4's widened subagents body, jobs, MCP names, and output`;
 
 function readState(path: string): State {
   return JSON.parse(readFileSync(path, 'utf8')) as State;
@@ -62,6 +63,7 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
       member: { type: 'string' },
       'read-only': { type: 'boolean', default: false },
       'keep-times': { type: 'boolean', default: false },
+      producer: { type: 'string', default: 'dc3' },
     },
   });
   if (!values.state || (command !== 'enroll' && command !== 'run')) {
@@ -81,6 +83,10 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
   }
   if (values.decisions !== 'recorded' && values.decisions !== 'wait') {
     console.error('--decisions is recorded or wait');
+    return 2;
+  }
+  if (values.producer !== 'dc3' && values.producer !== 'dc8') {
+    console.error('--producer is dc3 or dc8');
     return 2;
   }
   const state = readState(values.state);
@@ -111,6 +117,7 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
       readOnly: values['read-only'],
       retime: !values['keep-times'],
       reconnect: true,
+      producer: values.producer,
     });
     await machine.connect();
     console.log(`${state.machine} connected to ${state.hub} (generation ${machine.generation}); project ${values.project}`);

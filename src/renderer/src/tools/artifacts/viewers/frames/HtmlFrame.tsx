@@ -25,6 +25,12 @@
 // The frame is an opaque origin, so a message posted before its load reaches the blank document and is lost: a locate
 // waits for this frame's load before posting, and its clock starts at the post. Answers are heard whether or not
 // picking is on; the frame going away answers its pending locates with null.
+//
+// P3-H H4: the page's connector port. With `onPagePort`, every load of the frame's page, a page reloading itself
+// included (its window can stay the same object while the document is new), gets a MessageChannel of its own: one end
+// posted to the page (`{type: 'maws:connectors'}`, which the bridge's connector runtime takes from the parent alone),
+// the other handed to `onPagePort`, whose relay (and so the load's connector lease) ends at the next load or when the
+// frame unmounts. The port is all the page has: the artifact it acts on is the frame's, which the relay binds.
 import { useEffect, useEffectEvent, useLayoutEffect, useRef } from 'react';
 import type { CardRect } from '../../../code/anchor/anchor';
 import { locateMessage, parseLocatedMessage, parsePickMessage, pickMessage, type PickMessage } from '../pick';
@@ -44,9 +50,10 @@ interface Props {
   picking?: boolean;
   onPick?(message: PickMessage): void;
   onFrame?(handle: FrameHandle | null): void; // P2-E1: the locate handle, null once the frame is gone
+  onPagePort?(port: MessagePort): () => void; // P3-H H4: the app's end of this load's connector port; answers its end
 }
 
-export function HtmlFrame({ url, title, onMount, onLoad: loaded, picking = false, onPick, onFrame }: Props) {
+export function HtmlFrame({ url, title, onMount, onLoad: loaded, picking = false, onPick, onFrame, onPagePort }: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
   const load = useRef({ loaded: false, waiting: new Set<() => void>() }); // P2-E1: what waits for this frame's load
   const mounted = useEffectEvent(() => onMount?.());
@@ -112,9 +119,25 @@ export function HtmlFrame({ url, title, onMount, onLoad: loaded, picking = false
       for (const gone of [...unanswered]) gone();
     };
   }, []);
+  // P3-H H4: the current load's connector relay, ended by the next load or the unmount
+  const relay = useRef<(() => void) | null>(null);
+  const endRelay = () => {
+    relay.current?.();
+    relay.current = null;
+  };
+  useEffect(() => endRelay, []);
+  const handPort = () => {
+    endRelay();
+    const page = ref.current?.contentWindow;
+    if (!onPagePort || !page) return;
+    const channel = new MessageChannel();
+    page.postMessage({ type: 'maws:connectors' }, '*', [channel.port2]); // an opaque origin has no name to target
+    relay.current = onPagePort(channel.port1);
+  };
   const onLoad = () => {
     load.current.loaded = true;
     for (const post of [...load.current.waiting]) post();
+    handPort();
     loaded?.();
   };
   // P2-E1 end

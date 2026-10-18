@@ -12,14 +12,18 @@ import * as z from 'zod';
 import { ArtifactKindSchema, ArtifactSchema } from '../../artifacts/entity';
 import { ArtifactVersionSchema } from '../../artifacts/version';
 import { AppSessionIdSchema } from '../../graph/ids';
-import { ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
+import { ARTIFACT_EXPORT_FONTS /* P3-C */, ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
-import type { CommandSpec } from './common';
+import { JsonValueSchema, type CommandSpec } from './common';
+import { ConnectorDatasetSinkSchema /* E3 */, ConnectorGrantGestureSchema, ConnectorGrantSchema, ConnectorToolRefSchema } from '../../artifacts/connectors'; // P3-H H3b
+import { ConnectorGrantOutcomeSchema } from './connectors'; // P3-H H3b
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
 
 const Id = z.uuid();
+// E3: the snapshot refs one hold names (an artifact's own assets, `assets/<name>`), 1 to 64 (ASSET_HOLD_LIMITS.groupRefs)
+const HoldRefs = z.array(z.string().startsWith('assets/').max(1_000)).min(1).max(64);
 const Seq = z.number().int().nonnegative();
 // The realm-local class each structured-clone hop produces (pty.ts's note), over any buffer (a Yjs encoder's included).
 const Bytes = z.custom<Uint8Array>((value) => value instanceof Uint8Array, 'expected a Uint8Array');
@@ -47,25 +51,9 @@ export const ArtifactContentInputSchema = z.union([
 // (P3-A M5): what JSON.stringify would drop or rewrite (`undefined`, a function, NaN, Infinity) is refused at any depth,
 // since the detached JSON line would carry something else than was sent. The public type is one level deep and the rest
 // `unknown`, since a recursive JSON type makes Playwright's typed `page.evaluate` over CommandInput infinitely deep
-// (TS2589); the recursion is the runtime check below.
-function isJsonValue(value: unknown, ancestors: Set<object> = new Set()): boolean {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (typeof value !== 'object' || ancestors.has(value)) return false; // undefined, function, bigint, symbol, a cycle
-  const isArray = Array.isArray(value);
-  const prototype = Object.getPrototypeOf(value);
-  if (!isArray && prototype !== Object.prototype && prototype !== null) return false; // a Date, Map, typed array, class instance
-  ancestors.add(value);
-  const keys = Object.keys(value);
-  const ok = (!isArray || keys.length === (value as unknown[]).length) && keys.every((key) => isJsonValue((value as Record<string, unknown>)[key], ancestors));
-  ancestors.delete(value);
-  return ok;
-}
-const TestValueSchema = z
-  .union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.unknown()), z.record(z.string(), z.unknown())])
-  .refine((value) => isJsonValue(value), 'expected a JSON value');
+// (TS2589); the recursion is the runtime check (`JsonValueSchema`, common.ts).
 export const ArtifactTestOpSchema = z.discriminatedUnion('op', [
-  z.strictObject({ op: z.literal('setAttr'), key: z.string().min(1), value: TestValueSchema, root: z.string().min(1).optional() }),
+  z.strictObject({ op: z.literal('setAttr'), key: z.string().min(1), value: JsonValueSchema, root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('insertText'), index: Seq, text: z.string(), root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('deleteText'), index: Seq, length: z.number().int().positive(), root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('page'), text: z.string().max(ARTIFACT_MAX_BYTES) }), // M7 fix wave 1: an html page's new content
@@ -91,7 +79,7 @@ const ItemIdSchema = z.strictObject({ client: z.number().int().nonnegative().max
 export const SuggestionRangeSchema = z.strictObject({ start: ItemIdSchema, end: ItemIdSchema });
 const SuggestionRanges = z.array(SuggestionRangeSchema).min(1).max(1_000);
 
-export const ARTIFACT_REFUSALS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'designSystemInUse', 'storeTooNew', 'unavailable', 'exportUnavailable' /* M7 */] as const;
+export const ARTIFACT_REFUSALS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'designSystemInUse', 'storeTooNew', 'unavailable', 'exportUnavailable' /* M7 */, 'exportTooLarge' /* P3-E (E1 M5; Decision Log 26): {board, w, h, maxScale} */] as const;
 export const ArtifactRefusalSchema = z.strictObject({ reason: z.enum(ARTIFACT_REFUSALS), data: z.record(z.string(), z.unknown()) });
 export type ArtifactRefusal = z.infer<typeof ArtifactRefusalSchema>;
 
@@ -121,8 +109,11 @@ export type ArtifactConsole = z.infer<typeof ArtifactConsoleSchema>;
 
 export const commands = {
   'artifacts.list': host(z.strictObject({ filter: ArtifactListFilterSchema.optional() }), z.strictObject({ artifacts: z.array(ArtifactRowSchema) })),
-  // null when there is no such artifact (or it is deleted and `includeDeleted` is not set)
-  'artifacts.get': host(z.strictObject({ artifactId: Id, includeDeleted: z.boolean().optional() }), z.strictObject({ artifact: ArtifactRowSchema.nullable() })),
+  // null when there is no such artifact (or it is deleted and `includeDeleted` is not set). P3-E (docs/doperpowers/plans/
+  // 2026-10-16-p3-e-design-dashboard.md Decision Log 21 and 22): a live document an earlier build stored in another
+  // shape is migrated first, as the human, or the read refused naming why; `prepare: false` (the default is true) reads
+  // the row alone, for a caller that then reads a retained version and never the live document
+  'artifacts.get': host(z.strictObject({ artifactId: Id, includeDeleted: z.boolean().optional(), prepare: z.boolean().optional() /* P3-E */ }), z.strictObject({ artifact: ArtifactRowSchema.nullable() })),
   // The human's create: a byte kind with its content, a document kind empty.
   'artifacts.create': host(
     z.strictObject({ kind: ArtifactKindSchema, title: z.string().min(1).max(1_000), spaceId: Id.optional(), designSystemId: Id.optional(), content: ArtifactContentInputSchema.optional() }),
@@ -179,6 +170,25 @@ export const commands = {
     z.strictObject({ artifactId: Id, name: z.string().min(1).max(255), mime: z.string().min(1).max(255), bytes: Bytes.refine((bytes) => bytes.length <= ARTIFACT_MAX_BYTES, `at most ${ARTIFACT_MAX_BYTES} bytes`) }),
     z.strictObject({ assetId: z.uuid(), ref: z.string() }),
   ),
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, Decision Log 25; the parent's 65): one artifact's asset
+  // copied into another by the store, the human the actor: the source's bytes written through the upload path on the
+  // target (content-addressed, so identical bytes answer the target's existing ref and a name is made unique there);
+  // both artifacts live, a deleted or missing one refused by name.
+  'artifacts.copyAsset': host(z.strictObject({ from: Id, ref: z.string().min(1).max(1_000), to: Id }), z.strictObject({ assetId: z.uuid(), ref: z.string() })),
+  // P3-E (docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md M2; ledger X23 as amended by E's Decision Log 8): one
+  // page of a dataset snapshot, the asset `ref` read as `format` (the displayed or exported descriptor's: one ref may
+  // be bound as two formats), parsed by the host. At most `limit` rows (≤ 2,000, DATASET_READ_MAX_ROWS) and 1 MiB of
+  // JSON; the caller continues at `offset` plus the rows answered. A ref the artifact does not hold is `notFound`, a
+  // snapshot that does not read as the format `invalid {line?}`, a single row larger than a page `tooLarge`.
+  'artifacts.readDataset': host(
+    z.strictObject({ artifactId: Id, ref: z.string().min(1).max(1_000), format: z.enum(['csv', 'tsv', 'json']), offset: Seq.optional(), limit: z.number().int().min(1).max(2_000).optional() }),
+    z.strictObject({
+      columns: z.array(z.strictObject({ name: z.string(), type: z.enum(['string', 'number', 'boolean', 'date', 'null']), mismatches: z.number().int().positive().optional() })),
+      rows: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+      total: Seq,
+      truncated: z.boolean(),
+    }),
+  ),
   // The host's event-loop delay in ms since the last reset (Decision Log 23h); refused unless the host runs under MAWS_E2E=1.
   'artifacts.testLoopDelay': host(
     z.strictObject({ reset: z.boolean().optional() }),
@@ -219,19 +229,76 @@ export const commands = {
   // `format` under the store's directory (`<id>/exports/<revision>-<format>.<ext>`) and answers its path. `pageSize`
   // the paper (omitted: the exporter's default); a PNG is `width` CSS px wide (1280 when omitted) and `height` high (the
   // page's whole height when omitted). A kind and format no exporter serves is refused `exportUnavailable {kind, format}`.
+  // P3-E (E1 M5; X23, the parent's Decision Log 26): a design's `board` (its PNG's one board), `boards` (its PDF's pages)
+  // and `scale` (0.1 to 4); a PNG over the picture cap is refused `exportTooLarge {board, w, h, maxScale}`.
+  // P3-H (P3 Decision Log 91, the X31 `ownFile` row): `ownFile`, or a design's export (E's Decision Log 33), is a file
+  // of its own: main mints `exportId` before it renders, names the file `<revision>-<format>-<exportId>.<ext>` and
+  // answers the id beside its path, so no later export of the same revision and format replaces it. It lives under the
+  // artifact's export storage as the cache files do. Send to is the caller that sets it.
   'artifacts.export': main(
     z.strictObject({
       artifactId: Id,
       format: z.enum(ARTIFACT_EXPORT_FORMATS),
       versionId: z.number().int().positive().optional(),
       pageSize: z.enum(ARTIFACT_EXPORT_PAGE_SIZES).optional(),
+      fonts: z.enum(ARTIFACT_EXPORT_FONTS).optional(), // P3-C: a presentation's PPTX faces (omitted: named)
       width: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
       height: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
+      board: z.string().min(1).max(64).optional(), // P3-E
+      boards: z.array(z.string().min(1).max(64)).max(200).optional(), // P3-E
+      scale: z.number().min(0.1).max(4).optional(), // P3-E
+      ownFile: z.literal(true).optional(), // P3-H (Decision Log 91)
     }),
     // the snapshot exported (a document that moved since names a later revision); `blockedRequests`: remote requests the
-    // PDF printer refused
-    z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional() }),
+    // PDF printer refused; `exportId`: the id of an export of its own file, the one `library.saveAs` names it by (P3-E,
+    // E's Decision Log 33; P3-H, Decision Log 91)
+    z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional(), exportId: z.uuid().optional() }),
   ),
+  // P3-E (docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md M3; ledger X23 as amended by E's Decision Log 18): a
+  // dashboard's source sheet Download. Main resolves the artifact's own asset `ref` through `artifacts.content` (a ref
+  // it does not hold is `notFound`), shows Save under Downloads suggesting `name` (the displayed descriptor's source
+  // name, cut to a basename) and copies the bytes; `path` null when the owner cancels. The renderer fetches no bytes.
+  'artifacts.downloadAsset': main(
+    z.strictObject({ artifactId: Id, ref: z.string().startsWith('assets/').max(1_000), name: z.string().min(1).max(1_000).optional() }),
+    z.strictObject({ path: z.string().nullable() }),
+  ),
+  // P3-H H3b start: the owner's connector grants from the editor header (the P3 interface ledger's X23 grant rows), main's:
+  // a grant is taken under the fingerprint the route reports now (the gesture carries none), refused when no route has
+  // the tool or a read grant is asked for a tool the route does not mark read-only; a revoke stops the tool's work in
+  // flight before the store is asked (src/main/connectors/broker.ts).
+  'artifacts.connectorGrants': main(z.strictObject({ artifactId: Id }), z.strictObject({ grants: z.array(ConnectorGrantSchema) })),
+  'artifacts.grantConnectorTool': main(z.strictObject({ artifactId: Id, tool: ConnectorGrantGestureSchema }), ConnectorGrantOutcomeSchema),
+  'artifacts.revokeConnectorTool': main(z.strictObject({ artifactId: Id, ...ConnectorToolRefSchema.shape }), z.strictObject({ revoked: z.boolean() })),
+  // P3-H H3b end
+  // E3 start (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b; E's Decision Log 48 (3); the ledger's E3
+  // hold-IPC row): holds over a dashboard's snapshot bytes, so a reader that captured a descriptor reads the bytes it
+  // names whatever a refresh retires meanwhile. A hold is all or none and bounded per artifact (64 holds, 256 distinct
+  // refs, 64 refs in one: `tooLarge {hold, limit}`); a ref the artifact no longer holds is `notFound {ref,
+  // snapshotUnavailable: true}`, nothing held. Main-only, the host's holds are main's connection's: its going releases
+  // them, and an id it did not mint releases nothing (`released: false`).
+  // The export's capture: the live state (or `versionId`'s) and one hold over every snapshot its descriptors name, in one
+  // host read; the export releases `assetHoldId` when it ends. Main-only.
+  'artifacts.captureDatasetState': host(z.strictObject({ artifactId: Id, versionId: z.number().int().positive().optional() }), z.strictObject({ revision: Seq, bytes: Bytes, assetHoldId: z.uuid() })),
+  // Main's own hold over `refs` (a window's handle below, a Download's own). Main-only.
+  'artifacts.holdAssets': host(z.strictObject({ artifactId: Id, refs: HoldRefs }), z.strictObject({ assetHoldId: z.uuid() })),
+  'artifacts.releaseAssets': host(z.strictObject({ assetHoldId: z.uuid() }), z.strictObject({ released: z.boolean() })),
+  // A window's hold (the source sheet's captured snapshots, the painted cache's): main takes the host's hold and answers
+  // an unforgeable handle bound to the asking window, which alone releases it; the window's closing, navigating or
+  // crashing releases it too. Main's.
+  'artifacts.holdDatasets': main(z.strictObject({ artifactId: Id, refs: HoldRefs }), z.strictObject({ holdId: z.uuid() })),
+  'artifacts.releaseDatasets': main(z.strictObject({ holdId: z.uuid() }), z.strictObject({ released: z.boolean() })),
+  // An agent's pending `artifact_dataset` refresh (R3), read by main once `maws.artifact.datasetRefresh` named it: the
+  // dashboard, the dataset and the base the session read it at, the asking session, and the query its descriptor names
+  // (the tool and its arguments). Null once the request ended or for an id the host never issued. Main-only.
+  'artifacts.datasetRefreshRequest': host(
+    z.strictObject({ requestId: z.uuid() }),
+    z.strictObject({
+      request: z
+        .strictObject({ artifactId: Id, datasetId: ConnectorDatasetSinkSchema.shape.id, baseRevision: Seq, appSessionId: AppSessionIdSchema, ...ConnectorToolRefSchema.shape, args: z.record(z.string(), z.unknown()) })
+        .nullable(),
+    }),
+  ),
+  // E3 end
 } as const satisfies Record<`artifacts.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
