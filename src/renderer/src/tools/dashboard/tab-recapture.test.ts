@@ -3,7 +3,7 @@
 // sheet's hold was taken (never relabelling the old descriptors as latest), holds it afresh and reopens the sheet on
 // that one capture; if the document does not sync again within the bound, the sheet says the snapshot is unavailable.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
+import { removeDataset, setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { newDoc } from '@artifacts/yjs';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -181,5 +181,30 @@ describe('the dashboard tab’s source sheet recaptures from the document it was
     expect(snapshot.datasets.map(({ descriptor }) => descriptor.title)).toEqual(['Version']);
     expect(snapshot.preview).toBe(true);
     expect(w.holds.at(-1)!.refs).toEqual(['assets/q0.json']);
+  });
+});
+
+// P3-F dashboard-live-ui wave (scalpel-1#2): Show current reopens the sheet on the current capture of its datasets; a
+// dataset removed since leaves the shown document's others, never the false "No data is bound" sheet while some remain
+describe('the dashboard tab’s Show current on a removed dataset (P3-F)', () => {
+  it('reopens on the remaining datasets; with none left, on none', async () => {
+    const w = world();
+    tabs.push(w.tab);
+    await vi.waitFor(() => expect(w.tab.document.snapshot().ready).toBe(true));
+    setDataset(w.doc, 'other', live('assets/o1.json', 'Other'));
+    w.tab.displayed(w.doc);
+    w.tab.reopenSheet('live'); // as its source label opens it: that dataset alone
+    await settle();
+    expect(w.tab.sheet.snapshot().datasets.map(({ id }) => id)).toEqual(['live']);
+    removeDataset(w.doc, 'live');
+    w.tab.reopenSheet('live'); // its live block's Show current
+    await settle();
+    const snapshot = w.tab.sheet.snapshot();
+    expect(snapshot.open).toBe(true);
+    expect(snapshot.datasets.map(({ id }) => id)).toEqual(['other']);
+    expect(snapshot.selected).toBe('other');
+    removeDataset(w.doc, 'other');
+    w.tab.reopenSheet('other');
+    expect(w.tab.sheet.snapshot().datasets).toEqual([]); // nothing bound now: the sheet says so truly
   });
 });

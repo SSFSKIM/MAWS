@@ -124,12 +124,13 @@ export class DashboardTabState {
   };
 
   /** E3 M3: the sheet opened again on the current capture of its datasets (each with the view it was opened from),
-   * `selected` shown: the owner's explicit way to a newer fetch or a replaced query. */
+   * `selected` shown: the owner's explicit way to a newer fetch or a replaced query. P3-F: its datasets all removed
+   * since, on the shown document's others (none only when none remain). */
   reopenSheet = (selected: string): void => {
     const views = new Map(this.sheet.snapshot().datasets.map(({ id, view }) => [id, view]));
     const ids = this.sheet.snapshot().open ? [...views.keys()] : [selected];
     const datasets = this.shown.filter(({ id }) => ids.includes(id)).map((dataset) => ({ ...dataset, ...(views.get(dataset.id) && { view: views.get(dataset.id) }) }));
-    this.openSheet(datasets, selected);
+    this.openSheet(datasets.length > 0 ? datasets : this.shown, selected);
   };
 
   /** The header's Datasets: the sheet on the shown document's datasets, or closed when it is open. */
