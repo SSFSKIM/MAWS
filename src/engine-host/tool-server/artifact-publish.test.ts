@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import { ArtifactPublishResultSchema, artifactRefusalOf, TOOL_ERRORS } from '@shared/maws/tools';
@@ -330,6 +330,30 @@ describe('artifact_publish as a suggestion (M8; parent Decision Log 27)', () => 
     const first = jsonOf(await publish(args, { toolUseId: 'toolu_suggest' as ToolUseId }));
     expect(jsonOf(await publish(args, { toolUseId: 'toolu_suggest' as ToolUseId }))).toEqual(first);
     expect(rowsOf(`${created.artifactId}:suggest`)).toHaveLength(1);
+  });
+
+  // P3-F (artifact-protocol finding 8): the owner's setting is read where the publish writes, not before it waited
+  it('obeys the owner’s setting turned on while the publish waited to write: a suggestion, or the refusal of a kind that takes none', async () => {
+    const migrate = w.store.ensureMigrated.bind(w.store);
+    const turnedOnWhileWaiting = (id: string) => vi.spyOn(w.store, 'ensureMigrated').mockImplementationOnce(async (artifactId, actor) => {
+      await w.store.update(id, { agentEditsAsSuggestions: true });
+      return migrate(artifactId, actor);
+    });
+    const created = await design();
+    turnedOnWhileWaiting(created.artifactId);
+    expect(jsonOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { 'a.html': 'A2' } }))).toMatchObject({ status: 'suggested', changed: ['a.html'] });
+    expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A', 'b.css': 'B' });
+    expect(suggested(created.artifactId)).toEqual({ 'a.html': 'A2', 'b.css': 'B' });
+    const page = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    turnedOnWhileWaiting(page.artifactId);
+    const html = await publish({ artifact: 'dash', baseRevision: page.revision, files: { 'index.html': '<p>v2</p>' } });
+    expect(artifactRefusalOf(textOf(html))).toEqual({ reason: 'invalid', kind: 'html', mode: 'suggest', setting: true });
+    expect(w.store.revision(page.artifactId)).toBe(page.revision);
+    const board = await create({ kind: 'design', title: 'Board', files: { 'a.html': 'A' } });
+    turnedOnWhileWaiting(board.artifactId);
+    const refused = await publish({ artifact: board.artifactId, baseRevision: board.revision, files: { 'a.html': 'A2' } });
+    expect(artifactRefusalOf(textOf(refused))).toEqual({ reason: 'invalid', kind: 'design', mode: 'suggest', setting: true });
+    expect(liveFiles(board.artifactId)).toEqual({ 'a.html': 'A' });
   });
 
   it('refuses a suggestion to an html page, asked for or set by the owner, writing nothing', async () => {

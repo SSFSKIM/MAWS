@@ -68,25 +68,34 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
         if (held) throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard', held }, `${input.artifact}: ${legacyDashboardReason(held)}; nothing was written`);
         throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard' }, 'a dashboard is edited block by block (artifact_edit) and its data bound with artifact_dataset, not published');
       }
-      const suggest = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
-      if (suggest && !isDocKind(artifact.kind)) {
-        const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
-        throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}, and an html page takes none; nothing was written`);
-      }
-      // P3-C (the parent's Decision Log 53 (2)): nothing shows or settles a deck's suggestions in P3; P3-E: nor a design's,
-      // whether or not its adapter is registered (the parent's Decision Log 21 (2))
-      if (suggest && (artifact.kind === 'presentation' || artifact.kind === 'design')) {
-        const a = artifact.kind === 'design' ? 'a design' : 'a presentation';
-        const why = input.mode === 'suggest' ? `mode "suggest" asks for a suggestion, and ${a} takes none in this build of MAWS: publish with mode "direct"` : `the user set ${artifact.title} to take agent edits as suggestions, and ${a} takes none in this build of MAWS: ask the user to turn off agent edits as suggestions for it`;
-        throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}; nothing was written`);
-      }
+      suggestionPolicy(artifact, input); // a refusal before anything is migrated; read again where the publish writes
       // P3-E (E1's M2; Decision Log 11 (1)): an earlier build's shape is migrated by this session before its replica and
       // base are looked at, so the publish lands on the kind's model
       await store.ensureMigrated(artifact.id, actorOf(ctx));
-      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx, suggest) : await placed(store, await publishPage(deps, store, artifact, input, ctx), input, ctx);
+      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx) : await placed(store, await publishPage(deps, store, artifact, input, ctx), input, ctx);
       return toolText(result);
     })),
   );
+}
+
+// Whether the publish is a suggestion (`mode: 'suggest'`, or the owner's `agentEditsAsSuggestions`), throwing the refusal
+// of a kind that takes none. P3-F (artifact-protocol finding 8): asked again inside the publish's write, of the artifact
+// as it is then, so an owner who turned the setting on while the publish waited (on a batch, a migration) is obeyed;
+// that refusal is store state, released after the batch it was read in.
+function suggestionPolicy(artifact: Artifact, input: ArtifactPublishInput): boolean {
+  const suggest = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
+  if (suggest && !isDocKind(artifact.kind)) {
+    const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
+    throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}, and an html page takes none; nothing was written`);
+  }
+  // P3-C (the parent's Decision Log 53 (2)): nothing shows or settles a deck's suggestions in P3; P3-E: nor a design's,
+  // whether or not its adapter is registered (the parent's Decision Log 21 (2))
+  if (suggest && (artifact.kind === 'presentation' || artifact.kind === 'design')) {
+    const a = artifact.kind === 'design' ? 'a design' : 'a presentation';
+    const why = input.mode === 'suggest' ? `mode "suggest" asks for a suggestion, and ${a} takes none in this build of MAWS: publish with mode "direct"` : `the user set ${artifact.title} to take agent edits as suggestions, and ${a} takes none in this build of MAWS: ask the user to turn off agent edits as suggestions for it`;
+    throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}; nothing was written`);
+  }
+  return suggest;
 }
 
 const staleBase = (liveRevision: number, sentence: string) => refuse(TOOL, { reason: 'staleBase', liveRevision }, sentence);
@@ -121,6 +130,11 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifac
         const text = input.files[paths[0]!];
         if (paths.length !== 1 || !names.has(paths[0]!) || text === null || text === undefined) {
           throw refuse(TOOL, { reason: 'invalid', paths }, `an html artifact is one file: send files: {"${PAGE}": "<the whole page>"}`);
+        }
+        try {
+          suggestionPolicy(store.get(artifact.id) ?? artifact, input); // P3-F: the owner's setting where the publish writes
+        } catch (refusal) {
+          return refusedAfterCommit(store, refusal as ToolRefusal);
         }
         if (!base) return refusedAfterCommit(store, staleBase(live.revision, NEVER_READ));
         if (input.baseRevision !== base.revision) return refusedAfterCommit(store, staleBase(live.revision, notLastRead(input.baseRevision, base.revision)));
@@ -168,10 +182,10 @@ async function placed(store: ArtifactStore, recorded: ArtifactPublishResult, inp
   return { ...recorded, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version: place, externalReferences: externalReferenceCount(text), ...(owner !== null && owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
 }
 
-async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext, suggest: boolean): Promise<ArtifactPublishResult> {
+async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
   const actor = actorOf(ctx);
   const replica = store.service.replica(ctx.appSessionId, artifact.id);
-  const status = suggest ? 'suggested' : 'published';
+  let suggest = false;
   const base = replica.base;
   const publish = publisherOf(store, artifact.kind);
   const outcome: { conflicts?: { path: string; detail?: string }[]; failure?: unknown; result?: ArtifactPublishResult } = {};
@@ -182,6 +196,12 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
       TOOL,
       artifact.id,
       async (op) => {
+        try {
+          suggest = suggestionPolicy(store.get(artifact.id) ?? artifact, input); // P3-F: the owner's setting where the publish writes
+        } catch (refusal) {
+          return refusedAfterCommit(store, refusal as ToolRefusal);
+        }
+        const status = suggest ? 'suggested' : 'published';
         if (!base) return refusedAfterCommit(store, staleBase(store.revision(artifact.id), NEVER_READ));
         if (input.baseRevision !== base.revision) return refusedAfterCommit(store, staleBase(store.revision(artifact.id), notLastRead(input.baseRevision, base.revision)));
         baseFiles = base.files ?? withDoc(base.state, (doc) => filesOf(store, artifact.kind, doc)); // P3-C: the files the session read, kept on its base
