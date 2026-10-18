@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 96,
-    "defer:pending": 27,
+    "defer:committed": 97,
+    "defer:pending": 26,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1310,7 +1310,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L159; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
       "remainingClause": "Keep the editor mounted per tab or snapshot its DOM. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L159; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "f1166d629a5b7206bc93843aaf8b75edd493cb56"
     },
     {
       "line": 161,
@@ -1320,8 +1320,8 @@
       "triageReason": "Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L161; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
       "remainingClause": "Report upstream; drop the subtraction at the re-pin that fixes it. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L161; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 162,
