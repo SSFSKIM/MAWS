@@ -16,12 +16,12 @@
 // - Restore brings the frames, the content and the deleted board back as a new `restore` version, with the banner, a
 //   conversation since the version kept; no console error throughout.
 // The second case: "See N new changes" after an agent's cross-board move between two views, counted once.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { constants, existsSync, mkdtempSync, openSync, closeSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { asAgent, boardsOf, createDesign, editDesign, elementOf, filesOf, headerAction, ok, openFromLibrary, seamInstalled, seed, threadsOf } from './support/design';
+import { asAgent, boardsOf, createDesign, DESIGN_FILES, editDesign, elementOf, filesOf, headerAction, ok, openFromLibrary, pinOffset, plain, seamInstalled, seed, threadsOf } from './support/design';
 
 let launch: MawsLaunch | null = null;
 let channel: string | null = null;
@@ -300,4 +300,115 @@ test('See N new changes: an agent’s cross-board move between two views is offe
   await expect(mark).toHaveAttribute('title', /Claude/); // the agent, by the session's title or "Claude"
   await expect(bar.getByRole('button', { name: 'Restore this version' })).toHaveCount(0); // the live design: nothing to restore
   expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// E-acc clauses 2 (design) and 3: one carried design, a real quit/relaunch, and the linked directory produced by the app.
+test('carried design survives app relaunch with geometry, in-place text, conversation, restored history, export and read-only linked files', async () => {
+  test.setTimeout(240_000);
+  channel = mkdtempSync(join(tmpdir(), 'maws-carried-design-'));
+  const env = { MAWS_DESIGN_HISTORY: join(channel, 'agent') };
+  let page = await ready(env);
+  const { space } = await ok<{ space: { id: string } }>(page, 'spaces.create', { name: 'Carried launch', linkedDir: channel });
+  const title = 'Carried design';
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'design', title, spaceId: space.id });
+  const id = artifact.id;
+  const files = { ...DESIGN_FILES };
+  const manifest = JSON.parse(files['project/canvas.json']!);
+  delete manifest.boards.broken;
+  manifest.order = ['phone', 'tablet', 'desktop', 'poster'];
+  files['project/canvas.json'] = JSON.stringify(manifest);
+  delete files['project/boards/broken.html'];
+  await seed(page, id, files);
+  let tab = await openFromLibrary(page, title, id);
+  await editDesign(page, id, { op: 'setFrame', boardId: 'phone', frame: { x: 70, y: 90, w: 420, h: 900 } });
+  await editDesign(page, id, { op: 'setFrame', boardId: 'desktop', frame: { x: 1500, y: 140, w: 1500, h: 1100 } });
+  const toolbar = tab.getByRole('toolbar', { name: 'Design' });
+  if (!(await tab.getByRole('navigation', { name: 'Boards' }).isVisible())) await toolbar.getByRole('button', { name: 'Boards', exact: true }).click();
+  await tab.getByRole('button', { name: 'Board Desktop options' }).click();
+  await page.getByRole('menuitem', { name: 'Zoom to board' }).click();
+  await toolbar.getByRole('button', { name: 'Boards', exact: true }).click();
+  const note = tab.locator('[data-board-id="desktop"] [data-eid="note"]');
+  const box = (await note.boundingBox())!;
+  await page.mouse.dblclick(box.x + 20, box.y + box.height / 2);
+  await expect(tab.locator('.deck-textbox')).toBeFocused();
+  await page.keyboard.press('Meta+a');
+  await page.keyboard.type('Owner: keep this launch note.');
+  await page.keyboard.press('Escape');
+  await expect(note).toHaveText('Owner: keep this launch note.');
+  await editDesign(page, id, { op: 'addThread', threadId: 'carried-note', boardId: 'desktop', elementId: 'note', body: 'Keep the launch date.' });
+  const before = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'Carried layout' });
+  await asAgent(env.MAWS_DESIGN_HISTORY, id, { op: 'reply', threadId: 'carried-note', body: 'The date is confirmed.' });
+  await editDesign(page, id, { op: 'setFrame', boardId: 'desktop', frame: { y: 700 } });
+  await editDesign(page, id, { op: 'prependText', boardId: 'desktop', elementId: 'note', text: 'Discarded ' });
+  await expect.poll(async () => plain(await elementOf(page, id, 'desktop', 'note'))).toBe('Discarded Owner: keep this launch note.');
+  await ok(page, 'artifacts.restore', { artifactId: id, versionId: before.versionId });
+  await expect(note).toHaveText('Owner: keep this launch note.', { timeout: 15_000 });
+  const exported = await ok<{ path: string }>(page, 'artifacts.export', { artifactId: id, format: 'png', board: 'phone' });
+  const png = readFileSync(exported.path);
+  expect(png.subarray(1, 4).toString()).toBe('PNG');
+  expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([420, 900]);
+  const geometry = await boardsOf(page, id);
+  expect(geometry.find((b) => b.id === 'phone')!.frame).toEqual({ x: 70, y: 90, w: 420, h: 900 });
+  expect(geometry.find((b) => b.id === 'desktop')!.frame).toEqual({ x: 1500, y: 140, w: 1500, h: 1100 });
+  const history = await ok<{ versions: { kind: string; label?: string }[] }>(page, 'artifacts.versions', { artifactId: id });
+  expect(history.versions).toContainEqual(expect.objectContaining({ kind: 'restore', label: 'Restored from Carried layout' }));
+  const carriedFiles = await filesOf(page, id);
+  const conversation = await threadsOf(page, id);
+  expect(conversation).toEqual([expect.objectContaining({ id: 'carried-note', live: true, orphan: false, messages: [{ body: 'Keep the launch date.', by: 'human' }, { body: 'The date is confirmed.', by: expect.stringMatching(/^session:/) }] })]);
+
+  const mirror = join(channel, 'artifacts', `Carried-design-${id.slice(0, 8)}`);
+  const paths = ['canvas.json', 'boards/phone.html', 'boards/tablet.html', 'boards/desktop.html', 'boards/poster.html'];
+  await expect.poll(() => paths.every((p) => existsSync(join(mirror, p))), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => readFileSync(join(mirror, 'boards/desktop.html'), 'utf8')).toContain('Owner: keep this launch note.');
+  await expect.poll(() => JSON.parse(readFileSync(join(mirror, 'canvas.json'), 'utf8')).boards.desktop).toMatchObject({ x: 1500, y: 140, w: 1500, h: 1100 });
+  const mirrored = Object.fromEntries(paths.map((p) => [p, readFileSync(join(mirror, p), 'utf8')]));
+  const assertMirror = () => {
+    expect(readdirSync(join(mirror, 'boards')).sort()).toEqual(['desktop.html', 'phone.html', 'poster.html', 'tablet.html']);
+    expect(JSON.parse(readFileSync(join(mirror, 'canvas.json'), 'utf8')).boards.desktop).toMatchObject({ x: 1500, y: 140, w: 1500, h: 1100 });
+    for (const p of paths) {
+      const path = join(mirror, p);
+      expect(readFileSync(path, 'utf8')).toBe(mirrored[p]);
+      expect(statSync(path).mode & 0o222, `${p} has no writable mode`).toBe(0);
+      // A real open for writing must fail, without changing any bytes even if it unexpectedly succeeds.
+      expect(() => { const fd = openSync(path, constants.O_WRONLY); closeSync(fd); }, `${p} refuses writes`).toThrow(/EACCES|EPERM/);
+    }
+  };
+  assertMirror();
+  expect(launch!.consoleErrors()).toEqual([]);
+  const original = launch!;
+  const exited = original.app.waitForEvent('close');
+  await original.app.evaluate(({ app }) => app.quit());
+  await exited;
+  const restarted = await launchMaws({ userData: original.userData, keepConfigHome: true, env });
+  launch = { ...restarted, cleanup: async () => { await restarted.cleanup(); await original.cleanup(); } };
+  page = restarted.page;
+  await restarted.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1800, 1000));
+  await expect.poll(async () => (await ok<{ state: string }>(page, 'engine.hostState')).state, { timeout: 30_000 }).toBe('ready');
+  tab = await openFromLibrary(page, title, id);
+  expect(await boardsOf(page, id)).toEqual(geometry);
+  expect(await filesOf(page, id)).toEqual(carriedFiles);
+  expect(await threadsOf(page, id)).toEqual(conversation);
+  expect(await ok(page, 'artifacts.versions', { artifactId: id })).toEqual(history);
+  expect((await ok<{ artifact: { spaceId: string } }>(page, 'artifacts.get', { artifactId: id })).artifact.spaceId).toBe(space.id);
+  expect((await ok<{ spaces: { id: string; linkedDir: string }[] }>(page, 'spaces.list')).spaces).toContainEqual(expect.objectContaining({ id: space.id, linkedDir: channel }));
+  assertMirror();
+  // The owner's library identifies the linked Space and the exact directory whose files were inspected above.
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  const library = page.locator('[data-library]');
+  await expect(library.getByRole('article', { name: title, exact: true }).getByRole('button', { name: 'Carried launch', exact: true })).toBeVisible();
+  await library.getByRole('radio', { name: 'By Space' }).click();
+  await expect(library.locator('span[title]').filter({ hasText: channel! })).toBeVisible();
+  tab = await openFromLibrary(page, title, id);
+  expect(readFileSync(exported.path)).toEqual(png);
+  await expect(tab.locator('[data-board-id="desktop"] [data-eid="note"]')).toHaveText('Owner: keep this launch note.');
+  const pin = tab.locator('[data-comment-pin="note"]');
+  await expect(pin).toHaveCount(1);
+  await expect.poll(() => pinOffset(pin, tab.locator('[data-board-id="desktop"] [data-eid="note"]'))).toBeLessThan(4);
+  await tab.getByRole('toolbar', { name: 'Design' }).getByRole('button', { name: /^Comments/ }).click();
+  const thread = tab.getByRole('complementary', { name: 'Comments' }).locator('article[data-thread="carried-note"]');
+  await expect(thread).toContainText('Keep the launch date.');
+  await expect(thread).toContainText('The date is confirmed.');
+  await headerAction(page, 'Version history');
+  await expect(tab.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Carried layout/ })).toBeVisible();
+  expect(restarted.consoleErrors()).toEqual([]);
 });

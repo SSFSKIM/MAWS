@@ -9,7 +9,8 @@
 // new ones; Make a copy draws the copy's own snapshot; Restore brings the old data back as a new version, which a closed
 // and reopened tab keeps. Evidence shots go to test-results/dashboard-proof/.
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { bindCsv, chart, durable, insertBlocks, ok, openInMain, paragraph, restartHost, SESSION_A, startApp, tipsOf, type DashboardApp } from './support/dashboards';
+import { bindCsv, chart, durable, insertBlocks, ok, openInMain, openInPanel, paragraph, pinArtifactsTool, railOf, reply, restartHost, selectChart, SESSION_A, startApp, tipsOf, type DashboardApp } from './support/dashboards';
+import { launchMaws } from './support/launch';
 
 const PROOF = 'test-results/dashboard-proof';
 const AUTO_IDLE_MS = 2 * 60_000; // A's: an auto version this long after the last human update (src/engine-host/documents/store.ts)
@@ -183,4 +184,83 @@ test('a replacement-only agent change counts, marks and steps after a host resta
     await copy.screenshot({ path: `${PROOF}/history-copy.png` });
   });
   expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// E-acc: accumulated file-backed state crosses a real application quit, not only a host or tab restart.
+test('carried dashboard: bind, owner prose and conversation, agent replacement, restore, app relaunch and ordinary Duplicate', async () => {
+  test.setTimeout(240_000);
+  app = await startApp(PROOF);
+  let { page } = app;
+  const { agent } = app;
+  await pinArtifactsTool(page);
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'dashboard', title: 'Carried dashboard' });
+  const id = artifact.id;
+  let record = await openInPanel(page, id);
+  const read = () => agent.ok<{ revision: number }>('A', 'artifact_read', { artifact: id });
+  await agent.ok('A', 'artifact_dataset', { artifact: id, baseRevision: (await read()).revision, id: 'sales', title: 'Sales', path: await agent.write('A', 'sales.csv', OLD.csv) });
+  await insertBlocks(record, VIEWS);
+  await insertBlocks(record, [paragraph('Owner: compare with last year.')]);
+  await expect.poll(() => tipsOf(live(record).first())).toEqual(OLD.tips);
+  const labels = await live(record).locator('.dash-source-label').allTextContents();
+  expect(labels).toHaveLength(2);
+  for (const label of labels) expect(label).toMatch(/^Sales · from sales\.csv · updated .* UTC by Harness A$/);
+  await selectChart(record);
+  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+  const card = page.locator('[data-comment-card]');
+  await expect(card).toBeVisible();
+  const block = record.locator('.doc-chart').first();
+  await expect.poll(async () => (await block.getAttribute('class'))?.match(/\bcomment-(?!active\b)([\w-]+)/)?.[1] ?? '').not.toBe('');
+  const threadId = (await block.getAttribute('class'))!.match(/\bcomment-(?!active\b)([\w-]+)/)![1]!;
+  await card.getByRole('button', { name: 'Resolve' }).click();
+  let rail = await railOf(record);
+  await rail.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
+  await reply(rail, threadId, 'Keep the regional comparison.');
+  await durable(record);
+  const { versionId } = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'Carried baseline' });
+  await agent.ok('A', 'artifact_reply', { artifact: id, threadId, body: 'The comparison stays.' });
+  await agent.ok('A', 'artifact_dataset', { artifact: id, baseRevision: (await read()).revision, id: 'sales', path: await agent.write('A', 'sales.csv', NEW.csv) });
+  await expect.poll(() => tipsOf(live(record).first())).toEqual(NEW.tips);
+  await expect(live(record).nth(1).locator('tbody')).toContainText('30');
+  await expect(record.locator('.doc-live .ProseMirror')).toContainText('Owner: compare with last year.');
+  await expect(rail.locator(`article[data-thread="${threadId}"]`)).toContainText('The comparison stays.');
+  await ok(page, 'artifacts.restore', { artifactId: id, versionId });
+  await expect.poll(() => tipsOf(live(record).first())).toEqual(OLD.tips);
+  await durable(record);
+  const history = await ok<{ versions: { id: number; kind: string; label?: string }[] }>(page, 'artifacts.versions', { artifactId: id });
+  expect(history.versions).toContainEqual(expect.objectContaining({ kind: 'restore', label: 'Restored from Carried baseline' }));
+  expect(app.launch.consoleErrors()).toEqual([]);
+
+  const original = app;
+  const exited = original.launch.app.waitForEvent('close');
+  await original.launch.app.evaluate(({ app }) => app.quit());
+  await exited;
+  const restarted = await launchMaws({ userData: original.launch.userData, keepConfigHome: true, env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: 'stub:test/fixtures/panel/harness-sessions.json', MAWS_DASHBOARD_E2E: '1' } });
+  app = { ...original, launch: restarted, page: restarted.page, close: async () => { await restarted.cleanup(); await original.close(); } };
+  page = restarted.page;
+  await expect.poll(async () => (await ok<{ state: string }>(page, 'engine.hostState')).state, { timeout: 30_000 }).toBe('ready');
+  record = await openInMain(page, id);
+  await expect.poll(() => tipsOf(live(record).first())).toEqual(OLD.tips);
+  await expect(live(record).nth(1).locator('tbody')).toHaveText('North10South20');
+  await expect(live(record).locator('.dash-source-label')).toHaveText(labels);
+  await expect(record.locator('.doc-live .ProseMirror')).toContainText('Owner: compare with last year.');
+  rail = await railOf(record);
+  const thread = rail.locator(`article[data-thread="${threadId}"]`);
+  await expect(thread).toHaveAttribute('data-status', 'open');
+  await expect(thread).not.toHaveAttribute('data-orphan');
+  await expect(thread.getByRole('listitem')).toHaveText(['YouKeep the regional comparison.', /The comparison stays\.$/]);
+  expect(await ok(page, 'artifacts.versions', { artifactId: id })).toEqual(history);
+  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Version history' }).click();
+  await expect(record.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Carried baseline/ })).toBeVisible();
+
+  // Ordinary library Duplicate, never the version preview's Make a copy.
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  await page.locator(`[data-library] article[data-artifact-row="${id}"]`).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Duplicate', exact: true }).click();
+  const copies = async () => (await ok<{ artifacts: { id: string; kind: string }[] }>(page, 'artifacts.list', {})).artifacts.filter((a) => a.kind === 'dashboard' && a.id !== id);
+  await expect.poll(async () => (await copies()).length).toBe(1);
+  const copy = await openInMain(page, (await copies())[0]!.id);
+  await expect.poll(() => tipsOf(live(copy).first())).toEqual(OLD.tips);
+  await expect(live(copy).nth(1).locator('tbody')).toHaveText('North10South20');
+  await expect(live(copy).locator('.dash-source-label')).toHaveText(labels);
+  expect(restarted.consoleErrors()).toEqual([]);
 });
