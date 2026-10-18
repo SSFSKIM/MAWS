@@ -250,5 +250,16 @@
     "launcher": "/tmp/maws-review/p3f-doc-a-deck-launch.sh",
     "status": "not launched; DECK fix/recheck pending",
     "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:design,e2e:side,e2e:presentations,e2e:tools,e2e:artifacts,e2e:design-systems,e2e:dashboard"
+  },
+  "laneSchedule": {
+    "recordedAt": "2026-10-18T15:13:37Z",
+    "pair3": "launch immediately after DECK recheck and latest-master integration; report completion/result to architect",
+    "holdAfterPair3": {
+      "owner": "maws-3f cua child via CI-opt",
+      "expectedDurationMinutes": "45\u201360",
+      "status": "not started; begins after pair3 gate completes"
+    },
+    "duringHold": "implement pair4 DOC-B+SHELL",
+    "pair4GateRelease": "explicit architect lane-free message required; elapsed time alone never releases"
   }
 }
