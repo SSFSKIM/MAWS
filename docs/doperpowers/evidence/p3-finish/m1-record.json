@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 105,
-    "defer:pending": 18,
+    "defer:committed": 106,
+    "defer:pending": 17,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1409,7 +1409,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L178; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "remainingClause": "Moved to `e2e/support`, L adopting it first. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L178; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "d246d538886efc22f9e69002f042845205bafb18"
     },
     {
       "line": 179,
@@ -1419,8 +1419,8 @@
       "triageReason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L179; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "remainingClause": "The writer folded onto jszip now that B is on master. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L179; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 180,
