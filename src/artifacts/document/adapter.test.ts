@@ -686,3 +686,53 @@ describe('restore (revertScope, afterRestore)', () => {
     expect(adapter.summarizeTurn!([{ results: [{ line: 'replaced ^p1' }] }, { status: 'replied', line: 'replied on c:t1' }, { status: 'resolved', line: 'resolved c:t1' }])).toBe('replaced ^p1\nreplied on c:t1\nresolved c:t1');
   });
 });
+
+// P3-F document-model scalpel-2#1 (P1): a human drag copies the block as the dragging replica saw it. Text that reached
+// the live block before the drag, which that replica had not seen, is carried into the dragged copy (the carry pairs the
+// units the two hold in common), and an edit still in flight into the original, after either kind of text, follows.
+describe('a human drag of a block that concurrent text reached', () => {
+  const drag = (doc: Doc, id: string, after: string) => {
+    const pm = DocIndex.of(doc).pm(DocIndex.of(doc).find(id)!.top);
+    transact(doc, () => {
+      body(doc).delete(order(doc).indexOf(id), 1);
+      body(doc).insert(order(doc).indexOf(after) + 1, [pmnodeToDelta(pm)]);
+    });
+  };
+
+  it('carries the text that reached the block before the drag into the dragged copy, and later edits into the original follow it', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer(); // types before the drag, and stays stale for it
+    const dragger = host.peer(); // drags without having seen the agent's text
+    const other = host.peer(); // sees neither
+    typeAt(agent, 'p3', 0, 'BEFORE ');
+    host.send(agent, agent1);
+    drag(dragger, 'p3', 'c1');
+    const dragged = host.send(dragger, human);
+    expect(textOf(host.live, 'p3')).toBe('BEFORE A plain paragraph the human types into. Words to keep.');
+    expect(dragged?.provenance?.map((carry) => carry.kind)).toEqual(['move', 'move']); // the drag, and the run carried into it
+    expect(adapter.stats().carries).toBe(1);
+    typeAt(agent, 'p3', 'BEFORE '.length, 'AFTER '); // after its own run, into the original
+    host.send(agent, agent1);
+    typeAt(other, 'p3', 'end', ' END'); // after the seed's text, into the original
+    host.send(other, human);
+    for (const doc of [agent, dragger, other]) host.pull(doc);
+    const text = 'BEFORE AFTER A plain paragraph the human types into. Words to keep. END';
+    expect(textOf(host.live, 'p3')).toBe(text);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('c1') + 1);
+    expect(dupes(ids(host.live))).toEqual([]);
+    for (const doc of [agent, dragger, other]) expect(textOf(doc, 'p3')).toBe(text);
+    expect(new Set(authors(host, 'p3'))).toEqual(new Set(['human', actorKey(agent1)]));
+    expect(marksOf(host.live, 'p3')).toBe('BEFORE AFTER A plain paragraph the human types into. |Words[c:t4]| to keep. END');
+  });
+
+  it('a drag of a block nothing reached registers one carry', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const dragger = host.peer();
+    drag(dragger, 'p3', 'p4');
+    const dragged = host.send(dragger, human);
+    expect(dragged?.provenance?.map((carry) => carry.kind)).toEqual(['move']);
+    expect(adapter.stats().carries).toBe(1);
+  });
+});

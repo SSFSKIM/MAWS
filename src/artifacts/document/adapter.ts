@@ -58,12 +58,32 @@ interface DecodedItem {
   length: number;
 }
 
-/** A move a human made (a block's node deleted and re-inserted under its id in one update), seen before the apply. */
+/** A visible slot of a node with its character (null for a node or an embed), the unit two copies are matched by. */
+interface Unit {
+  slot: Slot;
+  ch: string | null;
+}
+
+/** A run of characters to replay: after the carried character before it, or before the one after it, or into its textblock. */
+interface Run {
+  text: string;
+  slots: Slot[];
+  after: Slot | null;
+  before: Slot | null;
+  block: Slot;
+}
+
+/**
+ * A move a human made (a block's node deleted and re-inserted under its id in one update), seen before the apply. The
+ * copy is the source as the dragging replica saw it: the units its update deletes (`shared`, what the copy holds unit
+ * for unit), and not the text that reached the source after that replica's state (`late`, carried into the copy).
+ */
 interface Drag {
   blockId: string;
   source: Slot;
-  sourceSlots: Slot[];
-  sourceBlocks: Slot[]; // the source's textblocks, paired in order with the copy's for the block forwards
+  shared: Unit[];
+  sourceBlocks: Slot[]; // the source's textblocks the copy holds, paired in order with the copy's for the block forwards
+  late: Run[];
   node: Slot;
   name: string; // the source node's type: a re-insert as another type is a retype
 }
@@ -71,7 +91,7 @@ interface Drag {
 /** Edits that reached a carried block's old copy before the update performing the carry (seen before the apply). */
 interface Late {
   carry: Carry;
-  inserts: Array<{ text: string; slots: Slot[]; after: Slot | null; before: Slot | null; block: Slot }>;
+  inserts: Run[];
   deletes: Slot[];
 }
 
@@ -178,18 +198,83 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     return out;
   }
 
-  /** Blocks of `live` the incoming update deletes and re-inserts under the same id (seen before the apply). */
+  /** Every visible slot under `node` in document order, as `deepSlotIds` lists them, with its character. */
+  function deepUnits(node: Node, out: Unit[] = []): Unit[] {
+    for (let item = node._start; item !== null; item = item.right) {
+      if (item.deleted || !item.countable) continue;
+      const content = item.content;
+      if (content instanceof ContentString) for (let k = 0; k < content.str.length; k++) out.push({ slot: [item.id.client, item.id.clock + k], ch: content.str[k] });
+      else if (content instanceof ContentType) {
+        out.push({ slot: [item.id.client, item.id.clock], ch: null });
+        deepUnits(content.type as Node, out);
+      } else for (let k = 0; k < item.length; k++) out.push({ slot: [item.id.client, item.id.clock + k], ch: null });
+    }
+    return out;
+  }
+
+  /**
+   * Blocks of `live` the incoming update deletes and re-inserts under the same id (seen before the apply). A nested block
+   * of a dragged block is a drag of its own (its carry and forwards), but the text that reached the subtree is carried
+   * once, by the outermost.
+   */
   function drags(live: Doc, inserted: Map<string, Slot>, deletes: ContentIds['deletes'], carried: Set<string>): Drag[] {
     if (inserted.size === 0) return [];
-    const out: Drag[] = [];
+    const out: Array<Drag & { sourceNode: Node }> = [];
+    const seen = (slot: Slot) => deletes.has(slot[0], slot[1]);
     itemsIn(live, deletes, (item) => {
       if (item.deleted || !(item.content instanceof ContentType)) return;
       const node = item.content.type as Node;
       const id: unknown = node.getAttr('id');
       const now = typeof id === 'string' ? inserted.get(id) : undefined;
-      if (now && !carried.has(slotKey(now))) out.push({ blockId: id as string, source: itemOf(node), sourceSlots: deepSlotIds(node), sourceBlocks: textblocksY(node).map(itemOf), node: now, name: node.name });
+      if (!now || carried.has(slotKey(now))) return;
+      out.push({
+        blockId: id as string,
+        source: itemOf(node),
+        shared: deepUnits(node).filter((unit) => seen(unit.slot)),
+        sourceBlocks: textblocksY(node).filter((block) => seen(itemOf(block))).map(itemOf),
+        late: lateRuns(node, seen, () => false),
+        node: now,
+        name: node.name,
+        sourceNode: node,
+      });
     });
-    return out;
+    const sources = new Set(out.map((drag) => drag.sourceNode));
+    const nested = (node: Node): boolean => {
+      for (let at = node.parent as Node | null; at; at = at.parent as Node | null) if (sources.has(at)) return true;
+      return false;
+    };
+    return out.map(({ sourceNode, ...drag }) => (nested(sourceNode) ? { ...drag, late: [] } : drag));
+  }
+
+  /**
+   * The runs of `source`'s visible characters its copy lacks (not `seen`: they reached the source after the copying
+   * replica's state), each placed after the seen character before it, or before the next one when it follows words
+   * the copying update deletes (`skip`: the agent's own replaced words, not late).
+   */
+  function lateRuns(source: Node, seen: (slot: Slot) => boolean, skip: (slot: Slot) => boolean): Run[] {
+    const inserts: Run[] = [];
+    for (const block of textblocksY(source)) {
+      let previous: Slot | null = null;
+      let run: Run | null = null;
+      const open: Run[] = [];
+      for (const { slot, ch } of charSlots(block)) {
+        if (seen(slot)) {
+          for (const waiting of open.splice(0)) waiting.before = slot;
+          previous = slot;
+          run = null;
+        } else if (skip(slot)) {
+          previous = null;
+          run = null;
+        } else if (run) {
+          run.text += ch;
+          run.slots.push(slot);
+        } else {
+          inserts.push((run = { text: ch, slots: [slot], after: previous, before: null, block: itemOf(block) }));
+          open.push(run);
+        }
+      }
+    }
+    return inserts;
   }
 
   /**
@@ -201,31 +286,15 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     const source = carry.source && nodeAt(live, carry.source);
     if (!source) return null;
     const from = new Set(carry.from.map(slotKey));
-    const late: Late = { carry, inserts: [], deletes: carry.from.filter((slot) => !itemAt(live, slot) || itemAt(live, slot)!.deleted) };
-    for (const block of textblocksY(source)) {
-      // a run of late characters sits right after the carried character it follows; one that follows words the agent
-      // replaced sits before the next carried character, after the agent's new words
-      let previous: Slot | null = null;
-      let run: Late['inserts'][number] | null = null;
-      const open: Array<Late['inserts'][number]> = [];
-      for (const { slot, ch } of charSlots(block)) {
-        if (from.has(slotKey(slot))) {
-          for (const waiting of open.splice(0)) waiting.before = slot;
-          previous = slot;
-          run = null;
-        } else if (deletes.has(slot[0], slot[1])) {
-          previous = null;
-          run = null;
-        }
-        else if (run) {
-          run.text += ch;
-          run.slots.push(slot);
-        } else {
-          late.inserts.push((run = { text: ch, slots: [slot], after: previous, before: null, block: itemOf(block) }));
-          open.push(run);
-        }
-      }
-    }
+    const late: Late = {
+      carry,
+      inserts: lateRuns(
+        source,
+        (slot) => from.has(slotKey(slot)),
+        (slot) => deletes.has(slot[0], slot[1]),
+      ),
+      deletes: carry.from.filter((slot) => !itemAt(live, slot) || itemAt(live, slot)!.deleted),
+    };
     return late.inserts.length || late.deletes.length ? late : null;
   }
 
@@ -263,7 +332,7 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     // delete of an old copy whole: the move overtook it, and forwarding it would empty the moved copy (P3-F, L168).
     const own = new Set([
       ...performing.flatMap((carry) => carry.from.map(slotKey)),
-      ...moved.flatMap((drag) => drag.sourceSlots.map(slotKey)),
+      ...moved.flatMap((drag) => drag.shared.map((unit) => slotKey(unit.slot))),
       ...registry.carriedOf(new Set(inserted.keys())),
       ...registry.carriedOfDeletedSources(ds),
     ]);
@@ -302,19 +371,19 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
         });
       }
       // a drag or retype is a carry of its own from here on: its copy is recorded and the old copy's characters and
-      // textblocks forward into it, so an edit still in flight into the old copy lands in the new one
-      const carries: AttributionCarry[] = [...copied];
+      // textblocks forward into it, so an edit still in flight into the old copy lands in the new one; the text that
+      // reached the old copy before the drag, which the dragging replica had not seen, is carried in after them
       for (const drag of moved) {
         const node = nodeAt(doc, drag.node);
         if (!node) continue;
-        const now = deepSlotIds(node);
-        if (now.length !== drag.sourceSlots.length) continue;
+        const now = deepUnits(node);
+        if (now.length !== drag.shared.length || now.some((unit, k) => unit.ch !== drag.shared[k].ch)) continue; // not the copy of what the replica saw: no carry, as for any other re-insert
         const blocks = textblocksY(node).map(itemOf);
         const carry: Carry = {
           kind: node.name === drag.name ? 'move' : 'retype',
           blockId: drag.blockId,
-          from: drag.sourceSlots,
-          to: now,
+          from: drag.shared.map((unit) => unit.slot),
+          to: now.map((unit) => unit.slot),
           source: drag.source,
           node: drag.node,
           blocks: drag.sourceBlocks.slice(0, blocks.length).map((old, k): [Slot, Slot] => [old, blocks[k]]),
@@ -322,9 +391,10 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
         registry.register([carry]);
         registry.activate(carry);
         registry.reported(carry);
-        carries.push(carry);
+        copied.push(carry);
+        for (const run of drag.late) copy('move', run.slots, replay(registry, doc, run.text, run.slots, run.after, run.before, run.block));
       }
-      if (carries.length) stash.set(doc, carries);
+      if (copied.length) stash.set(doc, copied);
     };
   }
 
