@@ -58,6 +58,16 @@ describe('dashboardE2eSeamRequested', () => {
 });
 
 describe('the seam’s commands', () => {
+  // E-acc: a real publish reaches the artifact tool, rather than the seam refusing an unknown tool.
+  it('routes artifact_publish through the same session authority as artifact_read', async () => {
+    const created = result<{ artifactId: string }>(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_create', args: { kind: 'html', title: 'Publish route', content: '<h1>Before</h1>' } }));
+    const read = result<{ revision: number; files: Record<string, string> }>(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_read', args: { artifact: created.artifactId } }));
+    const path = Object.keys(read.files)[0]!;
+    const published = result<{ status: string }>(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_publish', args: { artifact: created.artifactId, baseRevision: read.revision, files: { [path]: '<h1>After</h1>' } } }));
+    expect(published.status).toBe('published');
+    const after = result<{ files: Record<string, string> }>(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_read', args: { artifact: created.artifactId } }));
+    expect(after.files[path]).toBe('<h1>After</h1>');
+  });
   it('gives each session a real directory of its own under the seam’s, never `/`, and refuses a name that is not one', async () => {
     const { cwd } = (await seam.run({ cmd: 'cwd', session: 'A' })) as { ok: true; cwd: string };
     expect(cwd).toBe(join(data, 'cwd', 'A'));
@@ -101,7 +111,7 @@ describe('the seam’s commands', () => {
   it('serves B’s thread tools on the dashboard, and answers an unknown tool or command by name', async () => {
     const { artifactId } = result<{ artifactId: string }>(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_create', args: { kind: 'dashboard', title: 'Board', content: MARKDOWN } }));
     expect(result<{ threads: unknown[] }>(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_comments', args: { artifact: artifactId } })).threads).toEqual([]);
-    expect(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_publish' as never, args: {} })).toMatchObject({ ok: false, error: expect.stringContaining('artifact_publish') });
+    expect(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_export' as never, args: {} })).toMatchObject({ ok: false, error: expect.stringContaining('artifact_export') });
     expect(await seam.run({ cmd: 'nope' } as never)).toMatchObject({ ok: false, error: expect.stringContaining('nope') });
     expect(await seam.run({ cmd: 'release', session: 'A' })).toEqual({ ok: true });
   });

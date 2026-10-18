@@ -7,7 +7,7 @@
 export const DASHBOARD_ACCEPTANCE: readonly { file: string; tests: number }[] = [
   { file: 'dashboard.spec.ts', tests: 4 },
   { file: 'dashboard-comments.spec.ts', tests: 1 },
-  { file: 'dashboard-history.spec.ts', tests: 1 },
+  { file: 'dashboard-history.spec.ts', tests: 2 },
   { file: 'dashboard-export.spec.ts', tests: 4 },
 ];
 

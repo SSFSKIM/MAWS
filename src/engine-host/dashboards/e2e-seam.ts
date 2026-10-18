@@ -40,7 +40,8 @@ import type { McpToolDefinition } from '../tool-server/server';
 import { mawsTools } from '../tool-server/tools';
 
 /** The tools the seam serves: the agent's dashboard path, nothing that shows a pane, asks or captures. */
-export const DASHBOARD_SEAM_TOOLS = ['artifact_create', 'artifact_read', 'artifact_edit', 'artifact_dataset', 'artifact_list_assets', 'artifact_comments', 'artifact_reply', 'artifact_resolve'] as const;
+// E-acc: publish uses the same fixture session authority as read, for the design's stale-publication acceptance.
+export const DASHBOARD_SEAM_TOOLS = ['artifact_create', 'artifact_read', 'artifact_publish', 'artifact_edit', 'artifact_dataset', 'artifact_list_assets', 'artifact_comments', 'artifact_reply', 'artifact_resolve'] as const;
 export type DashboardSeamTool = (typeof DASHBOARD_SEAM_TOOLS)[number];
 
 export type DashboardSeamCommand =

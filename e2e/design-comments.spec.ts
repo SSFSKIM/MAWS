@@ -22,6 +22,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject } from './support/sidebar';
+import { AgentSeam, refusalOf } from './support/dashboards';
+import { openFromLibrary, plain } from './support/design';
 import { AGENT_SESSION, asAgent, createDesign, derivedIdOf, DESIGN_FILES, editDesign, elementOf, filesOf, ok, pinOffset, seamInstalled, seed, threadsOf, viewOf } from './support/design';
 
 let launch: MawsLaunch | null = null;
@@ -253,5 +255,45 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await expect.poll(() => pinOffset(ws.locator('[data-board-pin="phone"]'), ws.locator('[data-board-id="phone"]'))).toBeLessThan(4);
   });
 
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// E-acc: the same colour/property collides, while text against colour merges; no paid model turn.
+test('carried design colour collision across every board, text merge contrast and re-read preserve the owner’s colour and comment pin', async () => {
+  test.setTimeout(180_000);
+  const page = await ready({ MAWS_DASHBOARD_E2E: '1' });
+  const agent = new AgentSeam(join(launch!.userData, 'dashboard-e2e'));
+  const ids = ['phone', 'tablet', 'desktop', 'poster'];
+  const files: Record<string, string> = {
+    'project/canvas.json': JSON.stringify({ v: 1, title: 'Colour collision', order: ids, boards: {
+      phone: { x: 0, y: 0, w: 390, h: 844, title: 'Phone' }, tablet: { x: 490, y: 0, w: 834, h: 1194, title: 'Tablet' },
+      desktop: { x: 1424, y: 0, w: 1440, h: 1024, title: 'Desktop' }, poster: { x: 2964, y: 0, w: 1080, h: 9000, title: 'Poster' },
+    } }),
+    ...Object.fromEntries(ids.map((b) => [`project/boards/${b}.html`, `<section id="${b}" style="background:#ffffff; padding:24px"><h1 id="title" style="color:#112233">Launch</h1></section>`])),
+  };
+  const id = await createDesign(page, 'Colour collision', files);
+  const tab = await openFromLibrary(page, 'Colour collision', id);
+  await editDesign(page, id, { op: 'addThread', threadId: 'colour-note', boardId: 'phone', elementId: 'title', body: 'Keep this phone colour.' });
+  const read = () => agent.ok<{ revision: number; files: Record<string, string> }>('A', 'artifact_read', { artifact: id });
+  const changeColour = (source: Record<string, string>, from: string, to: string) => Object.fromEntries(Object.entries(source).map(([path, content]) => [path, path.endsWith('.html') ? content.replaceAll(from, to) : content]));
+  const base = await read();
+  await editDesign(page, id, { op: 'setStyle', boardId: 'phone', elementId: 'title', props: { color: '#aa2244' } });
+  const ownerFiles = await filesOf(page, id);
+  const refused = refusalOf(await agent.call('A', 'artifact_publish', { artifact: id, baseRevision: base.revision, files: changeColour(base.files, '#112233', '#225588') }));
+  expect(refused).toMatchObject({ reason: 'conflict', conflicts: [{ path: 'project/boards/phone.html', detail: expect.stringMatching(/element title: color changed since your read/) }] });
+  expect(await filesOf(page, id), 'the refusal applies nothing on any board').toEqual(ownerFiles);
+
+  // A stale text-only edit of the same element is disjoint from the owner's colour, and therefore merges.
+  await agent.ok('A', 'artifact_publish', { artifact: id, baseRevision: base.revision, files: { 'project/boards/phone.html': base.files['project/boards/phone.html']!.replace('Launch', 'Launch revised') } });
+  expect(plain(await elementOf(page, id, 'phone', 'title'))).toBe('Launch revised');
+  expect((await elementOf(page, id, 'phone', 'title'))!.style.color).toBe('#aa2244');
+  const fresh = await read();
+  await agent.ok('A', 'artifact_publish', { artifact: id, baseRevision: fresh.revision, files: changeColour(fresh.files, '#112233', '#225588') });
+  for (const board of ids) expect((await elementOf(page, id, board, 'title'))!.style.color, board).toBe(board === 'phone' ? '#aa2244' : '#225588');
+  expect(plain(await elementOf(page, id, 'phone', 'title'))).toBe('Launch revised');
+  await expect.poll(async () => (await threadsOf(page, id)).find((t) => t.id === 'colour-note')).toMatchObject({ slideId: 'phone', elementId: 'title', live: true, orphan: false, quote: 'Launch revised', messages: [{ body: 'Keep this phone colour.', by: 'human' }] });
+  const pin = tab.locator('[data-comment-pin="title"]');
+  await expect(pin).toHaveCount(1);
+  await expect.poll(() => pinOffset(pin, tab.locator('[data-board-id="phone"] [data-eid="title"]'))).toBeLessThan(4);
   expect(launch!.consoleErrors()).toEqual([]);
 });
