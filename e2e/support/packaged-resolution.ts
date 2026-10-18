@@ -115,9 +115,15 @@ export function runResolution(command: string, args: string[], env: Record<strin
 export const resourcesOf = (executable: string) => resolve(dirname(executable), '..', 'Resources');
 
 // The packaged binary as its supervisor runs (ELECTRON_RUN_AS_NODE=1), with the e2e launch's environment (every inherited
-// CLAUDE* variable dropped; no engine is started, no model or network is used) over the scene's scratch profile.
+// CLAUDE* variable dropped; no engine is started, no model or network is used) over the scene's scratch profile, then
+// the scrub main's supervisorEnv (src/main/hosts/detached-transport.ts) makes for a packaged app: no NODE_OPTIONS (a
+// preload, loader or inspector flag the actual supervisor never receives), no MAWS_HOST_MODE, no dev relay override.
+// Written out here, not imported: that module is main's, and the e2e project compiles only the files it names.
 export function packagedResolution(executable: string, userData: string): Resolution {
   const env = { ...launchEnvironment(process.env, userData), ELECTRON_RUN_AS_NODE: '1' };
+  delete env.NODE_OPTIONS;
+  delete env.MAWS_HOST_MODE;
+  delete env.MAWS_RELAY_URL;
   return runResolution(executable, [], env, { outMain: join(resourcesOf(executable), 'app.asar', 'out', 'main'), marker: ENGINE_HOST_MARKER });
 }
 

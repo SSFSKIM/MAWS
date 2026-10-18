@@ -4,11 +4,11 @@
 // checker refuses are pinned without an app: export maps that hide `package.json`, a dependency cycle, a package found
 // only outside Resources (as a repository's node_modules above an app built inside it would be), a missing dependency,
 // an optional peer, a pinned version, a missing chunk and the bound.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ENGINE_HOST_MARKER, resolutionProblems, runResolution, type Resolution } from '../../e2e/support/packaged-resolution';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ENGINE_HOST_MARKER, packagedResolution, resolutionProblems, runResolution, type Resolution } from '../../e2e/support/packaged-resolution';
 
 let root: string;
 let resources: string;
@@ -43,7 +43,10 @@ beforeEach(() => {
   mkdirSync(app, { recursive: true });
 });
 
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  vi.unstubAllEnvs();
+  rmSync(root, { recursive: true, force: true });
+});
 
 describe('the packaged resolution script', () => {
   it('finds the host chunk, resolves its packages through their export maps and walks their production closure, cycle-safe', () => {
@@ -119,5 +122,28 @@ describe('the packaged resolution script', () => {
     const result: Resolution = { chunk: join(root, 'host.js'), required: [], roots: [], packages: [], missing: [], truncated: false, limit: 10 };
     expect(resolutionProblems(result, resources, {})).toEqual([`the host chunk lies outside the app's Resources: ${join(root, 'host.js')}`]);
     expect(resolutionProblems({ ...result, error: 'boom' }, resources, {})).toEqual(['the resolution script failed: boom']);
+  });
+});
+
+describe('the packaged resolution probe’s environment', () => {
+  // The packaged binary is stood in for by a shell wrapper at the packaged path (Contents/MacOS/MAWS) that records the
+  // environment it was spawned with, then runs this Node over the same arguments: the check is at the spawn boundary.
+  it('is the packaged supervisor’s: no NODE_OPTIONS, MAWS_HOST_MODE, MAWS_RELAY_URL or CLAUDE variable reaches the child, Node mode set', () => {
+    pkg(app, 'sdk', {});
+    chunk(['sdk']);
+    const executable = join(resources, '..', 'MacOS', 'MAWS');
+    const seen = join(root, 'child-env.txt');
+    mkdirSync(dirname(executable), { recursive: true });
+    writeFileSync(executable, `#!/bin/sh\n/usr/bin/env > '${seen}'\nexec '${process.execPath}' "$@"\n`);
+    chmodSync(executable, 0o755);
+    for (const [name, value] of Object.entries({ NODE_OPTIONS: '--no-such-node-option', MAWS_HOST_MODE: 'detached', MAWS_RELAY_URL: 'http://127.0.0.1:1', CLAUDE_CONFIG_DIR: '/owner/.claude', ELECTRON_RUN_AS_NODE: '0' })) vi.stubEnv(name, value);
+
+    const result = packagedResolution(executable, join(root, 'profile')); // an inherited bad Node option would stop the child before the script ran
+
+    expect(result.error).toBeUndefined();
+    expect(result.chunk).toBe(join(app, 'out', 'main', 'host.js'));
+    const childEnv = Object.fromEntries(readFileSync(seen, 'utf8').trim().split('\n').map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+    expect(childEnv).toMatchObject({ ELECTRON_RUN_AS_NODE: '1', MAWS_USER_DATA: join(root, 'profile'), CLAUDE_CONFIG_DIR: join(root, 'profile', 'claude-config'), PATH: process.env.PATH });
+    for (const name of ['NODE_OPTIONS', 'MAWS_HOST_MODE', 'MAWS_RELAY_URL']) expect(childEnv).not.toHaveProperty(name);
   });
 });
