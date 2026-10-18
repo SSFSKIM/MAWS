@@ -1,9 +1,10 @@
 // One transcript of a session as a view draws it — the session's main thread in the center (DC9's session view) or a
 // subagent's in the depth column — as its subscription keeps it: MAWS's transcript view over the controller's source,
 // the request still streaming beneath the rows, older rows paged in at the top, and the subscription's disruptions said
-// in place. Each transcript has its own controller, store key, and subscription, so one's reset or end never touches
-// another's view. With the owner lane on (the session view), MAWS draws its report, and the streaming rows are bridged
-// into the turn the model is answering (`streaming-rows.ts`).
+// in place once they outlast the keeper's quiet window (`keeper.ts`: a reconnect of a second or two keeps the rows drawn
+// and says nothing). Each transcript has its own controller, store key, and subscription, so one's disruption or end
+// never touches another's view. With the owner lane on (the session view), MAWS draws its report, and the streaming rows
+// are bridged into the turn the model is answering (`streaming-rows.ts`).
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
@@ -13,7 +14,7 @@ import { Transcript, type TranscriptListHandle, type TranscriptProps } from '../
 import { useAccess } from '../../hub/access';
 import type { DeskSession } from '../../shell/sessions';
 import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
-import { reachable, TranscriptKeeper } from '../source/keeper';
+import { reachOf, TranscriptKeeper } from '../source/keeper';
 import type { StreamBlock } from '../stream/layer';
 import { drawnRows } from './drawn-rows';
 import { useKeepPlaceThroughOlderRows } from './keep-place';
@@ -30,8 +31,9 @@ const ENDED: Record<NonNullable<DepthTranscriptState['ended']>['reason'], string
   error: 'The transcript could not be served.',
 };
 
-/** The word a transcript's header shows for its phase. */
-export function transcriptStatus(state: DepthTranscriptState): string {
+/** The word a transcript's header shows for its phase: none while a disruption is quiet. */
+export function transcriptStatus(state: PaneState): string {
+  if (state.quiet) return '';
   switch (state.phase) {
     case 'loading':
       return 'Loading…';
@@ -44,14 +46,17 @@ export function transcriptStatus(state: DepthTranscriptState): string {
   }
 }
 
-/** A transcript's state as the pane draws it: the controller's, and when the next retry after an end is due. */
-export type PaneState = DepthTranscriptState & { retryIn?: number | null };
+/**
+ * A transcript's state as the pane draws it: the controller's, when the next retry after an end is due, and whether a
+ * disruption is still quiet (`keeper.ts`).
+ */
+export type PaneState = DepthTranscriptState & { retryIn?: number | null; quiet?: boolean };
 
-/** The pane's state of a kept transcript: its controller's, with the keeper's next retry. */
+/** The pane's state of a kept transcript: its controller's, with the keeper's notice. */
 export function useKeptTranscript(keeper: TranscriptKeeper): PaneState {
   const state = useStore(keeper.controller.state);
-  const retryIn = useStore(keeper.retry, (s) => s.retryIn);
-  return useMemo(() => ({ ...state, retryIn }), [state, retryIn]);
+  const notice = useStore(keeper.notice);
+  return useMemo(() => ({ ...state, ...notice }), [state, notice]);
 }
 
 /**
@@ -60,12 +65,12 @@ export function useKeptTranscript(keeper: TranscriptKeeper): PaneState {
  */
 export function useDeskTranscript(controller: DeskTranscript, session: DeskSession): PaneState {
   const [keeper] = useState(() => new TranscriptKeeper(controller, useTranscriptStore));
-  const live = reachable(session);
+  const reach = reachOf(session);
   useEffect(() => {
     keeper.start();
     return () => keeper.stop();
   }, [keeper]);
-  useEffect(() => keeper.reachable(live), [keeper, live]);
+  useEffect(() => keeper.reachable(reach), [keeper, reach]);
   return useKeptTranscript(keeper);
 }
 
@@ -112,13 +117,13 @@ export function TranscriptPane({ controller, state, variant, actions, list, owne
 
   return (
     <>
-      {state.phase === 'reconnecting' && rows.length === 0 && (
-        // A transcript between a reset and its fresh snapshot (or one the hub ended before its first) is not empty.
+      {state.phase === 'reconnecting' && rows.length === 0 && !state.quiet && (
+        // A transcript awaiting a fresh snapshot with nothing drawn (one the hub ended before its first) is not empty.
         <p className="m-0 px-4 py-3 text-ui-sm text-fg-muted" role="status" data-testid="depth-reconnecting">
           {lapsed !== null ? 'Signed out: the session reconnects once you sign in again.' : 'Reconnecting to the session…'}
         </p>
       )}
-      {state.ended && (
+      {state.ended && !state.quiet && (
         <p className="m-0 border-b border-border px-4 py-1.5 text-ui-sm text-fg-muted" role="status" data-testid="depth-unavailable">
           {ENDED[state.ended.reason]}
           {state.ended.message ? ` ${state.ended.message}` : ''}

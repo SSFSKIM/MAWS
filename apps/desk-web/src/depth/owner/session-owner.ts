@@ -15,7 +15,7 @@ import type { SubagentRef } from '../../../../../src/renderer/src/transcript/mod
 import type { SessionPlane } from '../../shell/session-plane';
 import type { DeskSession } from '../../shell/sessions';
 import { DeskTranscript, type TranscriptStoreApi } from '../source/desk-transcript';
-import { reachable, TranscriptKeeper } from '../source/keeper';
+import { reachOf, TranscriptKeeper } from '../source/keeper';
 
 /** The agent an `Agent` row asked the column to open: null when the tree does not name it yet (the tree is shown). */
 export type AgentRequest = { agentId: string | null };
@@ -103,8 +103,8 @@ function letGo(key: string, held: Held): void {
 /** A view's hold on its session's owner while it is mounted, with the session's liveness told to it. */
 export function useSessionOwner(project: string, session: DeskSession, plane: SessionPlane): SessionOwner {
   const [owner] = useState(() => sessionOwner({ project, machine: session.machine, session: session.session, plane }));
-  const live = reachable(session);
+  const reach = reachOf(session);
   useEffect(() => holdOwner(owner), [owner]);
-  useEffect(() => owner.keeper.reachable(live), [owner, live]);
+  useEffect(() => owner.keeper.reachable(reach), [owner, reach]);
   return owner;
 }

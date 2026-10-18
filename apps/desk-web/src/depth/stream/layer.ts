@@ -79,6 +79,66 @@ export class StreamingLayer {
     }
   }
 
+  /**
+   * A fresh snapshot's `streaming` after a disruption, over what was drawn before it. What the snapshot streams replaces
+   * what was drawn, as `load` does, a block drawn before keeping its identity (its live label's clock goes on). A block
+   * drawn before that the snapshot no longer streams had its row written, or its step ended, while the subscription was
+   * down: it stays drawn, taking no more chunks, until the row its `block-row` named lands, or, when none was named in
+   * time, until `landing` does (the newest row the snapshot brought, in the store once the transcript rebuilt from the
+   * snapshot is installed), so a block never leaves before its row is drawn. With neither, its step ended, and it goes.
+   * A snapshot cut before a `block-row` the old subscription delivered still streams the block that row named: its copy
+   * is dropped, and the block takes no more chunks, whether it was settled already or is still drawn awaiting its row.
+   * `lands` says whether a named row will land without a page (one held now, or one still to come live); a block whose
+   * named row will not waits for `landing` instead, so it is never left drawn for a row that may never come.
+   *
+   * A snapshot whose watermark for a request is below the drawn one (a producer that went back) is older than what was
+   * drawn of it, and changes nothing of that request, which keeps its blocks, the blocks named, its end and its watermark
+   * whole; the live part after the snapshot's cut replays the rest, the chunks the drawing holds dropped at the
+   * watermark, the later ones appended, `block-row` and `step-end` arriving as they do live. Otherwise too an ended
+   * request stays ended, whether or not the snapshot still streams it: the blocks its `step-end` dropped are not drawn
+   * again from the snapshot's copy, and it takes no more chunks.
+   */
+  resume(streaming: readonly Streaming[], landing: string | null, lands: (uuid: string) => boolean): void {
+    const before = this.requests;
+    this.load(streaming);
+    const loaded = this.requests;
+    this.requests = new Map();
+    // The requests in the order they first appeared: those drawn before, then those the gap started.
+    for (const [key, old] of before) {
+      const snapshot = loaded.get(key);
+      if (snapshot && old.upTo > snapshot.upTo) {
+        this.requests.set(key, old);
+        continue;
+      }
+      // An ended request is kept where the snapshot no longer streams it, so it still takes no chunk.
+      const request = snapshot ?? (old.ended ? this.request(old.turnId, old.agentId, old.step) : undefined);
+      if (request) {
+        for (const index of old.named) {
+          request.blocks.delete(index);
+          request.named.add(index);
+        }
+        if (old.ended) {
+          request.ended = true;
+          request.blocks.clear(); // the snapshot's copies of the blocks the step-end dropped
+        }
+      }
+      for (const [index, block] of old.blocks) {
+        const fresh = request?.blocks.get(index);
+        if (fresh) {
+          request!.blocks.set(index, Object.assign(block, { kind: fresh.kind, text: fresh.text, toolName: fresh.toolName, settledBy: null }));
+          continue;
+        }
+        const settledBy = block.settledBy !== null && lands(block.settledBy) ? block.settledBy : landing;
+        if (settledBy === null) continue;
+        const into = request ?? this.request(old.turnId, old.agentId, old.step);
+        into.named.add(index);
+        into.blocks.set(index, Object.assign(block, { settledBy }));
+      }
+      if (request) this.requests.set(key, request);
+    }
+    for (const [key, request] of loaded) if (!this.requests.has(key)) this.requests.set(key, request);
+  }
+
   /** Applies one live chunk; true when it changed what is drawn. */
   chunk(body: SessionBodies['chunk']): boolean {
     const request = this.request(body.turnId, body.agentId, body.step);
@@ -165,10 +225,6 @@ export class StreamingLayer {
       out.push(...[...request.blocks.values()].sort((a, b) => a.index - b.index));
     }
     return out;
-  }
-
-  clear(): void {
-    this.requests = new Map();
   }
 
   private request(turnId: string, agentId: string | null, step: number): Request {

@@ -18,6 +18,9 @@
 // DC10: it answers a `stop` for its session as the machine does — `unknown-task` for a job its index does not hold as
 // running, else `TaskStop`'s call and result written to the job's loop (`SessionDepth.stopJob`), so the job turns
 // `stopped` on the session's own body, and `done` — each nonce once, a retry answered from its ledger.
+//
+// Desk ticket #57: the machine's stream replaced while its lease holds (`replaceStream`, the hub ending its subscriptions
+// `machine-offline`), and every snapshot cut to a budget (`budget`), so a reader can page older rows in before it.
 import type { SessionMessage } from 'desk-hub/protocol';
 import { loadRecording, SessionDepth, TWO_SUBAGENTS, type Producer, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
 import type { JsonObject, Raised, Rpc, RpcOutcome, TaskOutput } from 'desk-hub/protocol';
@@ -42,16 +45,19 @@ export class FakeMachineReplay {
   private readonly ledger = new Map<string, RpcOutcome>();
   /** The next subscription's snapshot hooks (`raceNextSnapshot`'s `advance` and `overlap`) and its scope, used once. */
   private nextSnapshot: { agentId: string | null; options: SnapshotOptions } | null = null;
+  /** About how many bytes of rows every snapshot carries (the producer's own budget by default): older rows come as pages. */
+  private readonly budget: number | undefined;
   private cursor = 0;
   private readonly timer: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly hub: HubDouble,
     readonly where: { project: string; machine: string },
-    options: { recording?: string | Recording; producer?: Producer } = {},
+    options: { recording?: string | Recording; producer?: Producer; budget?: number } = {},
   ) {
     // A recording by its directory, or one a suite built in memory (a recorded one with rows of its own appended).
     this.recording = typeof options.recording === 'object' ? options.recording : loadRecording(options.recording ?? TWO_SUBAGENTS);
+    this.budget = options.budget;
     this.depth = new SessionDepth(this.recording.session, this.recording, (message) => this.relay(message), where, true, 'main', options.producer ?? 'dc3');
     this.hub.diffs.set(this.recording.session, { base: 'main', text: this.depth.diffText });
     this.timer = setInterval(() => this.poll(), 5);
@@ -123,6 +129,17 @@ export class FakeMachineReplay {
     this.depth.forgetAll();
   }
 
+  /**
+   * The machine's stream to the hub is replaced while its lease holds (a daemon restart, a stale generation): the hub
+   * ends each subscription the machine served `machine-offline`, its presence never going offline, and the new stream
+   * holds none of them.
+   */
+  replaceStream(): void {
+    const { project } = this.where;
+    for (const sub of this.depth.openSubs()) if (this.hub.subscriptions(project).some((s) => s.sub === sub)) this.hub.sendSub(project, sub, 'end', { reason: 'machine-offline' });
+    this.depth.forgetAll();
+  }
+
   /** While the next snapshot of `agentId`'s transcript is built, `advance` more steps are applied; with `overlap` the
    * live part is also handed what the snapshot holds (as `raceNextSnapshot` does). */
   raceNextSnapshot(options: { agentId?: string | null; advance?: number; overlap?: boolean }): void {
@@ -183,7 +200,7 @@ export class FakeMachineReplay {
       if (frame.t === 'subscribe' && frame.session === this.session) {
         const raced = this.nextSnapshot?.agentId === frame.agentId ? this.nextSnapshot : null;
         if (raced) this.nextSnapshot = null;
-        void this.depth.subscribe(frame.sub, frame.agentId, raced?.options ?? {});
+        void this.depth.subscribe(frame.sub, frame.agentId, { budget: this.budget, ...raced?.options });
       } else if (frame.t === 'unsubscribe') this.depth.end(frame.sub, 'unsubscribed');
       else if (frame.t === 'rows') {
         if (this.holdRows) this.heldRows.push({ sub: frame.sub, before: frame.before, limit: frame.limit });

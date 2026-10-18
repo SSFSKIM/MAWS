@@ -40,9 +40,9 @@ describe('session info and the diff on the main subscription', () => {
     expect(usage()).toEqual(USAGE);
     plane.send('usage', LATER);
     expect(usage()).toEqual(LATER);
-    plane.current.listener.reset();
+    plane.current.listener.interrupted();
     await settle();
-    expect(usage()).toBeUndefined(); // dropped with what the subscription delivered
+    expect(usage()).toEqual(LATER); // kept, as all the subscription delivered is, until the fresh snapshot says again
     plane.send('snapshot', { ...snapshotAt(script, 6), usage: USAGE });
     expect(usage()).toEqual(USAGE);
   });
@@ -68,7 +68,7 @@ describe('session info and the diff on the main subscription', () => {
 
     controller.requestDiff(); // the user's refresh: the last answer stays drawn until the new one
     expect(controller.state.getState().diff).toEqual({ pending: true, answer: DIFF });
-    plane.current.listener.reset(); // the request went down with the socket
+    plane.current.listener.interrupted(); // the request went down with the socket
     await settle();
     expect(controller.state.getState().diff).toEqual({ pending: true, answer: DIFF });
     plane.send('snapshot', snapshotAt(script, 4));
