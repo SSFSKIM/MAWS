@@ -13,9 +13,9 @@
   "checkedAt": "all 10 close, 123 defer and 17 preclosed frozen rows matched the current tracker exactly once before the first edit",
   "deferFormat": "each defer row keeps its whole text; its closing cell gains 'Re-deferred 2026-10-18 (P3-F triage, triage.txt L<n>; parent Decision Log 106): <ruled reason> Owner: <ruled step made explicit>.' (the P2-F pattern)",
   "counts": {
-    "close:committed": 1,
+    "close:committed": 2,
     "close:held": 1,
-    "close:pending": 8,
+    "close:pending": 7,
     "defer:pending": 123,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
@@ -165,7 +165,7 @@
       "note": "Accept branch of the row's own clause ('or the row is left as is with this note closed as accepted'), ratified by parent Decision Log 106 (1). Verified: src/renderer/src/panel/PanelHeader.tsx useNarrow reads offsetWidth inside useLayoutEffect (before paint) and follows resizes with a ResizeObserver; NARROW_HEADER_PX = 360. No container-query rewrite performed.",
       "triageReason": "Accept the existing pre-paint measurement: closing clause expressly permits acceptance; architect rules at checkpoint 1. Evidence: P3-G final record; PanelHeader.tsx.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "9d9f60f7ba8a45f8b602d6babf490a4826d40539"
     },
     {
       "line": 144,
@@ -174,8 +174,8 @@
       "closeKind": "close-accept",
       "note": "Accept branch of the row's own clause ('or accepted as a transition-window artefact'), ratified by parent Decision Log 106 (1). Source: docs/doperpowers/plans/2026-10-12-p3-l-library.md Decision Log 40(g) records the residue (records A's mirror wrote before the cutover keep place-based numbers; the import skips them). No one-time relabel performed.",
       "triageReason": "Accept the pre-cutover numbering artifact under the explicit accept branch; architect rules at checkpoint 1. Evidence: P3-L DL40g.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 171,
