@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "pair4 mechanical correction f4f6a0b69 reviewed; L242 test-only3c475c9ed and cause-undetermined standalone readiness fdfe73c31 in focused review; combined26 gate pending",
+  "phase": "all bounded pair4 repairs independently reviewed; current-source26-group shared pair4+pair5 gate next",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -541,7 +541,7 @@
     "L242": "3c475c9ed41a96d38c766c007f0eb6168679dd36 test-only fixture correction; production unchanged; closure attribution in waves/W-SHELL-checkpoint.json rowResults242",
     "standalone": "fdfe73c312347e957e4019da0bfb4fc99a49e451; cause undetermined, neither branch defect nor baseline; observational readiness then one unchanged range write and model+DOM checks; no timeout increase",
     "recurrence": "Same signature after readiness met is a DL59 red of its own; same-foreground master reproduction owed before further repair.",
-    "focusedReview": "ad7e512b27334234f, f4f6a0b69..fdfe73c31 exactly three specs, running; no local checks",
+    "focusedReview": "ad7e512b27334234f correct/no material findings, f4f6a0b69..fdfe73c31 exactly three specs, static only",
     "decisionLog": "no new entry for either attribution/readiness ruling"
   },
   "nextCombinedGate": {

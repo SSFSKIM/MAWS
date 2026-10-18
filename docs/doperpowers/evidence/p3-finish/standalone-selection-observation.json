@@ -8,9 +8,10 @@
   "readinessCommit": "fdfe73c312347e957e4019da0bfb4fc99a49e451",
   "readiness": "L277 selectIn precedent: model paragraph equals shown paragraph and hold.base.state().unsaved===0, at default expect timeout; one existing DOM-range write unchanged; then model and DOM selected quote checked",
   "boundaries": "no timeout increase, repeated range write, model-selection command, product change or document-narrow change; no local check",
-  "review": "ad7e512b27334234f running on three-spec frontier",
+  "review": "ad7e512b27334234f correct/no material findings, static pinned f4f6a0b69..fdfe73c31; no execution",
   "nativeStatus": "RED retained; combined26 pending",
   "recurrence": "If same signature recurs after this readiness with precondition met and selection still vanishing, its own DL59 red; master reproduction with same foreground flag owed before further repair.",
   "decisionLog": "none",
-  "M0": "supplemental observation outside immutable denominator"
+  "M0": "supplemental observation outside immutable denominator",
+  "trackerRow": "| 2026-10-18 | P3-F (standalone selection observation, cause undetermined) | Run39149994319 atfa23cabbb, document-standalone.spec.ts:107: 35 typed characters were visible, one DOM range write ran at18:03:34.938Z for13ms, and the page selection was empty at the first poll about5ms later and throughout5s. No snapshot names what changed it. Neither a branch defect nor a baseline is established. | E/standalone-selection-observation.json; readiness-only commitfdfe73c31, following L277's selectIn observational precedent. | Cause undetermined, not marked fixed. The helper now waits at the default expect timeout for its model paragraph to match the shown paragraph and zero unacknowledged edits, then makes its one unchanged DOM range write and checks model plus DOM selection. No timeout increase, synthetic selection, product change or document-narrow edit. Combined26-group GREEN pending. If the same signature recurs with the precondition met and selection still vanishing, it is its own Decision Log59 red and master reproduction under the same foreground flag is owed before any further repair. Owner: P3-F through the combined gate; supplemental observation outside frozen M0, no new Decision Log entry. |"
 }
