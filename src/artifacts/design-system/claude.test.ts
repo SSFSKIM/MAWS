@@ -392,4 +392,17 @@ describe('P3-F design-systems wave', () => {
     expect(back.tokens.tokens.get('layout.gutter')!.$value).toEqual({ value: 1, unit: 'rem' });
     expect(back.warnings.filter((w) => w.startsWith('layout '))).toEqual([]);
   });
+
+  // sweep#2: a deck style's line height takes every form Claude's grammar reads, as a ratio, as a text style's does.
+  it('imports a deck style’s length line height as a ratio of its size', () => {
+    const style = (name: string, fontSize: string, lineHeight: string) => ({ name, family: 'sans', fontSize, lineHeight });
+    const groups = [
+      { name: 'Text', styles: [style('title', '40px', '1.15'), style('body', '16px', '1.5')] },
+      { name: 'Deck', styles: [style('deck-title', '96px', '120%'), style('deck-body', '40px', '80px')] },
+    ];
+    const imported = fromClaude({ 'tokens.json': JSON.stringify({ type: { fonts: [], families: { sans: 'Inter' }, groups } }) });
+    const deck = (role: string) => imported.tokens.tokens.get(`type.${role}`)!.$extensions?.['dev.maws.deck'];
+    expect(deck('body')).toEqual({ fontSize: { value: 40, unit: 'px' }, lineHeight: 2 });
+    expect(deck('title')).toEqual({ fontSize: { value: 96, unit: 'px' }, lineHeight: 1.2 });
+  });
 });

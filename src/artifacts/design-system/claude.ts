@@ -218,19 +218,21 @@ function weightOf(value: string | number | undefined): number {
   return high !== undefined && low! <= 400 && 400 <= high ? 400 : low!;
 }
 
+/** A Claude line height as a ratio to a size of `px` pixels: a number as it is, a length (px, rem, em, %) over the size; else null. */
+function lineHeightOf(value: string | number | undefined, px: number): number | null {
+  if (value === undefined) return null;
+  const length = typeof value === 'number' ? { value, unit: '' } : parseLength(value);
+  if (!length) return null;
+  const ratio = { '': 1, em: 1, '%': 0.01, px: 1 / px, rem: REM / px }[length.unit];
+  return ratio === undefined ? null : round4(length.value * ratio);
+}
+
 /** A style's composite, its family a reference to the font token that holds it. */
 function compositeOf(style: ClaudeStyle, familyRef: (key: string | null) => string | FontFamilyValue): Record<string, unknown> | null {
   const fontSize = dimensionOf(style.fontSize) ?? (typeof style.fontSize === 'string' && /%$/.test(style.fontSize) ? { value: round4((parseFloat(style.fontSize) / 100) * REM), unit: 'px' as const } : null);
   if (!fontSize) return null;
   const px = toPx(fontSize);
-  let lineHeight = 1.4;
-  if (style.lineHeight !== undefined) {
-    const length = typeof style.lineHeight === 'number' ? { value: style.lineHeight, unit: '' } : parseLength(style.lineHeight);
-    if (length) {
-      const ratio = { '': 1, em: 1, '%': 0.01, px: 1 / px, rem: REM / px }[length.unit];
-      if (ratio !== undefined) lineHeight = round4(length.value * ratio);
-    }
-  }
+  const lineHeight = lineHeightOf(style.lineHeight, px) ?? 1.4;
   let letterSpacing: DimensionValue = { value: 0, unit: 'px' };
   if (style.letterSpacing !== undefined) letterSpacing = dimensionOf(style.letterSpacing, px) ?? letterSpacing;
   return { fontFamily: familyRef(style.family), fontSize, fontWeight: weightOf(style.fontWeight), lineHeight, letterSpacing };
@@ -483,13 +485,13 @@ function importType(reading: ClaudeReading, d: Draft, warnings: string[], family
     roles.add(role);
     warnings.push(`type.${role}: no style for it; it follows type.${to}`);
   }
-  // A `deck-<role>` style is that role's deck scale (D2), as the export writes it.
+  // A `deck-<role>` style is that role's deck scale (D2), as the export writes it; its line height read as a text style's.
   for (const style of deckStyles) {
     const token = d.token(`type.${style.name.toLowerCase().slice(5)}`)!;
     const fontSize = dimensionOf(style.fontSize);
     if (!fontSize) continue;
     const deck: Record<string, unknown> = { fontSize };
-    const line = typeof style.lineHeight === 'number' ? style.lineHeight : style.lineHeight !== undefined && /^\d*\.?\d+$/.test(style.lineHeight) ? Number(style.lineHeight) : null;
+    const line = lineHeightOf(style.lineHeight, toPx(fontSize));
     if (line !== null) deck.lineHeight = line;
     token.$extensions = { [DECK_KEY]: deck };
   }
