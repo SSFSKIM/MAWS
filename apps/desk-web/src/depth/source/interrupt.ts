@@ -15,7 +15,8 @@
 // - the engine's marker, one text block exactly one of the engine's two forms, on a user row with no `origin` and not
 //   meta (Esc; a typed prompt carries `origin.kind`), or on the bridge's meta row (the bridge's interrupt from
 //   doperpowers #225 on, which writes the marker alone and then a note row, "The interrupt came from …", with a line
-//   per background task; the note is meta, so neither a prompt nor a bubble, and ends nothing);
+//   per background task; the note is meta and one of the bridge's records, never a steer (`bridge-rows.ts`), so neither
+//   a prompt nor a bubble, and ends nothing);
 // - the bridge's record before #225 (`interruptText`), kept for the history that holds it and the plugins that still
 //   write it: on the bridge's meta row, one text block whose first line is one of its two marker lines ("… from the
 //   desk]", "… from outside the terminal]") and whose other lines, if any, are each one of its own "Task …" lines for a
@@ -35,14 +36,14 @@ import { isBridgeRow } from '../../conversation/delivery-frame';
 const ENGINE_MARKERS = new Set(['[Request interrupted by user]', '[Request interrupted by user for tool use]']);
 const BRIDGE_MARKERS = new Set(['[Request interrupted by user from the desk]', '[Request interrupted by user from outside the terminal]']);
 /** The bridge's line for each Bash call the interrupt moved to the background, stopped or not (`interruptText`). */
-const BRIDGE_TASK_LINE =
+export const BRIDGE_TASK_LINE =
   /^Task [A-Za-z0-9_-]+, the Bash command the interrupt moved to the background, (?:was then stopped: it is not running, and no notification will come for it\.|could not be stopped: it may still be running\.)$/;
 
 /** Where each mapping context's current turn started, for the end's duration. */
 const turnStarts = new WeakMap<BackfillContext, string>();
 
 /** The text of a row made of one text block (or a string), else null. */
-function singleText(row: JsonObject): string | null {
+export function singleText(row: JsonObject): string | null {
   const content = (row.message as JsonObject | undefined)?.content;
   if (typeof content === 'string') return content;
   if (!Array.isArray(content) || content.length !== 1) return null;
@@ -53,7 +54,7 @@ function singleText(row: JsonObject): string | null {
 const isUserRow = (row: JsonObject) => row.type === 'user';
 
 /** The engine's marker text, written by the engine (Esc) or by the bridge. */
-function isEngineMarker(row: JsonObject): boolean {
+export function isEngineMarker(row: JsonObject): boolean {
   const engines = isUserRow(row) && row.isMeta !== true && row.origin == null;
   if (!engines && !isBridgeRow(row)) return false;
   const text = singleText(row);
@@ -61,7 +62,7 @@ function isEngineMarker(row: JsonObject): boolean {
 }
 
 /** The bridge's record before #225, its lines with its marker line first; null for any other row. */
-function bridgeRecordLines(row: JsonObject): string[] | null {
+export function bridgeRecordLines(row: JsonObject): string[] | null {
   if (!isBridgeRow(row)) return null;
   const text = singleText(row);
   if (text === null) return null;

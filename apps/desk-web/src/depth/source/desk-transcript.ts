@@ -56,6 +56,7 @@ import { taskGraphOf, withEvents, withMetas, withStatuses } from '../agents/task
 import { OutputRequests } from '../jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
 import { deliveryAsDrawn } from '../../conversation/delivery-frame';
+import { steerAsDrawn } from './bridge-rows';
 import { normalizeInterruptRow, withInterruptEnd } from './interrupt';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
@@ -130,11 +131,12 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
  * backfill reads as a `subagent.message`) is the session woken by its subagent, not a peer session's: it takes the
  * engine's origin, whose divider MAWS reads as "Continued for …", as it reads a task notification's turn. An interrupt
  * marker ends the turn it interrupted, the bridge's record of one read as its marker line alone (`interrupt.ts`). A
- * delivered send is drawn without its frame line, a peer's under a label naming it, and one queued into a running turn
- * as a prompt queued there (`conversation/delivery-frame.ts`); the held row keeps its frame.
+ * delivered send is drawn without its frame line, a peer's under a label naming it, and one that entered a running turn
+ * as a prompt queued there (`conversation/delivery-frame.ts`); the held row keeps its frame. A steer the bridge appended
+ * is drawn as the owner's prompt queued there too (`bridge-rows.ts`).
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
-  const mapped = deliveryAsDrawn(normalizeInterruptRow(row));
+  const mapped = steerAsDrawn(deliveryAsDrawn(normalizeInterruptRow(row)));
   const record = TranscriptRecordSchema.safeParse(mapped);
   if (!record.success) return [];
   const events = withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx);

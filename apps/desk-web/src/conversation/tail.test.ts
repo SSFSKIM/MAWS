@@ -192,6 +192,7 @@ describe("a send at the session view's tail", () => {
       appendedRow('[Request interrupted by user]'),
       appendedRow('The interrupt came from the desk.'),
       appendedRow('Task bk3x9a1, a background task, was stopped from the desk: it is not running.'),
+      appendedRow(framed(1, 'x').split('\n')[0]), // a steer whose whole text is the frame line: sminos writes its text after it
       appendedRow(framed(1, 'x'), { kind: 'plugin', name: 'another' }), // another plugin's meta row
       { ...appendedRow(framed(1, 'x')), isMeta: false } as JsonObject, // the bridge's origin, not kept as its append
       userRow([{ type: 'text', text: framed(1, 'x') }], undefined, null), // an append with no origin

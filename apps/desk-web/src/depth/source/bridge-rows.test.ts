@@ -1,0 +1,138 @@
+// The rows the doperpowers plugin appends, a closed set (`bridge-rows.ts`): a delivery, the interrupt's marker, note and
+// older record, a stop's note, the `/secret` mod's record, and a steer, the one known by exclusion. Every such row in the
+// doperpowers fixtures MAWS vendors has its kind pinned here by its whole text, so a fixture re-vendored with a new kind
+// of row fails here until that kind is named, rather than drawing as the owner's words. Each kind is then read off
+// DX5's own texts, and a steer is drawn as the owner's prompt queued into the running turn, as MAWS draws one there.
+import { readFileSync } from 'node:fs';
+import { loadRecording, SESSION_VIEW, TWO_SUBAGENTS } from 'desk-hub/fake-machine';
+import type { JsonObject } from 'desk-hub/protocol';
+import { describe, expect, it } from 'vitest';
+import { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
+import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
+import { isBridgeRow } from '../../conversation/delivery-frame';
+import { bridgeRowKind, steerAsDrawn, type BridgeRowKind } from './bridge-rows';
+import { freshSource, subagentLookupOf } from './desk-transcript';
+
+/** The doperpowers fixtures MAWS vendors: DX4's vectors (written by doperpowers' `tests/sminos/dx4-jobs.gen.py`). */
+const VECTORS = new URL('../../../../desk-hub/fake-machine/dx4/dx4-jobs.json', import.meta.url);
+
+/** Every row the plugin appended, anywhere in a fixture, in file order. */
+function appendedRows(value: unknown, out: JsonObject[] = []): JsonObject[] {
+  if (Array.isArray(value)) for (const item of value) appendedRows(item, out);
+  else if (typeof value === 'object' && value !== null) {
+    if (isBridgeRow(value as JsonObject)) out.push(value as JsonObject);
+    else for (const item of Object.values(value)) appendedRows(item, out);
+  }
+  return out;
+}
+const textOf = (row: JsonObject) => ((row.message as JsonObject).content as Array<{ text: string }>).map((block) => block.text).join('\n');
+
+const STOP = (task: string, from: string) => `Task ${task}, a background task, was stopped from ${from}: it is not running.`;
+const STOPPED = (task: string) => `Task ${task}, the Bash command the interrupt moved to the background, was then stopped: it is not running, and no notification will come for it.`;
+const RUNNING = (task: string) => `Task ${task}, the Bash command the interrupt moved to the background, could not be stopped: it may still be running.`;
+
+let n = 0;
+const appended = (text: string): JsonObject => ({
+  uuid: `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`,
+  parentUuid: null,
+  timestamp: '2026-10-17T10:00:00.000Z',
+  sessionId: 'sess-1',
+  isSidechain: false,
+  type: 'user',
+  isMeta: true,
+  origin: { kind: 'plugin', name: 'doperpowers' },
+  message: { role: 'user', content: [{ type: 'text', text }] },
+});
+
+describe("the plugin's appended rows", () => {
+  it('pins the kind of every one in the vendored doperpowers fixtures: a new kind fails here, not drawn as the owner’s words', () => {
+    const rows = [
+      ...appendedRows(JSON.parse(readFileSync(VECTORS, 'utf8'))),
+      ...[SESSION_VIEW, TWO_SUBAGENTS].flatMap((dir) => appendedRows(loadRecording(dir).rows)),
+    ];
+    // DX4's case 18: the bridge's notes and marker, then rows a person steered that only quote a note.
+    expect(rows.map((row) => [textOf(row), bridgeRowKind(row)])).toEqual([
+      [STOP('bdesk0001', 'the desk'), 'stop-note'],
+      [STOP('bmon00002', 'outside the terminal'), 'stop-note'],
+      ['[Request interrupted by user]', 'interrupt-marker'],
+      [['The interrupt came from the desk.', STOPPED('bmove0003'), RUNNING('bstuck004')].join('\n'), 'interrupt-note'],
+      [`please stop: ${STOP('btyped005', 'the desk')}`, 'steer'],
+      [`\`\`\`\n${STOP('btyped005', 'the desk')}\n\`\`\``, 'steer'],
+      [`${STOP('btyped005', 'the desk')}\n`, 'steer'],
+      [['The interrupt came from the desk.', STOPPED('btyped005'), 'thanks'].join('\n'), 'steer'],
+    ]);
+  });
+
+  it("reads each kind off DX5's texts, and any other text as a steer", () => {
+    const kinds: Array<[string, BridgeRowKind]> = [
+      ['[sminos chat MAWS hub/5e55e5e5:12 from human → @you]\nRun the suites.', 'delivery'],
+      ['[sminos message from human id=5e551e17]\nRe-run the suites.', 'delivery'],
+      ['[Request interrupted by user]', 'interrupt-marker'],
+      ['[Request interrupted by user for tool use]', 'interrupt-marker'],
+      ['The interrupt came from the desk.', 'interrupt-note'],
+      [['The interrupt came from outside the terminal.', STOPPED('bk3x9a1'), RUNNING('b_7-q')].join('\n'), 'interrupt-note'],
+      [STOP('bk3x9a1', 'the desk'), 'stop-note'],
+      [STOP('bk3x9a1', 'outside the terminal'), 'stop-note'],
+      ['[Request interrupted by user from the desk]', 'interrupt-record'],
+      [['[Request interrupted by user from outside the terminal]', STOPPED('bk3x9a1')].join('\n'), 'interrupt-record'],
+      ['The person stored a secret under OPENAI_API_KEY. You never see its value. In a shell command, read it as "$(cat ~/.config/claude-secrets/OPENAI_API_KEY)", never printing it.', 'secret-note'],
+      ['use the split store', 'steer'],
+      ['[sminos chat MAWS hub/5e55e5e5:12 from human → @you]', 'steer'], // a frame line with nothing after it is no delivery
+      ['The interrupt came from the desk. Thanks', 'steer'],
+      ['The person stored a secret under A. You never see its value. In a shell command, read it as "$(cat ~/.config/claude-secrets/B)", never printing it.', 'steer'],
+    ];
+    expect(kinds.map(([text]) => [text, bridgeRowKind(appended(text))])).toEqual(kinds);
+    // Nothing the plugin did not append is one of its rows.
+    expect(bridgeRowKind({ ...appended('use the split store'), origin: { kind: 'plugin', name: 'another' } })).toBeNull();
+    expect(bridgeRowKind({ ...appended('use the split store'), isMeta: false })).toBeNull();
+    expect(bridgeRowKind({ ...appended('use the split store'), origin: { kind: 'human' } })).toBeNull();
+  });
+
+  it('draws a steer as the owner’s prompt queued into the running turn, under its row’s uuid; the others as they are', () => {
+    const steer = appended('use the split store');
+    expect(steerAsDrawn(steer)).toEqual({
+      uuid: steer.uuid, parentUuid: null, timestamp: steer.timestamp, sessionId: 'sess-1', isSidechain: false, type: 'attachment',
+      attachment: { type: 'queued_command', prompt: [{ type: 'text', text: 'use the split store' }], commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: steer.uuid },
+    });
+    for (const text of ['[Request interrupted by user]', 'The interrupt came from the desk.', STOP('bk3x9a1', 'the desk'), '[sminos chat MAWS hub/5e55e5e5:12 from human → @you]\nRun the suites.']) {
+      const row = appended(text);
+      expect(steerAsDrawn(row), text).toBe(row);
+    }
+  });
+});
+
+describe('a steer through MAWS’s backfill and projection', () => {
+  const SESSION = 'sess-1';
+  const at = (second: number) => `2026-10-17T10:00:${String(second).padStart(2, '0')}.000Z`;
+  const envelope = (second: number) => ({ uuid: `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`, parentUuid: null, timestamp: at(second), sessionId: SESSION, isSidechain: false });
+  const prompt = (text: string, second = 0): JsonObject => ({ ...envelope(second), type: 'user', origin: { kind: 'human' }, promptId: 'p1', message: { role: 'user', content: text } });
+  const assistant = (content: JsonObject[], second: number): JsonObject => ({ ...envelope(second), type: 'assistant', message: { id: `msg_${n}`, role: 'assistant', model: 'claude-opus-5-5', type: 'message', content, stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } } });
+  const call = (id: string, second: number) => assistant([{ type: 'tool_use', id, name: 'Bash', input: { command: 'ls' } }], second);
+  const result = (id: string, second: number): JsonObject => ({ ...envelope(second), type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'a.txt', is_error: false }] }, toolUseResult: { stdout: 'a.txt', stderr: '', interrupted: false, isImage: false } });
+  const atSecond = (row: JsonObject, second: number): JsonObject => ({ ...row, timestamp: at(second) });
+
+  async function drawn(rows: JsonObject[]): Promise<{ rows: Row[]; turns: number }> {
+    const store = createTranscriptStore();
+    await store.getState().attach('fresh', freshSource(rows, SESSION, subagentLookupOf([])), { agentId: null as never });
+    const entry = store.getState().entries.fresh;
+    return { rows: entry.rows, turns: entry.state.order.length };
+  }
+  const users = (rows: Row[]) => rows.filter((r): r is Extract<Row, { kind: 'user' }> => r.kind === 'user');
+
+  it('is the owner’s bubble in the turn it entered, "Sent during this turn", keyed by its row’s uuid, opening no turn', async () => {
+    const steer = atSecond(appended('use the split store'), 2);
+    const { rows, turns } = await drawn([prompt('List the files.'), call('toolu_s1', 1), result('toolu_s1', 2), steer, assistant([{ type: 'text', text: 'Switching to the split store.' }], 3)]);
+    expect(users(rows).map((u) => [u.text, u.steer])).toEqual([
+      ['List the files.', false],
+      ['use the split store', true],
+    ]);
+    expect(users(rows)[1].messageUuid).toBe(steer.uuid);
+    expect(turns).toBe(1);
+  });
+
+  it("draws none of the bridge's records beside it: the interrupt's marker and note, a stop's note", async () => {
+    const records = [appended('[Request interrupted by user]'), appended(['The interrupt came from the desk.', STOPPED('bk3x9a1')].join('\n')), appended(STOP('bk3x9a1', 'the desk'))].map((row) => atSecond(row, 3));
+    const { rows } = await drawn([prompt('List the files.'), call('toolu_s2', 1), result('toolu_s2', 2), ...records]);
+    expect(users(rows).map((u) => u.text)).toEqual(['List the files.']);
+  });
+});

@@ -415,6 +415,39 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   await expect(sendOf('Refuse this one.')).toHaveAttribute('data-state', 'failed'); // still there too
 });
 
+test("a desk Steer waits at the tail until the row its result names, then is the owner's words in the running turn, sent during it", async ({ page, hub }) => {
+  const { fm, view } = await openSession(page, hub);
+  const idle = fm.recording.steps.findIndex((s, i) => i > 0 && s.k === 'presence' && s.at > 18_000 && (s.record as { status?: string } | null)?.status === 'idle');
+  fm.step(idle + 1);
+  const envelope = (uuid: string, parentUuid: string) => ({ uuid, parentUuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session });
+  const land = (row: JsonObject) => fm.depth.apply({ at: 0, k: 'row', agentId: null, row: row as never });
+  // A turn at work: a prompt typed at the terminal, a Bash call and its result.
+  const prompt = { ...envelope('5e55a11d-0000-4000-8000-0000000000d1', fm.recording.rows.main.at(-1)!.uuid), type: 'user', origin: { kind: 'human' }, promptId: 'p-steer', message: { role: 'user', content: 'Count the files.' } };
+  const call = { ...envelope('5e55a11d-0000-4000-8000-0000000000d2', prompt.uuid), type: 'assistant', message: { id: 'msg_steer1', role: 'assistant', model: 'claude-haiku-5-5', type: 'message', content: [{ type: 'tool_use', id: 'toolu_steer1', name: 'Bash', input: { command: 'ls', description: 'List files' } }], stop_reason: 'tool_use', usage: { input_tokens: 1, output_tokens: 1 } } };
+  const result = { ...envelope('5e55a11d-0000-4000-8000-0000000000d3', call.uuid), type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_steer1', content: 'notes.md', is_error: false }] }, toolUseResult: { stdout: 'notes.md', stderr: '', interrupted: false, isImage: false } };
+  for (const row of [prompt, call, result]) land(row);
+  presence(hub, fm.session, { status: 'busy' });
+
+  const box = page.getByRole('textbox', { name: `Message ${ALIAS}` });
+  await box.fill('Use the split store.');
+  await box.press('Enter'); // while it works, Enter steers
+  await expect.poll(() => hub.rpcs(PROJECT).filter((r) => r.rpc === 'steer').length).toBe(1);
+  const steer = hub.rpcs(PROJECT).find((r) => r.rpc === 'steer')!;
+  const waiting = tailSends(view).filter({ hasText: 'Use the split store.' });
+  await expect(waiting).toHaveCount(1);
+  // The bridge's row for it (`$.session.append`, kept meta with the plugin's origin), named by the steer's result.
+  const steered = '5e55a11d-0000-4000-8000-0000000000d4';
+  hub.answerRpc(PROJECT, steer.nonce, { state: 'done', result: { row: steered } });
+  await expect(waiting.getByTestId('delivery-foot')).toHaveText('✓Steer · read at the next model request');
+  land({ ...envelope(steered, result.uuid), type: 'user', isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' }, message: { role: 'user', content: [{ type: 'text', text: 'Use the split store.' }] } });
+  await expect(waiting).toHaveCount(0);
+  const bubble = view.locator(`[data-row-id="user:${steered}"]`);
+  await expect(bubble).toHaveCount(1);
+  await expect(bubble).toContainText('Use the split store.');
+  await expect(bubble).toContainText('Sent during this turn');
+  await expect(view.locator('[data-kind="user"]').filter({ hasText: 'Use the split store.' })).toHaveCount(1);
+});
+
 /** The recording with one more turn before the session's end: a prompt, a Bash call and its result, then `interrupt`. */
 function withInterruptedTurn(recording: Recording, interrupt: (task: string) => string[]): Recording {
   const main = recording.rows.main;

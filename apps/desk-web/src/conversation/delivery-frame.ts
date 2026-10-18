@@ -59,15 +59,17 @@ const firstLine = (text: string) => text.split('\n', 1)[0];
 const isText = (block: unknown): block is { type: 'text'; text: string } => object(block)?.type === 'text' && typeof object(block)!.text === 'string';
 
 /**
- * The first lines of the prompts a row carries that may be deliveries: a user row's text or text blocks (never a tool's
- * result), a queued command's prompt; none for a row that marks no delivery's provenance.
+ * The first lines of the prompts a row carries that may be deliveries — a user row's text or text blocks (never a tool's
+ * result), a queued command's prompt — each with its text after it, as sminos writes a frame; none for a row that marks
+ * no delivery's provenance.
  */
 export function deliveredLines(row: JsonObject): string[] {
   const prompts = deliveredPrompts(row);
   if (prompts === null) return [];
-  if (prompts.kind === 'queued') return [firstLine(prompts.prompt)];
-  if (typeof prompts.content === 'string') return [firstLine(prompts.content)];
-  return prompts.content.flatMap((block) => (isText(block) ? [firstLine(block.text)] : []));
+  const framed = (text: string) => (text.includes('\n') ? [firstLine(text)] : []);
+  if (prompts.kind === 'queued') return framed(prompts.prompt);
+  if (typeof prompts.content === 'string') return framed(prompts.content);
+  return prompts.content.flatMap((block) => (isText(block) ? framed(block.text) : []));
 }
 
 const CHAT = /^\[sminos chat .+? \S+:\d+ from (.+) → @(?:you|all)(?: \| unread [1-9][0-9]*)?\]$/;
