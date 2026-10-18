@@ -173,7 +173,7 @@ export class SessionDepth {
    * MCP names. */
   private agentBody(agentId: string): { subagents: SubagentMeta[] } & Pick<Body, 'jobs' | 'mcp'> {
     const loop = this.indexes.get(agentId)?.index ?? new LoopIndex();
-    return { subagents: [], ...loopJobs(loop, this.record !== null) };
+    return { subagents: [], ...loopJobs(loop, this.record !== null, this.indexes.get('main')?.index) };
   }
 
   /**
@@ -507,7 +507,7 @@ export class SessionDepth {
   /** The job `taskId` names and the loop whose rows started it, while the session's jobs index holds it as running. */
   runningJob(taskId: string): { loop: string; job: Job } | null {
     for (const [loop, { index }] of this.indexes) {
-      const job = loopJobs(index, this.record !== null).jobs.find((j) => j.taskId === taskId);
+      const job = loopJobs(index, this.record !== null, loop === 'main' ? undefined : this.indexes.get('main')?.index).jobs.find((j) => j.taskId === taskId);
       if (job) return job.status === 'running' ? { loop, job } : null;
     }
     return null;
@@ -516,15 +516,14 @@ export class SessionDepth {
   /**
    * What the bridge's `stop` (DC10) leaves in the session. Its `TaskStop` through `$.tool.call` writes no row, so the
    * bridge appends its note to the main transcript (`$.session.append`: a meta user row with the plugin's origin), whose
-   * whole text DX4 reads as the task `stopped` (`stopNote`, the vectors' case 16). For a subagent's job, whose status
-   * its own loop's rows decide, the fake also writes the engine's `killed` notification into that loop: the engine's
-   * own path for a task it stops outside the main loop, assumed here, not observed. False, and nothing written, when
-   * the job is not running.
+   * whole text DX4 reads as the task `stopped` (`stopNote`, the vectors' case 16): a subagent's job too, since an
+   * agent's jobs read the main loop's words on its tasks after its own (`loopJobs`'s `also`), as the plane does; the
+   * live check saw the engine's own notice never reach a parked subagent. False, and nothing written, when the job is
+   * not running.
    */
   stopJob(taskId: string): boolean {
     const held = this.runningJob(taskId);
     if (!held) return false;
-    const { loop, job } = held;
     const timestamp = new Date().toISOString();
     this.appendRow(null, {
       type: 'user',
@@ -537,19 +536,6 @@ export class SessionDepth {
       origin: { kind: 'plugin', name: 'doperpowers' },
       message: { role: 'user', content: [{ type: 'text', text: stopNote(taskId) }] },
     });
-    if (loop !== 'main') {
-      const prompt = `<task-notification>\n<task-id>${taskId}</task-id>\n<tool-use-id>${job.toolUseId}</tool-use-id>\n<status>killed</status>\n<summary>Task "${job.description}" was stopped</summary>\n</task-notification>`;
-      this.appendRow(loop, {
-        type: 'attachment',
-        uuid: randomUUID(),
-        parentUuid: this.rows.get(loop)?.at(-1)?.uuid ?? null,
-        sessionId: this.id,
-        isSidechain: true,
-        agentId: loop,
-        timestamp,
-        attachment: { type: 'queued_command', commandMode: 'task-notification', prompt, origin: { kind: 'task-notification' } },
-      });
-    }
     return true;
   }
 

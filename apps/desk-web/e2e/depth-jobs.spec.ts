@@ -406,7 +406,7 @@ test('a subagent’s own shell stands above its transcript in the drill-in, and 
   await row.getByRole('button', { name: 'Stop' }).click();
   await expect(row).toContainText('stopped', { timeout: 2000 });
   expect(stopsSent(hub).at(-1)?.args).toEqual({ session: fm.session, taskId });
-  // The bridge's note is in the main transcript; the agent's own loop, which decides its job, has the engine's killed.
+  // The bridge's note is in the main transcript alone, and the agent's job read it there, as the plane reads it.
   expect(fm.depth.rows.get('main')!.some((r) => JSON.stringify(r).includes(`Task ${taskId}, a background task, was stopped from the desk`))).toBe(true);
-  expect(fm.depth.rows.get(ALPHA)!.some((r) => JSON.stringify(r).includes('<status>killed</status>'))).toBe(true);
+  expect(fm.depth.rows.get(ALPHA)!.some((r) => JSON.stringify(r).includes(taskId) && r.type !== 'assistant' && !('toolUseResult' in r))).toBe(false);
 });
