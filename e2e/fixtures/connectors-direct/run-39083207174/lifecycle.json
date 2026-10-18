@@ -1,0 +1,54 @@
+{
+  "steps": {
+    "revoke": {
+      "held": 3490,
+      "late": {
+        "fate": "released",
+        "ms": 104
+      },
+      "page": {
+        "last": "revoked:revoked",
+        "updates": 5
+      }
+    },
+    "once": {
+      "held": 5201,
+      "late": {
+        "fate": "released",
+        "ms": 103
+      },
+      "page": {
+        "last": "revoked:revoked",
+        "updates": 1
+      }
+    },
+    "restore": {
+      "versionId": 5,
+      "duplicateGrants": 0,
+      "restoredGrants": 0
+    },
+    "delete": {
+      "held": 8932,
+      "late": {
+        "fate": "released",
+        "ms": 105
+      }
+    }
+  },
+  "refreshes": [
+    {
+      "last": "ok n=1 via=direct",
+      "updates": 4,
+      "submitted": 1
+    }
+  ],
+  "journals": [
+    {
+      "spawns": 1,
+      "exits": 1,
+      "userFrames": 0,
+      "modelFrames": 0,
+      "needsAuth": 0
+    }
+  ]
+}
