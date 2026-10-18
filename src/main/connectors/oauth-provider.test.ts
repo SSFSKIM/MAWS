@@ -233,6 +233,28 @@ describe('demand refresh', () => {
     expect(flow.refreshes).toHaveLength(1);
   });
 
+  // P3-F F-connectors 4: the old epoch's pending close is retried before the replacement, now within the margin, is
+  // refreshed again, so a transient refresh failure leaves the still-valid replacement deliverable once the close confirms
+  it('retries a pending old-epoch close before refreshing again: a transient failure still delivers the valid replacement', async () => {
+    await seed(tokens(1, { expiresAt: NOW + 120_000 }));
+    await prepare();
+    clock = NOW + 120_000;
+    closeAnswers = [];
+    const first = prepare();
+    await vi.waitFor(() => expect(flow.refreshes).toHaveLength(1));
+    flow.refreshes[0]!.answer.resolve(tokens(2, { expiresAt: clock + 110_000 }));
+    await vi.waitFor(() => expect(closes).toHaveLength(1));
+    closeAnswers[0]!.resolve(false);
+    expect(await first).toEqual({ ok: false });
+    clock += 60_000; // the replacement has 50 s left: within the refresh margin, still valid
+    closeAnswers = null; // the host confirms closes again
+    const second = prepare();
+    await vi.waitFor(() => expect(flow.refreshes).toHaveLength(2));
+    expect(closes).toHaveLength(2); // the pending close went first
+    flow.refreshes[1]!.answer.reject(new ConnectorOAuthError('transient'));
+    expect(credentialOf(await second)).toMatchObject({ accessToken: 'at-2' });
+  });
+
   it('a host whose attachment ended needs no close of an old epoch; its waiting demand ends, the next is served', async () => {
     await seed(tokens(1, { expiresAt: NOW + 120_000 }));
     await prepare();
