@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 115,
-    "defer:pending": 8,
+    "defer:committed": 116,
+    "defer:pending": 7,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1519,7 +1519,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L219; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "A browser-run unit (or a jsdom-free DOM project) that applies the svg sheet, red on the old code. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L219; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "52319d51d52e9b2a48b6c4edc3d278265f8b7879"
     },
     {
       "line": 237,
@@ -1529,8 +1529,8 @@
       "triageReason": "Existing measured mitigation/bound stands; a new performance architecture or proposal signal needs its own pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L237; parent Decision Log 106): Existing measured mitigation/bound stands; a new performance architecture or proposal signal needs its own pass. Owner: P4.",
       "remainingClause": "C's plan phase cheaper on element-heavy slides, or a publish that yields between boards; then the one-board row returns to 50 ms for every board. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L237; parent Decision Log 106): Existing measured mitigation/bound stands; a new performance architecture or proposal signal needs its own pass. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 243,
