@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 106,
-    "defer:pending": 17,
+    "defer:committed": 107,
+    "defer:pending": 16,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1420,7 +1420,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L179; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "remainingClause": "The writer folded onto jszip now that B is on master. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L179; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "ae24ee539654f458731049d9c83af1d9ec2f179d"
     },
     {
       "line": 180,
@@ -1430,8 +1430,8 @@
       "triageReason": "Closing clause requires extending a shared adapter/assets-version contract; no silent new contract in F. Architect may explicitly promote after ruling.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L180; parent Decision Log 106): Closing clause requires extending a shared adapter/assets-version contract; no silent new contract in F. Ruled P4 at checkpoint 1 (parent Decision Log 106 (5)), on the owner's rulings sheet as an owner-informed deferral (a retained version's Claude export carries the current assets). Owner: P4.",
       "remainingClause": "The export reading assets at the version's revision (Decision Log 59's `assetUrl` revision, or the host's versioned asset read). Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L180; parent Decision Log 106): Closing clause requires extending a shared adapter/assets-version contract; no silent new contract in F. Ruled P4 at checkpoint 1 (parent Decision Log 106 (5)), on the owner's rulings sheet as an owner-informed deferral (a retained version's Claude export carries the current assets). Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 204,
