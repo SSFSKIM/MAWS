@@ -14,8 +14,7 @@
   "deferFormat": "each defer row keeps its whole text; its closing cell gains 'Re-deferred 2026-10-18 (P3-F triage, triage.txt L<n>; parent Decision Log 106): <ruled reason> Owner: <ruled step made explicit>.' (the P2-F pattern)",
   "counts": {
     "close:committed": 9,
-    "close:held": 1,
-    "defer:committed": 123,
+    "defer:committed": 124,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -198,12 +197,16 @@
     },
     {
       "line": 173,
-      "bin": "close",
-      "action": "held",
-      "note": "Held, not removed: the cited evidence does not show the clause met. e2e/support/latency.ts latencyBudgets has wrapped the bound since 5e277d082 (2026-09-29), before the row was logged (2026-10-14); that is the state that failed at 2,371 ms on the 2-core Linux runner (the load rule asserts the full 2 s whenever load < cores). e2e/code-tools.spec.ts:519-528 is unchanged: no MAWS_*_PERF seam, still inside the class-1b `code` group. Partial support: loosened on a loaded machine; gate-offload Decision Log 28 records `code` green on the mini's first full class-1b run (38840868976). Sent to the controller for an architect ruling: accept as met, or rebin defer to the gate lane.",
+      "bin": "defer",
+      "action": "re-defer",
       "triageReason": "Bounded-head budget uses the measured/load-aware seam, not an unconditional Linux wall limit. Evidence: e2e/support/latency.ts; e2e/code-tools.spec.ts.",
-      "status": "held",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)",
+      "binAtM0": "close",
+      "ruling": "Architect's ruling relayed by the P3-F controller (af4cd2993bc56e015) on 2026-10-18: L173 close -> defer under P3 Decision Log 107 (parent docs/doperpowers/plans/2026-10-12-p3-co-work.md; the entry is not in this worktree's copy of the parent at the time of this commit). Effective counts become fix 53 / sitting 10 / close 9 / defer 124 / theirs 42; frozen 238 unchanged.",
+      "appended": "Re-deferred 2026-10-18 (P3-F M1-record; P3 Decision Log 107): the ratified close cited 5e277d082, which predates the Linux failure and does not loosen the 2 s budget on a quiet machine; no P3 source repair. Owner: the gate lane, before any class-1b run on a platform slower than the mini; closes when the budget is platform-aware or the lane rules Linux out of e2e:code for good.",
+      "remainingClause": "Classify it as a class-2 measured bound (behind the load rule or a `MAWS_*_PERF` seam) before class 1b runs on any slower or loaded machine. Owner: the macOS runner's first run (gate-offload §3.6 step 6), else P3-F. Re-deferred 2026-10-18 (P3-F M1-record; P3 Decision Log 107): the ratified close cited 5e277d082, which predates the Linux failure and does not loosen the 2 s budget on a quiet machine; no P3 source repair. Owner: the gate lane, before any class-1b run on a platform slower than the mini; closes when the budget is platform-aware or the lane rules Linux out of e2e:code for good.",
+      "heldNote": "Held, not removed: the cited evidence does not show the clause met. e2e/support/latency.ts latencyBudgets has wrapped the bound since 5e277d082 (2026-09-29), before the row was logged (2026-10-14); that is the state that failed at 2,371 ms on the 2-core Linux runner (the load rule asserts the full 2 s whenever load < cores). e2e/code-tools.spec.ts:519-528 is unchanged: no MAWS_*_PERF seam, still inside the class-1b `code` group. Partial support: loosened on a loaded machine; gate-offload Decision Log 28 records `code` green on the mini's first full class-1b run (38840868976). Sent to the controller for an architect ruling: accept as met, or rebin defer to the gate lane."
     },
     {
       "line": 181,
@@ -1606,7 +1609,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L272; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "Closes exactly by an explicit verified-source Connect bootstrap that never releases ordinary calls before a successful discovery, with the reproducer as its regression. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L272; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "d616b6f7dceeec022d8dfb6037c3396229cdeb3d"
     }
   ]
 }
