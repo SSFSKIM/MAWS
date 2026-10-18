@@ -5,16 +5,20 @@
 // its live state), and merges them (`mergeOrgGroups`). A row names the session (`SessionLabel`: title, else alias, with
 // its machine), its project and its in-charge line; a click opens the session's channel in its project. The browser
 // draws only what it has verified with the org key, so a locked tab draws the grid's counts — the hub's, which the grid
-// shows anyway — and no session, and opens no project.
+// shows anyway — and no session, and opens no project. The view says how complete its roster is, as the project view
+// does: the projects still being read (backlog or verification), those whose socket dropped (their sessions shown as
+// last seen), and those holding events that failed verification (not drawn); "no session is running" is said only when
+// every project is connected, caught up and fully checked, with nothing refused.
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useStore } from 'zustand';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
+import { refused } from '../../log/project-log';
 import type { SessionGroup } from '../../log/projection';
 import { useProjectConnection } from '../../project/registry';
 import { orgWaiting } from '../../pwa/badge';
 import { useDeskLayout } from '../../shell/layout';
-import { mergeOrgGroups, ORG_GROUPS, type OrgGroup, type OrgSession } from '../../shell/org-sessions';
+import { feedState, mergeOrgGroups, ORG_GROUPS, type FeedHealth, type OrgGroup, type OrgSession } from '../../shell/org-sessions';
 import { SessionLabel } from '../../shell/SessionLabel';
 import { useDeskSessions, type DeskSession } from '../../shell/sessions';
 import { useGrid } from '../../state/grid';
@@ -22,8 +26,8 @@ import { UnlockForm } from '../key/UnlockForm';
 
 const HEADINGS: Record<OrgGroup, string> = { waiting: 'Waiting on you', working: 'Working', idle: 'Idle' };
 
-/** What one project's feed reports: its sessions grouped, and whether its backlog has arrived. */
-type Fed = { groups: Record<SessionGroup, DeskSession[]>; caughtUp: boolean };
+/** What one project's feed reports: its sessions grouped, and how far they can be taken as current. */
+type Fed = FeedHealth & { groups: Record<SessionGroup, DeskSession[]> };
 
 export function OrgView({ me }: { me: Me }) {
   const projects = useGrid((s) => s.projects);
@@ -39,7 +43,12 @@ export function OrgView({ me }: { me: Me }) {
     });
   }, []);
   const groups = useMemo(() => mergeOrgGroups(projects.filter((p) => fed[p.id]).map((p) => ({ project: p.id, name: p.name, groups: fed[p.id].groups }))), [projects, fed]);
-  const reading = projects.filter((p) => !fed[p.id]?.caughtUp).length;
+  const state = (id: string) => (fed[id] ? feedState(fed[id]) : 'reading');
+  const reading = projects.filter((p) => state(p.id) === 'reading');
+  const stale = projects.filter((p) => state(p.id) === 'stale');
+  const refusing = projects.filter((p) => (fed[p.id]?.refused ?? 0) > 0);
+  const staleIds = new Set(stale.map((p) => p.id));
+  const complete = reading.length === 0 && stale.length === 0 && refusing.length === 0;
   const shown = ORG_GROUPS.filter((g) => groups[g].length > 0);
   const locked = keyState !== 'unlocked';
   return (
@@ -52,12 +61,22 @@ export function OrgView({ me }: { me: Me }) {
             {projects.map((p) => (
               <ProjectFeed key={p.id} project={p.id} report={report} />
             ))}
-            {loaded && reading > 0 && (
+            {loaded && reading.length > 0 && (
               <p className="m-0 mb-3 text-ui-sm text-fg-muted" role="status" data-testid="org-reading">
-                Reading {reading === 1 ? 'one project' : `${reading} projects`} of {projects.length}…
+                Reading {names(reading)}: {reading.length === 1 ? 'its sessions appear' : 'their sessions appear'} once {reading.length === 1 ? 'its log has' : 'their logs have'} arrived and been checked.
               </p>
             )}
-            {loaded && reading === 0 && shown.length === 0 && (
+            {stale.length > 0 && (
+              <p className="m-0 mb-3 text-ui-sm text-warning" role="status" data-testid="org-stale">
+                Reconnecting to {names(stale)}: {stale.length === 1 ? 'its' : 'their'} sessions are shown as last seen, and may have changed since.
+              </p>
+            )}
+            {refusing.length > 0 && (
+              <p className="m-0 mb-3 text-ui-sm text-danger" role="alert" data-testid="org-refused">
+                {refusing.map((p) => `${p.name}: ${fed[p.id].refused === 1 ? 'One event' : `${fed[p.id].refused} events`} failed verification and ${fed[p.id].refused === 1 ? 'is' : 'are'} not shown`).join('; ')}; the project's own view names each.
+              </p>
+            )}
+            {loaded && complete && shown.length === 0 && (
               <p className="m-0 text-ui-sm text-fg-muted" data-testid="org-empty">
                 No session is running in any project.
               </p>
@@ -71,7 +90,7 @@ export function OrgView({ me }: { me: Me }) {
                 <ul className="m-0 list-none p-0">
                   {groups[group].map((session) => (
                     <li key={`${session.project}:${session.session}`}>
-                      <Row session={session} group={group} />
+                      <Row session={session} group={group} stale={staleIds.has(session.project)} />
                     </li>
                   ))}
                 </ul>
@@ -89,14 +108,24 @@ const ProjectFeed = memo(function ProjectFeed({ project, report }: { project: st
   const connection = useProjectConnection(project);
   const { groups } = useDeskSessions(connection);
   const caughtUp = useStore(connection.live, (s) => s.caughtUp);
-  useEffect(() => report(project, { groups, caughtUp }), [project, groups, caughtUp, report]);
+  const connected = useStore(connection.live, (s) => s.connected);
+  const pending = useStore(connection.log.store, (s) => s.entries.filter((e) => e.verdict === 'pending').length);
+  const refusedCount = useStore(connection.log.store, (s) => refused(s).length);
+  useEffect(() => report(project, { groups, caughtUp, connected, pending, refused: refusedCount }), [project, groups, caughtUp, connected, pending, refusedCount, report]);
   useEffect(() => () => report(project, null), [project, report]);
   return null;
 });
 
-function Row({ session, group }: { session: OrgSession; group: OrgGroup }) {
+/** "MAWS", "MAWS and mini", "MAWS, mini and arkho". */
+function names(projects: ReadonlyArray<{ name: string }>): string {
+  const all = projects.map((p) => p.name);
+  return all.length <= 1 ? (all[0] ?? '') : `${all.slice(0, -1).join(', ')} and ${all.at(-1)}`;
+}
+
+/** `stale`: its project's socket dropped, so the row is as last seen. */
+function Row({ session, group, stale }: { session: OrgSession; group: OrgGroup; stale: boolean }) {
   const navigate = useDeskLayout((s) => s.navigate);
-  const offline = session.machineOnline === false;
+  const offline = session.machineOnline === false || stale;
   return (
     <button
       type="button"
@@ -105,6 +134,7 @@ function Row({ session, group }: { session: OrgSession; group: OrgGroup }) {
       data-session={session.session}
       data-project={session.project}
       data-group={group}
+      data-stale={stale || undefined}
       className={['block w-full rounded-sm px-2.5 py-2 text-left hover:bg-bg-hover', offline ? 'text-fg-muted' : 'text-fg'].join(' ')}
     >
       <span className="flex min-w-0 items-baseline gap-1.5 text-ui-sm">

@@ -21,3 +21,16 @@ export function mergeOrgGroups(feeds: Iterable<ProjectFeed>): Record<OrgGroup, O
     merged[group].sort((a, b) => b.joinedTs.localeCompare(a.joinedTs) || a.projectName.localeCompare(b.projectName) || a.alias.localeCompare(b.alias));
   return merged;
 }
+
+/** How far one project's sessions can be taken as current: its socket, its backlog, and its log's verification. */
+export type FeedHealth = { connected: boolean; caughtUp: boolean; pending: number; refused: number };
+
+/**
+ * `reading`: connected but its backlog has not all arrived or is not all verified yet (or it has not connected yet);
+ * `stale`: its socket dropped after it caught up, so its sessions are as last seen; `current`: connected, caught up, and
+ * every entry it holds checked. Refusals are reported apart: a current feed with refusals is current, less what failed.
+ */
+export function feedState(h: FeedHealth): 'reading' | 'stale' | 'current' {
+  if (!h.connected) return h.caughtUp ? 'stale' : 'reading';
+  return h.caughtUp && h.pending === 0 ? 'current' : 'reading';
+}

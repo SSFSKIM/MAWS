@@ -67,6 +67,7 @@ beforeEach(async () => {
   for (const project of [P1, P2]) {
     const connection = new ProjectConnection(project, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
     connection.setKey(key);
+    connection.live.setState({ status: 'open', connected: true, caughtUp: true });
     held.set(project, connection);
   }
   await feed(held.get(P1)!, [
@@ -141,6 +142,85 @@ it("locked, draws the grid's counts and no session, and opens no project", () =>
   expect(screen.getByTestId('unlock-form')).toBeTruthy();
   expect(screen.queryAllByTestId('org-session')).toEqual([]);
   expect(acquired).toEqual([]);
+});
+
+// What the view says of its own completeness: a roster is drawn as current, and "no session" claimed, only from feeds
+// that are connected, caught up and fully verified, as the project view reports its own (refusals named, staleness said).
+async function emptyProjects() {
+  for (const connection of held.values()) connection.stop();
+  for (const project of [P1, P2]) {
+    const connection = new ProjectConnection(project, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
+    connection.setKey(key);
+    connection.live.setState({ status: 'open', connected: true, caughtUp: true });
+    held.set(project, connection);
+  }
+}
+
+it('says no session runs only once every project is connected, caught up and verified', async () => {
+  await emptyProjects();
+  render(<OrgView me={me} />);
+  await waitFor(() => expect(screen.getByTestId('org-empty')).toBeTruthy());
+  expect(screen.queryByTestId('org-reading')).toBeNull();
+});
+
+it('while a project\'s log is still being verified, names it as being read and claims no empty roster', async () => {
+  await emptyProjects();
+  const original = crypto.subtle.verify.bind(crypto.subtle);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const spy = vi.spyOn(crypto.subtle, 'verify').mockImplementation(async (...args: Parameters<SubtleCrypto['verify']>) => {
+    await gate;
+    return original(...args);
+  });
+  try {
+    const event = (await seal(key, 'log', P2, { seq: 1, ...joined(S.stray, 'mini-7c', 'mini', '2026-10-18T09:00:00.000Z') })) as unknown as LogEvent;
+    held.get(P2)!.log.receive([{ offset: 1, event }]);
+    presence(held.get(P2)!, { [S.stray]: 'waiting' });
+    render(<OrgView me={me} />);
+    await waitFor(() => expect(screen.getByTestId('org-reading').textContent).toContain('mini'));
+    expect(screen.getByTestId('org-reading').textContent).not.toContain('MAWS');
+    expect(screen.queryByTestId('org-empty')).toBeNull();
+    release();
+    await act(() => held.get(P2)!.log.settled());
+    await waitFor(() => expect(screen.getAllByTestId('org-session').map((r) => r.dataset.session)).toEqual([S.stray]));
+    expect(screen.queryByTestId('org-reading')).toBeNull();
+  } finally {
+    release();
+    spy.mockRestore();
+  }
+});
+
+it('names a project whose membership event fails its code, and claims no empty roster', async () => {
+  await emptyProjects();
+  const genuine = (await seal(key, 'log', P2, { seq: 1, ...joined(S.stray, 'mini-7c', 'mini', '2026-10-18T09:00:00.000Z') })) as unknown as LogEvent;
+  held.get(P2)!.log.receive([{ offset: 1, event: { ...genuine, alias: 'forged' } }]);
+  await held.get(P2)!.log.settled();
+  render(<OrgView me={me} />);
+  const alert = await waitFor(() => screen.getByTestId('org-refused'));
+  expect(alert.textContent).toContain('mini');
+  expect(alert.textContent).toContain('One event');
+  expect(alert.textContent).not.toContain('MAWS');
+  expect(screen.queryByTestId('org-empty')).toBeNull();
+  expect(screen.queryAllByTestId('org-session')).toEqual([]);
+});
+
+it('marks the sessions of a project whose connection dropped after catching up as last seen, and claims no empty roster', async () => {
+  render(<OrgView me={me} />);
+  await waitFor(() => expect(screen.getAllByTestId('org-session')).toHaveLength(4));
+  expect(screen.queryByTestId('org-stale')).toBeNull();
+  act(() => held.get(P1)!.live.setState({ status: 'connecting', connected: false })); // caughtUp stays true, as on a drop
+  const stale = await waitFor(() => screen.getByTestId('org-stale'));
+  expect(stale.textContent).toContain('MAWS');
+  expect(stale.textContent).not.toContain('mini');
+  const rows = screen.getAllByTestId('org-session');
+  expect(rows.filter((r) => r.dataset.stale !== undefined).map((r) => r.dataset.session).sort()).toEqual([S.asks, S.works].sort());
+
+  cleanup();
+  await emptyProjects();
+  held.get(P2)!.live.setState({ status: 'connecting', connected: false });
+  render(<OrgView me={me} />);
+  await waitFor(() => expect(screen.getByTestId('org-stale').textContent).toContain('mini'));
+  expect(screen.queryByTestId('org-empty')).toBeNull();
 });
 
 it('is at /sessions', () => {
