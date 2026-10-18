@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 63,
-    "defer:pending": 60,
+    "defer:committed": 64,
+    "defer:pending": 59,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -947,7 +947,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L108; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "remainingClause": "P3: the card shows the reason that the transcript could not be read, through an additive optional member of X18's `QuestionState`, recorded in the interface ledger when P3 takes it. Narrowed 2026-10-10 (P2-F W-O): the state shipped without the reason (the architect's ruling). Owner: P3 (the owner channel). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L108; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "f37bb053715f508dea05bfa8c3a0b7ac98d33690"
     },
     {
       "line": 110,
@@ -957,8 +957,8 @@
       "triageReason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L110; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "The web project's composite build reports no TS6307: its tests move to a project that owns their imports (or the web include lists them), and `pnpm typecheck` runs the web project composite. Owner: P2 (build) or P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L110; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 111,
