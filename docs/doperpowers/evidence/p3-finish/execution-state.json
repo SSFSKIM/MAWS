@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "pair2 native frontier accepted by architect; mechanical TS fix to next normal union; DOC-A/DECK orienting",
+  "phase": "DOC-A/DECK implementing disjoint approved paths; MINI TS lint slot-blocked; drag discriminator active",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -132,6 +132,11 @@
       "runs": [
         39133832247
       ]
+    },
+    "tsFixLint": {
+      "task": "bgmopgt3v",
+      "status": "queued on shared slots; exact void diff read",
+      "redundantWaiter": "bph5r69s0 stop requested; actual task auto-notifies"
     }
   },
   "W-STORE": {
@@ -214,11 +219,13 @@
     "failure": "static TS2322 test callback only; all13 other groups success"
   },
   "W-DOC-A": {
-    "executor": "a00549767dfb02089",
-    "status": "orienting; path claims must be acknowledged before edits"
+    "executor": "af7fe2d9bf548028a",
+    "status": "claims acknowledged; implementing",
+    "claims": "pair3-claims.json"
   },
   "W-DECK": {
-    "executor": "af7fe2d9bf548028a",
-    "status": "orienting; path claims must be acknowledged before edits"
+    "executor": "a00549767dfb02089",
+    "status": "claims acknowledged; implementing",
+    "claims": "pair3-claims.json"
   }
 }

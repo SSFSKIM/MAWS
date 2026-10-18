@@ -1,0 +1,49 @@
+{
+  "status": "disjoint claims approved; edits released",
+  "base": "0f2d04b9abaafcd02e116d8741c4bd53352b99b9",
+  "approvedAt": "2026-10-18T14:38:00Z",
+  "W-DOC-A": {
+    "executor": "af7fe2d9bf548028a",
+    "paths": [
+      "src/renderer/src/side/card/CardThread.tsx",
+      "src/renderer/src/side/card/CardHost.tsx",
+      "src/renderer/src/side/card/CardThread.test.tsx",
+      "src/renderer/src/tools/document/comments.test.tsx",
+      "src/artifacts/document/schema.ts",
+      "src/artifacts/document/link.dom.test.ts",
+      "src/artifacts/document/history.test.ts",
+      "src/artifacts/document/history.ts",
+      "src/artifacts/document/editor/DocumentEditor.tsx",
+      "src/artifacts/document/editor/narrow-panel.dom.test.tsx",
+      "src/renderer/src/tools/design/DesignBody.tsx",
+      "src/renderer/src/tools/design/comments.test.tsx"
+    ],
+    "constraints": "L154 card Reply fixed through existing frame contract; original row narrowed to that proof, one NEW P4 pane/tab composer remainder supplied to controller for separate guarded append. L170 local appendTransaction normalization; no throwing validator/fingerprint/schema change. L187 product only if regression red."
+  },
+  "W-DECK": {
+    "executor": "a00549767dfb02089",
+    "paths": [
+      "src/artifacts/slides/editor/Notes.tsx",
+      "src/artifacts/slides/editor/session.ts",
+      "src/artifacts/slides/editor/DeckEditor.dom.test.tsx",
+      "e2e/support/text-run.ts",
+      "test/support/text-run.test.ts",
+      "src/artifacts/slides/history.ts",
+      "src/artifacts/slides/history.test.ts",
+      "src/engine-host/tool-server/artifact-publish.ts",
+      "src/engine-host/tool-server/artifact-publish.test.ts",
+      "src/engine-host/presentations/tools.test.ts",
+      "src/artifacts/slides/editor/transform/Overlay.tsx",
+      "src/artifacts/slides/editor/transform/layout.dom.test.tsx",
+      "src/renderer/src/tools/presentation/exports.ts",
+      "src/renderer/src/tools/presentation/DeckBody.tsx",
+      "src/artifacts/slides/editor/DeckEditor.tsx",
+      "src/renderer/src/tools/presentation/exports.test.ts"
+    ],
+    "constraints": "L203/L233 in-memory DeckSession only, serial shared paths; existing versionId export; publish copy only, no shared tool-schema edits."
+  },
+  "intersection": [],
+  "commitLock": "/private/tmp/maws-p3f-commit.lock",
+  "helper": "/private/tmp/p3f-commit-row.py",
+  "mappingCorrection": "Initial parallel-result ordering was reversed; actual briefs confirmed by both agents before edits."
+}
