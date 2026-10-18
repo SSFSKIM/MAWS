@@ -16,17 +16,32 @@ export const deckHeadline = (stage: Locator) => stage.locator('[data-stage-slide
 /** The colour an element paints its text in. */
 export const paintedColor = (element: Locator) => element.evaluate((node) => getComputedStyle(node).color);
 
-/** The document page's `--ds-color-accent` (its scope's, or a version preview's own), as the window paints that colour. */
-export const pageAccent = (page: Locator) =>
-  page.evaluate((node) => {
-    const probe = node.ownerDocument.createElement('i');
-    probe.style.color = 'var(--ds-color-accent)';
-    node.append(probe);
-    try {
-      return getComputedStyle(probe).color;
-    } finally {
-      probe.remove();
-    }
+/**
+ * A reading-list passage whose link the document's theme sets in the system's accent (theme.css: `.ds-doc a`), as the
+ * document editor's `insertContent` takes it.
+ */
+export const READING_PASSAGE = [
+  {
+    type: 'paragraph',
+    content: [
+      { type: 'text', text: 'Before Monday, read chapter two of ' },
+      { type: 'text', text: 'the course reader', marks: [{ type: 'link', attrs: { href: 'https://example.edu/course-reader' } }] },
+      { type: 'text', text: ' and bring one question to the seminar.' },
+    ],
+  },
+];
+
+/** The owner's edit through a real document editor (`[data-editor]`, which carries its TipTap editor), inserting `content`. */
+export const insertThroughEditor = (editor: Locator, content: unknown) =>
+  editor.evaluate((node, inserted) => {
+    if (!(node as HTMLElement & { editor: { commands: { insertContent(value: unknown): boolean } } }).editor.commands.insertContent(inserted)) throw new Error('the editor refused the passage');
+  }, content);
+
+/** The edits a document editor's replica still waits for the host to acknowledge (document.spec.ts's `durable` read). */
+export const unacknowledged = (editor: Locator) =>
+  editor.evaluate((node) => {
+    const bound = (node as HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold?: { base: { state(): { unsaved: number } } } } }> } } }).editor;
+    return bound?.extensionManager.extensions.find((extension) => extension.name === 'collaboration')?.options.hold?.base.state().unsaved ?? -1;
   });
 
 /** An artifact opened from the library in its main tab, once `drawn` (a locator inside the tab) is visible. */

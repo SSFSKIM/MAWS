@@ -37,7 +37,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { ACCENT_DECK, deckHeadline, headerAction, openFromLibrary, pageAccent, paintedColor } from './support/design-restyle';
+import { ACCENT_DECK, deckHeadline, headerAction, insertThroughEditor, openFromLibrary, paintedColor, READING_PASSAGE, unacknowledged } from './support/design-restyle';
 import { allowNext, fixtureRows, mcpResultOf, ofKind, PASS3, resultText, scene, show, type Frame, type McpResult, type Scene } from './support/maws-tools';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; issues?: unknown } };
@@ -256,7 +256,9 @@ test('a document fixture restyles with its system, its retained version keeps th
 
 // P3-F's S-RESTYLE (Acceptance 10 and 11 on the real editors, which the fixture above stands in for): B's document page
 // and C's deck stage, each governed by a system the owner then recolours on its page, restyle with the live tokens with
-// no write to either artifact, while a version saved before the recolour previews in the revision it pinned.
+// no write to either artifact, while a version saved before the recolour previews in the revision it pinned. What is
+// read is the artifacts' own content as drawn: the document's link, which its theme sets in the accent, written by the
+// owner through the real editor, and the deck title set in the accent.
 test('the real document and deck editors restyle with their system’s live tokens, and their retained versions keep the pinned look', async () => {
   test.setTimeout(180_000);
   const page = await ready();
@@ -274,16 +276,20 @@ test('the real document and deck editors restyle with their system’s live toke
   const AFTER_HEX = '#2e8b57';
   const AFTER = rgbOf(AFTER_HEX);
   expect(BEFORE).not.toBe(AFTER);
-  // each artifact's version now pins the system as it is (X29)
-  for (const artifactId of [doc.id, deck.id]) expect((await saveVersion(page, artifactId, 'Handed out')).designSystemRef).toEqual({ id: system.id, versionSeq: expect.any(Number) });
   const revision = async (artifactId: string) => (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId })).artifact.revision;
 
-  // both real editors open in their main tabs, drawn in the system's accent
+  // the owner writes the reading list in the real document editor, its link drawn in the system's accent
   const DOC_DRAWN = '.ds-doc .ProseMirror';
   const DECK_DRAWN = '[data-deck-editor] [data-stage-slide]';
   const docTab = await openFromLibrary(page, 'Reading list', doc.id, DOC_DRAWN);
-  const docPage = docTab.locator('.ds-doc').first();
-  await expect.poll(() => pageAccent(docPage), { message: 'the document page draws the system’s accent' }).toBe(BEFORE);
+  const docEditor = docTab.locator('.ds-doc [data-editor="live"]').first();
+  await insertThroughEditor(docEditor, READING_PASSAGE);
+  const docLink = docTab.locator('.ds-doc [data-editor="live"] a', { hasText: 'the course reader' });
+  await expect(docLink).toBeVisible();
+  await expect.poll(() => unacknowledged(docEditor), { timeout: 10_000, message: 'the passage reached the store' }).toBe(0);
+  await expect.poll(() => paintedColor(docLink), { message: 'the document’s link draws the system’s accent' }).toBe(BEFORE);
+  // each artifact's version now pins the system as it is (X29), the document's holding the passage
+  for (const artifactId of [doc.id, deck.id]) expect((await saveVersion(page, artifactId, 'Handed out')).designSystemRef).toEqual({ id: system.id, versionSeq: expect.any(Number) });
   const deckTab = await openFromLibrary(page, 'Lecture', deck.id, DECK_DRAWN);
   await expect.poll(() => paintedColor(deckHeadline(deckTab)), { message: 'the deck’s title paints the system’s accent' }).toBe(BEFORE);
   const before = { doc: await revision(doc.id), deck: await revision(deck.id) };
@@ -292,7 +298,7 @@ test('the real document and deck editors restyle with their system’s live toke
     await openSystemPage(page, 'Copy of Classroom', system.id);
     expect(await recolourAccent(page, system.id, AFTER_HEX)).toEqual({ swatch: AFTER, property: AFTER_HEX });
     await openFromLibrary(page, 'Reading list', doc.id, DOC_DRAWN);
-    await expect.poll(() => pageAccent(docPage), { timeout: 10_000, message: 'the document page restyles' }).toBe(AFTER);
+    await expect.poll(() => paintedColor(docLink), { timeout: 10_000, message: 'the document’s link restyles' }).toBe(AFTER);
     await openFromLibrary(page, 'Lecture', deck.id, DECK_DRAWN);
     await expect.poll(() => paintedColor(deckHeadline(deckTab)), { timeout: 10_000, message: 'the deck restyles' }).toBe(AFTER);
     expect({ doc: await revision(doc.id), deck: await revision(deck.id) }).toEqual(before);
@@ -310,7 +316,12 @@ test('the real document and deck editors restyle with their system’s live toke
     await headerAction(page, 'Version history');
     await docTab.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Handed out/ }).click();
     await expect(docTab.getByRole('toolbar', { name: 'Version preview' })).toBeVisible({ timeout: 10_000 });
-    await expect.poll(() => pageAccent(docTab.locator('.ds-doc[data-preview]')), { timeout: 10_000, message: 'the version keeps its accent' }).toBe(BEFORE);
+    const versionLink = docTab.locator('.ds-doc[data-preview] [data-editor="preview"] a', { hasText: 'the course reader' });
+    await expect(versionLink).toBeVisible({ timeout: 10_000 });
+    await expect.poll(() => paintedColor(versionLink), { timeout: 10_000, message: 'the version’s link keeps the accent it pinned' }).toBe(BEFORE);
+    // the live passage, back in view, still follows the live system
+    await docTab.getByRole('toolbar', { name: 'Version preview' }).getByRole('button', { name: 'Back to document' }).click();
+    await expect.poll(() => paintedColor(docLink), { timeout: 10_000, message: 'the live link is in the live accent again' }).toBe(AFTER);
   });
   expect(launch!.consoleErrors()).toEqual([]);
 });
