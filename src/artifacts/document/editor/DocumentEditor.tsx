@@ -190,14 +190,26 @@ export function DocumentEditor(props: DocumentEditorProps) {
   // Escape inside the drawer closes it, and the keyboard goes back to the page; one the rail's own control took is its
   // own, and one in a text field holding text (a reply or a version name being written) is the field's, so the draft is
   // not lost. A checkbox, a radio or a button holds no draft, whatever its value.
+  const focusShownPage = () => {
+    const pages = body.current?.querySelectorAll<HTMLElement>('.doc-page-frame .ProseMirror') ?? [];
+    [...pages].find((page) => page.checkVisibility())?.focus({ preventScroll: true }); // the page shown (the live one, a review's)
+  };
+  // F (L241): History closing ends its preview, and the preview's page with the focus in it; the page shown once the
+  // preview has gone takes the keyboard instead
+  const focusAfterPreview = useRef(false);
+  useEffect(() => {
+    if (preview || !focusAfterPreview.current) return;
+    focusAfterPreview.current = false;
+    focusShownPage();
+  }, [preview]);
   const onBodyKeyDown = (event: KeyboardEvent) => {
     const { target } = event;
     if (!drawer || event.key !== 'Escape' || event.defaultPrevented || !(target instanceof Element) || !target.closest('.doc-rail')) return;
     if (holdsTypedText(target)) return;
     event.preventDefault();
     event.stopPropagation();
-    const pages = body.current?.querySelectorAll<HTMLElement>('.doc-page-frame .ProseMirror') ?? [];
-    [...pages].find((page) => page.checkVisibility())?.focus({ preventScroll: true }); // the page shown (a preview's, a review's)
+    if (rail === 'history' && preview) focusAfterPreview.current = true; // F (L241)
+    else focusShownPage();
     openRail(null);
   };
   return (
