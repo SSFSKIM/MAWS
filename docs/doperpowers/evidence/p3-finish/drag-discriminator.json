@@ -1,5 +1,5 @@
 {
-  "status": "A1/B1/A2 measured; final B2 running; no final comparison yet",
+  "status": "A/B/A/B complete; alleged regression closed as measurement confound, absolute/final-source half remains",
   "order": [
     "drag-a",
     "drag-b",
@@ -148,7 +148,60 @@
       "task": "b1yttnr8i",
       "log": "/tmp/maws-review/gates/p3f-drag-b2-ci.log",
       "jobId": 117706153551,
-      "status": "running"
+      "status": "completed",
+      "conclusion": "failure",
+      "attempt": 1,
+      "wrapperExit": 1,
+      "rawJobLog": "/private/tmp/p3f-drag-b2-logs.4PFJSx/job.txt",
+      "rawJobSha256": "038a1abbe285cc280b43d546a8855c993fea44849c55fbf99857bf54a796362e",
+      "result": "drag-b2-39137918574.json",
+      "dragTrialsMs": [
+        18.5,
+        20.1,
+        19.0
+      ],
+      "dragLoads": [
+        3.79,
+        3.52,
+        3.23
+      ],
+      "startLoad": 6.39,
+      "endLoad": 3.04,
+      "heavyHistory": "verified skipped"
     }
-  ]
+  ],
+  "comparison": {
+    "pooled": {
+      "A": {
+        "medianMs": 19.1,
+        "meanMs": 19.266666666666666,
+        "rangeMs": [
+          18.2,
+          20.5
+        ]
+      },
+      "B": {
+        "medianMs": 19.15,
+        "meanMs": 19.233333333333334,
+        "rangeMs": [
+          18.5,
+          20.1
+        ]
+      }
+    },
+    "trialLoadRange": [
+      2.5,
+      4.41
+    ],
+    "runMediansMs": [
+      18.8,
+      19.3,
+      19.9,
+      19.0
+    ],
+    "reading": "No discernible product gap with same host-faithful measurement at comparable low loads; direction reverses between pairs. Architect accepts regression half as confound, no bisection jobs.",
+    "absolute": "All12 trials miss16ms at below10 load; no waiver. Pooled medians descriptive only, original best-of-three verdicts unchanged.",
+    "remaining": "Final-source absolute, preview and heavy-preview measures remain. If final host-faithful absolute misses without product gap, parent-impact with stand-in15.4ms/load4.9 and host-faithful figures side by side; architect decides parent acceptance/bound rebase versus repair via P3 Decision Log. F neither waives nor assumes repair owed.",
+    "S-DRAG-FIDELITY": "remains deferred with measured divergence; promotion waits same parent bound decision, not in current DECK fix"
+  }
 }

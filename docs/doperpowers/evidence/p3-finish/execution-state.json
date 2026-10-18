@@ -39,7 +39,7 @@
     "reviewRounds": 2
   },
   "dependencyInstall": "completed exit 0 under with-slot",
-  "dragDiscriminator": "A1/B1/A2 measured; final B2 running39137918574 taskb1yttnr8i; comparison pending",
+  "dragDiscriminator": "complete four jobs; alleged regression closed as confound by architect, no bisect; final absolute/preview/heavy half and parent-bound decision remain",
   "commitLock": "/private/tmp/maws-p3f-commit.lock",
   "helper": "/private/tmp/p3f-commit-row.py",
   "paidSpendUsd": 0,
@@ -232,7 +232,7 @@
   },
   "W-DOC-A": {
     "executor": "af7fe2d9bf548028a",
-    "status": "five source commits complete; independent review running, not accepted",
+    "status": "independent review correct/no material findings; native union pending",
     "claims": "pair3-claims.json",
     "reviewer": "a69c0ca8f5888e14f",
     "checkpoint": "waves/W-DOC-A-checkpoint.json",
@@ -240,9 +240,15 @@
   },
   "W-DECK": {
     "executor": "a00549767dfb02089",
-    "status": "source six commits complete; independent review running, not accepted",
+    "status": "two verified review findings under fresh bounded fix wave; source closures not accepted",
     "claims": "pair3-claims.json",
     "reviewer": "a042b15ec9aa10fab",
-    "checkpoint": "waves/W-DECK-checkpoint.json"
+    "checkpoint": "waves/W-DECK-checkpoint.json",
+    "fixExecutor": "a2097c2f1e042d41a"
+  },
+  "pair3GatePrepared": {
+    "launcher": "/tmp/maws-review/p3f-doc-a-deck-launch.sh",
+    "status": "not launched; DECK fix/recheck pending",
+    "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:design,e2e:side,e2e:presentations,e2e:tools,e2e:artifacts,e2e:design-systems,e2e:dashboard"
   }
 }
