@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 38,
-    "defer:pending": 85,
+    "defer:committed": 39,
+    "defer:pending": 84,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -672,7 +672,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L66; parent Decision Log 106): Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner. Owner: P4, through the in-app browser's owner lane.",
       "remainingClause": "Main writes `browser.profile` at a `done` finish (through the settings service), or a window opened later applies the last `done` report it finds unapplied. Re-deferred 2026-10-07 (E11 1.6): rare (every window closed mid-import). Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L73): rare (every window closed mid-import). Owner: P3 (the in-app browser). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L66; parent Decision Log 106): Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner. Owner: P4, through the in-app browser's owner lane.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "5e48cd05f64def04bfaccd1969de60b417b4a7e3"
     },
     {
       "line": 67,
@@ -682,8 +682,8 @@
       "triageReason": "Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L67; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
       "remainingClause": "Each Electron bump, before it merges: read the new `lib/browser/api/web-contents.ts` `-run-dialog` listener; re-run `spikes/cua-backend/s1-dialogs.mjs` on the bare Electron binary (a leased tab's dialog is held while CDP answers it, and the wrap installs over exactly one listener); and run cua's `scripts/accept/maws-features.mjs` alert and confirm steps against `spikes/cua-backend/serve-plain.cjs` (no Playwright driver attached: under Playwright's Electron driver its own CDP client dismisses every dialog, so no e2e can see these routes; `e2e:browser` has no dialog step, and `e2e:browser-tools`' alert step retired with the browser tools on 2026-10-08, P1 A-54). `src/main/browser/agent/dialogs.test.ts` pins the routing table and the guard over fakes only. The row closes only if Electron offers a public per-webContents dialog handler and the wrap is replaced by it. Owner: P2 (each Electron bump). Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L75): a standing re-verify per Electron upgrade, by its own clause. Owner: each Electron bump (the in-app browser). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L67; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 68,
