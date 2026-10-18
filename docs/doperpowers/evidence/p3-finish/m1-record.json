@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 65,
-    "defer:pending": 58,
+    "defer:committed": 66,
+    "defer:pending": 57,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -969,7 +969,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L111; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "The pattern is derived from `Intl` (or from the host's own formatted timestamps) rather than claiming any locale. Owner: P3 (the e2e support). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L111; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "15d524bdbfc5df74e3c99707d62af248e85a0c4b"
     },
     {
       "line": 112,
@@ -979,8 +979,8 @@
       "triageReason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L112; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
       "remainingClause": "Unaffected observers and retry deadlines are kept across changes, with a multi-reply test. Owner: P3 (the comment card). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L112; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 113,
