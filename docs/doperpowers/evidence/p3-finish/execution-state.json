@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "pair3 accepted union; SHELL fix e0bb59c87 recheck correct, DOC-B fix named checks pending; pair5 corrected preparation held",
+  "phase": "pair4 implementation rechecks complete; exact DOC-B assertion correction verified; latest-master integration and union gate next",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -294,7 +294,7 @@
   },
   "W-DOC-B": {
     "executor": "afe4ec31e37c3925e",
-    "status": "bounded reader fix wave waiting on own named checks; no handback yet",
+    "status": "implementation recheck accepted; sole test assertion corrected d62e1aece and controller-verified; local GREEN not obtained, union gate pending",
     "claims": "pair4-claims.json",
     "rowCommits": [
       "4b6b3ec69",
@@ -306,7 +306,9 @@
     ],
     "checkpoint": "waves/W-DOC-B-checkpoint.json",
     "reviewer": "affe8ead56a9bcb86",
-    "fixExecutor": "addfe16856ce9d938"
+    "fixExecutor": "addfe16856ce9d938",
+    "fixCommit": "264697a788a3f99ef73ba7f0ebb602109e7feed6",
+    "assertionFix": "d62e1aece5238ae3e04d8d77992ba83ebc9d8e4b"
   },
   "W-SHELL": {
     "executor": "a87de8fe2228592d9",
@@ -334,7 +336,7 @@
     "defer": 125,
     "theirs": 42
   },
-  "checkpointAt": "2026-10-18T17:12:00Z",
+  "checkpointAt": "2026-10-18T17:29:27Z",
   "checkpointHead": "e631209455f1439cf29a22ec4292b20dc9d71c27",
   "pair3Retry": {
     "runId": 39145946170,
@@ -386,5 +388,32 @@
     "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:panel,e2e:side,e2e:to-human,e2e:transcript,e2e:default,e2e:browser,e2e:browser-comment,e2e:deliverables,e2e:library,e2e:available,e2e:terminal,e2e:agents",
     "reason": "document editor/export/mirror; shell and agent graph; actual C10 replay consumers including sessions via default; c12 empty fixtures does not seed",
     "upstreamFetched": "3efa6cba7; merge waits clean fix workers; incoming desk app/docs only"
+  },
+  "localSlotBlocker": {
+    "observedAt": "2026-10-18T17:18:33Z",
+    "reportedBy": "DOC-B fix worker addfe16856ce9d938, one-time process diagnosis requested after controller uptime read",
+    "status": "queued for shared local slot, tests not started, not source failure",
+    "ownedWrapperPid": 7940,
+    "elapsed": "27:42",
+    "command": "with-slot.sh pnpm --dir W exec vitest run src/artifacts/document/markdown.test.ts src/artifacts/document/export/markdown.test.ts",
+    "plainGreenLog": "/tmp/maws-review/doc-b-fix/green.log,0bytes at diagnosis",
+    "child": "only wrapper sleep10, no pnpm/vitest child",
+    "red": "worker retained3failed/433passed exit1 before fixes",
+    "hostLoadControllerRead": [
+      93.69,
+      106.22,
+      106.44
+    ],
+    "coordination": "architect identified other-session slot holders (remote-only CI waiter and long board-api sweep), requested release and will escalate if no movement in15min; DOC-B wrapper stays queued unchanged",
+    "prohibitionsObserved": "no slot override, live-lock deletion, other-process kill, bypass or completion polling",
+    "architectResolution": "Worker stopped own waiting taskbc4vgnsji/pid7940 without ever holding a slot, no other process/lock touched. Source264697a78 committed; retained RED3fail/433pass exit1, local GREEN absent, reviewer recheck running and union gate will supply GREEN."
+  },
+  "localSlotPolicy": "Architect ruling2026-10-18: local named check queued for a slot over10min is stopped, not waited for; preserve existing RED and commit source, reviewer reads diff against RED, union gate supplies GREEN. Record per row: local GREEN not obtained (slot wait); gate <run id> green only after verified result. Never fabricate unavailable checks. Lint/typecheck remote. Gate-only failure gets one bounded worker fix and DL59 relaunch. No slot bypass, lock deletion or other-process stop.",
+  "countDispositionAtM4": {
+    "L246": "5/5 under ruled throwaway-merge criterion: both parents ancestors and watched spec identical",
+    "L253": "10/10 stall-event, alternate5/10; observation pin ancestor; no root cause/repair claim",
+    "L90": "4/20, load readings absent",
+    "L264": "0 qualifying post-fix full sets",
+    "L265": "0/5 qualifying post-fix full sets"
   }
 }

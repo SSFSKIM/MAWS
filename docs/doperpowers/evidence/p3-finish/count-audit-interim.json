@@ -146,5 +146,23 @@
     "L253": "run id + all-groups conclusions (no refused/cancelled left uncovered) + grep of every non-refused red job log for the 'host restarts' timeout / pid-stall signature, absent"
   },
   "controllerVerification": "Read raw deliverables log1372 case10 at1061 pass and12/12 summary; gh reports all34 e2e jobs completed30success/4failure; four red raw logs contain no teardown-stall signature. Recommend count lane-neutral whole set39109740879 for L2465/5 and L25310/10 stall-event reading; final disposition at M4, source/reset caveat retained. L90 unchanged4/20; L264/L265 zero qualifying post-fix full sets.",
-  "architectRuling": "Conditional: count39109740879 for L246 fifth and L253 tenth stall-event (alternate5/10) only if each actual repair commit is an ancestor of source4287e099; ancestry prerequisite investigation resumed, not assumed. Finalize at M4 with source/reset caveat. No new lane restriction. L90 stays4/20; L264/L265 zero post-fix full sets."
+  "architectRuling": "Latest: count L246 fifth under both-parents-plus-identical-watched-spec criterion for throwaway observation merge; L253 tenth on stall-event reading (alternate5/10), observation pin itself ancestor. Finalize M4 with pin nature/parents/spec and source/reset caveats. L90 4/20, L264/L265 zero post-fix full sets.",
+  "ancestryFollowup": {
+    "recordedAt": "2026-10-18T17:29:27Z",
+    "meaning": "Both rows are unrepaired one-off observations, not repair streaks. Architect clarified condition: counted set source must descend from actual observation pin; do not infer from both merge parents.",
+    "target": "4287e099fa6aba0bee0d1f221972ee09ee75e58f",
+    "controllerCheckedExitCodes": {
+      "9cf551db542198991b47ef2852a0ca624ba0e3db": 0,
+      "ffbc2e072b0a861b72a5b2fc0087e8b316354e8a": 0,
+      "512107c14074c18acf62f37fb99e4f4acb742d1f": 1,
+      "5522428111840754e925a20c11ded7a6dc67f8f8": 0,
+      "2cde39578f66523d2f07bdeb68d3cb6ea4f0f08b": 0,
+      "3dff5766f826e94c65ce96124ef1eeac74c4a039": 1
+    },
+    "exitMeaning": "git merge-base --is-ancestor:0ancestor,1not ancestor; each command controller executed with literal W and full SHAs",
+    "L253": "observation pin9cf551db ancestor, condition met; host/lifecycle diff empty; restartHost unchanged though other dashboard helper functions changed. Counts10/10 stall-event, alternate5/10. ffbc2e072 idle-unload test substitution is not a repair. Actual old failure is test-initiated SIGKILL/restartHost30s pid poll, not closeOrKill teardown; whole sets exercise adjacent host-kill scenes, not opt-in original scale case. L265 cleanup3dff5766f is unrelated, not a reset claimed.",
+    "L246": "Observation pin512107c14 is throwaway landing-gate merge, not ancestor of4287e099 or current F HEAD. General parent criterion for such pins: both merge parents ancestors AND watched spec identical. Verified552242811 and2cde39578 ancestry exit0 plus empty deliverables.spec.ts diff satisfy criterion;39109740879 therefore fifth, close at M4 with this caveat. This is the ruled criterion, not a claim that parent ancestry alone proves whole-tree equality.",
+    "status": "Both dispositions ruled for M4; no tracker row closed yet",
+    "generalThrowawayMergeRuling": "For an unrepaired observation pinned to a never-landed throwaway gate merge, counted source descends from both parents and watched spec is identical to pin. Applies to future F full sets too; no manufactured ancestry."
+  }
 }

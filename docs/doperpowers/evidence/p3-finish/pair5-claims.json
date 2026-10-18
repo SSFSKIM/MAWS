@@ -54,5 +54,6 @@
     "gate": "packaged plus connectors-direct and shared static/unit/probes/Darwin union as appropriate"
   },
   "intersection": [],
-  "process": "exact source claims only; original row plus own paths committed under existing lock/helper; no source edits before explicit release"
+  "process": "exact source claims only; original row plus own paths committed under existing lock/helper; no source edits before explicit release",
+  "localChecksPolicy": "Architect ruling2026-10-18: local named check queued for a slot over10min is stopped, not waited for; preserve existing RED and commit source, reviewer reads diff against RED, union gate supplies GREEN. Record per row: local GREEN not obtained (slot wait); gate <run id> green only after verified result. Never fabricate unavailable checks. Lint/typecheck remote. Gate-only failure gets one bounded worker fix and DL59 relaunch. No slot bypass, lock deletion or other-process stop."
 }
