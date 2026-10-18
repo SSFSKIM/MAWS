@@ -43,7 +43,8 @@
 //   serves it, never another session's, under the same read grant; the owner's revoke, the store's revoke or delete and
 //   main's stop end it as they end a page's work. E3 M2 fix: a dataset work, a page's or an agent's, runs on one
 //   budget (CONNECTOR_OPERATION_DEADLINE_MS) from its admission here through the route, the grant, the call and the
-//   host's publication; at its end the work is aborted (`paused: unavailable`) and may no longer publish. E3 M2
+//   host's publication; at its end the work is aborted (`paused: unavailable`) and may no longer publish (P3-F
+//   F-connectors 2: a watch's refresh so ended is a refresh that ran: published, the next due an interval later). E3 M2
 //   residual (the architect's terminal-ownership ruling): an aborted dataset call is not answered "nothing published"
 //   while its commit may land. Once dispatched, its route settles it through the host's cancel: the abort's refusal
 //   when the cancel won, else the publication's durable end, which stands as the outcome (`settledBy`). E3 M3 fix (the
@@ -123,6 +124,7 @@ interface Lease {
 interface Work {
   readonly key: string; // the artifact and the tool
   readonly controller: AbortController;
+  expired?: boolean; // P3-F F-connectors 2: aborted by its dataset budget's end, not by a hide, close, unwatch or revoke
 }
 
 interface Watch {
@@ -678,7 +680,9 @@ export class ConnectorBroker {
     this.recheckWindow(lease.owner); // P3-H H4: at publication, a hide no event announced aborts it still
     // The publication fence, checked now rather than when the run ended: a hide, close, unwatch or revoke since then
     // (another watch's listener, say) has aborted the work, which is still registered, or changed what it would check.
-    if (work.controller.signal.aborted || !this.watches.has(watch.id) || !this.visible(lease) || watch.waitingForGrant) {
+    // P3-F F-connectors 2: the budget's end alone is no such abort: the refresh ended, and its outcome is published.
+    const cancelled = work.controller.signal.aborted && !work.expired;
+    if (cancelled || !this.watches.has(watch.id) || !this.visible(lease) || watch.waitingForGrant) {
       lease.work.delete(work);
       this.schedule(watch); // a hide's watch is due again once shown; a revoke's waits; a closed one is gone
       return;
@@ -775,7 +779,11 @@ function settledBy(work: Work, outcome: ConnectorCallOutcome, sink: ConnectorDat
 // E3 M2 fix: a dataset work's one budget, from now: at its end the work is aborted (and so no longer publishable).
 // Answers what lets the timer go.
 function bounded(work: Work): () => void {
-  const timer = setTimeout(() => work.controller.abort(refusal('paused', 'unavailable')), CONNECTOR_OPERATION_DEADLINE_MS);
+  const timer = setTimeout(() => {
+    if (work.controller.signal.aborted) return; // stopped otherwise first: that abort stands
+    work.expired = true; // P3-F F-connectors 2
+    work.controller.abort(refusal('paused', 'unavailable'));
+  }, CONNECTOR_OPERATION_DEADLINE_MS);
   return () => clearTimeout(timer);
 }
 

@@ -5,7 +5,7 @@
 // the asking session's own engine (route E for that session alone) or a direct route, never another session's, and
 // the owner's revoke, the artifact's deletion and main's stop end it as they end a page's work.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CONNECTOR_OPERATION_DEADLINE_MS, type ConnectorAuthorization, type ConnectorCallOutcome, type ConnectorCallRef, type ConnectorGrant, type ConnectorGrantMode, type ConnectorGrantRequest, type ConnectorRouteName, type ConnectorToolRef } from '@shared/artifacts/connectors';
+import { CONNECTOR_OPERATION_DEADLINE_MS, CONNECTOR_WATCH_MAX_MS, type ConnectorAuthorization, type ConnectorCallOutcome, type ConnectorCallRef, type ConnectorGrant, type ConnectorGrantMode, type ConnectorGrantRequest, type ConnectorRouteName, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import { ConnectorBroker, type ConnectorAgentRefresh } from './broker';
 import type { ConnectorGrantAuthority, ConnectorRoute, ConnectorRouteAnswer, ConnectorRouteCallContext, ConnectorRouteTarget } from './route';
 
@@ -291,5 +291,22 @@ describe('a dataset work’s one budget', () => {
     expect(await pending(plain)).toBe(true); // H's route keeps its own deadline
     engine.calls.at(-1)!.answer({ ok: true, result: 1 });
     expect(await plain).toMatchObject({ ok: true, result: 1 });
+  });
+
+  // P3-F F-connectors 2: the budget's end ends a watch's refresh as a refresh that ran: its listener hears the timeout,
+  // and the next refresh is due an interval later, never at once
+  it('ends a watch’s refresh at the deadline as a timeout its listener hears, the next due an interval later', async () => {
+    grants.put(ROWS, 'read');
+    const lease = page();
+    engine.hold = true;
+    const updates: ConnectorCallOutcome[] = [];
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: CONNECTOR_WATCH_MAX_MS }, (update) => updates.push(update), { dataset: { id: 'live' } });
+    await vi.waitFor(() => expect(engine.calls).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(updates).toEqual([{ ok: false, state: 'paused', reason: 'unavailable' }]);
+    expect(engine.calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(CONNECTOR_WATCH_MAX_MS);
+    await vi.waitFor(() => expect(engine.calls).toHaveLength(2));
   });
 });
