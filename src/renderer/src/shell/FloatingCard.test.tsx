@@ -139,6 +139,15 @@ describe('the floating card in the Shell', () => {
     expect(within(header()).getByRole('button', { name: 'Dock session', pressed: true })).toBeTruthy();
   });
 
+  // P3-F L132: `overflow-y-auto` alone makes x-overflow auto too; a child wider than the card is clipped, never scrolled
+  it('the card’s body scrolls vertically and clips a horizontally overflowing child', () => {
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    const body = card()!.querySelector<HTMLElement>('[data-pane="card"]')!;
+    expect(body.classList).toContain('overflow-y-auto');
+    expect(body.classList).toContain('overflow-x-hidden');
+  });
+
   it('Dock restores the column at its width and the main pane’s composer takes the keyboard', async () => {
     const user = userEvent.setup();
     useLayout.getState().setPanel({ width: 444 });
