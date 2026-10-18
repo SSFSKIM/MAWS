@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 114,
-    "defer:pending": 9,
+    "defer:committed": 115,
+    "defer:pending": 8,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1508,7 +1508,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L215; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "remainingClause": "One drawing module imported by the canvas and the export page. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L215; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "ba064b0c79ca05ff4264cd56338a7280c9625f7a"
     },
     {
       "line": 219,
@@ -1518,8 +1518,8 @@
       "triageReason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L219; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "A browser-run unit (or a jsdom-free DOM project) that applies the svg sheet, red on the old code. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L219; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 237,
