@@ -572,6 +572,7 @@ button is pressed; the acceptance timings cite it]**
 | Question | native: `PermissionRequest` racing the dialog; async: the ask mod's external path | terminal only: the supervisor's `reply` goes out with `nextTurn`, which queues a prompt rather than answering, and no path sends one without it in phase 1; async: none (the ask mod is itself a mod) | terminal only | shown, not answerable |
 | Allow / deny | `PermissionRequest` racing the dialog; a background subagent's prompt within its 3 s window, then terminal only; a person-only prompt terminal only | terminal only | terminal only | shown, not answerable |
 | Model / compact | per request / at the turn's end | no | no | fails at once |
+| Stop a job **[DC10]** | `TaskStop` through `$.tool.call`, within 2 s | no | no | fails at once |
 | Messages to the human | as each span completes | at Stop (the record hook) | at Stop | already in the log |
 | Presence | the session record, within 1 s | same | same | the last `state` event, with its age |
 | Depth | rows (100 ms flush) and `turn.step` chunks, subagents included | rows | rows | unavailable |
@@ -1083,7 +1084,7 @@ on a running job, and the desk draws it disabled with its reason,
 "Stopping a job runs from its terminal" (§5); web Stop (DX6 RPC → bridge
 command → `$.tool.call({tool: 'TaskStop', task_id})`, the call the bridge
 already makes) is the first follow-up once DC8 and DC9 land (the owner,
-2026-10-17). MCP servers appear by name only, from the rows'
+2026-10-17); it is DC10. MCP servers appear by name only, from the rows'
 `mcp_instructions_delta` attachments (`addedNames`, `removedNames`); their
 status needs the SDK host's `mcp_status` (MAWS `engine-host/controls.ts`),
 so it is deferred.
@@ -1623,7 +1624,49 @@ predates the module has no evidence while it runs.
   bubble's foot, requests inline at the tail, a job's output under its
   row, Stop disabled, the end marker as drawn.
 - **Required:** required.
-- **Status:** cut 2026-10-17; not started.
+- **Status:** merged and deployed 2026-10-18 (tracking row).
+
+### DC10: Stop a job from the web — machine and web
+
+- **Purpose:** A running background job of a bridged session is stopped
+  from the desk's Jobs tab. That covers a shell or a monitor, the main
+  loop's or a subagent's. Stop has drawn disabled since DC9, "Stopping a
+  job runs from its terminal". The owner approved building it right
+  after DC8 and DC9 (2026-10-17).
+- **Acceptance:**
+  - **G1 (stop):** on a bridged session with a running background shell
+    and a running monitor, Stop on each row sends DX6 `stop`. The bridge
+    runs `TaskStop` through `$.tool.call`, the RPC answers `done`, and the
+    row reads `stopped` from the session's own DX4 body (the `TaskStop`
+    row the derivation already reads) within 2 s. This is proved against
+    a real bridge on the machine side (the bridge's tests and one live
+    check) and against the fake machine on the web side.
+  - **G2 (what cannot):** on a session without a bridge, on a machine
+    that is offline or read-only, and on a job that is not running, Stop
+    stays disabled with its reason (§5's table). Forced through anyway,
+    the RPC is refused `unsupported`, `machine-offline` or `read-only`.
+  - **G3 (which task):** the daemon refuses a `taskId` that the session's
+    own jobs index does not hold as running with `unknown-task`, before it
+    claims the nonce. A retried nonce is answered from the ledger and
+    never stops anything twice.
+  - **G4 (failure shown):** a `TaskStop` the engine answers with an error
+    fails the RPC `failed` with the engine's message, and the row shows
+    the message inline while it keeps its status.
+- **Edges:** blocked-by: DC8 and DC9 (merged). The two halves build in
+  parallel against this section, and the machine half lands first. A hub
+  that knows `stop` under a daemon that does not gets `bad-shape` from
+  the daemon, shown as a failure, so either deploy order is safe.
+- **Contracts:** DX6 (`stop`), DX5 (the bridge's `stop` command), §5's
+  table (its Stop row), DX3 (the browser's RPC call; no new frame).
+- **Design inheritance:** §9.4 (the jobs view as DC9 built it; output
+  stays as it is). Background agents are out: their rows draw no Stop
+  today, and stopping one is a separate decision. Advisory: the bridge
+  already calls `TaskStop` for an interrupt (`hooks/mods/bridge.tsx`),
+  `sminos_rpc.py` holds the RPCs, `sminos_jobs.py` the jobs index, and
+  `apps/desk-web/src/depth/` the jobs view.
+- **Grain:** two executors, one per repository, one milestone each.
+- **Required:** required.
+- **Status:** cut 2026-10-18.
 
 ## Cross-Child Contracts
 
@@ -3323,6 +3366,7 @@ type Rpc<N> = {
 | `spawn` | `{checkout, worktree?, brief, model?, effort?, permission_mode?}` | `{session, alias}`; the log's record of the spawn carries the RPC's `member` as `by` |
 | `retire` | `{session}` | `{}`; the log's `retired` carries the RPC's `member` as `by` (acceptance 7), never sminos's operator `""` |
 | `resume` | `{session}` | `{session}` — the same id |
+| `stop` **[DC10, 2026-10-18]** | `{session, taskId}` — a background shell's or monitor's task id, `[A-Za-z0-9_-]{1,64}` | `{taskId}`; refused `unsupported` without a bridge, `unknown-task` when the session's jobs index does not hold the task as running (checked before the claim), `failed` with the engine's message when `TaskStop` errs. The job's `stopped` arrives on the session's DX4 body, not in the result |
 
 `digest` is `{session, request, tool, input_sha256}` (DX1), `request` as the `raised` named it, opaque; `input_sha256` is
 over the `raised`'s `input` as sent, the capped input when it is `truncated`. An outcome is
@@ -4163,6 +4207,7 @@ a hub that connects into machines (§2).
 | DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`; four P2 fixed after the final review, the presence watermark among them); PR https://github.com/SSFSKIM/doperpowers/pull/196 (branch `dc7-controls`), merge `af3a5573`, 7.157.0; sminos 1740/1742 (the two load-timing assertions in TECH-DEBT), mods 298/298; Resume live 5/5 on 2.1.301; report `docs/doperpowers/plans/2026-10-15-desk-dc7-report.md` |
 | DC8 machine: history and jobs | plan: `docs/doperpowers/plans/2026-10-17-desk-dc8-machine.md` (doperpowers, branch `desk-dc8`) | **merged 2026-10-17**: M1–M4 reviewed clean; the xhigh whole-branch panel (`b8f7d197..d5a54a13`, 3 P2: a refusal lost across a resync, legacy background launches derived `completed` cold, the clear-time retry hiding a new fork) fixed in one wave, reviewer-high on the delta found one more P2 (launch text over an explicit `toolUseResult`), fixed and re-reviewed `correct`; PR https://github.com/SSFSKIM/doperpowers/pull/219, merge `13b6033c` at head `20d3e283`, 7.168.0; CI green on 8 gates (run 39065772977); shared fixture `tests/sminos/dx4-jobs.json` at `48f254aa` (80 cases, 36 planted bugs caught); rolled out to `macbook` and `mini` 2026-10-17 20:23Z, both uplinks reconnected; residue `delivered.uuid` to the web, MAWS backfill's preamble form and origin gate (S2), adopted shells' output; report `docs/doperpowers/plans/2026-10-17-desk-dc8-report.md` |
 | DC9 web: the session view | plan: `docs/doperpowers/plans/2026-10-17-desk-dc9-session-view.md` (MAWS, branch `desk-dc9`) | **merged and deployed 2026-10-18**: T0 mockups with the owner's verdicts (and the owner's look at M3–M5's shots); M1–M6 each reviewed clean; the xhigh whole-branch panel (`d94663760..79a8c812f`, 4 P2: a request notification not reaching a virtualized card, a withdrawn async question left waiting, keep-place restoring by raw index in report mode, paging stalling in report mode) fixed in one wave, reviewer-high on the delta found one more P2, fixed and re-reviewed clean; PR https://github.com/SSFSKIM/MAWS/pull/30, merge `f248aae6` at head `af6d5b8c2`; gates `static,unit` 39086239342 and `e2e:desk-web` 39086762891 on the head's tree; deployed `hub@f248aae6 web@master.f248aae6` (Worker version `0a030034`), both machines online after; S1 merged as https://github.com/SSFSKIM/MAWS/pull/26 (`67710dddd`); S2 parked on `desk-backfill-jobs` (§9.5, Decision Log); the bridge's interrupt row fixed in doperpowers #225 (7.170.0); residue in the report; report `docs/doperpowers/plans/2026-10-17-desk-dc9-report.md`, the SDE workspace and shots kept under this worktree's `.doperpowers/sde/` |
+| DC10 stop a job from the web | this document's DC10 section (machine half in doperpowers, web half in MAWS) | **cut 2026-10-18** (the owner's approval of 2026-10-17): building |
 
 ## Surprises & Discoveries
 
