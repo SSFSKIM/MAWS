@@ -1,7 +1,7 @@
 {
   "run": 39083207174,
   "source": "7b5e35c1dace5880d5be947c4bf134bcf5d6c660",
-  "result": "Whole gate: static/unit/probes/Darwin and31/34 e2e groups passed; document-app/to-human/widgets await authorized named-group relaunch. Connector proof green: H5/5 (3.4m), direct15/15 (9.9m), OAuth3/3 (4.9m), including resource-identity and discovery-origin refusals. No whole-run green claim.",
+  "result": "Connector proof green: H5/5(3.4m), direct15/15(9.9m), OAuth3/3(4.9m). Whole gate39083207174 and same-source relaunch39088865535 accepted as a union by architect: static/unit/probes/Darwin and31/34 e2e groups from whole run; widgets28/28 from relaunch; document436 and to-human29 against row199, document519 as new nondeterministic baseline established by same-pin pass/fail and architect-reported E3 merged-tree pass. Not a claim that every job was green.",
   "files": [
     {
       "file": "direct-main-loss.json",
