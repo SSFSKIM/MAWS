@@ -1,0 +1,15 @@
+07:09:01 391
+07:09:21 392
+07:09:31 404
+07:09:41 411
+07:09:51 418
+07:10:01 426
+07:10:11 437
+07:10:21 451
+07:10:31 464
+07:10:41 472
+07:10:52 480
+final 07:10:52 480
+2026-10-17T06:37:33.840Z uplink: connected to https://desk-hub.opencognita-platform.workers.dev as macbook (stream 11)
+2026-10-17T07:01:38.916Z uplink: a POST was not delivered (the hub answered 409 {"error":"stale-generation","message":"the POST names no current stream of this machine; open the stream and use its generation"}): reconnecting, to redo the handshake
+2026-10-17T07:01:41.483Z uplink: connected to https://desk-hub.opencognita-platform.workers.dev as macbook (stream 12)

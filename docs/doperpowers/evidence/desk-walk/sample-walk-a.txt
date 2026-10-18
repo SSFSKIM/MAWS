@@ -1,0 +1,13 @@
+06:10:00.077 walk-b@mini=idle walk-a@macbook=idle
+06:10:57.121 walk-b@mini=idle walk-a@macbook=busy
+06:11:01.899 walk-b@mini=idle walk-a@macbook=waiting
+06:11:06.286 walk-b@mini=waiting walk-a@macbook=waiting
+06:11:13.207 walk-b@mini=waiting walk-a@macbook=busy
+06:11:14.873 walk-b@mini=waiting walk-a@macbook=idle
+06:11:28.340 walk-b@mini=busy walk-a@macbook=idle
+06:11:34.139 walk-b@mini=idle walk-a@macbook=idle
+06:11:48.956 walk-b@mini=idle walk-a@macbook=busy
+06:11:54.321 walk-b@mini=idle walk-a@macbook=idle
+06:12:03.166 walk-b@mini=busy walk-a@macbook=idle
+06:12:06.371 walk-b@mini=busy walk-a@macbook=busy
+06:12:08.716 walk-b@mini=busy walk-a@macbook=idle

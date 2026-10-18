@@ -18,7 +18,7 @@
 > `tests/mods/`, and the two files it cites under `docs/doperpowers/specs/`
 > (the `.smns` design and DC1's findings) are doperpowers
 > (`SSFSKIM/doperpowers`); `src/`, `apps/`, `scripts/ci-gate.sh`, and
-> `docs/charter.md` are MAWS. Its child and contract ids carry a `D` (DC1–DC7, DX1–DX8)
+> `docs/charter.md` are MAWS. Its child and contract ids carry a `D` (DC1–DC9, DX1–DX8)
 > because MAWS's own charter already binds C1–C12 and X1–X8 in that
 > repository.
 
@@ -481,8 +481,10 @@ unavailable; everything they sent the human is still in the log.
   after it, and under it, muted, its alias, the name `@` addresses (alias
   and machine on one line while it has no title); then its in-charge line;
   "+ Session". Center: the selected
-  channel. Right: the selected session's depth (transcript, subagents,
-  diff, session info: machine, cwd, worktree, model, context, cost).
+  channel — on a desktop browser whose machine is online, the session view
+  (§9). Right: the selected session's depth (subagents, background jobs,
+  diff, session info: machine, cwd, worktree, model, context, cost;
+  amended 2026-10-17, §9: the transcript tab moved to the center).
 - **The group chat** shows what is addressed to the human: messages,
   questions (answerable in place), permission prompts while pending
   (decidable in place), lifecycle as system lines, and what humans posted.
@@ -491,10 +493,15 @@ unavailable; everything they sent the human is still in the log.
   `@alias` delivers, `@all` wakes every live member.
 - **A direct channel** is one session's exchange with the human — its
   messages, questions, and permission prompts, and what the human sent it —
-  with the working record between them folded, as the to-human mod draws a
-  session in the terminal. Unfolding opens the live transcript. An ended
-  session's channel keeps its history and offers Resume. A message
-  the bridge submitted as the human's words is drawn as the human's.
+  with the working record between them folded. **Amended 2026-10-17 (§9):**
+  on a desktop browser whose machine is online it is the session view, the
+  MAWS report over the session's own transcript, folded per turn, with a
+  Report · Transcript toggle; the channel built from the log, as the
+  to-human mod draws a session in the terminal, remains for a machine that
+  is offline and for the phone, and the group chat is unchanged. An ended
+  session's channel keeps its history, back to its first line, and offers
+  Resume. A message the bridge submitted as the human's words is drawn as
+  the human's.
 - **The composer** has the terminal's three verbs. **Send** queues the text
   for when the session is idle. **Steer** puts it into the running turn at
   the next model request, without stopping the tool that is running, as
@@ -507,6 +514,10 @@ unavailable; everything they sent the human is still in the log.
   owner and answering it: the grid with its waiting counts, the group chat,
   a direct channel, and request cards answerable in place. Session depth
   (the transcript stream, the subagent tree, the diff) stays desktop-only.
+  **[binding — owner, 2026-10-17]** Reaffirmed when the session view was
+  designed (§9): the phone keeps messages only — the log-built channel with
+  its folds as the label "Working record · on a computer" — and never
+  mounts the transcript.
 - **Notifications are Web Push.** A push fires when a question or a
   permission prompt is raised, or a `<message>` arrives, and no browser of
   that member has the project open and visible. Each member device's push
@@ -528,8 +539,8 @@ afleet's. Taste-heavy surfaces are reviewed as mockups in the web children.
 
 | From the web | Plane | Path |
 | --- | --- | --- |
-| Send | log | `human` event → `deliver_next` → bridge `$.prompt.submit({asUser: true})`, queued until idle |
-| Steer | RPC | bridge `$.session.append` of a user row, read at the loop's next request; refused when no turn is running (the web offers Send instead); a turn that answers before any request read the steer gets one wake prompt, at most once per turn (DX5) |
+| Send | log | the owner's `human` event → `deliver_next` → the bridge: idle, `$.prompt.submit({asUser: true})`; while a turn runs, `$.session.append` of a row read at the loop's next request, with one `[sminos bridge]` wake if the turn answers first; refused after an Esc, the session's inbox frame (doperpowers #233). A peer's event never takes this path: it goes to the session's inbox socket as a peer message closed by its reply line (doperpowers #236) |
+| Steer | RPC | bridge `$.session.append` of a user row, read at the loop's next request: the owner's words under the line `[sminos steer from human]` [2026-10-18]; refused when no turn is running (the web offers Send instead); a turn that answers before any request read the steer gets one wake prompt, at most once per turn (DX5) |
 | Interrupt | RPC | bridge `$.turn.abort` (the main loop's turn), then `TaskStop` through `$.tool.call` on each Bash of that turn the abort moved to the background, the main loop's and its foreground subagents' (a background subagent's never), as Esc kills it in the terminal; the result names the tasks stopped and any still running, and a task still running means the interrupt is incomplete |
 | Answer a question | RPC | bridge: `classic.PermissionRequest` returning `updatedInput: {questions, answers}` for a native AskUserQuestion; the ask mod's external-answer path for an async one |
 | Allow / deny | RPC | bridge `classic.PermissionRequest`, racing the terminal's dialog |
@@ -560,12 +571,13 @@ button is pressed; the acceptance timings cite it]**
 
 | | bridged (terminal or `--bg`) | `--bg` seat, no bridge | terminal, no bridge | machine offline |
 | --- | --- | --- | --- | --- |
-| Send | log → `deliver_next` → `$.prompt.submit`, queued until idle | `control.sock` `reply`, at the next step | cross-session frame, at the next tool round | in the log; delivered when the daemon reconnects |
+| Send | log → `deliver_next` → `$.prompt.submit` when idle, `$.session.append` at the next model request when busy, the inbox frame after an Esc | `control.sock` `reply`, at the next step | cross-session frame, at the next tool round | in the log; delivered when the daemon reconnects |
 | Steer | `$.session.append`, at the next model request | `reply`, at the next step | as send | fails at once |
 | Interrupt | `$.turn.abort` and `TaskStop`, within 2 s | no | no | fails at once |
 | Question | native: `PermissionRequest` racing the dialog; async: the ask mod's external path | terminal only: the supervisor's `reply` goes out with `nextTurn`, which queues a prompt rather than answering, and no path sends one without it in phase 1; async: none (the ask mod is itself a mod) | terminal only | shown, not answerable |
 | Allow / deny | `PermissionRequest` racing the dialog; a background subagent's prompt within its 3 s window, then terminal only; a person-only prompt terminal only | terminal only | terminal only | shown, not answerable |
 | Model / compact | per request / at the turn's end | no | no | fails at once |
+| Stop a job **[DC10]** | `TaskStop` through `$.tool.call`, within 2 s | no | no | fails at once |
 | Messages to the human | as each span completes | at Stop (the record hook) | at Stop | already in the log |
 | Presence | the session record, within 1 s | same | same | the last `state` event, with its age |
 | Depth | rows (100 ms flush) and `turn.step` chunks, subagents included | rows | rows | unavailable |
@@ -722,6 +734,421 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
    service talks to a session"; they are gated behind a flag and an
    Anthropic allowlist today. If they open, the send-and-answer half of the
    bridge can become a small server with native provenance.
+
+### 9. The session view, history to the first line, and jobs (2026-10-17)
+
+Found during the walk's Part I — the owner working a day from the desk
+(acceptance 11) — and designed against a read-only survey of the code
+(`docs/doperpowers/specs/2026-10-17-desk-session-view-survey.md`, 2026-10-17). Four gaps and one closed
+door shape it:
+
+1. Opening a session shows the log-built channel, whose folds unfold into
+   a raw transcript box, while the component the desk already renders
+   (MAWS's `Transcript`) carries MAWS's own report view, switched off only
+   because the desk never passes `ownerLane`
+   (`src/renderer/src/transcript/view/Transcript.tsx:286-298`,
+   `apps/desk-web/src/depth/view/TranscriptPane.tsx:159`).
+2. History stops at the join, because the direct channel reads the log and
+   the log starts at `joined` (`sminos.py`'s `position_init` sets the Stop
+   hook's export position to the transcript's end at SessionStart; the
+   bridge exports spans only as they are written after it loads). The
+   plane pages the transcript from disk, but each page re-parses the whole
+   file on the uplink's thread (`sminos_plane.py` `page`, `rows_of`;
+   `sminos_uplink.py:685-691`), and an ended session's subscription ends
+   at the newest 512 KB (`finish`, `END_GRACE`): 2.15 s per full parse of
+   a 156 MB, 12,704-row transcript measured; about 300 pages to its start,
+   roughly 11 minutes of stalled uplink.
+3. Every subagent that ran before the bridge loaded, and every nested one,
+   has status "unknown" and sits under "On disk / status unavailable"
+   (`task-graph.ts:416-421`, `:594`; `SubagentTree.tsx:41-45`), because
+   only the held rows give a status and a nested agent's spawn row is in
+   its parent's transcript; the plane also drops the bridge's agent state
+   (`event()` handles chunk, block-row, row-seen, step, turn, usage, gap
+   and nothing of `agent`, while the child keeps `agents` and puts it in
+   every snapshot, `sminos_bridge.py:617, 661-667, 773`).
+4. The desk shows no background shell, monitor or MCP server: no `$` API
+   lists them (`$.mcp` has `call` and `connect` only; `$.agent.list()` is
+   agents), MAWS's backfill emits task events for agents alone
+   (`src/engine-host/fs/backfill.ts:255-284`), and a result carrying
+   `backgroundTaskId` only patches a node that already exists
+   (`task-graph.ts:314-320`).
+5. **Closed:** the desk as a remote mod surface (9.6).
+
+**9.1 The session view.** Opening a session on a desktop browser whose
+machine is online shows MAWS's report: `<Transcript>` over the session's
+main subscription with its owner lane on, so `<message>` spans and
+questions by default, one "Working record · N tool calls · M messages" row
+per marked turn right after its prompt, with running dots while the turn
+works (`owner/report/project.ts:44-73`, `OwnerRecordRow.tsx`, the labels of
+`owner/report/copy.ts`), persistent rows kept in view (prompts, questions,
+asks, boundaries, errors; `transcript/model/derive.ts:126-129`), an
+unmarked turn drawn whole, and a Report · Transcript toggle. **[binding —
+owner, 2026-10-17]** The fold is MAWS's per-turn shape. Rejected: the
+terminal's cross-turn folds, which the log-built channel mimics today (a
+run of working record between two rows the human reads, bounded by log
+`src`s, `conversation/stream.ts:161-165`); they cost a subscription per
+opened fold (`depth/connect.ts:12-14`) and a span-granularity clip of the
+transcript (`depth/source/range.ts`), and with MAWS's shape the desk and
+the desktop app draw a session alike by construction, one model behind
+both, so a later change to the shape lands in both. It is one subscription and one virtualized
+list; the parser already reads `<message>` (`shared/owner/to-human-parser.ts:120`).
+
+Three pieces of MAWS's report do not come along, and the desk supplies
+them: `ReportBar` returns null unless the owner-channel store, fed over
+IPC, has the lane on (`stores/owner-channel.ts`, `ReportBar.tsx`), so the
+desk's toggle is its own, calling `useTranscriptStore.getState().setView`;
+mark states (answered, read) also ride IPC, so cards draw without them;
+and MAWS classifies only `AskUserQuestion` and `mcp__maws__ask` as
+questions (`transcript/model/classify.ts:38,41`), so doperpowers' ask tool
+folds into the working record until one entry is added to that shared
+table (9.5).
+
+What only the log or the hub knows joins the transcript:
+- **A send not yet in the transcript** — an outbox item, or a `human`
+  event addressed to the session whose user row has not been observed —
+  is a tail row: MAWS's user bubble with the delivery state in its foot,
+  under a hairline, and the whole bubble tinted when the send will not
+  arrive (`recorded`, `refused-read-only`, `failed`), a long reason in its
+  tooltip. The owner chose it (2026-10-17) over a caption under MAWS's
+  held-prompt shape (`derive.ts:131-135`, `heldRow`): a send that will not
+  arrive is visible from a scroll away. The foot is a component of its
+  own beside an unchanged bubble, since the owner means to suggest the
+  same style to the MAWS app. **Delivered is not "the
+  row exists"** (the review, 2026-10-17): the bridge answers `submitted`
+  before `$.prompt.submit` resolves (`hooks/mods/bridge.tsx:451-476`; the
+  submit is not awaited, and a `drop` comes later as `refused`), and the
+  daemon maps that to DX4 `delivered` (`sminos_outcomes.py`, "pushed to
+  the live session"), so a `delivered` outcome says the text entered the
+  session's queue, not that its row is on disk. The tail row therefore
+  stays, whatever the delivery state says, until a matching user row of
+  the transcript is observed, and only then gives way to it. Matching is
+  one to one — each send consumes at most one row, each row matches at
+  most one send — and uses the event's identity first: the delivery frame
+  the bridge submits names the event in its first line, `[sminos chat
+  <project> <writer_short>:<seq> from human → @you…]` (`compose_chat_frame`,
+  `event_ref`, `writer_short` in `sminos.py`; `hub/<member>:<seq>` for a web
+  send, since a `hub/` writer has no session part), so a row whose frame
+  names the send's `(writer, seq)` is its row; the only other match is an
+  exact row id, the bridge's optional `delivered.uuid` (9.7). **A row
+  without a frame never matches a web send** (the review's round 2,
+  2026-10-17): a prompt typed in the terminal, a text that entered another
+  way, is not the send's, however equal its text — a text-containment
+  fallback was dropped, since "continue" typed and "continue" sent would
+  take each other's row. So the tail row stays visible, with its state
+  (sent; delivered, waiting for its row), until its own framed row or its
+  named uuid arrives, and if none ever does — the session ends first, the
+  frame never reaches the transcript — it stays as a delivered entry at
+  the tail, ahead of the session's end marker, never silently hidden. A
+  send whose delivery ends `failed`, `refused-read-only` or `recorded`
+  keeps its tail row with that state; one whose submission the engine
+  later refuses (`drop`) gets a second outcome for the same key, `failed`
+  with the bridge's reason — the bridge's `delivered {outcome: "refused"}`
+  reaches no DX4 outcome today (the child keeps `submitted` keys alone,
+  `sminos_bridge.py:642-646`), so DC8 relays it — and the tail row shows
+  that state; its row never comes. A row consumes a send only with
+  affirmative delivery provenance: a bridge row whose origin is `plugin`
+  or `asUser`, or an inbox queued command from `peer` or `plugin`. A typed
+  or origin-less row never does, even when it carries the whole frame
+  line; web sends exist only on engines that write the origin (DC9's M4
+  review, 2026-10-17). On a reopened session whose history is not all
+  held, a `queued`, `delivered` or `uncertain` send older than the oldest
+  held row stays off the tail until the history is paged to its start
+  (`more` false), and shows then if its row never came. Its row may be in
+  the history not yet paged, and drawing it at the tail would misplace
+  every past send. A `failed`, `refused-read-only` or `recorded` send has
+  no row, so it always stays (DC9's M4, 2026-10-17). The accepted
+  residual: a delivered send whose row never came before the session
+  ended shows only once the reader pages to the start. Rejected:
+  reconciling against rows not yet loaded, which needs the whole
+  transcript on the web or a new DX4 lookup.
+- **Pending requests** are request cards at the transcript's tail, after
+  any tail sends, scrolling with it — the cards the channel draws today
+  from the hub's pending set, so a request is answered in the session view
+  as in the channel — with a "N waiting ↓" pill that jumps to them while
+  the reader is scrolled up. The owner chose it (2026-10-17) over a band
+  above the composer, which kept them in reach at any scroll but took
+  about half the center with two open. They come after the last working
+  record, so a request is never folded inside one. Rejected:
+  synthesizing `permission.requested` and `question.requested` events into
+  the source so MAWS draws `request_slot` rows at the call
+  (`Transcript.tsx:229`, `derive.ts:1320-1323`): `request_slot` is a work
+  row in MAWS's derivation (`derive.ts:743`), hidden under a closed
+  working record in the report, so the request a turn is blocked on could
+  sit folded; making it persistent is a change to MAWS's own report view
+  with no evidence behind it. The cards are the channel's own, so the
+  fallback channel and the phone draw them unchanged.
+- **An async question** (the ask mod's, `mcp__doperpowers__AskUserQuestion`)
+  draws from its transcript row once classified; the log's `question` and
+  `answered` events overlay it, joined by the event's `src`, the call's
+  tool-use id (`stream.ts:7-8`). [2026-10-18, MAWS #49] Its answer draws
+  where it reached the model, as a dim line `answered: <header> →
+  <answer> · …` (`Skipped` for a declined dialog), on each of the ask
+  mod's three routes: the plugin prompt of an idle session, never drawn
+  as the engine's "The doperpowers plugin sent a message" bubble, and the
+  context on a tool result or on the next prompt after a stop. The
+  question's row takes the answer by call id when the log has none.
+- **Lifecycle** stays in the header and the sidebar; the channel keeps an
+  ended or retired session's end as one marker row at the tail.
+- **Fallbacks.** An offline machine serves no transcript
+  (`TranscriptPane.tsx:21`): the channel falls back to the log-built
+  stream, which still says "everything it sent stays here"
+  (`ChannelView.tsx:63-66`), its folds drawn as labels ("Working record ·
+  <machine> is offline"), never as buttons. A subscription that ends at
+  `n` 0 (no transcript for the session on that machine: a daemon older
+  than DC8, a `/clear` that left the history under an old id) falls back
+  the same way and says why. The phone always draws the log-built stream
+  with "Working record · on a computer" (§4 [binding]); the group chat is
+  unchanged.
+
+**Streaming in the report** (the review, 2026-10-17). DC6 draws a
+streaming block as a tail row with `turnId: null`
+(`depth/view/streaming-rows.ts:14-20`), and the report reads turns: its
+projection groups rows by `turnId` and reads live marks from the open
+turn's live buffers (`owner/report/project.ts:33-48`), and a marked text
+folds by its row's `turnId` (`transcript/surface/Rows.tsx:63-66`), so a
+turnless streaming row is neither folded with its turn nor seen as a live
+mark. DC9 bridges DX4's streaming identities into the report's turn and
+live-buffer model: a main-loop block (`turnId, agentId null, step, index`)
+belongs to the turn of the latest prompt row, and its text is the turn's
+live buffer for that block, so the turn folds and the mark shows while it
+streams; block settlement and de-duplication are unchanged — the
+`block-row`'s row replaces the live row, and a settled block's chunks are
+ignored. A subagent's block never reaches the main view (DX4). The means
+is DC9's; the acceptance (DC9.G1) is the behaviour.
+
+**The subscription moves.** The depth column owns the session's main
+subscription today (`DepthColumn.tsx:40`), and its Subagents, Diff and
+Info tabs are fed by it (`desk-transcript.ts:22-31, 401-409`). It moves
+into one per-session owner that the center's session view and the column
+share — one `DeskTranscript` per (machine, session) while any view holds
+it; MAWS's store already shares one attachment per key
+(`stores/transcript.ts:51`). `openSubagent` (`DepthColumn.tsx:51-64`)
+becomes a small shared store, so an Agent row in the center opens the
+column's Subagents tab; the status word (`:73-75`) moves to the center's
+header. The column's Transcript tab goes; Subagents, Diff and Info stay;
+a background-jobs view joins them (9.4). With the folds gone, these
+retire: `FoldTranscript`, `depth/source/range.ts`, `export-marks.ts`,
+`depth/view/unfold-turns.ts`, and DX8's `transcript` slot. Acceptance 5's
+scene (the live transcript streaming, a subagent streaming in the tree,
+the diff) is met by the session view's Transcript toggle and the column.
+
+**9.2 History to the first line.** The plane already serves older rows
+from disk; three changes make them reachable:
+- **An offset index per transcript.** When a subscription first parses
+  its transcript (`Tail.read` from offset 0 at `open`), the plane records
+  each row's uuid, byte offset and length in file order, and extends the
+  index as rows are flushed; one index per transcript file, shared by
+  every subscription on it (two browsers on one session parse once), and
+  dropped when the file is replaced or shrinks (`Reset`). `page(before)`
+  then finds `before`, takes the newest rows before it that fit `limit`
+  and `ROWS_BUDGET`, seeks to the first and reads through the last: a
+  page costs its own bytes, not the file's. The index needs each row's
+  uuid and byte span, not its parse; whether the build reads less than
+  `json.loads` of every line is DC8's to measure (a tool result's own JSON
+  can carry a nested `uuid` key, so a regex over the line is not a
+  parse). Rejected: reading backward in blocks per page without an index,
+  as the bridge child's `last_row` does for one row (`sminos_bridge.py:282-317`):
+  each page would re-find `before` from the end, and the uuid set the
+  plane keeps for de-duplication (`emitted`) is the index's cost already.
+- **Pages and the open-time parse off the uplink's thread**, as `diff`
+  runs (`sminos_plane.py:964-981`): a thread reads and parses the page's
+  bytes, or builds the index and the snapshot at `open`, and hands the
+  body to a queue; `tick` numbers and posts it. The open moves too because
+  the session view subscribes whenever a session is opened, and on the
+  MacBook one subscribe to a 254 MB transcript held the uplink's thread
+  about 4 s (2026-10-17, measured on a copy of the machine's state), which
+  with a slow tick is what starved its heartbeat answers before the
+  acker thread (doperpowers #214) took them off that thread. Rejected:
+  keeping the open on the thread because the index is built once per file
+  — the first open of each large session is exactly the view's common case.
+- **An ended session's subscription stays pageable.** Today `finish`
+  sends `end {session-ended}` one second after the process is gone, `tick`
+  drops the subscription, the hub forgets its route on `end`
+  (`objects/project.ts`, `relay`), and `rows` for a sub the hub does not
+  hold is passed over — so an ended session can never show more than its
+  newest 512 KB (`desk-transcript.ts:354-357`, `:300-306`). Instead the
+  subscription stays open and idle and answers `rows` until unsubscribed
+  or ended by the machine going offline or a discontinuity; liveness comes
+  from presence (`record` null: not running), which the web already reads
+  (`TranscriptPane.tsx:21`). This amends DX4's `end {session-ended}`,
+  which keeps only its `n` 0 meaning (no transcript for the session here).
+  A session Resume brings back is a transcript-only subscription whose
+  bridge now answers, which the plane already ends `discontinuity` for a
+  fresh streaming one (`tick`). Rejected: a hub-side reconnect buffer or
+  stored history (**[binding — the hub never stores transcripts]**, §3);
+  and re-subscribing per page after `session-ended`, a snapshot's cost per
+  page.
+
+Sessions with no bridge are covered on two conditions: the session joined
+the project from that machine, since the plane's `here` set comes from the
+log (`sminos_plane.py:832-845, 926-930`), and the machine runs the current
+daemon. Without an endpoint the subscription is transcript-only — reader
+None, streaming empty, usage null (`:931-941`) — and the transcript is
+found by session id (`sminos.py` `transcript_path`). Not covered: an
+offline machine, an old daemon, history left under an old session id after
+`/clear`. A session without the to-human style has no marks and draws as a
+full transcript, as MAWS draws an unmarked turn.
+
+**9.3 Subagents with real status.** One plane-side jobs index, built from
+the parse `open` already does and kept current from the rows the
+subscription releases, gives a status to everything whose start lies
+outside the held rows; deriving it on the web cannot, since the web sees
+only the rows it holds and a nested agent's spawn is in its parent's
+transcript. Its sources, per transcript:
+- the loop's rows: a `tool_result` for the meta's `toolUseId` (for a
+  background agent the result is its start, and only a notification or a
+  `task_status` ends it); a task-notification (a user row's
+  `queued_command` attachment with `commandMode: "task-notification"`, or
+  a plain user row whose text is the notification, the form the engine
+  writes when it starts a turn on one — both read (DC9, 2026-10-17); a
+  plain row counts only when its `origin.kind` is `task-notification` and
+  its text is the notification, or, in a subagent's transcript, the
+  engine's fixed `[SYSTEM NOTIFICATION - NOT USER INPUT]` preamble, a
+  blank line, then the notification (DC8, 2026-10-17):
+  `<task-id>`, `<tool-use-id>`, `<output-file>`, `<status>`, `<summary>`);
+  a `task_status` attachment (`{taskId, taskType, description, status,
+  deltaSummary, outputFilePath}`, observed for `local_agent`);
+- a nested agent's outcome from its parent agent's transcript file
+  (`subagents/agent-<parent>.jsonl`), where the nested call's result row
+  and notification live: the `tool_result` for the nested `toolUseId`,
+  read like the other disk facts, only when the parent file's size or
+  mtime changed (the review, 2026-10-17);
+- the bridge's agent state — DX5's `agent` spawn and stop events and the
+  child's `agents` list with `running` — which the plane forwards instead
+  of dropping; and, so agents that predate the module are in it, the
+  bridge seeds that state from `$.agent.list()` at load and refreshes it
+  while agents run, as `hooks/mods/agents.tsx:328-345` does (mandatory in
+  DC8; the review, 2026-10-17);
+- disk facts per agent transcript (`size`, `mtimeMs`, first and last row
+  timestamps), read only when size or mtime changed: the plane already
+  opens and parses every meta file twice a second (`metas`, `METAS_EVERY`),
+  and the coordinator session's 158 agent files total 1.1 GB, so the index
+  caches metas and file facts by (size, mtime) and each check is a stat.
+
+The engine's raw status words are normalized by one table (DX4), the one
+MAWS applies (`backfill.ts` `parseTaskNotification`, `task-graph.ts`
+`statusOfPatch`), and evidence has a precedence (DX4; the review's round
+2): an explicit terminal outcome in a row first; then known process death
+— the session's process gone, the parent agent ended, the bridge
+reporting the agent stopped without a terminal word — as `exited`; then
+`running` or `pending` evidence from the rows or the bridge, which stops
+counting once the session's process is gone; then `unknown`. A cold
+reconstruction (a subscribe to an ended session) and a view that was open
+while it ended reach the same status. `unknown` is allowed
+only where no evidence exists, and those cases are named: a nested agent
+whose parent is not over and whose parent transcript is gone or
+unreadable; an agent of a running session without a bridge (no function
+hooks) whose call has no result, notification or `task_status` yet; a meta
+with no `toolUseId` and no spawn record (a loop the engine tracks as an
+agent with no `agent.spawn`, such as a forked skill, per the mod API's
+`$.agent.list()` note). The result rides in the existing `subagents` body,
+widened (DX4), in the snapshot and in each `subagents` message, so the hub,
+which relays it without reading it, changes nothing; the web patches a
+node's unknown status from these facts on the desk side
+(`depth/agents/task-feed.ts`), not in MAWS's `mergeSidecars`, which MAWS's
+own store uses. Rejected: changing `mergeSidecars` (the desktop app's
+sidecar semantics, that a sidecar says nothing of status, are right there);
+polling the engine from the plane (no API lists another process's agents;
+the bridge, inside the process, can).
+
+**9.4 Background jobs.** Shells and monitors are read from the rows through
+the same index — a Bash result whose `toolUseResult.backgroundTaskId` is
+set, with "Output is being written to: <path>" in its text (MAWS's
+`parseOutputPath`, `task-graph.ts:201-205`); a Monitor result's
+`toolUseResult {taskId, timeoutMs, persistent}`; a task-notification or a
+`task_status` for the task; a `TaskStop` call naming it (the bridge's own
+interrupt makes that call, `bridge.tsx:322`) — and drawn with MAWS's
+`ShellRow` and `MonitorRow` (`tools/agents/background/TaskRows.tsx`, which
+import no IPC) in the column's jobs view. A shell's output is read on
+request: DX3 and DX2 gain `output {taskId, tail}`, answered as a new DX4
+kind `output` on the subscription, reading the task's output file — the
+engine writes them under `<realpath of CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>/<project
+slug>/<session id>/tasks/<task id>.output` (engine SPEC ch. 20, "the
+shared per-uid temp root"; `/private/tmp/claude-501/…` as the
+`task_status`, the notification and the Bash result each name it here) —
+only for a task the loop's index holds, only at the path the session's own
+rows named for it, and only when the resolved path of what is opened is
+exactly `<taskId>.output` under one of the resolved canonical roots the
+machine derives for that session from its own state (the engine's temp rule, the uid, the slugs of
+the transcript's project directory and of the session's working
+directories, the session id; DX4), besides carrying the
+`<session id>/tasks/<taskId>.output` suffix. A symlink that keeps the
+suffix but points elsewhere, and one to a file of another name, are both
+refused (the review, 2026-10-17); an agent task's `.output`, which the
+engine makes a symlink into the agent's transcript (SPEC ch. 20), is
+refused the same way, since an agent's transcript is read through its own
+subscription. The answer has explicit shapes for what is absent — a task
+the index does not hold, a file that is gone or not yet named, a refusal
+with its reason (DX4) — and a job's `outputFile` is null until a row names
+one (a monitor names none at its start): asked for such a task, the
+machine answers `missing` with no path, never `refused`, which stays the
+containment refusal. The hub refuses a frame
+it does not know (`objects/project.ts` `dispatch`, `bad-shape`) and a
+session message of a kind it does not list (`:391-392`,
+`SUBSCRIPTION_KINDS`), and the uplink passes an unknown frame by
+(`sminos_uplink.py:587`), so the hub ships before any uplink answers
+`output`, and an old daemon under a new hub simply never answers. A job's
+output opens under its row in the column, a few lines high, the list
+staying in view (the owner, 2026-10-17, over the column's whole pane).
+Stopping a job from the web is not in this round: MAWS's rows draw Stop
+on a running job, and the desk draws it disabled with its reason,
+"Stopping a job runs from its terminal" (§5); web Stop (DX6 RPC → bridge
+command → `$.tool.call({tool: 'TaskStop', task_id})`, the call the bridge
+already makes) is the first follow-up once DC8 and DC9 land (the owner,
+2026-10-17); it is DC10. MCP servers appear by name only, from the rows'
+`mcp_instructions_delta` attachments (`addedNames`, `removedNames`); their
+status needs the SDK host's `mcp_status` (MAWS `engine-host/controls.ts`),
+so it is deferred.
+
+**9.5 Shared MAWS edits**, each a small separate PR to MAWS, since each
+changes the desktop app too: the classify entry, so
+`mcp__doperpowers__AskUserQuestion` is a question
+(`transcript/model/classify.ts`); and shell and monitor starts in MAWS's
+backfill (`engine-host/fs/backfill.ts`: a Bash result with
+`backgroundTaskId` as `task.started` of `local_bash`, a Monitor result's
+`taskId` as `task.started` of a monitor, `task_status` read), so MAWS's own
+disk-only sessions gain them. **The second left DC9 (2026-10-17):** its
+review found backfill alone delivers nothing — the desktop app's
+background-task store reads only sidecars and workflow runs for a
+disk-only session, rejects events without a `seq`, and BackgroundTool
+hides a job without an engine status, by C8b's documented line "shells
+and monitors are known only while the session runs here". Delivering it
+is a product change to the MAWS app (a disk-only `session.events` read,
+an exited rule, the live gate dropped, Stop hidden for a reconstructed
+job), its architect's to decide, and the desk does not need it (its jobs
+come from DC8's body), so the backfill branch (`desk-backfill-jobs`) is
+parked for that follow-up rather than landed without a consumer.
+
+**9.6 Rejected: the desk as a remote mod surface.** MAWS's engine host
+attaches as surface `"desktop"` over `ui_attach` and asks `ui_render` per
+row (`src/engine-host/surface.ts:1-75`, `controls.ts:107-119`,
+`renderer/src/engine-surface/site.ts:15-55`). That protocol is part of the
+engine's stream-json control channel, advertised only when the session is
+not on a remote transport (`docs/doperpowers/evidence/ux-2026-10-01/r6-claude-mods.txt:21,
+279-280`), and only the process's SDK host holds it: a terminal `claude`
+session or a seat exposes nothing the uplink could attach to, and from
+inside the session the bridge cannot stand in, since `$.ui` has no `render`
+(`ui.render` is an event in `EventCalls`, never a method on `$`; mod API
+declarations 2.1.300). Were it possible it would cost a round trip per row
+through browser → hub → uplink → engine, serve live sessions only (no
+history for ended or offline ones), and `ui_press` would run mod handlers
+from the web, a new trust surface under §6. Reuse of the MAWS model already
+in the bundle is the route. Revisit only if the engine adds a render call a
+mod can make, or a surface transport for terminal sessions.
+
+**9.7 Optional**, in DC8 if its cost is small: the bridge's `delivered
+{key, outcome: "entered", uuid}`, emitted once the submitted prompt's row
+is named by `session.append` (`PromptSubmitResult` carries no row id), for
+an exact match of a delivered send to its row where the frame's identity
+(9.1) is not enough. DC8 built it and leaves it on the bridge's stream
+(2026-10-17): the frame's `(writer, seq)` matched all 174 bridge
+deliveries in this machine's transcripts, so the uuid matters only where
+the engine rewrites a frame, and carrying it to the web needs a contract
+change — a `row` on DX4's sealed `delivery`, a hub change, or a relay
+message on the main subscription — deferred; meanwhile such a send's tail
+row stays, visible, as §9.1 says. The `$.agent.list()` seed, optional in the first
+draft, is mandatory (9.3; the review, 2026-10-17): without it an agent that
+predates the module has no evidence while it runs.
 
 ## Children
 
@@ -926,7 +1353,10 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
   taste-heavy surfaces (the grid card, the folded agent-traffic row, the
   request cards) go to the owner as mockups before polish.
 - **Required:** required.
-- **Status:** merged (2026-10-16; MAWS PR #13, `76b1de782`).
+- **Status:** merged (2026-10-16; MAWS PR #13, `76b1de782`). Amended
+  2026-10-17: on a desktop browser whose machine is online the direct
+  channel's center becomes DC9's session view; the log-built channel stays
+  for the phone, an offline machine, and the group chat (§9).
 
 ### DC6: The web — session depth — plan
 
@@ -945,7 +1375,11 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 - **Design inheritance:** §2 Web client (the adapter), §3 session plane, §4
   right panel.
 - **Required:** required.
-- **Status:** merged (2026-10-16; MAWS PR #12, `1a06f2d9`).
+- **Status:** merged (2026-10-16; MAWS PR #12, `1a06f2d9`). Amended
+  2026-10-17: DC9 lifts the main subscription out of the column, retires
+  the Transcript tab, the fold (`FoldTranscript`, `range.ts`,
+  `export-marks.ts`, `unfold-turns.ts`) and DX8's `transcript` slot, and
+  adds the jobs view (§9).
 
 ### DC7: The machine's controls — plan
 
@@ -992,6 +1426,262 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
   [binding: the daemon as boundary, codes, digests, read-only].
 - **Required:** required.
 - **Status:** merged (2026-10-15; PR #196, `af3a5573`, 7.157.0).
+
+### DC8: The machine — history and jobs — plan
+
+- **Purpose:** The session plane serves a session's whole history and knows
+  what the session is running: an offset index per transcript, pages and
+  the open-time build off the uplink's thread, an ended session's subscription that stays
+  pageable, the jobs index (agents, shells, monitors, MCP names) carried in
+  the widened `subagents` body, the bridge's agent state forwarded and
+  seeded from `$.agent.list()`, a submission refused after `submitted`
+  reported as a `failed` delivery, and the `output` request; optionally
+  the bridge's `delivered.uuid` (§9.7).
+- **Acceptance:**
+  - **G1 (pages):** on a transcript of at least 150 MB and 10,000 rows (the
+    coordinator session's, 156 MB and 12,704 rows, where one full parse
+    measured 2.15 s), with a subscription open: each `rows` page is
+    answered within 200 ms of the frame reaching the daemon, measured over
+    paging from the newest row to the first line; the uplink's heartbeat
+    answers and presence keep their bounds (DX2; DC7.G1's 1 s) throughout;
+    the index is built once per transcript file — a second subscription on
+    the same transcript builds nothing — within the time of one full parse
+    today, the measured figure recorded, and off the uplink's thread: a
+    subscribe to that transcript leaves the heartbeat answers, presence and
+    deliveries within their bounds while its snapshot is built; a transcript replaced or shrunk
+    drops its index and ends its subscriptions `discontinuity` as today;
+    live rows flushed after the open are pageable in their turn.
+  - **G2 (ended sessions):** a session that ends while subscribed sends no
+    `end`: its last flushed rows arrive, the subscription stays idle and
+    answers `rows` back to the first line, `presence` says the session is
+    not running within 1 s, and `unsubscribe` ends it; a subscribe to a
+    session with no process (a closed terminal session, a stopped seat) is
+    served a snapshot from disk and pages the same way; a session Resume
+    brings back ends its transcript-only subscription `discontinuity` and
+    the fresh one streams; `end {session-ended}` is sent only at `n` 0,
+    for a session whose transcript the machine does not hold.
+  - **G3 (status):** for a session with agents that ran before the bridge
+    loaded (the module reloaded mid-session), nested agents whose parent
+    still runs and nested agents whose parent is over, and agents running
+    now, every entry of `subagents` carries a `status` other than
+    `unknown` within 1 s of its evidence being written, in DX4's order —
+    `completed`, `failed` or `stopped` from the call's result, the
+    notification or the `task_status`, a nested agent's from its parent's
+    transcript file; else `exited` for any agent of a session whose
+    process is gone, a nested agent whose parent has ended, or an agent
+    the bridge reports stopped without a terminal word; else `running`
+    from the bridge (seeded from `$.agent.list()` for agents the module
+    did not see spawn) or from a row — with its evidence, the engine's raw
+    word normalized by DX4's one table, and the agent's spawn record and
+    file facts; a nested agent names its parent; `unknown` appears only in
+    the cases §9.3 names (a parent transcript gone or unreadable while the
+    parent is not over; a running session without a bridge whose agent's
+    call has no outcome yet; a meta with no `toolUseId` and no spawn
+    record), each shown as such; a cold subscribe to an ended session and
+    a subscription that was open while it ended show the same statuses (a
+    `running` held from the bridge turns `exited` when the process is
+    gone); the 158 agent files of a large session are stat'ed, not read,
+    on each check, read only when size or mtime changed. The shared
+    fixture pins the module-reload case, the nested-agent-whose-parent-
+    still-runs case, a cold open of an ended session holding an agent with
+    a `running` status and no completion notification (`exited`), a nested
+    agent under an ended parent (`exited`), and each raw status word of
+    DX4's table.
+  - **G4 (jobs and output):** a background Bash and a Monitor started
+    before the subscription opened appear in `jobs` with kind, command or
+    description, start time, status and output path (null for the monitor
+    until a row names one), and end on their notification, `task_status`
+    or `TaskStop`; `output {taskId, tail}` answers `ok` with the last
+    `tail` bytes of the task's file, `missing` with the path when the file
+    is gone and `missing` with `path: null` for a known task no row has
+    named a file for yet (the fixture's monitor; the same request after a
+    row names its path answers `ok` or `missing` with that path, never
+    `refused`), `unknown-task` for a task the index does not hold, and
+    `refused` with its reason for any path other than the one the
+    session's rows named, for a path whose resolved target is not exactly
+    `<taskId>.output` under one of the resolved canonical roots the
+    machine derives (DX4), including a symlink to another task's file
+    under the same root, a
+    symlink whose target keeps all three suffix components (`…/<same
+    session>/tasks/<same task>.output` elsewhere) and an ordinary symlink
+    to a file of another name; MCP names from the rows; the machine side
+    proved by the plane's tests with the frames DX2 names, and end to end
+    on the deployment once DC9's hub is deployed (the hub ships first,
+    DX4). The shared fixture holds an unknown task, a deleted file, and a
+    monitor just started with no path.
+  - **G5 (deliveries):** a web send whose submission the engine refuses
+    after the bridge answered `submitted` (a `drop`) gets a second DX4
+    `delivery` for the same key, `failed` with the bridge's reason, within
+    the delivery path's next pass; the first outcome, `delivered`, is
+    unchanged in meaning (the text entered the session's queue).
+  - **G6 (optional):** `delivered {outcome: "entered", uuid}` names the
+    delivered prompt's row.
+- **Edges:** blocked-by: DC7 (merged); blocks: — (DC9 builds against the
+  contract and the fake machine; the two meet on the deployment at the
+  walk's Part I, run again).
+- **Contracts:** DX4 (producer; the amendments of 2026-10-17), DX2
+  (consumer of `output`), DX5 (consumer of `agent` and `resync.agents`;
+  owner of the `$.agent.list()` seed, the refused-delivery report, and
+  G6's `delivered.uuid`).
+- **Design inheritance:** §9.1 (delivered is not the row), §9.2–9.4 and
+  9.7; §3 session plane [binding: the hub never stores transcripts]; §6
+  [the daemon as boundary: `output` reads one directory the machine
+  derives and the rows name]. Advisory: `sminos_plane.py` (the index
+  beside `Tail`, the thread and queue as `diff`'s, `finish` and `tick` for
+  G2, `event()` for the agent state), `sminos_bridge.py` and
+  `hooks/mods/bridge.tsx` for the seed, the refusal report and G6,
+  `sminos_outcomes.py` for G5; a fixture of rows → expected `subagents`
+  body shared with DC9's fake machine pins the two derivations and the
+  normalization table, as DX1's vectors pin the two code implementations.
+- **Required:** required (G6 optional).
+- **Status:** cut 2026-10-17; not started.
+
+### DC9: The web — the session view — plan
+
+- **Purpose:** Opening a session shows the MAWS report over its own
+  transcript: the session view with its toggle, the sends not yet
+  delivered as tail rows, pending requests answerable in place, the
+  log-built channel as the fallback for an offline machine and the phone;
+  the main subscription lifted into a per-session owner shared with the
+  depth column, whose Transcript tab goes and whose Subagents gain real
+  status and a jobs view; the hub's `output` frame and kind and the fake
+  machine's widened bodies; the two shared MAWS edits as separate PRs.
+- **Acceptance:** against DC3's fake machine replaying a recording that
+  holds a `<message>` turn, two subagents, a nested agent, a background
+  Bash and a Monitor with their notifications, an async question from the
+  ask mod, and a send recorded undelivered (recorded anew with
+  `fake-machine/record.py`, or the committed `two-subagents` extended with
+  synthesized rows — DC9's call), and on the deployment:
+  - **G1 (the view):** a session's channel on a desktop draws the report —
+    its `<message>` spans and questions, one "Working record · N tool
+    calls · M messages" per marked turn with running dots while it works,
+    an unmarked turn whole — and the toggle shows the full transcript and
+    back; the text streams per content block as DC6's did; a reload shows
+    the same rows; the ask mod's question row draws as a question with the
+    log's answer overlaid; a send is a tail row with its delivery state
+    until its framed row (or the row its `delivered.uuid` names) is
+    observed, and then the row replaces it without a double, in five
+    cases: the `delivered` outcome arrives before the row (a long-running
+    turn: the tail row stays, saying delivered, until the row lands); two
+    identical sends in a row (each takes the row whose frame names its
+    `(writer, seq)`); an earlier terminal-typed prompt "continue" exists
+    and a web send "continue" is acknowledged while the session is busy
+    (the web send stays visible until its framed row arrives; the typed
+    row is never taken for it); a submission delayed and then refused (the
+    tail row stays and shows the `failed` state); a send whose row never
+    arrives because the session ends first (it stays as a delivered entry
+    at the tail, ahead of the end marker); a pending permission and a
+    pending question are answered from their cards at the tail and the cards leave; the
+    ended session's channel shows its end marker and Resume. Streaming in
+    the report: a marked response folds its turn and shows the mark live
+    before its first row flush; unmarked streaming text later in an
+    already-marked turn stays inside the record; settlement leaves no
+    double (the live row gone when the `block-row`'s row lands).
+  - **G2 (history):** against a recording of more than one page, scrolling
+    to the top pages older rows until the first row, on a live session and
+    on one that ended while open (the fake machine's `session-ended` at
+    `n` 0 only), with no stall of the view; a session whose subscription
+    ends at `n` 0 falls back to the log-built channel with the reason.
+  - **G3 (fallbacks):** with the fake machine disconnected the channel is
+    the log-built stream with its folds as labels; on the phone layout the
+    channel is the log-built stream with "Working record · on a computer"
+    and no transcript chunk is loaded (the phone loads no script holding
+    MAWS's Transcript, SessionView or TranscriptPane; MAWS's Markdown,
+    with its KaTeX and shiki chunks, stays, since the log-built channel
+    has drawn `<message>` bodies through it since DC5; amended 2026-10-17,
+    DC9's M6); the group chat is unchanged against DC5's tests.
+  - **G4 (the column):** the Transcript tab is gone; Subagents shows the
+    nested agent under its parent and every recorded agent with the
+    status DX4 carries, none under "On disk / status unavailable"; an
+    Agent row in the center opens the column's Subagents tab on that
+    agent; the jobs view draws the shell and the monitor with `ShellRow`
+    and `MonitorRow`, the shell's Output opens its tail through `output`,
+    and the MCP names are listed; Diff and Info work as before over the
+    shared subscription (DC6's tests pass or are moved); `FoldTranscript`,
+    `range.ts`, `export-marks.ts`, `unfold-turns.ts` and the `transcript`
+    slot are deleted, and DX8 is amended.
+  - **G5 (hub and fake machine):** the hub takes `output {sub, taskId,
+    tail}` up and `output` down (`protocol/session.ts`, `browser.ts`,
+    `machine.ts`, `objects/project.ts`), relaying it as `rows`; the fake
+    machine answers `rows` for a session after its replay ends and serves
+    `output` from a recording's `tasks/<taskId>.output`, with each DX4
+    variant (`ok`, `missing`, `unknown-task`, `refused`); it carries the
+    widened `subagents` body derived from its recording's rows by DX4's
+    rules, normalization table and precedence, pinned by the fixture DC8
+    shares (the module-reload and nested-parent-still-runs cases, a cold
+    open of an ended session with a `running` agent and no notification,
+    a nested agent under an ended parent, each raw status word, an unknown
+    task, a deleted file, a monitor with no path answering `missing` with
+    `path: null`);
+    `test/session-plane.test.ts` covers the new frame and kind.
+  - **G6 (shared edits):** one MAWS PR, reviewed on its own:
+    `mcp__doperpowers__AskUserQuestion` classified as a question, with
+    MAWS's own tests. (The backfill edit left DC9 for a MAWS-app
+    follow-up, §9.5.)
+- **Edges:** blocked-by: DC5, DC6 (merged), this document's DX4 and DX8
+  amendments (written 2026-10-17); blocks: — (DC8's `output` is proved end
+  to end once the hub is deployed).
+- **Contracts:** DX8 (owner of the amendment), DX3 and DX2 (`output`
+  frames; the module is in MAWS), DX4 (consumer; the hub's kind list and
+  the fake machine), DX1 and DX6 (as DC5).
+- **Design inheritance:** §9.1, 9.3 (the web's half), 9.4 (the view and
+  the hub's frame), 9.5; §4 as amended [binding: the phone]; §5 table
+  (what a session cannot do stays shown as disabled). Advisory:
+  `apps/desk-web/src/depth/` and `views/`; the per-session owner is a small
+  store, the toggle about twenty lines calling the transcript store's
+  `setView`; taste surfaces (the tail row's delivery line, the band, the
+  end marker, the jobs view) go to the owner as mockups before polish, as
+  DC5's did; the owner's verdicts (2026-10-17): the delivery state in the
+  bubble's foot, requests inline at the tail, a job's output under its
+  row, Stop disabled, the end marker as drawn.
+- **Required:** required.
+- **Status:** merged and deployed 2026-10-18 (tracking row).
+
+### DC10: Stop a job from the web — machine and web
+
+- **Purpose:** A running background job of a bridged session is stopped
+  from the desk's Jobs tab. That covers a shell or a monitor, the main
+  loop's or a subagent's. Stop has drawn disabled since DC9, "Stopping a
+  job runs from its terminal". The owner approved building it right
+  after DC8 and DC9 (2026-10-17).
+- **Acceptance:**
+  - **G1 (stop):** on a bridged session with a running background shell
+    and a running monitor, Stop on each row sends DX6 `stop`. The bridge
+    runs `TaskStop` through `$.tool.call`, the RPC answers `done`, and the
+    row reads `stopped` from the session's own DX4 body within 2 s. The
+    body learns it from the bridge's stop note: `$.tool.call` writes no
+    row, so on success the bridge appends a meta row whose whole text is
+    `Task <id>, a background task, was stopped from the desk: it is not
+    running.` The derivation reads that row as `stopped` (amended at the
+    machine half, 2026-10-18). This is proved against
+    a real bridge on the machine side (the bridge's tests and one live
+    check) and against the fake machine on the web side.
+  - **G2 (what cannot):** on a session without a bridge, on a machine
+    that is offline or read-only, and on a job that is not running, Stop
+    stays disabled with its reason (§5's table). Forced through anyway,
+    the RPC is refused `unsupported`, `machine-offline` or `read-only`.
+  - **G3 (which task):** the daemon refuses a `taskId` that the session's
+    own jobs index does not hold as running with `unknown-task`, before it
+    claims the nonce. A retried nonce is answered from the ledger and
+    never stops anything twice.
+  - **G4 (failure shown):** a `TaskStop` the engine answers with an error
+    fails the RPC `failed` with the engine's message, and the row shows
+    the message inline while it keeps its status.
+- **Edges:** blocked-by: DC8 and DC9 (merged). The two halves build in
+  parallel against this section, and the machine half lands first. A hub
+  that knows `stop` under a daemon that does not gets `bad-shape` from
+  the daemon, shown as a failure, so either deploy order is safe.
+- **Contracts:** DX6 (`stop`), DX5 (the bridge's `stop` command), §5's
+  table (its Stop row), DX3 (the browser's RPC call; no new frame).
+- **Design inheritance:** §9.4 (the jobs view as DC9 built it; output
+  stays as it is). Background agents are out: their rows draw no Stop
+  today, and stopping one is a separate decision. Advisory: the bridge
+  already calls `TaskStop` for an interrupt (`hooks/mods/bridge.tsx`),
+  `sminos_rpc.py` holds the RPCs, `sminos_jobs.py` the jobs index, and
+  `apps/desk-web/src/depth/` the jobs view.
+- **Grain:** two executors, one per repository, one milestone each.
+- **Required:** required.
+- **Status:** cut 2026-10-18.
 
 ## Cross-Child Contracts
 
@@ -1063,7 +1753,9 @@ consumers start after that gate.
   carries to the machine and which binds the subscription's snapshot and
   older-row pages to that one transcript; log events,
   presence, the pending set, and DX4 messages down; authenticated `human`
-  events and RPCs up, with their results. Binds DC5, DC6.
+  events and RPCs up, with their results. Binds DC5, DC6. Amended
+  2026-10-17 (§9): `output {sub, taskId, tail}` up, answered as DX4
+  `output`; binds DC9 (builds it in the hub) and DC8 (answers it).
 - **DX4 — Session-plane messages (envelope owner DC3, at DC3.G1; producers DC2
   and DC7; semantics complete here).** An envelope `{project, machine,
   session, kind, sub, n, body}` around the engine's own shapes, passed
@@ -1139,7 +1831,14 @@ consumers start after that gate.
   The hub interprets presence, pending requests, and delivery outcomes;
   everything else it relays.
   Binds DC2 and DC7 (produce), DC3 (relays, implements the semantics in its
-  fake machine), DC5 and DC6 (consume).
+  fake machine), DC5 and DC6 (consume). Amended 2026-10-17 (§9): a
+  subscription outlives its session and pages its transcript to the first
+  line (`end {session-ended}` keeps its `n` 0 meaning only); `subagents`
+  is widened with each agent's status and evidence, the loop's `jobs`, and
+  `mcp` names; a new kind `output` answers a task's output tail at a path
+  the session's rows named under its `tasks/` directory. Binds DC8
+  (produces), DC9 (consumes; carries the kind through the hub and the fake
+  machine). The hub ships before any uplink answers `output`.
 - **DX5 — Local bridge protocol (owner DC2, at DC2.G1).** The session
   endpoint's API (`$SMINOS_HOME/bridge/<session-id>.sock`): the bridge's
   event stream into it and the subscription out of it, the command lines
@@ -1185,7 +1884,9 @@ consumers start after that gate.
 - **DX8 — The web shell's slots (owner DC5, at DC5.G1).** The slot, layout,
   session, and transcript-store interfaces the depth panel plugs into,
   copied from MAWS's `src/renderer/src/app/slots.ts` and
-  `src/renderer/src/transcript/shell.tsx`. Binds DC6.
+  `src/renderer/src/transcript/shell.tsx`. Binds DC6; DC9 (2026-10-17: the
+  `transcript` slot retires, `Subscription` gains `output`, the depth
+  tabs change).
 
 ## Interfaces
 
@@ -1208,6 +1909,10 @@ beside them, a stdlib-Python implementation independent of the
 TypeScript one: where this text and the module ever differ, the module's
 tests decide and the text is corrected. Each subsection ends with what
 DC3's later milestones extend. DX5 is DC2's; DX8 is DC5's.
+The 2026-10-17 amendments (§9; DC8 and DC9) are marked **[2026-10-17]**
+in place: DX2's and DX3's `output` frame, DX4's history, `subagents` and
+`output` rows, and DX8's slot retirement; DX4's module and the fake machine
+are DC9's to align, DX4's producer DC8's.
 
 Conventions throughout: hub-owned multi-word fields are snake_case (as smns's log and DX6's `input_sha256`); fields
 that pass through from the engine keep the engine's camelCase (`turnId`, `agentId`, `upTo`, `waitingFor`). Times are
@@ -1548,6 +2253,7 @@ default) [2026-10-15, DC3, from DC5's real-hub suite]. A half-open client is bou
 | `unsubscribe` | `project`, `sub` | end it: its browser unsubscribed or went, or a message came for a sub no browser holds; the machine answers `end {reason: "unsubscribed"}`, which the hub, having dropped the sub's route first, discards |
 | `rows` | `project`, `session`, `agentId`, `sub`, `before`, `limit` | older rows of the sub's transcript, before row `before` |
 | `diff` | `project`, `session`, `sub` | the browser's DX3 `diff` on a main-transcript sub: answer with DX4 `diff` on that sub (M3) |
+| `output` | `project`, `session`, `agentId`, `sub`, `taskId`, `tail` | **[2026-10-17]** the browser's DX3 `output` on the sub: answer with DX4 `output` on that sub, the last `tail` bytes of the task's output file under the containment rule DX4 states. A daemon older than DC8 passes the frame by (its frame handler logs an unknown `t`), and nothing follows |
 | `part` | `id`, `index`, `count`, `data` | a slice of a larger frame (below) |
 
 **Frames up** (`UpFrame`):
@@ -1726,6 +2432,9 @@ subscription frames down (`subscribe`, `unsubscribe`, `rows`, `diff`), and the s
 fresh `have` (the archive flag as it is now) and the backlog past its vector, the machine in the fan-out once
 (`test/log.test.ts`).
 
+**For DC9 [2026-10-17]:** the `output` frame down, relayed as `rows` is (the route's machine, session, `agentId` and
+`sub`), with `taskId` and `tail` passed through; the hub's `test/session-plane.test.ts` covers it.
+
 ### DX3 — Browser ↔ hub (owner DC3; G1, amended; the log plane built at M2, the session plane at M3)
 
 **Transport.** WebSockets, JSON text frames, behind Access (the browser's Access session becomes the assertion on the
@@ -1752,6 +2461,7 @@ below); a frame naming a `sub` this socket does not hold (one that just ended, s
 | `unsubscribe` | `sub` | carried to the machine; the hub forgets the sub at once, so no `end {unsubscribed}` follows |
 | `rows` | `sub`, `before`, `limit` | older rows of the subscription's transcript, `limit` 1 to 1000 |
 | `diff` | `sub` | the session's working-tree diff against its base branch, answered as DX4 `diff` on that sub; only on a main-transcript subscription (`agentId` null: an agent-scope sub's is refused `bad-shape`). Computed on request, never pushed, since it costs the machine a git run whether or not a view is open |
+| `output` | `sub`, `taskId`, `tail` | **[2026-10-17]** the last `tail` bytes of a background task's output file, answered as DX4 `output` on that sub; `taskId` a task id as the engine spells it (`[A-Za-z0-9_-]{1,64}`, else `bad-shape`), `tail` 1 to 524288 bytes (else `bad-shape`), so the answer fits one frame. Valid on a main-scope or an agent-scope sub: a job belongs to the loop whose rows started it. Read on request, never pushed; what is absent or refused comes back as the answer's own variant (DX4 `output`: `ok`, `missing`, `unknown-task`, `refused`), never as a hub refusal |
 | `visibility` | `visible` | whether this tab shows the project; a visible tab holds back its member's pushes (DX7). A socket starts not visible. While visible, the browser repeats `visibility {visible: true}` every 30 s, and the hub counts a socket visible only while that frame is under 90 s old, so a phone that sleeps or is swiped away before its hidden frame arrives stops holding back pushes within 90 s |
 | `part` | as DX2 | |
 
@@ -1846,6 +2556,10 @@ its summaries, proved on the local runtime by `test/session-plane.test.ts`, incl
 `Project` while sockets stay open (Miniflare's `unsafeEvictDurableObject`) and a `Machine` terminated under its stream
 (`ctx.abort()`; workerd will not evict an object holding a streaming request).
 
+**For DC9 [2026-10-17]:** `output` up, checked by shape and routed by `ownRoute` as `rows` is, refused `bad-shape` for
+`taskId` or `tail` out of form; carried to the machine as DX2 `output`. A hub older than DC9 refuses the frame
+`bad-shape` (`dispatch`'s default), which is why the hub ships before the web asks and before any uplink answers.
+
 ### DX4 — The session-plane envelope (owner DC3; G1; the relay built at M3)
 ```ts
 type Envelope<K, Session, Sub, N> = {
@@ -1860,7 +2574,7 @@ type Envelope<K, Session, Sub, N> = {
 // Discriminated by kind; each kind's invariants are in its type:
 type SessionMessage =
   | Envelope<'snapshot', string, string, 0>                                                       // a sub's first message
-  | Envelope<'row' | 'chunk' | 'block-row' | 'step-end' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, … (`end` may come first, at n 0)
+  | Envelope<'row' | 'chunk' | 'block-row' | 'step-end' | 'rows' | 'subagents' | 'diff' | 'usage' | 'output' | 'end', string, string, number>   // then n = 1, 2, … (`end` may come first, at n 0); `output` [2026-10-17]
   | Envelope<'presence' | 'raised' | 'settled' | 'delivery' | 'compact', string, null, null>     // to every browser, outside subs
   | Envelope<'machine', null, null, null>;                                                         // names no session
 ```
@@ -1882,16 +2596,17 @@ and `streaming` are that agent's own.
 
 | `kind` | in a sub | body |
 | --- | --- | --- |
-| `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming, usage}`: `usage` is the bridge's last `usage` (DX5) on a main-transcript subscription, null when the session has no bridge or none has come yet, and absent on a subagent's; rows of the sub's transcript newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, one per model request still streaming, `{turnId, agentId, step, model?, upTo, blocks: [{index, kind, text, upTo, id?, name?}]}` holding only its content blocks without a `block-row` yet, below (`step` the model request's ordinal in the turn; `model` what the request was sent with, absent when its start was not seen; the entry's `upTo` the `chunkIndex` of the last chunk applied to the message, -1 for none, and **the watermark**: `chunkIndex` counts across the whole message, so a chunk at or below it is already in the text, whichever block it belongs to; `index` the content block's, the same `index` its chunks and its `block-row` carry; `kind` one of `text`, `thinking` (redacted thinking included), `tool`; `text` the partial text, a tool block's being its argument JSON streamed so far, unparsed until its row; a block's `upTo` informational only; `id` and `name` the call's `tool_use_id` and tool name, on a tool block only). An entry whose `blocks` is empty can remain until its step ends and is skipped |
-| `row` | yes | `{row, agentId}`: a transcript row verbatim; `agentId` the subagent whose transcript holds it, or null |
+| `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming, usage, jobs, mcp}` (**[2026-10-17]** `subagents` entries widened, `jobs` and `mcp` added, as the `subagents` row below): `usage` is the bridge's last `usage` (DX5) on a main-transcript subscription, null when the session has no bridge or none has come yet, and absent on a subagent's; rows of the sub's transcript newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, one per model request still streaming, `{turnId, agentId, step, model?, upTo, blocks: [{index, kind, text, upTo, id?, name?}]}` holding only its content blocks without a `block-row` yet, below (`step` the model request's ordinal in the turn; `model` what the request was sent with, absent when its start was not seen; the entry's `upTo` the `chunkIndex` of the last chunk applied to the message, -1 for none, and **the watermark**: `chunkIndex` counts across the whole message, so a chunk at or below it is already in the text, whichever block it belongs to; `index` the content block's, the same `index` its chunks and its `block-row` carry; `kind` one of `text`, `thinking` (redacted thinking included), `tool`; `text` the partial text, a tool block's being its argument JSON streamed so far, unparsed until its row; a block's `upTo` informational only; `id` and `name` the call's `tool_use_id` and tool name, on a tool block only). An entry whose `blocks` is empty can remain until its step ends and is skipped. **[2026-10-18]** `offChain: string[]` lists the uuids among `rows` that are off the session's live chain. It is always present and may be empty (the live chain, below) |
+| `row` | yes | `{row, agentId, offChain?, onChain?}`: a transcript row verbatim; `agentId` the subagent whose transcript holds it, or null. **[2026-10-18]** `offChain` lists the rows this row took off the live chain: the rows left behind by a branch it starts, oldest first, plus the row itself when it is written off the chain. `onChain` lists the rows it put back. Each is present only when non-empty |
 | `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0 |
 | `block-row` | yes | `{uuid, turnId, agentId, step, index}`: the engine wrote the row `uuid` for content block `index` of that step; sent before the row itself arrives |
 | `step-end` | yes | `{turnId, agentId, step}`: that model request ended — finished, aborted, or cut off by its turn's end — from DX5's `step end` or `turn complete`; sent after every `block-row` of the step, so a block of it still without one never gets one, and the browser drops its partial text |
-| `rows` | yes | `{rows, before, more}`: older rows of the sub's transcript, newest first, answering a `rows` request |
-| `subagents` | yes | `{subagents: [{agentId, meta}]}`, each `meta` a `subagents/*.meta.json` verbatim |
+| `rows` | yes | `{rows, before, more, offChain}`: older rows of the sub's transcript, newest first, answering a `rows` request; **[2026-10-18]** `offChain` as in the snapshot, for the page's rows |
+| `subagents` | yes | `{subagents: [{agentId, meta, status, evidence, running?, spawn?, outcome?, file?}], jobs: [Job], mcp: [{name}]}` **[2026-10-17]**: each `meta` a `subagents/*.meta.json` verbatim (a main-scope sub's the session's tree, an agent-scope sub's that agent's own, as before); `status` one of `running \| completed \| failed \| stopped \| exited \| unknown` (MAWS's `TaskStatus` words, so the web patches without a mapping) and `evidence` what it rests on, `bridge \| rows \| parent \| session \| none` (below); `running` the bridge's, present while the bridge holds the agent; `spawn` the bridge's spawn record, `{parentAgentId, subagentType, description, name, background, model, toolUseId}` (DX5 `agent` spawn, or the `$.agent.list()` seed's `{parentAgentId, subagentType, description, name?}` for an agent the module did not see spawn — `name` when the engine's list gives one (DC8, 2026-10-17)), present when it holds one; `outcome` from the rows — the loop's, or for a nested agent its parent agent's transcript — `{status, raw, at, summary?, outputFile?}`, `raw` the engine's own word before the normalization table below; `file` the agent transcript's `{size, mtimeMs, firstAt, lastAt}`, read only when size or mtime changed. `jobs`: the loop's background shells and monitors, `{taskId, kind: "shell" \| "monitor", toolUseId, startedAt, description, command?, outputFile: string \| null, status, endedAt?, summary?}`, `status` as above less `unknown`, `outputFile` null until a row names one (a Monitor's result names none; a notification or a `task_status` may). `mcp`: the server names the loop's `mcp_instructions_delta` attachments added and did not remove, in order; names only. Sent in the snapshot and whenever any of it changes (the metas today, every `METAS_EVERY`; now also a status, a job, a name). A consumer older than DC9 reads `subagents[*].agentId` and `meta` and ignores the rest; a producer older than DC8 sends the two fields alone, and the web then shows an agent as it does today |
 | `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
+| `output` | yes | **[2026-10-17]** `{taskId, result, …}`, answering an `output` request, one of four variants by `result`: **`ok`** `{taskId, result: "ok", path, size, from, text, truncated}` — `path` the output file as the session's rows named it, `size` the file's bytes, `text` its last `tail` bytes decoded UTF-8 with replacement, cut forward to the first line break inside the window when the window does not start the file, `from` the byte offset `text` starts at, `truncated` whether anything precedes it; **`missing`** `{taskId, result: "missing", path: string \| null}` — the task is known and there is nothing to read: `path` a string when the rows named a file, it passed containment, and no file is there (the engine writes them under the temporary directory), or null when no row has named a file for the task yet (a monitor just started; `Job.outputFile` null) — never `refused`, which is the containment refusal alone (the review's round 2); **`refused`** `{taskId, result: "refused", path, reason}` — the path the rows named fails containment (below), `reason` a sentence for the human; **`unknown-task`** `{taskId, result: "unknown-task"}` — the loop's index holds no such task. No variant carries a field another variant's rule leaves out. The consumer: `ok` draws the tail, with how many bytes precede it when `truncated`; `missing` says the file is gone, or that the task has no output file yet when `path` is null, leaves the row's own summary standing, and stays retry-eligible — when a later `subagents` supplies or changes the task's `outputFile`, the web may ask again; `refused` draws as a warning with `reason` and offers no retry; `unknown-task` waits for the next `subagents` to carry the task (the request raced the index) and otherwise says the task is unknown to the machine. Read on the thread that reads pages |
 | `usage` | yes | `{context: {tokens?, window, percent?}, cost: {usd} \| null}`: the bridge's `usage` event (DX5) verbatim (`tokens` and `percent` absent until a response has reported the window's fill; `cost` null where the engine keeps no ledger), after each main turn, on main-transcript subscriptions only. It is the one source of a session's context use and cost on the web: the transcript's rows do not carry them (the engine's `cost-state` records have no `uuid` and are not rows here), so a session without a bridge shows both as unavailable |
-| `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "discontinuity" \| "error", message?}` |
+| `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "discontinuity" \| "error", message?}`. **[2026-10-17]** `session-ended` is sent at `n` 0 only, for a session whose transcript the machine does not hold; a subscription whose session ends is not ended (below) |
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
 | `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
 | `raised` | no | `{request, session, tool, input, agentId?, truncated?, deadline?, async?, toolUseId?, mac}`: `request` the call's tool-use id where the engine gives one (`toolu_…`; an ask-mod question's `toolu_plugin_…`), otherwise a synthetic `request-…`, opaque to every consumer, the DX6 digest included; `toolUseId` the transcript's tool-use id of the call the request belongs to, a non-empty string of at most 512 characters (else `bad-shape`), present only where it differs from `request` (the ask mod's blocking question, whose `request` is the engine dialog it opens inside its own call, a call no transcript row names), so `toolUseId ?? request` is always the id a transcript row carries, or a synthetic id no row carries; `deadline` ISO 8601 UTC with milliseconds (the producer converts DX5's epoch milliseconds); `async: true` for the ask mod's async question, answered or withdrawn, never denied; `agentId` the subagent that asked (absent for the main thread), a non-empty string; `truncated: true` when the bridge capped the input it shows, and the DX6 digest is over that capped input on both sides. The code covers every field, and the hub keeps and relays them as received; another form of `agentId`, `truncated`, `deadline`, or `async` is refused `bad-shape` |
@@ -1902,6 +2617,24 @@ and `streaming` are that agent's own.
 `raised`, `settled`, and `delivery` carry codes under their own domains (DX1). The hub interprets `presence`,
 `machine`, `raised`, `settled`, and `delivery`; it relays every other kind, `block-row` included, without reading its
 body.
+
+**The live chain [2026-10-18, doperpowers #239; plane `Chain` in `sminos_plane.py`].**
+- **What it is.** The engine reads only the chain from a transcript's leaf back through `parentUuid`. An Esc-rewind, a `/rewind`, or a response the engine dropped leaves rows on a dead branch, and the engine no longer holds them.
+- **Where the marks are read.** The machine marks those rows off its own copy of the chain, fed in the order the subscription's messages go, so a page never contradicts a `row` sent before it.
+- **Compatibility.** The fields are additive: an older desk ignores them, and the hub relays them unread.
+- **Consumer rule.** Apply the marks in message order; the latest wins. A snapshot or page sets on or off for each of its rows. A `row` adds its `offChain` and removes its `onChain`. A uuid in `offChain` may name a row not paged in yet; the page that later brings it carries its own mark.
+- **The engine's rules (2.1.300), as the plane mirrors them:**
+  - A tool result names its issuing assistant (`sourceToolAssistantUUID`), not the leaf, and stays on while that assistant is on the chain.
+  - Any other row parented off the leaf starts a branch. The rows after the branch point go off, except those the resume loader recovers: response siblings and their results, and attachment, system and meta-user rows.
+  - Rows a branch had taken off come back with their responses, in file order.
+  - A child written before its parent waits for it.
+  - A null parent (a compaction boundary) continues the chain, so history before a compaction stays drawn.
+  - One deliberate divergence from the loader: a plain user row delivered between a call and its result stays on. The live engine read it; the loader drops it on resume.
+- **Checked offline** on 1,500 local transcripts (about 667k rows, about 2 µs a row): 870 branches, each a re-sent prompt, a `/rewind` or a dropped response, and every final chain matched the loader apart from that divergence.
+- **Known gaps** (doperpowers TECH-DEBT):
+  - A retraction lands with the branch's first row, not at the Esc. The interactive engine writes nothing when it hands a prompt back.
+  - An Esc that empties the conversation (a session's first prompt) leaves no branch, so the desk keeps #42's frame-line fold for that delivery.
+  - A row whose parent never appears stays unmarked (1 in 1,500 transcripts).
 
 **Streaming is per content block.** One API response becomes several transcript rows, one per content block, and the
 mod sees no API message id, so a streaming block is settled by row uuid. A `block-row` touches two parties at two
@@ -1928,6 +2661,132 @@ snapshot. A gap in the bridge's own stream (DX5's `gap`), and the end of a DX5 s
 child ends every open one when it applies any `resync` after its first: a module reload, a replacement child), each
 end every DX4 subscription they touch with `end {reason: "discontinuity"}`, and the browser does the same. Nothing is
 resumed from a hub buffer.
+
+**History and ended sessions [2026-10-17, §9.2; DC8 produces, DC9 consumes].** A subscription outlives its session.
+Once the session's process is gone and what it flushed is drawn (the machine's grace, 1 s today), the machine sends no
+`end`: the subscription stays open and idle, carries nothing live, and answers `rows` (and `output`) until the browser
+unsubscribes, the machine goes offline, or a discontinuity ends it — a bridge answering for the session again, as
+Resume brings it back, ends a transcript-only subscription `discontinuity`, and the fresh one streams. A subscribe to
+a session with no process is served the same way: a snapshot from disk, then pages. The browser reads whether the
+session runs from `presence` (`record` null: not running), never from the subscription; `session-ended` after a
+snapshot means a daemon older than DC8, and the browser treats it as it did. **Pages** come from an index the machine
+builds once per transcript file when it first parses it (at a subscription's open) and extends as rows are flushed —
+each row's uuid, byte offset and length, in file order — shared by every subscription on that transcript and dropped
+when the file is replaced or shrinks (`discontinuity`, as today). A page reads and parses only the rows it returns,
+the newest before `before` that fit `limit` and the 512 KB budget, and that read runs off the uplink's thread, so a
+page costs its own bytes, not the file's: the measured 2.15 s a full parse of a 156 MB transcript takes is paid once,
+at the open, never per page. The web pages a live or an ended session to its first row. The hub changes nothing for
+this; the fake machine already keeps its sessions pageable after a replay and sends `session-ended` at `n` 0 alone.
+
+**Jobs and agent status [2026-10-17, §9.3–9.4; DC8 produces, DC9 consumes].** The widened `subagents` body is built
+on the machine from the rows the subscription already parses — at the open and as rows are released — joined with the
+bridge's agent state (DX5's `agent` spawn and stop events, and `resync.agents`, which DC7 dropped and DC8 forwards)
+and disk facts about each agent's transcript. The rows read, as the engine writes them (2.1.300–2.1.301; engine
+internals, Risks): a `tool_result` for a call; a user row's `queued_command` attachment with `commandMode:
+"task-notification"`, or a plain user row whose text is the notification — the form the engine writes when it starts
+a turn on one (76 of 300 recent transcripts; DC9, 2026-10-17) — both read, a plain row only when it is a user row
+whose `origin.kind` is `task-notification` and whose text starts with `<task-notification>` or, in a subagent's
+transcript, with the engine's fixed `[SYSTEM NOTIFICATION - NOT USER INPUT]` preamble and the notification after the
+blank line (the shared fixture's `about`; a typed prompt or a peer message never carries that origin), carrying
+`<task-id>`, `<tool-use-id>`, `<output-file>`, `<status>` and `<summary>`; a user row's `task_status` attachment `{taskId, taskType, description, status, deltaSummary,
+outputFilePath}`; the bridge's notes that a task was stopped, each a doperpowers plugin meta row matched on its whole
+text — `Task <id>, a background task, was stopped from the desk: it is not running.` (DC10's Stop) and the interrupt
+note's `Task <id>, the Bash command the interrupt moved to the background, was then stopped: …` line — read as
+`stopped`, since `TaskStop` through `$.tool.call` writes no row and, for a main-loop task, queues no notification
+(DC10, 2026-10-18; fixture case 16); a Bash result whose `toolUseResult.backgroundTaskId` is set, its text naming the file after
+"Output is being written to:"; a Monitor result's `toolUseResult {taskId, timeoutMs, persistent}`; a `TaskStop` call
+(`input.task_id`) with a result that is not an error; `mcp_instructions_delta` (`addedNames`, `removedNames`). A
+nested agent's result row and notification are in its parent agent's transcript, not the loop's: the producer reads
+them there, for the nested `toolUseId`, as a disk fact of the parent's file, re-read only when that file's size or
+mtime changed. The bridge's agent state covers agents the module did not see spawn: at load it seeds `agents` from
+`$.agent.list()` (`{id, description, type, status, parentId}`) and refreshes while any runs, so a module reloaded
+mid-session still names the agents running then (the review, 2026-10-17).
+
+**One normalization table**, applied by both producers (the plane, the fake machine) to every raw status word the
+rows carry — a notification's `<status>`, a `task_status`'s `status`, a `task.updated` patch's — built from MAWS's own
+two mappings (`backfill.ts` `parseTaskNotification`; `task-graph.ts` `statusOfPatch`):
+
+| raw | DX4 `status` | terminal |
+| --- | --- | --- |
+| `completed` | `completed` | yes |
+| `failed`, `error` | `failed` | yes |
+| `stopped`, `killed`, `cancelled`, `interrupted` | `stopped` | yes |
+| `running`, `pending` | `running` | no |
+| anything else | no change; kept in `outcome.raw` | — |
+
+A result row is terminal: `completed`, or `failed` when `is_error`; a `TaskStop` with a non-error result is `stopped`.
+A monitor's expiry notice is terminal (DC8, 2026-10-17): a task-notification for a task the index holds as a
+monitor, with no `<status>`, whose `<event>` begins `[Monitor expired after ` or is `[Monitor timed out` (engine 2.1.300,
+`dEr`) is `completed` with raw `expired`, `endedAt` the notice's time and `summary` its `<event>` — the word MAWS's
+backfill lands on for a notification without `<status>` (`backfill.ts:678-682`); a monitor's other statusless event
+notices are no evidence, so a monitor that expired never stays `running` until its session ends.
+
+**Precedence** (the review's round 2, 2026-10-17), highest first — better evidence is never overridden by worse:
+(1) an explicit terminal outcome in a row — `completed`, `failed` or `stopped` after the table, the newest in row
+order (`evidence: rows`; for a background agent, the result row is its start and does not count). An agent is known as
+background by `meta.requestShape`, `spawn.background`, the persisted call's `input.run_in_background` (`true` or
+`"true"`; `false` proves nothing, since calls flagged false were launched async), or its result's exact launch text
+(`Async agent launched successfully.` followed by a line `agentId: …`, or a fork's `Fork started — processing in
+background`), read only on a result row with no `toolUseResult` that is not `is_error` — where one is present its status decides, since a
+foreground agent's own answer may begin with that text. Either text is `async_launched` running evidence at (3), and a
+launch without a `toolUseResult` names no `outputFile` (the panel, DC8, 2026-10-17: older launches and all forks carry no `toolUseResult`, so without these a
+cold open read them `completed` while the live view read `exited`). (2) known process death, `exited`: the session's process is gone (`session`), the parent
+agent (`meta.parentAgentId` or `spawn.parentAgentId`) has ended — a terminal status or `exited` of its own
+(`parent`) — or the bridge reports the agent stopped without a terminal word (`bridge`); (3) `running` or `pending`
+evidence, `running`: the bridge's word on an agent it holds (true from spawn, the seed or a refresh; `bridge`) or a
+row's non-terminal word (`rows`), a background agent's launch result (`toolUseResult.status` `async_launched`)
+among them, as `outcome {status: running, raw: async_launched}` (DC8, 2026-10-17: without it a background agent of
+a running session without a bridge would be `unknown` with a result in hand, none of the named cases) — and cached bridge-running evidence stops counting once the session's process is
+gone, so (2) holds then; (4) `unknown` (`none`), only with no evidence, the cases §9.3 names: a parent transcript gone
+or unreadable while the parent is not over; a running session without a bridge whose agent's call has no result,
+notification or `task_status` yet; a meta with no `toolUseId` and no spawn record. An unrecognized raw word changes
+nothing at any level. **The same status from cold and from live:** a subscription opened on an ended session
+(reconstruction from disk alone) and one that was open while the session ended reach the same statuses, so the
+producer re-derives every entry when the process goes (presence `record` null) and sends a `subagents` message for
+what changed; a `running` held from the bridge turns `exited` then. Accepted residual: a background agent resumed
+after its notification shows `completed` until its next notification, since a row's terminal word outranks the
+bridge's `running`. A job is `running` from its start row, ends on its notification, `task_status` or `TaskStop`
+through the same table, and is `exited` once the session's process is gone. The web patches these onto MAWS's task
+graph on the desk side (`task-feed.ts`), never in MAWS's `mergeSidecars`. One fixture of rows and the body they yield
+pins the plane's and the fake machine's derivations, as DX1's vectors pin its two code implementations (doperpowers
+`tests/sminos/dx4-jobs.json`, run by `jobs_parity.py`; its `about` field is normative where this prose is silent —
+unrecognized words, an Agent result's raw word, ties within a level, a job's times and summary, MCP removals before
+additions, an output window without a line break); it holds the
+module-reload case, a nested agent whose parent still runs, a cold open of an ended session holding an agent with a
+`running` status and no completion notification (`exited`), a nested agent under an ended parent (`exited`), each raw
+word of the table, a background agent of a bridgeless running session with only its `async_launched` result
+(`running`), an unknown task, a deleted output file (`missing` with its path), a monitor just started with no path
+(`missing` with `path: null`), and an output path under the original working directory's slug for a session whose
+transcript lives under another (`ok`).
+
+**`output` [2026-10-17, §9.4].** The browser asks `output {sub, taskId, tail}` (DX3); the hub carries it (DX2); the
+machine answers `output` on the sub. **Containment** (the review, 2026-10-17): the machine first derives the
+**canonical roots** for the session from its own state, never from a row — the engine's tasks directories,
+`<resolved tmp>/claude-<uid>/<slug>/<session id>/tasks/`, where `<resolved tmp>` is the realpath of
+`CLAUDE_CODE_TMPDIR` or `/tmp` as the engine resolves it (SPEC ch. 20, "the shared per-uid temp root"; `/private/tmp`
+on macOS), `<uid>` the daemon's own, `<session id>` the subscription's, and `<slug>` each of: the name of the
+transcript's project directory (`~/.claude/projects/<slug>/<session id>.jsonl`), the engine's slug (SPEC §35.2.1) of
+the working directory the session joined the log with, and the engine's slug of its session record's `cwd`. A shell
+a `--bg` takeover adopted from another session writes under that session's root, which nothing on the machine names
+(`adoptShellOutputRoot` is the engine's in-process takeover state in 2.1.300, not a setting; DC8, 2026-10-17): its
+output is refused, a known refusal, never a root read from a row. A set, not one
+root (DC8, 2026-10-17): the engine's temp directory takes the slug of the session's original working directory,
+so a session that moved into a worktree writes its outputs under one slug while its transcript lives under another
+(a family coordinator session's rows named 387 output paths under the first and 137 under the second); one root
+taken from the transcript directory would refuse most of its shells. It then serves only a task the loop's index
+holds (`unknown-task` otherwise), only at the path the session's own rows named for it — a `task_status`'s
+`outputFilePath`, a notification's `<output-file>`, a Bash result's "Output is being written to:" — and only when
+**both** hold: the path carries the suffix `<session id>/tasks/<taskId>.output`, and the realpath of the target as
+opened (symlinks resolved) equals `<realpath of one root>/<taskId>.output` exactly and is a regular file — exact, not a
+component prefix, which would accept a symlink to another task's file under the same root (DC8, 2026-10-17); the check runs again on the opened descriptor (its path, `F_GETPATH` on macOS, `/proc/self/fd` on Linux), so nothing swapped in between check and open is read, and a descriptor that cannot be named is refused. So a symlink under the root whose target keeps all three suffix
+components elsewhere (`…/<same session>/tasks/<same task>.output` under another root) is refused, an ordinary
+symlink to a file of another name is refused, and an agent task's `.output` — a symlink the engine makes into the
+agent's transcript under `~/.claude/projects/` (SPEC ch. 20) — is refused, the agent being read through its own
+subscription. A refusal is the answer's `refused` variant with its reason; a path that passes and is not there is
+`missing`. It reads the last `tail` bytes backward from the end, as the bridge child reads a tail, on the thread that
+reads pages; it never follows a path the rows did not name and never lists the directory. The deploy order: the hub
+ships before the web asks and before any uplink answers (the hub refuses an unknown frame and an unlisted kind
+`bad-shape`, the uplink passes an unknown frame by).
 
 **Settlement (confirmed by DC2, DX4's producer).** `settled.outcome` is one of `allow`, `deny`, `answered`,
 `withdrawn`. `winner` and `by` name who decided: `web` with `by` the member id; `terminal` with `by` `"terminal"`;
@@ -1961,6 +2820,11 @@ passed through as a sub's first message, and `step-end` relayed unread as `block
 `block-row` for its rows included (a subagent's `block-row` in a main-scope sub settling that block at once),
 `step-end` after every step's `block-row`s, aborted steps included, an `end`
 at `n` 0 for a subscribe it cannot serve, and a DX5 subscription the child ends (`end {discontinuity}`).
+
+**For DC8 and DC9 [2026-10-17]:** the hub lists `output` among the subscription kinds and relays it unread, as it does
+`diff`; the fake machine carries the widened `subagents` body from its recording's rows, answers `output` from a
+recording's `tasks/<taskId>.output`, and keeps answering `rows` after a replay ends (DC9's G5); the plane produces
+all of it (DC8).
 
 ### DX5 — Local bridge protocol (owner DC2; version 1 with its M2, M3 and M4 extensions and its final review, folded 2026-10-15)
 
@@ -2169,7 +3033,7 @@ M1 left them (with fw1/fw2). Changed rows are marked **[M2]**.
 
 | Op | Built | Arguments | Result |
 | --- | --- | --- | --- |
-| `steer` | M2 **[M2]** **[fw1]** | `{text}` | `{row: <uuid of the appended user row>}`. During the main turn: `$.session.append` of a user row (one text block), read at the main loop's next model request; the running tool goes on; mirrored as the transcript line `steer: <text>` (`$.ui.log`). Refused idle (`ok: false`, "no turn is running to steer: send it instead"). **[fw1]** The steer is bound to the main turn it was given in before the append is awaited. When that turn ends with `answer` and no main-loop request of it began after the row was in (or the turn ended while the append was pending, and the row then lands), the bridge submits **one wake prompt** (`asUser`) that does not repeat the steer. **[fw2]** The wake is owned by the originating turn: it is decided once the turn has ended *and* every append given in it has settled (in, refused, or failed), and is issued at most once per turn: "I added a note to the conversation while you were finishing your answer. Read it and act on it." (`STEER_WAKE`); the next request reads the row. A turn ending `aborted`/`error`/`refusal` wakes nothing. One wake per turn, however many steers |
+| `steer` | M2 **[M2]** **[fw1]** | `{text}` | `{row: <uuid of the appended user row>}`. During the main turn: `$.session.append` of a user row (one text block), read at the main loop's next model request; the running tool goes on; mirrored as the transcript line `steer: <text>` (`$.ui.log`). **[2026-10-18, doperpowers #240, 7.180.0]** The block is the line `[sminos steer from human]`, then `\n` and the text verbatim (`STEER_LINE`): the row names itself a steer, so the desk knows it positively, and no text reads as one of the bridge's other rows; the marker and note refusals #225 and DC10 added are dropped. Refused idle (`ok: false`, "no turn is running to steer: send it instead"). **[fw1]** The steer is bound to the main turn it was given in before the append is awaited. When that turn ends with `answer` and no main-loop request of it began after the row was in (or the turn ended while the append was pending, and the row then lands), the bridge submits **one wake prompt** (`asUser`) that does not repeat the steer. **[fw2]** The wake is owned by the originating turn: it is decided once the turn has ended *and* every append given in it has settled (in, refused, or failed), and is issued at most once per turn: "I added a note to the conversation while you were finishing your answer. Read it and act on it." (`STEER_WAKE`); the next request reads the row. A turn ending `aborted`/`error`/`refusal` wakes nothing. One wake per turn, however many steers |
 | `interrupt` | M2 **[M2]** **[fw1]** | — | `{turnId, stopped: [<task ids>], running: [<task ids>]}`: `$.turn.abort` on the main turn, then `TaskStop` (`$.tool.call`) on each Bash call **attributable to that turn** and running at the abort whose result names the background task the abort moved it to (`running in background with ID: <id>`; their results awaited at most 3 s). **[fw1]** Attributable: a main-loop call made during that turn, or a call of a foreground subagent spawned in it (nested foreground subagents inherit their parent's turn); a background subagent's calls never are. **[fw1]** `running` names each task whose TaskStop failed (an `isError` result or a rejection): the interrupt is incomplete when it is not empty. Idle: `{turnId: null, stopped: [], running: []}` |
 | `model` | M2 **[M2]** | `{model, effort?}` — `model` an id, a family alias, `"default"` or null; `effort` one of `low medium high xhigh max`, or null | `{model, effort}` now in force (null: the session's own). Rewritten on every **main-loop** `turn.step` request, subagents untouched; never `$.config.set`. A family alias (`haiku`, `sonnet`, `opus`, `fable`) is resolved through the session's `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`; one it does not map is refused, naming the id to use. Emits `model`; kept by the child |
 | `compact` | M2 **[M2]** | `{instructions?}` | During the main turn `{queued: true, turnId}`: held, and run inside that turn's `turn.complete` (a second while one is held keeps the first). Idle `{started: true}`: run at once. Either way the outcome follows on the stream as `compact` events carrying this command's `id` |
@@ -2263,7 +3127,7 @@ and M2 left them. Changed rows are marked **[M3]**; rows fix wave 1 changed are 
 | `settled` | M3 **[M3]** (was reserved), **[fw1]** | `request, winner, outcome, by`. `outcome` ∈ `allow \| deny \| answered \| withdrawn`. `winner` ∈ `terminal \| other \| web`. `by` is `terminal` when the terminal's answer was used, `cli` when the CLI's was (winner `other`), the member id when the web's was (winner `web`), and `bridge` for `withdrawn` (winner `other`). A passed deadline settles nothing: the request stays pending, answerable only in the terminal, until the terminal's answer settles it as `terminal` with its real outcome. Exactly one per `raised`. **[fw1] Evidence, all tied to the call's own id:** (1) the engine's `tool_decision` record for the call, which arrives at decision time: source `hook` with the bridge's handed-out decision of the same behavior means the decider; `user_temporary`, `user_permanent` or `user_reject` means the terminal, with the record's real outcome (accept is `allow`/`answered`, reject is `deny`); anything else (`user_abort`, `config`, a hook's decision the bridge did not hand out) means `withdrawn` by `bridge`. A request the bridge's interrupt aborted is `withdrawn` whatever the record says. (2) With no record within 1 s of a real call's result row, the call's transcript (its subagent's own for a subagent) once the result row is in it: a `hook_permission_decision` mark carrying the call's `toolUseID` means the hook's answer was used (then as (1) with source `hook`); none means the terminal's, with the outcome the result shows. (3) Neither available (the ask mod's dialog keeps no rows; the transcript unreadable or the result never written within about 2 s): `withdrawn` by `bridge`. A turn's end and the session's end withdraw as before. An async question answered through a dialog a press opened settles with that dialog's request: `answered` by its `by` (or `withdrawn` when the dialog's was) |
 | `block-row` | M3 **[M3]** | `uuid, turnId, agentId, step, index`: the transcript row `uuid` holds block `index` of that message. Posted from `session.append` for each response row, paired by the row's block type and the order of the step's block starts (a tool row by its call id), never by position. The child removes the block from `streaming` under the lock; later chunks of that block are ignored. A row whose block never streamed (a server tool) names none |
 | `chunk` | M1, **[M3]** | Unchanged on the wire. The child now folds each chunk into its **block** (`chunk.index`) |
-| `resync` | M1 fw1, M2, **[M3]**, **[fw1]** | `turns, streaming` (per block, as the snapshot's, **[fw1]** each entry also carrying `settled: [<index>…]`, the blocks a `block-row` settled), `agents, override, delivered`, **`pending`** (each `raised`'s fields with `t`), **`settled`** (recent settlements). The child replaces its pending set with `pending` (keeping a request's decided/closed state) and merges `settled` with its own. **[fw1]** The child keeps an entry's `settled` blocks out of the message and ignores their late chunks, and a block it saw settled itself stays settled across the resync, even when the copy does not name it (the snapshot's `streaming` entry shape is unchanged: `settled` is never shown) |
+| `resync` | M1 fw1, M2, **[M3]**, **[fw1]** | `turns, streaming` (per block, as the snapshot's, **[fw1]** each entry also carrying `settled: [<index>…]`, the blocks a `block-row` settled), `agents, override, delivered`, **`pending`** (each `raised`'s fields with `t`), **`settled`** (recent settlements). The child replaces its pending set with `pending` (keeping a request's decided/closed state) and merges `settled` with its own. **[fw1]** The child keeps an entry's `settled` blocks out of the message and ignores their late chunks, and a block it saw settled itself stays settled across the resync, even when the copy does not name it (the snapshot's `streaming` entry shape is unchanged: `settled` is never shown). **[DC8]** **`refused`**: `[{key, reason}]`, each delivery refusal the mod holds until the child has answered a post that carried it; the child records each key once, as it would the `delivered {outcome: "refused"}` event, so a refusal whose post failed still becomes the `failed` outcome (the panel, 2026-10-17). A `/clear` forgets them as it forgets `delivered` |
 
 **The mod's evidence [fw1].** The mod hooks `telemetry.log` (`{to: "collector"}`) and
 reads the engine's `tool_decision` records: `attributes.tool_use_id`, `source`, `decision`.
@@ -2483,6 +3347,36 @@ a full backlog refuses too). The child's listen backlog is 128.
   interrupt said "idle: nothing to interrupt" with exit 0, compact ran at once, and steer
   was refused as idle.
 
+#### For DC8 [2026-10-17] (owner DC8; §9, the review's findings 1 and 3)
+
+- **`resync.agents` and the `agent` events** cover agents the module did not see spawn:
+  at load the mod seeds its agent state from `$.agent.list()` (`id`, `description`,
+  `type`, `status`, `parentId`) and refreshes it while any agent runs, as
+  `hooks/mods/agents.tsx` does, emitting `agent` spawn and stop for what it learns; the
+  child's `agents` carries them with `running`. DC8 forwards that state in DX4's widened
+  `subagents`.
+- **`delivered`** gains the outcome the daemon needs: a `refused` (the engine dropped the
+  submitted prompt, `PromptSubmitResult.drop`) after a `submitted` is kept by the child
+  with its key and reason, and reported to the daemon, which records a second DX4
+  `delivery` for the key, `failed` with that reason (the child keeps `submitted` keys
+  alone today). `delivered {outcome: "entered", uuid}`, the row the submitted prompt
+  became, stays optional (DC8.G6).
+- **As built at DC8's M3 [2026-10-17]:** a seeded agent still running is `agent` spawn
+  `{agentId, parentAgentId, subagentType, description, name?}` (`name` when the engine's
+  list gives one: `AgentInfo.name?`, 2.1.300); one already over at load is a spawn then a
+  stop. The list's `completed`, `failed`, `killed` are over; `pending`, `running`,
+  `waiting`, `idle` are running; an agent that leaves the list is over. The list refreshes
+  every 500 ms while any agent runs, at each heartbeat, and when an unknown loop starts a
+  turn. The child keeps the last 100 refusals in its `<id>.json` as `refused`, each reason
+  capped at 1,000 characters; the daemon's `deliver_owed`, under the session's delivery
+  lock and for settled events only, records the second `delivery` once per key (ledger
+  `refused/<session>.json`): `failed`, "the session dropped it after taking it, so it
+  never entered the conversation: <the bridge's reason>" — after a `delivered` or an
+  `uncertain` alike, since the text never entered. `delivered {outcome: "entered",
+  uuid}` is emitted when a main-loop prompt row this plugin submitted as the human's words
+  has a first text block equal to exactly one waiting delivery's text, nothing when
+  ambiguous or rewritten; it stays on the bridge's stream (§9.7).
+
 ### DX6 — RPC shapes (owner DC3; G1; the hub's record built at M3)
 
 ```ts
@@ -2509,6 +3403,7 @@ type Rpc<N> = {
 | `spawn` | `{checkout, worktree?, brief, model?, effort?, permission_mode?}` | `{session, alias}`; the log's record of the spawn carries the RPC's `member` as `by` |
 | `retire` | `{session}` | `{}`; the log's `retired` carries the RPC's `member` as `by` (acceptance 7), never sminos's operator `""` |
 | `resume` | `{session}` | `{session}` — the same id |
+| `stop` **[DC10, 2026-10-18]** | `{session, taskId}` — a background shell's or monitor's task id, `[A-Za-z0-9_-]{1,64}` | `{taskId}`; refused `unsupported` without a bridge, `unknown-task` when the session's jobs index does not hold the task as running (checked before the claim), `failed` with the engine's message when `TaskStop` errs. The job's `stopped` arrives on the session's DX4 body, not in the result |
 
 `digest` is `{session, request, tool, input_sha256}` (DX1), `request` as the `raised` named it, opaque; `input_sha256` is
 over the `raised`'s `input` as sent, the capped input when it is `truncated`. An outcome is
@@ -2544,7 +3439,8 @@ fit its request: a deny on an async question, an `answer` to a permission prompt
 answers, answers keyed by anything but the request's own questions; caught with the digest check, from the pending
 request the bridge reports, and the bridge's own 400 for the same misfit, should one get past, is `bad-shape` too, after
 the claim), `digest-mismatch`, `not-pending` (the request is no longer pending), `unknown-checkout`,
-`above-ceiling`, `no-session`, `unsupported` (the session's kind cannot, per §5's table), `session-live` (a Resume of
+`above-ceiling`, `no-session`, `unknown-task` (a `stop` whose task the session's jobs index does not hold as a running
+shell or monitor; DC10), `unsupported` (the session's kind cannot, per §5's table), `session-live` (a Resume of
 a session live on its machine: a session's transcript lives on the machine that ran it, so "live anywhere" means any
 process of this machine holding the session, terminal or `--bg`), `idle` (a steer while no turn is running: the web offers Send instead). After a claim: `copy-started` (a Resume raced the owner reopening the session; the copy is
 stopped), `interrupted` (below), `failed` (execution failed; `message` says how).
@@ -2967,7 +3863,7 @@ What it does, as DX2 and DX4 have it:
 
   A claim left without an outcome is answered from its trace. Without one, which happens only for a scripted RPC, it
   is answered `failed: interrupted`. The default effects:
-  - `steer`: appends a user row to the running main turn and answers its uuid (`idle` with no main turn);
+  - `steer`: appends a user row to the running main turn (`[sminos steer from human]\n<text>`, the bridge's shape) and answers its uuid (`idle` with no main turn);
   - `interrupt`: answers `{turnId: <the main turn running, or null>, stopped: [], running: []}`;
   - `model`: answers what is now in force for that session, `"default"` giving null;
   - `compact`: answers `{at: "now"}` with the compaction's `start` and `end` at once, or `{at: "turn-end"}` with them
@@ -3102,7 +3998,8 @@ Folded from DC5's plan (MAWS `66eabe92`,
 `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` on `smns-erb-web`),
 written at DC5's M1 and reviewed clean with it (fix wave `16e3aaff`).
 
-Owner DC5, written at M1 (DC5.G1); binds DC6. The reference is the code under
+Owner DC5, written at M1 (DC5.G1); binds DC6, and DC9 from 2026-10-17
+(the amendments marked **[2026-10-17]** below). The reference is the code under
 `apps/desk-web/src/shell/` (`slots.ts`, `slot-fallbacks.tsx`,
 `session-plane.ts`, `sessions.ts`, `layout.ts`): where this text and those
 types ever differ, the types decide and the text is corrected. A later
@@ -3112,36 +4009,47 @@ change is a Decision Log entry that flags DC6.
 `registerSlot(name, component)` returns its unregistration and the last
 registration wins; `useSlot(name)` gives the registered component or the
 shell's fallback (a quiet note of what will be there); `resetSlots()` for
-tests. DC6 registers both slots from one `connectDepth()` called once from
+tests. DC6 registered both slots from one `connectDepth()` called once from
 `apps/desk-web/src/main.tsx`, as MAWS's `connectTranscript()` is called
-from `App.tsx`.
+from `App.tsx`; **[2026-10-17]** DC9 registers `depth` alone there
+(`connectDepth()` returns the unregistration of `registerSlot('depth',
+Depth)`), and the session view is the center's own component, not a slot:
+`ChannelView` mounts it for a direct channel on the desktop layout while
+`machineOnline !== false`. The session's main transcript is held per
+(machine, session) by one reference-counted owner
+(`depth/owner/session-owner.ts`, DC9's M3), which keeps the open-agent
+request and the status word; the center passes MAWS's `ownerLane`, and the
+Report · Transcript choice is kept per transcript key for the page's life
+(as built at DC9's M4, desk-dc9 `7e2bbe642`).
 
 | slot | props | where the shell mounts it |
 | --- | --- | --- |
-| `depth` | `{project, session: DeskSession \| null, plane: SessionPlane}` | the project view's right column while it is open; `session` is the selected direct channel's, null on the group chat and while the browser is locked |
-| `transcript` | `{project, session: DeskSession, plane: SessionPlane, range: {from: string \| null, to: string \| null}}` | a direct channel's working record, unfolded in the center at one fold (DC5's M3 mounts it); `range` is that fold's bounds, below |
+| `depth` | `{project, session: DeskSession \| null, plane: SessionPlane}` | the project view's right column while it is open; `session` is the selected direct channel's, null on the group chat and while the browser is locked. **[2026-10-17]** Its tabs are Subagents (the default), Jobs, Diff and Info, in that order (`DepthColumn.tsx`, DC9's M5); the Transcript tab is gone with the slot |
 
-**The working record's range.** The `transcript` slot draws a session's
-transcript through the to-human Presenter, and each fold hands it
-`range: {from, to}`: each end is the `src` of the exchange item bounding the
-fold — a `<message>` span's `<transcript row uuid>#<span index>`, or a
-question's call id (a raised question's `toolUseId ?? request`, DX4) — or null for an open end (the first fold's `from`; a live
-session's last fold, after its last item, has `to` null). The slot draws only
-what lies strictly between, at span granularity: a bounding message's marked
-span is excluded, and unmarked text in the same row is drawn. The shell passes
-the bounds and trims nothing.
+**[2026-10-17]** The `transcript` slot (`{project, session, plane, range}`;
+a direct channel's working record, unfolded in the center at one fold) is
+retired with the folds it drew: the center draws the session view over the
+session's shared main subscription (§9.1). `TranscriptSlotProps` and the
+fallback go with it.
+
+**The working record's range** [retired 2026-10-17]. The fold's `range:
+{from, to}` of exchange-item `src`s, clipped at span granularity, has no
+consumer once the slot is gone; the per-turn record is MAWS's projection
+over the transcript's own turns (§9.1 [binding — owner]). `range.ts` is
+deleted, and `DeskTranscript` loses its range options, its `bounds` state
+and the key suffix they added.
 
 **The session plane** (`session-plane.ts`), handed to both slots as `plane`:
 
 ```ts
 type SessionTarget = { machine: string; session: string; agentId: string | null }; // agentId null: the main thread
-type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'step-end' | 'rows' | 'subagents' | 'diff' | 'usage'>;
+type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'step-end' | 'rows' | 'subagents' | 'diff' | 'usage' | 'output'>; // output [2026-10-17]
 interface SubscriptionListener {
   message(message: SubscriptionMessage): void; // snapshot (n 0) first, then n = 1, 2, … with no gap
   reset(): void;                                // a discontinuity the client recovers from: drop what was delivered
   end(body: SessionBodies['end']): void;        // the hub ended it, or the client cannot serve it; nothing follows
 }
-interface Subscription { rows(before: string, limit: number): void; diff(): void; close(): void } // diff(): main transcript only
+interface Subscription { rows(before: string, limit: number): void; diff(): void; output(taskId: string, tail: number): void; close(): void } // diff(): main transcript only; output() [2026-10-17]: a task's output tail, answered as an `output` message
 interface SessionPlane { subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription }
 const transcriptKey: (project: string, target: { session: string; agentId: string | null }) => string;
 ```
@@ -3151,11 +4059,17 @@ a hub restart, and the hub's `end {reason: "discontinuity"}` (the bridge's
 own stream lost events) each become `reset`; the client gives the broken
 sub up, subscribes again under a fresh `sub` once the socket is up, and a
 fresh snapshot follows; a message of a given-up sub is never delivered.
-Any other `end` (machine offline, session ended, unsubscribed, error) ends
-it for good: the consumer subscribes again when it wants to, for instance
-when `DeskSession` shows the machine back. `close()` ends it silently and
-it is never re-subscribed. Older rows arrive as a `rows` message through
-`message`. The target's `agentId` scopes the subscription to one
+Any other `end` (machine offline, unsubscribed, error; `session-ended`
+at `n` 0) ends it for good: the consumer subscribes again when it wants
+to, for instance when `DeskSession` shows the machine back. **[2026-10-17]**
+A subscription whose session ends stays open, idle and pageable (DX4):
+the consumer reads the session's end from `DeskSession.presence`, keeps
+the subscription while the view is open, and closes it when the view
+goes, so a socket's 32 subscriptions are not spent on sessions nobody is
+reading. `close()` ends it silently and it is never re-subscribed. Older
+rows arrive as a `rows` message through `message`, a task's output as an
+`output` message (`output()` clamps `tail` to 1..524288 and sends nothing
+for a task id outside `[A-Za-z0-9_-]{1,64}`). The target's `agentId` scopes the subscription to one
 transcript, as DX3's `subscribe` carries it; per-block streaming
 (`block-row` settling a block when its row arrives) is the consumer's,
 passed through as DX4 has it.
@@ -3182,8 +4096,8 @@ project's connection.
 {kind: "session", session}}`, mirrored in the URL as `/`, `/p/<project>`,
 `/p/<project>/s/<session>`) and `depth: {open, width}` (default open, 380
 px, kept in the browser's `localStorage`), with `navigate(route)` and
-`setDepth(partial)`. The depth column's own tabs (transcript, subagents,
-diff, info) are DC6's state.
+`setDepth(partial)`. The depth column's own tabs (subagents, jobs, diff, info; **[2026-10-17]**
+the transcript tab moved to the center) are DC9's state, as DC6's were.
 
 **The transcript store.** DC6 imports MAWS's transcript model and
 `useTranscriptStore` as they stand (the renderer survey) and keeps each
@@ -3192,6 +4106,12 @@ built over `SessionPlane` maps `reset` to `onReset`. A transcript is live
 while its `DeskSession` has `presence.record` non-null and `machineOnline`
 not false; DC6 tells the store through `setLive(key, live)`, as MAWS's
 `transcript/shell.tsx` does.
+**[2026-10-17]** The session's main transcript is owned per (machine,
+session) by one controller the center's session view and the column share
+while either holds it, with the open-agent request and the status word on
+the same owner; the center passes `ownerLane` to `Transcript` and keeps
+the Report · Transcript choice in the transcript store's `view`, as MAWS
+does.
 
 ## Ordering & Dependency Map
 
@@ -3202,6 +4122,9 @@ DC3 hub ──G1──► DC4 uplink ──────────────�
         │                                                               ├──► recomposition
         ├──G1──► DC5 web: conversation ──G1──► DC6 web: depth ────────────┤    (acceptance 1–12)
         └──G5 (fake machine) ──► DC5.G2 and DC6 acceptance ───────────────┘
+                                                                          │
+   2026-10-17 (§9): DC7 ──► DC8 machine: history and jobs ────────────────┤──► the walk's Part I again
+                    DC6 ──► DC9 web: the session view ──(fake machine)────┘    (acceptance 11)
 ```
 
 DC1 and DC3 start at once. DC3's G1 (the protocols) is its first deliverable
@@ -3210,6 +4133,15 @@ against DC3's fake machine, so they do not wait for the machine side; the
 real two-Mac integration happens at recomposition. DC2, DC4, and DC7 change
 doperpowers; DC3, DC5, and DC6 change the MAWS repository (`apps/desk-hub`,
 `apps/desk-web`).
+DC8 and DC9 (cut 2026-10-17, §9) follow the same shape: DC9 builds
+against the contract and the fake machine, as DC5 and DC6 did, and does not
+wait for DC8's code; DC8 changes doperpowers (the plane; the bridge for its
+optional items), DC9 the MAWS repository (`apps/desk-web`; `apps/desk-hub`
+for the `output` frame and kind and the fake machine; `src/` for the two
+shared edits, as separate PRs). The one ordering between them is a deploy
+order, not a build order: the hub with `output` is deployed before any
+uplink release answers it (DX4). They meet on the deployment when the
+walk's Part I is run again.
 
 ## Risks & Mitigations
 
@@ -3240,6 +4172,28 @@ doperpowers; DC3, DC5, and DC6 change the MAWS repository (`apps/desk-hub`,
   for single users on first-party login; this unit's reason to exist is the
   project log shared by sessions and humans, the owner's machines behind
   their gateway, and the org model.
+- **The engine's transcript attachments are internal.** The jobs index
+  reads shapes no public typing names (`task_status`, `queued_command`
+  with `commandMode: "task-notification"`, `toolUseResult.backgroundTaskId`,
+  a Monitor's `toolUseResult`, `mcp_instructions_delta`), as read in
+  2.1.300–2.1.301 transcripts. A release that changes one degrades a
+  status to `unknown` or drops a job, never the transcript itself; DC8's
+  fixture pins each shape so the change is seen at the test, and the
+  bridge's live `agent` state covers running agents whatever the rows say.
+- **The open-time build is shared across threads.** The index and the
+  snapshot are built off the uplink's thread (DC8.G1), so the index is
+  shared state between the build thread and `tick`'s live extension: one
+  owner per transcript file, handed over through the queue, never read
+  half-built.
+- **Ended subscriptions count against a socket's 32.** The web closes a
+  session's subscription when its view goes (DX8); the hub's bound is
+  unchanged.
+- **Task output files live under the temporary directory** and can be
+  gone when asked for; `output` answers `missing`, never an error, and
+  the row's own text (the notification's summary) stands.
+- **A large session's agent files** (158 pairs, 1.1 GB observed) are
+  stat'ed twice a second and read only on a changed size or mtime; a
+  session that writes to many agents at once reads many files once each.
 
 ## Deferred / Out of Scope
 
@@ -3261,6 +4215,17 @@ past a busy machine's uplink, §8 unknown 3); a staging deployment, so
 measurements and proofs never switch the production Worker's org, and on
 it a re-measure of the phase-1 streaming budget from a quiet client (DC3's
 M5).
+From 2026-10-17 (§9): MCP server status in the desk (names only now;
+status is the SDK host's `mcp_status`, which no mod or transcript carries,
+though a `deferred_tools_delta` attachment names the servers that had
+failed, needed auth or were pending at the moment it was written, a "last
+known" a later unit could draw); stopping a background job from the web (a
+DX6 RPC to the bridge's `TaskStop`, optional in DC8); history left under an old session id after
+`/clear`, and sessions on a machine whose daemon predates DC8 (the web
+falls back to the log-built channel); the desk as a remote mod surface,
+until the engine adds a render call a mod can make or a surface transport
+for terminal sessions (§9.6); the bridge's `delivered.uuid` carried to the
+web, which DC8 left on the bridge's stream (§9.7; its `$.agent.list()` seed is mandatory since the review).
 
 **Explicitly out of scope (standing exclusions):** the hub storing
 transcripts (§3); hosting sessions on the SDK wire (§2); depending on
@@ -3278,6 +4243,9 @@ a hub that connects into machines (§2).
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | **merged 2026-10-16**: every task, the xhigh whole-branch panel (`895e27d1..3de8a15e`, 16 findings, 14 fixed over two reviewed waves, one left to DC5's judgment, one to tech debt) and the tail-follow rework reviewed clean; PR https://github.com/SSFSKIM/MAWS/pull/13, merge `76b1de782` at head `12ca2e89`; 287 unit tests; `e2e:desk-web` 45/45 on the Mac mini (run 38899621892) and 49/49 on Linux with WebKit (38899609623), `static,unit` 38899633797; the real-hub suite, gate group `e2e:desk-web-hub`, 16/16 on the mini (38890504759); the owner's phone walk through P2.12, P2.11 pending; residue the wrapped-key label collision (tech debt) and Safari before 27 (Decision Log); report `docs/doperpowers/plans/2026-10-15-desk-dc5-report.md` |
 | DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | **merged 2026-10-16**: M1–M3 and the branch reviewed clean (`high`, after two final fix waves); the xhigh whole-branch panel (`76b1de78..1a59b984`, 3 P2: paging that stalled on a page with no drawn rows, folds cut with a grammar other than the export's, a tool result lost across a fold boundary) fixed in one reviewed wave, its one regression fixed and re-reviewed; PR https://github.com/SSFSKIM/MAWS/pull/12, merge `1a06f2d9` at head `9dc963ab`; `src/depth` 111 unit tests; `static,unit` 38911431438, `e2e:desk-web` on the Mac mini 38912283795 and on Linux 38912751782, `e2e:desk-web-hub` 38913352891; report `docs/doperpowers/plans/2026-10-15-desk-dc6-report.md` |
 | DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`; four P2 fixed after the final review, the presence watermark among them); PR https://github.com/SSFSKIM/doperpowers/pull/196 (branch `dc7-controls`), merge `af3a5573`, 7.157.0; sminos 1740/1742 (the two load-timing assertions in TECH-DEBT), mods 298/298; Resume live 5/5 on 2.1.301; report `docs/doperpowers/plans/2026-10-15-desk-dc7-report.md` |
+| DC8 machine: history and jobs | plan: `docs/doperpowers/plans/2026-10-17-desk-dc8-machine.md` (doperpowers, branch `desk-dc8`) | **merged 2026-10-17**: M1–M4 reviewed clean; the xhigh whole-branch panel (`b8f7d197..d5a54a13`, 3 P2: a refusal lost across a resync, legacy background launches derived `completed` cold, the clear-time retry hiding a new fork) fixed in one wave, reviewer-high on the delta found one more P2 (launch text over an explicit `toolUseResult`), fixed and re-reviewed `correct`; PR https://github.com/SSFSKIM/doperpowers/pull/219, merge `13b6033c` at head `20d3e283`, 7.168.0; CI green on 8 gates (run 39065772977); shared fixture `tests/sminos/dx4-jobs.json` at `48f254aa` (80 cases, 36 planted bugs caught); rolled out to `macbook` and `mini` 2026-10-17 20:23Z, both uplinks reconnected; residue `delivered.uuid` to the web, MAWS backfill's preamble form and origin gate (S2), adopted shells' output; report `docs/doperpowers/plans/2026-10-17-desk-dc8-report.md` |
+| DC9 web: the session view | plan: `docs/doperpowers/plans/2026-10-17-desk-dc9-session-view.md` (MAWS, branch `desk-dc9`) | **merged and deployed 2026-10-18**: T0 mockups with the owner's verdicts (and the owner's look at M3–M5's shots); M1–M6 each reviewed clean; the xhigh whole-branch panel (`d94663760..79a8c812f`, 4 P2: a request notification not reaching a virtualized card, a withdrawn async question left waiting, keep-place restoring by raw index in report mode, paging stalling in report mode) fixed in one wave, reviewer-high on the delta found one more P2, fixed and re-reviewed clean; PR https://github.com/SSFSKIM/MAWS/pull/30, merge `f248aae6` at head `af6d5b8c2`; gates `static,unit` 39086239342 and `e2e:desk-web` 39086762891 on the head's tree; deployed `hub@f248aae6 web@master.f248aae6` (Worker version `0a030034`), both machines online after; S1 merged as https://github.com/SSFSKIM/MAWS/pull/26 (`67710dddd`); S2 parked on `desk-backfill-jobs` (§9.5, Decision Log); the bridge's interrupt row fixed in doperpowers #225 (7.170.0); residue in the report; report `docs/doperpowers/plans/2026-10-17-desk-dc9-report.md`, the SDE workspace and shots kept under this worktree's `.doperpowers/sde/` |
+| DC10 stop a job from the web | this document's DC10 section (machine half in doperpowers, web half in MAWS) | **cut 2026-10-18** (the owner's approval of 2026-10-17): machine half merged, https://github.com/SSFSKIM/doperpowers/pull/232, merge `717c5b0b` at head `2972de35`, 7.172.0 (reviewer-high's 2 P2 fixed, reviewer-medium on the fix `correct`; ci-gate 39099630158 on the head's tree; live stop check 16/16 on 2.1.302), rolled out to `macbook` and `mini` 2026-10-18 05:21Z; web half merged, https://github.com/SSFSKIM/MAWS/pull/31, merge `484d4283` at head `32b0eb5c2` (reviewer-medium three rounds, the last `correct`; gates 39101526541 on the head's tree after master was merged in), with a subagent's shells and monitors in its drill-in, and the fake machine reading the main loop's stop note for an agent's jobs as the plane does; deployed `hub@484d4283 web@master.484d4283` (Worker version `cbe31407`) 2026-10-18 05:54Z; shots under this worktree's `.doperpowers/sde/2026-10-18-desk-dc10/shots/` |
 
 ## Surprises & Discoveries
 
@@ -3376,6 +4344,21 @@ a hub that connects into machines (§2).
   one call. A freshly minted Access service token is refused 401 for a few
   seconds.
   Evidence: DC3's M5 `frame-cost` and report (MAWS `ebde4565`, `83756611`).
+- Observation: the MAWS report view already ships inside the component the
+  desk renders. `Transcript` applies `reportRows` whenever the store's UI
+  has `ownerLane` set and the reader has not chosen the transcript; the
+  desk never passed `ownerLane`, so the direct channel re-implemented a
+  cross-turn fold over the log instead, with a subscription per opened
+  fold. Evidence: `src/renderer/src/transcript/view/Transcript.tsx:286-298`,
+  `apps/desk-web/src/depth/view/TranscriptPane.tsx:159`,
+  `apps/desk-web/src/depth/connect.ts:12-14` (the survey, 2026-10-17).
+- Observation: each `rows` page re-parsed the whole transcript on the
+  uplink's thread, and an ended session's subscription ended at its
+  newest 512 KB, so an ended session's history was unreachable and a live
+  one's cost about 300 pages of 2.15 s each on a 156 MB, 12,704-row
+  transcript (about 11 minutes of stalled uplink). Evidence:
+  `sminos_plane.py` `page` and `rows_of`, `finish`; `sminos_uplink.py:685-691`;
+  the survey's timing run (`python3 -I`, read-only, 2026-10-17).
 
 ## Decision Log
 
@@ -3521,6 +4504,363 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The session view, history to the first line, and jobs (§9;
+  two children cut, DC8 in doperpowers and DC9 in MAWS). The owner, after
+  a day working from the desk (the walk's Part I, acceptance 11), ruled:
+  (1) **[binding — owner, 2026-10-17]** opening a session shows the MAWS
+  app's own report over the session's transcript, folded per turn
+  ("Working record · N tool calls · M messages", MAWS's `reportRows`),
+  with a Report · Transcript toggle — the per-turn shape over the
+  terminal's cross-turn folds that the log-built channel mimicked; and
+  (2) **[binding — owner, 2026-10-17]** the phone keeps messages only, the
+  log-built channel with "Working record · on a computer", reaffirming §4's
+  2026-10-15 decision. From the survey: the report already ships inside
+  the component the desk renders and was off only for want of `ownerLane`;
+  history stopped at the join (the log) and, through the plane, at an
+  ended session's newest 512 KB, each page re-parsing the whole file on
+  the uplink's thread (2.15 s per parse of a 156 MB transcript); every
+  agent that ran before the bridge loaded, and every nested one, was
+  "unknown"; no `$` API lists shells, monitors or MCP servers, but the
+  rows carry the shell and monitor lifecycle. So: DC8 builds an offset
+  index per transcript, pages and builds it off the uplink's thread (a
+  subscribe to a 254 MB transcript held that thread about 4 s on the
+  MacBook), keeps an ended
+  session's subscription pageable, builds a jobs index from the parse the
+  plane already does joined with the bridge's agent state (forwarded, not
+  dropped) and cached disk facts, carries it in the widened `subagents`
+  body, and answers `output {taskId, tail}` under a containment rule; DC9
+  builds the session view over the shared main subscription, the tail rows
+  for undelivered sends, the request cards, the fallbacks, the column's
+  agents with real status and its jobs view, the hub's `output` frame and
+  kind and the fake machine's part, retires the folds and DX8's
+  `transcript` slot, and lands the two shared MAWS edits (the ask-tool
+  classify entry; shell and monitor starts in the backfill) as separate
+  PRs. DX2, DX3 and DX4 gain `output`; DX4's `end {session-ended}` keeps
+  its `n` 0 meaning only; DX8 loses the slot and gains `output()`. The hub
+  ships before any uplink answers `output`. **Rejected:** the desk as a
+  remote mod surface — the surface protocol rides the engine's stream-json
+  control channel, held only by the process's SDK host, advertised only
+  off a remote transport, and `$.ui` has no `render`, so neither the
+  uplink nor the bridge can attach; it would also serve live sessions
+  alone and run mod handlers from the web (§9.6); revisit if the engine
+  adds a mod-callable render or a surface transport for terminal sessions.
+  Also rejected: `request_slot` rows for pending requests in the session
+  view (a work row in MAWS's derivation, folded under a closed record);
+  patching agent status inside MAWS's `mergeSidecars` (the desktop app's
+  semantics); a hub-side history buffer (§3 [binding]); the transcript on
+  the phone (§4 [binding]; it also pulls MAWS's Markdown and shiki chunk).
+  Flags DC3 (DX2, DX3, DX4's module and the fake machine, now edited by
+  DC9), DC5 (DX8, the channel's fallback), DC6 (its depth column and fold
+  are what DC9 reshapes), DC7 (DX4's producer, extended by DC8).
+  Date/Author: 2026-10-17, owner ruling (the walk's Part I) and design
+  session (the survey).
+  2026-10-17, after the adversarial review (six findings, all adopted): a
+  send's tail row stays until its transcript row is observed, matched one
+  to one by the delivery frame's `(writer, seq)` (round 1 kept an ordered
+  text-containment fallback; round 2, below, removed it), since
+  `delivered` means submitted, not written, and DC8 reports a refusal
+  after `submitted` as a `failed` delivery (§9.1, DC8.G5, DX5);
+  DC9 bridges DX4's streaming identities into the report's turn and
+  live-buffer model, which DC6's turnless tail rows never reached (§9.1,
+  DC9.G1); the `$.agent.list()` seed is mandatory and a nested agent's
+  outcome is read from its parent's transcript, so `unknown` is allowed
+  only in three named cases (§9.3, DC8.G3, DX4, DX5); `output`'s
+  containment checks the opened target's realpath against a canonical
+  root derived from machine state, besides the name suffix (§9.4, DX4,
+  DC8.G4); `output` has four explicit variants and `Job.outputFile` is
+  nullable (DX4, DX3, DX8); one normalization table and an evidence
+  precedence, from MAWS's own mappings, bind both producers, pinned by the
+  shared fixture (DX4, §9.3).
+  2026-10-17, after the review's round 2 (three findings, all adopted): a
+  web send is matched only by the frame's `(writer, seq)` or an exact row
+  uuid — an unframed row, a terminal-typed prompt, never matches it, and
+  the tail row stays, as a delivered entry if its row never comes (§9.1,
+  DC9.G1); the status precedence is terminal row outcome, then known
+  process death as `exited` (session gone, parent ended, bridge stopped
+  without a word), then running or pending evidence, which stops counting
+  once the process is gone, then `unknown`, with cold reconstruction and
+  an open view reaching the same status (DX4, §9.3, DC8.G3, DC9.G5); a
+  known task with no output file yet answers `missing` with `path: null`,
+  retry-eligible, never `refused`, which stays the containment warning
+  (DX4, §9.4, DC8.G4, DC9.G5).
+  2026-10-17, DC8's two gaps in DX4, recorded from its Decision Log: the
+  `output` containment root is a set — the slugs of the transcript's
+  project directory, of the working directory the session joined with and
+  of its session record's `cwd` — because the
+  engine's temp directory follows the session's original working
+  directory and a session that moved into a worktree splits its outputs
+  from its transcript (387 and 137 paths in one family session); one root
+  would refuse most of its shells, and a root taken from a row would undo
+  containment. A background agent's `async_launched` result is `running`
+  evidence from the rows at precedence (3), so a bridgeless running
+  session's background agent is not `unknown` with a result in hand; the
+  shared fixture pins it, and DC9's fake machine applies the same rule.
+  2026-10-17, the owner's verdicts on DC9's taste mockups
+  (`mockups/desk/09-session-view.html`): a send's delivery state sits in
+  its bubble's foot and a send that will not arrive tints the bubble,
+  over a caption under MAWS's held bubble (the owner means to suggest the
+  same style to the MAWS app, so the foot is its own component); pending
+  requests are cards inline at the transcript's tail with a "N waiting ↓"
+  pill, over a band above the composer; a job's output opens under its
+  row, over the column's whole pane; web Stop draws disabled now and is
+  the first follow-up after DC8 and DC9; the end marker as drawn. The ask
+  mod's question shows as its card at the tail while pending and as its
+  transcript row, which points to the card, then carries the answer (§9.1).
+  2026-10-17, the owner, on DC9's screenshots of the session view over a
+  copy of a real session: the Transcript side of the toggle keeps the
+  MAWS app's shape. Each finished turn folds behind its "Worked for …"
+  divider, and one click opens its tool calls. Rejected: opening every
+  turn by default. That would make the toggle's Transcript mean
+  something other than the MAWS app's, and long sessions would get much
+  longer to scroll.
+  2026-10-17, DC8's shared fixture (doperpowers `tests/sminos/dx4-jobs.json`)
+  binds both producers, its `about` normative where DX4's prose is silent;
+  `output` containment is exact — the opened target's realpath equals
+  `<realpath of one root>/<taskId>.output` — since a component prefix
+  would accept a symlink to another task's file in the same root; the
+  `$.agent.list()` seed carries `name` only when the engine's list gives
+  one (DX5 as amended; corrected at DC8's M3, which found `AgentInfo.name?`
+  in 2.1.300). At DC8's M3: the seed's and the refused delivery's shapes
+  (DX5, "As built"), and `delivered.uuid` left on the bridge's stream —
+  the frame matched all 174 observed deliveries; carrying the uuid to the
+  web is a sealed-contract change deferred (§9.7). Rejected: a `row` on
+  DX4 `delivery` now, a hub change for a case no delivery showed.
+  2026-10-17, DC9's M2: a task-notification is read in both of the
+  engine's forms — the `queued_command` attachment and a plain user row
+  whose text is the notification, written when the engine starts a turn
+  on one (76 of 300 recent transcripts) — by both producers; the shared
+  fixture gains a plain-row case (doperpowers b7511dd9). DC8's survey
+  (300 transcripts: 2,166 plain rows in main transcripts, 262 in
+  subagent ones, 838 and 162 events in no other form) set the rule: the
+  row's `origin.kind` must be `task-notification`, and a subagent's
+  transcript writes the notification behind a fixed preamble. Rejected:
+  MAWS's backfill's start-only check, which a typed prompt beginning
+  with the tag passes; that backfill also misses the preamble form, so
+  it loses nested agents' notifications (for the parked S2 work). Reading
+  the attachment alone would leave such an agent `running`, then
+  `exited`, never its terminal word.
+  2026-10-17, §9.5's backfill edit leaves DC9: its review showed backfill
+  alone gives the desktop app's disk-only sessions no shells or monitors
+  (the store reads no `session.events` for them, drops events without a
+  `seq`, and hides jobs without an engine status, by C8b's line), and
+  delivering it reverses that product line in the MAWS app; the desk
+  takes its jobs from DC8's body. The branch `desk-backfill-jobs` (with
+  its review's fixes: expiry, a re-delivered result keeping its start) is
+  parked for a MAWS-app follow-up that owns the whole feature, offered to
+  its architect. Rejected: landing the backfill without a consumer, a
+  half-feature on master that contradicts C8b's documented line.
+  2026-10-17, DC8's M4: `adoptShellOutputRoot` is struck from the
+  containment roots. In 2.1.300 it is the engine's in-process `--bg`
+  takeover state, not a setting, and nothing on the machine names it.
+  A shell adopted from another session therefore has its output refused,
+  as a known refusal. The three slug roots stay. How many adopted
+  shells fall under the original-cwd slug anyway is unmeasured.
+  Rejected: taking that root from the adopting session's rows, which
+  would undo containment.
+  2026-10-17, DC9's M5: the session view ends an open turn at an
+  interrupt marker row ("[Request interrupted by user]", and its "for
+  tool use" form), whether the interrupt came from the desk or from Esc.
+  Only 11 of 171 markers in 60 transcripts are followed by a
+  `system/turn_duration`. MAWS's backfill only clears the tool loop
+  there, and MAWS's live path ends the turn from the SDK result, which
+  the web never receives. Without this, every interrupt leaves the turn
+  reading "working" until the next prompt. The marker is an engine row,
+  read in order, and the `turn.ended` takes an id derived from its uuid
+  and position, so a reset, a rebuild or an older page replays it the
+  same way. Rejected for now: relaying the bridge's DX5 turn end as a
+  DX4 kind, which is more exact but changes a sealed contract. It is
+  kept as residue. A turn with no end row and no marker (a process
+  killed mid-turn, a cut replay) still reads "working", and is logged
+  as debt. Rejected earlier: ending a turn on idle presence, which
+  corrupted turn history.
+  2026-10-17, the bridge's interrupt row (doperpowers #225, 7.170.0).
+  The bridge wrote one row, `[Request interrupted by user from the
+  desk]` followed by "Task …" lines, which no reader takes as the
+  engine's marker. It now writes the engine's exact marker as a row of
+  its own, then a note row (where the interrupt came from, each
+  background task stopped). Both are meta rows with origin `{kind:
+  plugin, name: doperpowers}`, since a plugin cannot append any other
+  kind. A steer is the same kind of row, so the bridge refuses a steer
+  whose text is exactly a marker or begins with the old form. The desk
+  ends a turn on the exact marker from Esc (no origin) or from the
+  doperpowers plugin. It keeps reading the legacy shape strictly, and
+  draws the note row as nothing. The residual is a human steering the
+  exact marker text through an older plugin, logged as debt. Rejected:
+  telling the rows apart by an append field, since 2.1.300's
+  `$.session.append` offers none.
+  2026-10-17, DC9.G3 amended at DC9's M6. G3 said the phone's bundle is
+  measured without MAWS's Markdown and shiki chunks. But the phone's
+  log-built channel has drawn every `<message>` body through MAWS's
+  Markdown since DC5, and the owner walked that phone. What §4 binds is
+  that the phone never mounts the transcript, so G3 now holds the phone
+  to loading no transcript chunk. Rejected: plain-text messages on the
+  phone, which would make its report worse to meet a measuring line
+  that overreached. A follow-up loads shiki and KaTeX only when a
+  message holds code or math.
+  2026-10-18, DC10's machine half (doperpowers #232, 7.172.0): a stopped
+  job learns it from a note. `TaskStop` through `$.tool.call` writes no
+  transcript row, and for a main-loop task the engine queues no
+  notification. So a job stopped from the desk, or by DC8's interrupt,
+  would have read `running` until the session ended. On success the
+  bridge now appends `Task <id>, a background task, was stopped from the
+  desk: it is not running.`, and DX4's derivation reads that note, and
+  the interrupt note's "was then stopped" line, as `stopped`, each on
+  its whole text. A steer that would read as either note is refused, as
+  for the interrupt marker. The bridge refuses a stop that names an
+  agent (`TaskStop` would kill it), so agents stay out of DC10.
+  Rejected: waiting for the engine's notification, which never comes for
+  a main-loop task.
+  2026-10-18, the owner: a peer's message arrives as a peer's. The bridge
+  has submitted every log event as the human's words (`$.prompt.submit`,
+  `asUser`). So the terminal, the MAWS app and the desk all drew a
+  peer's message as the owner's prompt, and the model read it in the
+  owner's voice, approvals included. The desk's "From <name>" label only
+  covered that up. A peer's event now takes the session's inbox socket,
+  the channel native SendMessage between sessions rides. Claude Code
+  delivers it as "Another Claude session sent a message", and MAWS's
+  derivation already draws that as an `agent_message` row (`origin`
+  `peer`, `parsePeerMessage`). Only the owner's events stay the human's
+  words through the bridge. Sending is unchanged: `sminos say`, the log,
+  and the hub across machines. Rejected: having agents switch to native
+  SendMessage, which reaches only the same machine and leaves no record.
+  Also rejected: changing only how surfaces draw the row, which leaves
+  the model reading a peer in the owner's voice.
+  2026-10-18, the owner: the desk's Access session lasts 30 days
+  (`720h`, MAWS #35). At 24 h the phone was signed out every day, and
+  until #33 the desk then sat on "Connecting to the hub…" with no word of
+  why. Each deploy reconciles the application by name, so the next one
+  applies the value. Cloudflare's maximum is one month. The org's global
+  session stays 24 h, so an application token past 30 days needs a fresh
+  sign-in. Rejected: 7 days, which leaves the weekly sign-in; keeping 24
+  h with #33's banner alone.
+  2026-10-18, the owner, on what comes after phase 1 (MAWS #36, #37, #38,
+  all deferred until the walk ends):
+  - Hosting stays on Workers and Durable Objects. Cloud Run would need an
+    external store and cross-instance fan-out to rebuild what one object
+    per project gives, and its WebSockets end within 60 minutes.
+  - App-level Google sign-in is explored only if Access still causes
+    trouble after the 30-day session, and then only after a spike on the
+    installed iPhone app.
+  - Machines join with reusable, expiring tokens and name themselves.
+    A token grants membership only; an unlocked desk tab wraps the org key
+    to the new machine. Tokens carry a scope and distinct authorities:
+    projects, default policy, automatic key handover, expiry, a use cap,
+    ephemeral.
+  - The org key's authority is split so that machines verify RPCs but
+    cannot mint them.
+
+  Rejected: a join token that carries the org key, which would leave the
+  power to command every machine wherever the token is stored.
+  2026-10-18, a delivery into a running turn (doperpowers #233, another
+  session's): the bridge appends the owner's delivery as a row read at
+  the loop's next request (`$.session.append`), not as a prompt queued
+  to the turn's end (median 39 s, max 253 s observed). The engine keeps
+  that row as an `isMeta` row from the plugin, and an append can carry
+  no `asUser`. The desk counted a delivery only on the bridge's
+  `asUser` prompt or a queued command, so a Send to a busy session
+  would have stayed at the tail and its row gone undrawn. #233 is held
+  until desk-web reads a bridge meta row that opens with a whole sminos
+  frame as the delivery, drawn as "Sent during this turn". The same
+  change draws a steer's row, which was drawn as nothing. Steer rows
+  are known by exclusion from the bridge's closed set of rows (DX5),
+  pinned by a test. Rejected: the owner's message as an inbox frame
+  while busy, which would put the owner's words in a peer's shape.
+  2026-10-18, landed and rolled: doperpowers #233 (7.176.0) and #236
+  (7.177.0, the peer's message as a peer's) merged, both Macs on 7.177.0
+  with their daemons restarted; desk-web draws the bridge's wake (a row
+  whose first line is `[sminos bridge]`) as a dim system line, and a
+  delivery the bridge appended again after an Esc-rewind once, keeping
+  the later copy, the one the engine read (MAWS #42, deployed `hub@cfaba533
+  web@master.cfaba533`). Rejected for the rewind: walking the chain from
+  the leaf, which drops parallel tool results that hang off their
+  assistant, not the leaf's ancestry. Still open: the owner's message
+  after an Esc pressed in the terminal (or a Remote Control cancel) falls
+  back to the inbox frame, and the engine labels that frame as another
+  session's, not the human's. The desk draws it as the owner's; the model
+  reads it as a peer's. The desk's Interrupt does not cause it: the mod's
+  `$.turn.abort` does not set the engine's stop marker (2.1.300). The fix
+  proposed: append the owner's row and send only a wake through the inbox.
+  2026-10-18, the owner: a steer whose turn an Esc undid before the
+  session read it stays undone. It is not added to the next turn, and the
+  desk draws it dimmed, "Not read: the turn was undone", so the owner can
+  send it again as a message. A steer is guidance for the turn it was
+  sent into. Added to a later turn, it could steer different work.
+  Rejected: adding it again at the next turn start, as the bridge does for
+  a delivered message. In the same change the machine marks the rows an
+  Esc-rewind left off the live chain in DX4, and retracts rows already
+  sent. The desk drops them, except that an owner's input no on-chain row
+  repeats is drawn as undone. This retires #42's frame-line dedupe where
+  it becomes a special case.
+  2026-10-18, the off-chain marks landed as doperpowers #239 (7.179.0,
+  head 686cf6ea, green 39124943916, unmerged until the desk PR that draws
+  them is deployed). The DX4 delta is folded above under "The live chain".
+  The desk draws them by these rules:
+  - **Edited re-sends (orchestrator, within the owner's decision).** A typed
+    prompt re-sent from the same point, with nothing answered between,
+    counts as a repeat even when its text was edited. Its first wording is
+    hidden, not drawn "Not read". Steers and deliveries keep the exact-text
+    rule. Across 800 local transcripts there were 975 Esc re-send pairs: 159
+    exact repeats, 402 prefix edits, 414 other edits. Under exact text alone,
+    about 84% of re-sent prompts would draw a superseded wording dimmed,
+    which the owner had already replaced by hand.
+  - An off-chain input that an assistant row was written under was read and
+    then undone on purpose (a `/rewind`). It is hidden with its turn.
+  - Of identical undone inputs, only the last is drawn.
+  - Merge order: desk PR deployed, then #238 (7.178.0), then #239 (7.179.0),
+    then one Mac roll.
+  2026-10-18, a steer's row names itself (doperpowers #240, 7.180.0; MAWS
+  #49, deployed `hub@b4480ee6 web@master.b4480ee6`, both Macs rolled). The
+  desk knew a steer only by exclusion from the bridge's closed set of
+  rows, so any new kind of appended row would have drawn as the owner's
+  words. `$.session.append` lets the plugin set only text blocks and an
+  `agentId` (2.1.300 `AGt`, `m6r`), so the mark is a first line:
+  `[sminos steer from human]`, the line `sminos steer`'s inbox fallback
+  already opens with. The desk matches the line first and draws the words
+  without it. It falls back to exclusion for unmarked rows, which an older
+  bridge writes, and which exist for the minutes between the deploy and
+  the roll. With the line, no steer's text reads as the interrupt's marker
+  or a note, so #225's and DC10's steer refusals are dropped. The model
+  acts on the framed steer at its next request, in a terminal session and
+  in a `--bg` job (`tests/mods/live-control-check.py` on the merged tree,
+  32 of 32). Rejected:
+  pairing the row with the bridge's mirror line, a separate system row
+  that other rows can land between, and that older bridges also write.
+  The same desk change draws an async answer as the answer (above, the
+  async question), and fixes the phone's top bar: a long project name had
+  widened the whole app past the screen, pushing the status dot, the key
+  state, Menu, "Sign in again" and the composer off it. The bar is
+  `min-w-0`, and the name has an 80px floor. A steer through the inbox
+  fallback (a session with no bridge) still draws as MAWS's peer message,
+  logged as debt.
+  2026-10-18, the owner: the phone's top bar says the hub link's state
+  in a word only when it needs them ("Reconnecting", "Signed out"); Live
+  stays a bare dot (MAWS #51, deployed `hub@df318ba8 web@master.df318ba8`).
+  While the word shows, the project name's floor drops to 56px, and the
+  key state truncates first. Rejected: the word in every state, which
+  costs about 60px of name on every screen; the bare dot alone, which
+  left the owner reading a red dot without knowing it meant signed out.
+  2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
+  desk-dc8 370662a2, c81b77fc, 578b11b8):
+  - DX5's `resync` gains `refused`, so a refusal whose post failed is not
+    lost. Before, the desk kept "delivered" on a prompt the engine had
+    dropped.
+  - DX4 knows a background agent from three more sources: the persisted
+    call's flag, and the two exact launch texts. The shared fixture is
+    at c81b77fc. Without them, a cold open read older launches and every
+    fork `completed`, while the live view read `exited`.
+  - The bridge's clear-time retry no longer sets aside an agent that the
+    new conversation's own hooks name, and restores one already set
+    aside. Rejected: tech debt for the third, because hiding a live
+    agent for the rest of a session is worse than the accepted seed
+    residual.
+- Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
+  the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
+  `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
+  a secret put or rotated still waits for the owner. The two Macs enroll as `macbook` and `mini`, the walk sheet's
+  names. Rejected: the owner approving each deploy in the moment (Part F's redeploy is timed against running
+  traffic, and the earlier deploys rested on the plan's M5 rather than a direct confirmation, which the deploy
+  tooling flagged).
+  Date/Author: 2026-10-16, owner ruling.
 - Decision: A removal whose answer from the machine's object is lost is finished by the admin's Remove again, with
   nothing persisted for it in Phase 1. The object fences the credential before it answers and answers a second
   revocation of a fenced credential as it did the first, so the retried DELETE completes (pinned by a test, MAWS #20);
@@ -4425,6 +5765,70 @@ a hub that connects into machines (§2).
 
 ## Outcomes & Retrospective
 
-Pending — written when the unit closes. Closing is a RECOMPOSITION check:
-verify Parent-Level Acceptance as written — all children landed is not the
-same event — then retrospect.
+**Phase 1 closed on 2026-10-18 by recomposition.** The two-Mac walk checked Parent-Level Acceptance item by item on
+the owner's two Macs (`macbook`, `mini`) and iPhone, with the hub deployed for org `ssfskim`. The walk sheet is
+`docs/doperpowers/plans/2026-10-16-desk-recomposition-walk.md`. Parts A–H ran on 2026-10-17 between 05:57Z and
+07:27Z in the scratch project `desk-walk`. Part I was the owner's working day in MAWS, through 2026-10-18. The text
+evidence is under `docs/doperpowers/evidence/desk-walk/`: list captures, the hub's audit, per-writer counts, and the
+daemons' refusal lines.
+
+| item | verdict | evidence and notes |
+| --- | --- | --- |
+| 1 Projects | holds | Part A. Card counts matched `sminos list` on each machine (the `20261017T…` captures). Once, in A1, the card lagged about 10 s, and it did not recur. Local presence flips 0.3–0.5 s after a prompt (`sample-walk-a.txt`), so that lag lay between the uplink and the web. |
+| 2 Messages | holds | Part A, after the IPv6 fix below. |
+| 3 Questions | holds | Part B. Blocking and async questions on both machines were answered from the web: decided rows in `audit-after-B.txt`, by the owner's member, from `web`. |
+| 4 Permissions | holds | Part B: a web deny, a web allow, and a terminal deny that left the web (`audit-after-B.txt`). Deviation: B3's compound command (`mkdir && ls && rm -rf`) prompted as one. |
+| 5 Depth | holds | Part C1. |
+| 6 The three verbs | holds | Part C. The steer arrived mid-sleep and was acted on. Each of five interrupts stopped the sleep within 2 s. A send to an idle session started a turn. The finding that the model was never told of the interrupt is below. |
+| 7 Spawn, retire, resume | holds | Part D. A seat was spawned on `mini` and retired from the web. An ended terminal session showed "recorded, not delivered", and Resume brought it back in about 5 s under the same id (`D-chat-mini.txt`). |
+| 8 The machine decides | holds, by the method decided on 2026-10-16 | Part G. Live (G1, G3): a forged `human` event and a forged RPC from the browser console were refused `bad-code` by both daemons (`G-*-daemon.txt`), and the web drew the refusal banner and the audit's rejected rows (`audit-after-G.txt`). Read-only (G6) was also live (`G6-on.txt`, `G6-off.txt`). G2, G4 and G5 were shown by the suites: MAWS gate 39004066775 and doperpowers' `sminos-suites`. A stopped seat under read-only was not exercised; the owner waived it. |
+| 9 Offline | holds | Part E. With `mini`'s daemon booted out, the desk read one of two machines online and its session offline, and `mini` rejoined on bootstrap. |
+| 10 No loss across restarts | holds | Part F: a Worker redeploy, a daemon restart and a browser reload while both machines wrote a 480-event loop. Before (`F1-counts.txt`) and after convergence (`F4b-counts.txt`) every writer agreed: 8 writers, 1,051 events, nothing lost or duplicated. `F4-counts.txt` caught the import lag below before it converged. |
+| 11 The desk | holds | Part I. The owner worked about 18 hours across both Macs from the desk, in MAWS, a hub project since d7c926733. Verdict (owner, 2026-10-18): fine. The one thing that sent them to a terminal was **the working record**. |
+| 12 The phone | holds | Part H. A question pushed, the notification opened its card, and the answer "pear" continued the session and closed `mini`'s dialog. A permission pushed and was denied from the phone. |
+
+**Not verified.** The "Sign in again" round trip in the iPhone's installed app was never walked; the owner ended
+the walk first. This is the path MAWS #33 added for a lapsed Access session, and since #35 an application session
+lasts 30 days. Only the desktop browser's path has been seen working.
+
+**What the walk turned up.** Each finding below was fixed while the walk was still running.
+- **IPv6 blackhole (A2).** The MacBook's network has a global IPv6 route that is blackholed toward Cloudflare. The
+  uplink tried the AAAA addresses first, serially, and every POST timed out at 60 s. Fixed with Happy Eyeballs
+  (doperpowers #206, 7.162.2).
+- **Interrupt invisible to the model (C3).** A desk interrupt left the model no record, so it believed the killed
+  sleep was still running. #207 (7.162.3) added a record, and #225 (7.170.0) reshaped it into the engine's own
+  marker plus a note.
+- **Import lag (F).** Under load, the MacBook imported `mini`'s events up to about 5.7 minutes late, because the
+  uplink took one frame per tick. Fixed by drain-then-tick (#208, 7.162.4).
+
+Part I then turned into the working day it was meant to be, and the day produced children and fixes. Each one is in
+the Tracking Map and the Decision Log:
+- DC8 (machine history and jobs), DC9 (the session view) and DC10 (stopping a job from the web);
+- the bridge's rows: a delivery appended into a running turn (#233), and a peer's message arriving as a peer's
+  (#236);
+- the owner's message after an Esc (#238), and the live chain's off-chain marks (#239, MAWS #48);
+- the steer's own line (#240, MAWS #49);
+- the async answer drawn as the answer, and the phone's top bar (MAWS #49, #51);
+- Access lapse detection and a 30-day session (MAWS #33, #35).
+
+**Left for later.**
+- The next phase is **MAWS #52**, from the owner's verdict: the desk becomes web MAWS plus a Claude Code
+  remote-control client. It is ticketed for a discussion before any design.
+- Its likely prerequisites: MAWS #36 (sign-in and hosting), #37 (machine join tokens) and #38 (the org key's split).
+- Phase 1 residue: MAWS #43, #44 and #45, and doperpowers #94, #95 and #96.
+- The sminos org directory (doperpowers #93) is specced and being built.
+
+**Retrospective.**
+- **Real machines found what no suite did.** The suites run on loopback stand-ins and idle machines. Only the
+  owner's own hardware, under its real load, exposed a blackholed IPv6 path, an interrupt the model never heard
+  of, and an uplink that took one frame per tick. Each was found within an hour of the walk reaching it. The next
+  phase should keep a walk like this one, on the same machines.
+- **Inference was the fragile part.** At first the desk knew a steer only by exclusion, a rewound row by nothing,
+  and an interrupt by a row shape the engine's own readers did not share. Each of these became a positive mark the
+  machine writes: the steer's line, the off-chain marks, the engine's own marker. Where the desk reads a transcript,
+  the writer should mark what each row means.
+- **The standing deploy approval (2026-10-16) set the pace.** A finding went from diagnosis to a deployed fix in
+  the same sitting, while the owner kept working. The gates that bound it held: no migration, no Access change and
+  no secret without the owner.
+- **What the owner still lacks is reading, not control.** Every verb worked from the web. What sent the owner back
+  to a terminal was seeing what a session did between its messages, and that is where #52 begins.
