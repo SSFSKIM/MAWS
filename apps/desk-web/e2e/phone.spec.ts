@@ -89,6 +89,55 @@ test('@layout the grid in two columns; a project opens on its channel list, a ch
   await expect(page.getByTestId('grid')).toBeVisible();
 });
 
+test("@layout the top bar keeps a long project name readable beside its controls, and never widens the desk past the phone", async ({ page, hub }) => {
+  // A bar laid out at its content's width once set the desk's column, and with it the whole app, past the phone's edge.
+  const name = 'doperpowers-desk-residue-phone-walk';
+  await stageProject(hub);
+  hub.updateSummary(summary({ name }));
+  await seedKey(page, hub);
+  const label = page.getByTestId('top-bar-label');
+  /** At the phone's width and at the narrowest (320): the name holds its share, the controls are whole beside it. */
+  const readable = async (fits: boolean) => {
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expect(label).toBeVisible();
+      const [bar, held, controls] = [await page.getByTestId('top-bar').boundingBox(), await label.boundingBox(), await page.getByTestId('top-bar-controls').boundingBox()];
+      expect(bar!.x + bar!.width).toBeLessThanOrEqual(width);
+      expect(held!.width).toBeGreaterThanOrEqual(80); // its floor: about a dozen characters
+      expect(held!.x + held!.width).toBeLessThanOrEqual(controls!.x);
+      for (const control of ['grid-status', 'key-state', 'menu']) await expect(page.getByTestId(control)).toBeInViewport({ ratio: 1 });
+      if (fits && width === 390) await fitsTheWidth(page);
+    }
+  };
+  const list = page.getByRole('navigation', { name: 'Channels' });
+  await page.goto(`${hub.url}/p/${PROJECT}`);
+  await expect(list).toBeVisible();
+  await expect(label).toHaveText(name);
+  await readable(true);
+  await list.getByRole('button', { name: new RegExp(name) }).click();
+  await expect(page.getByRole('button', { name: `Back to ${name}` })).toBeVisible();
+  await readable(true);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+  await expect(page.getByTestId('channel-header')).toContainText('maws-45');
+  await readable(true);
+
+  // The key's state at its longest: a Lock this device could not forget. The name keeps its floor and the key's state
+  // truncates on one line.
+  await page.getByRole('button', { name: `Back to ${name}` }).click();
+  await page.evaluate(() => {
+    IDBObjectStore.prototype.delete = () => {
+      throw new DOMException('refused', 'UnknownError');
+    };
+  });
+  await page.getByTestId('key-state').click();
+  await page.getByRole('dialog', { name: 'Org key' }).getByRole('button', { name: 'Lock', exact: true }).click();
+  await expect(page.getByTestId('forget-failed')).toBeVisible();
+  await page.getByRole('button', { name: 'Close' }).click();
+  await expect(page.getByTestId('key-state')).toHaveText('Locked · key still stored');
+  await readable(false);
+  expect((await page.getByTestId('key-state').boundingBox())!.height).toBeLessThan(24); // one line
+});
+
 test('@layout an ended session shows Resume in place of the composer, and a retired one who retired it', async ({ page, hub }) => {
   await stageProject(hub);
   hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session: S.rests, kind: 'presence', sub: null, n: null, body: { record: null, bridge: true } });

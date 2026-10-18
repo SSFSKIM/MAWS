@@ -132,26 +132,34 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
       else usePhoneProject.setState({ groupChatOpen: false });
     };
     const backButton = 'flex h-9 min-w-0 items-center rounded-sm px-1.5 text-ui text-fg-muted hover:bg-bg-hover';
+    // The project's name takes the room the controls leave, and never less than a readable floor: past it the key's
+    // state truncates instead. The bar is `min-w-0`, so a long name truncates in it rather than widening the desk's
+    // column, and the whole app with it, past the phone's edge.
+    const label = 'min-w-20 flex-1';
     return (
-      <header className="flex h-[var(--toolbar-h)] items-center gap-2 border-b border-border bg-bg-raised px-3" data-testid="top-bar">
+      <header className="flex h-[var(--toolbar-h)] min-w-0 items-center gap-2 border-b border-border bg-bg-raised px-3" data-testid="top-bar">
         {title === null ? (
           <span className="px-1 text-ui-sm font-semibold tracking-[1.7px] text-fg-muted">DESK</span>
         ) : inChannel ? (
-          <button type="button" onClick={back} className={backButton} aria-label={`Back to ${title}`}>
-            <span className="truncate">‹ {title}</span>
-          </button>
+          <div className={`flex ${label}`} data-testid="top-bar-label">
+            <button type="button" onClick={back} className={backButton} aria-label={`Back to ${title}`}>
+              <span className="truncate">‹ {title}</span>
+            </button>
+          </div>
         ) : (
           <>
-            <button type="button" onClick={() => navigate({ view: 'grid' })} className={backButton} aria-label="Projects">
+            <button type="button" onClick={() => navigate({ view: 'grid' })} className={`${backButton} shrink-0`} aria-label="Projects">
               ‹ Projects
             </button>
-            <span className="min-w-0 truncate text-ui font-medium">{title}</span>
+            <span className={`${label} truncate text-ui font-medium`} data-testid="top-bar-label">
+              {title}
+            </span>
           </>
         )}
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex min-w-0 items-center gap-1" data-testid="top-bar-controls">
           <GridStatus compact />
-          <KeyButton open={open} />
-          <button type="button" onClick={() => open('menu')} className="flex h-9 items-center rounded-sm px-2 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg" data-testid="menu">
+          <KeyButton open={open} compact />
+          <button type="button" onClick={() => open('menu')} className="flex h-9 shrink-0 items-center rounded-sm px-2 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg" data-testid="menu">
             Menu
           </button>
         </div>
@@ -159,7 +167,7 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
     );
   }
   return (
-    <header className="flex h-[var(--toolbar-h)] items-center gap-3 border-b border-border bg-bg-raised px-4" data-testid="top-bar">
+    <header className="flex h-[var(--toolbar-h)] min-w-0 items-center gap-3 border-b border-border bg-bg-raised px-4" data-testid="top-bar">
       <button type="button" onClick={() => navigate({ view: 'grid' })} className="rounded-sm px-1 text-ui-sm font-semibold tracking-[1.7px] text-fg-muted hover:bg-bg-hover">
         DESK
       </button>
@@ -189,13 +197,19 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
   );
 }
 
-function KeyButton({ open }: { open: (panel: Panel) => void }) {
+/** The org key's state; `compact` (the phone's bar) keeps it to one line, truncating once the project's name is at its floor. */
+function KeyButton({ open, compact = false }: { open: (panel: Panel) => void; compact?: boolean }) {
   const keyState = useKeyHolder((s) => s.state);
   const keyNotForgotten = useKeyHolder((s) => s.forgetError !== null);
-  return (
-    <button type="button" onClick={() => open('key')} className="rounded-sm px-1 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg" data-testid="key-state" disabled={keyState === 'loading'}>
+  const text = (
+    <>
       {keyState === 'locked' ? 'Locked' : keyState === 'unlocked' ? 'Unlocked' : ''}
       {keyNotForgotten && <span className="text-danger"> · key still stored</span>}
+    </>
+  );
+  return (
+    <button type="button" onClick={() => open('key')} className={`rounded-sm px-1 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg${compact ? ' flex min-w-0' : ''}`} data-testid="key-state" disabled={keyState === 'loading'}>
+      {compact ? <span className="truncate">{text}</span> : text}
     </button>
   );
 }
