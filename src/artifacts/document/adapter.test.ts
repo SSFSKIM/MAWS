@@ -759,3 +759,24 @@ describe('a textblock moved twice', () => {
     expect(textOf(person, 'e1')).toBe('Hello');
   });
 });
+
+// P3-F document-model sweep#2 (P2): a forwarded insertion whose left neighbour's copy was deleted since the move falls
+// back to its right neighbour (then to its textblock) rather than being dropped.
+describe('a forwarded insertion whose anchor was deleted', () => {
+  it('a keystroke after a character the agent deleted from the moved copy lands before the next one', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const person = host.peer(); // has not seen the move
+    agentBatch(host, adapter, agent, agent1, [{ op: 'move', id: 'p3', after: 'c1' }]);
+    host.pull(agent);
+    transact(agent, () => nodeOf(agent, 'p3').delete(0, 1)); // the moved copy's 'A'
+    host.send(agent, agent1);
+    expect(textOf(host.live, 'p3')).toBe(' plain paragraph the human types into. Words to keep.');
+    typeAt(person, 'p3', 1, 'X'); // after the original's 'A'
+    host.send(person, human);
+    host.pull(person);
+    expect(textOf(host.live, 'p3')).toBe('X plain paragraph the human types into. Words to keep.');
+    expect(textOf(person, 'p3')).toBe(textOf(host.live, 'p3'));
+  });
+});

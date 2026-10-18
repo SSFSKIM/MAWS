@@ -299,17 +299,25 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
   }
 
   /**
-   * Inserts `text` where the forwards say its left (or right) neighbour, or its textblock, lives now; answers the slots
-   * it wrote (null when it found no place), which the caller reports as a carry of `slots` so the copied characters
-   * keep their author.
+   * Inserts `text` where the forwards say its left neighbour lives now, else (never carried, or deleted from the copy
+   * since) its right neighbour, else at the start of its textblock; answers the slots it wrote (null when it found no
+   * place), which the caller reports as a carry of `slots` so the copied characters keep their author.
    */
   function replay(registry: CarryRegistry, doc: Doc, text: string, slots: Slot[], left: Slot | null, right: Slot | null, block: Slot | null): Slot[] | null {
     const after = left && registry.resolve(left);
-    const before = !after && right ? registry.resolve(right) : null;
-    const into = !after && !before && block ? registry.resolveBlock(block) : null;
-    const at = after ? locateSlot(doc, after) : before ? locateSlot(doc, before) : into ? { node: nodeAt(doc, into)!, index: -1 } : null;
-    if (!at || !at.node) return null;
-    const index = after ? at.index + 1 : before ? at.index : 0;
+    let at = after ? locateSlot(doc, after) : null;
+    let index = at ? at.index + 1 : 0;
+    if (!at) {
+      const before = right && registry.resolve(right);
+      at = before ? locateSlot(doc, before) : null;
+      index = at ? at.index : 0;
+    }
+    if (!at) {
+      const into = block && registry.resolveBlock(block);
+      const node = into && nodeAt(doc, into);
+      at = node ? { node, index: 0 } : null;
+    }
+    if (!at) return null;
     at.node.insert(index, text, formatAt(at.node, index, isCommentKey));
     const now = deepSlotIds(at.node).slice(index, index + text.length);
     slots.forEach((slot, k) => registry.noteForward(slot, now[k]));
