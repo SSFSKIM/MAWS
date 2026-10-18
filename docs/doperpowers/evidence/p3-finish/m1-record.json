@@ -16,8 +16,8 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 7,
-    "preclosed:pending": 9,
+    "preclosed:committed": 8,
+    "preclosed:pending": 8,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -75,15 +75,15 @@
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at E2's M6 tick ba05e4680 (on master). Its wording 'the suffix pass runs after filtering' reads like the original defect, so the code was checked: src/artifacts/dashboard/render/render.ts:304-305 and :364 name series and entries over the unfiltered snapshot's domain, which is the clause.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "3622646f2b304bac7a1abc293230d3d2f4815aac"
     },
     {
       "line": 226,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at E2's M6 tick ba05e4680 (on master).",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 228,
