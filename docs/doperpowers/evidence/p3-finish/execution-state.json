@@ -1,0 +1,15 @@
+{
+  "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
+  "phase": "M1 pair 1",
+  "W-T": {
+    "status": "executing",
+    "base": "1c007d713",
+    "executor": "a57f5bfb86c7f98b3"
+  },
+  "W-RD": {
+    "status": "dispatching"
+  },
+  "commitLock": "/private/tmp/maws-p3f-commit.lock",
+  "helper": "/private/tmp/p3f-commit-row.py",
+  "paidSpendUsd": 0
+}
