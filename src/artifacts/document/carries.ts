@@ -120,8 +120,15 @@ export class CarryRegistry {
     return last;
   }
 
+  /** Where a carried textblock lives now (following re-inserts of re-inserts, as `resolve` does), or null when it was never carried. */
   resolveBlock(textblock: Slot): Slot | null {
-    return this.forwardBlock.get(slotKey(textblock)) ?? null;
+    let last: Slot | null = null;
+    let at: Slot | undefined = this.forwardBlock.get(slotKey(textblock));
+    for (let n = 0; at && n < MAX_CHAIN; n++) {
+      last = at;
+      at = this.forwardBlock.get(slotKey(at));
+    }
+    return last;
   }
 
   /** A replayed character's new slot, so the next keystroke typed after it follows. */

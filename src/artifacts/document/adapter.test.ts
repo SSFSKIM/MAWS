@@ -736,3 +736,26 @@ describe('a human drag of a block that concurrent text reached', () => {
     expect(adapter.stats().carries).toBe(1);
   });
 });
+
+// P3-F document-model sweep#1 (P2): a textblock's forward follows the chain of carries as a character's does, so a
+// keystroke into an empty paragraph the agent moved twice lands in the live copy, not the tombstoned first one.
+describe('a textblock moved twice', () => {
+  it('a keystroke into the original of an empty paragraph moved twice lands in the live copy', () => {
+    const adapter = adapterOf();
+    const seed = seedDoc();
+    transact(seed, () => body(seed).insert(order(seed).indexOf('p1') + 1, [pmnodeToDelta(schemaFor().nodes.paragraph.create({ id: 'e1' }))]));
+    const host = new Host(seed, adapter);
+    const agent = host.peer();
+    const person = host.peer(); // sees neither move
+    agentBatch(host, adapter, agent, agent1, [{ op: 'move', id: 'e1', after: 'p2' }]);
+    host.pull(agent);
+    agentBatch(host, adapter, agent, agent1, [{ op: 'move', id: 'e1', after: 'p3' }]);
+    typeAt(person, 'e1', 0, 'Hello');
+    host.send(person, human);
+    host.pull(person);
+    expect(textOf(host.live, 'e1')).toBe('Hello');
+    expect(order(host.live).filter((id) => id === 'e1')).toHaveLength(1);
+    expect(order(host.live).indexOf('e1')).toBe(order(host.live).indexOf('p3') + 1);
+    expect(textOf(person, 'e1')).toBe('Hello');
+  });
+});
