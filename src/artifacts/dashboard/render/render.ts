@@ -20,7 +20,7 @@ import { parseSpec, type ValueFormat, type ViewSpec } from '../spec';
 import { DATASET_STATES, VIEW_STATES } from '../states';
 import * as geo from './geometry';
 import { SHAPES, type Point, type Ticks } from './geometry';
-import { decimalsFor, esc, formatClock, formatInstant, formatNumber, px, unitOf, type Theme } from './svg';
+import { decimalsFor, esc, formatClock, formatInstant, formatNumber, formatValue, px, unitOf, type Theme } from './svg';
 import { textWidth, wrap } from './text';
 import { columnFormat, instantOf, overflowKey, shownColumns, transform, typedKey, type ViewColumn, type ViewData, type ViewTable } from './transform';
 
@@ -182,9 +182,9 @@ function notice(theme: Theme, message: string, caption: string, warnings: string
 function formatCell(value: Cell, column: ViewColumn | undefined, format?: ValueFormat): string {
   if (value === null) return '—';
   if (typeof value === 'number') {
-    if (format === 'percent') return `${formatNumber(value * 100, 1)}%`;
+    if (format === 'percent') return `${formatValue(value * 100, 1)}%`;
     if (format === 'text') return String(value);
-    return formatNumber(value, 2);
+    return formatValue(value, 2);
   }
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (column?.type === 'date' && format !== 'text') {

@@ -753,4 +753,19 @@ describe('labels and values at their edges (P3-F dashboard-model wave)', () => {
       expect(svg, view).not.toMatch(/undefined|NaN/);
     }
   });
+
+  // sweep#2: a measure too small for two decimals keeps its significant figures and its sign wherever its value is said
+  const small: ViewTable = { columns: [{ name: 'k', type: 'string' }, { name: 'v', type: 'number' }], rows: [['a', 0.001], ['b', -0.001], ['c', 1e-5]] };
+  it('says a small nonzero measure with its magnitude and sign: a table cell, a tip and the export preview', () => {
+    const said = ['0.001', '−0.001', '0.00001'];
+    const html = renderView({ view: 'table' }, small, theme, 't').html!;
+    expect([...html.matchAll(/<td class="dash-num">([^<]*)<\/td>/g)].map((m) => m[1])).toEqual(said);
+    expect(tips(renderView({ view: 'bar', x: 'k', y: 'v' }, small, theme, 't').svg!)).toEqual(said.map((v, i) => `${'abc'[i]} · v: ${v}`));
+    expect(layer(renderView({ view: 'line', x: 'k', y: 'v' }, small, theme, 't').svg!).map((point) => point.tip)).toEqual(said.map((v, i) => `${'abc'[i]} · v: ${v}`));
+    const preview = viewPreview({ view: 'bar', x: 'k', y: 'v' }, small, 't');
+    expect(preview.ok && preview.table.rows).toEqual(said.map((v, i) => ['abc'[i], v]));
+    // in percent too: 0.001% is not 0%
+    const percent = renderView({ view: 'table', format: { v: 'percent' } }, small, theme, 't').html!;
+    expect([...percent.matchAll(/<td class="dash-num">([^<]*)<\/td>/g)].map((m) => m[1])).toEqual(['0.1%', '−0.1%', '0.001%']);
+  });
 });

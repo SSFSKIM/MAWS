@@ -32,6 +32,18 @@ export function formatNumber(value: number, decimals = 2): string {
   return (value < 0 && Number(text) !== 0 ? MINUS : '') + body;
 }
 
+/**
+ * A cell's number as a view says it (a table or preview cell, a tip, a value label, a category's or a series' name):
+ * `formatNumber`'s, except that a nonzero value too small for `decimals` places keeps three significant figures (0.001,
+ * −0.001, 0.00001), so it never reads as 0 or loses its sign (P3-F). Axis ticks and pie shares keep fixed places.
+ */
+export function formatValue(value: number, decimals = 2): string {
+  const abs = Math.abs(value);
+  // from 1e-6 up `toPrecision` writes fixed digits; below it `formatNumber` already writes an exponent
+  if (abs >= 1e-6 && Number(abs.toFixed(decimals)) === 0) return (value < 0 ? MINUS : '') + abs.toPrecision(3).replace(/\.?0+$/, '');
+  return formatNumber(value, decimals);
+}
+
 /** The fewest decimals (0 to 6) that write every tick exactly. */
 export function decimalsFor(ticks: number[]): number {
   for (let d = 0; d <= 6; d += 1) if (ticks.every((t) => Math.abs(Math.round(t * 10 ** d) - t * 10 ** d) < 1e-6)) return d;
