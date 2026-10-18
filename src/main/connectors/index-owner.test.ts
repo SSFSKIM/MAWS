@@ -128,6 +128,7 @@ beforeEach(() => {
     reconnect: vi.fn(),
     disconnect: vi.fn(async () => ({ local: 'forgotten', host: 'confirmed', revocation: 'revoked' })),
     disconnecting: vi.fn(() => null),
+    retirements: vi.fn(() => []), // P3-F F-connectors 7
     onChange: vi.fn((listener: () => void) => {
       changeListeners.add(listener);
       return () => void changeListeners.delete(listener);

@@ -940,6 +940,7 @@ describe('a withdrawn connection’s retirement', () => {
     flow.connects[0]!.answer.resolve(grant(tokens(9)));
     expect(await replacing).toEqual({ ok: true, connectionId: FRESH, reused: false });
     expect(provider.disconnecting(SAVED)).toBe('unconfirmed');
+    expect(provider.retirements()).toEqual([SAVED]); // P3-F F-connectors 7: the replaced record's retirement, for the owner's row
     const held = prepare();
     await vi.waitFor(() => expect(closeAnswers).toHaveLength(2)); // retried for the old connection, the same floor
     expect(closes[1]).toEqual({ connectionId: SAVED, credentialEpoch: old.credentialEpoch });
@@ -948,6 +949,7 @@ describe('a withdrawn connection’s retirement', () => {
     closeAnswers = null;
     expect(credentialOf(await prepare())).toMatchObject({ connectionId: FRESH, accessToken: 'at-9' });
     expect(provider.disconnecting(SAVED)).toBeNull();
+    expect(provider.retirements()).toEqual([]);
   });
 
   it('an unanswered old close times out as unconfirmed and holds the replacement', async () => {

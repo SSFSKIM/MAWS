@@ -20,8 +20,10 @@
 //   Its end, and its start, are `connectors.serversChanged {artifactId}` to the windows that read rows: they read again.
 // - Disconnect takes a saved connection's id alone (no current source, no decryption). A retirement the host has not
 //   confirmed stays visible as its own row, retryable, after the provider has forgotten the record (`disconnecting` is the
-//   provider's, separate from `saved`). Forgetting an unreadable record withdraws, for this main's lifetime, every HTTP
-//   source without its own MAWS sign-in from automatic use (the provider's rule, Decision Log 33); the answer says so.
+//   provider's, separate from `saved`), whether the owner's Disconnect or (P3-F F-connectors 7) a Reconnect's
+//   replacement of the record started it: the provider enumerates its retirements. Forgetting an unreadable record
+//   withdraws, for this main's lifetime, every HTTP source without its own MAWS sign-in from automatic use (the
+//   provider's rule, Decision Log 33); the answer says so.
 // - P3-HD M3c2 correction: a Disconnect synchronously cancels every older owner action it could concern (the exact
 //   HTTP row a listing tied the id to; every HTTP action when no listing did), before anything awaits, so an older
 //   Connect or Reconnect never reaches the provider after a newer Disconnect. A saved record is hidden only behind a
@@ -62,7 +64,7 @@ export interface ConnectorOwnerViewer {
 
 export interface ConnectorOwnerDeps {
   direct: Pick<DirectRoute, 'resolveSource' | 'discover'>;
-  oauth: Pick<ConnectorOAuthProvider, 'state' | 'saved' | 'connect' | 'reconnect' | 'disconnect' | 'disconnecting' | 'onChange' | 'withdrawnUnattributed'> | null; // null: no OAuth of MAWS's own
+  oauth: Pick<ConnectorOAuthProvider, 'state' | 'saved' | 'connect' | 'reconnect' | 'disconnect' | 'disconnecting' | 'retirements' | 'onChange' | 'withdrawnUnattributed'> | null; // null: no OAuth of MAWS's own
   grants(artifactId: string): Promise<ConnectorGrant[]>; // the artifact's durable grants
   log?: (line: string) => void;
 }
@@ -161,7 +163,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
   const lastByKey = new Map<string, Last>();
   const lastByConnection = new Map<string, Last>();
   const labels = new Map<string, Origin | 'unreadable'>(); // what a listing last showed for a connection id
-  const retiring = new Map<string, Origin | null>(); // connections the owner disconnected, by id
+  const retiring = new Map<string, Origin | null>(); // connections being retired (the owner's or the provider's), by id
   const disconnects = new Set<string>(); // in flight
   const viewers = new Map<number, { viewer: ConnectorOwnerViewer; artifacts: Set<string> }>();
   const queries = new Set<AbortController>();
@@ -336,7 +338,13 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
         }
         shown.add(entry.connectionId);
       }
-      // forgotten connections whose withdrawal is still unconfirmed
+      // forgotten connections whose withdrawal is still unconfirmed: the owner's Disconnects and (P3-F F-connectors 7) the
+      // provider's own, a Reconnect's of the record it replaced, labelled by what a listing last showed for the id
+      for (const connectionId of oauth.retirements()) {
+        if (retiring.has(connectionId)) continue;
+        const label = labels.get(connectionId);
+        remember(retiring, connectionId, label === undefined || label === 'unreadable' ? null : label);
+      }
       for (const [connectionId, origin] of [...retiring]) {
         const disconnecting = oauth.disconnecting(connectionId);
         if (disconnecting === null) {

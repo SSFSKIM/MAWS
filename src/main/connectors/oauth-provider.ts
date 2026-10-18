@@ -113,6 +113,9 @@ export interface ConnectorOAuthProvider extends DirectCredentialPreparation {
   // A withdrawn connection's retirement still unanswered (`pending`) or answered without confirmation (`unconfirmed`):
   // until it clears, its identity is delivered nothing.
   disconnecting(connectionId: string): 'pending' | 'unconfirmed' | null;
+  // P3-F F-connectors 7: every connection whose retirement is still pending or unconfirmed, the owner's Disconnects and
+  // a Reconnect's retirement of the record it replaced alike, so the owner can show each (and its Retry).
+  retirements(): string[];
   // P3-HD M3c2 correction (the owner's seam, main-only): `listener` hears, with nothing in the notice, that something an
   // owner's row shows may differ (a flow begun or ended, a source parked, withdrawn or reconnect-bound, a retirement's
   // state, a forgotten record, the unattributed withdrawal). The owner reads the state again; nothing here is authority.
@@ -771,6 +774,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     disconnecting(connectionId) {
       return retirements.get(connectionId)?.state ?? null;
     },
+    retirements: () => [...retirements.keys()], // P3-F F-connectors 7
 
     // P3-HD M3c2 correction start: the owner's seam
     onChange(listener) {
