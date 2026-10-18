@@ -1,8 +1,8 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M1 pair 1 reviewed; preflight gate next",
+  "phase": "M1 pair1 CI repairs re-reviewed; whole named preflight rerun next",
   "W-T": {
-    "status": "review approved; authoritative union gate pending",
+    "status": "CI repairs committed and independently approved; authoritative union gate pending",
     "base": "1c007d713",
     "executor": "a57f5bfb86c7f98b3",
     "rowCommits": [
@@ -18,7 +18,9 @@
       "cleanup": "a507344cd689e05ff",
       "otherRows": "a3e84a98079cfd6a4"
     },
-    "countRemainder": "L265 five full sets, currently 0"
+    "countRemainder": "L265 five full sets, currently 0",
+    "gateFixCommit": "312a3e83d",
+    "gateFixReviewer": "ac9a488552c09c721"
   },
   "W-RD": {
     "status": "review approved; authoritative union gate pending",
@@ -40,5 +42,12 @@
   "dragDiscriminator": "prepared cce228678; not before 12Z; no wave gate pending",
   "commitLock": "/private/tmp/maws-p3f-commit.lock",
   "helper": "/private/tmp/p3f-commit-row.py",
-  "paidSpendUsd": 0
+  "paidSpendUsd": 0,
+  "preflight": {
+    "runId": 39115417793,
+    "attempt": 1,
+    "conclusion": "cancelled",
+    "bundleInspection": "passed; not extracted; not final-source evidence",
+    "repairCommit": "312a3e83d"
+  }
 }
