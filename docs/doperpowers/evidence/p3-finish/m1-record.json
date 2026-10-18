@@ -15,8 +15,7 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 122,
-    "defer:pending": 1,
+    "defer:committed": 123,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1596,7 +1595,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L263; parent Decision Log 106): Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here. Owner: the gate lane.",
       "remainingClause": "The cases join a gated group (a `voice` group or `default`'s own list) with their cost measured, or are recorded as developer-only with the reason beside them. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L263; parent Decision Log 106): Gate topology/coverage debt belongs to the gate lane; no .github or ci-kit edit here. Owner: the gate lane.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "71cf2d2e79d6a9a8d39136a630b81f9f18f1424c"
     },
     {
       "line": 272,
@@ -1606,8 +1605,8 @@
       "triageReason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L272; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "Closes exactly by an explicit verified-source Connect bootstrap that never releases ordinary calls before a successful discovery, with the reproducer as its regression. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L272; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     }
   ]
 }
