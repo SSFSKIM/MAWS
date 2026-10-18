@@ -53,11 +53,11 @@ const say = (hub: HubDouble, from: [string, string, string], to: Array<[string, 
   hub.append(PROJECT, { writer: `${from[2]}/${from[0]}`, kind: 'say', from: from[1], to: to === '*' ? '*' : to.map(([session, alias]) => ({ session, alias })), text });
 const FE: [string, string, string] = [S.works, 'maws-fe', 'SK.local'];
 
-// DC9 draws a direct channel's center on a desktop whose machine is online as its session view (MAWS's report over the
+// DC9 draws a direct channel's center wherever its machine is online as its session view (MAWS's report over the
 // session's own transcript, which this double serves only where a test hands a subscription its snapshot): the sends
 // not yet in the transcript, the pending requests and the end marker at its tail. Where a test reads the channel built
 // from the log (its scrolling, a landing on a message), the session's machine is offline, as the log's channel is
-// drawn then (and on the phone).
+// drawn then, on a desktop and on the phone alike.
 const M45: [string, string, string] = [S.asks, 'maws-45', 'mini'];
 
 test('the group chat draws the log as §4 says: messages, humans, lifecycle lines, and agent traffic folded per run', async ({ page, hub }) => {
