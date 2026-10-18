@@ -16,8 +16,8 @@
 // The conversation the engine holds (`off-chain.ts`). The machine marks the rows off the session's live chain — on the
 // snapshot and each page for their rows, on a `row` for the rows its write took off or put back — and the latest message
 // about a row says. A row off the chain is not mapped, but an owner input the session never read draws as undone
-// (`drawingOf`). When the marks, a repeat of an undone input's words, or a delivery's later copy change what is drawn
-// of the rows already mapped, the transcript is rebuilt from the held rows, as for an older page.
+// (`drawingOf`). When the marks, a repeat of an undone input, a response that reads one, or a delivery's later copy
+// change what is drawn of the rows already mapped, the transcript is rebuilt from the held rows, as for an older page.
 //
 // The stream. Chunks never reach MAWS's reducer, which pairs a streaming block with its row only by an API message id
 // that DX4's chunks lack: they go to the streaming layer (`stream/layer.ts`), and a block's text is dropped from it
@@ -67,7 +67,7 @@ import { withAppendedTurn } from './appended-turn';
 import { isMirrorLine, steerAsDrawn } from './bridge-rows';
 import { withWakeLine } from './bridge-wake';
 import { normalizeInterruptRow, withInterruptEnd } from './interrupt';
-import { drawingOf, drawingsDiffer, NONE_OFF, ownerInput, undoneEvents, type Drawing } from './off-chain';
+import { drawingOf, drawingsDiffer, isResponse, NONE_OFF, ownerInput, undoneEvents, type Drawing } from './off-chain';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
 export type TranscriptStoreApi = Pick<ReturnType<typeof createTranscriptStore>, 'getState' | 'subscribe'>;
@@ -489,9 +489,11 @@ export class DeskTranscript {
       if (model !== null && model !== this.state.getState().model) this.setModel(model);
     }
     // What is drawn of the rows already mapped changes only with the marks, an owner input (it may repeat an undone one's
-    // words), or a delivery (a later copy of a held one): then the drawing is read again, and the transcript rebuilt
-    // when it changed for any of them.
-    if (marked || (fresh && (ownerInput(row) !== null || deliveryFrame(row) !== null))) {
+    // words), a delivery (a later copy of a held one), or, while an input draws as undone, a response (the session read
+    // what it answers, and only an undone input can turn read): then the drawing is read again, and the transcript
+    // rebuilt when it changed for any of them.
+    const reads = this.drawing.undone.size > 0 && isResponse(row);
+    if (marked || (fresh && (ownerInput(row) !== null || deliveryFrame(row) !== null || reads))) {
       const drawing = drawingOf(this.rows, this.off);
       const changed = drawingsDiffer(this.drawing, drawing, fresh ? row.uuid : null);
       this.drawing = drawing;

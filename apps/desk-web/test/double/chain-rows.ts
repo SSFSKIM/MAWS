@@ -36,8 +36,14 @@ export class Chain {
     return row;
   }
 
-  prompt(text: string, parent?: JsonObject | null): JsonObject {
-    return this.row('user', { origin: { kind: 'human' }, promptId: `p${this.n}`, message: { role: 'user', content: text } }, parent);
+  /** A typed prompt: its text, or its content blocks (an image pasted alone). */
+  prompt(content: string | JsonObject[], parent?: JsonObject | null): JsonObject {
+    return this.row('user', { origin: { kind: 'human' }, promptId: `p${this.n}`, message: { role: 'user', content } }, parent);
+  }
+
+  /** The engine's own response (`<synthetic>`), written with no request: "No response requested.". */
+  synthetic(parent?: JsonObject | null): JsonObject {
+    return this.row('assistant', { message: { id: `msg_${this.tag}_${this.n}`, role: 'assistant', model: '<synthetic>', type: 'message', content: [{ type: 'text', text: 'No response requested.' }], stop_reason: 'stop_sequence', usage: { input_tokens: 0, output_tokens: 0 } } }, parent);
   }
 
   /** The attachment the engine writes under a prompt (`total_tokens_reminder`): context, never drawn. */

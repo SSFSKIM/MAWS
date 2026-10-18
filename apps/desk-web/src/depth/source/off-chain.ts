@@ -18,7 +18,8 @@
 // place, edited or not: the next one from the same point of the conversation, with no response and no other owner input
 // in between. An Esc hands the prompt back to the input box, and most go back in edited (local transcripts, 2026-10-18:
 // of 975 prompts sent again from the same point, 159 as they were), so nothing was lost. A steer or a delivery is a
-// repeat only by its words. Of several undone inputs with the same words, the last is drawn.
+// repeat only by its words, and an input with no words (a prompt of images alone) never is. Of several undone inputs
+// with the same words, the last is drawn.
 //
 // The delivery frame's dedupe (`supersededDeliveries`, MAWS PR #42) is this rule's special case under a producer that
 // marks: a delivery appended again after an Esc left its first copy off the chain, repeated by the copy on it. It is
@@ -94,6 +95,9 @@ export function ownerInput(row: JsonObject): OwnerInput | null {
   return found;
 }
 
+/** A response the model wrote: an assistant row, but not one the engine wrote itself (`<synthetic>`), which reads nothing. */
+export const isResponse = (row: JsonObject): boolean => row.type === 'assistant' && object(row.message)?.model !== '<synthetic>';
+
 /** The assistant row that issued a tool result (a user row holding a `tool_result` block), or null for any other row. */
 function resultCall(row: JsonObject): string | null {
   const content = row.type === 'user' ? object(row.message)?.content : null;
@@ -103,16 +107,15 @@ function resultCall(row: JsonObject): string | null {
 }
 
 /**
- * The rows a response was written under: the session read them. A response the engine wrote itself (`<synthetic>`)
- * reads nothing. A row the bridge appended while a tool ran goes in under the call's assistant, beside the call's result,
- * and the next response descends from the result: the request it answered read the row all the same.
+ * The rows a response was written under: the session read them. A row the bridge appended while a tool ran goes in
+ * under the call's assistant, beside the call's result, and the next response descends from the result: the request it
+ * answered read the row all the same.
  */
 function readRows(rows: readonly JsonObject[]): Set<string> {
   const read = new Set<string>();
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i];
-    const answered = row.type === 'assistant' && object(row.message)?.model !== '<synthetic>';
-    if ((answered || read.has(row.uuid as string)) && typeof row.parentUuid === 'string') read.add(row.parentUuid);
+    if ((isResponse(row) || read.has(row.uuid as string)) && typeof row.parentUuid === 'string') read.add(row.parentUuid);
   }
   const answeredCalls = new Set<string>();
   for (const row of rows) {
@@ -138,7 +141,7 @@ function promptPoints(rows: readonly JsonObject[], off: ReadonlySet<string>): Ma
     for (let step = 0; typeof point === 'string' && step < 64; step++) {
       points.set(point, at);
       const parent = byUuid.get(point);
-      if (parent === undefined || parent.type === 'assistant' || ownerInput(parent) !== null) break;
+      if (parent === undefined || isResponse(parent) || ownerInput(parent) !== null) break;
       point = parent.parentUuid;
     }
   });
@@ -153,13 +156,15 @@ export function drawingOf(rows: readonly JsonObject[], off: ReadonlySet<string>)
   if (!marked) return { hidden, undone };
   const read = readRows(rows);
   const points = promptPoints(rows, off);
-  const later = new Set<string>(); // the words of the owner inputs after this row, on the chain or drawn undone
+  // The words of the owner inputs after this row, on the chain or drawn undone. An input with no words (an image-only
+  // prompt) repeats none and is repeated by none: its images are not compared.
+  const later = new Set<string>();
   for (let at = rows.length - 1; at >= 0; at--) {
     const row = rows[at];
     const uuid = row.uuid as string;
     const owner = ownerInput(row);
     if (!off.has(uuid)) {
-      if (owner !== null) later.add(owner.words);
+      if (owner !== null && owner.words !== '') later.add(owner.words);
       continue;
     }
     const replaced = owner?.typed === true && typeof row.parentUuid === 'string' && (points.get(row.parentUuid) ?? -1) > at;
@@ -168,7 +173,7 @@ export function drawingOf(rows: readonly JsonObject[], off: ReadonlySet<string>)
       continue;
     }
     undone.add(uuid);
-    later.add(owner.words);
+    if (owner.words !== '') later.add(owner.words);
   }
   return { hidden, undone };
 }

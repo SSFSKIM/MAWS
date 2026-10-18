@@ -31,6 +31,7 @@ async function drawn(rows: JsonObject[], off: JsonObject[] = []) {
 }
 const bubbles = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'user' ? [row.text] : []));
 const user = (rows: Row[], text: string) => rows.find((row): row is User => row.kind === 'user' && row.text === text);
+const byUuid = (rows: Row[], uuid: unknown) => rows.find((row): row is User => row.kind === 'user' && row.messageUuid === uuid);
 const answers = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'assistant_text' ? [row.markdown] : []));
 
 describe('the rows off the live chain', () => {
@@ -55,20 +56,26 @@ describe('the rows off the live chain', () => {
     expect(bubbles((await drawn(c.rows)).rows)).toEqual(['List the files.', 'Now the tests.', 'Now the tests.']);
   });
 
-  it('a prompt sent again edited from the same point repeats it: drawn once, the engine’s own notice between them or not', async () => {
-    for (const notice of [false, true]) {
+  it('a prompt sent again edited from the same point repeats it: drawn once, the engine’s own notice or response between them or not', async () => {
+    for (const between of ['nothing', 'notice', 'synthetic'] as const) {
       const c = new Chain();
       c.prompt('Write a poem about rivers.');
       c.answer('Rivers run.');
       const ended = c.end();
       const first = c.prompt('Write a poem about lakes.');
       const context = c.attachment();
-      const point = notice ? c.row('system', { subtype: 'informational', content: 'Dropped a peer message: identical to the previous message from this sender.', isMeta: false, level: 'info' }, ended) : ended;
+      // A row the engine wrote itself starts the branch: its notice, or its response to no request, which reads nothing.
+      const point =
+        between === 'notice'
+          ? c.row('system', { subtype: 'informational', content: 'Dropped a peer message: identical to the previous message from this sender.', isMeta: false, level: 'info' }, ended)
+          : between === 'synthetic'
+            ? c.synthetic(ended)
+            : ended;
       c.prompt('Write a poem about lakes. Keep it short.', point);
       c.answer('Still as glass.');
       c.end();
       const { rows } = await drawn(c.rows, [first, context]);
-      expect(bubbles(rows), `notice ${notice}`).toEqual(['Write a poem about rivers.', 'Write a poem about lakes. Keep it short.']);
+      expect(bubbles(rows), between).toEqual(['Write a poem about rivers.', 'Write a poem about lakes. Keep it short.']);
       expect(user(rows, 'Write a poem about lakes. Keep it short.')).toMatchObject({ dropped: false });
     }
   });
@@ -93,6 +100,29 @@ describe('the rows off the live chain', () => {
       const { rows } = await drawn(c.rows, [first]);
       expect(user(rows, 'Write a poem about lakes.'), between).toMatchObject({ dropped: true, messageUuid: first.uuid });
     }
+  });
+
+  it('a prompt of images alone is repeated by no other: one sent later from another point leaves it drawn as not read', async () => {
+    const image = (data: string) => [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data } }];
+    const c = new Chain();
+    c.prompt('Summarize the log.');
+    c.answer('It has 3 errors.');
+    const ended = c.end();
+    const lost = c.prompt(image('iVBORw0KGgo='));
+    const context = c.attachment();
+    // From that point, a message (no prompt) the session answered; then the owner went on from there.
+    c.inboxWake('[sminos bridge]\nA note was added to the conversation.', ended);
+    c.answer('Noted.');
+    c.end();
+    c.prompt('Now the tests.');
+    c.answer('Running them.');
+    c.end();
+    const other = c.prompt(image('iVBORw0KGgoAAAANSUhEUg=='));
+    c.answer('A chart of the runs.');
+    c.end();
+    const { rows } = await drawn(c.rows, [lost, context]);
+    expect(byUuid(rows, lost.uuid)).toMatchObject({ dropped: true });
+    expect(byUuid(rows, other.uuid)).toMatchObject({ dropped: false });
   });
 
   it('a steer or a delivery is repeated only by its words: sent again edited, its first wording still draws as not read', async () => {
@@ -394,6 +424,32 @@ describe('the marks as the subscription carries them', () => {
     view.plane.send('row', { row: back, agentId: null, onChain: [dropped.uuid as string] });
     await settled();
     expect(answers(view.drawnRows())).toEqual(['The bug is in the', 'Checked.']);
+    view.close();
+  });
+
+  it('a response that reads an undone input takes it out of the drawing, though no mark changed', async () => {
+    const c = new Chain();
+    c.prompt('Check both services.');
+    const tool = (id: string) => ({ type: 'tool_use', id, name: 'Bash', input: { command: 'sleep 12', description: 'Wait' } });
+    const call = c.assistant([tool('toolu_p1'), tool('toolu_p2')]);
+    // The bridge appends under the call's assistant while the tools run. The first result goes in beside the first append;
+    // the second append, under the call too, branches there and leaves the first behind (the plane's mark), though the
+    // request after the second result reads them both.
+    const first = c.delivery('5e551e17', 'Use the staging database.', call);
+    const mirror = c.mirror('delivered', '[sminos message from human id=5e551e17]\nUse the staging database.');
+    c.result('toolu_p1', call);
+    c.delivery('6f662f28', 'Skip the cache.', call);
+    c.mirror('delivered', '[sminos message from human id=6f662f28]\nSkip the cache.');
+    const result = c.result('toolu_p2', call);
+    const view = open();
+    view.plane.send('snapshot', snapshot(c.rows, [first.uuid as string, mirror.uuid as string]));
+    await settled();
+    expect(user(view.drawnRows(), 'Use the staging database.')).toMatchObject({ dropped: true, messageUuid: first.uuid });
+    const response = c.answer('Both are up; staging used, cache skipped.', result);
+    view.plane.send('row', { row: response, agentId: null });
+    await settled();
+    expect(user(view.drawnRows(), 'Use the staging database.')).toBeUndefined();
+    expect(view.drawnRows()).toEqual(await view.fresh(c.rows, [first, mirror]));
     view.close();
   });
 
