@@ -69,7 +69,7 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
   // P3-HD M2: route D's host half over the same store and observations; its connections live for main's attachment
   const direct =
     deps.direct ??
-    new DirectCalls({ cache: statusCache, pool: new DirectConnectionPool(), store: () => store, completed: (operationId) => void emit('connectors.directOperation', { operationId }) });
+    new DirectCalls({ datasets: connectorDatasetSink({ store: () => store, requests: deps.datasetRefresh ?? null }), cache: statusCache, pool: new DirectConnectionPool(), store: () => store, completed: (operationId) => void emit('connectors.directOperation', { operationId }) });
   const storeOf = (): ArtifactStore => {
     if (!store) throw refused('unavailable', 'the artifact store could not be opened this run', {}, 'internal');
     return store;
@@ -98,7 +98,7 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
   serve('connectors.directResolve', (input) => direct.resolve(input));
   serve('connectors.directStart', (input) => direct.start(input));
   serve('connectors.directDiscover', (input) => direct.discover(input));
-  serve('connectors.directTake', ({ operationId }) => ({ outcome: direct.take(operationId) }));
+  serve('connectors.directTake', ({ operationId }) => direct.takeOperation(operationId)); // E3c
   serve('connectors.directCancel', ({ operationId }) => ({ cancelled: direct.cancel(operationId) }));
   serve('connectors.directClose', ({ connectionId, credentialEpoch }) => ({ cancelled: direct.withdraw(connectionId, credentialEpoch) }));
   // P3-HD M2 end

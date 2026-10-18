@@ -361,7 +361,7 @@ export class ConnectorBroker {
       const found = await this.agentTarget(request, tool, signal);
       if ('ok' in found) return signal.aborted ? (signal.reason as ConnectorRefusal) : found;
       const publishable = () => !signal.aborted && this.agentWork.has(work);
-      const outcome = await this.callTarget(request.artifactId, found.route, found.target, tool, args, 'call', signal, null, { sink: request.dataset, publishable });
+      const outcome = await this.callTarget(request.artifactId, found.route, found.target, tool, args, 'call', signal, null, { sink: request.dataset, publishable, appSessionId: request.appSessionId });
       return settledBy(work, outcome, request.dataset); // E3 M2 residual
     } finally {
       unbound();
@@ -489,7 +489,7 @@ export class ConnectorBroker {
   // The target's grant checked and its call made, the outcome read. `owner`: the page's window, re-read at the
   // backend's door (null for an agent's refresh). E3: `dataset`, the sink and its recheck, which only a read grant of a
   // read-only tool feeds.
-  private async callTarget(artifactId: string, route: ConnectorRouteName, target: ConnectorRouteTarget, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, signal: AbortSignal, owner: string | null, dataset?: { sink: ConnectorDatasetSink & { requestId?: string }; publishable: () => boolean }): Promise<ConnectorCallOutcome> {
+  private async callTarget(artifactId: string, route: ConnectorRouteName, target: ConnectorRouteTarget, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, signal: AbortSignal, owner: string | null, dataset?: { sink: ConnectorDatasetSink & { requestId?: string }; publishable: () => boolean; appSessionId?: string }): Promise<ConnectorCallOutcome> {
     const named = `${artifactId}'s ${tool.server} · ${tool.tool}`;
     if ((use === 'watch' || dataset) && !target.readOnly && !target.grantBacked) return invalid('notReadOnly'); // P3-HD M3b: the grant decides below
     let authorization;
@@ -508,7 +508,7 @@ export class ConnectorBroker {
       const admitted = authorization;
       const dispatched = Promise.resolve().then<ConnectorRouteAnswer | typeof ABORTED>(() => {
         if (owner !== null) this.recheckWindow(owner);
-        return signal.aborted ? ABORTED : target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode, ...(dataset && { dataset: dataset.sink, publishable: dataset.publishable }) /* E3 */ });
+        return signal.aborted ? ABORTED : target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode, ...(dataset && { dataset: dataset.sink, publishable: dataset.publishable, ...(dataset.appSessionId && { appSessionId: dataset.appSessionId }) }) /* E3 */ });
       });
       // E3 M2 residual: a dataset call, once dispatched, is settled by its route even when aborted (never raced)
       answer = await (dataset ? dispatched : unlessAborted(dispatched, signal));

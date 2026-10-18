@@ -44,6 +44,7 @@ export interface ConnectorRouteTarget {
 }
 
 export interface ConnectorRouteCallContext {
+  appSessionId?: string; // E3c: the asking session for a direct dataset refresh
   signal: AbortSignal;
   fingerprint: string;
   mode: ConnectorGrantMode;
