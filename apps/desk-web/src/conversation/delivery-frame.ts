@@ -32,6 +32,16 @@
 // the held row stays verbatim for the tail. The owner's send whose words MAWS's backfill would read as an interrupt
 // marker (`[Request interrupted by user…]` whole) keeps its frame line: without it the bubble would be read as the
 // marker, drawing nothing and stopping the turn.
+//
+// A delivered row can be on disk twice. An Esc before the model answers hands the human's prompt back to the input box,
+// and the prompt sent next goes in under the same parent: a row the bridge appended after the first one is left on a
+// branch no request reads, and the bridge appends it again (doperpowers #233, `recheckDeliveries`), the same text. Its
+// frame line names its event (`id=<msg_id>`, or the chat frame's `<writer_short>:<seq>`), so the session view draws one
+// row per frame line, the last held: the copy the engine read (`supersededDeliveries`).
+//
+// The bridge's wake is no delivery: when a turn ends with a steer or a delivered row unread, the bridge sends a prompt
+// of its own pointing the session at it, as the user or, after an Esc, through the inbox, its first line the bridge's
+// name (`isBridgeWake`). It carries no frame, so it never takes a send at the tail.
 import { parsePeerMessage, sminosFrameSender } from '@shared/engine/peer-envelope';
 import type { JsonObject } from 'desk-hub/protocol';
 import { INTERRUPT_MARKER } from '../../../../src/engine-host/normalizer-support';
@@ -92,7 +102,7 @@ const isText = (block: unknown): block is { type: 'text'; text: string } => obje
  */
 export function deliveredLines(row: JsonObject): string[] {
   const prompts = deliveredPrompts(row);
-  if (prompts === null) return [];
+  if (prompts === null || isBridgeWake(row)) return [];
   const framed = (text: string) => (text.includes('\n') ? [firstLine(text)] : []);
   if (prompts.kind === 'enveloped') return [prompts.frame];
   if (prompts.kind === 'queued') return framed(prompts.prompt);
@@ -107,12 +117,64 @@ function frameLine(prompts: Prompts): string | null {
   return text?.includes('\n') ? firstLine(text) : null;
 }
 
-/** The frame a delivered row opens with — who sent it, and whether that is the owner — or null for any other row. */
-export function deliveryFrame(row: JsonObject): { from: string; own: boolean } | null {
+/** The whole sminos frame line a delivered row opens with, or null for any other row. */
+function deliveredFrameLine(row: JsonObject): string | null {
   const prompts = deliveredPrompts(row);
   const line = prompts && frameLine(prompts);
-  const from = line ? sminosFrameSender(line) : null;
-  return from === null ? null : { from, own: from === 'human' };
+  return line && sminosFrameSender(line) !== null ? line : null;
+}
+
+/** The frame a delivered row opens with — who sent it, and whether that is the owner — or null for any other row. */
+export function deliveryFrame(row: JsonObject): { from: string; own: boolean } | null {
+  const line = deliveredFrameLine(row);
+  if (line === null) return null;
+  const from = sminosFrameSender(line)!;
+  return { from, own: from === 'human' };
+}
+
+/**
+ * The uuids of the delivered rows a later row of `rows` (oldest first) repeats the frame line of: the copy an Esc left
+ * on a dead branch, which the engine never read. The session view draws only the last copy of each.
+ */
+export function supersededDeliveries(rows: readonly JsonObject[]): Set<string> {
+  const last = new Map<string, string>();
+  const superseded = new Set<string>();
+  for (const row of rows) {
+    const line = deliveredFrameLine(row);
+    if (line === null || typeof row.uuid !== 'string') continue;
+    const earlier = last.get(line);
+    if (earlier !== undefined) superseded.add(earlier);
+    last.set(line, row.uuid);
+  }
+  return superseded;
+}
+
+/** The first line of every prompt the doperpowers bridge sends of its own to wake a session (#233: `STEER_WAKE`, `DELIVERY_WAKE`). */
+export const BRIDGE_WAKE_LINE = '[sminos bridge]';
+
+/**
+ * The bridge's wake, by its first line: its prompt as the user (`$.prompt.submit({asUser: true})`), or the inbox frame
+ * it sends after an Esc, which the engine keeps as a peer message, idle or queued into a running turn, the line opening
+ * its envelope's body.
+ */
+export function isBridgeWake(row: JsonObject): boolean {
+  let text: string | null = null;
+  if (row.type === 'user') {
+    const origin = object(row.origin);
+    const content = object(row.message)?.content;
+    if (origin?.kind === 'plugin' && origin.asUser === true) text = typeof content === 'string' ? content : Array.isArray(content) ? (content.find(isText)?.text ?? null) : null;
+    else if (origin?.kind === 'peer') text = envelopeBody(typeof content === 'string' ? content : Array.isArray(content) ? content.flatMap((block) => (isText(block) ? [block.text] : [])).join('\n') : '');
+  } else {
+    const attachment = object(row.attachment);
+    if (row.type === 'attachment' && attachment?.type === 'queued_command' && object(attachment.origin)?.kind === 'peer' && typeof attachment.prompt === 'string') text = envelopeBody(attachment.prompt);
+  }
+  return text !== null && firstLine(text) === BRIDGE_WAKE_LINE;
+}
+
+/** The body of an unframed message from another session, as the engine's envelope carries it (the wake carries no sminos frame); null for any other text. */
+function envelopeBody(text: string): string | null {
+  const envelope = parsePeerMessage(text);
+  return envelope?.kind === 'cross-session' && envelope.frame === null ? envelope.body : null;
 }
 
 /** A sender's name as Markdown text: every character Markdown could read as syntax escaped, math's `$` included. */

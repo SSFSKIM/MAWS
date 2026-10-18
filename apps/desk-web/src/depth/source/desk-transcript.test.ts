@@ -2,7 +2,7 @@
 // plane faked in-process, the live part synthesized from the recording's rows. After every message the drawn state
 // is checked for no gap and no duplicated text; at the end the store's rows equal the rows a fresh load of the same
 // point gives.
-import type { SessionBodies, SubagentMeta } from 'desk-hub/protocol';
+import type { JsonObject, SessionBodies, SubagentMeta } from 'desk-hub/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
@@ -400,6 +400,38 @@ describe('the main transcript through the session plane', () => {
     const handback = (uuid: unknown) => dividers.find((row) => row.turnId !== null && store.getState().entries[controller.key].state.turns.get(row.turnId)?.events.some((e) => 'messageUuid' in e && e.messageUuid === uuid));
     for (const at of [13, 19]) expect(handback(recording.session[at].uuid)?.origin, `row ${at}'s turn`).toBe('engine');
     expect(dividers.map((row) => row.origin)).not.toContain('peer');
+  });
+
+  it('draws a delivery the bridge appended again after an Esc once: the copy drawn leaves as the one the engine read lands', async () => {
+    // An Esc before the model answered left the first copy on a dead branch (the owner's prompt sent again went in under
+    // the same parent), and the bridge appended the delivery again (doperpowers #233), the same text.
+    const last = recording.session.at(-1)!;
+    const id = (n: number) => `e5c0e5c0-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const at = (second: number) => `2027-01-01T00:00:${String(second).padStart(2, '0')}.000Z`;
+    const base = (n: number, parent: string, second: number) => ({ uuid: id(n), parentUuid: parent, timestamp: at(second), sessionId: TARGET.session, isSidechain: false });
+    const prompt = (n: number, second: number) => ({ ...base(n, String(last.uuid), second), type: 'user', origin: { kind: 'human' }, promptId: `p${n}`, message: { role: 'user', content: 'Now the tests.' } });
+    const delivery = (n: number, parent: number, second: number) => ({ ...base(n, id(parent), second), type: 'user', isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' }, message: { role: 'user', content: [{ type: 'text', text: '[sminos message from human id=5e551e17]\nRun the suites.' }] } });
+    const rows: JsonObject[] = [
+      ...recording.session,
+      prompt(1, 10),
+      delivery(2, 1, 11),
+      { ...base(3, id(2), 12), type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
+      prompt(4, 13),
+      delivery(5, 4, 14),
+      { ...base(6, id(5), 15), type: 'assistant', message: { id: 'msg_esc_reply', role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'text', text: 'Running them.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } },
+    ];
+    const script = scriptOf(rows, null);
+    const rowAt = (n: number) => script.findIndex((item) => item.kind === 'row' && item.body.row.uuid === id(n));
+    const deliveries = () => store.getState().entries[controller.key].rows.flatMap((row) => (row.kind === 'user' && row.text === 'Run the suites.' ? [row.messageUuid] : []));
+    plane.snapshot(script, rowAt(1));
+    await settle();
+    await step(script.slice(rowAt(1), rowAt(5)));
+    expect(deliveries()).toEqual([id(2)]);
+    await step(script.slice(rowAt(5), rowAt(5) + 1));
+    await settle(); // the rebuilt source, attached
+    expect(deliveries()).toEqual([id(5)]);
+    await step(script.slice(rowAt(5) + 1));
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rows));
   });
 
   it('closes its subscription when closed', () => {

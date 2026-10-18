@@ -195,6 +195,17 @@ describe("a send at the session view's tail", () => {
     expect(tailSends(base({ entries: sends, transcript: { rows: [assistantRow('x'), appendedRow(framed(3, 'continue'))], complete: false } })).map((s) => s.key)).toEqual([`chat:${WEB}:2`]);
   });
 
+  it("is never taken by the bridge's wake (doperpowers #233), as the user or through the inbox; one appended again after an Esc is taken once", () => {
+    const send = human(1, 'x');
+    const STEER_WAKE = '[sminos bridge]\nA note was added to the conversation while you were finishing your answer. Read it and act on it.';
+    const DELIVERY_WAKE = '[sminos bridge]\nA message for you was added to the conversation while your turn was stopped, before you read it. Read it and act on it.';
+    for (const row of [userRow(STEER_WAKE), inboxRow(DELIVERY_WAKE), inboxQueued(STEER_WAKE)])
+      expect(shape(tailSends(base({ entries: [send], deliveries: delivery(1, 'delivered'), transcript: { rows: [assistantRow('x'), row], complete: false } }))), JSON.stringify(row)).toEqual([['x', 'delivered']]);
+    // The copy an Esc left on a dead branch and the one the bridge appended again carry one frame: one send, given way.
+    const twice = [assistantRow('x'), appendedRow(framed(1, 'x')), appendedRow(framed(1, 'x')), userRow(STEER_WAKE)];
+    expect(tailSends(base({ entries: [send, human(2, 'y')], deliveries: delivery(1, 'delivered'), transcript: { rows: twice, complete: false } })).map((s) => s.key)).toEqual([`chat:${WEB}:2`]);
+  });
+
   it("is never taken by a steer's row, the bridge's other rows, nor a frame on a plugin's row the engine did not keep as the bridge's append", () => {
     const send = human(1, 'x');
     for (const row of [
