@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react';
 // C8c start
 import { createRequire } from 'node:module';
 // C8c end
+import { compiledRendererSuites } from './test/support/compiled-suites'; // P3-F
 
 const alias = { '@shared': resolve(__dirname, 'src/shared'), '@artifacts': resolve(__dirname, 'src/artifacts') }; // P3-A: @artifacts
 // C8c start: `lowlight` aliased to a grammar-less build (ruled 2026-09-29, the C8c document's M1 fold (2)): the diff
@@ -37,8 +38,6 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
 ];
-// Every renderer component suite (P3-F: the `renderer-compiled` projects run them all again under the React Compiler).
-const RENDERER_COMPONENT_TESTS = 'src/renderer/src/**/*.test.tsx';
 const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',
   'src/renderer/src/sessions/resource.test.tsx', // a whole-tree mount switched across 20 sessions (gate offload, Decision Log 11)
@@ -134,10 +133,11 @@ export default defineConfig({
       // C8a start: the renderer's component suites again under the React Compiler, as electron-vite builds the app, so a
       // render that reads mutable module state (the instance map, a tool's state, a module's cache) without selecting it
       // is caught in a test. C8a compiled the panel host; C8c, C8b, E6, E4a, P3-D, P3-H, P3-F1 and E3 each added their
-      // own suites; P3-F widened it to every renderer component suite (the tracker's compiled-include row: the library's
-      // first Export of a kind never showed, its formats read from the module's cache in render, while its uncompiled
-      // suite passed). The whole-app suites keep their timing budget in a project of their own.
-      compiled({ name: 'renderer-compiled', include: [RENDERER_COMPONENT_TESTS, 'src/artifacts/design-system/**/*.test.tsx' /* P3-D M4 */], exclude: [...configDefaults.exclude, ...TIMING_RENDERER_TESTS] }),
+      // own suites; P3-F widened it to every renderer component and hook suite, `.ts` ones that render or call hooks
+      // included (test/support/compiled-suites.ts; the tracker's compiled-include row: the library's first Export of a
+      // kind never showed, its formats read from the module's cache in render, while its uncompiled hook suite passed).
+      // The whole-app suites keep their timing budget in a project of their own.
+      compiled({ name: 'renderer-compiled', include: [...compiledRendererSuites(__dirname, TIMING_RENDERER_TESTS), 'src/artifacts/design-system/**/*.test.tsx' /* P3-D M4 */], exclude: [...configDefaults.exclude, ...TIMING_RENDERER_TESTS] }),
       compiled({ name: 'renderer-compiled-timing', include: TIMING_RENDERER_TESTS, ...TIMING_TIMEOUTS }),
       // C8a end
       // The desk's hub (apps/desk-hub, DC3 of docs/doperpowers/specs/2026-10-15-desk-design.md): its own config, under
