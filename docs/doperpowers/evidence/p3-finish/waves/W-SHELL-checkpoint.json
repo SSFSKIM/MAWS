@@ -92,7 +92,7 @@
   },
   "rowResults242": {
     "source": "1cc84bf04 and e0bb59c87 product unchanged",
-    "status": "test-only3c475c9ed focused review correct; combined26 default/browser-comment GREEN pending",
+    "status": "fixture correction3c475c9ed independently reviewed and native GREEN in39156492025 default/browser-comment; product unchanged",
     "observed": "empty default source produced no fork intent/child record; browser cards remained composing with an alert/refused form phase; alert words and host log absent",
     "inferred": "no_engine_session refusal reason, and random-pin seed followed by record rebinding to PARENT; neither is an artifact-observed refusal code",
     "fixtureMismatches": [
@@ -103,5 +103,6 @@
     "correction": "faithful first parent turn and settled result/idle; matching sessionId pin; no forged transcript or product change",
     "processDeviation": "worker committed under legacy /tmp/maws-review/p2f-wt.lock, not /private/tmp/maws-p3f-commit.lock; controller release said shared lock without identifier. Exact commit is only the approved two specs, no absorbed files; empty index worker-reported. No amendment; required lock restated explicitly.",
     "decisionLog": "none; bounded replay seam unchanged"
-  }
+  },
+  "nativeUnion": "39156492025 original native groups green, static corrective retry pending; MainArea supplement recorded separately"
 }

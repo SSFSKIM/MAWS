@@ -108,5 +108,6 @@
     "recheck": "implementation fixes accepted; sole rendered-entity assertion defect corrected d62e1aece, exact one-line diff controller-verified against retained RED line71; no third review",
     "gateGreen": "pending; no pass claimed",
     "assertionFix": "d62e1aece5238ae3e04d8d77992ba83ebc9d8e4b"
-  }
+  },
+  "localGreenOmissionResolution": "local GREEN not obtained (slot wait); unit group39156492025 green, overall run red elsewhere. Original pair4 native groups green; static corrective retry pending."
 }

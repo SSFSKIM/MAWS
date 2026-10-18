@@ -1,0 +1,14 @@
+{
+  "runId": 39162779550,
+  "sourceCommit": "29bb6d09260cfbef7be2f9c84e9a83a458fae389",
+  "wrapperHead": "742e8d0540bf35a272d981fc0eff0604caadfa97",
+  "createdAt": "2026-10-18T20:19:28Z",
+  "groups": [
+    "static"
+  ],
+  "statusAtIdentityRead": "in_progress",
+  "conclusion": null,
+  "completionTask": "bcvvpuacd",
+  "afterOriginalCompletion": true,
+  "rule": "DL59 static-only corrective union; source correction tests/config only, no product change; MainArea later test supplement still needs final hand-back unit proof"
+}

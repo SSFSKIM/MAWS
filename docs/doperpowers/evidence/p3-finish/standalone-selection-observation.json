@@ -9,7 +9,7 @@
   "readiness": "L277 selectIn precedent: model paragraph equals shown paragraph and hold.base.state().unsaved===0, at default expect timeout; one existing DOM-range write unchanged; then model and DOM selected quote checked",
   "boundaries": "no timeout increase, repeated range write, model-selection command, product change or document-narrow change; no local check",
   "review": "ad7e512b27334234f correct/no material findings, static pinned f4f6a0b69..fdfe73c31; no execution",
-  "nativeStatus": "RED retained; combined26 pending",
+  "nativeStatus": "39156492025 document-app10/10, both standalone cases passed; readiness-only evidence, cause undetermined, not fixed/product/baseline",
   "recurrence": "If same signature recurs after this readiness with precondition met and selection still vanishing, its own DL59 red; master reproduction with same foreground flag owed before further repair.",
   "decisionLog": "none",
   "M0": "supplemental observation outside immutable denominator",

@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "union39156492025 active; static correction29bb6d092 reviewed correct, static-only relaunch waits for completion; MainArea full named-file88/88 verified, final unit proof remains",
+  "phase": "union39156492025 completed21green/5red; static-only39162779550 running; three bounded read-only attributions for packaged, measurements and artifact announcement",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -556,7 +556,7 @@
     "wrapperHead": "b1c6c53c2d0740a7a4eba1965da38ad68c52b4b4",
     "createdAt": "2026-10-18T18:56:55Z",
     "statusAtIdentityRead": "queued",
-    "conclusion": null,
+    "conclusion": "failure",
     "groups": [
       "static",
       "unit",
@@ -599,7 +599,7 @@
       "3c475c9ed L242 fixtures plus fdfe73c31 standalone observational readiness, ad7e512b27334234f correct"
     ],
     "acceptance": "current-source shared pair4+pair5 union, not an artificial fix-only retry or whole set; own reds use DL59 afterward",
-    "nativeGreen": "pending",
+    "nativeGreen": "original pair4 native groups all green here; static retry needed for its selected-group union; pair5 packaged/measure fronts still red",
     "fullSetCounterAdvance": false,
     "paidSpendUsd": 0,
     "viewerContext": {
@@ -672,6 +672,285 @@
       ],
       "reportedToArchitect": true,
       "method": "single queue-age check, not completion polling"
+    },
+    "recordedCompletedAt": "2026-10-18T20:24:34Z",
+    "status": "completed",
+    "completedAt": "2026-10-18T20:17:45Z",
+    "exit": 1,
+    "jobs": [
+      {
+        "name": "unit",
+        "databaseId": 117760724387,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T18:58:02Z",
+        "completedAt": "2026-10-18T19:06:10Z"
+      },
+      {
+        "name": "static",
+        "databaseId": 117760724418,
+        "status": "completed",
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T18:58:04Z",
+        "completedAt": "2026-10-18T19:01:35Z"
+      },
+      {
+        "name": "probes",
+        "databaseId": 117760724452,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T18:57:56Z",
+        "completedAt": "2026-10-18T18:58:48Z"
+      },
+      {
+        "name": "unit:darwin",
+        "databaseId": 117760724463,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:03:47Z",
+        "completedAt": "2026-10-18T19:04:27Z"
+      },
+      {
+        "name": "packaged",
+        "databaseId": 117760724566,
+        "status": "completed",
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T19:29:12Z",
+        "completedAt": "2026-10-18T19:45:03Z"
+      },
+      {
+        "name": "e2e:panel",
+        "databaseId": 117760724646,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T18:57:10Z",
+        "completedAt": "2026-10-18T18:59:10Z"
+      },
+      {
+        "name": "e2e:document-app",
+        "databaseId": 117760724650,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:02:02Z",
+        "completedAt": "2026-10-18T19:03:44Z"
+      },
+      {
+        "name": "e2e:deliverables",
+        "databaseId": 117760724656,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T18:59:12Z",
+        "completedAt": "2026-10-18T19:00:42Z"
+      },
+      {
+        "name": "e2e:browser-comment",
+        "databaseId": 117760724661,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:00:44Z",
+        "completedAt": "2026-10-18T19:02:00Z"
+      },
+      {
+        "name": "e2e:library",
+        "databaseId": 117760724673,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:06:58Z",
+        "completedAt": "2026-10-18T19:07:49Z"
+      },
+      {
+        "name": "e2e:document",
+        "databaseId": 117760724677,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:06:19Z",
+        "completedAt": "2026-10-18T19:06:57Z"
+      },
+      {
+        "name": "e2e:side",
+        "databaseId": 117760724688,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:04:28Z",
+        "completedAt": "2026-10-18T19:05:41Z"
+      },
+      {
+        "name": "e2e:to-human",
+        "databaseId": 117760724714,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:14:17Z",
+        "completedAt": "2026-10-18T19:14:51Z"
+      },
+      {
+        "name": "e2e:default",
+        "databaseId": 117760724716,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:18:01Z",
+        "completedAt": "2026-10-18T19:24:37Z"
+      },
+      {
+        "name": "e2e:browser",
+        "databaseId": 117760724741,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:16:52Z",
+        "completedAt": "2026-10-18T19:17:59Z"
+      },
+      {
+        "name": "e2e:transcript",
+        "databaseId": 117760724749,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:24:39Z",
+        "completedAt": "2026-10-18T19:29:10Z"
+      },
+      {
+        "name": "e2e:available",
+        "databaseId": 117760724767,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:05:43Z",
+        "completedAt": "2026-10-18T19:06:17Z"
+      },
+      {
+        "name": "e2e:agents",
+        "databaseId": 117760724818,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:14:53Z",
+        "completedAt": "2026-10-18T19:16:50Z"
+      },
+      {
+        "name": "e2e:document-scale",
+        "databaseId": 117760724825,
+        "status": "completed",
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T20:13:29Z",
+        "completedAt": "2026-10-18T20:17:45Z"
+      },
+      {
+        "name": "e2e:dashboard",
+        "databaseId": 117760724826,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:10:11Z",
+        "completedAt": "2026-10-18T19:14:16Z"
+      },
+      {
+        "name": "e2e:terminal",
+        "databaseId": 117760724840,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:07:52Z",
+        "completedAt": "2026-10-18T19:10:09Z"
+      },
+      {
+        "name": "e2e:design",
+        "databaseId": 117760724855,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T20:03:52Z",
+        "completedAt": "2026-10-18T20:05:27Z"
+      },
+      {
+        "name": "e2e:presentations-scale",
+        "databaseId": 117760724874,
+        "status": "completed",
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T20:05:29Z",
+        "completedAt": "2026-10-18T20:11:10Z"
+      },
+      {
+        "name": "e2e:dashboard-scale",
+        "databaseId": 117760724885,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:45:05Z",
+        "completedAt": "2026-10-18T19:53:20Z"
+      },
+      {
+        "name": "e2e:connectors-direct",
+        "databaseId": 117760724896,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:53:22Z",
+        "completedAt": "2026-10-18T20:03:50Z"
+      },
+      {
+        "name": "e2e:artifacts-perf",
+        "databaseId": 117760724946,
+        "status": "completed",
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T20:11:13Z",
+        "completedAt": "2026-10-18T20:13:27Z"
+      }
+    ],
+    "rawLogs": "/private/tmp/p3f-pair45-complete.h0El4i/logs.zip",
+    "rawLogsSha256": "1bdc6a588e328aceb43214fcb59e2c5289f2d19644875b618056080972f02d8d",
+    "reports": "/tmp/maws-review/gates/ci-55d012a2/",
+    "evidenceStatusAfterGate": "empty; no dirty evidence paths anywhere",
+    "greenGroupCounts": {
+      "unit": "20563passed/73skipped,1532files passed/7skipped",
+      "probes": "219passed",
+      "unit:darwin": "282passed/14files",
+      "e2e:document-app": "10passed, both standalone cases and restore scene passed",
+      "e2e:document": "9passed",
+      "e2e:panel": "26passed",
+      "e2e:side": "12passed",
+      "e2e:to-human": "2passed",
+      "e2e:transcript": "35passed",
+      "e2e:default": "74passed/165skipped; fork-in-place sessions.spec.ts300 passed",
+      "e2e:browser": "11passed",
+      "e2e:browser-comment": "16passed",
+      "e2e:deliverables": "12passed",
+      "e2e:library": "5passed",
+      "e2e:available": "2passed",
+      "e2e:terminal": "15passed",
+      "e2e:agents": "23passed",
+      "e2e:dashboard": "11passed",
+      "e2e:dashboard-scale": "1passed, all bounded rows met with admitted trials; loaded attempts retained",
+      "e2e:design": "14passed",
+      "e2e:connectors-direct": "15passed; not packaged proof"
+    },
+    "redGroups": [
+      "static",
+      "packaged",
+      "e2e:document-scale",
+      "e2e:presentations-scale",
+      "e2e:artifacts-perf"
+    ],
+    "remainingAttribution": {
+      "packaged": "a209e629db229083f read-only",
+      "document/presentations-scale": "a9e90f35808356d51 read-only, includes heavy generation proof",
+      "artifacts-perf": "a07742cd27dea4251 read-only, announcement and actual metrics"
+    },
+    "nativeSceneProof": {
+      "restore": "native focused/contentsFocused true at19:03:32.799Z; case and group passed; L2775/10",
+      "mustRead": "native focused/contentsFocused true at19:14:41.147Z; case passed; L1993/10",
+      "copyCut": "copy-paste editor73/73 at19:03:27.613Z; cut-paste81/81 at19:03:27.804Z; native true and assertions passed",
+      "standalone": "both cases passed, source fdfe73c31 readiness; cause remains undetermined, not product-fix/baseline",
+      "L242": "default fork case passed, browser-comment16/16; fixture corrections supplied native GREEN, product contract unchanged"
+    },
+    "measurementReadingFrame": {
+      "judgingFloor": 20,
+      "rule": "P3 DL54, gate-offload3.5;15.68/17.3 are observations, no waiver; child below10 quiet requirement is separate",
+      "perRowRequired": [
+        "value",
+        "unchanged bound",
+        "sample load",
+        "time since build step ended",
+        "mini idle load or explicit unknown"
+      ],
+      "separateCauses": [
+        "external mini load: CI-opt investigates19:33-20:17 and#157 overlap; if established, unchanged groups rerun once quiet",
+        "build tail: bounded shared test-side settle before first measured trial only after extraction/ruling; record wait/start load, still run trials and record load if budget expires",
+        "quiet-mini host mismatch: architect owns rebase-versus-repair acceptance entry, no bound edit by F"
+      ],
+      "heavy": "distinguish6-minute generation budget failure from export/validation failure, with load",
+      "mechanics": "one DL59 combined relaunch of four Mac reds after approved corrections, union with21greens plus static retry; no measurement fix committed before per-row extraction",
+      "packaged": "L255 attribution independent"
     }
   },
   "postPartitionIncomingRows": {
@@ -681,5 +960,24 @@
     "DC9": "desk-owned, no action",
     "MainArea": "test-only e3f5ce79a committed after union launch; residual-timer RED and final10 named test instances verified; applied-source review correct; hand-back unit and CI-opt repeated-run clause remain",
     "decisionLog": "none"
+  },
+  "pair45StaticRetry": {
+    "runId": 39162779550,
+    "sourceCommit": "29bb6d09260cfbef7be2f9c84e9a83a458fae389",
+    "wrapperHead": "742e8d0540bf35a272d981fc0eff0604caadfa97",
+    "createdAt": "2026-10-18T20:19:28Z",
+    "groups": [
+      "static"
+    ],
+    "statusAtIdentityRead": "in_progress",
+    "conclusion": null,
+    "completionTask": "bcvvpuacd",
+    "afterOriginalCompletion": true,
+    "rule": "DL59 static-only corrective union; source correction tests/config only, no product change; MainArea later test supplement still needs final hand-back unit proof"
+  },
+  "pair45NativeCounts": {
+    "L277": 5,
+    "L199MustRead": 3,
+    "fullSets": 0
   }
 }
