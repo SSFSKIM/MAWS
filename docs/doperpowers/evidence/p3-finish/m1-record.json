@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 104,
-    "defer:pending": 19,
+    "defer:committed": 105,
+    "defer:pending": 18,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1398,7 +1398,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L177; parent Decision Log 106): Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely. Owner: P4.",
       "remainingClause": "C's parse5 pin reused on the host once C lands, or a lighter structural check. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L177; parent Decision Log 106): Canon validation/lifeline construction is a larger independent hardening change than this deadline can carry completely. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "807f855bd651c3b58f90b6ee04c79fcaa0ed0611"
     },
     {
       "line": 178,
@@ -1408,8 +1408,8 @@
       "triageReason": "Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L178; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
       "remainingClause": "Moved to `e2e/support`, L adopting it first. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L178; parent Decision Log 106): Refactor/duplication with no current defect; do not spend the finish deadline replacing working internals. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 179,
