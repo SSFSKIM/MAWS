@@ -1035,6 +1035,7 @@
   "quietRelaunch": {
     "script": "/private/tmp/p3f-pair45-mac-relaunch.sh",
     "groups": [
+      "static",
       "packaged",
       "e2e:presentations-scale",
       "e2e:artifacts-perf",
@@ -1043,6 +1044,8 @@
     "launched": false,
     "permissionCondition": "architect relay after CI-opt sees no manim scenes and mini load<5 twice30s apart; not yet received",
     "knownBackground": "one-core diagnostic loop and sminos daemon remain; record per-row start load",
-    "hold": "manim-master-fa capped since20:29Z and quiet flag set per architect, not itself the quiet release"
+    "hold": "manim-master-fa capped since20:29Z and quiet flag set per architect, not itself the quiet release",
+    "class1a": "pool; no unit job, MainArea full-unit obligation stays with hand-back",
+    "review": "a6c00dc1f0a527021 reviewing d81b68a67..d31423307, calibration and approval diagnostic"
   }
 }

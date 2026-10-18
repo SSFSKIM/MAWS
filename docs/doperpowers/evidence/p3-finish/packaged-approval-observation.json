@@ -10,5 +10,7 @@
   "grantedHardening": "child/request identities and public pending/answer states around existing single Allow click; same20s and assertions, no extra click/sleep/timeout/skip/direct answer/product/SDK change",
   "worker": "aac7ba2e85a9e839c",
   "acceptance": "quiet combined relaunch is gate; recurrence with evidence becomes product row, pass is one unreproduced observation never fixed",
-  "decisionLog": "none"
+  "decisionLog": "none",
+  "diagnosticCommit": "d31423307afbd479adaebaa9fa62e78c02cba81b",
+  "review": "a6c00dc1f0a527021 running; no local execution"
 }
