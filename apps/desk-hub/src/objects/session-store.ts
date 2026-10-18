@@ -9,7 +9,7 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS presence (machine TEXT NOT NULL, session TEXT NOT NULL, message TEXT NOT NULL, PRIMARY KEY (machine, session));
 CREATE TABLE IF NOT EXISTS leases (
   machine TEXT PRIMARY KEY, generation INTEGER NOT NULL, expires INTEGER NOT NULL, online INTEGER NOT NULL, closed INTEGER NOT NULL,
-  follow INTEGER NOT NULL DEFAULT 0);
+  follow INTEGER NOT NULL DEFAULT 0, client TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS machine_presence (machine TEXT PRIMARY KEY, body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pending (
   machine TEXT NOT NULL, session TEXT NOT NULL, request TEXT NOT NULL, raised TEXT NOT NULL, deadline INTEGER,
@@ -37,11 +37,12 @@ const SETTLED_MS = 30 * 24 * 3600 * 1000;
 
 /** `closed`: the stream it belongs to closed, so nothing of that generation renews it again (a lapse alone may be
  * renewed: a daemon back from a suspension on a stream that held). `follow`: its latest `hello` said the machine only
- * follows the project (DX2 `hello.follow`), so it counts toward none of the project's machines. */
-export type Lease = { machine: string; generation: number; expires: number; online: boolean; closed: boolean; follow: boolean };
-type LeaseRow = { machine: string; generation: number; expires: number; online: number; closed: number; follow: number };
+ * follows the project (DX2 `hello.follow`), so it counts toward none of the project's machines. `client`: the credential
+ * (Access client id) of the stream that opened it, which tells one enrollment of the name from another. */
+export type Lease = { machine: string; client: string; generation: number; expires: number; online: boolean; closed: boolean; follow: boolean };
+type LeaseRow = { machine: string; client: string; generation: number; expires: number; online: number; closed: number; follow: number };
 const leaseOf = (row: LeaseRow): Lease => ({ ...row, online: row.online === 1, closed: row.closed === 1, follow: row.follow === 1 });
-const LEASE_COLUMNS = 'machine, generation, expires, online, closed, follow';
+const LEASE_COLUMNS = 'machine, generation, expires, online, closed, follow, client';
 export type PendingRow = { machine: string; raised: Raised; deadline: number | null };
 export type RpcRecord = { nonce: string; machine: string; member: string; rpc: Rpc; state: RpcState; outcome: RpcOutcome | null; generation: number };
 export type Route = { sub: string; socket: string; machine: string; session: string; agentId: string | null; generation: number };
@@ -49,9 +50,10 @@ export type Route = { sub: string; socket: string; machine: string; session: str
 export class SessionStore {
   constructor(private readonly storage: DurableObjectStorage) {
     storage.sql.exec(SCHEMA);
-    // A project stored before follow-only hellos: every lease it holds is a holder's.
+    // A project stored before follow-only hellos: every lease it holds is a holder's, of a credential it did not keep.
     const columns = storage.sql.exec<{ name: string }>('PRAGMA table_info(leases)').toArray().map((c) => c.name);
     if (!columns.includes('follow')) storage.sql.exec('ALTER TABLE leases ADD COLUMN follow INTEGER NOT NULL DEFAULT 0');
+    if (!columns.includes('client')) storage.sql.exec("ALTER TABLE leases ADD COLUMN client TEXT NOT NULL DEFAULT ''");
   }
 
   private get sql() {
@@ -71,13 +73,14 @@ export class SessionStore {
 
   putLease(lease: Lease): void {
     this.sql.exec(
-      `INSERT OR REPLACE INTO leases (${LEASE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO leases (${LEASE_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       lease.machine,
       lease.generation,
       lease.expires,
       lease.online ? 1 : 0,
       lease.closed ? 1 : 0,
       lease.follow ? 1 : 0,
+      lease.client,
     );
   }
 

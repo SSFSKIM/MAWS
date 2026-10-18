@@ -60,6 +60,9 @@ const lastSummary = (grid: GridClient, project: string) =>
     .filter((p) => p.id === project)
     .at(-1);
 
+/** A project's counts, for a report handed to the Registry straight. */
+const COUNTS = { machines: 1, machines_online: 1, working: 0, waiting: 0 };
+
 const machinesFrames = (b: BrowserClient, from = 0) => b.frames.slice(from).filter((f): f is Extract<ProjectDown, { t: 'machines' }> => f.t === 'machines');
 
 describe('the org frame', () => {
@@ -238,17 +241,57 @@ describe("a machine's project", () => {
     const project = newProject();
     const old = await connected(name);
     await old.sync(project);
-    const generation = old.generation;
     await nextOrg(old, 0, (f) => machineIn(f, name)?.online === true, 'the first enrollment online');
     expect((await hub.fetchAs(ADMIN, `/api/machines/${name}`, { method: 'DELETE' })).status).toBe(200);
     const again = await connected(name);
-    // A report the project sent before it took the revocation, delivered only now: its lease is the old stream's.
-    const late = await hub.report(project, { machines: 1, machines_online: 1, working: 0, waiting: 0, machines_state: [{ name, online: true, generation }] });
+    // A report sent before its project took the revocation, delivered only now and the first the Registry has of that
+    // project, so nothing orders it out: its lease is the old enrollment's.
+    const late = await hub.report(newProject(), { ...COUNTS, seq: 1, machines_state: [{ name, online: true, client: old.creds.clientId }] });
     expect(machineIn(late, name)).toEqual({ name, online: false, seen: null });
     // The new enrollment's own lease counts as soon as it opens a project.
     const from = again.frames.length;
     await again.sync(project);
     await nextOrg(again, from, (f) => machineIn(f, name)?.online === true, 'the new enrollment online');
+    await again.close();
+    await old.close();
+  });
+
+  it("keeps its successor online through a stale report of the project, and through a report of a Project on the old version", async () => {
+    const name = newName();
+    const project = newProject();
+    const old = await connected(name);
+    await old.sync(project);
+    await nextOrg(old, 0, (f) => machineIn(f, name)?.online === true, 'the first enrollment online');
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${name}`, { method: 'DELETE' })).status).toBe(200);
+    const again = await connected(name);
+    await again.sync(project);
+    await nextOrg(again, 0, (f) => machineIn(f, name)?.online === true, 'the successor online');
+    // A report older than the project's latest (it reported the successor since), naming only the old enrollment.
+    const stale = await hub.report(project, { ...COUNTS, seq: 1, machines_state: [{ name, online: false, client: old.creds.clientId }] });
+    expect(machineIn(stale, name)).toMatchObject({ online: true });
+    // A report from a Project still on the version before machines' online state: no sequence and no client.
+    const unversioned = await hub.report(project, { ...COUNTS, machines_state: [{ name, online: false }] });
+    expect(machineIn(unversioned, name)).toMatchObject({ online: true });
+    await again.close();
+    await old.close();
+  });
+
+  it('counts the lease of a name enrolled anew in another case, whose Machine object counts its streams from one again', async () => {
+    const name = newName();
+    const project = newProject();
+    const old = await connected(name);
+    // Several streams, so the old object's generation is past the new one's first.
+    await old.connect();
+    await old.connect();
+    await old.sync(project);
+    await nextOrg(old, 0, (f) => machineIn(f, name)?.online === true, 'the first enrollment online');
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${name}`, { method: 'DELETE' })).status).toBe(200);
+    const upper = name.toUpperCase();
+    const again = await connected(upper);
+    expect(again.generation).toBeLessThan(old.generation);
+    const from = again.frames.length;
+    await again.sync(project);
+    await nextOrg(again, from, (f) => machineIn(f, upper)?.online === true, 'the new spelling online');
     await again.close();
     await old.close();
   });

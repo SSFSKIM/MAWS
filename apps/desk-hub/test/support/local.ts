@@ -211,7 +211,7 @@ export async function startLocalHub() {
     },
     /** Hands a project a lease's renewal or close for any generation, as a late one from an older stream would come. */
     async lease(project: string, change: { op: 'renew' | 'closed'; machine: string; generation: number; leaseMs?: number }) {
-      await seam('PROJECT', project, PROJECT_LEASE_PATH, { org: ORG, project, leaseMs: 0, ...change });
+      await seam('PROJECT', project, PROJECT_LEASE_PATH, { org: ORG, project, client: '', leaseMs: 0, ...change });
     },
     /**
      * Evicts an object, as Cloudflare does to an idle one: its memory is gone and the next request constructs it again.

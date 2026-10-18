@@ -71,10 +71,10 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT PRIMARY KEY, member TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS summaries (
   project TEXT PRIMARY KEY, machines INTEGER NOT NULL, machines_online INTEGER NOT NULL, working INTEGER NOT NULL,
-  waiting INTEGER NOT NULL);
+  waiting INTEGER NOT NULL, report_seq INTEGER);
 CREATE TABLE IF NOT EXISTS machine_states (
-  project TEXT NOT NULL, name_key TEXT NOT NULL, online INTEGER NOT NULL, PRIMARY KEY (project, name_key));
-CREATE TABLE IF NOT EXISTS revoked_names (name_key TEXT PRIMARY KEY, generation INTEGER NOT NULL);
+  project TEXT NOT NULL, name_key TEXT NOT NULL, client TEXT NOT NULL, online INTEGER NOT NULL,
+  PRIMARY KEY (project, name_key, client));
 `;
 
 /** Columns added to tables a registry stored before them, with what an older row reads as. */
@@ -82,6 +82,7 @@ const ADDED_COLUMNS: Record<string, string[]> = {
   org: ['key_check TEXT', 'key_auth TEXT'],
   machines: ['online INTEGER NOT NULL DEFAULT 0', 'seen TEXT'],
   projects: ["kind TEXT NOT NULL DEFAULT 'hub'", 'machine TEXT', 'retired INTEGER NOT NULL DEFAULT 0'],
+  summaries: ['report_seq INTEGER'],
 };
 
 /** A member's devices: enough for a person's phones, tablets, and browsers, and a bound on what one member can store. */
@@ -90,13 +91,13 @@ const MAX_ENDPOINT = 2048;
 type Counts = Pick<ProjectSummary, 'machines' | 'machines_online' | 'working' | 'waiting'>;
 
 /**
- * What a `Project` reports when its line changes: its counts, and every machine leased there, a follower too, with
- * whether its lease is fresh (the machines' online state) and the stream generation it belongs to. A lease of a stream
- * a revocation of the name reached is no evidence for the machine enrolled under the name since (`revoked_names`):
- * reports are asynchronous, and one sent before its project took the revocation can arrive after. A `Project` still on
- * the version before this reports no `machines_state`.
+ * What a `Project` reports when its line changes: its counts; `seq`, rising with each report it sends, since reports
+ * travel asynchronously and one can arrive after a later one; and every machine leased there, a follower too, with
+ * whether its lease is fresh and the credential (`client`, the Access client id) of the stream that opened it. A lease
+ * is evidence only for the enrollment holding that credential: one of a revoked enrollment, reported late, says nothing
+ * of the machine enrolled since under the name, in whatever case. A `Project` on the version before this sends neither.
  */
-export type SummaryReport = Counts & { machines_state?: Array<{ name: string; online: boolean; generation: number }> };
+export type SummaryReport = Counts & { seq?: number; machines_state?: Array<{ name: string; online: boolean; client: string }> };
 
 const MACHINE_COLUMNS = 'name, client_id, token_name, state, enrollment, created, confirmed';
 const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, ttl_s';
@@ -310,11 +311,6 @@ export class Registry extends DurableObject<Env> {
     const retired = this.ctx.storage.transactionSync(() => {
       this.sql.exec('DELETE FROM machines WHERE name = ? AND enrollment = ?', revoked.name, revoked.enrollment);
       this.sql.exec('DELETE FROM machine_states WHERE name_key = ?', machineNameKey(revoked.name));
-      this.sql.exec(
-        'INSERT INTO revoked_names (name_key, generation) VALUES (?, ?) ON CONFLICT (name_key) DO UPDATE SET generation = MAX(generation, excluded.generation)',
-        machineNameKey(revoked.name),
-        generation,
-      );
       this.sql.exec("UPDATE enrollments SET state = 'expired' WHERE id = ? AND state IN ('open', 'pending')", revoked.enrollment);
       this.sql.exec('UPDATE projects SET archive_machine = NULL WHERE archive_machine = ?', revoked.name);
       this.orphan(revoked.token_name);
@@ -419,13 +415,13 @@ export class Registry extends DurableObject<Env> {
     for (const { name } of frame.machines) void this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org}:${name}`)).directory(frame, version).catch(() => {});
   }
 
-  /** Each enrolled machine is online while any project reports a fresh lease of it, and `seen` is when that last
-   * changed; the directory goes out when it did. */
+  /** Each enrolled machine is online while any project reports a fresh lease of it, opened with its own credential,
+   * and `seen` is when that last changed; the directory goes out when it did. */
   private refreshOnline(): void {
     const now = iso(Date.now());
     let changed = false;
-    for (const m of this.sql.exec<{ name: string; name_key: string; online: number }>("SELECT name, name_key, online FROM machines WHERE state = 'active'").toArray()) {
-      const online = this.sql.exec('SELECT 1 FROM machine_states WHERE name_key = ? AND online = 1 LIMIT 1', m.name_key).toArray().length > 0;
+    for (const m of this.sql.exec<{ name: string; name_key: string; client_id: string | null; online: number }>("SELECT name, name_key, client_id, online FROM machines WHERE state = 'active'").toArray()) {
+      const online = this.sql.exec('SELECT 1 FROM machine_states WHERE name_key = ? AND client = ? AND online = 1 LIMIT 1', m.name_key, m.client_id ?? '').toArray().length > 0;
       if (online === (m.online === 1)) continue;
       this.sql.exec('UPDATE machines SET online = ?, seen = ? WHERE name = ?', online ? 1 : 0, now, m.name);
       changed = true;
@@ -454,27 +450,35 @@ export class Registry extends DurableObject<Env> {
   /** The grid takes nothing up. */
   async webSocketMessage(): Promise<void> {}
 
-  /** A project's counts and its machines' leases, as its `Project` object reports them when they change. A retired
-   * project's are kept and drawn on no grid. */
+  /**
+   * A project's counts and its machines' leases, as its `Project` object reports them when they change. A report older
+   * than the latest taken from the project changes nothing; a newer one supersedes all the project said before. One
+   * without `seq` (a `Project` on the previous version) still sets the counts but leaves the leases as they were. A
+   * retired project's are kept and drawn on no grid.
+   */
   summary(project: string, report: SummaryReport): void {
-    this.ctx.storage.transactionSync(() => {
+    const seq = Number.isSafeInteger(report.seq) ? (report.seq as number) : null;
+    const taken = this.ctx.storage.transactionSync(() => {
+      const last = this.sql.exec<{ report_seq: number | null }>('SELECT report_seq FROM summaries WHERE project = ?', project).toArray()[0]?.report_seq ?? null;
+      if (seq !== null && last !== null && seq <= last) return false;
       this.sql.exec(
-        'INSERT OR REPLACE INTO summaries (project, machines, machines_online, working, waiting) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO summaries (project, machines, machines_online, working, waiting, report_seq) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (project) DO UPDATE SET machines = excluded.machines, machines_online = excluded.machines_online, working = excluded.working, waiting = excluded.waiting, report_seq = COALESCE(excluded.report_seq, summaries.report_seq)',
         project,
         report.machines,
         report.machines_online,
         report.working,
         report.waiting,
+        seq,
       );
-      if (!Array.isArray(report.machines_state)) return;
+      if (seq === null || !Array.isArray(report.machines_state)) return true;
       this.sql.exec('DELETE FROM machine_states WHERE project = ?', project);
-      for (const { name, online, generation } of report.machines_state) {
-        const key = machineNameKey(name);
-        const through = this.sql.exec<{ generation: number }>('SELECT generation FROM revoked_names WHERE name_key = ?', key).toArray()[0]?.generation;
-        if (through !== undefined && !(Number.isSafeInteger(generation) && generation > through)) continue;
-        this.sql.exec('INSERT OR REPLACE INTO machine_states (project, name_key, online) VALUES (?, ?, ?)', project, key, online ? 1 : 0);
+      for (const { name, online, client } of report.machines_state) {
+        if (typeof name !== 'string' || typeof client !== 'string' || client === '') continue;
+        this.sql.exec('INSERT OR REPLACE INTO machine_states (project, name_key, client, online) VALUES (?, ?, ?, ?)', project, machineNameKey(name), client, online ? 1 : 0);
       }
+      return true;
     });
+    if (!taken) return;
     const record = this.project(project);
     if (record && !record.retired) this.toGrid({ t: 'summary', project: this.summaryOf(record) });
     this.refreshOnline();

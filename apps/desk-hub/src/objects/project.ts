@@ -41,9 +41,9 @@ export type SocketAttachment = { id: string; member: string; visibleAt: number |
 /** How long a socket's last `visibility {visible: true}` holds its member's pushes back. */
 export const VISIBLE_MS = 90_000;
 
-/** Who sent a machine's frame: its org, the project it names, the machine, the stream the POST belongs to, and how long
- * a renewal on that stream keeps the machine online. */
-export type MachineContext = { org: string; project: string; machine: string; generation: number; leaseMs: number };
+/** Who sent a machine's frame: its org, the project it names, the machine and the credential its stream was opened
+ * with, the stream the POST belongs to, and how long a renewal on that stream keeps the machine online. */
+export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number };
 
 /** How many audit entries a browser that resumes is shown after `caught-up`. */
 const AUDIT_REPLAY = 100;
@@ -246,7 +246,7 @@ export class Project extends DurableObject<Env> {
     if (lease && (lease.generation > ctx.generation || (lease.generation === ctx.generation && lease.closed))) return;
     if (!lease || lease.generation < ctx.generation) {
       if (lease?.online) this.lapse(lease);
-      this.plane.putLease({ machine: ctx.machine, generation: ctx.generation, expires: 0, online: false, closed: true, follow: false });
+      this.plane.putLease({ machine: ctx.machine, client: ctx.client, generation: ctx.generation, expires: 0, online: false, closed: true, follow: false });
       return;
     }
     if (lease.online) this.lapse({ ...lease, closed: true });
@@ -687,7 +687,7 @@ export class Project extends DurableObject<Env> {
     const wasOnline = old !== undefined && this.isFresh(old);
     // A second `hello` on a stream that already closed (it was on its way) opens nothing.
     if (old?.generation === ctx.generation && old.closed) return;
-    this.plane.putLease({ machine: ctx.machine, generation: ctx.generation, expires: Date.now() + ctx.leaseMs, online: true, closed: false, follow });
+    this.plane.putLease({ machine: ctx.machine, client: ctx.client, generation: ctx.generation, expires: Date.now() + ctx.leaseMs, online: true, closed: false, follow });
     const presenceGone = follow && this.plane.deleteMachinePresence(ctx.machine);
     if (!wasOnline) this.cameOnline(ctx.machine);
     else if (old.generation !== ctx.generation || old.follow !== follow || presenceGone) this.machinesChanged();
@@ -789,7 +789,7 @@ export class Project extends DurableObject<Env> {
   /**
    * The project's line on the org's grid, sent to the registry when it changes. Its counts are of the machines that hold
    * the project; `machines_state` names every machine leased here, followers included, with whether its lease is fresh
-   * and its stream generation, which is how the Registry knows each machine's online state.
+   * and the credential of the stream that opened it, which is how the Registry knows each machine's online state.
    */
   private reportSummary(): void {
     // A revoked machine is no machine of the project, unless its name was enrolled anew and opened the project since.
@@ -808,13 +808,16 @@ export class Project extends DurableObject<Env> {
       machines_online: online.size,
       working,
       waiting: this.waitingSessions().size,
-      machines_state: leased.map((l) => ({ name: l.machine, online: this.isFresh(l), generation: l.generation })),
+      machines_state: leased.map((l) => ({ name: l.machine, online: this.isFresh(l), client: l.client })),
     };
     const text = JSON.stringify(summary);
     if (this.ctx.storage.kv.get('summary') === text) return;
     this.ctx.storage.kv.put('summary', text);
+    // Reports travel asynchronously: the Registry takes one only when it is newer than the last it took.
+    const seq = (this.ctx.storage.kv.get<number>('summary-seq') ?? 0) + 1;
+    this.ctx.storage.kv.put('summary-seq', seq);
     void this.registry()
-      .summary(this.projectId, summary)
+      .summary(this.projectId, { ...summary, seq })
       .catch(() => this.ctx.storage.kv.delete('summary'));
   }
 

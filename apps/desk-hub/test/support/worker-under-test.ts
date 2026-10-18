@@ -255,7 +255,7 @@ export class Project extends DeployedProject {
     if (url.pathname === PROJECT_LIFE_PATH) return new Response(this.life);
     if (url.pathname === PROJECT_CALLS_PATH) return Response.json(this.ctx.storage.kv.get('calls') ?? { calls: 0, frames: 0 });
     if (url.pathname === PROJECT_LEASE_PATH) {
-      const { op, ...ctx } = (await request.json()) as { op: 'renew' | 'closed'; org: string; project: string; machine: string; generation: number; leaseMs: number };
+      const { op, ...ctx } = (await request.json()) as { op: 'renew' | 'closed'; org: string; project: string; machine: string; client: string; generation: number; leaseMs: number };
       if (op === 'renew') this.renew(ctx);
       else this.closed(ctx);
       return new Response('done');

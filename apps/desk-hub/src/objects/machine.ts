@@ -26,6 +26,8 @@ import { PROJECT_ID, type MachineContext } from './project';
 type Stream = {
   org: string;
   machine: string;
+  /** The credential the stream was opened with (the Access client id): which enrollment of the name it is. */
+  client: string;
   generation: number;
   writer: WritableStreamDefaultWriter<Uint8Array>;
   /** Errors the stream, both its sides: how it ends (`end`). */
@@ -130,6 +132,7 @@ export class Machine extends DurableObject<Env> {
     const stream: Stream = {
       org,
       machine,
+      client: request.headers.get(CLIENT_HEADER) ?? '',
       generation,
       writer: writable.getWriter(),
       fail,
@@ -281,7 +284,7 @@ export class Machine extends DurableObject<Env> {
   }
 
   private context(stream: Stream, project: string): MachineContext {
-    return { org: stream.org, project, machine: stream.machine, generation: stream.generation, leaseMs: this.timing().leaseMs };
+    return { org: stream.org, project, machine: stream.machine, client: stream.client, generation: stream.generation, leaseMs: this.timing().leaseMs };
   }
 
   private project(stream: Stream, project: string) {
