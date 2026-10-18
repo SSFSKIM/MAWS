@@ -681,9 +681,13 @@ test('a card the push named says why it is not drawn: settled before the tap, or
 
   // A request settled before the tap is in the conversation's store (the audit record's `decided`, replayed after
   // caught-up, carries its `raised`), yet the session view draws only pending cards at its tail: the tap says why.
+  // The group chat draws it settled once the store holds it, and the tap then lands in place, so the store keeps it.
   await hub.raise(PROJECT, 'mini', { request: 'toolu_settled_before', session: S.asks, tool: 'Bash', input: { command: 'pnpm e2e', description: 'Run the e2e suite' } });
   await hub.settle(PROJECT, 'mini', S.asks, { request: 'toolu_settled_before', winner: 'web', outcome: 'allow', by: DOUBLE_MEMBER.id });
-  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?request=toolu_settled_before`);
+  await page.goto(`${hub.url}/p/${PROJECT}`);
+  await page.getByRole('navigation', { name: 'Channels' }).getByRole('button', { name: /MAWS/ }).click();
+  await expect(center(page).locator('[data-request="toolu_settled_before"]').getByTestId('settled')).toHaveText('Allowed from the web by you');
+  await page.evaluate((url) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'desk-open', url } })), `/p/${PROJECT}/s/${S.asks}?request=toolu_settled_before`);
   await expect(center(page).getByTestId('session-view')).toHaveAttribute('data-session', S.asks);
   await expect(page.getByTestId('landing')).toHaveText(/This request is no longer waiting: it was answered or withdrawn before you opened it\./);
   await expect(center(page).locator('[data-request="toolu_settled_before"]')).toHaveCount(0);
