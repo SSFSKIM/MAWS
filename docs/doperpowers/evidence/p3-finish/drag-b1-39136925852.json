@@ -1,0 +1,292 @@
+{
+  "run": "2026-10-18T14:39:58.433Z",
+  "deck": "benchDeckFiles(100): S6\u2019s seven bench shapes cycled, S7b\u2019s 100-slide deck",
+  "loads": {
+    "start": 3.21,
+    "end": 2.94
+  },
+  "agentFirstRead": {
+    "wallMs": 46.87520899999072,
+    "loopMaxMs": 46.89175000000978,
+    "busyMs": 68.51937500000349,
+    "load": 2.56
+  },
+  "memory": {
+    "before": {
+      "renderers": [
+        {
+          "windowId": 1,
+          "pid": 5786,
+          "workingSetMB": 440.6
+        }
+      ],
+      "utility": [
+        {
+          "pid": 5785,
+          "name": "network.mojom.NetworkService",
+          "workingSetMB": 47.5
+        },
+        {
+          "pid": 5790,
+          "name": "node.mojom.NodeService",
+          "workingSetMB": 268.2
+        },
+        {
+          "pid": 5791,
+          "name": "node.mojom.NodeService",
+          "workingSetMB": 90.9
+        }
+      ]
+    },
+    "after": {
+      "renderers": [
+        {
+          "windowId": 1,
+          "pid": 5786,
+          "workingSetMB": 328.5
+        }
+      ],
+      "utility": [
+        {
+          "pid": 5785,
+          "name": "network.mojom.NetworkService",
+          "workingSetMB": 47.5
+        },
+        {
+          "pid": 5790,
+          "name": "node.mojom.NodeService",
+          "workingSetMB": 268.2
+        },
+        {
+          "pid": 5791,
+          "name": "node.mojom.NodeService",
+          "workingSetMB": 90.9
+        }
+      ]
+    }
+  },
+  "heavyPreview": "skipped: MAWS_DECK_HISTORY names no export of S7a\u2019s heavy deck soak (src/engine-host/presentations/history-bench.test.ts says how)",
+  "marginal": [],
+  "judging": {
+    "marginalMiss": 0.2,
+    "marginalLoad": 10,
+    "rule": "Decision Log 24: marginal under a 20 % miss at load \u2265 10; failed at a 20 % miss or more, any miss below load 10, any miss of a zero bound; a row judged on its best trial (the parent\u2019s Decision Log 54), a per-publish bound on the median of its publishes (judgedBy)"
+  },
+  "rows": [
+    {
+      "row": "1 open cold",
+      "measure": "open cold to interactive: the editor\u2019s createState to the stage and 100 live thumbnails drawn, the host\u2019s copy unloaded first",
+      "bound": "\u2264 1,000 ms (S7b 116)",
+      "limit": 1000,
+      "unit": "ms",
+      "value": 93.4,
+      "judgedBy": "best",
+      "load": 2.56,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 144.2,
+          "load": 2.52,
+          "note": "synced at 50.7 ms; 100 thumbnails; the window\u2019s first open of a deck"
+        },
+        {
+          "value": 93.7,
+          "load": 2.52,
+          "note": "synced at 41.4 ms; 100 thumbnails"
+        },
+        {
+          "value": 93.4,
+          "load": 2.56,
+          "note": "synced at 45.0 ms; 100 thumbnails"
+        }
+      ]
+    },
+    {
+      "row": "1 open warm",
+      "measure": "open warm: the same, reopened at once (the host\u2019s copy loaded)",
+      "bound": "\u2264 1,000 ms",
+      "limit": 1000,
+      "unit": "ms",
+      "value": 80.7,
+      "judgedBy": "best",
+      "load": 2.56,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 90,
+          "load": 2.48,
+          "note": "synced at 41.8 ms"
+        },
+        {
+          "value": 80.7,
+          "load": 2.52,
+          "note": "synced at 34.4 ms"
+        },
+        {
+          "value": 89.3,
+          "load": 2.56,
+          "note": "synced at 42.2 ms"
+        }
+      ]
+    },
+    {
+      "row": "4 publish one slide",
+      "measure": "a one-slide publish through A\u2019s publishDoc on the 100-slide deck (the agent\u2019s session, after its own publish): the host loop\u2019s busy time over the call, median of 7",
+      "bound": "\u2264 50 ms",
+      "limit": 50,
+      "unit": "ms",
+      "value": 35.85,
+      "judgedBy": "median",
+      "load": 2.67,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 32.13,
+          "load": 2.56,
+          "note": "loop\u2019s longest stretch 33.1 ms; wall 33.1 ms"
+        },
+        {
+          "value": 54.11,
+          "load": 2.56,
+          "note": "loop\u2019s longest stretch 42.8 ms; wall 56.1 ms"
+        },
+        {
+          "value": 51.01,
+          "load": 2.56,
+          "note": "loop\u2019s longest stretch 52.0 ms; wall 52.0 ms"
+        },
+        {
+          "value": 47.12,
+          "load": 2.56,
+          "note": "loop\u2019s longest stretch 48.1 ms; wall 48.1 ms"
+        },
+        {
+          "value": 33.05,
+          "load": 2.56,
+          "note": "loop\u2019s longest stretch 26.1 ms; wall 35.0 ms"
+        },
+        {
+          "value": 31.76,
+          "load": 2.67,
+          "note": "loop\u2019s longest stretch 25.4 ms; wall 32.6 ms"
+        },
+        {
+          "value": 35.85,
+          "load": 2.67,
+          "note": "loop\u2019s longest stretch 29.0 ms; wall 37.8 ms"
+        }
+      ],
+      "note": "longest stretch p95 52 ms"
+    },
+    {
+      "row": "4 publish whole deck",
+      "measure": "a whole-deck publish (100 slide files, each changed) through A\u2019s publishDoc: the host loop\u2019s busy time over the call, median of 5",
+      "bound": "\u2264 200 ms",
+      "limit": 200,
+      "unit": "ms",
+      "value": 150.57,
+      "judgedBy": "median",
+      "load": 2.67,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 194.83,
+          "load": 2.67,
+          "note": "loop\u2019s longest stretch 104.4 ms; wall 196.8 ms"
+        },
+        {
+          "value": 150.57,
+          "load": 2.67,
+          "note": "loop\u2019s longest stretch 79.0 ms; wall 152.5 ms"
+        },
+        {
+          "value": 148.16,
+          "load": 2.67,
+          "note": "loop\u2019s longest stretch 76.9 ms; wall 150.1 ms"
+        },
+        {
+          "value": 156.08,
+          "load": 2.67,
+          "note": "loop\u2019s longest stretch 156.1 ms; wall 156.0 ms"
+        },
+        {
+          "value": 137.31,
+          "load": 2.54,
+          "note": "loop\u2019s longest stretch 78.9 ms; wall 139.3 ms"
+        }
+      ],
+      "note": "longest stretch max 156.1 ms"
+    },
+    {
+      "row": "2 drag p95",
+      "measure": "drag move to frame, p95 over 200 pointer moves, while the agent republishes one slide every 0.7 s through publishDoc",
+      "bound": "p95 \u2264 16 ms (S7b 8.9)",
+      "limit": 16,
+      "unit": "ms",
+      "value": 19,
+      "judgedBy": "best",
+      "load": 3.02,
+      "verdict": "failed",
+      "trials": [
+        {
+          "value": 19.3,
+          "load": 2.54,
+          "note": "167/200 moves wrote; move \u2192 transaction p95 18.3 ms; move \u2192 frame p50 10.8, max 24.1 ms; 0 long tasks; the agent published 8 slides (busy p95 45 ms)"
+        },
+        {
+          "value": 19,
+          "load": 2.5,
+          "note": "169/200 moves wrote; move \u2192 transaction p95 17.6 ms; move \u2192 frame p50 11, max 21.5 ms; 0 long tasks; the agent published 8 slides (busy p95 55.6 ms)"
+        },
+        {
+          "value": 19.5,
+          "load": 3.02,
+          "note": "167/200 moves wrote; move \u2192 transaction p95 18.5 ms; move \u2192 frame p50 11.1, max 22.1 ms; 0 long tasks; the agent published 8 slides (busy p95 44.6 ms)"
+        }
+      ]
+    },
+    {
+      "row": "5 preview",
+      "measure": "history preview of a version (the seeded one, against the deck after the run\u2019s publishes and drags): the controller\u2019s request to the slide drawn with its marks",
+      "bound": "\u2264 1,000 ms",
+      "limit": 1000,
+      "unit": "ms",
+      "value": 59.8,
+      "judgedBy": "best",
+      "load": 2.94,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 77.5,
+          "load": 2.94
+        },
+        {
+          "value": 59.8,
+          "load": 2.94
+        },
+        {
+          "value": 64.7,
+          "load": 2.94
+        }
+      ]
+    },
+    {
+      "row": "3 renderer 1",
+      "measure": "the renderer\u2019s working set (window 1) with the deck open after the drags and the previews, read after a forced collection",
+      "bound": "\u2264 500 MB",
+      "limit": 500,
+      "unit": "MB",
+      "value": 328.5,
+      "judgedBy": "best",
+      "load": 2.94,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 328.5,
+          "load": 2.94
+        }
+      ],
+      "note": "440.6 MB before the collection"
+    }
+  ]
+}

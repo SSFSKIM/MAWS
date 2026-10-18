@@ -39,7 +39,7 @@
     "reviewRounds": 2
   },
   "dependencyInstall": "completed exit 0 under with-slot",
-  "dragDiscriminator": "A1 drag18.2/18.8/19.1ms at loads4.34/4.31/4.41; B1 running39136925852 taskb03za34sw; no comparison yet",
+  "dragDiscriminator": "A1/B1 measured, below10 loads both miss16ms absolute bound; A2 running39137361846 taskbqr3snsr4; comparison awaits all four jobs",
   "commitLock": "/private/tmp/maws-p3f-commit.lock",
   "helper": "/private/tmp/p3f-commit-row.py",
   "paidSpendUsd": 0,
