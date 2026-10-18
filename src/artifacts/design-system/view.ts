@@ -5,10 +5,11 @@ import { HOUSE_KEY, defaultSystem } from '../types/design_system/defaults';
 import { onUpdate, type Doc } from '../yjs';
 import { fontFaces, type AssetUrl } from './assets';
 import { DOCUMENT_CSS_PATH } from './canon';
-import { fontFamilyCss, generateTokensCss, type Medium } from './css';
+import { fontFamilyCss, generateTokensCss, tokenProperties, type Medium } from './css';
 import { parseFontStack } from './css-read';
 import { readSystem, type SystemOrigin } from './model';
 import { resolveTokens } from './resolve';
+import { acceptedOverrides, safeOverrides } from './resolve-vars';
 import { cssNamesOf } from './roles';
 import { parseTokens, type TokenSet } from './tokens';
 
@@ -37,19 +38,8 @@ export interface SystemSnapshot {
   origin: SystemOrigin | null;
 }
 
-const OVERRIDE_NAME = /^--ds-[A-Za-z0-9_-]+$/;
-// A value that could end the declaration, the rule or the element, fetch anything, or carry a priority (`!important`,
-// which a scope reads as the declaration's and an export would write into the property's value), is not an override.
-const UNSAFE_VALUE = /[;{}<>\\!\n\r]|\/\*|\b(?:url|image|image-set|cross-fade|element|src)\s*\(|@import/i;
-const balancedQuotes = (value: string) => (value.match(/"/g)?.length ?? 0) % 2 === 0 && (value.match(/'/g)?.length ?? 0) % 2 === 0;
-
-/** The overrides a scope may set: `--ds-*` names with plain values, in name order (byte-stable). */
-export function safeOverrides(overrides: TokenOverrides | undefined): [string, string][] {
-  return Object.entries(overrides ?? {})
-    .filter(([name, value]) => OVERRIDE_NAME.test(name) && typeof value === 'string' && value.trim() !== '' && !UNSAFE_VALUE.test(value) && balancedQuotes(value))
-    .map(([name, value]): [string, string] => [name, value.trim()])
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-}
+// The overrides a scope may set (`safeOverrides`): one filter with the export's resolver, so it lives there (P3-F).
+export { safeOverrides } from './resolve-vars';
 
 /**
  * An override of a font-family name with each bundled family's private name set before its authored one, as the
@@ -64,10 +54,13 @@ function aliasedStack(value: string, aliases: ReadonlyMap<string, string>): stri
 /**
  * The stylesheet of a snapshot for a scope (D3, D8): the system's faces under their private names, `tokens.css` with
  * each bundled family's private name before its authored one, then the overrides (a font family's aliased the same way).
+ * P3-F: the overrides an export takes, each as the literal it resolves (`acceptedOverrides`), so the scope draws what an
+ * export writes: one the export drops (a cycle, a reference to nothing) keeps the system's value here too, and a
+ * reference is never left to whatever the page around the scope sets.
  */
 export function snapshotCss(snapshot: SystemSnapshot, toUrl: AssetUrl | null, scope: string, medium: Medium, overrides?: TokenOverrides): string {
   const faces = fontFaces(snapshot.files[DOCUMENT_CSS_PATH], snapshot.tokens, toUrl, { aliased: true });
-  let own = safeOverrides(overrides);
+  let own: [string, string][] = safeOverrides(overrides).length ? [...acceptedOverrides(tokenProperties(snapshot.tokens, medium), overrides)] : [];
   if (own.length && faces.aliases.size) {
     const families = new Set([...resolveTokens(snapshot.tokens).tokens.values()].filter((t) => t.type === 'fontFamily').flatMap((t) => cssNamesOf(t.path, t.type)));
     own = own.map(([name, value]) => [name, families.has(name) ? aliasedStack(value, faces.aliases) : value]);

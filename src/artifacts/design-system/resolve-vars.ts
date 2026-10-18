@@ -3,10 +3,25 @@
 // same function as a renderer; apply.ts re-exports it, where the ledger names it. P3-C
 // (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 16, 27 (2)): `literalValues` and
 // `overrideLiterals` exported, the latter split out of the former, so the deck's mirror and Theme panel resolve exactly
-// as a scope and an export do (its M3 `literals.ts` reconciled here, the one home).
+// as a scope and an export do (its M3 `literals.ts` reconciled here, the one home). P3-F: the overrides' one filter,
+// `safeOverrides` and `acceptedOverrides`, lives here too, and a scope's stylesheet (view.ts) sets what it accepts.
 import { tokenProperties, type Medium } from './css';
 import type { TokenSet } from './tokens';
-import { safeOverrides, type TokenOverrides } from './view';
+import type { TokenOverrides } from './view';
+
+const OVERRIDE_NAME = /^--ds-[A-Za-z0-9_-]+$/;
+// A value that could end the declaration, the rule or the element, fetch anything, or carry a priority (`!important`,
+// which a scope reads as the declaration's and an export would write into the property's value), is not an override.
+const UNSAFE_VALUE = /[;{}<>\\!\n\r]|\/\*|\b(?:url|image|image-set|cross-fade|element|src)\s*\(|@import/i;
+const balancedQuotes = (value: string) => (value.match(/"/g)?.length ?? 0) % 2 === 0 && (value.match(/'/g)?.length ?? 0) % 2 === 0;
+
+/** The overrides a scope may set: `--ds-*` names with plain values, in name order (byte-stable). */
+export function safeOverrides(overrides: TokenOverrides | undefined): [string, string][] {
+  return Object.entries(overrides ?? {})
+    .filter(([name, value]) => OVERRIDE_NAME.test(name) && typeof value === 'string' && value.trim() !== '' && !UNSAFE_VALUE.test(value) && balancedQuotes(value))
+    .map(([name, value]): [string, string] => [name, value.trim()])
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
 
 /** Each `var(…)` in `text` in order: its span, the name and the fallback text (null without one). Unclosed: not listed. */
 function varsIn(text: string): { at: number; end: number; name: string; inner: string; fallback: string | null }[] {
@@ -55,6 +70,15 @@ export function literalValues(tokens: TokenSet, medium: Medium, overrides: Token
 
 /** P3-C: `literalValues` over values already read (`tokenProperties`'s): the overrides set over `values`, resolved likewise. */
 export function overrideLiterals(values: ReadonlyMap<string, string>, overrides: TokenOverrides | undefined): Map<string, string> {
+  return new Map([...values, ...acceptedOverrides(values, overrides)]);
+}
+
+/**
+ * P3-F: the overrides taken over `values`, by name in name order, each as its literal: `safeOverrides`, each one's
+ * references resolved against `values` with the overrides on top, following chains; one in a reference cycle, or with a
+ * reference that resolves to nothing, left out. The one filter of a scope (view.ts), an export and the mirrors.
+ */
+export function acceptedOverrides(values: ReadonlyMap<string, string>, overrides: TokenOverrides | undefined): Map<string, string> {
   const raw = new Map(safeOverrides(overrides));
   const settled = new Map<string, string | null>(); // an override's literal, or null when dropped
   const stack: string[] = []; // the overrides being resolved, outermost first
@@ -76,12 +100,12 @@ export function overrideLiterals(values: ReadonlyMap<string, string>, overrides:
     settled.set(name, result);
     return result;
   };
-  const merged = new Map(values);
+  const accepted = new Map<string, string>();
   for (const name of raw.keys()) {
     const literal = overrideValue(name);
-    if (literal !== null) merged.set(name, literal);
+    if (literal !== null) accepted.set(name, literal);
   }
-  return merged;
+  return accepted;
 }
 
 /**

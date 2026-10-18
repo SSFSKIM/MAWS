@@ -473,6 +473,40 @@ describe('a scope’s overrides and the export’s', () => {
       expect(declared(scope(overrides), '--ds-space-1')).toBe(resolveDsVars('var(--ds-space-1)', tokens, 'document', overrides));
     }
   });
+
+  // scalpel-2#1: the scope sets the overrides the export takes, each as the literal the export resolves
+  it('sets in the scope each override the export takes, as the value the export resolves', () => {
+    const cases: Record<string, string>[] = [
+      { '--ds-color-accent': 'var(--ds-missing)' }, // resolves to nothing: dropped, the system's value kept
+      { '--ds-color-accent': 'var(--ds-color-border)', '--ds-color-border': 'var(--ds-color-accent)' }, // a cycle: dropped
+      { '--ds-color-accent': 'var(--accent, #123456)' }, // not a system name: its fallback, whatever the page sets
+      { '--ds-color-accent': 'var(--ds-color-text)', '--ds-color-text': '#010203' }, // a chain through another override
+    ];
+    for (const overrides of cases) {
+      const css = scope(overrides);
+      for (const name of ['--ds-color-accent', '--ds-color-border', '--ds-color-text']) {
+        expect.soft(declared(css, name), `${JSON.stringify(overrides)} ${name}`).toBe(resolveDsVars(`var(${name})`, tokens, 'document', overrides));
+      }
+    }
+  });
+
+  it('draws in a scope the accent the export writes, whatever the page around it sets', () => {
+    document.documentElement.style.setProperty('--accent', '#00ff00'); // the app's own accent (the renderer's tokens.css)
+    const style = document.head.appendChild(document.createElement('style'));
+    const host = document.body.appendChild(document.createElement('div'));
+    onTestFinished(() => {
+      style.remove();
+      host.remove();
+      document.documentElement.style.removeProperty('--accent');
+    });
+    host.className = 's';
+    host.innerHTML = '<p style="color: var(--ds-color-accent)">text</p>';
+    for (const value of ['var(--ds-missing)', 'var(--accent, #123456)']) {
+      const overrides = { '--ds-color-accent': value };
+      style.textContent = scope(overrides);
+      expect.soft(getComputedStyle(host.firstElementChild!).color, value).toBe(resolveDsVars('var(--ds-color-accent)', tokens, 'document', overrides));
+    }
+  });
 });
 
 describe('lifetimes (fix wave 1)', () => {
