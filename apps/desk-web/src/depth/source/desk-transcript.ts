@@ -46,7 +46,8 @@
 // Disruptions (DX8). A `reset` (a gap, a dropped socket, a hub restart, the bridge's own discontinuity) drops what was
 // drawn: the layer is cleared, the source resets MAWS's store key, and its next snapshot waits for the fresh one the
 // client subscribes for. Any other `end` keeps what was drawn and says why; `resubscribe` takes a fresh snapshot,
-// which continues the held rows when it overlaps them and replaces them when it does not.
+// which replaces the held rows, the older ones paging back in with their own marks; an older producer's, which marks
+// nothing, continues the held rows where it overlaps them.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, TranscriptRecordSchema } from '@shared/wire/transcript';
@@ -331,7 +332,7 @@ export class DeskTranscript {
     this.outputs.clear();
   }
 
-  /** After an `end` other than a reset: subscribe again; the fresh snapshot takes up from what is drawn. */
+  /** After an `end` other than a reset: subscribe again; the fresh snapshot replaces what is drawn (an older producer's continues it). */
   resubscribe(): void {
     if (this.subscription || this.state.getState().phase !== 'ended') return;
     this.state.setState({ phase: 'loading' });
@@ -414,8 +415,11 @@ export class DeskTranscript {
     const fresh = [...body.rows].reverse().filter(hasUuid);
     let more = body.more;
     if (this.served) {
-      // A snapshot after an end: it continues the held rows where it overlaps them, else it replaces them.
-      const at = fresh.length > 0 ? this.rows.findIndex((row) => row.uuid === fresh[0].uuid) : -1;
+      // A snapshot after an end. A producer that marks (`offChain`) marks the snapshot's own rows only, and a held row
+      // older than them may have left the chain in the gap (a /rewind while unsubscribed) with nothing but its own page
+      // to say so: the snapshot replaces the held rows, and the older ones page back in with their marks. An older
+      // producer's continues the held rows where it overlaps them, else it replaces them.
+      const at = body.offChain === undefined && fresh.length > 0 ? this.rows.findIndex((row) => row.uuid === fresh[0].uuid) : -1;
       if (at >= 0) more = this.state.getState().more;
       else this.off.clear();
       this.mark(fresh, body.offChain);

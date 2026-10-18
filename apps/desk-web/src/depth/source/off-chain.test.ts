@@ -337,6 +337,68 @@ describe('the marks as the subscription carries them', () => {
     view.close();
   });
 
+  it('a snapshot after an end replaces the held rows: a held turn a /rewind undid in the gap is not drawn, and pages back in off', async () => {
+    const c = new Chain();
+    c.prompt('Plan the migration.');
+    c.answer('Three steps.');
+    const point = c.end();
+    const from = c.rows.length;
+    c.prompt('Do step one.');
+    c.answer('Step one done.');
+    const turnEnd = c.end();
+    const undone = c.rows.slice(from);
+    const view = open();
+    view.plane.send('snapshot', snapshot(c.rows, []));
+    await settled();
+    expect(bubbles(view.drawnRows())).toEqual(['Plan the migration.', 'Do step one.']);
+    view.plane.current.listener.end({ reason: 'machine-offline' });
+    view.controller.resubscribe();
+    // In the gap a /rewind undid the turn: the next prompt went in under the earlier point. The fresh snapshot's newest
+    // rows overlap the held ones at the turn's last row, and it marks its own rows only.
+    c.prompt('Do step one, carefully.', point);
+    c.answer('Carefully done.');
+    c.end();
+    const split = c.rows.indexOf(turnEnd);
+    view.plane.send('snapshot', snapshot(c.rows.slice(split), [turnEnd.uuid as string], true));
+    await settled();
+    expect(bubbles(view.drawnRows())).toEqual(['Do step one, carefully.']);
+    expect(answers(view.drawnRows())).toEqual(['Carefully done.']);
+    expect(view.controller.state.getState().more).toBe(true);
+    view.controller.loadOlder();
+    expect(view.plane.current.asked).toEqual([{ before: turnEnd.uuid, limit: expect.any(Number) }]);
+    const page = c.rows.slice(0, split);
+    view.plane.send('rows', { rows: [...page].reverse(), before: turnEnd.uuid as string, more: false, offChain: undone.filter((row) => page.includes(row)).map((row) => row.uuid as string) });
+    await settled();
+    expect(bubbles(view.drawnRows())).toEqual(['Plan the migration.', 'Do step one, carefully.']);
+    expect(view.drawnRows()).toEqual(await view.fresh(c.rows, undone));
+    view.close();
+  });
+
+  it('an older producer’s snapshot after an end continues the held rows where it overlaps them', async () => {
+    const c = new Chain();
+    c.prompt('Plan the migration.');
+    c.answer('Three steps.');
+    c.end();
+    c.prompt('Do step one.');
+    c.answer('Step one done.');
+    const turnEnd = c.end();
+    const view = open();
+    view.plane.send('snapshot', snapshot(c.rows));
+    await settled();
+    view.plane.current.listener.end({ reason: 'machine-offline' });
+    view.controller.resubscribe();
+    c.prompt('Do step two.');
+    c.answer('Step two done.');
+    c.end();
+    view.plane.send('snapshot', snapshot(c.rows.slice(c.rows.indexOf(turnEnd)), undefined, true));
+    await settled();
+    expect(bubbles(view.drawnRows())).toEqual(['Plan the migration.', 'Do step one.', 'Do step two.']);
+    expect(view.drawnRows()).toEqual(await view.fresh(c.rows, []));
+    // The held rows reach the start: nothing older to ask for.
+    expect(view.controller.state.getState().more).toBe(false);
+    view.close();
+  });
+
   it('an older producer marks nothing: every held row draws, a delivery appended again once, as before', async () => {
     const c = new Chain();
     const ended = c.end();
