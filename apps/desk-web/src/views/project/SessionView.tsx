@@ -39,6 +39,7 @@ import { useDeskLayout } from '../../shell/layout';
 import type { SessionPlane } from '../../shell/session-plane';
 import type { DeskSession } from '../../shell/sessions';
 import { useDesk } from '../conversation/desk-context';
+import { useLandOnCard } from './land-on-card';
 import { useLandOnMessage } from './landed-message';
 import { ReportToggle } from './ReportToggle';
 import { questionOverlayFacts, QuestionOverlays } from './tail/QuestionOverlay';
@@ -174,45 +175,6 @@ function useNoTranscript(state: { phase: string; ended: { reason: string } | nul
   if (!none && state.phase === 'ended' && state.ended?.reason === 'session-ended' && held === 0) setNone(true);
   if (none && state.phase === 'live') setNone(false);
   return none;
-}
-
-/** Frames a landing waits for its card to be mounted, after moving the list to it, before it gives up. */
-const LANDING_FRAMES = 120;
-
-/**
- * A notification that landed on one of the tail's cards (`row`, its tail row's id): the card is brought into view,
- * focused, and marked (its row draws the mark while it is the landing's). The list is virtualized, so a reader far up
- * in the history has no card mounted to scroll to: the list is moved to the card's index among the rows it draws, and
- * the card is waited for, frame by frame, until the list mounts it.
- */
-function useLandOnCard(root: HTMLElement | null, list: RefObject<TranscriptListHandle | null>, rowIndex: RefObject<RowIndex | null>, landed: { request: string; row: string } | null) {
-  const request = landed?.request ?? null;
-  const row = landed?.row ?? null;
-  useEffect(() => {
-    if (!root || request === null || row === null) return;
-    let frame = 0;
-    let frames = 0;
-    let moved = false;
-    const step = () => {
-      frame = 0;
-      const card = root.querySelector<HTMLElement>(`[data-tail-request="${CSS.escape(request)}"]`);
-      if (card) {
-        card.scrollIntoView({ block: 'center' });
-        card.focus({ preventScroll: true });
-        return;
-      }
-      if (!moved) {
-        const index = rowIndex.current?.(row) ?? -1;
-        if (index >= 0) {
-          list.current?.scrollToIndex(index, 'center');
-          moved = true;
-        }
-      }
-      if (++frames < LANDING_FRAMES) frame = requestAnimationFrame(step);
-    };
-    frame = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(frame);
-  }, [root, list, rowIndex, request, row]);
 }
 
 /**

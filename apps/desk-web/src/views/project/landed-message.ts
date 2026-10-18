@@ -5,12 +5,14 @@
 // record when the report holds the text inside it) and marks the row, as a request's landing marks its card at the tail.
 // The jump waits for the row: the transcript may still be hydrating, or the row may lie in history the view has not
 // paged in, which it pages toward, saying so, until the row is held or no older rows are left (then it says the row is
-// not in the transcript).
-import { useEffect, useState } from 'react';
+// not in the transcript). A reader who moves while it waits — a wheel, a touch, a press or the keys on the list, focus
+// taken elsewhere (`reader-intent.ts`) — keeps the place they went to: the landing ends there and says nothing more.
+import { useEffect, useRef, useState } from 'react';
 import type { JsonObject } from 'desk-hub/protocol';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import { marksOfText } from '../../../../../src/renderer/src/transcript/model/owner-marks';
 import type { MessageUuid } from '@shared/graph/ids';
+import { watchReaderIntent } from '../../depth/view/reader-intent';
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
 
@@ -64,23 +66,46 @@ export type LandingNotice = 'finding' | 'missing' | null;
 export function useLandOnMessage(root: HTMLElement | null, transcript: Landable, state: { phase: string; more: boolean; loadingOlder: boolean }, src: string | null): LandingNotice {
   const [landed, setLanded] = useState<{ src: string; row: string | null } | null>(null);
   const [paging, setPaging] = useState<string | null>(null);
-  const settled = landed !== null && landed.src === src;
+  // The landing the reader moved away from (its src), at once for the effect below and as state for the view.
+  const [yielded, setYielded] = useState<string | null>(null);
+  const gaveWay = useRef<string | null>(null);
+  const jumping = useRef(false); // the landing is moving the list and focus itself: none of that is the reader's
+  const gone = src !== null && yielded === src;
+  const settled = (landed !== null && landed.src === src) || gone;
   const { phase, more, loadingOlder } = state;
+
+  useEffect(() => {
+    const scroller = root?.querySelector<HTMLElement>('[data-transcript-scroller]');
+    if (!scroller || src === null || settled) return;
+    jumping.current = false;
+    return watchReaderIntent(
+      scroller,
+      () => {
+        if (jumping.current) return;
+        gaveWay.current = src;
+        setYielded(src);
+      },
+      { focus: true },
+    );
+  }, [root, src, settled]);
+
   useEffect(() => {
     if (src === null || settled) return;
     let done = false;
     let frame = 0;
     const jump = (anchor: Anchor) => {
       done = true; // the jump's own store change calls back in here
+      jumping.current = true;
       if (!useTranscriptStore.getState().jumpToMessage(transcript.key, anchor)) {
         done = false;
+        jumping.current = false;
         return;
       }
       off();
       setLanded({ src, row: useTranscriptStore.getState().entries[transcript.key]?.jump?.rowId ?? null });
     };
     const settle = () => {
-      if (done || frame !== 0) return;
+      if (done || frame !== 0 || gaveWay.current === src) return;
       const entry = useTranscriptStore.getState().entries[transcript.key];
       const anchor = messageAnchor(src, transcript.heldRows());
       switch (landingStep({ anchor, live: phase === 'live' && entry?.phase === 'live', more, loadingOlder })) {
@@ -98,6 +123,8 @@ export function useLandOnMessage(root: HTMLElement | null, transcript: Landable,
           frame = requestAnimationFrame(() =>
             (frame = requestAnimationFrame(() => {
               frame = 0;
+              if (gaveWay.current === src) return; // the reader moved while the page was out: their place stands
+              jumping.current = true;
               root?.querySelector('[data-transcript-scroller]')?.dispatchEvent(new WheelEvent('wheel'));
               jump(anchor!);
             })),
@@ -113,7 +140,7 @@ export function useLandOnMessage(root: HTMLElement | null, transcript: Landable,
     };
   }, [transcript, src, settled, phase, more, loadingOlder, paging, root]);
 
-  const row = settled ? landed.row : null;
+  const row = landed !== null && landed.src === src ? landed.row : null;
   useEffect(() => {
     if (!root || row === null) return;
     // The list is virtualized: the row's element comes and goes as the reader scrolls, so it is marked again whenever
@@ -136,7 +163,7 @@ export function useLandOnMessage(root: HTMLElement | null, transcript: Landable,
     };
   }, [root, row]);
 
-  if (src === null) return null;
-  if (settled) return landed.row === null ? 'missing' : null;
+  if (src === null || gone) return null;
+  if (settled) return landed!.row === null ? 'missing' : null;
   return paging === src ? 'finding' : null;
 }
