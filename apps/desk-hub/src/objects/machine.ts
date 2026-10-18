@@ -69,6 +69,8 @@ export type Timing = { heartbeatMs: number; leaseMs: number; graceMs: number; pr
 
 /** How often a stream's instance asks whether new requests still reach it: a replaced one ends its stream within this. */
 export const PROBE_MS = 1000;
+/** How long a probe waits for its answer before it counts as no answer. */
+const PROBE_WAIT_MS = 5000;
 
 const encoder = new TextEncoder();
 const utf8Length = (text: string) => encoder.encode(text).length;
@@ -173,12 +175,17 @@ export class Machine extends DurableObject<Env> {
     return current !== null && current !== this.life;
   }
 
-  /** The instance new requests to this object reach, by its id; null when the call fails. */
+  /** The instance new requests to this object reach, by its id; null when the call fails or takes longer than a few
+   * probes' time (a call that never settles must not keep every later probe from asking). */
   protected async current(): Promise<string | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), PROBE_WAIT_MS)));
     try {
-      return await this.env.MACHINE.get(this.ctx.id).instance();
+      return await Promise.race([this.env.MACHINE.get(this.ctx.id).instance(), late]);
     } catch {
       return null;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
 
