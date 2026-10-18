@@ -1,0 +1,42 @@
+{
+  "status": "M3 preparation only; rebuild and verify on post-debt head, not a final partition",
+  "source": "2c45e150fe9bc87c867f76feccaab1548933697f",
+  "base": "5ad08789",
+  "newAssignments": {
+    "e2e/agent-tools-live.spec.ts": "design-proof",
+    "e2e/support/final-invocation.ts": "design-proof",
+    "e2e/support/p1-live.ts": "design-proof",
+    "e2e/support/processes.ts": "design-proof",
+    "test/support/final-invocation.test.ts": "design-proof",
+    "test/support/p1-live.test.ts": "design-proof",
+    "test/support/processes.test.ts": "design-proof",
+    "src/engine-host/fs/backfill.test.ts": "composition",
+    "src/shared/engine/peer-envelope.test.ts": "composition",
+    "src/shared/engine/peer-envelope.ts": "composition",
+    "test/support/compiled-suites.test.ts": "composition",
+    "test/support/compiled-suites.ts": "composition",
+    "test/support/connector-direct-probe.test.ts": "editor-proof"
+  },
+  "sameTierRebalance": {
+    "from": "editor-proof",
+    "to": "design-proof",
+    "paths": [
+      "e2e/design-systems-live.spec.ts",
+      "e2e/design-systems.spec.ts"
+    ],
+    "reason": "Keep design-system acceptance together and leave room for actual-editor restyle proof; both remain xhigh"
+  },
+  "currentSizesAfterProposedMapping": {
+    "editor-proof": 14122,
+    "design-proof": 10655,
+    "composition": 11233
+  },
+  "removedFromRange": [
+    "e2e/support/dashboard-bundle.ts",
+    "e2e/support/design-bundle.ts",
+    "test/support/dashboard-bundle.test.ts",
+    "test/support/design-bundle.test.ts",
+    "test/support/design-final-reporter.test.ts"
+  ],
+  "finalChecks": "Refresh exclusions and changed paths, remove paths no longer in base..head, classify every new path, recompute line totals, require zero overlaps/unassigned and <=15000 per area, then rebuild all synthetic pairs and verify stats/tree equality."
+}
