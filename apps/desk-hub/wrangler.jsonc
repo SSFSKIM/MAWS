@@ -9,6 +9,11 @@
   // A Durable Object sees a client close its SSE stream through the request's signal (the M1 probe).
   "compatibility_flags": ["enable_request_signal"],
   "workers_dev": true,
+  // Workers Logs keep the lines the hub writes itself (a machine stream's open and end with its cause, an object
+  // call's exception; MAWS #57), never message content. Per-request logs stay off: the heartbeats and polls would
+  // bury those lines. `wrangler tail` is no substitute, since attaching it replaces the objects and drops every
+  // machine's stream (owner, 2026-10-18).
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   // The web app (apps/desk-web, DC5), served as static assets; every path the Worker answers runs it first, the
   // enrollment redeem (`/machine/enroll`) included. scripts/assets-dir.mjs makes the directory when desk-web has not
   // been built, since wrangler refuses a missing one.
