@@ -28,7 +28,8 @@ Declaring HTML artifact (id/title) and the route label it shows:
 Server source eligible (literal user/local scope, no ${…}, normal directory, DCR and S256 sign-in): [ ] yes [ ] no, reason:
 Write-capable Drive connector and destination:
 Write-capable Notion connector and destination:
-Disposable design-system copy (name) assigned as the P3 sitting Space's default before 2.1 and 5.1: [ ] yes [ ] no
+Disposable design-system copy (name) assigned as the P3 sitting Space's default before 2.1 and 5.1 (Settings > Artifacts > By Space > 'Design system for P3 sitting'): [ ] yes [ ] no
+Settings > Artifacts values as found (owner 'Default design system' / the Space's), to put back after 6.3:
 Named document version saved before the recolour: [ ] yes [ ] no   Accent link and marked passage in the sample: [ ] yes [ ] no
 6.2b: recoloured system was the disposable copy [ ] yes [ ] no; main tab (old version) showed the old accent [ ] yes [ ] no; panel (live) showed the new accent [ ] yes [ ] no; any crossing or switch-away loss:
 
