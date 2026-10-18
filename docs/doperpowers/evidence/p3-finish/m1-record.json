@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 14,
-    "defer:pending": 109,
+    "defer:committed": 15,
+    "defer:pending": 108,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -408,7 +408,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L41; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "Add a bounded SGR-to-semantic-token pass inside the Markdown text-node pipeline (never raw HTML), preserving links/code/math and streaming escape boundaries, with contrast and sanitizer regressions. Not a change to the mod render protocol. Re-deferred 2026-10-07 (E11 1.6): a design pass. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L43): a design pass (SGR to tokens inside Markdown). Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L41; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "819551cf40e16d444c877e65d330031a2aa8dec5"
     },
     {
       "line": 42,
@@ -418,8 +418,8 @@
       "triageReason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L42; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "Shell-aware clean-prompt evidence enables safe input reset, or these configurations use manual recovery rather than automatic fg. Re-deferred 2026-10-07 (E11 1.6): scoped out by the architect. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L44): scoped out by the architect (W14). Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L42; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 43,
