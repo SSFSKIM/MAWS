@@ -16,7 +16,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { AskCancelReason, PendingAsk } from '@shared/maws/ask';
 import type { AskRowData } from '../../../transcript';
 import { SHEET } from './copy';
-import { canSubmit, EMPTY_DRAFT, toAnswers, type Draft, type ProjectRef } from './draft';
+import { canSubmit, EMPTY_DRAFT, setDesignSystem, toAnswers, type Draft, type ProjectRef } from './draft';
 
 export interface SheetAsk extends PendingAsk {
   state: 'pending' | 'cancelled';
@@ -194,7 +194,10 @@ export const dismissNotice = (appSessionId: AppSessionId): void => askSheet(appS
 
 // Submit: every question's answer (the empty ones skipped) through `maws.ask.answer`. Delivered: the ask leaves and the
 // next pending one shows. Not pending: answered elsewhere, so it leaves with a notice. Refused (`write_failed`, or the
-// command itself): the drafts stay and the sheet offers a retry.
+// command itself): the drafts stay and the sheet offers a retry. F's L176: a design system picked is read first
+// (`artifacts.get`, no preparation); one deleted since the pick is not sent by its id, which the host's chain would skip
+// silently: its pick is cleared, the notice names it and nothing is sent, so the owner picks again. A check that cannot
+// be read is refused like the command itself.
 export async function submitAsk(appSessionId: AppSessionId, askId: string, client: MawsBridge, projects: readonly ProjectRef[]): Promise<void> {
   const store = askSheet(appSessionId);
   const state = store.getState();
@@ -202,7 +205,25 @@ export async function submitAsk(appSessionId: AppSessionId, askId: string, clien
   // Submit's own rule, for Retry too: nothing while another answer is out, nothing while a question is half answered
   if (!ask || ask.state !== 'pending' || state.submitting !== null || !canSubmit(ask.questions, state.drafts.get(askId))) return;
   store.setState({ submitting: askId, failed: null, notice: null });
-  const result = await client.invoke('maws.ask.answer', { appSessionId, askId, answers: toAnswers(ask.questions, state.drafts.get(askId), projects) });
+  const answers = toAnswers(ask.questions, state.drafts.get(askId), projects);
+  const gone: { questionId: string; name: string }[] = [];
+  for (const answer of answers) {
+    if (answer.designSystemId === undefined) continue;
+    const found = await client.invoke('artifacts.get', { artifactId: answer.designSystemId, prepare: false });
+    if (!found.ok) {
+      store.setState({ submitting: null, failed: { askId, detail: found.error.message } });
+      return;
+    }
+    if (found.value.artifact?.kind !== 'design_system') gone.push({ questionId: answer.id, name: answer.name ?? answer.designSystemId });
+  }
+  if (gone.length > 0) {
+    const drafts = store.getState().drafts;
+    const forAsk = new Map(drafts.get(askId));
+    for (const { questionId } of gone) forAsk.set(questionId, setDesignSystem(forAsk.get(questionId) ?? EMPTY_DRAFT, null));
+    store.setState({ submitting: null, drafts: new Map(drafts).set(askId, forAsk), notice: SHEET.systemDeleted(gone.map((system) => system.name)) });
+    return;
+  }
+  const result = await client.invoke('maws.ask.answer', { appSessionId, askId, answers });
   const now = store.getState();
   if (!result.ok) {
     store.setState({ submitting: null, failed: { askId, detail: result.error.message } });
