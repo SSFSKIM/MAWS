@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 89,
-    "defer:pending": 34,
+    "defer:committed": 90,
+    "defer:pending": 33,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1233,7 +1233,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L149; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "remainingClause": "An `artifact` pane target carrying tab and block, or a `document` pane. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L149; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "a12235794fba9538b3fde5bd72ee6449dd58192d"
     },
     {
       "line": 150,
@@ -1243,8 +1243,8 @@
       "triageReason": "Binding implementation limitation; no untested dependency upgrade in Finish.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L150; parent Decision Log 106): Binding implementation limitation; no untested dependency upgrade in Finish. Owner: P4; revalidated at each binding re-pin.",
       "remainingClause": "Removed at the re-pin. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L150; parent Decision Log 106): Binding implementation limitation; no untested dependency upgrade in Finish. Owner: P4; revalidated at each binding re-pin.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 151,
