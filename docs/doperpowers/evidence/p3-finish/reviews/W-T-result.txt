@@ -1,0 +1,11 @@
+W-T — all five source repairs independently approved; first union gate pending
+L145 b177fe204: conservative missing-cost accounting.
+L238 aa98bcbdd: exact KaTeX advisory filter across happy-dom projects and layout.get fake answer.
+L265 3dff5766f: owned-shell cleanup; row narrowed to five full sets after this repair.
+L231 a58b39e86: one FinalBundleReporter/writer, with p3f-final plain output from the dashboard job.
+L235 c889aadae, review fix 412fe9a1f: every src/renderer/src React suite, JSX or not, selected under the compiler; Node/timing partition retained. Portable artifacts-dom is explicitly outside this row and logged separately.
+High review L231: correct, actual pinned Playwright 1.63.0 FullConfig.argv/lifecycle inspected; 76 invocation/bundle tests independently passed.
+High review L265: correct; 7 process tests independently passed. Five-full-set count is still open. Accepted tradeoffs: bounded 5s keep-quit cost, informational remaining-shell line, no speculative ps-failure guard.
+Task review L145/L238/L235: first round found omitted non-JSX React suites. Worker fixed the general selection at412fe9a1f; second round approved with no remaining findings. Executor reports4 selection tests and11 newly compiled files/120tests passing; re-review did not rerun them. Ordinary compiled selection207 files, plus timing and existing design-system selection. First pool unit job must remain under about25min, else architect ruling/opt-in routing, never silent narrowing.
+Controller verified L238’s exact predicate: one argument, exact advisory text; other warnings pass through. Doctype cannot satisfy this happy-dom clause because compatMode is absent.
+The first named union gate uses p3f-final solely as reporter preflight, NOT final-source evidence. Inspect its manifest/archive but do not extract out/ or run paid scenes. Final full-set p3f-final after source freeze remains required.

@@ -1,17 +1,38 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M1 pair 1",
+  "phase": "M1 pair 1 reviewed; preflight gate next",
   "W-T": {
-    "status": "executing",
+    "status": "review approved; authoritative union gate pending",
     "base": "1c007d713",
-    "executor": "a57f5bfb86c7f98b3"
+    "executor": "a57f5bfb86c7f98b3",
+    "rowCommits": [
+      "b177fe204",
+      "aa98bcbdd",
+      "3dff5766f",
+      "a58b39e86",
+      "c889aadae"
+    ],
+    "fixCommit": "412fe9a1f",
+    "reviewers": {
+      "bundle": "a3d3b1ae84bcc3caf",
+      "cleanup": "a507344cd689e05ff",
+      "otherRows": "a3e84a98079cfd6a4"
+    },
+    "countRemainder": "L265 five full sets, currently 0"
   },
   "W-RD": {
     "status": "review approved; authoritative union gate pending",
     "base": "73f24d2a0",
     "executor": "a53212fbc596ac2a9",
     "reviewer": "a84a924b3c8fb8e36",
-    "rowCommits": ["ba8ff17e5", "b7889552e", "ed201bdb1", "36cc73187", "7fcca4305", "aa710027e"],
+    "rowCommits": [
+      "ba8ff17e5",
+      "b7889552e",
+      "ed201bdb1",
+      "36cc73187",
+      "7fcca4305",
+      "aa710027e"
+    ],
     "fixCommit": "a0acd8c76",
     "reviewRounds": 2
   },
