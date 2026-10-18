@@ -10,7 +10,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { McpStatusResponse } from '@shared/wire/control';
 import type { JournalDirection, JournalRow } from '@shared/wire/journal';
@@ -69,8 +69,8 @@ export interface LogEntry {
 
 export const readLog = (layout: ProbeLayout): LogEntry[] => (existsSync(layout.log) ? readFileSync(layout.log, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as LogEntry) : []);
 
-// The origins of auth-advertising fixtures this process started: for MAWS's own client only (P3-HD Decision Log 23).
-const authOrigins = new Set<string>();
+// The ports of auth-advertising fixtures this process started: for MAWS's own client only (P3-HD Decision Log 23).
+const authPorts = new Set<number>();
 
 // `auth`: a MAWS-client-only fixture; a probe engine whose configuration names one refuses to launch.
 export async function startHttpFixture(layout: ProbeLayout, id: string, options: { auth?: boolean } = {}): Promise<{ url: string; close(): void }> {
@@ -79,17 +79,76 @@ export async function startHttpFixture(layout: ProbeLayout, id: string, options:
     child.stdout!.once('data', (chunk: Buffer) => resolve((JSON.parse(chunk.toString('utf8').split('\n')[0]!) as { port: number }).port));
     child.once('exit', (code) => reject(new Error(`the http fixture ${id} exited (${code})`)));
   });
-  if (options.auth) authOrigins.add(`127.0.0.1:${port}`);
+  if (options.auth) authPorts.add(port);
   return { url: `http://127.0.0.1:${port}/mcp`, close: () => void child.kill('SIGTERM') };
 }
 
-// No engine may see a resource that advertises authorization, not even its 401 (P3-HD Decision Log 23): the engine's
-// configuration as this launch would read it (both config homes, the project's .mcp.json, the user settings, the
-// dynamic servers) must name no auth fixture's origin.
-export function assertNoAuthFixture(layout: ProbeLayout, dynamic?: Record<string, unknown>): void {
-  const files = [join(layout.config, '.claude.json'), join(layout.home, '.claude.json'), join(layout.config, 'settings.json'), join(layout.project, '.mcp.json')];
-  const configuration = [...files.filter((path) => existsSync(path)).map((path) => readFileSync(path, 'utf8')), JSON.stringify(dynamic ?? {})].join('\n');
-  for (const origin of authOrigins) if (configuration.includes(origin)) throw new Error(`a probe engine must never be configured with the auth-advertising fixture at ${origin} (P3-HD Decision Log 23)`);
+// What a probe engine launch is handed: its spawn cwd, its exact environment and its arguments (the dynamic
+// `--mcp-config` and the `--settings` MAWS passes among them).
+export interface ProbeLaunchInputs {
+  cwd: string;
+  env: Readonly<Record<string, string>>;
+  args: readonly string[];
+}
+
+// The files an engine launched so could read servers or settings from (P3-F L256): the config file and settings of each
+// home its environment names (CLAUDE_CONFIG_DIR, HOME), the legacy file, and the project files of every directory from
+// the cwd up to the root.
+export function launchConfigurationFiles(inputs: ProbeLaunchInputs): string[] {
+  const { CLAUDE_CONFIG_DIR: configDir, HOME: home } = inputs.env;
+  const homes = [configDir, home].filter((dir): dir is string => dir !== undefined && isAbsolute(dir));
+  const configDirs = [configDir, home === undefined ? undefined : join(home, '.claude')].filter((dir): dir is string => dir !== undefined && isAbsolute(dir));
+  const files = [
+    ...homes.flatMap((dir) => [join(dir, '.claude.json'), join(dir, '.claude-custom-oauth.json')]),
+    ...configDirs.flatMap((dir) => [join(dir, 'settings.json'), join(dir, 'settings.local.json'), join(dir, '.config.json')]),
+  ];
+  for (let dir = resolvePath(inputs.cwd); ; dir = dirname(dir)) {
+    files.push(join(dir, '.mcp.json'), join(dir, '.claude', 'settings.json'), join(dir, '.claude', 'settings.local.json'));
+    if (dir === dirname(dir)) break;
+  }
+  return [...new Set(files)];
+}
+
+// Every string a JSON text holds (keys and values, escapes resolved), or the text itself when it is not JSON.
+function stringsOf(text: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [text];
+  }
+  const found: string[] = [];
+  const walk = (value: unknown): void => {
+    if (typeof value === 'string') found.push(value);
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (typeof value === 'object' && value !== null) {
+      for (const [key, inner] of Object.entries(value)) {
+        found.push(key);
+        walk(inner);
+      }
+    }
+  };
+  walk(parsed);
+  return found;
+}
+
+// The first of `ports` the launch could reach, or null. Matched by the port number alone, so that no spelling of the
+// loopback host (localhost, [::1], 127.1, a zero-padded port) and no value split across a configuration reference and
+// the environment escapes it. A file that exists but cannot be read throws, refusing the launch.
+export function authFixtureExposure(inputs: ProbeLaunchInputs, ports: Iterable<number>): number | null {
+  const texts = [...launchConfigurationFiles(inputs).filter((path) => existsSync(path)).flatMap((path) => stringsOf(readFileSync(path, 'utf8'))), ...Object.values(inputs.env), ...inputs.args.flatMap(stringsOf)];
+  for (const port of ports) {
+    const named = new RegExp(`(?<!\\d)0*${port}(?!\\d)`);
+    if (texts.some((text) => named.test(text))) return port;
+  }
+  return null;
+}
+
+// No engine may see a resource that advertises authorization, not even its 401 (P3-HD Decision Log 23): nothing the
+// launch would read (P3-F L256: its own cwd, config homes, environment and arguments) may name an auth fixture.
+export function assertNoAuthFixture(inputs: ProbeLaunchInputs): void {
+  const port = authFixtureExposure(inputs, authPorts);
+  if (port !== null) throw new Error(`a probe engine must never be configured with the auth-advertising fixture at 127.0.0.1:${port} (P3-HD Decision Log 23)`);
 }
 
 // The PATH a probe launch hands its engine: the layout's bin first, then the runner's.
@@ -109,9 +168,6 @@ let launches = 0;
 
 // `configDir`: launch with CLAUDE_CONFIG_DIR at the layout's config home, else with HOME alone.
 export async function startProbeEngine(layout: ProbeLayout, options: { cwd: string; configDir: boolean; dynamic?: Record<string, unknown>; appSessionId?: string; launchEnv?: Record<string, string>; syntheticEnv?: Record<string, string> }): Promise<ProbeEngine> {
-  assertNoAuthFixture(layout, options.dynamic); // before anything of the engine runs
-  const engine = installedEngine();
-  launches += 1;
   const captured: Record<string, string> = {
     HOME: layout.home, PATH: launchPathOf(layout), USER: process.env.USER ?? 'probe', LOGNAME: process.env.LOGNAME ?? process.env.USER ?? 'probe', SHELL: process.env.SHELL ?? '/bin/sh', TMPDIR: tmpdir(), LANG: 'en_US.UTF-8',
     XDG_MAWS_PROBE_VALUE: PROBE_VALUE, XDG_MAWS_PROBE_ARG: PROBE_ARG, // pass MAWS's allowlist (XDG_), as an owner's exported variable would
@@ -122,6 +178,9 @@ export async function startProbeEngine(layout: ProbeLayout, options: { cwd: stri
   const env = { ...buildEnvironment(spec, captured, RELAY_URL), ...options.syntheticEnv };
   const flagSettings = mergeFlagSettings(spec);
   const args = [...ENGINE_FLAGS, ...(options.dynamic ? ['--mcp-config', JSON.stringify(options.dynamic)] : []), '--settings', JSON.stringify(flagSettings)];
+  assertNoAuthFixture({ cwd: options.cwd, env, args }); // on exactly what the engine is handed, before anything of it runs
+  const engine = installedEngine();
+  launches += 1;
   const launchId = `PROBE-${launches}`;
   const localKey = await captureLocalKey(options.cwd); // before the spawn, as the launcher does
   const context = connectorLaunchContext({ appSessionId: options.appSessionId ?? `probe-${launches}`, launchId, cwd: options.cwd, environment: env, flagSettings, localKey });
