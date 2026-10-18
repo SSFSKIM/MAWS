@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 68,
-    "defer:pending": 55,
+    "defer:committed": 69,
+    "defer:pending": 54,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1002,7 +1002,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L114; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
       "remainingClause": "A native shim tells `before-quit` the quit came from the alternate (a Node-API addon on `native/peer-auth/`'s pattern: `terminate:`'s sender, or the current event's Option flag) and the quit guard takes its keep path for it, verified by the owner's hands; or Electron exposes the quit's sender or menu alternates. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L114; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "e7306f19660a7e1aed8afc0d2e423b9291b13c26"
     },
     {
       "line": 118,
@@ -1012,8 +1012,8 @@
       "triageReason": "Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L118; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
       "remainingClause": "The rejection is caught, a failure notice shown, the recovery action left available, with a rejected-write test. Owner: P3 (the comment card). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L118; parent Decision Log 106): Minor nonblocking UX/diagnostic cleanup outside the P3 contract frontier; carry deliberately to P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 119,
