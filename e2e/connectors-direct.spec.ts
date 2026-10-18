@@ -43,7 +43,7 @@
 //   transport host death: a stand-in host starts the same plan and is SIGKILLed; the lifeline alone ends the group.
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'; // P3-HD M4b: rmSync
-import { join } from 'node:path';
+import { join, resolve } from 'node:path'; // P3-F W-PKG: resolve
 import { test, expect, type TestInfo } from '@playwright/test';
 import type { McpStatusResponse } from '@shared/wire/control';
 import { ConnectorStatusCache } from '../src/engine-host/connectors/provenance';
@@ -68,8 +68,19 @@ import { createPageIn, expectNoForbiddenFrames, expectQuietJournals, heldServer,
 import { blankResumeStartupRejection, boundedAcquire, heldFate, isBlankResume, journalFrameShapes, oncePageHtml } from './support/connector-direct-checks';
 import { allow, evidence, grantsOf, printEvidence, revokeInSheet, shot, stopEngine } from './support/connector-direct-acceptance';
 // P3-HD M4b end
+// P3-F W-PKG start
+import { REPO_ROOT } from './support/launch';
+import { packagedResolution, productionPin, resolutionProblems, resourcesOf } from './support/packaged-resolution';
+// P3-F W-PKG end
 
-test.skip(process.env.MAWS_CONNECTORS_DIRECT_E2E !== '1', 'the direct-route e2e runs under pnpm e2e:connectors-direct (MAWS_CONNECTORS_DIRECT_E2E=1)');
+// P3-F W-PKG (the tracker's packaged-SDK row): the transition scene is route D's packaged proof too. Under a packaged
+// MAWS_E2E_EXECUTABLE (`pnpm e2e:packaged`, the packaged gate's bare set) it alone runs, over the packaged app; every
+// other case keeps the direct group's switch.
+const DIRECT_GROUP = process.env.MAWS_CONNECTORS_DIRECT_E2E === '1';
+const PACKAGED = Boolean(process.env.MAWS_E2E_EXECUTABLE);
+const TRANSITION = 'transition:';
+test.skip(!DIRECT_GROUP && !PACKAGED, 'the direct-route e2e runs under pnpm e2e:connectors-direct (MAWS_CONNECTORS_DIRECT_E2E=1), and its transition scene under pnpm e2e:packaged');
+test.beforeEach(() => test.skip(!DIRECT_GROUP && !test.info().title.startsWith(TRANSITION), 'over the packaged app only the transition scene runs (pnpm e2e:packaged); the rest under pnpm e2e:connectors-direct'));
 test.describe.configure({ timeout: 180_000 });
 
 type Reported = { name: string; status: string; scope?: string; source?: string; config?: Record<string, unknown> };
@@ -697,6 +708,7 @@ test('transition: one grant reads through E, then D with no engine, then E again
     const directParent = Number(ps(directServer, 'ppid'));
     expect(directServer, 'a server other than the engine’s').not.toBe(engineServer);
     expect(directParent, 'not the engine’s child').not.toBe(engine.pid);
+    if (run.maws.packaged) await expectPackagedHost(info, scene, directParent); // P3-F W-PKG
     expect(await grantsOf(run.page, artifactId), 'the same grant, fingerprint and mode: no new one').toEqual(grants);
     expect(await scene.live(run.page), 'route D started no engine').toEqual([]);
     expect(scene.launches(engine.appSessionId), 'the owner’s one launch, exited').toEqual({ spawns: 1, exits: 1 });
@@ -811,6 +823,30 @@ test('transition: one grant reads through E, then D with no engine, then E again
     expectQuietJournals(journals, blankResume ? engine.appSessionId : undefined);
   });
 });
+
+// P3-F W-PKG: the read route D just served came from the packaged app's own host. Its server is the child of the
+// supervisor main connected to, which runs the engine-host chunk from inside this bundle's app.asar, and the packaged
+// binary in that same Node mode resolves the chunk's SDK at the repository's pin, and the SDK's whole production closure,
+// inside the bundle's Resources, not from the repository the app was built in. Kept as evidence before the assertions.
+async function expectPackagedHost(info: TestInfo, scene: ConnectorScene, directParent: number): Promise<void> {
+  const executable = realpathSync(resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE!));
+  const resources = resourcesOf(executable);
+  const asar = join(resources, 'app.asar');
+  const command = ps(directParent, 'command');
+  const pins = { '@modelcontextprotocol/sdk': productionPin(REPO_ROOT, '@modelcontextprotocol/sdk') };
+  const resolution = packagedResolution(executable, scene.userData);
+  const problems = resolutionProblems(resolution, resources, pins);
+  const local = (path: string | null) => (path === null ? null : path.replace(`${resources}/`, '<Resources>/'));
+  await evidence(info, 'transition-packaged', {
+    supervisor: { pid: directParent, connected: scene.supervisors.has(directParent), command: command.replaceAll(`${resources}/`, '<Resources>/').replaceAll(scene.root, '<scene>') },
+    resolution: { chunk: local(resolution.chunk), required: resolution.required.map(({ specifier, file }) => ({ specifier, file: local(file) })), roots: resolution.roots.map(({ name, version }) => `${name}@${version}`), packages: resolution.packages.length, closure: resolution.packages.map(({ name, version }) => `${name}@${version}`).sort(), missing: resolution.missing, truncated: resolution.truncated },
+    pins,
+    problems,
+  });
+  expect(scene.supervisors.has(directParent), 'route D’s server is the child of the supervisor main connected to').toBe(true);
+  expect(command, 'that supervisor runs the engine-host chunk from inside this bundle’s app.asar').toContain(`${asar}/`);
+  expect(problems, 'the packaged binary resolves the host’s SDK and its production closure inside the bundle').toEqual([]);
+}
 
 const ONCE_TITLE = 'Signups, once';
 
