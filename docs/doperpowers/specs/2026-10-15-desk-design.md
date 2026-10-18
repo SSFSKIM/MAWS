@@ -2423,11 +2423,13 @@ project the stream opened, at once), what the stream carried ends: each of its s
 (`end {reason: "machine-offline"}`, numbered one past the last `n` relayed on it) and its forwarded RPCs without a
 result become `uncertain` (DX6). The lease, closed (nothing of that generation renews it again), holds the machine
 online for a grace of one heartbeat period, no longer than the lease had left, for the machine's next stream to take it
-over at its `hello` without the machine ever reading offline. In the grace a browser's `subscribe` waits for that
-stream and is carried to it at its `hello`; an RPC needs an open stream and fails `machine-offline` at once. When the
+over at its `hello` without the machine ever reading offline. In the grace a browser's `subscribe`, and a new RPC
+(recorded `forwarded`), wait for that stream and are carried to it at its `hello`; a retry of an `uncertain` RPC is
+answered from its record. When the
 lease lapses (found by the project's alarm, and before anything else at each entry — a renewal, any frame a machine
 posts, a browser's request — whether or not the alarm ran yet; a closed lease lapses when its grace runs out), the
-machine is offline: what its stream carried ends as above, a subscription that waited ends too (at `n` 0), DX3's
+machine is offline: what its stream carried ends as above, a subscription that waited ends too (at `n` 0), an RPC
+that waited fails `machine-offline` (it never reached the machine), DX3's
 `machines` shows it offline, and its sessions' stored presence is no longer handed to a browser as current (DX3).
 [2026-10-18, MAWS #57: the grace; before it a close put the machine offline at once.] A later renewal of the same generation (a daemon back from a
 suspension on a stream that held) puts it online again, after the lapse has ended the old work; its subscriptions do
@@ -3464,8 +3466,8 @@ should act. Right after the code verifies, the daemon refuses an RPC whose `mach
 (`unknown-project`), or whose session is not a session of that project on this machine (`no-session`), before the
 ledger, before freshness, and before anything else. It never relies on the hub's routing for this.
 
-**Error codes.** The hub's: `machine-offline` (no fresh lease, or one held only by a closed stream's grace: fails at
-once, nothing queued), `stale` (older than 60
+**Error codes.** The hub's: `machine-offline` (no fresh lease: fails at once, nothing queued; an RPC that waited out a
+closed stream's grace for the next stream fails so too), `stale` (older than 60
 seconds), `not-member` (`member` is not the signed-in member), `bad-shape`. The daemon's, before it executes:
 `bad-code`, `wrong-machine`, `unknown-project`, `read-only`, `bad-shape` (arguments malformed, or a decision that does not
 fit its request: a deny on an async question, an `answer` to a permission prompt, an allow on a question without its
@@ -4934,9 +4936,9 @@ a hub that connects into machines (§2).
   the reset was decided: the instance holding a stream asks every second
   which instance its own id reaches and ends the stream once it is another;
   a closed stream's lease holds the machine online for a grace of one
-  heartbeat, a `subscribe` in the grace waits for the next stream (stored as
-  route generation 0, a new value in an existing column, no new table,
-  column or key), and an RPC in the grace fails at once; the Worker answers an
+  heartbeat, a `subscribe` or a new RPC in the grace waits for the next
+  stream (stored as generation 0 of its route or record, a new value in an
+  existing column, no new table, column or key); the Worker answers an
   object's exception as JSON; and the web keeps what a subscription drew
   through any disruption, merges the fresh snapshot into it, and says
   nothing about a gap shorter than the same 15 s. Rejected then: persisting

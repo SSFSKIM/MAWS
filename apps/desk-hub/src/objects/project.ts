@@ -11,9 +11,10 @@
 // subscriptions end at the browsers and its forwarded RPCs without a result become `uncertain`. A stream's close does
 // not put the machine offline at once: its lease holds for a grace (`graceMs`, one heartbeat), long enough for the
 // machine's next stream to take it over, so a reconnect (the daemon's, or one the hub's own object forced) never flaps
-// the machine's presence. A subscription a browser asks for in that grace waits for the next stream (`PARKED`) and is
-// carried to it at its `hello`. When the lease lapses (the grace or the lease ran out) or the machine is revoked, the
-// machine is offline, and what still waited ends too.
+// the machine's presence. A subscription or an RPC a browser sends in that grace waits for the next stream (`PARKED`)
+// and is carried to it at its `hello`. When the lease lapses (the grace or the lease ran out) or the machine is revoked,
+// the machine is offline, and what still waited ends too: a waiting subscription ends, a waiting RPC fails
+// `machine-offline` (it never reached the machine).
 import { DurableObject } from 'cloudflare:workers';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
@@ -596,21 +597,29 @@ export class Project extends DurableObject<Env> {
     const record = this.plane.rpc(nonce);
     if (record) {
       if (record.member !== member || canonicalize(record.rpc) !== canonicalize(rpc)) return fail('bad-shape', 'this nonce was sent with another RPC');
+      // A retry waits for no stream: in a closed stream's grace it is answered from the record, and sent again later.
       if (record.state === 'uncertain' && this.reachable(record.machine)) return this.forward(record.rpc, member, true);
       return this.toSocket(socket, rpcStateFrame(record));
     }
     if (!(Date.now() - Date.parse(rpc.created) <= RPC_FRESHNESS_MS)) return fail('stale', 'older than 60 seconds: issue it again');
-    if (!this.reachable(rpc.machine)) return fail('machine-offline', this.isOnline(rpc.machine) ? `${rpc.machine} is reconnecting: try again in a moment` : `${rpc.machine} is offline`);
+    if (!this.isOnline(rpc.machine)) return fail('machine-offline', `${rpc.machine} is offline`);
     this.forward(rpc, member);
   }
 
-  /** Records the RPC as forwarded and writes it to the machine's stream. A send that finds no stream fails it
-   * `machine-offline`; but a `retry` of an uncertain one stays uncertain, since a retry the hub could not deliver says
-   * nothing of what the first forward did. */
+  /** Records the RPC as forwarded and writes it to the machine's stream; in a closed stream's grace it is recorded as
+   * waiting for the next stream (`PARKED`), which takes it at its `hello`. */
   private forward(rpc: Rpc, member: string, retry = false): void {
-    const { generation } = this.plane.lease(rpc.machine)!;
-    const record: RpcRecord = { nonce: rpc.nonce, machine: rpc.machine, member, rpc, state: 'forwarded', outcome: null, generation };
+    const lease = this.plane.lease(rpc.machine)!;
+    const record: RpcRecord = { nonce: rpc.nonce, machine: rpc.machine, member, rpc, state: 'forwarded', outcome: null, generation: lease.closed ? PARKED : lease.generation };
     this.updateRpc(record);
+    if (record.generation !== PARKED) this.send(record, retry);
+  }
+
+  /** Writes a forwarded RPC to the stream its record names. A send that finds no stream fails it `machine-offline`; but a
+   * `retry` of an uncertain one stays uncertain, since a retry the hub could not deliver says nothing of what the first
+   * forward did. */
+  private send(record: RpcRecord, retry = false): void {
+    const { rpc, generation } = record;
     const unsent = (undelivered: 'failed' | 'uncertain') => {
       const state = retry ? 'uncertain' : undelivered;
       const now = this.plane.rpc(rpc.nonce);
@@ -725,6 +734,11 @@ export class Project extends DurableObject<Env> {
       this.routes.set(route.sub, route);
       this.carry(route);
     }
+    for (const parked of this.plane.forwarded(ctx.machine, PARKED)) {
+      const record = { ...parked, generation: ctx.generation };
+      this.plane.putRpc(record, Date.now());
+      this.send(record);
+    }
     void this.schedule();
   }
 
@@ -740,14 +754,17 @@ export class Project extends DurableObject<Env> {
   }
 
   /** What a machine's stream carried ends with it: its subscriptions end at their browsers, and its forwarded RPCs
-   * without a result become `uncertain`. Subscriptions waiting for its next stream end too when `parked` (the machine is
-   * offline), and wait on otherwise. */
+   * without a result become `uncertain`. What waits for its next stream ends too when `parked` (the machine is offline):
+   * a subscription ends, and an RPC, which never reached the machine, fails `machine-offline`; otherwise it waits on. */
   private endStreamWork(machine: string, generation: number, parked: boolean): void {
     for (const route of [...this.routes.values()]) {
       if (route.machine !== machine || route.generation > generation || (route.generation === PARKED && !parked)) continue;
       this.endSub(route, 'machine-offline');
     }
-    for (const record of this.plane.forwarded(machine, generation)) this.updateRpc({ ...record, state: 'uncertain', outcome: null });
+    for (const record of this.plane.forwarded(machine, generation)) {
+      if (record.generation !== PARKED) this.updateRpc({ ...record, state: 'uncertain', outcome: null });
+      else if (parked) this.updateRpc({ ...record, state: 'failed', outcome: { state: 'failed', error: { code: 'machine-offline', message: `${machine} is offline` } } });
+    }
   }
 
   /** Lapses every lease whose time is up (checked on read, and by the alarm). */

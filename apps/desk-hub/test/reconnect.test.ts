@@ -1,22 +1,33 @@
 // A machine's reconnect, as the hub makes it (MAWS #57): the instance holding a machine's stream ends it the moment
 // Cloudflare routes the object's new requests to a successor, so the machine reconnects at once instead of at its next
 // heartbeat's ack; a closed stream's lease holds the machine online for a grace (one heartbeat), so the reconnect does not
-// flap its presence; a subscription a browser asks for in that grace waits for the machine's next stream and is carried
-// to it at its `hello`; a POST of a replaced object's stream says so; and an object's exception reaches the machine as
+// flap its presence; a subscription or an RPC a browser sends in that grace waits for the machine's next stream and is
+// carried to it at its `hello`; a POST of a replaced object's stream says so; and an object's exception reaches the machine as
 // JSON, never as the runtime's bare 1101. Miniflare cannot keep an old instance streaming while it routes new requests
 // to a successor, so the replacement is the suites' seam (`hub.replace`); the probe that finds it is checked for real
 // against a live object (`hub.probe`), and runs under every other suite with a stream.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ProjectDown } from '../src/protocol/browser';
-import { newNonce } from '../src/protocol/codes';
+import type { DownFrame } from '../src/protocol/machine';
+import { importOrgKey, newNonce, sealRpc } from '../src/protocol/codes';
+import type { Rpc, RpcDraft } from '../src/protocol/rpc';
 import type { SessionMessage } from '../src/protocol/session';
 import { BrowserClient, enroll, MachineClient, waitFor } from './support/clients';
 import { ADMIN, startLocalHub, type LocalHub } from './support/local';
 
 let hub: LocalHub;
+let memberId: string;
 beforeAll(async () => {
   hub = await startLocalHub();
+  memberId = ((await (await hub.fetchAs(ADMIN, '/api/me')).json()) as { member: { id: string } }).member.id;
 });
+
+const KEY = importOrgKey(new Uint8Array(32).fill(4));
+/** An interrupt of the session on `machine`, sealed as the web seals it. */
+async function interrupt(project: string, machine: string): Promise<Rpc> {
+  const draft = { rpc: 'interrupt', project, machine, member: memberId, created: new Date().toISOString(), nonce: newNonce(), args: { session: SESSION } } as unknown as RpcDraft;
+  return sealRpc(await KEY, draft);
+}
 afterAll(() => hub?.close());
 
 const SESSION = '5e1d0a8e-3b2d-4c5e-9f70-0000000000aa';
@@ -125,7 +136,7 @@ describe('a machine whose object was replaced under its stream', () => {
 });
 
 describe("a closed stream's grace", () => {
-  it('holds the machine online for the grace, keeps a subscription asked for in it waiting, and ends both once it runs out', async () => {
+  it('holds the machine online for the grace, keeps a subscription and an RPC sent in it waiting, and ends all three once it runs out', async () => {
     const project = newProject();
     const m = await machine(project);
     const b = await BrowserClient.open(hub, ADMIN, project);
@@ -139,28 +150,41 @@ describe("a closed stream's grace", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
     const waiting = newNonce();
     b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub: waiting });
+    const call = await interrupt(project, m.name);
+    b.send({ t: 'rpc', rpc: call });
     await new Promise((resolve) => setTimeout(resolve, GRACE_MS / 2 - 300));
     expect(onlineStates(b, m.name, from)).not.toContain(false);
     expect(b.frames.slice(from).some(isEnd(waiting))).toBe(false);
+    // The RPC is recorded as forwarded, and waits: nothing has failed it.
+    expect(b.frames.slice(from).filter((f) => f.t === 'rpc-state' && f.nonce === call.nonce).map((f) => (f as { state: string }).state)).toEqual(['forwarded']);
 
     await b.next((f) => f.t === 'machines' && f.machines.some((x) => x.machine === m.name && !x.online), 'offline once the grace ran out', from, GRACE_MS + 2 * MARGIN_MS);
     expect(Date.now() - closedAt).toBeGreaterThanOrEqual(GRACE_MS - 100);
     const ended = (await b.next(isEnd(waiting), 'the waiting subscription ended', from)) as Extract<ProjectDown, { t: 'session' }>;
     expect(ended.message).toMatchObject({ n: 0, body: { reason: 'machine-offline' } });
+    // It never reached the machine: it fails, rather than reading as possibly done.
+    expect(await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce && f.state !== 'forwarded', 'the waiting RPC settled', from)).toMatchObject({
+      state: 'failed',
+      outcome: { error: { code: 'machine-offline' } },
+    });
     b.close();
   });
 
-  it('a reconnect within the grace is no flap: the browser sees no offline, and a new subscription is served', async () => {
+  it('a reconnect within the grace is no flap: the browser sees no offline, an RPC sent between streams reaches the next one, and a new subscription is served', async () => {
     const project = newProject();
     const m = await machine(project);
     const b = await BrowserClient.open(hub, ADMIN, project);
     await b.next((f) => f.t === 'machines' && f.machines.some((x) => x.machine === m.name && x.online), 'online');
     const from = b.frames.length;
     await m.close();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const call = await interrupt(project, m.name);
+    b.send({ t: 'rpc', rpc: call });
+    await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce && f.state === 'forwarded', 'the RPC forwarded', from);
     const reconnected = m.frames.length;
     await m.connect();
     await m.sync(project);
+    expect(((await m.next((f) => f.t === 'rpc', 'the waiting RPC on the new stream', reconnected)) as Extract<DownFrame, { t: 'rpc' }>).rpc.nonce).toBe(call.nonce);
     const sub = newNonce();
     b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub });
     await m.next((f) => f.t === 'subscribe' && f.sub === sub, 'the subscribe', reconnected);
