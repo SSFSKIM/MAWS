@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 85,
-    "defer:pending": 38,
+    "defer:committed": 86,
+    "defer:pending": 37,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1189,7 +1189,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L143; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "The viewer reading under the artifact's own session when the window learns it, or a session-less comment path. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L143; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "c00a1541fa844b89d8d531162bc2b4ba1f8dc469"
     },
     {
       "line": 146,
@@ -1199,8 +1199,8 @@
       "triageReason": "Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L146; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
       "remainingClause": "A fold matching APFS's, or the device-and-inode comparison extended to the stale sweep. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L146; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 147,
