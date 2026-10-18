@@ -194,6 +194,23 @@ test('the pending requests are cards at the tail, answered in place and gone onc
   await expect(question).not.toContainText('Waiting for your answer');
 });
 
+test("an async question whose request was withdrawn unanswered reads as withdrawn, its card gone, not as waiting", async ({ page, hub }) => {
+  const { fm, view } = await openSession(page, hub);
+  const stage = logStager(hub, fm);
+  const raised = fm.playThrough((s) => s.k === 'raised' && s.draft.tool === ASK);
+  if (raised?.k !== 'raised') throw new Error('the recording raises no async question');
+  const asked = fm.recording.steps.findIndex((s) => s.k === 'log' && s.event.kind === 'question');
+  await stage(Math.max(fm.played, asked + 1));
+  await hub.raise(PROJECT, MACHINE, { ...raised.draft, session: fm.session });
+  const question = view.locator('[data-row-id^="question:toolu_01ptPa1uE4qkTexQaiwjlnsO"]');
+  await expect(question).toContainText('Waiting for your answer · below');
+  // The turn is aborted: the bridge settles the request with no answer used (DX4 `withdrawn`).
+  await hub.settle(PROJECT, MACHINE, fm.session, { request: raised.draft.request, winner: 'other', outcome: 'withdrawn', by: 'bridge' });
+  await expect(view.locator(`[data-tail-request="${raised.draft.request}"]`)).toHaveCount(0);
+  await expect(question.getByTestId('question-withdrawn')).toHaveText('Withdrawn: the session moved on without an answer');
+  await expect(question).not.toContainText('Waiting');
+});
+
 test('a send from the composer stays at the tail, queued then delivered, until its own framed row arrives; a terminal prompt with its words never takes its place', async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
   // Up to the session at rest after the answer's turn, so Send delivers it as a turn of its own.

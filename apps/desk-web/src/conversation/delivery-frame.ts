@@ -74,8 +74,8 @@ export function deliveryFrame(row: JsonObject): { from: string; own: boolean } |
   return from === null ? null : { from, own: from === 'human' };
 }
 
-/** A sender's name as Markdown text: every character Markdown could read as syntax escaped. */
-const literal = (text: string) => text.replace(/[\\`*_{}[\]()#+\-.!|<>~]/g, '\\$&');
+/** A sender's name as Markdown text: every character Markdown could read as syntax escaped, math's `$` included. */
+const literal = (text: string) => text.replace(/[\\`*_{}[\]()#+\-.!|<>~$]/g, '\\$&');
 
 /**
  * The row as the session view draws it: a delivered row with its frame line dropped (the owner's own send) or drawn as

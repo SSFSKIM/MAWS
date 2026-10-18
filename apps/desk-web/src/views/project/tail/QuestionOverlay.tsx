@@ -2,7 +2,9 @@
 // row, MAWS's question receipt (S1 classifies `mcp__doperpowers__AskUserQuestion` as a question), and the log's
 // `question` and `answered` events, joined to it by their `src` (the call's tool-use id), overlay that row: while its
 // card waits at the tail the receipt says "Waiting for your answer · below", and once answered it carries the log's
-// answer, which the transcript never writes back into the call (the answer reaches the model later, as a prompt).
+// answer, which the transcript never writes back into the call (the answer reaches the model later, as a prompt). A
+// question whose request was settled with no answer used (DX4's `withdrawn`: its turn aborted, its session ended) and
+// that the log never answered says so, as its card would have, rather than waiting on an answer nothing will take.
 //
 // MAWS's list offers no seam to redraw one derived row and its `QuestionRow` is not edited here, so the overlay is drawn
 // into the row the list mounted: a host element appended to the receipt, found again whenever the virtualized list
@@ -12,9 +14,34 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QUESTION } from '../../../../../../src/renderer/src/transcript/model/copy';
 import type { AskedQuestion } from '../../../conversation/asked';
+import { settledText } from '../../../conversation/words';
+import type { RequestRecord } from '../../../project/conversation';
 
-/** One question row's overlay: its questions, the log's answers (or its answer's text when it reads no answers). */
-export type QuestionOverlayFact = AskedQuestion & { waiting: 'below' | 'open' | null };
+/**
+ * One question row's overlay: its questions, the log's answers (or its answer's text when it reads no answers), whether
+ * it waits on its card below or on an answer from anywhere, and, once its request was withdrawn unanswered, the words
+ * of that settlement.
+ */
+export type QuestionOverlayFact = AskedQuestion & { waiting: 'below' | 'open' | null; withdrawn: string | null };
+
+/**
+ * Each asked question's overlay, given the session's requests as the conversation keeps them (pending or settled, each
+ * settlement verified): the log's answer first; else waiting on its card below while its request is pending; else
+ * withdrawn when its request was settled so; else open.
+ */
+export function questionOverlayFacts(asked: ReadonlyMap<string, AskedQuestion>, requests: readonly RequestRecord[]): Map<string, QuestionOverlayFact> {
+  const callOf = (r: RequestRecord) => r.raised.toolUseId ?? r.request;
+  const pending = new Set(requests.filter((r) => r.pending).map(callOf));
+  const withdrawn = new Map(requests.flatMap((r) => (r.settled?.outcome === 'withdrawn' ? [[callOf(r), settledText(r.settled.winner, 'withdrawn', r.settled.by, '')] as const] : [])));
+  const facts = new Map<string, QuestionOverlayFact>();
+  for (const [src, question] of asked) {
+    const open = question.answeredText === null;
+    const below = open && pending.has(src);
+    const ended = open && !below ? (withdrawn.get(src) ?? null) : null;
+    facts.set(src, { ...question, waiting: !open ? null : below ? 'below' : ended === null ? 'open' : null, withdrawn: ended });
+  }
+  return facts;
+}
 
 export function QuestionOverlays({ root, facts }: { root: HTMLElement | null; facts: ReadonlyMap<string, QuestionOverlayFact> }) {
   const hosts = useHosts(root, [...facts.keys()]);
@@ -25,7 +52,7 @@ export function QuestionOverlays({ root, facts }: { root: HTMLElement | null; fa
 }
 
 function Overlay({ fact }: { fact: QuestionOverlayFact }) {
-  const { questions, answers, answeredText, waiting } = fact;
+  const { questions, answers, answeredText, waiting, withdrawn } = fact;
   return (
     <>
       <ul className="transcript-question-lines" data-testid="question-overlay">
@@ -38,7 +65,7 @@ function Overlay({ fact }: { fact: QuestionOverlayFact }) {
                 →
               </span>
               <span className="transcript-question-answer" data-answer={answer === undefined ? 'none' : ''}>
-                {answer ?? (waiting ? 'waiting' : answeredText !== null ? QUESTION.notAnswered : 'not answered yet')}
+                {answer ?? (waiting ? 'waiting' : answeredText !== null || withdrawn !== null ? QUESTION.notAnswered : 'not answered yet')}
               </span>
             </li>
           );
@@ -52,6 +79,11 @@ function Overlay({ fact }: { fact: QuestionOverlayFact }) {
       {waiting === 'open' && (
         <div className="desk-question-foot" data-waiting="">
           Waiting for an answer
+        </div>
+      )}
+      {withdrawn !== null && (
+        <div className="desk-question-foot" data-testid="question-withdrawn">
+          {withdrawn}
         </div>
       )}
       {answers === null && answeredText !== null && (

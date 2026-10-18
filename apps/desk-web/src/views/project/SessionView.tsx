@@ -10,10 +10,11 @@
 // What only the log and the hub know joins the transcript (M4; `tail/`): at its tail, the sends not yet in it, each with
 // its delivery state in its bubble's foot; then the session's pending requests as the channel's cards, answered in
 // place, with an "N waiting ↓" pill while none of them is in view; then an ended or retired session's end marker. The ask
-// mod's async question rows carry the log's question and answer. A session whose machine serves no transcript for it
-// (its subscription ended at n 0) draws the channel built from the log instead, saying why (`fallback`). A tapped
-// notification lands on its request's card at the tail, or on its `<message>`'s row in the transcript. A send's row
-// draws without its delivery frame line, a peer's send labelled with who sent it (`conversation/delivery-frame.ts`).
+// mod's async question rows carry the log's question and answer, or say the question was withdrawn unanswered. A
+// session whose machine serves no transcript for it (its subscription ended at n 0) draws the channel built from the
+// log instead, saying why (`fallback`). A tapped notification lands on its request's card at the tail, brought into the
+// virtualized list wherever the reader was, or on its `<message>`'s row in the transcript. A send's row draws without
+// its delivery frame line, a peer's send labelled with who sent it (`conversation/delivery-frame.ts`).
 //
 // Two decorations of MAWS's view are the desk's own (`styles/app.css`, under `data-session-view`): a gutter that keeps
 // every row, breakouts included, clear of MAWS's floating "Jump to latest"; and, while the session is at rest, that
@@ -31,7 +32,7 @@ import { retiredBy } from '../../conversation/capabilities';
 import { tailSends } from '../../conversation/tail';
 import { useSessionOwner } from '../../depth/owner/session-owner';
 import { DESK_ACTIONS } from '../../depth/view/actions';
-import { TranscriptPane, transcriptStatus, useKeptTranscript } from '../../depth/view/TranscriptPane';
+import { TranscriptPane, transcriptStatus, useKeptTranscript, type RowIndex } from '../../depth/view/TranscriptPane';
 import { sessionName } from '../../log/projection';
 import { useLanding } from '../../pwa/service-worker';
 import { useDeskLayout } from '../../shell/layout';
@@ -40,8 +41,8 @@ import type { DeskSession } from '../../shell/sessions';
 import { useDesk } from '../conversation/desk-context';
 import { useLandOnMessage } from './landed-message';
 import { ReportToggle } from './ReportToggle';
-import { QuestionOverlays, type QuestionOverlayFact } from './tail/QuestionOverlay';
-import { renderTailRow, TailProvider, tailRows, type TailItem } from './tail/session-tail';
+import { questionOverlayFacts, QuestionOverlays } from './tail/QuestionOverlay';
+import { renderTailRow, requestRowId, TailProvider, tailRows, type TailItem } from './tail/session-tail';
 
 type Props = {
   project: string;
@@ -66,6 +67,7 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
   const owner = useSessionOwner(project, session, plane);
   const state = useKeptTranscript(owner.keeper);
   const list = useRef<TranscriptListHandle>(null);
+  const rowIndex = useRef<RowIndex>(null);
   const [root, setRoot] = useState<HTMLElement | null>(null);
   const { connection } = useDesk();
   const conversation = useStore(connection.conversation.store);
@@ -101,13 +103,9 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the held rows are read through their count and oldest row
     [session.session, session.machine, events, conversation.deliveries, conversation.outbox, conversation.rpcs, loaded, state.more, heldCount, oldest, owner],
   );
-  const requests = useMemo(
-    () =>
-      Object.values(conversation.requests)
-        .filter((r) => r.pending && r.machine === session.machine && r.raised.session === session.session)
-        .sort((a, b) => a.at - b.at),
-    [conversation.requests, session.machine, session.session],
-  );
+  // The session's requests as the conversation keeps them, settled ones included; those pending are the tail's cards.
+  const known = useMemo(() => Object.values(conversation.requests).filter((r) => r.machine === session.machine && r.raised.session === session.session), [conversation.requests, session.machine, session.session]);
+  const requests = useMemo(() => known.filter((r) => r.pending).sort((a, b) => a.at - b.at), [known]);
   const ended = session.group === 'ended';
   const items = useMemo<TailItem[]>(
     () => [...sends.map((send) => ({ kind: 'send' as const, send })), ...requests.map((r) => ({ kind: 'request' as const, key: r.key, request: r.request })), ...(ended ? [{ kind: 'end' as const }] : [])],
@@ -121,18 +119,17 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
     foot: { running: session.presence?.record != null, ended, resumable: retiredBy(session) === null },
   };
 
-  // The ask mod's async questions the log knows, each waiting on its card below while its request is pending.
-  const overlays = useMemo(() => {
-    const facts = new Map<string, QuestionOverlayFact>();
-    const calls = new Set(requests.map((r) => r.raised.toolUseId ?? r.request));
-    for (const [src, asked] of askedQuestions(session.session, events, owner.main.heldRows()))
-      facts.set(src, { ...asked, waiting: asked.answeredText !== null ? null : calls.has(src) ? 'below' : 'open' });
-    return facts;
+  // The ask mod's async questions the log knows, each waiting on its card below while its request is pending, or
+  // withdrawn once its request was settled so.
+  const overlays = useMemo(
+    () => questionOverlayFacts(askedQuestions(session.session, events, owner.main.heldRows()), known),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the held rows are read through their count and oldest row
-  }, [session.session, events, requests, heldCount, oldest, owner]);
+    [session.session, events, known, heldCount, oldest, owner],
+  );
 
   const unavailable = useNoTranscript(state, heldCount);
-  useLandOnCard(root, landedRequest, requests.some((r) => r.request === landedRequest));
+  const landedCard = requests.find((r) => r.request === landedRequest) ?? null;
+  useLandOnCard(root, list, rowIndex, landedCard && { request: landedCard.request, row: requestRowId(landedCard.key) });
   const landing = useLandOnMessage(root, owner.main, state, landedMessage);
 
   if (unavailable && fallback)
@@ -160,7 +157,7 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
       )}
       <ReportToggle storeKey={owner.main.key} />
       <TailProvider value={tail}>
-        <TranscriptPane controller={owner.main} state={state} variant="session" ownerLane actions={actions} list={list} extraTail={drawn.rows} renderRequest={renderTailRow} />
+        <TranscriptPane controller={owner.main} state={state} variant="session" ownerLane actions={actions} list={list} extraTail={drawn.rows} renderRequest={renderTailRow} rowIndex={rowIndex} />
       </TailProvider>
       <QuestionOverlays root={root} facts={overlays} />
       <WaitingPill list={list} count={requests.length} />
@@ -179,13 +176,43 @@ function useNoTranscript(state: { phase: string; ended: { reason: string } | nul
   return none;
 }
 
-/** A notification that landed on one of the tail's cards: the card is scrolled into view once it is drawn. */
-function useLandOnCard(root: HTMLElement | null, request: string | null, present: boolean) {
+/** Frames a landing waits for its card to be mounted, after moving the list to it, before it gives up. */
+const LANDING_FRAMES = 120;
+
+/**
+ * A notification that landed on one of the tail's cards (`row`, its tail row's id): the card is brought into view,
+ * focused, and marked (its row draws the mark while it is the landing's). The list is virtualized, so a reader far up
+ * in the history has no card mounted to scroll to: the list is moved to the card's index among the rows it draws, and
+ * the card is waited for, frame by frame, until the list mounts it.
+ */
+function useLandOnCard(root: HTMLElement | null, list: RefObject<TranscriptListHandle | null>, rowIndex: RefObject<RowIndex | null>, landed: { request: string; row: string } | null) {
+  const request = landed?.request ?? null;
+  const row = landed?.row ?? null;
   useEffect(() => {
-    if (!root || request === null || !present) return;
-    const frame = requestAnimationFrame(() => root.querySelector(`[data-tail-request="${CSS.escape(request)}"]`)?.scrollIntoView({ block: 'center' }));
+    if (!root || request === null || row === null) return;
+    let frame = 0;
+    let frames = 0;
+    let moved = false;
+    const step = () => {
+      frame = 0;
+      const card = root.querySelector<HTMLElement>(`[data-tail-request="${CSS.escape(request)}"]`);
+      if (card) {
+        card.scrollIntoView({ block: 'center' });
+        card.focus({ preventScroll: true });
+        return;
+      }
+      if (!moved) {
+        const index = rowIndex.current?.(row) ?? -1;
+        if (index >= 0) {
+          list.current?.scrollToIndex(index, 'center');
+          moved = true;
+        }
+      }
+      if (++frames < LANDING_FRAMES) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [root, request, present]);
+  }, [root, list, rowIndex, request, row]);
 }
 
 /**

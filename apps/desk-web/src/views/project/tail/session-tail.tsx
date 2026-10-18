@@ -20,7 +20,9 @@ import { TailBubble } from './TailBubble';
 export type TailItem = { kind: 'send'; send: TailSend } | { kind: 'request'; key: string; request: string } | { kind: 'end' };
 
 const PREFIX = 'desk-tail:';
-const idOf = (item: TailItem): string => PREFIX + (item.kind === 'send' ? `send:${item.send.key}` : item.kind === 'request' ? `request:${item.key}` : 'end');
+/** The tail row of a pending request, by its key in the conversation's requests. */
+export const requestRowId = (key: string): string => `${PREFIX}request:${key}`;
+const idOf = (item: TailItem): string => (item.kind === 'request' ? requestRowId(item.key) : PREFIX + (item.kind === 'send' ? `send:${item.send.key}` : 'end'));
 
 type TailValue = { items: ReadonlyMap<string, TailItem>; foot: FootContext; session: DeskSession; landed: string | null };
 const TailContext = createContext<TailValue | null>(null);
@@ -48,7 +50,7 @@ function TailRow({ id }: { id: string }) {
       return <TailBubble text={item.send.text} at={item.send.at} foot={footOf(item.send, tail.foot)} />;
     case 'request':
       return (
-        <div data-tail-request={item.request} {...(tail.landed === item.request ? { 'data-landed': '', className: 'desk-landed' } : {})}>
+        <div data-tail-request={item.request} {...(tail.landed === item.request ? { 'data-landed': '', className: 'desk-landed', tabIndex: -1 } : {})}>
           <RequestCard request={item.key} embedded />
         </div>
       );

@@ -360,3 +360,26 @@ for (const delay of [0, 300, 1500]) {
     }
   });
 }
+
+test("a notification's landing on a request reaches its card from far up in the history: the list brings it in, focused and marked", async ({ page, hub }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await stageProject(hub);
+  const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: longHistory, limit: 40 }));
+  played.skip(played.script.length);
+  played.holdRows = true; // the reader stays where they went: no older page lands under them
+  await hub.raise(PROJECT, 'mini', { request: 'toolu_far', session: S.asks, tool: 'Bash', input: { command: 'pnpm e2e' } });
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+  const view = page.getByTestId('session-view');
+  const card = view.locator('[data-tail-request="toolu_far"]');
+  await expect(view).toContainText('Both subagents reported back.');
+  await expect(card).toContainText('Wants to run a command');
+  // The reader goes far up the history: the list no longer mounts the card.
+  await view.locator('[data-transcript-scroller]').evaluate((el) => el.scrollTo({ top: 0 }));
+  await expect(card).toHaveCount(0);
+  // A tap on the request's notification, with the app open on this channel.
+  await page.evaluate((url) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'desk-open', url } })), `/p/${PROJECT}/s/${S.asks}?request=toolu_far`);
+  await expect(card).toHaveAttribute('data-landed', '');
+  await expect(card).toBeInViewport();
+  await expect(card).toBeFocused();
+});

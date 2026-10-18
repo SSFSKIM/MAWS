@@ -8,7 +8,9 @@
 // while it is out are live ones, beneath the reader, and settle nothing here); when they are, the scroller moves by
 // however far that row moved (nothing, when the list's anchor held), and is held there frame by frame while the list
 // measures the page's rows at their sizes, each of which, above the reader, moves them again. A row the list has not
-// rendered (a page longer than its overscan) is jumped to by index first, then held the same way.
+// rendered (a page longer than its overscan) is jumped to by index first, then held the same way: its index among the
+// rows the list draws (`indexOf`), which in the report are not the held rows (a closed working record stands for the
+// rows it folds).
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
@@ -55,7 +57,11 @@ function settle(scroller: HTMLElement, kept: Place): boolean {
   return true;
 }
 
-export function useKeepPlaceThroughOlderRows(list: RefObject<TranscriptListHandle | null>, rows: readonly Row[], loadingOlder: boolean): void {
+/**
+ * `rows` are the held rows, whose change says a page's rows are in; `indexOf` is a row's index in what the list draws
+ * now (-1 when it draws none by that id).
+ */
+export function useKeepPlaceThroughOlderRows(list: RefObject<TranscriptListHandle | null>, rows: readonly Row[], loadingOlder: boolean, indexOf: (id: string) => number): void {
   const place = useRef<Place | null>(null);
   const asked = useRef(false); // an older page is on its way
   const landed = useRef(false); // it was answered; its rows are the next drawn
@@ -128,7 +134,7 @@ export function useKeepPlaceThroughOlderRows(list: RefObject<TranscriptListHandl
     if (landed.current) {
       // These are the page's rows. A reader the list holds at the end, or one with no row in view, is the list's.
       landed.current = false;
-      const index = kept === null || handle.following ? -1 : rows.findIndex((row) => row.id === kept.id);
+      const index = kept === null || handle.following ? -1 : indexOf(kept.id);
       if (kept !== null && index >= 0) {
         // Drawn or not, the page's rows go on being measured over the next frames (the list draws them at its guesses,
         // then at their size), each measurement above the reader moving them: the place is held until it holds.
@@ -163,5 +169,6 @@ export function useKeepPlaceThroughOlderRows(list: RefObject<TranscriptListHandl
       settle(scroller, kept); // drawn at once when the list renders it in the jump's own pass
       correcting.current = requestAnimationFrame(frame);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `indexOf` is read when the rows change, as the list draws them then
   }, [list, rows]);
 }

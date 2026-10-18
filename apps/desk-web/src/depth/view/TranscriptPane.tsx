@@ -4,7 +4,7 @@
 // in place. Each transcript has its own controller, store key, and subscription, so one's reset or end never touches
 // another's view. With the owner lane on (the session view), MAWS draws its report, and the streaming rows are bridged
 // into the turn the model is answering (`streaming-rows.ts`).
-import { useEffect, useMemo, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
@@ -14,6 +14,7 @@ import type { DeskSession } from '../../shell/sessions';
 import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
 import { reachable, TranscriptKeeper } from '../source/keeper';
 import type { StreamBlock } from '../stream/layer';
+import { drawnRows } from './drawn-rows';
 import { useKeepPlaceThroughOlderRows } from './keep-place';
 import { useOlderPages } from './older-pages';
 import { latestTurn, streamingRows } from './streaming-rows';
@@ -78,25 +79,38 @@ type PaneProps = {
   /** The session view's rows after the streaming ones (its tail sends, requests, end), drawn by `renderRequest`. */
   extraTail?: readonly Row[];
   renderRequest?: TranscriptProps['renderRequest'];
+  /** Given a row's id, its index among the rows the list draws now (-1 for none): what the list's `scrollToIndex` takes. */
+  rowIndex?: Ref<RowIndex>;
 };
 
-/** The transcript's rows and stream, and what its subscription's disruptions say. */
-export function TranscriptPane({ controller, state, variant, actions, list, ownerLane, extraTail = NO_ROWS, renderRequest }: PaneProps) {
-  // Older rows when the reader scrolls to the top, while the rows drawn do not fill the pane, and after a page that drew
-  // nothing new (`older-pages.ts`).
-  const rows = useTranscriptStore((s) => s.entries[controller.key]?.rows ?? NO_ROWS);
-  const drawnRows = rows.length;
-  useKeepPlaceThroughOlderRows(list, rows, state.loadingOlder);
-  useOlderPages(controller, list, state);
+/** A row's index among the rows MAWS's list draws, by its id; -1 when it draws none by that id. */
+export type RowIndex = (id: string) => number;
 
+/** The transcript's rows and stream, and what its subscription's disruptions say. */
+export function TranscriptPane({ controller, state, variant, actions, list, ownerLane, extraTail = NO_ROWS, renderRequest, rowIndex }: PaneProps) {
+  const rows = useTranscriptStore((s) => s.entries[controller.key]?.rows ?? NO_ROWS);
   const since = useSince();
   const turn = ownerLane ? latestTurn(rows) : null;
   const streaming = useMemo(() => streamingRows(state.streaming, since, { turn }), [state.streaming, since, turn]);
   const tail = useMemo(() => (extraTail.length === 0 ? streaming : [...streaming, ...extraTail]), [streaming, extraTail]);
 
+  // Where a row is among the rows the list draws (in the report, its projection of the held rows and this tail), read
+  // when asked: the list's indices are those, never the held rows'.
+  const drawnTail = useRef(tail);
+  useLayoutEffect(() => {
+    drawnTail.current = tail;
+  }, [tail]);
+  const indexOf = useCallback<RowIndex>((id) => drawnRows(controller.key, drawnTail.current).findIndex((row) => row.id === id), [controller.key]);
+  useImperativeHandle(rowIndex, () => indexOf, [indexOf]);
+
+  // Older rows when the reader scrolls to the top, while the rows drawn do not fill the pane, and after a page that drew
+  // nothing new (`older-pages.ts`); the reader's place kept through each (`keep-place.ts`).
+  useKeepPlaceThroughOlderRows(list, rows, state.loadingOlder, indexOf);
+  useOlderPages(controller, list, state);
+
   return (
     <>
-      {state.phase === 'reconnecting' && drawnRows === 0 && (
+      {state.phase === 'reconnecting' && rows.length === 0 && (
         // A transcript between a reset and its fresh snapshot (or one the hub ended before its first) is not empty.
         <p className="m-0 px-4 py-3 text-ui-sm text-fg-muted" role="status" data-testid="depth-reconnecting">
           Reconnecting to the session…
