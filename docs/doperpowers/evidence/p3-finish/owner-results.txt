@@ -86,7 +86,7 @@ design workbench:
 
 A.1 fields (no tokens, no credentials)
 Native prompt(s) seen and the process each named (MAWS or a claude/engine process):
-Order actually followed (preparation (e)); disposable observing session used (project, archived [ ] yes [ ] no, unarchived after relaunch [ ] yes [ ] no [ ] n/a); the owner declined archiving [ ] yes [ ] no:
+Order actually followed (preparation (e)); step 1a observation done each time before Connect and before each Archive (manual refresh with the session ready, route resolved, chosen server visible in Connectors > Servers) [ ] yes [ ] no, first refresh outcome: disposable observing session used (project, archived [ ] yes [ ] no, unarchived after relaunch [ ] yes [ ] no [ ] n/a); the owner declined archiving [ ] yes [ ] no:
 via.route shown at each refresh (direct = D MAWS's own connection / engine = E connected session / none) and whether an eligible session was connected:
 Authorisations asked: first connect / after relaunch (a second one is a finding unless the owner chose Reconnect):
 Reconnect / Disconnect result:
