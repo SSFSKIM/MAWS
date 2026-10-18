@@ -54,5 +54,26 @@
     "status": "complete; accepted boundaries in reviews/W-MINI-native-assessment.txt",
     "scope": "adversarial bounded paste/virtualizer repair recommendation; no code edits"
   },
-  "mutationScope": "Diagnostics14c3e6fd6 committed; generic paste-selection hook rejected. Model-aware caret readiness and regression-first minimal handledFocus repair plus repeated-target edge authorized; one-time conditional L200 harness activation authorized."
+  "mutationScope": "Diagnostics14c3e6fd6 committed; generic paste-selection hook rejected. Model-aware caret readiness and regression-first minimal handledFocus repair plus repeated-target edge authorized; one-time conditional L200 harness activation authorized.",
+  "nativeRepair": {
+    "commits": [
+      "14c3e6fd6",
+      "abdad9d35",
+      "63cbc8db7",
+      "7a23ef400"
+    ],
+    "status": "committed; independent frontier review pending",
+    "product": "Invalidate handledFocus on explicit request; record only actual target focus in frame, including repeated same-target request",
+    "paste": "Existing-timeout DOM and model caret readiness plus synchronous paste capture/dispatch; no generic selection hook",
+    "activation": "Conditional one-shot own-window activation before Overview, event wait bounded1s; no poll/retry, original assertions retained",
+    "checks": {
+      "provenance": "worker-reported filtered stdout only; no retained raw logs, no reruns merely for bookkeeping",
+      "red": "Transcript new cases4fail/28skip; renderer-only repeat confirms post-frame assertion failures at200/226",
+      "green": "Transcript32/32 in2projects; named Transcript/anchor/store/Divider95/95 in7files",
+      "lint": "named five changed files exit0 worker reported",
+      "prefix": "pnpm_config_verify_deps_before_run=false /tmp/maws-review/with-slot.sh pnpm -C absolute-W exec",
+      "notRun": "local typecheck/e2e/app/GUI"
+    },
+    "wording": "63cbc8db7 commit message overstates stale replacement as observed; it remains inferred until synchronous next-gate readings. Commit not amended."
+  }
 }

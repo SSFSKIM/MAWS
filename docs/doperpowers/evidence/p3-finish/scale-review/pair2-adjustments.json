@@ -1,0 +1,38 @@
+{
+  "status": "preparatory read-only audit, not final pairs",
+  "auditor": "af8cc936d8638ea90",
+  "head": "7a23ef400218a5053f87f717d84c84b00de634d4",
+  "base": "5ad08789",
+  "method": "no-renames added+deleted numstat, verified against pair1 figures",
+  "sourceFiles": 1583,
+  "sourceLines": 233043,
+  "overlaps": 0,
+  "unassignedPathsBeforeRecommendations": 6,
+  "assignments": {
+    "src/renderer/src/tools/maws/ask/store.ts": "shell",
+    "src/renderer/src/tools/maws/ask/store.test.ts": "shell",
+    "src/renderer/src/transcript/view/Transcript.test.tsx": "shell",
+    "e2e/support/design-restyle.ts": "design-proof",
+    "e2e/shell.spec.ts": "design-proof",
+    "e2e/support/foreground-trace.ts": "design-proof"
+  },
+  "resultingSizes": {
+    "store-versions": 14758,
+    "slide-model": 14358,
+    "editor-proof": 14217,
+    "design-systems": 14123,
+    "artifact-protocol": 13333,
+    "design-proof": 11157,
+    "shell": 8646
+  },
+  "contingentMoves": {
+    "src/engine-host/documents/connector-grants.test.ts": "if store-versions crosses15000: connectors-host, same max tier,598lines",
+    "send-to group": "if editor-proof crosses15000: design-proof, same xhigh tier,473lines"
+  },
+  "incomingMaster782bbf83c": {
+    "src/renderer/src/transcript/view/rows/User.tsx": "shell",
+    "src/renderer/src/transcript/view/rows/User.test.tsx": "shell"
+  },
+  "unchangedRules": "five obsolete pair1 paths remain removed; eight existing exclusions cover remainder; preserve protocol fixture/fingerprint exceptions rather than broadening exclusions; binary fonts0numstat",
+  "finalRequirement": "recompute from actual post-debt commit, zero omission/overlap, each area<=15000; scripts still have stale M0 assumptions"
+}

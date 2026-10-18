@@ -152,5 +152,13 @@
     "scope": "DocumentPanel.test.tsx only; distinct live/pinned page-margin token values replace prohibited colour literals; guard unchanged",
     "verification": "controller read complete diff; retained named test log24pass/3files; worker reports eslint exit0",
     "review": "exact mechanical test correction; no third broad STORE review"
+  },
+  "queueThresholdResult": {
+    "task": "bet8xg7l6",
+    "exit": 0,
+    "stillQueuedAfter1800Seconds": [],
+    "completionTask": "b7408uqe9",
+    "completionTaskExit": 0,
+    "wrapperExit": 1
   }
 }

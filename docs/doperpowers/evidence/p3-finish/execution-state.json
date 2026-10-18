@@ -92,7 +92,7 @@
     ]
   },
   "W-MINI": {
-    "status": "assessment complete; model-aware readiness and regression-first minimal must-read repair implementing",
+    "status": "native repair committed; preparing independent new-frontier review then one remaining union gate",
     "foreground": "package-script activation permitted; lane hold lifted; child DL13",
     "executor": "ab180409652104010",
     "claims": "pair2-claims.json",
@@ -119,7 +119,12 @@
     },
     "repairAssessment": "a788b678f28592255",
     "diagnosticSupplement": "14c3e6fd6",
-    "remainingUnionGateBudget": 1
+    "remainingUnionGateBudget": 1,
+    "nativeRepairCommits": [
+      "abdad9d35",
+      "63cbc8db7",
+      "7a23ef400"
+    ]
   },
   "W-STORE": {
     "status": "actual restyle e2e passed39130559347; token-test correction05d1f824b verified locally; authoritative rerun pending",
@@ -179,5 +184,11 @@
     "completionTask": "b7408uqe9",
     "queueThresholdTask": "bet8xg7l6",
     "record": "gates/pair2-diagnostic-39130559347.json"
+  },
+  "pair2RepairPrepared": {
+    "launcher": "/tmp/maws-review/p3f-mini-store-repair-launch.sh",
+    "status": "not launched",
+    "groups": "prior13 plus e2e:transcript for shared jump repair",
+    "reviewBase": "c237ddc5a9a8aff74dc1a5495c4fccbe222573cb"
   }
 }
