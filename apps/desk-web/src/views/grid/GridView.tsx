@@ -3,9 +3,11 @@
 // is waiting), empty (enrolling a machine is the one next step), and reconnecting (the last counts held, dimmed, with
 // how old they are; tiles still open). Once the hub refuses this browser (its sign-in expired), the notice says so and
 // offers to sign in again, in place of waiting for an answer that will not come. On a phone, two columns of the same
-// tiles (mockups/desk/05-phone.html, 2).
+// tiles (mockups/desk/05-phone.html, 2). Above the tiles, "All sessions" opens the org view: every live session of every
+// project on one screen (smns org directory §8).
 import { useMemo } from 'react';
 import { useAccess } from '../../hub/access';
+import { orgWaiting } from '../../pwa/badge';
 import { useDeskLayout } from '../../shell/layout';
 import { sortForGrid, useGrid } from '../../state/grid';
 import { LapsedBanner } from '../access/SignInAgain';
@@ -18,6 +20,7 @@ export function GridView({ onEnroll }: { onEnroll: () => void }) {
   const { projects, loaded, status, asOf } = useGrid();
   const navigate = useDeskLayout((s) => s.navigate);
   const sorted = useMemo(() => sortForGrid(projects), [projects]);
+  const waiting = orgWaiting(projects);
   const lapsed = useAccess((s) => s.lapsed);
   const stale = loaded && (status === 'connecting' || lapsed !== null);
   const asOfText = `Counts as of ${asOf === null ? 'the last connection' : time(asOf)}.`;
@@ -54,13 +57,25 @@ export function GridView({ onEnroll }: { onEnroll: () => void }) {
             <p className="mt-3 text-ui-sm text-fg-muted">Enrolling takes a minute on the Mac itself.</p>
           </div>
         ) : (
-          <ul className={['m-0 grid list-none grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] md:gap-3 p-0', stale ? 'opacity-60' : ''].join(' ')} data-testid="grid">
-            {sorted.map((project) => (
-              <li key={project.id}>
-                <ProjectCard project={project} onOpen={() => navigate({ view: 'project', project: project.id, channel: { kind: 'group' } })} />
-              </li>
-            ))}
-          </ul>
+          <>
+            <button
+              type="button"
+              onClick={() => navigate({ view: 'org' })}
+              className="mb-3 flex w-full items-baseline gap-3 rounded-md border border-border bg-bg-raised px-3 py-2 text-left hover:bg-bg-hover md:px-4"
+              data-testid="all-sessions"
+            >
+              <span className="text-ui font-semibold text-fg">All sessions</span>
+              <span className="hidden text-ui-sm text-fg-muted md:inline">every live session of every project</span>
+              {waiting > 0 && <span className="ml-auto shrink-0 text-ui-sm text-warning">{waiting} waiting on you</span>}
+            </button>
+            <ul className={['m-0 grid list-none grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] md:gap-3 p-0', stale ? 'opacity-60' : ''].join(' ')} data-testid="grid">
+              {sorted.map((project) => (
+                <li key={project.id}>
+                  <ProjectCard project={project} onOpen={() => navigate({ view: 'project', project: project.id, channel: { kind: 'group' } })} />
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
     </main>

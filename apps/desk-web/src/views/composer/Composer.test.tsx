@@ -26,6 +26,7 @@ const session = (id: string, alias: string, group: DeskSession['group'] = 'idle'
   status: null,
   state: null,
   joinedAt: 1,
+  joinedTs: '',
   group,
   presence: { record: { status: 'idle' }, bridge: true },
   machineOnline: true,

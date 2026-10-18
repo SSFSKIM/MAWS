@@ -1,7 +1,8 @@
 // A project on the grid (§4; mockups/desk/01-grid.html's tiles, pending the owner's verdict). Waiting on you is the
 // signal: only a project that waits on the owner carries a numeral and a tint. A project whose machines are all
 // offline reads as absent, not quiet. On a phone's two columns (05-phone.html, 2) a long name takes two lines and the
-// machine dots stand without their words.
+// machine dots stand without their words. A machine project (the project of a machine's sessions that no repository's
+// `.smns` claims: smns org directory §3) is labelled by its kind.
 import type { ProjectSummary } from 'desk-hub/protocol';
 
 export function ProjectCard({ project, onOpen }: { project: ProjectSummary; onOpen(): void }) {
@@ -12,6 +13,7 @@ export function ProjectCard({ project, onOpen }: { project: ProjectSummary; onOp
       type="button"
       onClick={onOpen}
       data-project={project.id}
+      data-kind={project.kind}
       data-waiting={project.waiting}
       data-working={project.working}
       className={[
@@ -23,6 +25,11 @@ export function ProjectCard({ project, onOpen }: { project: ProjectSummary; onOp
         <span className="line-clamp-2 text-ui font-semibold break-words text-fg md:line-clamp-none md:truncate" title={project.name}>
           {project.name}
         </span>
+        {project.kind === 'machine' && (
+          <span className="shrink-0 rounded-sm border border-border px-1.5 text-ui-sm text-fg-muted" data-testid="project-kind" title="The sessions on this machine that no repository's project claims">
+            machine
+          </span>
+        )}
       </div>
       <div className="flex flex-1 flex-wrap items-end gap-x-4 gap-y-1">
         {waiting ? (

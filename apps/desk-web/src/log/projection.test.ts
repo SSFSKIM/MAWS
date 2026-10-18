@@ -60,6 +60,26 @@ describe('projectSessions', () => {
     expect(sessionName(sessions.get(S2)!)).toBe('maws-45');
   });
 
+  it("keeps the membership's join time: a relocated joined refreshes the directory and moves neither its time nor its place", () => {
+    const sessions = projectSessions([
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', cwd: '/w/maws', worktree: '', seat: '', by: '' }, '2026-10-18T08:00:00.000Z'),
+      joined(S2, 'cua_repl', 'mini'),
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', cwd: '/w/maws/.claude/worktrees/x', worktree: '', seat: '', by: '', relocated: true }, '2026-10-18T09:30:00.000Z'),
+    ]);
+    const s1 = sessions.get(S1)!;
+    expect(s1).toMatchObject({ cwd: '/w/maws/.claude/worktrees/x', member: true, joinedTs: '2026-10-18T08:00:00.000Z' });
+    expect(s1.joinedAt).toBeLessThan(sessions.get(S2)!.joinedAt); // still listed after the session that joined since
+  });
+
+  it('starts a new join time when a retired session joins again', () => {
+    const sessions = projectSessions([
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', cwd: '/w/maws' }, '2026-10-18T08:00:00.000Z'),
+      ev(`mini/${S1}`, 'retired', { session: S1, by: '', reason: 'moved', project: 'p2' }, '2026-10-18T08:10:00.000Z'),
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', cwd: '/w/maws', by: 'move' }, '2026-10-18T08:20:00.000Z'),
+    ]);
+    expect(sessions.get(S1)).toMatchObject({ member: true, ended: null, joinedTs: '2026-10-18T08:20:00.000Z' });
+  });
+
   it('reads an empty or malformed title as none', () => {
     const blank = projectSessions([joined(S1, 'maws-4d', 'macbook'), ev(`macbook/${S1}`, 'titled', { session: S1, title: 'x' }), ev(`macbook/${S1}`, 'titled', { session: S1, title: '  ' })]);
     expect(blank.get(S1)?.title).toBeNull();
@@ -80,7 +100,7 @@ describe('projectSessions', () => {
 });
 
 describe('groupOf', () => {
-  const base: ProjectedSession = { session: S1, alias: 'a', machine: 'mini', cwd: null, worktree: null, seat: '', title: null, member: true, ended: null, charge: null, status: null, state: null, joinedAt: 1 };
+  const base: ProjectedSession = { session: S1, alias: 'a', machine: 'mini', cwd: null, worktree: null, seat: '', title: null, member: true, ended: null, charge: null, status: null, state: null, joinedAt: 1, joinedTs: '' };
 
   it('puts a retired session under ended, whatever its presence says', () => {
     expect(groupOf({ ...base, member: false, ended: { by: '', reason: 'ended' } }, { presence: { record: { status: 'busy' }, bridge: true }, machineOnline: true, pending: 0 })).toBe('ended');
