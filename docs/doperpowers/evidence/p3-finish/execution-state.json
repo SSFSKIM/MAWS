@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "shared pair4+pair5 current-source26-group run39156492025 active; MainArea test-only cleanup routed after launch for final pairs/freeze",
+  "phase": "union39156492025 active; static correction29bb6d092 committed and in focused review, static-only relaunch only after completion; MainArea full named-file follow-up pending",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -605,7 +605,29 @@
     "viewerContext": "viewer-confound.json: custody after17:45Z unknown; remote=none not proof; no failure cause inferred",
     "newMasterUnitReading": "Only all tests passing with hover-card Timeout._onTimeout after MainArea.test.tsx teardown and ReferenceError window is not defined reads against b1110be77 master row, one DL59 relaunch, no new row.",
     "queueThresholdTask": "bb4lghff2",
-    "queueThreshold": "one queue-age check at19:26:55Z (created+30min), not a completion waiter"
+    "queueThreshold": "one queue-age check at19:26:55Z (created+30min), not a completion waiter",
+    "earlyStaticFailure": {
+      "job": 117760724418,
+      "log": "/private/tmp/p3f-pair45-static.Tf1O2o/static.log",
+      "verifiedDiagnostics": [
+        "TS6307 deck-history.ts missing from tsconfig.node.json include",
+        "TS6307 packaged-resolution.ts missing from tsconfig.node.json include",
+        "deck-history.test.ts:42 unused _soak/_workload/_filesView"
+      ],
+      "fixWorker": "ad88e48c3c4f5badf",
+      "authorizedPaths": [
+        "tsconfig.node.json",
+        "test/support/deck-history.test.ts"
+      ],
+      "relaunch": "static only, after this run completes, DL59; no early relaunch, no product source changes",
+      "conclusion": "failure",
+      "startedAt": "2026-10-18T18:58:04Z",
+      "completedAt": "2026-10-18T19:01:35Z",
+      "logSha256": "80997bc671bddedbb17a783c7c581e2800976d8a218747c92eeaa272adc8ae28",
+      "fixCommit": "29bb6d09260cfbef7be2f9c84e9a83a458fae389",
+      "fixScope": "exact two paths,3insert/1delete; explicit two includes and true omission via entry filter; no product change",
+      "focusedReview": "a212cf83b5473e7de running, no local checks"
+    }
   },
   "postPartitionIncomingRows": {
     "source": "b1110be77b024e3b8758353671e93552992184b5",
