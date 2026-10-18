@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 64,
-    "defer:pending": 59,
+    "defer:committed": 65,
+    "defer:pending": 58,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -958,7 +958,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L110; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "The web project's composite build reports no TS6307: its tests move to a project that owns their imports (or the web include lists them), and `pnpm typecheck` runs the web project composite. Owner: P2 (build) or P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L110; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "c757f4d1774d524d15202b52bf00036128d994ad"
     },
     {
       "line": 111,
@@ -968,8 +968,8 @@
       "triageReason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L111; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "The pattern is derived from `Intl` (or from the host's own formatted timestamps) rather than claiming any locale. Owner: P3 (the e2e support). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L111; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 112,
