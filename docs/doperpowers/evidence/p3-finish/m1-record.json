@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 50,
-    "defer:pending": 73,
+    "defer:committed": 51,
+    "defer:pending": 72,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -804,7 +804,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L78; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "remainingClause": "Closes when (owner P2) delivery is acknowledged or backpressured through `HostEmit` (`src/shared/host/runtime.ts`) so the cursor advances only for lines the client received, with a test. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L92): needs backpressure through `HostEmit` (X13); the 256 MiB cap is not reached in use. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L78; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "f33db7d59cdf60b48e6906f48aa265f1c2a7a439"
     },
     {
       "line": 79,
@@ -814,8 +814,8 @@
       "triageReason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L79; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "Closes when (owner P2) the settlement counts a `next` prompt written while a turn was open as covered by that turn's result, with a unit over a steered-turn journal. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L93): harness only and over-conservative, which is safe under caps. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L79; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 80,
