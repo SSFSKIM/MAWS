@@ -11,7 +11,9 @@
 // new state is whole, and keep their ids — so an older page never lands after newer turns and a page boundary between
 // a tool call and its result attributes nothing wrongly (the DC6 plan's M1 decision on older rows). Subagent metadata
 // arriving live does the same when it names an agent call a held row was mapped without, so the rows are attributed
-// as a fresh load with that metadata attributes them.
+// as a fresh load with that metadata attributes them, and so does a live delivered row that repeats a held one's frame
+// line: a delivery appended again after an Esc left its first copy on a dead branch, and only the last copy is mapped
+// (`supersededDeliveries`).
 //
 // The stream. Chunks never reach MAWS's reducer, which pairs a streaming block with its row only by an API message id
 // that DX4's chunks lack: they go to the streaming layer (`stream/layer.ts`), and a block's text is dropped from it
@@ -55,8 +57,9 @@ import { noteModel } from '../../state/models';
 import { taskGraphOf, withEvents, withMetas, withStatuses } from '../agents/task-feed';
 import { OutputRequests } from '../jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
-import { deliveryAsDrawn } from '../../conversation/delivery-frame';
+import { deliveryAsDrawn, deliveryFrame, supersededDeliveries } from '../../conversation/delivery-frame';
 import { steerAsDrawn } from './bridge-rows';
+import { withWakeLine } from './bridge-wake';
 import { normalizeInterruptRow, withInterruptEnd } from './interrupt';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
@@ -133,13 +136,14 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
  * marker ends the turn it interrupted, the bridge's record of one read as its marker line alone (`interrupt.ts`). A
  * delivered send is drawn without its frame line, a peer's under a label naming it, and one that entered a running turn
  * as a prompt queued there (`conversation/delivery-frame.ts`); the held row keeps its frame. A steer the bridge appended
- * is drawn as the owner's prompt queued there too (`bridge-rows.ts`).
+ * is drawn as the owner's prompt queued there too (`bridge-rows.ts`), and the bridge's wake as its own line in a turn
+ * the session continued (`bridge-wake.ts`).
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
   const mapped = steerAsDrawn(deliveryAsDrawn(normalizeInterruptRow(row)));
   const record = TranscriptRecordSchema.safeParse(mapped);
   if (!record.success) return [];
-  const events = withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx);
+  const events = withWakeLine(mapped, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx);
   if (!events.some((event) => event.kind === 'subagent.message')) return events;
   return events.map((event) => (event.kind === 'turn.started' && event.origin === 'peer' ? { ...event, origin: 'task-notification' } : event));
 }
@@ -153,7 +157,8 @@ export function freshSource(rows: readonly JsonObject[], session: string, subage
     subscribe: () => () => {},
     snapshot: async () => {
       const ctx = contextFor({ machine: '', session, agentId }, subagents);
-      return rows.flatMap((row) => eventsOf(row, ctx));
+      const superseded = supersededDeliveries(rows);
+      return rows.flatMap((row) => (superseded.has(row.uuid as string) ? [] : eventsOf(row, ctx)));
     },
   };
 }
@@ -225,6 +230,8 @@ export class DeskTranscript {
   private subscription: Subscription | null = null;
   private rows: Row[] = [];
   private readonly uuids = new Set<string>();
+  /** Held delivered rows a later held row repeats: never mapped (`supersededDeliveries`). */
+  private superseded = new Set<string>();
   /** Held rows whose mapping gave no event under the row's own uuid: in the store as soon as they are mapped. */
   private readonly silent = new Set<string>();
   private metas: readonly SubagentMeta[] = [];
@@ -353,9 +360,13 @@ export class DeskTranscript {
   }
 
   mapRow(row: Row, ctx: BackfillContext): SessionEvent[] {
-    const events = eventsOf(row, ctx);
+    const events = this.drawnEventsOf(row, ctx);
     if (!events.some((event) => event.id === row.uuid)) this.silent.add(row.uuid);
     return events;
+  }
+
+  private drawnEventsOf(row: Row, ctx: BackfillContext): SessionEvent[] {
+    return this.superseded.has(row.uuid) ? [] : eventsOf(row, ctx);
   }
 
   // The subscription.
@@ -435,6 +446,17 @@ export class DeskTranscript {
     this.rows.push(row);
     const model = modelOf(row);
     if (model !== null && model !== this.state.getState().model) this.setModel(model);
+    // A delivery the bridge appended again after an Esc: the copy already drawn leaves the drawing, rebuilt without it.
+    if (deliveryFrame(row) !== null) {
+      const superseded = supersededDeliveries(this.rows);
+      if (superseded.size > this.superseded.size) {
+        this.superseded = superseded;
+        if (this.served) {
+          this.rebuild();
+          return this.publish();
+        }
+      }
+    }
     this.source.live(row);
     if (this.treeContext !== null) this.setTree(withEvents(this.heldTasks, eventsOf(row, this.treeContext)));
     this.publish();
@@ -491,7 +513,7 @@ export class DeskTranscript {
   private retree(): void {
     const ctx = this.newContext();
     this.treeContext = ctx;
-    this.setTree(taskGraphOf(this.metas, this.rows.flatMap((row) => eventsOf(row, ctx))));
+    this.setTree(taskGraphOf(this.metas, this.rows.flatMap((row) => this.drawnEventsOf(row, ctx))));
   }
 
   /** The tree as the held rows and metas build it, published with each agent's DX4 status laid over it. */
@@ -510,6 +532,7 @@ export class DeskTranscript {
     this.rows = rows;
     this.uuids.clear();
     this.silent.clear();
+    this.superseded = supersededDeliveries(rows);
     for (const row of rows) this.uuids.add(row.uuid);
     const latest = rows.findLast((row) => modelOf(row) !== null);
     if (latest) this.setModel(modelOf(latest)!);
