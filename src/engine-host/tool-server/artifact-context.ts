@@ -6,8 +6,8 @@
 // `readCommitted`, writes run inside `writeCommitted`, and an answer that carries store state is re-read through
 // `readCommitted` or built in the write's `inFrame`. A refusal computed from store state (a stale base, a conflict, a
 // missing artifact) is held the same way, so no answer names rows a failed batch takes back.
-import { readFile, stat } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { lstat, readFile, realpath, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { publishFiles, readFiles, type PublishOutcome } from '@artifacts/files';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
@@ -124,6 +124,35 @@ export function pathUnderCwd(tool: ArtifactToolName, cwd: string, path: string):
   const inside = relative(cwd, absolute);
   if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) throw refuse(tool, { reason: 'invalid', path: absolute }, `${absolute} is not under the working directory ${cwd}`);
   return absolute;
+}
+
+// P3-F (artifact-protocol finding 4): `pathUnderCwd` checks the words; these check where they lead once every link on
+// the path and on the working directory is resolved. A source (a file read) must lead inside; a path that leads
+// nowhere is answered by its read. A destination (a file written) must not be a link itself, and the nearest of it and
+// its directories that exists must lead inside (the directory itself included), so what is made below it stays inside.
+export async function sourceUnderCwd(tool: ArtifactToolName, cwd: string, path: string): Promise<string> {
+  const named = pathUnderCwd(tool, cwd, path);
+  const real = await realpath(named).catch(() => null);
+  if (real !== null) await leadsInside(tool, cwd, named, real, false);
+  return named;
+}
+
+export async function destinationUnderCwd(tool: ArtifactToolName, cwd: string, path: string): Promise<string> {
+  const named = pathUnderCwd(tool, cwd, path);
+  if ((await lstat(named).catch(() => null))?.isSymbolicLink()) throw refuse(tool, { reason: 'invalid', path: named }, `${named} is a link; a file is not written through one`);
+  for (let existing = named; ; existing = dirname(existing)) {
+    const real = await realpath(existing).catch(() => null);
+    if (real === null) continue;
+    await leadsInside(tool, cwd, named, real, existing !== named);
+    return named;
+  }
+}
+
+async function leadsInside(tool: ArtifactToolName, cwd: string, named: string, real: string, directory: boolean): Promise<void> {
+  const root = await realpath(cwd).catch(() => resolve(cwd));
+  const inside = relative(root, real);
+  if (inside === '' ? directory : !inside.startsWith('..') && !isAbsolute(inside)) return;
+  throw refuse(tool, { reason: 'invalid', path: named }, `${named} leads to ${real}, outside the working directory ${root}`);
 }
 
 // A regular file of at most ARTIFACT_MAX_BYTES, read whole; refused otherwise.

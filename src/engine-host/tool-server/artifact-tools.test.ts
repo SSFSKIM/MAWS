@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -385,6 +386,28 @@ describe('artifact_upload_asset and artifact_list_assets', () => {
     expect(artifactRefusalOf(textOf(await artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path: '/etc/hosts' }, w.ctx())))).toMatchObject({ reason: 'invalid' });
     expect(textOf(await artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path: 'gone.png' }, w.ctx()))).toBe(TOOL_ERRORS.artifactNotAFile('artifact_upload_asset', join(w.cwd, 'gone.png')));
   });
+
+  // P3-F (artifact-protocol finding 4): the working directory bounds where a path leads, not only its words
+  it('refuses a source a link under the working directory leads out of it, and follows one that stays inside', async () => {
+    const design = jsonOf(await create({ kind: 'design', title: 'Site' }));
+    const outside = mkdtempSync(join(tmpdir(), 'maws-tools-outside-'));
+    try {
+      writeFileSync(join(outside, 'private.txt'), 'secret');
+      symlinkSync(outside, join(w.cwd, 'out'));
+      symlinkSync(join(outside, 'private.txt'), join(w.cwd, 'private.png'));
+      for (const path of ['out/private.txt', 'private.png']) {
+        const refused = await artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path }, w.ctx());
+        expect(artifactRefusalOf(textOf(refused))).toMatchObject({ reason: 'invalid', path: join(w.cwd, path) });
+      }
+      expect(w.store.listAssets(design.artifactId as string)).toEqual([]);
+      mkdirSync(join(w.cwd, 'img'));
+      writeFileSync(join(w.cwd, 'img', 'logo.png'), 'png');
+      symlinkSync(join(w.cwd, 'img'), join(w.cwd, 'pictures'));
+      expect(jsonOf(await artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path: 'pictures/logo.png' }, w.ctx()))).toMatchObject({ status: 'uploaded', name: 'logo.png' });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('artifact_export', () => {
@@ -431,6 +454,51 @@ describe('artifact_export', () => {
     expect(exported).toEqual({ status: 'exported', artifactId: plan.id, format: 'pdf', revision: 3, path: join(w.userData, 'artifacts', plan.id, 'exports', '3-pdf.pdf'), blockedRequests: 2 });
     answer = (request) => ({ ok: true, revision: request.revision, path: join(w.cwd, 'elsewhere.pdf') });
     expect(textOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: plan.id, format: 'pdf' }, w.ctx()))).toMatch(/outside/);
+  });
+
+  // P3-F (artifact-protocol finding 4): a copy is never written through a link out of the working directory
+  it('refuses a `to` a link under the working directory leads out of it, or that is a link itself, before asking main', async () => {
+    jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
+    const outside = mkdtempSync(join(tmpdir(), 'maws-tools-outside-'));
+    try {
+      writeFileSync(join(outside, 'report.pdf'), 'theirs');
+      symlinkSync(outside, join(w.cwd, 'out'));
+      symlinkSync(join(outside, 'report.pdf'), join(w.cwd, 'report.pdf'));
+      const sent: ArtifactExportRequest[] = [];
+      const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => (sent.push(request), writeFileSync(request.path, '%PDF-1.7'), queueMicrotask(() => exporter.answer(request.requestId, { ok: true, revision: request.revision, path: request.path }))), answerMs: 60_000 });
+      for (const to of ['out/report.pdf', 'out/new/report.pdf', 'report.pdf']) {
+        const refused = await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', to }, w.ctx());
+        expect(artifactRefusalOf(textOf(refused))).toMatchObject({ reason: 'invalid', path: join(w.cwd, to) });
+      }
+      expect(sent).toEqual([]);
+      expect(readFileSync(join(outside, 'report.pdf'), 'utf8')).toBe('theirs');
+      expect(existsSync(join(outside, 'new'))).toBe(false);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses the copy when its directory became a link out of the working directory while main exported', async () => {
+    jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
+    const outside = mkdtempSync(join(tmpdir(), 'maws-tools-outside-'));
+    try {
+      writeFileSync(join(outside, 'report.pdf'), 'theirs');
+      mkdirSync(join(w.cwd, 'out'));
+      const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({
+        send: (request) => {
+          writeFileSync(request.path, '%PDF-1.7');
+          rmSync(join(w.cwd, 'out'), { recursive: true });
+          symlinkSync(outside, join(w.cwd, 'out'));
+          queueMicrotask(() => exporter.answer(request.requestId, { ok: true, revision: request.revision, path: request.path }));
+        },
+        answerMs: 60_000,
+      });
+      const refused = textOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', to: 'out/report.pdf' }, w.ctx()));
+      expect(refused).toMatch(/^artifact_export: exported to .+, but the copy to .+ failed: .+outside the working directory/);
+      expect(readFileSync(join(outside, 'report.pdf'), 'utf8')).toBe('theirs');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('answers exportUnavailable for a pair main has no exporter for, and in a build without the service', async () => {

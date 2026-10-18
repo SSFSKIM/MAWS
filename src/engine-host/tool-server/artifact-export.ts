@@ -10,7 +10,7 @@ import { copyFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { ARTIFACT_REFUSAL_REASONS, artifactExportName, parseToolArguments, TOOL_ERRORS, type ArtifactExportResult, type ArtifactRefusalReason } from '@shared/maws/tools';
-import { actorOf, answering, lineageOf, messageOf, pathUnderCwd, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
+import { actorOf, answering, destinationUnderCwd, lineageOf, messageOf, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
 import type { HostBridge } from './bridge';
 import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './server';
 
@@ -28,7 +28,7 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
       const store = storeOf('artifact_export', deps);
-      const to = input.to === undefined ? null : pathUnderCwd('artifact_export', ctx.cwd, input.to);
+      const to = input.to === undefined ? null : await destinationUnderCwd('artifact_export', ctx.cwd, input.to); // P3-F: where it leads, too
       const artifactId = await resolveArtifact('artifact_export', store, input.artifact, lineageOf(ctx, deps));
       const target = await store.readCommitted(() => {
         const artifact = store.get(artifactId);
@@ -67,6 +67,7 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
       const exported = answer.path;
       if (to !== null) {
         try {
+          await destinationUnderCwd('artifact_export', ctx.cwd, to); // P3-F: again, the directory may have moved during the export
           await mkdir(dirname(to), { recursive: true });
           await copyFile(exported, to);
         } catch (error) {
