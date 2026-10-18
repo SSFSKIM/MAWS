@@ -76,6 +76,6 @@
     "logSha256": "80997bc671bddedbb17a783c7c581e2800976d8a218747c92eeaa272adc8ae28",
     "fixCommit": "29bb6d09260cfbef7be2f9c84e9a83a458fae389",
     "fixScope": "exact two paths,3insert/1delete; explicit two includes and true omission via entry filter; no product change",
-    "focusedReview": "a212cf83b5473e7de running, no local checks"
+    "focusedReview": "a212cf83b5473e7de correct/no material findings; exact37858708b..29bb6d092, static only, no checks"
   }
 }
