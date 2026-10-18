@@ -13,9 +13,9 @@
   "checkedAt": "all 10 close, 123 defer and 17 preclosed frozen rows matched the current tracker exactly once before the first edit",
   "deferFormat": "each defer row keeps its whole text; its closing cell gains 'Re-deferred 2026-10-18 (P3-F triage, triage.txt L<n>; parent Decision Log 106): <ruled reason> Owner: <ruled step made explicit>.' (the P2-F pattern)",
   "counts": {
-    "close:committed": 3,
+    "close:committed": 4,
     "close:held": 1,
-    "close:pending": 6,
+    "close:pending": 5,
     "defer:pending": 123,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
@@ -185,7 +185,7 @@
       "note": "Closed on B's exact test filter under parent Decision Log 106 (1) ('L171 on the test filter with the renderer side on its own row', L238 in W-T). The clause's literal act, a compatMode shim, is not performed: happy-dom has no document.compatMode and a doctype cannot supply it (P3-F plan Decision Log 10). Master evidence: 6c2bcd698 (P3-B M4 fix) test/support/artifacts-dom-setup.ts drops only KaTeX's exact quirks-mode warning. The renderer-project widening (aa98bcbdd, W-T L238) is not on master and is not cited here.",
       "triageReason": "Exact KaTeX warning filtered in B artifact suites; renderer residue is separate L238. Evidence: test/support/artifacts-dom-setup.ts.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "e30bc8a5ae9625b32e115cded3260410e474baff"
     },
     {
       "line": 172,
@@ -194,8 +194,8 @@
       "closeKind": "close",
       "note": "Clause 'Fix the comment' met by 349dee0ed (on master, P3-A M7 fix wave 1): src/shared/maws/tools.ts above DOCUMENT_READ_FIELDS now says B's document-tools.ts imports this export and keeps no copy (Decision Log 44d); src/shared/maws/document-tools.ts:63 agrees.",
       "triageReason": "Comment already describes the built tool behavior. Evidence: 349dee0ed; src/shared/maws/tools.ts:209–213.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 173,
