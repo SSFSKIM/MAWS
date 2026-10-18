@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 88,
-    "defer:pending": 35,
+    "defer:committed": 89,
+    "defer:pending": 34,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1222,7 +1222,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L148; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "A block-scoped hold. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L148; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "4be8f07e82021c10caeb9436a963d4e666c9bb0b"
     },
     {
       "line": 149,
@@ -1232,8 +1232,8 @@
       "triageReason": "Needs a new cross-process or persisted contract; outside a contract-preserving finish wave.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L149; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
       "remainingClause": "An `artifact` pane target carrying tab and block, or a `document` pane. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L149; parent Decision Log 106): Needs a new cross-process or persisted contract; outside a contract-preserving finish wave. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 150,
