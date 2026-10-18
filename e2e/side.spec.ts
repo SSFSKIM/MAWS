@@ -23,7 +23,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { FIRST_CREATED_REVISION } from './support/design-systems'; // Decision Log 67: fresh artifacts follow the seeded defaults.
 import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SIDE_QUESTION_ROWS, SideJournal, solidPng, transcript } from './support/side-replay';
 import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
-import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b
+import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
@@ -947,8 +947,14 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const request = card.locator('[data-request-card]');
     await expect(request).toContainText('Approval needed', { timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
+    // P3-F (a diagnostic, not a fix): the request's identity and the public pending state are read before the two clicks
+    // (so they follow each other as before), and again right after the one Allow click; a failure below carries both and
+    // a third reading, by which the answer's path (card, event, attention item, journal) can be told from where it stopped
+    const evidenceFrom = Date.now();
+    const pending = await allowEvidence(c, child, request, evidenceFrom);
     await request.getByRole('radio', { name: 'Allow once' }).click();
     await request.getByRole('button', { name: 'Allow', exact: true }).click();
+    const afterAllow = await allowEvidence(c, child, request, evidenceFrom);
 
     // the host served the call against the parent's artifact: two versions long, the thread's the second (P3-L M6b: the
     // store's versions; X12's copy of v2 under the parent's record directory was the Deliverables store's alone), and no
@@ -959,7 +965,16 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       const result = call ? mcpResultOf(rows(), call.requestId) : null;
       return result ? (JSON.parse(resultText(result)) as Record<string, unknown>) : null;
     };
-    await expect.poll(served, { timeout: 20_000 }).toMatchObject({ status: 'published', id: 'dash', deliverableId: record.id, version: 2, ownerAppSessionId: parent });
+    try {
+      await expect.poll(served, { timeout: 20_000 }).toMatchObject({ status: 'published', id: 'dash', deliverableId: record.id, version: 2, ownerAppSessionId: parent });
+    } catch (error) {
+      const final = await allowEvidence(c, child, request, evidenceFrom);
+      const seen = Object.entries({ pending, afterAllow, final }).map(([label, reading]) => `  ${label}: ${JSON.stringify(reading)}`);
+      throw new Error(
+        `case 12: the thread's artifact_publish was not served as expected within 20 s of its single Allow click (side thread ${child}, engine session ${CHILD}; ids and statuses only; ms counts from just before the first reading to the start of each):\n${seen.join('\n')}\n${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
     const { versions } = value(await invoke(page, 'artifacts.versions', { artifactId: record.id }));
     const stored = [...versions].sort((a, b) => a.seq - b.seq);
     expect(await Promise.all(stored.map(async (v) => readFileSync(value(await invoke(page, 'library.content', { artifactId: record.id, revision: v.seq })).path, 'utf8')))).toEqual([HEADING_PAGE, HEADING_PAGE_V2]);
@@ -996,6 +1011,84 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 });
+
+// P3-F, case 12's diagnostic: one reading of the thread's permission round, as bounded identities and statuses: the request
+// card's own DOM (its request id, busy, the scope chosen, the Allow button's state and place, any alert or status text),
+// the thread's status, its permission events, its permission attention items and the host's journal (the engine's asks,
+// the host's answers, the `maws` calls and whether each was answered, the troubles the host noted). Never an input or a
+// payload. Reads only: nothing here clicks, answers, focuses or waits, and a source that cannot be read says so in its
+// place, so the reading cannot fail the case itself. `ms` is the reading's start, counted from `from` (a Date.now()).
+async function allowEvidence(c: Case, child: string, request: Locator, from: number): Promise<Record<string, unknown>> {
+  const { page, maws } = c;
+  const id = child as never;
+  const read = async <T>(source: () => T | Promise<T>): Promise<T | { unreadable: string }> => {
+    try {
+      return await source();
+    } catch (error) {
+      return { unreadable: String(error).slice(0, 200) };
+    }
+  };
+  type Wire = {
+    type?: string;
+    request_id?: string;
+    request?: { subtype?: string; tool_name?: string; tool_use_id?: string };
+    response?: { subtype?: string; request_id?: string; response?: { behavior?: string } };
+    event?: string;
+    requestId?: string;
+    expected?: string;
+    got?: string;
+    message?: string;
+  };
+  const wire = (row: JournalRow): Wire => row.frame as unknown as Wire;
+  const troubles = new Set(['replay_mismatch', 'write_failed', 'transport_error']);
+  return {
+    ms: Date.now() - from,
+    card: await read(() =>
+      request.evaluateAll((roots) =>
+        roots.map((root) => {
+          const allow = Array.from(root.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Allow');
+          const box = allow?.getBoundingClientRect();
+          return {
+            requestCard: root.getAttribute('data-request-card'),
+            busy: root.getAttribute('aria-busy'),
+            scope: Array.from(root.querySelectorAll('[role="radio"][aria-checked="true"]')).map((node) => node.getAttribute('aria-label')),
+            allow: allow && box ? { disabled: allow.disabled, focused: allow === document.activeElement, x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width), h: Math.round(box.height) } : null,
+            alert: Array.from(root.querySelectorAll('[role="alert"]')).map((node) => `${node.textContent ?? ''} | ${node.querySelector('[title]')?.getAttribute('title') ?? ''}`.slice(0, 200)),
+            status: Array.from(root.querySelectorAll('[role="status"]')).map((node) => (node.textContent ?? '').slice(0, 80)),
+          };
+        }),
+      ),
+    ),
+    status: await read(async () => {
+      const s = value(await invoke(page, 'session.status', { appSessionId: id }));
+      return { process: s.process, engineState: s.engineState, engineSessionId: s.engineSessionId, launchId: s.launchId, turn: s.turn?.id ?? null, exit: s.exit && { code: s.exit.code, signal: s.exit.signal, reason: s.exit.reason } };
+    }),
+    events: await read(async () => {
+      const snapshot = value(await invoke(page, 'session.events', { appSessionId: id, afterSeq: null, limit: null }));
+      return {
+        lastSeq: snapshot.lastSeq,
+        requested: ofKind(snapshot.events, 'permission.requested').map((e) => ({ requestId: e.requestId, toolUseId: e.toolUseId, tool: e.toolName })),
+        resolved: ofKind(snapshot.events, 'permission.resolved').map((e) => ({ requestId: e.requestId, behavior: e.behavior, by: e.resolvedBy })),
+      };
+    }),
+    attention: await read(async () =>
+      value(await invoke(page, 'attention.list', undefined))
+        .filter((item) => item.appSessionId === child && item.kind === 'permission')
+        .map((item) => ({ id: item.id, requestId: item.request.requestId, toolUseId: item.request.toolUseId, state: item.state })),
+    ),
+    journal: await read(() => {
+      const rows = journal(maws, child);
+      const shared = rows as unknown as Parameters<typeof mcpCalls>[0];
+      return {
+        asked: rows.filter((r) => r.direction === 'in' && wire(r).request?.subtype === 'can_use_tool').map((r) => ({ requestId: wire(r).request_id, tool: wire(r).request?.tool_name, toolUseId: wire(r).request?.tool_use_id })),
+        answered: rows.filter((r) => r.direction === 'out' && wire(r).type === 'control_response').map((r) => ({ requestId: wire(r).response?.request_id, subtype: wire(r).response?.subtype, behavior: wire(r).response?.response?.behavior })),
+        calls: mcpCalls(shared).map((call) => ({ requestId: call.requestId, name: call.name, answered: mcpResultOf(shared, call.requestId) !== null })),
+        troubles: rows.filter((r) => r.direction === 'meta' && troubles.has(wire(r).event ?? '')).map((r) => ({ event: wire(r).event, requestId: wire(r).requestId, expected: wire(r).expected, got: wire(r).got, message: wire(r).message?.slice(0, 200) })),
+        meta: metaEvents(shared).slice(-8),
+      };
+    }),
+  };
+}
 
 // P2-E1 (M5): a side thread that updates its parent's page: the anchored prompt, the rename, the update (P3-A M6:
 // `artifact_read` of the page, allowed by a rule, then `artifact_publish` of the new page from the revision the read
