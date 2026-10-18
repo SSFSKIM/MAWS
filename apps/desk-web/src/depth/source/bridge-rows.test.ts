@@ -1,8 +1,9 @@
-// The rows the doperpowers plugin appends, a closed set (`bridge-rows.ts`): a delivery, the interrupt's marker, note and
-// older record, a stop's note, the `/secret` mod's record, and a steer, the one known by exclusion. Every such row in the
-// doperpowers fixtures MAWS vendors has its kind pinned here by its whole text, so a fixture re-vendored with a new kind
-// of row fails here until that kind is named, rather than drawing as the owner's words. Each kind is then read off
-// DX5's own texts, and a steer is drawn as the owner's prompt queued into the running turn, as MAWS draws one there.
+// The rows the doperpowers plugin appends, a closed set (`bridge-rows.ts`): a steer, known by its own first line from
+// doperpowers 7.180.0, a delivery, the interrupt's marker, note and older record, a stop's note, the `/secret` mod's
+// record, and an older bridge's steer, known by exclusion. Every such row in the doperpowers fixtures MAWS vendors has
+// its kind pinned here by its whole text, so a fixture re-vendored with a new kind of row fails here until that kind is
+// named, rather than drawing as the owner's words. Each kind is then read off DX5's own texts, and a steer is drawn as
+// the owner's prompt queued into the running turn, as MAWS draws one there, without its line.
 import { readFileSync } from 'node:fs';
 import { loadRecording, SESSION_VIEW, TWO_SUBAGENTS } from 'desk-hub/fake-machine';
 import type { JsonObject } from 'desk-hub/protocol';
@@ -10,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
 import { isBridgeRow } from '../../conversation/delivery-frame';
-import { bridgeRowKind, steerAsDrawn, type BridgeRowKind } from './bridge-rows';
+import { bridgeRowKind, markedSteerWords, STEER_LINE, steerAsDrawn, type BridgeRowKind } from './bridge-rows';
 import { freshSource, subagentLookupOf } from './desk-transcript';
 
 /** The doperpowers fixtures MAWS vendors: DX4's vectors (written by doperpowers' `tests/sminos/dx4-jobs.gen.py`). */
@@ -65,6 +66,14 @@ describe("the plugin's appended rows", () => {
 
   it("reads each kind off DX5's texts, and any other text as a steer", () => {
     const kinds: Array<[string, BridgeRowKind]> = [
+      // A steer from 7.180.0, its own first line, whatever its words: the interrupt's marker or a note quoted whole, a
+      // delivery's frame, the line again.
+      [`${STEER_LINE}\nuse the split store`, 'steer'],
+      [`${STEER_LINE}\n[Request interrupted by user]`, 'steer'],
+      [`${STEER_LINE}\n${STOP('bk3x9a1', 'the desk')}`, 'steer'],
+      [`${STEER_LINE}\n${['The interrupt came from the desk.', STOPPED('bk3x9a1')].join('\n')}`, 'steer'],
+      [`${STEER_LINE}\n[sminos message from human id=5e551e17]\nRe-run the suites.`, 'steer'],
+      [`${STEER_LINE}\n${STEER_LINE}`, 'steer'],
       ['[sminos chat MAWS hub/5e55e5e5:12 from human → @you]\nRun the suites.', 'delivery'],
       ['[sminos message from human id=5e551e17]\nRe-run the suites.', 'delivery'],
       ['[Request interrupted by user]', 'interrupt-marker'],
@@ -80,8 +89,13 @@ describe("the plugin's appended rows", () => {
       ['[sminos chat MAWS hub/5e55e5e5:12 from human → @you]', 'steer'], // a frame line with nothing after it is no delivery
       ['The interrupt came from the desk. Thanks', 'steer'],
       ['The person stored a secret under A. You never see its value. In a shell command, read it as "$(cat ~/.config/claude-secrets/B)", never printing it.', 'steer'],
+      [STEER_LINE, 'steer'], // the line with no words after it marks nothing: an older bridge's steer of those words
+      [` ${STEER_LINE}\nuse the split store`, 'steer'],
     ];
     expect(kinds.map(([text]) => [text, bridgeRowKind(appended(text))])).toEqual(kinds);
+    // Only a row that opens with the whole line, words after it, is marked; the rest are steers by exclusion.
+    expect(kinds.map(([text]) => markedSteerWords(appended(text)) !== null)).toEqual([true, true, true, true, true, true, ...kinds.slice(6).map(() => false)]);
+    expect(markedSteerWords({ ...appended(`${STEER_LINE}\nuse the split store`), origin: { kind: 'plugin', name: 'another' } })).toBeNull();
     // Nothing the plugin did not append is one of its rows.
     expect(bridgeRowKind({ ...appended('use the split store'), origin: { kind: 'plugin', name: 'another' } })).toBeNull();
     expect(bridgeRowKind({ ...appended('use the split store'), isMeta: false })).toBeNull();
@@ -102,6 +116,15 @@ describe("the plugin's appended rows", () => {
     for (const text of ['[Request interrupted by user]', 'The interrupt came from the desk.', STOP('bk3x9a1', 'the desk'), '[sminos chat MAWS hub/5e55e5e5:12 from human → @you]\nRun the suites.']) {
       const row = appended(text);
       expect(steerAsDrawn(row), text).toBe(row);
+    }
+  });
+
+  it('draws a marked steer without its line, but keeps the line on words MAWS would read as an interrupt marker', () => {
+    const steer = appended(`${STEER_LINE}\nuse the split store\nand the tests`);
+    expect((steerAsDrawn(steer).attachment as JsonObject).prompt).toEqual([{ type: 'text', text: 'use the split store\nand the tests' }]);
+    for (const words of ['[Request interrupted by user]', ' [Request interrupted by user for tool use]', '[Request interrupted by user from the desk]']) {
+      const row = appended(`${STEER_LINE}\n${words}`);
+      expect((steerAsDrawn(row).attachment as JsonObject).prompt, words).toEqual([{ type: 'text', text: `${STEER_LINE}\n${words}` }]);
     }
   });
 });
@@ -133,6 +156,23 @@ describe('a steer through MAWS’s backfill and projection', () => {
     ]);
     expect(users(rows)[1].messageUuid).toBe(steer.uuid);
     expect(turns).toBe(1);
+  });
+
+  it('marked, is drawn the same: the owner’s words in their bubble, the line not drawn; words that are the interrupt’s marker end no turn', async () => {
+    const steer = atSecond(appended(`${STEER_LINE}\nuse the split store`), 2);
+    const { rows, turns } = await drawn([prompt('List the files.'), call('toolu_s3', 1), result('toolu_s3', 2), steer, assistant([{ type: 'text', text: 'Switching to the split store.' }], 3)]);
+    expect(users(rows).map((u) => [u.text, u.steer, u.messageUuid])).toEqual([
+      ['List the files.', false, expect.any(String)],
+      ['use the split store', true, steer.uuid],
+    ]);
+    expect(turns).toBe(1);
+    const marker = atSecond(appended(`${STEER_LINE}\n[Request interrupted by user]`), 2);
+    const quoted = await drawn([prompt('List the files.'), call('toolu_s4', 1), result('toolu_s4', 2), marker, assistant([{ type: 'text', text: 'Still listing.' }], 3)]);
+    expect(users(quoted.rows).map((u) => [u.text, u.steer])).toEqual([
+      ['List the files.', false],
+      [`${STEER_LINE}\n[Request interrupted by user]`, true],
+    ]);
+    expect(quoted.rows.find((r) => r.kind === 'divider')).toMatchObject({ state: 'working' });
   });
 
   it("draws none of the bridge's records beside it: the interrupt's marker and note, a stop's note", async () => {

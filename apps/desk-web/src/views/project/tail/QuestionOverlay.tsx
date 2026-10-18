@@ -2,14 +2,16 @@
 // row, MAWS's question receipt (S1 classifies `mcp__doperpowers__AskUserQuestion` as a question), and the log's
 // `question` and `answered` events, joined to it by their `src` (the call's tool-use id), overlay that row: while its
 // card waits at the tail the receipt says "Waiting for your answer · below", and once answered it carries the log's
-// answer, which the transcript never writes back into the call (the answer reaches the model later, as a prompt). A
+// answer, which the transcript never writes back into the call (the answer reaches the model later, as a prompt or a
+// context the transcript holds apart, which answers the row too when the log has none: `conversation/asked.ts`). A
 // question whose request was settled with no answer used (DX4's `withdrawn`: its turn aborted, its session ended) and
 // that the log never answered says so, as its card would have, rather than waiting on an answer nothing will take.
 //
 // MAWS's list offers no seam to redraw one derived row and its `QuestionRow` is not edited here, so the overlay is drawn
 // into the row the list mounted: a host element appended to the receipt, found again whenever the virtualized list
 // mounts the row anew, its lines in MAWS's own classes standing in for the receipt's (the desk's stylesheet hides the
-// receipt's lines while the overlay draws in it). Only the rows named by the log's questions are touched.
+// receipt's lines while the overlay draws in it). Only the rows of the questions the log or a transcript answer names
+// are touched.
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QUESTION } from '../../../../../../src/renderer/src/transcript/model/copy';
