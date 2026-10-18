@@ -168,7 +168,10 @@
       ],
       "currentAtCommit": "f58b9736b7512a097c86a7dbf48cbcd8913d1c9d",
       "currentReview": "source narrowing independently reviewed; remaining owner/native/wire clauses retained",
-      "reconciledAt": "2026-10-18T18:59:40Z"
+      "reconciledAt": "2026-10-18T18:59:40Z",
+      "status": "closed",
+      "closedAtCommit": "e935dbe6224bbf321ed168d6577ce1ee7c202b53",
+      "closureProof": "waves/W-PKG-checkpoint.json rowResult255; current field retained as last row, no longer present in tracker"
     },
     "258": {
       "original": "| 2026-10-17 | C3 / C8b (the live task frames and the background tool; found by the desk's DC9 S2) | A command Monitor reaches the live path as the engine sends it, `task_started` with `task_type: \"local_bash\"` (the engine runs it as a shell of `kind: \"monitor\"`, and the frame carries no kind), so `kindOf` makes it a shell and Background work draws it under Shells, while the engine's own task list, the desk's jobs body and the parked disk backfill (branch `desk-backfill-jobs`, DC9 S2) call it a monitor (`monitor_ws` for a WebSocket source). | 2.1.300 `cli.pretty.js:871450` (`xFe(…, kind: \"monitor\")` registers a `local_bash`) and `:443588` (`task_type: e.type`); the engine's task list and display call it a monitor (`shell_kind: \"monitor\"` at `:1042988`, display type at `:477868`); the desk's jobs body (DX4, DC8's `sminos_jobs.py`) says `monitor`. | Closes when the live path types a command Monitor as `monitor`, by the Monitor call's tool-use id (the `task_started` frame names it) or a kind the engine adds to the frame, so it draws under Monitors, as the desk and a disk backfill would. Owner: whoever owns the live path (C3's normaliser or C8b's task graph). |",

@@ -7,8 +7,15 @@
     "static"
   ],
   "statusAtIdentityRead": "in_progress",
-  "conclusion": null,
+  "conclusion": "success",
   "completionTask": "bcvvpuacd",
   "afterOriginalCompletion": true,
-  "rule": "DL59 static-only corrective union; source correction tests/config only, no product change; MainArea later test supplement still needs final hand-back unit proof"
+  "rule": "DL59 static-only corrective union; source correction tests/config only, no product change; MainArea later test supplement still needs final hand-back unit proof",
+  "status": "completed",
+  "attempt": 1,
+  "exit": 0,
+  "job": 117779435067,
+  "startedAt": "2026-10-18T20:21:06Z",
+  "completedAt": "2026-10-18T20:26:24Z",
+  "evidenceStatusAfterGate": "empty; no dirty evidence paths outside p3-finish or inside it"
 }

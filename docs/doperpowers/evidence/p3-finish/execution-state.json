@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "shared union original native frontier green after static retry; four Mac reds await approved packaged diagnostic scope and architect quiet signal; measurement rows externally load-confounded, no settle code tonight",
+  "phase": "parentDL108 merged/calibrationf690a54a4 committed; packaged approval diagnostic implementation and focused review pending; four-Mac relaunch prepared, awaiting architect quiet relay",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -302,7 +302,7 @@
   },
   "W-DOC-B": {
     "executor": "afe4ec31e37c3925e",
-    "status": "implementation review and exact assertion correction accepted; local GREEN absent, union gate pending",
+    "status": "unit/native source frontier green39156492025 plus static39162779550; local GREEN omission recorded",
     "claims": "pair4-claims.json",
     "rowCommits": [
       "4b6b3ec69",
@@ -320,7 +320,7 @@
   },
   "W-SHELL": {
     "executor": "a87de8fe2228592d9",
-    "status": "source/fix recheck accepted; union gate pending",
+    "status": "original pair4 native source frontier accepted by39156492025 plus static39162779550; MainArea supplement final unit proof remains",
     "claims": "pair4-claims.json",
     "rowCommits": [
       "80757a5c6",
@@ -393,7 +393,7 @@
   },
   "W-PKG": {
     "executor": "af1eb156dd5f3f542",
-    "status": "original scrub finding closed; allowlisted capture accepted; final POSIX test-path quote correction0ba7596c controller-verified with6/6 exit0, native packaged proof pending",
+    "status": "L255 closed e935dbe62 on actual packaged transition/resolution plus smoke; overall packaged approval red independent",
     "claims": "pair5-claims.json",
     "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
     "rowCommit": "f58b9736b7512a097c86a7dbf48cbcd8913d1c9d",
@@ -975,10 +975,17 @@
       "static"
     ],
     "statusAtIdentityRead": "in_progress",
-    "conclusion": null,
+    "conclusion": "success",
     "completionTask": "bcvvpuacd",
     "afterOriginalCompletion": true,
-    "rule": "DL59 static-only corrective union; source correction tests/config only, no product change; MainArea later test supplement still needs final hand-back unit proof"
+    "rule": "DL59 static-only corrective union; source correction tests/config only, no product change; MainArea later test supplement still needs final hand-back unit proof",
+    "status": "completed",
+    "attempt": 1,
+    "exit": 0,
+    "job": 117779435067,
+    "startedAt": "2026-10-18T20:21:06Z",
+    "completedAt": "2026-10-18T20:26:24Z",
+    "evidenceStatusAfterGate": "empty; no dirty evidence paths outside p3-finish or inside it"
   },
   "pair45NativeCounts": {
     "L277": 5,
@@ -1024,5 +1031,18 @@
     "loadRule": "judging floor20 unchanged; external-work confound is not a numeric high-load waiver; below10 quiet clause remains separate",
     "protocol": "No settle-wait spec change tonight. One deferred P3 tracker row; promote only if quiet relaunch first samples exceed10 without external source.",
     "nextRun": "one DL59 relaunch of packaged/document-scale/presentations-scale/artifacts-perf on same tree plus accepted packaged correction and parent DL108 drag calibration, only after architect relays CI-opt quiet hold and mini below5; no further run after quiet failure without architect rebase-versus-repair ruling"
+  },
+  "quietRelaunch": {
+    "script": "/private/tmp/p3f-pair45-mac-relaunch.sh",
+    "groups": [
+      "packaged",
+      "e2e:presentations-scale",
+      "e2e:artifacts-perf",
+      "e2e:document-scale"
+    ],
+    "launched": false,
+    "permissionCondition": "architect relay after CI-opt sees no manim scenes and mini load<5 twice30s apart; not yet received",
+    "knownBackground": "one-core diagnostic loop and sminos daemon remain; record per-row start load",
+    "hold": "manim-master-fa capped since20:29Z and quiet flag set per architect, not itself the quiet release"
   }
 }
