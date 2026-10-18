@@ -17,7 +17,7 @@
 // measured in trials is judged on its best (the parent's Decision Log 54); every trial is in the results JSON,
 // `test-results/presentations-scale.json`. The run exits 0 when no row failed and prints the marginal rows for P3-F.
 // Run on purpose only, at the quietest load the machine gives:
-//   MAWS_PRESENTATIONS_SCALE=1 pnpm e2e:presentations-scale
+//   pnpm e2e:presentations-scale   (the script sets MAWS_PRESENTATIONS_SCALE=1)
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';

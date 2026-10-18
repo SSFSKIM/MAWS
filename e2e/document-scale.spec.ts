@@ -11,7 +11,7 @@
 // included: the bar's change count drawn) and leave; the host's heap (loaded, and after close and unload against
 // idle) and the renderers' working set; Korean composed under load into a block the agent edits; a host SIGKILL under
 // load. Run on purpose only, at low load (each bound is judged at load under 20):
-//   MAWS_DOCUMENT_PERF=1 pnpm e2e:document-scale
+//   pnpm e2e:document-scale        (the script sets MAWS_DOCUMENT_PERF=1)
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
