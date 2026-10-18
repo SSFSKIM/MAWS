@@ -12,7 +12,7 @@ import { URL, fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const { alertLine, check, decide, macJobs, parseAlert } = await import(join(root, 'scripts/ci-gate-alerts.mjs'));
+const { alertLine, check, decide, macJobs, parseAlert, poolE2e } = await import(join(root, 'scripts/ci-gate-alerts.mjs'));
 
 test('an alert title parses into machine, dialog, time and source; other alert kinds do not', () => {
   assert.deepEqual(parseAlert('ci-kit alert: mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)'), { machine: 'mini', dialog: 'SecurityAgent', since: '2026-10-17T20:06Z', source: 'source unknown' });
@@ -46,6 +46,11 @@ test('the Mac jobs of a run, from the flags and the repository variables', () =>
   assert.deepEqual(macJobs({ gates: 'static,probes', class1a: 'macos', variables: today }), ['static', 'probes']);
   assert.deepEqual(macJobs({ gates: 'static', variables: { GATE_RUNNER: 'macos' } }), ['plan', 'static']);
   assert.deepEqual(macJobs({ gates: 'static', class1a: 'pool', variables: { GATE_RUNNER: 'MacOS' } }), ['plan']);
+  // A POOL_E2E group never takes a Mac (Decision Log 72): the desk lane's own run shape needs none.
+  const offMac = poolE2e(readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8'));
+  assert.deepEqual(offMac, ['desk-web']);
+  assert.deepEqual(macJobs({ gates: 'static,unit,e2e:desk-web', variables: today, offMac }), []);
+  assert.deepEqual(macJobs({ gates: 'e2e:side,e2e:desk-web', class1a: 'linux', variables: today, offMac }), ['e2e:side']);
 });
 
 // Every combination of the flags and the variables over a few gate sets, against the plan the workflow would run.
@@ -56,12 +61,12 @@ test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its j
   // packaged always on the Mac.
   assert.match(workflow, /\n {2}plan:\n(?: {4}.*\n|\n)*? {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| 'ubuntu-slim' \}\}\n/);
   for (const job of ['unit-darwin', 'packaged']) assert.match(workflow, new RegExp(`\\n {2}${job}:\\n(?: {4}.*\\n)*? {4}runs-on: \\[self-hosted, macOS, ARM64\\]\\n`), job);
-  // Each e2e job takes the runner its matrix entry carries, the lane's or, for POOL_E2E on a Linux lane, the pool's.
+  // Each e2e job takes the runner its matrix entry carries, the lane's or, for POOL_E2E, the pool's or hosted Linux.
   assert.match(workflow, /\n {2}e2e:\n(?: {4}.*\n)*? {4}runs-on: \$\{\{ fromJSON\(matrix\.runner\) \}\}\n/);
   const onMac = (runner) => JSON.stringify(JSON.parse(runner)) === mac;
 
   const cases = [];
-  for (const gates of ['', 'static', 'static,unit,probes', 'unit:darwin', 'packaged', 'e2e:library', 'e2e:library,e2e:desk-web'])
+  for (const gates of ['', 'static', 'static,unit,probes', 'unit:darwin', 'packaged', 'e2e:library', 'e2e:desk-web', 'e2e:library,e2e:desk-web'])
     for (const runner of ['', 'linux', 'macos'])
       for (const class1a of ['', 'linux', 'macos', 'pool'])
         for (const GATE_RUNNER of ['', 'linux', 'macos', 'pool'])
@@ -94,7 +99,7 @@ test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its j
       }
     };
     await Promise.all(Array.from({ length: Math.min(16, availableParallelism()) }, worker));
-    const wrong = cases.filter((entry, index) => results[index] !== macJobs({ ...entry, variables: entry }).length > 0);
+    const wrong = cases.filter((entry, index) => results[index] !== macJobs({ ...entry, variables: entry, offMac: ['desk-web'] }).length > 0);
     assert.deepEqual(wrong, []);
     assert.ok(results.some(Boolean) && !results.every(Boolean));
   } finally {
