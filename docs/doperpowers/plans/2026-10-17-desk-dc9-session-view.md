@@ -1063,3 +1063,60 @@ in their own worktrees.
   the controller, and the brief names that path.
 
 ## Outcomes & Retrospective
+
+**2026-10-17, at the branch's end (controller).** Every milestone is
+built and reviewed clean: S1 (merged as MAWS #26), T0, M1 to M6. S2 is
+parked on `desk-backfill-jobs` as the MAWS app's own follow-up. The
+whole-branch xhigh panel (`d9466376..79a8c812`, run by the composite's
+writer) found four P2s and confirmed nothing in its delivery-truth or
+status/jobs/output lenses. All four were fixed in one wave, with the `$`
+escape and three tech-debt rows, and the delta was re-checked at the high
+rung.
+
+DC9's acceptance passes against the fake machine replaying
+`session-view` with the DC8 producer, mapped clause by clause in M6's
+report:
+- the report with its per-turn records, streaming into its turns;
+- the toggle;
+- tail sends matched by identity and provenance alone;
+- requests inline at the tail;
+- the ask overlay;
+- the end marker;
+- paging to the first row across a compaction, live and after the
+  session ended;
+- the fallbacks;
+- the phone loading no transcript chunk;
+- the column's DX4 statuses, jobs, `output` and MCP names;
+- the hub's `output` frame and kind.
+
+DC8's machine side end to end waits for the deployment: the hub ships
+first.
+
+What held:
+- **MAWS's components imported as they stand.** The report, `UserRow`'s
+  classes, `ShellRow` and `MonitorRow`, and the task graph were all used
+  unedited. The desk's seams were its own source, its tail rows, a portal
+  for the ask overlay, a layout effect for Stop, and a projection of what
+  the list draws.
+- **One owner per session.** The center and the column share one
+  subscription.
+
+What moved under the plan:
+- The contract moved repeatedly while it was being built. DC8's fixture
+  went through four revisions, and DX4's precedence and the meaning of a
+  launch were corrected. There was an adopt root that did not exist,
+  plain-row notifications, and the bridge's interrupt rows (fixed on both
+  sides, with doperpowers #225). Folding each change into the Decision Log
+  before the next dispatch kept the executors on current ground.
+- The owner's reviews changed three things: the delivery state moved into
+  the bubble (1B), requests moved inline (2B), and the Transcript toggle
+  kept MAWS's shape. A real-session probe found the place-keeping drift
+  on late pages, which no recording had shown.
+- Three ideas were tried and reverted or narrowed: a synthetic turn end
+  driven by presence (it corrupted turn history), text-containment
+  matching, and an origin-less fallback.
+- A cmux restart paused the work mid-execution. Nothing was lost: every
+  worker committed WIP first, and the ledger carried the handles.
+
+Left open: the residue and the tech-debt rows named in the report
+(`docs/doperpowers/plans/2026-10-17-desk-dc9-report.md`).
