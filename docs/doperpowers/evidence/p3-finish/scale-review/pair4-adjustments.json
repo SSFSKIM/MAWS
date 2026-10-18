@@ -1,0 +1,251 @@
+{
+  "status": "INTERIM read-only partition audit (pair4 preparation); NOT final pairs and NOT the M3 hand-up. Pinned to the committed head below; uncommitted worker edits ignored. Rebuild and re-verify on the committed post-debt head after W-E, W-PKG and the fix waves.",
+  "controller": "af4cd2993bc56e015",
+  "head": "218491b4d06ac421e89025fcdc146141a7fb86b2",
+  "base": "5ad08789cc0f4e564091cdb2f5224026304fb889",
+  "previousAuditHead": "7a23ef400218a5053f87f717d84c84b00de634d4",
+  "method": "git diff --no-renames --numstat base..head (added+deleted; binary 0). Effective assignment = areas.json paths, then pair1 newAssignments, pair1 sameTierRebalance, minus pair1 removedFromRange, then pair2 assignments and incomingMaster782bbf83c, then this file's assignments. Exclusions recomputed by rule at head, not from the M0 excludedPaths list.",
+  "crossCheck": "the same method on base..7a23ef400 reproduces pair2: 1583 source files, 233043 lines; pair2 resultingSizes reproduced exactly",
+  "coverage": {
+    "changedFiles": 2830,
+    "assignedFiles": 1598,
+    "excludedFiles": 1232,
+    "unassignedAfterThisFile": 0,
+    "overlaps": 0,
+    "obsoleteAssignments": 0,
+    "assignedLines": 234841,
+    "excludedLines": 197240
+  },
+  "exclusionsVerified": {
+    ".github/**": 7,
+    "apps/**": 398,
+    "docs/**": 147,
+    "e2e/fixtures/**/run-<id>/ recorded evidence (.json/.jsonl)": 259,
+    "mockups/**": 11,
+    "research/**": 1,
+    "scripts/ci-*": 7,
+    "spikes/** except spikes/protocol-probe/**": 402
+  },
+  "exclusionNotes": "Rule-excluded paths new since M0 (97: docs 79, apps/desk-web 16, scripts/ci-gate-preemptions.sh and .test.mjs) are covered by the eight existing rules; no e2e/fixtures path changed since M0 and all 259 sit under run-<id>/ recorded-evidence directories; all 4 changed spikes/protocol-probe paths stay assigned (composition); no assigned path matches an exclusion rule.",
+  "newSincePair2": {
+    "total": 57,
+    "excluded": 42,
+    "preassignedByPair2Incoming": [
+      "src/renderer/src/transcript/view/rows/User.tsx",
+      "src/renderer/src/transcript/view/rows/User.test.tsx"
+    ],
+    "newlyAssignedHere": 13
+  },
+  "obsoleteSincePair2": [],
+  "assignments": {
+    "src/engine-host/replay-transcript.test.ts": "composition",
+    "src/engine-host/replay-transcript.ts": "composition",
+    "src/engine-host/replay-transport.test.ts": "composition",
+    "src/engine-host/replay-transport.ts": "composition",
+    "src/main/sessions/rollback.test.ts": "composition",
+    "src/main/sessions/service-register.test.ts": "composition",
+    "src/main/sessions/service.ts": "composition",
+    "src/main/sessions/side-thread.test.ts": "composition",
+    "src/renderer/src/statusline/format.test.ts": "shell",
+    "src/renderer/src/statusline/format.ts": "shell",
+    "src/renderer/src/tools/agents/model/task-graph.test.ts": "shell",
+    "src/renderer/src/tools/agents/model/task-graph.ts": "shell",
+    "src/renderer/src/transcript/model/fixtures.test.ts": "shell"
+  },
+  "assignmentReasons": {
+    "composition": "P3-F W-SHELL L242 (1cc84bf04): replay seam and session start-guard; siblings launcher.ts, index.ts, ipc.ts, start-guards.ts and service.test.ts are composition (tier 1 max, the stricter tier)",
+    "shell": "W-SHELL L125/L258/L260 (80757a5c6, 3c068c7b3, 957948cd9): status line, task graph, transcript model; siblings derive.ts and tools/agents/* are shell"
+  },
+  "areaSizes": {
+    "store-versions": {
+      "tier": 1,
+      "effort": "max",
+      "files": 63,
+      "lines": 14758,
+      "headroom": 242
+    },
+    "slide-model": {
+      "tier": 1,
+      "effort": "max",
+      "files": 69,
+      "lines": 14416,
+      "headroom": 584
+    },
+    "design-systems": {
+      "tier": 1,
+      "effort": "max",
+      "files": 101,
+      "lines": 14123,
+      "headroom": 877
+    },
+    "artifact-protocol": {
+      "tier": 1,
+      "effort": "max",
+      "files": 117,
+      "lines": 13364,
+      "headroom": 1636
+    },
+    "library": {
+      "tier": 1,
+      "effort": "max",
+      "files": 86,
+      "lines": 13122,
+      "headroom": 1878
+    },
+    "document-model": {
+      "tier": 1,
+      "effort": "max",
+      "files": 60,
+      "lines": 13093,
+      "headroom": 1907
+    },
+    "dashboard-model": {
+      "tier": 1,
+      "effort": "max",
+      "files": 89,
+      "lines": 12676,
+      "headroom": 2324
+    },
+    "connectors-main": {
+      "tier": 1,
+      "effort": "max",
+      "files": 37,
+      "lines": 12089,
+      "headroom": 2911
+    },
+    "exports-capture": {
+      "tier": 1,
+      "effort": "max",
+      "files": 70,
+      "lines": 11861,
+      "headroom": 3139
+    },
+    "history-anchors": {
+      "tier": 1,
+      "effort": "max",
+      "files": 71,
+      "lines": 11633,
+      "headroom": 3367
+    },
+    "composition": {
+      "tier": 1,
+      "effort": "max",
+      "files": 186,
+      "lines": 11562,
+      "headroom": 3438
+    },
+    "connectors-host": {
+      "tier": 1,
+      "effort": "max",
+      "files": 46,
+      "lines": 11156,
+      "headroom": 3844
+    },
+    "design-workbench": {
+      "tier": 1,
+      "effort": "max",
+      "files": 70,
+      "lines": 11111,
+      "headroom": 3889
+    },
+    "library-viewers-cutover": {
+      "tier": 1,
+      "effort": "max",
+      "files": 60,
+      "lines": 8381,
+      "headroom": 6619
+    },
+    "editor-proof": {
+      "tier": 2,
+      "effort": "xhigh",
+      "files": 50,
+      "lines": 14217,
+      "headroom": 783
+    },
+    "slide-editor": {
+      "tier": 2,
+      "effort": "xhigh",
+      "files": 75,
+      "lines": 12390,
+      "headroom": 2610
+    },
+    "design-proof": {
+      "tier": 2,
+      "effort": "xhigh",
+      "files": 67,
+      "lines": 11194,
+      "headroom": 3806
+    },
+    "shell": {
+      "tier": 2,
+      "effort": "xhigh",
+      "files": 204,
+      "lines": 8901,
+      "headroom": 6099
+    },
+    "document-editor": {
+      "tier": 2,
+      "effort": "xhigh",
+      "files": 48,
+      "lines": 8130,
+      "headroom": 6870
+    },
+    "dashboard-live-ui": {
+      "tier": 2,
+      "effort": "xhigh",
+      "files": 29,
+      "lines": 6664,
+      "headroom": 8336
+    }
+  },
+  "areasOver15000": [],
+  "contingentSameTierSpills": {
+    "store-versions->connectors-host (max)": {
+      "paths": {
+        "src/engine-host/documents/connector-grants.test.ts": 598
+      },
+      "lines": 598,
+      "after": {
+        "store-versions": 14160,
+        "connectors-host": 11754
+      },
+      "domain": "connectors-host lens 1 (grants consumed only at fenced final write)"
+    },
+    "editor-proof->design-proof (xhigh)": {
+      "paths": {
+        "e2e/send-to-live.spec.ts": 352,
+        "e2e/support/send-to-mcp-server.mjs": 86,
+        "e2e/support/send-to-approval.ts": 35,
+        "test/support/send-to-mcp-server.test.ts": 73,
+        "test/support/send-to-approval.test.ts": 68
+      },
+      "lines": 614,
+      "after": {
+        "editor-proof": 13603,
+        "design-proof": 11808
+      },
+      "domain": "send-to live proof with its two support modules and their unit tests; pair2's 473 was the three e2e paths only, moving the tests too keeps support code with its tests"
+    },
+    "slide-model->history-anchors (max)": {
+      "paths": {
+        "src/artifacts/slides/history.ts": 628,
+        "src/artifacts/slides/history.test.ts": 454
+      },
+      "lines": 1082,
+      "after": {
+        "slide-model": 13334,
+        "history-anchors": 12715
+      },
+      "domain": "the pure half of per-slide version history; its editor half (slides/editor/history/*) and the design/dashboard history models already sit in history-anchors"
+    },
+    "rule": "none needed at this head; apply a spill only if its source area exceeds 15000 at the final committed head"
+  },
+  "finalRebuildMust": [
+    "pin the committed post-debt head explicitly (no HEAD, no working tree) and recompute numstat base..head",
+    "apply areas.json + pair1 + pair2 + this file, then classify every path new since 218491b4d and drop any path that left the range",
+    "recompute exclusions by rule, recheck e2e/fixtures for non-evidence code, require zero unassigned, zero overlap, each area <=15000, 14 max + 6 xhigh unchanged",
+    "run git with literal pathspecs (GIT_LITERAL_PATHSPECS=1 or :(literal)): test/fixtures/document/handmade-docx/[Content_Types].xml is a glob as a plain pathspec",
+    "replace the stale M0 assumptions in /private/tmp/p3f-area-stats.py (HEAD, hard-coded 607ad9b9b header, stored changedLines, explicit excludedPaths list, overwrites areas.json) and p3f-make-pairs.py (data[head]=607ad9b9b, unadjusted area paths, preliminary status and file names)",
+    "rebuild every pair in /private/tmp/maws-p3f-review/<area> from the final head and verify pair stat equals source stat, review-head tree equals the source tree, and clean status; write final pairs files, not pairs-preliminary"
+  ]
+}

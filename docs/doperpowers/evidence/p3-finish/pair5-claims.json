@@ -1,0 +1,35 @@
+{
+  "status": "preparation complete; no source edit release until reviewed pair4 pin; W-E semantic assessment pending",
+  "W-E": {
+    "executor": "a40d9b1903ee4f68d",
+    "rows": [158,227,247,249,251],
+    "paths": [
+      "src/artifacts/design/export.ts", "src/artifacts/design/export.test.ts",
+      "src/artifacts/dashboard/render/render.ts", "src/artifacts/dashboard/render/render.test.ts",
+      "src/engine-host/documents/loop-delay.ts", "src/engine-host/documents/loop-delay.test.ts",
+      "src/engine-host/documents/register.ts", "src/engine-host/documents/register.test.ts",
+      "e2e/document-scale.spec.ts",
+      "src/engine-host/dashboards/e2e-seam.ts", "src/engine-host/dashboards/e2e-seam.test.ts",
+      "e2e/dashboard-scale.spec.ts", "e2e/support/dashboard-scale.ts", "test/support/dashboard-scale.test.ts",
+      "package.json", "e2e/presentations-scale.spec.ts",
+      "spikes/p3-store/s7/soak/soak.mjs", "spikes/p3-store/s7/soak/deck/sim.ts",
+      "src/engine-host/presentations/history-bench.test.ts",
+      "e2e/support/deck-history.ts", "test/support/deck-history.test.ts"
+    ],
+    "assessment": "a8580d52d4a37bb4b, bounded read-only adversarial assessment of sampler, per-call announcement ownership, late-memory fallback and heavy generation semantics",
+    "boundaries": "all raw samples/loads retained; original bounds unchanged; L251 side-by-side layout remains owner sitting; no new ArtifactChanged/schema/persisted key; generator once inside mini job, about5min deterministic workload criterion, no local generation or extra historical bisection",
+    "sharedPathsWithinWave": "dashboard-scale.spec.ts and document-scale.spec.ts require serial row/supplement commits"
+  },
+  "W-PKG": {
+    "executor": "af1eb156dd5f3f542",
+    "rows": [255],
+    "paths": ["e2e/connectors-direct.spec.ts", "e2e/support/packaged-resolution.ts", "test/support/packaged-resolution.test.ts"],
+    "lastPathConditional": "add named unit test if closure/climbing logic warrants it",
+    "decision": "controller accepts packaged-binary RunAsNode dependency-resolution proof B(ii), actual packaged host route-D transition and smoke host load; source still held",
+    "proof": "existing transition E-D-E runs under packaged executable, other direct cases keep existing activation; verify D fixture parent is packaged supervisor; SDK1.32.1 and production closure resolve under Resources, cycle-safe/bounded, no hard-coded lock count, export-map aware, no dependency imports",
+    "safety": "new subprocess uses existing launchEnvironment to drop inherited CLAUDE variables; no model turn/OAuth/native custody; no product source or gate-topology changes; controller classifies actual reds, none predeclared baseline",
+    "gate": "packaged plus connectors-direct and shared static/unit/probes/Darwin union as appropriate"
+  },
+  "intersection": [],
+  "process": "exact source claims only; original row plus own paths committed under existing lock/helper; no source edits before explicit release"
+}
