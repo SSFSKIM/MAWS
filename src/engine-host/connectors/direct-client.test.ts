@@ -4,6 +4,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DirectConnectionPool, directConnectionKey, type DirectConnectionSpec, type DirectPoolOptions } from './direct-client';
+import { STDIO_STOP } from './direct-stdio';
 import { FakeMcpServer, FakeProcesses, fakeFetch, fakeSource } from './direct-test-fakes';
 
 const URL_ = 'http://127.0.0.1:4100/mcp';
@@ -463,6 +464,25 @@ describe('a tools/call over stdio', () => {
     processes.children[0]!.emitStdout('z'.repeat(5_000)); // no newline: an unterminated line past the bound
     expect(await pending).toMatchObject({ ok: false, failure: 'tooLarge', admitted: true });
     expect(processes.children[0]!.stdinEnded).toBe(true);
+  });
+
+  // P3-F: a server that closed its input but did not exit fails the write only asynchronously (EPIPE)
+  it('fails a call whose write the server’s closed input refused, at once, and ends the connection', async () => {
+    vi.useFakeTimers();
+    const { pool, processes } = stdioPool();
+    processes.behaviour = { exitOnStdinEnd: false, exitOn: ['SIGTERM', 'SIGKILL'] };
+    const lease = await leaseOf(pool, stdioSpec());
+    const child = processes.children[0]!;
+    child.inputClosed = true;
+    let outcome: unknown = 'pending';
+    void lease.callTool(call, { admit: () => true, signal: new AbortController().signal }).then((value) => (outcome = value));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(outcome).toMatchObject({ ok: false, failure: 'unavailable', admitted: true });
+    await vi.advanceTimersByTimeAsync(STDIO_STOP.termAfterMs + STDIO_STOP.pollMs);
+    expect(processes.signals).toContainEqual({ pid: -child.pid, signal: 'SIGTERM' });
+    expect(processes.alive(child.pid)).toEqual([]);
+    expect(pool.size).toBe(0);
+    lease.release();
   });
 });
 

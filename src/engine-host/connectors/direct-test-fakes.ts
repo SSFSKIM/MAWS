@@ -114,6 +114,7 @@ export class FakeChild extends EventEmitter {
   readonly lines: string[] = [];
   exited = false;
   stdinEnded = false;
+  inputClosed = false; // P3-F: the server closed its input yet lives on, so every write fails asynchronously (EPIPE)
 
   constructor(
     readonly pid: number,
@@ -128,6 +129,10 @@ export class FakeChild extends EventEmitter {
     let pending = '';
     this.stdin = new Writable({
       write: (chunk: Buffer, _encoding, done) => {
+        if (this.inputClosed) {
+          done(Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+          return;
+        }
         pending += chunk.toString('utf8');
         for (let newline = pending.indexOf('\n'); newline !== -1; newline = pending.indexOf('\n')) {
           const line = pending.slice(0, newline);
