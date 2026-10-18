@@ -1,0 +1,12 @@
+{
+  "parentEntry": "docs/doperpowers/plans/2026-10-12-p3-co-work.md Decision Log108",
+  "parentPin": "a963cf44689afd2799a171b08c257ac87c36a8b8",
+  "integration": "d81b68a674e506770d797e417c09394db8b8c039",
+  "sourceEditor": "abdb4c353aba6c8ef",
+  "scope": "presentations-scale row2 limit16->24 plus calibration label/header only; no other measurement row, trial, marginal rule, pointer interval or product change",
+  "meaning": "parent acceptance calibration, not a performance fix; twelve earlier host-faithful trials support decision, corrected parent retains final single-scene context",
+  "newProductRow": "| 2026-10-18 | P4 presentations editor (host publish application during drag; parent Decision Log108) | The host-faithful drag path adds roughly4ms while the renderer applies an arriving agent publish during drag. This is the product cost retained by the parent acceptance rebase, not a waived repair or the alleged pre/post-wave regression (no product gap was measured). | P3 Decision Log108; A/B/A/B12trials18.2-20.5ms and pooled19.10/19.15ms; union39156492025 at55d012a2e:20.3,19.9,19.6ms at4.54,4.45,4.46,zero long tasks. Last three have the recorded single-manim-scene custody context; corrected parenta963cf446 retains the ruling. | Bring the host-faithful drag p95 back under16ms with the agent republishing by deferring or yielding the arriving publish application to the drag; retain raw measurements and the existing workload. Owner: P4 presentations editor. Current acceptance is <=24ms under parent Decision Log108; no product repair in P3-F. |",
+  "seamRow": "still deferred P4, calibrated bound now known",
+  "L216": "not removed now; close at landing with source55d012a2e figures20.3/19.9/19.6 and loads4.54/4.45/4.46,zero long tasks, citing DL108; frozen-source final measurements remain part of hand-back",
+  "checks": "no local check; focused source review and quiet combined relaunch pending"
+}

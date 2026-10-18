@@ -6,7 +6,8 @@
 // `artifact_publish`, so every publish is A's `publishDoc` over the deck's three-way publish), and the editor measured
 // through the renderer seam's timings and drag probe. Rows, each with the 1-minute load at its trials:
 //   1 open     cold to interactive with 100 live thumbnails ≤ 1,000 ms (the host's copy unloaded first; S7b 116 ms)
-//   2 drag     move to frame p95 ≤ 16 ms while the agent republishes a slide every 0.7 s (S7b 8.9 ms)
+//   2 drag     move to frame p95 ≤ 24 ms while the agent republishes a slide every 0.7 s (the parent's Decision Log 108;
+//              calibration: host-faithful 18.2 to 20.5 ms on the mini; S7b 8.9 ms in the spike; the stand-in 15.4 ms)
 //   3 renderer working set ≤ 500 MB (read after a forced collection, B's Decision Log 44; the figure before it kept)
 //   4 publish  one slide occupies the host loop ≤ 50 ms; the whole deck ≤ 200 ms (the loop's busy time over the call;
 //              the longest single stretch kept beside it)
@@ -328,7 +329,7 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
       trials.push({ value: drag.inputToFrameMs.p95, load: Math.max(load, load1()), note: `${drag.withTransaction}/${drag.moves} moves wrote; move → transaction p95 ${drag.inputToTxMs.p95} ms; move → frame p50 ${drag.inputToFrameMs.p50}, max ${drag.inputToFrameMs.max} ms; ${drag.longTasks} long tasks; the agent published ${published.length} slides (busy p95 ${stats(published.map((p) => p.busyMs)).p95} ms)` });
       await sleep(1_000);
     }
-    rows.add('2 drag p95', 'drag move to frame, p95 over 200 pointer moves, while the agent republishes one slide every 0.7 s through publishDoc', 'ms', 16, 'p95 ≤ 16 ms (S7b 8.9)', trials);
+    rows.add('2 drag p95', 'drag move to frame, p95 over 200 pointer moves, while the agent republishes one slide every 0.7 s through publishDoc', 'ms', 24, 'p95 ≤ 24 ms (host-faithful 18.2 to 20.5 ms on the mini; S7b 8.9 ms in the spike; the stand-in 15.4 ms)', trials);
   });
 
   await test.step('5: the history preview of the seeded version, three times', async () => {
