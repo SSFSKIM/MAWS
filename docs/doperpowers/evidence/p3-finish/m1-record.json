@@ -16,8 +16,8 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 12,
-    "preclosed:pending": 4,
+    "preclosed:committed": 13,
+    "preclosed:pending": 3,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -123,15 +123,15 @@
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at E2's M6 tick ba05e4680 (on master), with the bounded causal claim and the controlled pair recorded.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "8b171889688769fffc2cc8d6d50704bde35b13d1"
     },
     {
       "line": 240,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at P3-F1's landing bd8532a18 (on master); the switch is in src/main/chromium-features.ts (f327debe6, on master).",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 273,
