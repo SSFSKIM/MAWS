@@ -274,12 +274,12 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     rows.add('2 p95', 'keystroke → presented (Event Timing; a keystroke under its 16 ms threshold counted at 16)', keys.presented.p95, 'ms', 50, 'p95 ≤ 50 ms', `${keys.presentedReported} keydowns reported at ≥ 16 ms; max ${keys.presented.max}`);
     rows.add('3 p95', 'keystroke → durable ack, p95', keys.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${keys.acked} acked; p50 ${keys.ack.p50}, max ${keys.ack.max}`);
     rows.add('4 p95', 'keystroke painted in window B, p95', painted.p95, 'ms', 100, 'p95 ≤ 100 ms', `n ${painted.n}; p50 ${painted.p50}, max ${painted.max}`);
-    rows.add('5 p99', 'host event-loop delay over the run (A’s testLoopDelay), p99, documents live with the writer’s batches', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
+    rows.add('5 p99', 'host event-loop delay over the run (A’s testLoopDelay: the whole gaps of its own 10 ms timer), p99, documents live with the writer’s batches', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
     rows.add('5 max', 'host event-loop delay over the run, max', loop.max, 'ms', 100, 'max ≤ 100 ms');
     const all = agents.flatMap((a, k) => a.applied.slice(steadyFrom[k]));
     rows.add('5 batch max', 'an agent batch of five ops in the steady state (replicas fully read, typing and the other agent running): the host loop’s max over each batch', Math.max(...all.map((b) => b.loop.max)), 'ms', 50, '≤ 50 ms (Decision Log 37)', `${all.length} batches; loop max p95 ${stats(all.map((b) => b.loop.max)).p95}; call wall p95 ${stats(all.map((b) => b.wallMs)).p95} ms`);
     const seamLoop = await seam.send<{ loop: { max: number; p99: number } }>({ cmd: 'loop' });
-    rows.add('5 max (gaps)', 'host loop over the run measured by the seam’s 1 ms tick gaps (beside A’s monitorEventLoopDelay), max', seamLoop.loop.max, 'ms', 100, 'max ≤ 100 ms', `p99 ${seamLoop.loop.p99.toFixed(1)} ms`);
+    rows.add('5 max (gaps)', 'host loop over the run measured by the seam’s 1 ms tick gaps (beside A’s 10 ms testLoopDelay), max', seamLoop.loop.max, 'ms', 100, 'max ≤ 100 ms', `p99 ${seamLoop.loop.p99.toFixed(1)} ms`);
     for (const [k, r] of reads.entries()) rows.add(`read load ${k + 1}`, `the 200-block read under load (${r.session}, typing and the other agent running), host loop max over the call`, r.answer.loop.max, 'ms', 100, 'held to row 5’s max ≤ 100 ms', `wall ${r.answer.wallMs.toFixed(1)} ms`);
     rows.write({ steady: { loads, typing: keys, painted, loop, agents: agents.map((a) => ({ session: a.session, applied: a.applied.length, refused: a.refused })) } });
     expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);

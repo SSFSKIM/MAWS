@@ -185,6 +185,20 @@ describe('the artifacts and spaces surface (M4)', () => {
     expect(Object.keys(delay).sort()).toEqual(['max', 'mean', 'p50', 'p99']);
   });
 
+  it('samples the loop delay with its own timer from the first call, which answers zeros, and reads a block in full (P3-F L158)', async () => {
+    surface!.close();
+    register({ MAWS_E2E: '1' });
+    expect(await call('artifacts.testLoopDelay', { reset: true })).toEqual({ p50: 0, p99: 0, max: 0, mean: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const until = performance.now() + 80;
+    while (performance.now() < until) {
+      // an 80 ms synchronous block on the host's loop
+    }
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const delay = await call('artifacts.testLoopDelay', { reset: true });
+    expect(delay.max).toBeGreaterThanOrEqual(80); // `call` validates the answer against the command's output schema
+  });
+
   it('keeps the defaults main relays, serves a byte kind’s file and an asset, and reports the store healthy', async () => {
     const system = (await call('artifacts.create', { kind: 'design_system', title: 'House' })).artifact;
     await call('artifacts.setDefaults', { owner: system.id, spaces: {} });
