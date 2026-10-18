@@ -16,10 +16,12 @@
 //   - a `Project` that holds its archive lookups, lists its send queues, and queues a frame for any generation;
 //   - a `Project` armed to fail its next `forget`, as a failed RPC from the Registry would;
 //   - a `Registry` whose org record can be rewritten, as an object still on a deploy's previous version would make it;
-//   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand.
+//   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand;
+//   - a `Registry` that drops a project's row, as a hub from before machine projects lacks a machine's, and takes a
+//     project's summary report straight, as a late one would arrive.
 import { Machine as DeployedMachine, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
-import { Registry as DeployedRegistry } from '../../src/objects/registry';
+import { Registry as DeployedRegistry, type SummaryReport } from '../../src/objects/registry';
 import type { DownFrame, UpFrame } from '../../src/protocol/machine';
 import type { MachineContext } from '../../src/objects/project';
 import type { Env } from '../../src/env';
@@ -46,7 +48,9 @@ import {
   SEND_FAULT_PATH,
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
+  REPORT_PATH,
   TIMING_PATH,
+  UNREGISTER_PATH,
 } from './send-fault';
 
 export { default } from '../../src/worker';
@@ -65,6 +69,16 @@ export class Registry extends DeployedRegistry {
         }
       });
       return new Response('added');
+    }
+    if (url.pathname === REPORT_PATH) {
+      const { project, report } = (await request.json()) as { project: string; report: SummaryReport };
+      this.summary(project, report);
+      return Response.json(this.orgFrame().frame);
+    }
+    if (url.pathname === UNREGISTER_PATH) {
+      const { id } = (await request.json()) as { id: string };
+      this.ctx.storage.sql.exec('DELETE FROM projects WHERE id = ?', id);
+      return new Response('unregistered');
     }
     if (url.pathname === ORG_ROW_PATH) {
       const { id, name } = (await request.json()) as { id: string; name: string };
@@ -241,7 +255,7 @@ export class Project extends DeployedProject {
     if (url.pathname === PROJECT_LIFE_PATH) return new Response(this.life);
     if (url.pathname === PROJECT_CALLS_PATH) return Response.json(this.ctx.storage.kv.get('calls') ?? { calls: 0, frames: 0 });
     if (url.pathname === PROJECT_LEASE_PATH) {
-      const { op, ...ctx } = (await request.json()) as { op: 'renew' | 'closed'; org: string; project: string; machine: string; generation: number; leaseMs: number };
+      const { op, ...ctx } = (await request.json()) as { op: 'renew' | 'closed'; org: string; project: string; machine: string; client: string; generation: number; leaseMs: number };
       if (op === 'renew') this.renew(ctx);
       else this.closed(ctx);
       return new Response('done');

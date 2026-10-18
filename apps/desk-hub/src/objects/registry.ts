@@ -1,7 +1,9 @@
 // The org's registry (DX7): one per org. It holds the org, its members, its machines, its projects, and the
 // enrollments that create machines, and answers who an Access identity is to the hub; its members' push subscriptions,
 // which it sends Web Push to; and the grid, each project's summary as its `Project` reports it, streamed to members'
-// grid sockets.
+// grid sockets; and the org's directory, sent down every machine's stream as the `org` frame: every project with its kind,
+// and every enrolled machine with whether it is online, as the projects' leases report it. Each enrolled machine has a
+// project of its own (`kind` `machine`), registered when its enrollment is confirmed and retired when it is revoked.
 //
 // Enrollment is a durable state machine. Redeeming a token reserves the machine's name and records the intent to mint
 // (a machine row without a client id) before Cloudflare's API is called; the service token is named
@@ -18,12 +20,14 @@ import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
 import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../protocol/base64url';
-import type { GridDown, ProjectSummary, PushNotice } from '../protocol/browser';
+import type { GridDown, MachineSummary, ProjectSummary, PushNotice } from '../protocol/browser';
+import type { OrgFrame } from '../protocol/machine';
 import { toWire } from '../protocol/parts';
 import {
   ENROLLMENT_TTL_S,
   isMachineName,
   machineNameKey,
+  machineProjectId,
   MAX_ENROLLMENT_TTL_S,
   serviceTokenName,
   type EnrollmentIssued,
@@ -31,6 +35,7 @@ import {
   type MachineRecord,
   type MemberRecord,
   type OrgRecord,
+  type ProjectKind,
   type ProjectRecord,
   type PushSubscriptionRecord,
   type Redeemed,
@@ -52,29 +57,55 @@ CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machines (
   name TEXT PRIMARY KEY, name_key TEXT NOT NULL UNIQUE, client_id TEXT UNIQUE, token_name TEXT NOT NULL,
-  state TEXT NOT NULL, enrollment TEXT NOT NULL, created TEXT NOT NULL, confirmed TEXT);
+  state TEXT NOT NULL, enrollment TEXT NOT NULL, created TEXT NOT NULL, confirmed TEXT,
+  online INTEGER NOT NULL DEFAULT 0, seen TEXT);
 CREATE TABLE IF NOT EXISTS enrollments (
   id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_by TEXT NOT NULL, created TEXT NOT NULL,
   expires TEXT NOT NULL, ttl_s INTEGER NOT NULL, state TEXT NOT NULL, machine TEXT);
 CREATE TABLE IF NOT EXISTS projects (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, registered_by TEXT NOT NULL, created TEXT NOT NULL, archive_machine TEXT);
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, registered_by TEXT NOT NULL, created TEXT NOT NULL, archive_machine TEXT,
+  kind TEXT NOT NULL DEFAULT 'hub', machine TEXT, retired INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS orphans (token_name TEXT PRIMARY KEY, since TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS revocations (machine TEXT NOT NULL, project TEXT NOT NULL, generation INTEGER NOT NULL, PRIMARY KEY (machine, project));
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT PRIMARY KEY, member TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS summaries (
   project TEXT PRIMARY KEY, machines INTEGER NOT NULL, machines_online INTEGER NOT NULL, working INTEGER NOT NULL,
-  waiting INTEGER NOT NULL);
+  waiting INTEGER NOT NULL, report_seq INTEGER);
+CREATE TABLE IF NOT EXISTS machine_states (
+  project TEXT NOT NULL, name_key TEXT NOT NULL, client TEXT NOT NULL, online INTEGER NOT NULL,
+  PRIMARY KEY (project, name_key, client));
 `;
+
+/** Columns added to tables a registry stored before them, with what an older row reads as. */
+const ADDED_COLUMNS: Record<string, string[]> = {
+  org: ['key_check TEXT', 'key_auth TEXT'],
+  machines: ['online INTEGER NOT NULL DEFAULT 0', 'seen TEXT'],
+  projects: ["kind TEXT NOT NULL DEFAULT 'hub'", 'machine TEXT', 'retired INTEGER NOT NULL DEFAULT 0'],
+  summaries: ['report_seq INTEGER'],
+};
 
 /** A member's devices: enough for a person's phones, tablets, and browsers, and a bound on what one member can store. */
 const MAX_PUSH_SUBSCRIPTIONS = 20;
 const MAX_ENDPOINT = 2048;
-type Counts = Omit<ProjectSummary, 'id' | 'name'>;
+type Counts = Pick<ProjectSummary, 'machines' | 'machines_online' | 'working' | 'waiting'>;
+
+/**
+ * What a `Project` reports when its line changes: its counts; `seq`, rising with each report it sends, since reports
+ * travel asynchronously and one can arrive after a later one; and every machine leased there, a follower too, with
+ * whether its lease is fresh and the credential (`client`, the Access client id) of the stream that opened it. A lease
+ * is evidence only for the enrollment holding that credential: one of a revoked enrollment, reported late, says nothing
+ * of the machine enrolled since under the name, in whatever case. A `Project` on the version before this sends neither.
+ */
+export type SummaryReport = Counts & { seq?: number; machines_state?: Array<{ name: string; online: boolean; client: string }> };
 
 const MACHINE_COLUMNS = 'name, client_id, token_name, state, enrollment, created, confirmed';
 const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, ttl_s';
-const PROJECT_COLUMNS = 'id, name, registered_by, created, archive_machine';
+const PROJECT_COLUMNS = 'id, name, registered_by, created, archive_machine, kind, retired';
+type ProjectRow = Omit<ProjectRecord, 'retired'> & { retired: number };
+const projectOf = (row: ProjectRow): ProjectRecord => ({ ...row, retired: row.retired === 1 });
+/** The `kv` key of the directory's version, raised by every change it carries (`directoryChanged`). */
+const DIRECTORY_VERSION = 'directory-version';
 /** How soon a failed orphan deletion, or a revocation a project has not taken, is tried again. */
 const RETRY_MS = 60_000;
 
@@ -98,9 +129,12 @@ export class Registry extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(SCHEMA);
-    // An org stored before wrapped keys (M2's local state) gains its key check and key auth, empty.
-    const columns = ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(org)').toArray().map((c) => c.name);
-    for (const column of ['key_check', 'key_auth']) if (!columns.includes(column)) ctx.storage.sql.exec(`ALTER TABLE org ADD COLUMN ${column} TEXT`);
+    // A registry stored before a column was added gains it: an org before wrapped keys (M2's local state) its key check
+    // and key auth, empty; machines and projects before the org directory their online state and kind.
+    for (const [table, added] of Object.entries(ADDED_COLUMNS)) {
+      const columns = ctx.storage.sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().map((c) => c.name);
+      for (const column of added) if (!columns.includes(column.split(' ')[0])) ctx.storage.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`);
+    }
     this.keys = new OrgKeys(ctx.storage);
   }
 
@@ -116,7 +150,8 @@ export class Registry extends DurableObject<Env> {
   }
 
   /** Who an identity Access admitted is to the hub: a member, an enrolled machine, or null for no one. A pending
-   * machine's first authenticated request confirms its enrollment. */
+   * machine's first authenticated request confirms its enrollment, and in the same step registers its machine project,
+   * or reactivates it when the name was enrolled before. */
   resolve(identity: AccessIdentity): Principal | null {
     const org = this.ensureOrg();
     if (identity.kind === 'human') {
@@ -131,10 +166,14 @@ export class Registry extends DurableObject<Env> {
       const enrollment = this.enrollmentById(machine.enrollment);
       if (!enrollment || enrollment.state !== 'pending' || lapsed(enrollment)) return null;
       const confirmed = iso(Date.now());
-      this.ctx.storage.transactionSync(() => {
+      const project = machineProjectId(org.id, machine.name);
+      const listed = this.ctx.storage.transactionSync(() => {
         this.sql.exec("UPDATE machines SET state = 'active', confirmed = ? WHERE name = ?", confirmed, machine.name);
         this.sql.exec("UPDATE enrollments SET state = 'confirmed' WHERE id = ?", enrollment.id);
+        return this.keepMachineProject(project, machine.name);
       });
+      if (listed) this.toGrid({ t: 'summary', project: this.summaryOf(this.project(project)!) });
+      this.directoryChanged();
       return { kind: 'machine', org, machine: { ...machine, state: 'active', confirmed } };
     }
     return { kind: 'machine', org, machine };
@@ -269,8 +308,9 @@ export class Registry extends DurableObject<Env> {
       generation = Math.max(generation, await object.revoke(machine.client_id));
     }
     const revoked = machine;
-    this.ctx.storage.transactionSync(() => {
+    const retired = this.ctx.storage.transactionSync(() => {
       this.sql.exec('DELETE FROM machines WHERE name = ? AND enrollment = ?', revoked.name, revoked.enrollment);
+      this.sql.exec('DELETE FROM machine_states WHERE name_key = ?', machineNameKey(revoked.name));
       this.sql.exec("UPDATE enrollments SET state = 'expired' WHERE id = ? AND state IN ('open', 'pending')", revoked.enrollment);
       this.sql.exec('UPDATE projects SET archive_machine = NULL WHERE archive_machine = ?', revoked.name);
       this.orphan(revoked.token_name);
@@ -280,7 +320,12 @@ export class Registry extends DurableObject<Env> {
         revoked.name,
         generation,
       );
+      // Its machine project keeps its log for history, off the grid and marked retired in the directory.
+      return this.sql.exec("UPDATE projects SET retired = 1 WHERE id = ? AND kind = 'machine' AND retired = 0", machineProjectId(org.id, revoked.name)).rowsWritten > 0;
     });
+    // A summary cannot take a row off the grid: the grid goes again whole.
+    if (retired) this.toGrid(this.gridFrame());
+    this.directoryChanged();
     await this.sweepRevocations();
     await this.sweepOrphans();
     await this.scheduleAlarm();
@@ -292,19 +337,96 @@ export class Registry extends DurableObject<Env> {
   }
 
   projects(): ProjectRecord[] {
-    return this.sql.exec<ProjectRecord>(`SELECT ${PROJECT_COLUMNS} FROM projects ORDER BY created, id`).toArray();
+    return this.sql.exec<ProjectRow>(`SELECT ${PROJECT_COLUMNS} FROM projects ORDER BY created, id`).toArray().map(projectOf);
   }
 
   project(id: string): ProjectRecord | null {
-    return this.sql.exec<ProjectRecord>(`SELECT ${PROJECT_COLUMNS} FROM projects WHERE id = ?`, id).toArray()[0] ?? null;
+    const row = this.sql.exec<ProjectRow>(`SELECT ${PROJECT_COLUMNS} FROM projects WHERE id = ?`, id).toArray()[0];
+    return row ? projectOf(row) : null;
   }
 
-  /** A machine's `hello` for a project the registry does not hold registers it, under the name from its `.smns`. */
+  /**
+   * A machine's `hello` for a project the registry does not hold registers it, under the name from its `.smns`. The id
+   * of an enrolled machine's project registers as that machine's (`kind` `machine`, under its name), whoever sends it: a
+   * machine enrolled before machine projects existed has none until its first hello of it. A retired machine project
+   * whose name was enrolled again is active again. Anything else is answered as held, a retired project too (a machine
+   * may hello one from a directory it read before the retirement).
+   */
   registerProject(id: string, name: string, machine: string): ProjectRecord {
-    const inserted = this.sql.exec('INSERT OR IGNORE INTO projects (id, name, registered_by, created, archive_machine) VALUES (?, ?, ?, ?, NULL)', id, name, machine, iso(Date.now())).rowsWritten;
+    const held = this.project(id);
+    if (held && !held.retired) return held;
+    const org = this.ensureOrg().id;
+    const owner = this.sql
+      .exec<{ name: string }>("SELECT name FROM machines WHERE state = 'active' ORDER BY name")
+      .toArray()
+      .find((m) => machineProjectId(org, m.name) === id)?.name;
+    if (held && !owner) return held;
+    const listed = owner
+      ? this.keepMachineProject(id, owner, machine)
+      : this.sql.exec("INSERT INTO projects (id, name, registered_by, created, archive_machine, kind, machine, retired) VALUES (?, ?, ?, ?, NULL, 'hub', NULL, 0)", id, name, machine, iso(Date.now())).rowsWritten > 0;
     const project = this.project(id)!;
-    if (inserted > 0) this.toGrid({ t: 'summary', project: this.summaryOf(project) });
+    if (listed) {
+      this.toGrid({ t: 'summary', project: this.summaryOf(project) });
+      this.directoryChanged();
+    }
     return project;
+  }
+
+  /** Registers an enrolled machine's project under its name, or reactivates it; true when it was not on the grid. */
+  private keepMachineProject(id: string, machine: string, registeredBy = machine): boolean {
+    const before = this.project(id);
+    if (before && !before.retired) return false;
+    this.sql.exec(
+      "INSERT INTO projects (id, name, registered_by, created, archive_machine, kind, machine, retired) VALUES (?, ?, ?, ?, NULL, 'machine', ?, 0) ON CONFLICT (id) DO UPDATE SET name = excluded.name, kind = 'machine', machine = excluded.machine, retired = 0",
+      id,
+      machine,
+      registeredBy,
+      iso(Date.now()),
+      machine,
+    );
+    return true;
+  }
+
+  // ---- The org's directory (the `org` frame down every machine's stream) -----------------------------------------
+
+  /** The org's directory as it stands, and the version of the latest change it carries. */
+  orgFrame(): { frame: OrgFrame; version: number } {
+    const projects = this.sql
+      .exec<{ id: string; name: string; kind: ProjectKind; machine: string | null; retired: number }>('SELECT id, name, kind, machine, retired FROM projects ORDER BY created, id')
+      .toArray()
+      .map((p) => ({ id: p.id, name: p.name, kind: p.kind, ...(p.kind === 'machine' && p.machine !== null ? { machine: p.machine } : {}), retired: p.retired === 1 }));
+    const machines = this.sql
+      .exec<{ name: string; online: number; seen: string | null }>("SELECT name, online, seen FROM machines WHERE state = 'active' ORDER BY name")
+      .toArray()
+      .map((m): MachineSummary => ({ name: m.name, online: m.online === 1, seen: m.seen }));
+    return { frame: { t: 'org', projects, machines }, version: this.ctx.storage.kv.get<number>(DIRECTORY_VERSION) ?? 0 };
+  }
+
+  /**
+   * The directory changed: every enrolled machine with a stream is sent it whole, through its `Machine` object (one
+   * with no stream is not sent it: its next `welcome` brings the directory). Each carries the version of its change, so
+   * a `Machine` that wrote a later one, or the snapshot its stream opened with, passes an older one by.
+   */
+  private directoryChanged(): void {
+    const version = (this.ctx.storage.kv.get<number>(DIRECTORY_VERSION) ?? 0) + 1;
+    this.ctx.storage.kv.put(DIRECTORY_VERSION, version);
+    const { frame } = this.orgFrame();
+    const org = this.ensureOrg().id;
+    for (const { name } of frame.machines) void this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org}:${name}`)).directory(frame, version).catch(() => {});
+  }
+
+  /** Each enrolled machine is online while any project reports a fresh lease of it, opened with its own credential,
+   * and `seen` is when that last changed; the directory goes out when it did. */
+  private refreshOnline(): void {
+    const now = iso(Date.now());
+    let changed = false;
+    for (const m of this.sql.exec<{ name: string; name_key: string; client_id: string | null; online: number }>("SELECT name, name_key, client_id, online FROM machines WHERE state = 'active'").toArray()) {
+      const online = this.sql.exec('SELECT 1 FROM machine_states WHERE name_key = ? AND client = ? AND online = 1 LIMIT 1', m.name_key, m.client_id ?? '').toArray().length > 0;
+      if (online === (m.online === 1)) continue;
+      this.sql.exec('UPDATE machines SET online = ?, seen = ? WHERE name = ?', online ? 1 : 0, now, m.name);
+      changed = true;
+    }
+    if (changed) this.directoryChanged();
   }
 
   // ---- The grid (DX3's registry socket) ------------------------------------------------------------------------
@@ -316,30 +438,55 @@ export class Registry extends DurableObject<Env> {
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ member: request.headers.get(MEMBER_HEADER) ?? '' });
-    this.send(server, { t: 'grid', projects: this.projects().map((p) => this.summaryOf(p)) });
+    this.send(server, this.gridFrame());
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** The whole grid: every project's line but a retired one's. */
+  private gridFrame(): GridDown {
+    return { t: 'grid', projects: this.projects().filter((p) => !p.retired).map((p) => this.summaryOf(p)) };
   }
 
   /** The grid takes nothing up. */
   async webSocketMessage(): Promise<void> {}
 
-  /** A project's counts, as its `Project` object reports them when they change. */
-  summary(project: string, counts: Counts): void {
-    this.sql.exec(
-      'INSERT OR REPLACE INTO summaries (project, machines, machines_online, working, waiting) VALUES (?, ?, ?, ?, ?)',
-      project,
-      counts.machines,
-      counts.machines_online,
-      counts.working,
-      counts.waiting,
-    );
+  /**
+   * A project's counts and its machines' leases, as its `Project` object reports them when they change. A report older
+   * than the latest taken from the project changes nothing; a newer one supersedes all the project said before. One
+   * without `seq` (a `Project` on the previous version) still sets the counts but leaves the leases as they were. A
+   * retired project's are kept and drawn on no grid.
+   */
+  summary(project: string, report: SummaryReport): void {
+    const seq = Number.isSafeInteger(report.seq) ? (report.seq as number) : null;
+    const taken = this.ctx.storage.transactionSync(() => {
+      const last = this.sql.exec<{ report_seq: number | null }>('SELECT report_seq FROM summaries WHERE project = ?', project).toArray()[0]?.report_seq ?? null;
+      if (seq !== null && last !== null && seq <= last) return false;
+      this.sql.exec(
+        'INSERT INTO summaries (project, machines, machines_online, working, waiting, report_seq) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (project) DO UPDATE SET machines = excluded.machines, machines_online = excluded.machines_online, working = excluded.working, waiting = excluded.waiting, report_seq = COALESCE(excluded.report_seq, summaries.report_seq)',
+        project,
+        report.machines,
+        report.machines_online,
+        report.working,
+        report.waiting,
+        seq,
+      );
+      if (seq === null || !Array.isArray(report.machines_state)) return true;
+      this.sql.exec('DELETE FROM machine_states WHERE project = ?', project);
+      for (const { name, online, client } of report.machines_state) {
+        if (typeof name !== 'string' || typeof client !== 'string' || client === '') continue;
+        this.sql.exec('INSERT OR REPLACE INTO machine_states (project, name_key, client, online) VALUES (?, ?, ?, ?)', project, machineNameKey(name), client, online ? 1 : 0);
+      }
+      return true;
+    });
+    if (!taken) return;
     const record = this.project(project);
-    if (record) this.toGrid({ t: 'summary', project: this.summaryOf(record) });
+    if (record && !record.retired) this.toGrid({ t: 'summary', project: this.summaryOf(record) });
+    this.refreshOnline();
   }
 
   private summaryOf(project: ProjectRecord): ProjectSummary {
     const counts = this.sql.exec<Counts>('SELECT machines, machines_online, working, waiting FROM summaries WHERE project = ?', project.id).toArray()[0];
-    return { id: project.id, name: project.name, ...(counts ?? { machines: 0, machines_online: 0, working: 0, waiting: 0 }) };
+    return { id: project.id, name: project.name, kind: project.kind, ...(counts ?? { machines: 0, machines_online: 0, working: 0, waiting: 0 }) };
   }
 
   private toGrid(frame: GridDown): void {

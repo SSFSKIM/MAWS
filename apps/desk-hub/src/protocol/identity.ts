@@ -90,15 +90,23 @@ export type EnrollmentRecord = {
   machine: string | null;
 };
 
+/** A project a `.smns` names (`hub`), or an enrolled machine's own (`machine`): the project of that machine's sessions
+ * that no `.smns` claims, whose id is `machineProjectId` of the org and the machine's name. */
+export type ProjectKind = 'hub' | 'machine';
+
 export type ProjectRecord = {
-  /** The `.smns` id. */
+  /** The `.smns` id, or a machine project's `machineProjectId`. */
   id: string;
-  /** From `.smns`, as the machine that registered the project read it. */
+  /** From `.smns`, as the machine that registered the project read it; a machine project's is its machine's name. */
   name: string;
   registered_by: string;
   created: string;
   /** The one machine that writes the log's git archive (§3); null until the owner designates one. */
   archive_machine: string | null;
+  kind: ProjectKind;
+  /** A machine project whose machine was revoked: off the grid, its log kept, active again when the name is enrolled
+   * anew. A hub project is never retired. */
+  retired: boolean;
 };
 
 /** One member device's Web Push subscription; `endpoint` is its key. */
@@ -132,6 +140,62 @@ export const machineNameKey = (name: string) => name.toLowerCase();
 
 export function isMachineName(name: string): boolean {
   return MACHINE_NAME.test(name) && !(RESERVED_MACHINE_NAMES as readonly string[]).includes(machineNameKey(name));
+}
+
+/**
+ * A machine project's id: the UUID v5, in the URL namespace, of `smns-machine:<org>:<the machine's name lower-cased>`
+ * (lower-cased as the hub compares names), so the hub and sminos (`machine_project`) compute it from the org and the
+ * name alone, and a machine opens its project before the hub has listed it. Pinned by vectors/machine-project.json,
+ * which Python's uuid module writes (generate-machine-project.py).
+ */
+export function machineProjectId(org: string, machine: string): string {
+  const name = new TextEncoder().encode(`smns-machine:${org}:${machineNameKey(machine)}`);
+  const input = new Uint8Array(URL_NAMESPACE.length + name.length);
+  input.set(URL_NAMESPACE);
+  input.set(name, URL_NAMESPACE.length);
+  const bytes = sha1(input).slice(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50; // version 5
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122's variant
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** RFC 4122's URL namespace, 6ba7b811-9dad-11d1-80b4-00c04fd430c8, as bytes. */
+const URL_NAMESPACE = Uint8Array.from('6ba7b8119dad11d180b400c04fd430c8'.match(/../g)!, (h) => parseInt(h, 16));
+
+/** SHA-1 (FIPS 180-4), synchronous: WebCrypto's digest is asynchronous, and the Registry computes a machine project's
+ * id inside the synchronous steps that confirm an enrollment and register a project. Used for that id alone. */
+function sha1(message: Uint8Array): Uint8Array {
+  const blocks = Math.ceil((message.length + 9) / 64);
+  const padded = new Uint8Array(blocks * 64);
+  padded.set(message);
+  padded[message.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  const bits = message.length * 8;
+  view.setUint32(padded.length - 8, Math.floor(bits / 2 ** 32));
+  view.setUint32(padded.length - 4, bits >>> 0);
+  const h = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+  const w = new Uint32Array(80);
+  const rotl = (x: number, n: number) => (x << n) | (x >>> (32 - n));
+  for (let block = 0; block < blocks; block++) {
+    for (let t = 0; t < 16; t++) w[t] = view.getUint32(block * 64 + t * 4);
+    for (let t = 16; t < 80; t++) w[t] = rotl(w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16], 1);
+    let [a, b, c, d, e] = h;
+    for (let t = 0; t < 80; t++) {
+      const [f, k] = t < 20 ? [(b & c) | (~b & d), 0x5a827999] : t < 40 ? [b ^ c ^ d, 0x6ed9eba1] : t < 60 ? [(b & c) | (b & d) | (c & d), 0x8f1bbcdc] : [b ^ c ^ d, 0xca62c1d6];
+      const next = (rotl(a, 5) + f + e + k + w[t]) >>> 0;
+      e = d;
+      d = c;
+      c = rotl(b, 30) >>> 0;
+      b = a;
+      a = next;
+    }
+    for (const [i, v] of [a, b, c, d, e].entries()) h[i] = (h[i] + v) >>> 0;
+  }
+  const out = new Uint8Array(20);
+  const outView = new DataView(out.buffer);
+  h.forEach((word, i) => outView.setUint32(i * 4, word));
+  return out;
 }
 
 /** The Access service token's name, so an orphan of an interrupted enrollment is found by name. */

@@ -21,6 +21,7 @@ import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from 
 import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
 import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
 import { BATCH_BYTES, eventShapeError, LogStore, sameEvent, type AuditRow, type Stored } from './log-store';
+import type { SummaryReport } from './registry';
 import { pendingKey, SessionStore, type Lease, type Route, type RpcRecord } from './session-store';
 
 /** A `.smns` project id (a lowercase uuid). */
@@ -40,9 +41,9 @@ export type SocketAttachment = { id: string; member: string; visibleAt: number |
 /** How long a socket's last `visibility {visible: true}` holds its member's pushes back. */
 export const VISIBLE_MS = 90_000;
 
-/** Who sent a machine's frame: its org, the project it names, the machine, the stream the POST belongs to, and how long
- * a renewal on that stream keeps the machine online. */
-export type MachineContext = { org: string; project: string; machine: string; generation: number; leaseMs: number };
+/** Who sent a machine's frame: its org, the project it names, the machine and the credential its stream was opened
+ * with, the stream the POST belongs to, and how long a renewal on that stream keeps the machine online. */
+export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number };
 
 /** How many audit entries a browser that resumes is shown after `caught-up`. */
 const AUDIT_REPLAY = 100;
@@ -245,7 +246,7 @@ export class Project extends DurableObject<Env> {
     if (lease && (lease.generation > ctx.generation || (lease.generation === ctx.generation && lease.closed))) return;
     if (!lease || lease.generation < ctx.generation) {
       if (lease?.online) this.lapse(lease);
-      this.plane.putLease({ machine: ctx.machine, generation: ctx.generation, expires: 0, online: false, closed: true });
+      this.plane.putLease({ machine: ctx.machine, client: ctx.client, generation: ctx.generation, expires: 0, online: false, closed: true, follow: false });
       return;
     }
     if (lease.online) this.lapse({ ...lease, closed: true });
@@ -278,7 +279,8 @@ export class Project extends DurableObject<Env> {
 
   // The log handshake (DX2): the hub's vector and whether this machine writes the archive, then every writer's suffix
   // the machine lacks. The machine joins the fan-out in the same step the backlog is read, so an event stored after it
-  // goes out live behind the backlog, and none falls between. The `hello` also starts the machine's lease here.
+  // goes out live behind the backlog, and none falls between. The `hello` also starts the machine's lease here, a
+  // follower's (`follow`) as a holder's, and says which the machine is.
   private async hello(ctx: MachineContext, frame: Extract<UpFrame, { t: 'hello' }>): Promise<void> {
     const have = frame.have as unknown;
     const valid =
@@ -288,8 +290,9 @@ export class Project extends DurableObject<Env> {
       typeof have === 'object' &&
       have !== null &&
       !Array.isArray(have) &&
-      Object.values(have).every((seq) => Number.isSafeInteger(seq) && (seq as number) >= 0);
-    if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'hello is {project, name, have: {writer: seq}}' });
+      Object.values(have).every((seq) => Number.isSafeInteger(seq) && (seq as number) >= 0) &&
+      (frame.follow === undefined || typeof frame.follow === 'boolean');
+    if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'hello is {project, name, have: {writer: seq}, follow?: boolean}' });
     const record = await this.register(ctx.project, frame.name, ctx.machine);
     // A newer stream of this machine may have opened the project while the registry answered: it keeps its place.
     this.ctx.storage.sql.exec(
@@ -298,7 +301,7 @@ export class Project extends DurableObject<Env> {
       ctx.generation,
     );
     if (!this.isOpen(ctx)) return;
-    this.startLease(ctx);
+    this.startLease(ctx, frame.follow === true);
     this.toMachine(ctx.machine, ctx.generation, { t: 'have', project: ctx.project, have: this.log.vector(), archive: record.archive_machine === ctx.machine });
     // The backlog is the log as of now, read a page at a time as the stream takes it: a page is read once the page
     // before it is written, so a long log is never held whole. An event stored from now on goes out live, queued
@@ -674,7 +677,9 @@ export class Project extends DurableObject<Env> {
 
   // ---- Leases ----------------------------------------------------------------------------------------------------
 
-  private startLease(ctx: MachineContext): void {
+  /** A follower's lease is a lease (it renews and lapses alike), but the machine is none of the project's machines: its
+   * own presence, kept from when it held the project, goes, so it leaves the machines frame and the grid's counts. */
+  private startLease(ctx: MachineContext, follow: boolean): void {
     const old = this.plane.lease(ctx.machine);
     if (old && old.generation > ctx.generation) return;
     // The older stream's subscriptions and unanswered RPCs went with it.
@@ -682,9 +687,10 @@ export class Project extends DurableObject<Env> {
     const wasOnline = old !== undefined && this.isFresh(old);
     // A second `hello` on a stream that already closed (it was on its way) opens nothing.
     if (old?.generation === ctx.generation && old.closed) return;
-    this.plane.putLease({ machine: ctx.machine, generation: ctx.generation, expires: Date.now() + ctx.leaseMs, online: true, closed: false });
+    this.plane.putLease({ machine: ctx.machine, client: ctx.client, generation: ctx.generation, expires: Date.now() + ctx.leaseMs, online: true, closed: false, follow });
+    const presenceGone = follow && this.plane.deleteMachinePresence(ctx.machine);
     if (!wasOnline) this.cameOnline(ctx.machine);
-    else if (old.generation !== ctx.generation) this.machinesChanged();
+    else if (old.generation !== ctx.generation || old.follow !== follow || presenceGone) this.machinesChanged();
     void this.schedule();
   }
 
@@ -734,6 +740,12 @@ export class Project extends DurableObject<Env> {
     return lease !== undefined && this.isFresh(lease);
   }
 
+  /** Whether the machine is online and holds the project: one that only follows it is none of its machines. */
+  private holds(machine: string): boolean {
+    const lease = this.plane.lease(machine);
+    return lease !== undefined && !lease.follow && this.isFresh(lease);
+  }
+
   /** Whether the stream a route was set up on is still the machine's live one. */
   private leaseServes(route: Route): boolean {
     const lease = this.plane.lease(route.machine);
@@ -774,32 +786,47 @@ export class Project extends DurableObject<Env> {
     this.broadcast(this.pendingFrame());
   }
 
-  /** The project's line on the org's grid, sent to the registry when it changes. */
+  /**
+   * The project's line on the org's grid, sent to the registry when it changes. Its counts are of the machines that hold
+   * the project; `machines_state` names every machine leased here, followers included, with whether its lease is fresh
+   * and the credential of the stream that opened it, which is how the Registry knows each machine's online state.
+   */
   private reportSummary(): void {
     // A revoked machine is no machine of the project, unless its name was enrolled anew and opened the project since.
     const leased = this.plane.leases().filter((l) => !this.isRevoked(l.machine, l.generation));
     const revoked = (machine: string) => this.isRevoked(machine, this.plane.lease(machine)?.generation ?? 0);
-    const machines = new Set([...leased.map((l) => l.machine), ...this.plane.machinePresence().map((p) => p.machine).filter((m) => !revoked(m))]);
-    const online = new Set(leased.filter((l) => this.isFresh(l)).map((l) => l.machine));
+    const holding = leased.filter((l) => !l.follow);
+    const machines = new Set([...holding.map((l) => l.machine), ...this.plane.machinePresence().map((p) => p.machine).filter((m) => !revoked(m))]);
+    const online = new Set(holding.filter((l) => this.isFresh(l)).map((l) => l.machine));
     let working = 0;
     for (const { machine, message } of this.plane.presence()) {
       const status = message.body.record?.status;
       if (online.has(machine) && (status === 'busy' || status === 'shell')) working++;
     }
-    const summary = { machines: machines.size, machines_online: online.size, working, waiting: this.waitingSessions().size };
+    const summary: SummaryReport = {
+      machines: machines.size,
+      machines_online: online.size,
+      working,
+      waiting: this.waitingSessions().size,
+      machines_state: leased.map((l) => ({ name: l.machine, online: this.isFresh(l), client: l.client })),
+    };
     const text = JSON.stringify(summary);
     if (this.ctx.storage.kv.get('summary') === text) return;
     this.ctx.storage.kv.put('summary', text);
+    // Reports travel asynchronously: the Registry takes one only when it is newer than the last it took.
+    const seq = (this.ctx.storage.kv.get<number>('summary-seq') ?? 0) + 1;
+    this.ctx.storage.kv.put('summary-seq', seq);
     void this.registry()
-      .summary(this.projectId, summary)
+      .summary(this.projectId, { ...summary, seq })
       .catch(() => this.ctx.storage.kv.delete('summary'));
   }
 
-  /** The sessions of online machines whose presence says waiting, as `machine/session`: the grid's `waiting`. */
+  /** The sessions of online machines holding the project whose presence says waiting, as `machine/session`: the grid's
+   * `waiting`. */
   private waitingSessions(): Set<string> {
     const waiting = new Set<string>();
     for (const { machine, message } of this.plane.presence()) {
-      if (this.isOnline(machine) && message.body.record?.status === 'waiting') waiting.add(`${machine}/${message.session}`);
+      if (this.holds(machine) && message.body.record?.status === 'waiting') waiting.add(`${machine}/${message.session}`);
     }
     return waiting;
   }

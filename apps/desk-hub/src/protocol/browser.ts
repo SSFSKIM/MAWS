@@ -1,6 +1,7 @@
 // DX3 — browser ↔ hub. WebSockets with JSON text frames: one to a project's `Project` object for its view
 // (`/api/projects/<id>/socket`), one to the org's `Registry` for the grid (`/api/registry/socket`). Browsers see project
 // offsets, never writer vectors.
+import type { ProjectKind } from './identity';
 import type { HumanEvent, LogEvent } from './log';
 import type { Refusal, Rejection } from './machine';
 import type { Part } from './parts';
@@ -89,15 +90,25 @@ export type AuditEntry = { id: number; at: string };
 
 export type PendingRequest = { machine: string; raised: Raised; terminal_only: boolean };
 
-/** The grid's row for one project. */
+/** The grid's row for one project. `machines` and `machines_online` count the machines that hold it (a checkout or a
+ * session), never those that only follow it (DX2 `hello.follow`). A retired machine project has no row. */
 export type ProjectSummary = {
   id: string;
   name: string;
+  kind: ProjectKind;
   machines: number;
   machines_online: number;
   working: number;
   waiting: number;
 };
+
+/**
+ * An enrolled machine as the org's directory lists it (DX2 `org`): online while any project of the org holds a fresh
+ * lease of it, a follow lease included; `seen` is when that last changed at the Registry, ISO 8601 UTC with
+ * milliseconds — when it came online, for an online machine, and when it went offline, for an offline one — and null
+ * for a machine never reported online.
+ */
+export type MachineSummary = { name: string; online: boolean; seen: string | null };
 
 /** Hub → browser over the registry socket. A frame above `FRAME_LIMIT` (a grid of many projects) comes as numbered parts,
  * joined as on a project socket. */

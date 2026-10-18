@@ -45,3 +45,8 @@ export const REVOKE_FAULT_PATH = '/__test/revoke-fault';
 export const REVOKE_HELD_PATH = '/__test/revoke-held';
 /** Where the suites' `Machine` releases a held revocation's answer: answers `released`, or `none` while none is held. */
 export const REVOKE_RELEASE_PATH = '/__test/revoke-release';
+/** Where the suites' `Registry` drops a project's row (`{id}`), as a hub from before machine projects never held one. */
+export const UNREGISTER_PATH = '/__test/unregister';
+/** Where the suites' `Registry` takes a project's summary report (`{project, report}`), as one delivered late would
+ * arrive, and answers the org's directory after it. */
+export const REPORT_PATH = '/__test/report';

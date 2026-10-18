@@ -11,6 +11,7 @@ import { convertV4MiniflareOptions, Miniflare, Response as MiniflareResponse, ty
 import { inject } from 'vitest';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
+import type { OrgFrame } from '../../src/protocol/machine';
 import { generateVapidKey } from '../../src/push/web-push';
 import {
   ABORT_REASON,
@@ -34,7 +35,9 @@ import {
   REVOKE_RELEASE_PATH,
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
+  REPORT_PATH,
   TIMING_PATH,
+  UNREGISTER_PATH,
 } from './send-fault';
 
 const require = createRequire(import.meta.url);
@@ -208,7 +211,7 @@ export async function startLocalHub() {
     },
     /** Hands a project a lease's renewal or close for any generation, as a late one from an older stream would come. */
     async lease(project: string, change: { op: 'renew' | 'closed'; machine: string; generation: number; leaseMs?: number }) {
-      await seam('PROJECT', project, PROJECT_LEASE_PATH, { org: ORG, project, leaseMs: 0, ...change });
+      await seam('PROJECT', project, PROJECT_LEASE_PATH, { org: ORG, project, client: '', leaseMs: 0, ...change });
     },
     /**
      * Evicts an object, as Cloudflare does to an idle one: its memory is gone and the next request constructs it again.
@@ -287,6 +290,14 @@ export async function startLocalHub() {
     /** Shortens how long a socket's `visibility` holds a project's pushes back (90 s deployed). */
     async visibleWindow(project: string, ms: number) {
       await seam('PROJECT', project, PROJECT_VISIBLE_PATH, { ms });
+    },
+    /** Drops a project's row from the Registry, as a hub from before machine projects never held one. */
+    async unregister(id: string) {
+      await seam('REGISTRY', ORG, UNREGISTER_PATH, { id });
+    },
+    /** Hands the Registry a project's summary report, as one delivered late would arrive; the org's directory after. */
+    async report(project: string, report: unknown): Promise<OrgFrame> {
+      return JSON.parse(await seam('REGISTRY', ORG, REPORT_PATH, { project, report })) as OrgFrame;
     },
     /** Puts `count` projects straight into the Registry, with long names. */
     async addProjects(count: number, prefix: string) {

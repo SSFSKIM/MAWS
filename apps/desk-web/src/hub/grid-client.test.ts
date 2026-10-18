@@ -14,7 +14,7 @@ const until = async (check: () => boolean, ms = 3000) => {
   }
 };
 
-const summary = (id: string, waiting: number): ProjectSummary => ({ id, name: id.toUpperCase(), machines: 2, machines_online: 1, working: 1, waiting });
+const summary = (id: string, waiting: number): ProjectSummary => ({ id, name: id.toUpperCase(), kind: 'hub', machines: 2, machines_online: 1, working: 1, waiting });
 
 let double: HubDouble;
 let client: GridClient | null = null;

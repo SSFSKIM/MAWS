@@ -1,10 +1,11 @@
 // Clients for the suites, speaking the hub's protocols through the stand-in as DC4's daemon and DC5's web app will: a
 // machine (DX2: its SSE stream down, NDJSON POSTs up, a mirror of each project's log) and a browser (DX3: a project's
 // WebSocket). Each keeps every frame it received, in order, and waits for the one a test names.
-import type { ProjectDown, ProjectUp } from '../../src/protocol/browser';
+import type { GridDown, ProjectDown, ProjectUp } from '../../src/protocol/browser';
 import type { LogEvent, Vector } from '../../src/protocol/log';
 import type { DownFrame, UpFrame } from '../../src/protocol/machine';
 import { GENERATION_HEADER } from '../../src/protocol/machine';
+import { PartAssembler } from '../../src/protocol/parts';
 import { credentials, type LocalHub, type Who } from './local';
 
 export type Credentials = { clientId: string; clientSecret: string };
@@ -210,6 +211,52 @@ export class BrowserClient {
     return this.frames.flatMap((f) => (f.t === 'log' ? f.events : []));
   }
 
+  close() {
+    this.socket.close(1000, 'done');
+  }
+}
+
+/** Polls `probe` until it answers something other than undefined; throws when it has not within `ms`. */
+export async function waitFor<T>(probe: () => T | undefined | Promise<T | undefined>, ms = 5000): Promise<T> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const value = await probe();
+    if (value !== undefined) return value;
+    if (Date.now() > deadline) throw new Error('timed out');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+/** A member's grid socket (DX3's registry socket), joining a grid sent as parts. */
+export class GridClient {
+  readonly frames: GridDown[] = [];
+  /** The size in bytes of every message the socket carried, parts included. */
+  readonly wire: number[] = [];
+  private readonly parts = new PartAssembler();
+  private socket!: WebSocket;
+  static async open(hub: LocalHub, who: string): Promise<GridClient> {
+    const client = new GridClient();
+    client.socket = new WebSocket(`${hub.url.replace('http', 'ws')}/api/registry/socket`, { headers: { 'x-desk-standin-user': who } } as unknown as string[]);
+    client.socket.addEventListener('message', (event) => {
+      const text = String(event.data);
+      client.wire.push(Buffer.byteLength(text));
+      const frame = JSON.parse(text) as GridDown;
+      if (frame.t !== 'part') return void client.frames.push(frame);
+      const whole = client.parts.add(frame);
+      if (whole !== undefined) client.frames.push(whole as GridDown);
+    });
+    await new Promise<void>((resolve, reject) => {
+      client.socket.addEventListener('open', () => resolve());
+      client.socket.addEventListener('error', () => reject(new Error('grid socket refused')));
+    });
+    await waitFor(() => (client.frames.length > 0 ? true : undefined), 15_000);
+    return client;
+  }
+  next(predicate: (frame: GridClient['frames'][number]) => boolean, what: string) {
+    return waitFor(() => this.frames.find(predicate), 5000).catch(() => {
+      throw new Error(`no ${what}; got ${JSON.stringify(this.frames.slice(-5))}`);
+    });
+  }
   close() {
     this.socket.close(1000, 'done');
   }
