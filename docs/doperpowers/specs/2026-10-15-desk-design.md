@@ -4696,6 +4696,28 @@ a hub that connects into machines (§2).
   SendMessage, which reaches only the same machine and leaves no record.
   Also rejected: changing only how surfaces draw the row, which leaves
   the model reading a peer in the owner's voice.
+  2026-10-18, the owner: the desk's Access session lasts 30 days
+  (`720h`, MAWS #35). At 24 h the phone was signed out every day, and
+  until #33 the desk then sat on "Connecting to the hub…" with no word of
+  why. Each deploy reconciles the application by name, so the next one
+  applies the value. Cloudflare's maximum is one month. The org's global
+  session stays 24 h, so an application token past 30 days needs a fresh
+  sign-in. Rejected: 7 days, which leaves the weekly sign-in; keeping 24
+  h with #33's banner alone.
+  2026-10-18, a delivery into a running turn (doperpowers #233, another
+  session's): the bridge appends the owner's delivery as a row read at
+  the loop's next request (`$.session.append`), not as a prompt queued
+  to the turn's end (median 39 s, max 253 s observed). The engine keeps
+  that row as an `isMeta` row from the plugin, and an append can carry
+  no `asUser`. The desk counted a delivery only on the bridge's
+  `asUser` prompt or a queued command, so a Send to a busy session
+  would have stayed at the tail and its row gone undrawn. #233 is held
+  until desk-web reads a bridge meta row that opens with a whole sminos
+  frame as the delivery, drawn as "Sent during this turn". The same
+  change draws a steer's row, which was drawn as nothing. Steer rows
+  are known by exclusion from the bridge's closed set of rows (DX5),
+  pinned by a test. Rejected: the owner's message as an inbox frame
+  while busy, which would put the owner's words in a peer's shape.
   2026-10-17, DC8's xhigh panel (three P2s, all fixed; doperpowers
   desk-dc8 370662a2, c81b77fc, 578b11b8):
   - DX5's `resync` gains `refused`, so a refusal whose post failed is not
