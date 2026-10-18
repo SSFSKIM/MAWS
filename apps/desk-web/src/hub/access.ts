@@ -16,6 +16,9 @@ export type Lapse = Extract<Admission, 'signed-out' | 'not-a-member'>;
 
 const ME = '/api/me';
 
+/** How long one probe request may take: a connection that is blackholed, not refused, never answers on its own. */
+export const PROBE_TIMEOUT_MS = 8000;
+
 /** What an answer from `/api/me` says of this browser's sign-in (a 403's body is read; any other is left unread). */
 export async function admissionOf(response: Response): Promise<Admission> {
   // A redirect the engine exposes (outside a browser) says what an `opaqueredirect` does.
@@ -29,12 +32,17 @@ export async function admissionOf(response: Response): Promise<Admission> {
   return response.ok ? 'admitted' : 'unreachable';
 }
 
-export async function probeAdmission(fetcher: typeof fetch = fetch): Promise<Admission> {
+export async function probeAdmission(fetcher: typeof fetch = fetch, timeoutMs = PROBE_TIMEOUT_MS): Promise<Admission> {
+  // A request that outlives its bound would hold the one probe slot for good, so each is cut off, and a cut-off one reads
+  // as a network that does not answer.
+  const signal = AbortSignal.timeout(timeoutMs);
   try {
-    return await admissionOf(await fetcher(ME, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' }));
+    return await admissionOf(await fetcher(ME, { credentials: 'same-origin', redirect: 'manual', cache: 'no-store', signal }));
   } catch {
+    // A request that hung is no engine refusing the manual redirect, so the second ask would only hang as well.
+    if (signal.aborted) return 'unreachable';
     try {
-      return await admissionOf(await fetcher(ME, { credentials: 'same-origin', mode: 'no-cors', cache: 'no-store' }));
+      return await admissionOf(await fetcher(ME, { credentials: 'same-origin', mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(timeoutMs) }));
     } catch {
       return 'unreachable';
     }
@@ -76,15 +84,24 @@ export function connectFailed(failures: number): void {
     });
 }
 
+/** Which open the hub's sockets are on: an answer to a request begun under an earlier one speaks of a sign-in since renewed. */
+export function admissionGeneration(): number {
+  return generation;
+}
+
 /** A socket opened: whatever lapsed has been mended (a sign-in in another tab counts). */
 export function connectOpened(): void {
   generation++;
   setLapsed(null);
 }
 
-/** An answer from the hub's own origin redirected off it: Access has no session for this browser. */
-export function redirectedToSignIn(): void {
-  setLapsed('signed-out');
+/**
+ * An answer from the hub's own origin redirected off it: Access has no session for this browser. `at` is the
+ * `admissionGeneration()` read when the request began; if a socket has opened since, the redirect is of a sign-in that
+ * has been renewed, and nothing would clear it while the sockets stay healthy.
+ */
+export function redirectedToSignIn(at: number): void {
+  if (at === generation) setLapsed('signed-out');
 }
 
 function setLapsed(lapsed: Lapse | null): void {
