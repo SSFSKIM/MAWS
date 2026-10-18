@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "pair3 corrective static+design39145946170 running on fix-only pin; pair4 committed, independent reviews running",
+  "phase": "pair3 accepted selected-group union; pair4 two verified fix waves running, W-E/W-PKG read-only preparation",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -95,7 +95,7 @@
     "notesSceneFixCommit": "f02852e10"
   },
   "W-MINI": {
-    "status": "native frontier accepted with count clauses; both type-only corrections reviewed, remote static retry running",
+    "status": "both type corrections proved by green static39145946170; native source accepted, original count clauses remain",
     "foreground": "package-script activation permitted; lane hold lifted; child DL13",
     "executor": "ab180409652104010",
     "claims": "pair2-claims.json",
@@ -247,7 +247,7 @@
   },
   "W-DOC-A": {
     "executor": "af7fe2d9bf548028a",
-    "status": "source review correct; pair3 design expectation repaired fba70d44e and focused recheck correct; corrective execution pending",
+    "status": "source/recheck correct; design14 passed at fixed pin; pair3 selected-group union accepted",
     "claims": "pair3-claims.json",
     "reviewer": "a69c0ca8f5888e14f",
     "checkpoint": "waves/W-DOC-A-checkpoint.json",
@@ -256,7 +256,7 @@
   },
   "W-DECK": {
     "executor": "a00549767dfb02089",
-    "status": "source review correct; all relevant pair3 groups passed; L211 canonical restore partial fix, editor-undo P4 remainder retained",
+    "status": "source/recheck correct; pair3 selected-group union accepted; L211 exact partial carry retained",
     "claims": "pair3-claims.json",
     "reviewer": "a042b15ec9aa10fab",
     "checkpoint": "waves/W-DECK-checkpoint.json",
@@ -294,7 +294,7 @@
   },
   "W-DOC-B": {
     "executor": "afe4ec31e37c3925e",
-    "status": "source committed, independently reviewing; gate not yet launched",
+    "status": "incorrect:2 verified P2; fresh fix wave running",
     "claims": "pair4-claims.json",
     "rowCommits": [
       "4b6b3ec69",
@@ -304,11 +304,12 @@
       "796c9323e",
       "e63120945"
     ],
-    "checkpoint": "waves/W-DOC-B-checkpoint.json"
+    "checkpoint": "waves/W-DOC-B-checkpoint.json",
+    "reviewer": "affe8ead56a9bcb86"
   },
   "W-SHELL": {
     "executor": "a87de8fe2228592d9",
-    "status": "source committed, independently reviewing; gate not yet launched",
+    "status": "incorrect:2 verified P2; fresh fix wave running",
     "claims": "pair4-claims.json",
     "rowCommits": [
       "80757a5c6",
@@ -320,7 +321,8 @@
       "3bbe7134d",
       "1cc84bf04"
     ],
-    "checkpoint": "waves/W-SHELL-checkpoint.json"
+    "checkpoint": "waves/W-SHELL-checkpoint.json",
+    "reviewer": "af5a8d2e5227da2f7"
   },
   "effectiveBins": {
     "fix": 52,
@@ -329,7 +331,7 @@
     "defer": 125,
     "theirs": 42
   },
-  "checkpointAt": "2026-10-18T16:44:55Z",
+  "checkpointAt": "2026-10-18T16:49:22Z",
   "checkpointHead": "e631209455f1439cf29a22ec4292b20dc9d71c27",
   "pair3Retry": {
     "runId": 39145946170,
@@ -337,7 +339,7 @@
     "sourceCommit": "fba70d44e3e309d0e12ca9c8064b2837cb1f4251",
     "wrapperHead": "39f3596e90398dfed92f0623360bfb8c67f20e39",
     "createdAt": "2026-10-18T16:38:48Z",
-    "status": "in_progress",
+    "status": "completed",
     "groups": [
       "static",
       "e2e:design"
@@ -351,6 +353,23 @@
     "review": "focused two-file recheck a69c0ca8f5888e14f correct/no material findings",
     "fullSetCounterAdvance": false,
     "notFinalSource": true,
-    "recordedAt": "2026-10-18T16:44:55Z"
+    "recordedAt": "2026-10-18T16:49:22Z",
+    "conclusion": "success",
+    "completedAt": "2026-10-18T16:45:21Z",
+    "exit": 0,
+    "rawLogs": "/private/tmp/p3f-pair3-retry-logs.ZaVoiF/logs.zip",
+    "rawLogsSha256": "d68bdf49b23047519298906b31e15f45d4afacf75e435fddd5bc5d2a54dd2d77",
+    "results": {
+      "static": "success: typecheck all projects, lint and gate-script tests",
+      "e2e:design": "14 passed,55.6s"
+    },
+    "afterGateEvidenceStatus": "empty",
+    "union": "all13 original selected groups green across39140360292 and this fix-only corrective retry; no full-set credit"
+  },
+  "W-E": {
+    "status": "read-only preparation dispatched; no edit release"
+  },
+  "W-PKG": {
+    "status": "read-only preparation dispatched; no edit release"
   }
 }

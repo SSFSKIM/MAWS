@@ -43,7 +43,23 @@
     "src/renderer/src/transcript/model/derive.ts",
     "src/renderer/src/transcript/model/fixtures.test.ts"
   ],
-  "review": "independent high running; actual reviewer-wave mapping will follow agent introduction/handback, not parallel result order",
+  "review": {
+    "reviewer": "af5a8d2e5227da2f7",
+    "result": "incorrect:2 verified P2; fresh fix wave running",
+    "findings": [
+      "replay transcript projects/slug symlinks can redirect writes outside canonical scratch config; wx does not constrain parent directories",
+      "discarded seed promise lets replay reply/result/idle precede transcript file; false no_engine_session on immediate Side/Fork"
+    ],
+    "verification": "controller read canonical guard/mkdir/write and void hook/transport resolve source; no owner-store write observed; reviewer code tracing, no executed reproduction",
+    "fixPaths": [
+      "src/engine-host/replay-transcript.ts",
+      "src/engine-host/replay-transcript.test.ts",
+      "src/engine-host/replay-transport.ts",
+      "src/engine-host/replay-transport.test.ts",
+      "src/engine-host/launcher.ts"
+    ],
+    "fixRule": "scratch-only failing regressions; actual containment before any escaping filesystem mutation; await seed before replay progress, coherent failure/kill semantics; no new knob/key; one recheck"
+  },
   "rowMap": {
     "125": "80757a5c6",
     "129": "d5f5c5b9e",
@@ -64,5 +80,5 @@
   },
   "processDeviation": "SHELL added rollback.test.ts, service-register.test.ts, index.ts and replay-transcript.ts/test before acknowledgment; ipc.ts absent from prior claim, disclosed at handback. Included in exact independent review, not retrospectively compliant.",
   "replayBoundary": "existing C10 seam only; first accepted replay user record, canonical scratch config home under OS tmp, exclusive wx; independent safety review pending",
-  "acceptance": "not yet accepted; independent review and expanded actual-consumer union pending"
+  "acceptance": "not accepted; bounded fix/recheck and pair4 gate pending"
 }

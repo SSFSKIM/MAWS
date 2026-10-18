@@ -4,7 +4,7 @@
   "sourceCommit": "fba70d44e3e309d0e12ca9c8064b2837cb1f4251",
   "wrapperHead": "39f3596e90398dfed92f0623360bfb8c67f20e39",
   "createdAt": "2026-10-18T16:38:48Z",
-  "status": "in_progress",
+  "status": "completed",
   "groups": [
     "static",
     "e2e:design"
@@ -18,5 +18,16 @@
   "review": "focused two-file recheck a69c0ca8f5888e14f correct/no material findings",
   "fullSetCounterAdvance": false,
   "notFinalSource": true,
-  "recordedAt": "2026-10-18T16:44:55Z"
+  "recordedAt": "2026-10-18T16:49:22Z",
+  "conclusion": "success",
+  "completedAt": "2026-10-18T16:45:21Z",
+  "exit": 0,
+  "rawLogs": "/private/tmp/p3f-pair3-retry-logs.ZaVoiF/logs.zip",
+  "rawLogsSha256": "d68bdf49b23047519298906b31e15f45d4afacf75e435fddd5bc5d2a54dd2d77",
+  "results": {
+    "static": "success: typecheck all projects, lint and gate-script tests",
+    "e2e:design": "14 passed,55.6s"
+  },
+  "afterGateEvidenceStatus": "empty",
+  "union": "all13 original selected groups green across39140360292 and this fix-only corrective retry; no full-set credit"
 }

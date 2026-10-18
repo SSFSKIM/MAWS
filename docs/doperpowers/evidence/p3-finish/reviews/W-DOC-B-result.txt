@@ -1,0 +1,19 @@
+Review at e631209455f1439cf29a22ec4292b20dc9d71c27, base fba70d44e3e309d0e12ca9c8064b2837cb1f4251, exact wave paths only.
+{
+  "reviewer": "affe8ead56a9bcb86",
+  "result": "incorrect:2 verified P2; fresh fix wave running",
+  "findings": [
+    "reader GFM-cell relaxation accepts multiline code-marked text, raw LF turns into visible <br> inside backticks",
+    "reader terminal LF/hardBreak followed by whitespace-only final node emits literal backslash instead of rendered br"
+  ],
+  "verification": "reviewer reproduced with in-memory read-only probes through slot; controller read gfmText/prepareInline terminal loop, confirms both paths",
+  "fixPaths": [
+    "src/artifacts/document/markdown.ts",
+    "src/artifacts/document/markdown-syntax.ts",
+    "src/artifacts/document/markdown.test.ts",
+    "src/artifacts/document/export/markdown.ts",
+    "src/artifacts/document/export/markdown.test.ts"
+  ],
+  "fixRule": "reader-only corrections with actual marked rendering; no canonical/parser grammar expansion; qualify broad header exactness as required by architect never-claim-remaining-loss-preserved ruling; one recheck"
+}
+No separate gate proof yet.

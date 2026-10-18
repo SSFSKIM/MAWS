@@ -28,7 +28,23 @@
     "src/artifacts/types/document/format.md",
     "src/engine-host/tool-server/documents.test.ts"
   ],
-  "review": "independent high running; actual reviewer-wave mapping will follow agent introduction/handback, not parallel result order",
+  "review": {
+    "reviewer": "affe8ead56a9bcb86",
+    "result": "incorrect:2 verified P2; fresh fix wave running",
+    "findings": [
+      "reader GFM-cell relaxation accepts multiline code-marked text, raw LF turns into visible <br> inside backticks",
+      "reader terminal LF/hardBreak followed by whitespace-only final node emits literal backslash instead of rendered br"
+    ],
+    "verification": "reviewer reproduced with in-memory read-only probes through slot; controller read gfmText/prepareInline terminal loop, confirms both paths",
+    "fixPaths": [
+      "src/artifacts/document/markdown.ts",
+      "src/artifacts/document/markdown-syntax.ts",
+      "src/artifacts/document/markdown.test.ts",
+      "src/artifacts/document/export/markdown.ts",
+      "src/artifacts/document/export/markdown.test.ts"
+    ],
+    "fixRule": "reader-only corrections with actual marked rendering; no canonical/parser grammar expansion; qualify broad header exactness as required by architect never-claim-remaining-loss-preserved ruling; one recheck"
+  },
   "rowMap": {
     "155": "4b6b3ec69",
     "168": "7e8b60563",
@@ -55,5 +71,5 @@
     "comment milestone boundary splits line-start/end construct"
   ],
   "processDeviation": "DOC-B edited/committed export/markdown.ts,test and export/docx.ts,test before acknowledgment; scope now acknowledged under architect ruling, deviation retained.",
-  "acceptance": "not yet accepted; independent review and pair4 union pending"
+  "acceptance": "not accepted; bounded fix/recheck and pair4 gate pending"
 }
