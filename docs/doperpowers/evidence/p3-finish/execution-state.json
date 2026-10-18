@@ -58,6 +58,22 @@
   },
   "M1-record": {
     "executor": "a37d3b91c053340cd",
-    "status": "dispatched; records only; L230 reserved for W-DOC-A"
+    "status": "independently approved;149 row commits complete;L230 reserved for W-DOC-A",
+    "reviewer": "aa9e606e95ce0d337",
+    "recordCommits": [
+      "7d9c8de2b",
+      "c3d5aa56a"
+    ],
+    "counts": {
+      "preclosedRemoved": 16,
+      "closedRemoved": 9,
+      "reDeferred": 124
+    }
+  },
+  "M2-preparation": {
+    "executor": "adeb9c47ffd6b1bc0",
+    "status": "draft corrected; independent procedure review pending; no owner steps run",
+    "commit": "b9551cab8",
+    "reviewer": "adcc38ef2eb777453"
   }
 }
