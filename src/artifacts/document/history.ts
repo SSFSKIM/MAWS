@@ -38,7 +38,9 @@ export function openDiff({ prevState, nextState, attributions }: { prevState: Ui
   const renderer = createDiffRenderer(prevDoc, nextDoc, { attributions });
   // A deleted tab's body is gone from `nextDoc` (the host collects deleted content), and drawn from `prevDoc` it reads
   // as alive: the renderer takes a piece's status from its own item. Both states in one gc-off doc keep the body with
-  // its items deleted, which the renderer draws as deletions. Built on first use.
+  // its items deleted, which the renderer draws as deletions. Built on first use. F (L187): the tab drawn is the one the
+  // earlier state held, by its item: a restore that brought the tab back and a later deletion of it again leave the
+  // key's last item the restore's, inserted and deleted inside the window, where the earlier tab is the one before it.
   let both: Doc | null = null;
   const removedBody = (tabId: string): YType | undefined => {
     if (!prevState || tabBody(nextDoc, tabId) || !tabBody(prevDoc, tabId)) return undefined;
@@ -47,7 +49,10 @@ export function openDiff({ prevState, nextState, attributions }: { prevState: Ui
       applyV2(both, prevState);
       applyV2(both, nextState);
     }
-    const tab = both.get(TABS)._map.get(tabId)?.content;
+    const earlier = prevDoc.get(TABS)._map.get(tabId)!.id;
+    let item = both.get(TABS)._map.get(tabId) ?? null;
+    while (item !== null && (item.id.client !== earlier.client || item.id.clock !== earlier.clock)) item = item.left;
+    const tab = item?.content;
     const body = tab instanceof ContentType ? (tab.type as YType)._map.get('body')?.content : undefined;
     return body instanceof ContentType ? (body.type as YType) : undefined;
   };

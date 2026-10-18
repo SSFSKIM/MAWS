@@ -5,7 +5,7 @@
 // merging touching runs with ↑ ↓ visiting each; comment marks and a new node's attributes not counted; Show editors per
 // block from provenance; and the blocks a move or a retype re-inserted, from the carries A's attribution keeps.
 import { describe, expect, it } from 'vitest';
-import { applyV2, newDoc } from '../yjs';
+import { applyV2, newDoc, revertUpdate, stateV2, type Doc } from '../yjs';
 import { applyEdit } from './patch-writer';
 import { attributedRuns, carriedBlocks, changeList, countChanges, diffBody, diffTabs, documentChanges, nextChange, openDiff, prevChange, renderDiff, showEditors, type Run } from './history';
 import { AGENT_1, AGENT_2, HUMAN, HistoryHub, TAB, block, body, markFormat, seededHub, textOf, yblock, type Version } from './history.fixture';
@@ -428,6 +428,69 @@ describe('the whole comparison’s changes', () => {
       expect(changes.map(({ tab, entry, body: inBody }) => ({ id: tab.id, title: tab.title, previousTitle: tab.previousTitle, entry, inBody }))).toEqual([{ id: TAB, title: 'After', previousTitle: 'Before', entry: 'renamed', inBody: 0 }]);
       expect(countChanges(diff)).toBe(1);
       expect(changeList(renderDiff(body(diff.nextDoc), diff.renderer))).toHaveLength(0); // the body alone has none
+    } finally {
+      diff.destroy();
+    }
+  });
+});
+
+// F's L187 (P3-C M8's second walk defect, relayed): the deck's per-slide walk drew nothing of a slide or an element a
+// restore brought back and someone deleted again, since the key's last item there is the restore's, inserted and deleted
+// inside the window. B's comparison against the same sequence: a version, a deletion, the owner's restore of the version
+// (A's `revertUpdate`, as restore.ts applies it), the deletion again; the comparison from the version shows what is gone.
+describe('a block or a tab a restore brought back and someone deleted again', () => {
+  const paragraphs = (ids: string[], tab: string) =>
+    schemaFor().nodeFromJSON({ type: 'doc', content: ids.map((id) => ({ type: 'paragraph', attrs: { id }, content: [{ type: 'text', text: `${tab} ${id} as the human wrote it.` }] })) });
+  const deleteBlock = (doc: Doc, id: string) => {
+    const top = body(doc);
+    top.delete(
+      top.toArray().findIndex((child) => (child as { getAttr?(k: string): unknown }).getAttr?.('id') === id),
+      1,
+    );
+  };
+  // the version, the first deletion, the owner's restore of the version, the second deletion; compared from the version
+  function sequence(remove: (doc: Doc) => void) {
+    const hub = new HistoryHub();
+    hub.write(HUMAN, (doc) => {
+      createDocument(doc, { title: 'Main', id: TAB, body: paragraphs(['p1', 'p2', 'p3'], 'Main') });
+      addTab(doc, { title: 'Appendix', id: 'apx', body: paragraphs(['x1'], 'Appendix') });
+    });
+    const before = hub.version('before', HUMAN);
+    remove(hub.connect(AGENT_1));
+    const owner = hub.connect(HUMAN);
+    applyV2(owner, revertUpdate(before.state, stateV2(owner)));
+    remove(hub.connect(AGENT_2));
+    const after = hub.version('after', AGENT_2);
+    return openDiff({ prevState: before.state, nextState: after.state, attributions: hub.attributions(before.seq, after.seq) });
+  }
+
+  it('draws the block as deleted and counts it as the one change', () => {
+    const diff = sequence((doc) => deleteBlock(doc, 'p2'));
+    try {
+      const shown = renderDiff(diffBody(diff, TAB)!, diff.renderer);
+      expect(shown.textContent).toContain('Main p2 as the human wrote it.');
+      const removed = attributedRuns(shown).filter((run) => run.kind === 'del' && run.text.includes('Main p2'));
+      expect(removed, 'the block drawn as deleted').not.toEqual([]);
+      expect(new Set(removed.map((run) => run.who)), 'by who deleted the version’s own block').toEqual(new Set([AGENT_1]));
+      expect(countChanges(diff)).toBe(1);
+    } finally {
+      diff.destroy();
+    }
+  });
+
+  it('lists the tab as removed, draws its content as deleted and counts it as the one change', () => {
+    const diff = sequence((doc) => deleteTab(doc, 'apx'));
+    try {
+      expect(diffTabs(diff).map(({ id, change }) => ({ id, change }))).toEqual([
+        { id: TAB, change: undefined },
+        { id: 'apx', change: 'removed' },
+      ]);
+      const removed = renderDiff(diffBody(diff, 'apx')!, diff.renderer);
+      expect(removed.textContent).toBe('Appendix x1 as the human wrote it.');
+      const deleted = attributedRuns(removed).filter((run) => run.kind === 'del');
+      expect(deleted, 'the tab’s content drawn as deleted').not.toEqual([]);
+      expect(new Set(deleted.map((run) => run.who)), 'by who deleted the version’s own tab, as a block is').toEqual(new Set([AGENT_1]));
+      expect(countChanges(diff)).toBe(1);
     } finally {
       diff.destroy();
     }
