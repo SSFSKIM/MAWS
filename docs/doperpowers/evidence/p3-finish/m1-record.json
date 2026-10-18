@@ -13,8 +13,9 @@
   "checkedAt": "all 10 close, 123 defer and 17 preclosed frozen rows matched the current tracker exactly once before the first edit",
   "deferFormat": "each defer row keeps its whole text; its closing cell gains 'Re-deferred 2026-10-18 (P3-F triage, triage.txt L<n>; parent Decision Log 106): <ruled reason> Owner: <ruled step made explicit>.' (the P2-F pattern)",
   "counts": {
+    "close:committed": 1,
     "close:held": 1,
-    "close:pending": 9,
+    "close:pending": 8,
     "defer:pending": 123,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
@@ -154,7 +155,7 @@
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-18 at E3c's landing a79fe986a (on master), hand-back gate 39101656520.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "52d1f72163e9d4ee47ff1176192353c8765d166f"
     },
     {
       "line": 131,
@@ -163,8 +164,8 @@
       "closeKind": "close-accept",
       "note": "Accept branch of the row's own clause ('or the row is left as is with this note closed as accepted'), ratified by parent Decision Log 106 (1). Verified: src/renderer/src/panel/PanelHeader.tsx useNarrow reads offsetWidth inside useLayoutEffect (before paint) and follows resizes with a ResizeObserver; NARROW_HEADER_PX = 360. No container-query rewrite performed.",
       "triageReason": "Accept the existing pre-paint measurement: closing clause expressly permits acceptance; architect rules at checkpoint 1. Evidence: P3-G final record; PanelHeader.tsx.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 144,
