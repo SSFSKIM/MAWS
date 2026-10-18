@@ -5,6 +5,7 @@ import { registerArtifactEditor } from '../../artifacts/registry';
 import { documentWindowDeps } from '../document';
 import type { DocumentTabDeps } from '../document/tab-state';
 import { DashboardMain, DashboardPanel } from './DashboardPanel';
+import { dashboardLiveDeps } from './live-start'; // E3 M3: the owner's Start for a live query
 import { DashboardTabState } from './tab-state';
 
 /** Registers the dashboard editor (App.tsx's P3-E block); returns the registration's removal. */
@@ -12,7 +13,7 @@ export function registerDashboardEditor(deps: () => DocumentTabDeps = documentWi
   return registerArtifactEditor<DashboardTabState>('dashboard', {
     Panel: DashboardPanel,
     Main: DashboardMain,
-    createState: (target) => new DashboardTabState(target, deps()),
+    createState: (target) => new DashboardTabState(target, deps(), dashboardLiveDeps), // E3 M3
     dispose: (state) => state.dispose(),
   });
 }

@@ -19,11 +19,17 @@
 //   release  {session}                                  the session's replicas closed (its end)
 //   loaded   {artifactId}                               whether the host holds the document in memory (E2 M6: a cold
 //                                                       open is proved unloaded first; parent Decision Log 42)
+//
+// E3 M4 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md Decision Log 13): the host's entry hands the seam its
+// own registry of agents' dataset refreshes, so a session's `artifact_dataset {refresh: true}` asks main as that session
+// (a live data run names the session the owner's Start launched) and answers what the host settles. Without one (E2's
+// tests), a refresh is refused as unavailable, as before.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
+import type { DatasetRefreshRequests } from '../connectors/dataset-requests'; // E3
 import { LoopSampler, serveCommandFiles, type LoopStats } from '../documents/kinds/document-perf';
 import type { ArtifactStore } from '../documents/store';
 import { ArtifactSession } from '../tool-server/artifact-context';
@@ -89,10 +95,12 @@ export class DashboardE2eSeam {
   private readonly nonce = randomUUID();
   private calls = 0;
 
-  /** `root`: the directory under which each session's working directory is made (`<root>/<session>`). */
+  /** `root`: the directory under which each session's working directory is made (`<root>/<session>`); `datasetRefresh`
+   * (E3): the host's registry the sessions' dataset refreshes ask main through, absent where nothing can answer one. */
   constructor(
     private readonly store: ArtifactStore,
     private readonly root: string,
+    private readonly datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>,
   ) {}
 
   async run(command: DashboardSeamCommand): Promise<DashboardSeamAnswer> {
@@ -133,6 +141,7 @@ export class DashboardE2eSeam {
         askCancelled: () => {},
         artifacts: () => this.store,
         session: new ArtifactSession(),
+        datasetRefresh: this.datasetRefresh, // E3
       });
       session = { tools: new Map(list.filter((tool) => (DASHBOARD_SEAM_TOOLS as readonly string[]).includes(tool.name)).map((tool) => [tool.name, tool])), cwd, lastRevision: 0 };
       this.sessions.set(name, session);
@@ -184,8 +193,14 @@ export class DashboardE2eSeam {
   }
 }
 
-/** The seam over the file channel in `dir` (`in`, `out`; the sessions' directories under `cwd`); `close` stops it. */
-export function startDashboardE2eSeam(store: ArtifactStore, dir: string, log: (line: string) => void = (line) => console.warn(`[dashboard-e2e] ${line}`)): { close(): void } {
-  const seam = new DashboardE2eSeam(store, join(dir, 'cwd'));
+/** The seam over the file channel in `dir` (`in`, `out`; the sessions' directories under `cwd`); `close` stops it.
+ * `datasetRefresh` (E3): the host's registry, handed to the seam's sessions. */
+export function startDashboardE2eSeam(
+  store: ArtifactStore,
+  dir: string,
+  log: (line: string) => void = (line) => console.warn(`[dashboard-e2e] ${line}`),
+  datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>,
+): { close(): void } {
+  const seam = new DashboardE2eSeam(store, join(dir, 'cwd'), datasetRefresh);
   return serveCommandFiles(dir, (command: DashboardSeamCommand) => seam.run(command), log, () => seam.close());
 }

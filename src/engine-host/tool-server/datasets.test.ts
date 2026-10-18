@@ -199,7 +199,7 @@ describe('artifact_dataset', () => {
     ]);
     const descriptor = readDataset(world.service.live(bound.artifactId), 'sales')!;
     expect(descriptor.source).toEqual({ kind: 'file', ref: 'assets/sales.csv', name: 'sales.csv', format: 'csv', sha256: expect.stringMatching(/^[0-9a-f]{64}$/), size: SALES.length });
-    expect(descriptor.updated.by).toEqual({ kind: 'session', appSessionId: SELF });
+    expect(descriptor.updated!.by).toEqual({ kind: 'session', appSessionId: SELF }); // E3: `updated` is optional in the type (a query never fetched has none); a file's always has it
     expect(world.store.links(bound.artifactId)).toEqual(expect.arrayContaining([expect.objectContaining({ appSessionId: SELF, role: 'edited' })]));
   });
 
@@ -462,7 +462,7 @@ describe('artifact_dataset', () => {
     world = open(); // a cold cache
     const old = newDoc();
     applyV2(old, world.store.versionState(id, version!));
-    const names = (d: DatasetDescriptor) => datasetReaderOf(world.store).read(id, snapshotOf(d).ref, { format: snapshotOf(d).format }).columns.map((c) => c.name);
+    const names = (d: DatasetDescriptor) => datasetReaderOf(world.store).read(id, snapshotOf(d)!.ref, { format: snapshotOf(d)!.format }).columns.map((c) => c.name); // E3: snapshotOf is null only for a query never fetched
     expect(names(readDataset(old, 'tab')!)).toEqual(['a,b', 'c']);
     expect(names(readDataset(old, 'comma')!)).toEqual(['a', 'b\tc']);
     old.destroy();

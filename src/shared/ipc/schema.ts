@@ -228,6 +228,7 @@ export const HOST_EVENTS = [
   'maws.pane.show',
   'maws.artifact.capture',
   'maws.artifact.export', // P3-A M7: `artifact_export` asks main's export service
+  'maws.artifact.datasetRefresh', // E3: `artifact_dataset`'s refresh asks main's connector service, by its id alone
   'host.supervisorStatus', // the supervisor's own facts (host.status is main's)
   'artifacts.changed', 'spaces.changed', // P3-A M4: the store's change feed
   'connectors.operation', 'connectors.grantChanged', // P3-H H3b: an operation's end (its id alone) and a committed grant change

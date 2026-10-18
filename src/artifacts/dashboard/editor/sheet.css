@@ -295,6 +295,48 @@
   outline-offset: 1px;
   border-radius: var(--radius-sm);
 }
+/* E3 M3: a query's live block, between the captured label and the snapshot's columns: hairlines part it from the
+   capture (tonal, no panel), its state in words beside its schedule, its gestures as the sheet's own quiet tools */
+.dash-sheet-live {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 0.5);
+  padding: calc(var(--space) * 2) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.dash-sheet-live-heading {
+  margin: 0;
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.dash-sheet-live-tool {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-sheet-live-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 calc(var(--space) * 3);
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}
+.dash-sheet-live-actions {
+  display: flex;
+  flex-wrap: wrap; /* a narrow sheet wraps its gestures rather than clipping them */
+  align-items: center;
+  gap: var(--space);
+  margin-left: calc(var(--space) * -1.5); /* the tools' own padding aligns their words with the text above */
+}
+.dash-sheet-live .doc-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
 @media (prefers-reduced-motion: reduce) {
   .ds-doc .dash-view[aria-busy='true'] .dash-figure > svg,
   .ds-doc button.dash-source-label:hover {

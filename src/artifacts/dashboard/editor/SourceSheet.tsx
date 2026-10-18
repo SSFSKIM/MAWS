@@ -5,15 +5,18 @@
 // snapshot that descriptor names in a virtual table (the whole snapshot, read by its ref and format through the tab's
 // reader; sortable by a column, copyable as TSV; a bounded number of rows in the page at any size), and Download, main's
 // Save of the snapshot's own bytes under its source name. A replacement while it is open leaves it on its snapshot until
-// it is opened again. Escape or Close closes it and gives the focus back to what opened it.
+// it is opened again. Escape or Close closes it and gives the focus back to what opened it. E3 M3: a query dataset's
+// captured snapshot has the tab's live query block beside it (./LiveQuery.tsx), never over a history preview.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactHost } from '../../host';
 import { snapshotOf, type Cell, type DatasetDescriptor } from '../datasets';
 import { compareCells, viewRows, type ViewTable } from '../render';
 import { mismatchNotes, sourceLabel, VIEW_STATES } from '../states';
-import type { SheetDataset, SourceSheetState } from './sheet';
+import type { SheetDataset, SourceSheetSnapshot, SourceSheetState } from './sheet';
 import type { SnapshotReader } from '../snapshots';
+import type { LiveDatasets } from './live'; // E3
+import { LiveQuery } from './LiveQuery'; // E3
 import { toTsv } from './tsv';
 import './sheet.css';
 
@@ -31,9 +34,13 @@ export interface SourceSheetProps {
   reader: SnapshotReader;
   host: Pick<ArtifactHost, 'downloadAsset'>;
   actorName(actor: Actor): string;
+  /** E3 M3: the tab's live datasets (the live query block's status and gestures), and its reopening on the current
+   * capture of a dataset (`Show latest`, `Show current`). */
+  live?: LiveDatasets;
+  onReopen?(id: string): void;
 }
 
-export function SourceSheet({ artifactId, sheet, reader, host, actorName }: SourceSheetProps) {
+export function SourceSheet({ artifactId, sheet, reader, host, actorName, live, onReopen }: SourceSheetProps) {
   const state = useSyncExternalStore(sheet.subscribe, sheet.snapshot);
   const panel = useRef<HTMLElement>(null);
   const opener = useRef<Element | null>(null);
@@ -78,7 +85,7 @@ export function SourceSheet({ artifactId, sheet, reader, host, actorName }: Sour
         </label>
       )}
       {shown ? (
-        <DatasetDetail key={`${state.opened}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} reader={reader} host={host} actorName={actorName} />
+        <DatasetDetail key={`${state.opened}:${state.capture}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} hold={state.hold} reader={reader} host={host} actorName={actorName} live={state.preview || state.previewing ? undefined : live /* E3 M3 fix: no live controls while a preview runs */} onReopen={onReopen} />
       ) : (
         <p className="dash-sheet-empty">No data is bound to this dashboard yet. An agent binds a file with artifact_dataset.</p>
       )}
@@ -92,14 +99,15 @@ type Sort = { column: number; dir: 'ascending' | 'descending' } | null;
 // snapshot as bound. A sheet opened from the header, on no view, shows the snapshot alone.
 type Shown = 'view' | 'source';
 
-function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorName }: { artifactId: string; id: string; descriptor: DatasetDescriptor; view?: SheetDataset['view'] } & Pick<SourceSheetProps, 'reader' | 'host' | 'actorName'>) {
+function DatasetDetail({ artifactId, id, descriptor, view, hold, reader, host, actorName, live, onReopen }: { artifactId: string; id: string; descriptor: DatasetDescriptor; view?: SheetDataset['view']; hold: SourceSheetSnapshot['hold'] } & Pick<SourceSheetProps, 'reader' | 'host' | 'actorName' | 'live' | 'onReopen'>) {
   const [source, setSource] = useState<ViewTable | null>(null);
   const [shown, setShown] = useState<Shown>(view ? 'view' : 'source');
   const [failed, setFailed] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>(null);
   const [status, setStatus] = useState('');
-  const snapshot = useMemo(() => snapshotOf(descriptor), [descriptor]);
+  const snapshot = useMemo(() => snapshotOf(descriptor), [descriptor]); // E3: null for a query never fetched
   useEffect(() => {
+    if (!snapshot || hold !== 'held') return; // E3: nothing read before the captured snapshot is held
     let current = true;
     reader.read(snapshot).then(
       (read) => current && setSource(read),
@@ -108,7 +116,7 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
     return () => {
       current = false;
     };
-  }, [reader, snapshot]);
+  }, [reader, snapshot, hold]);
   // the view's rows: the interpretation the view itself draws (renderView's transform), never a second one
   const viewed = useMemo(() => (view && source ? viewRows(view.spec, source, id) : null), [view, source, id]);
   const table = shown === 'view' ? (viewed?.ok ? viewed.table : null) : source;
@@ -137,6 +145,7 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
   };
   const name = descriptor.source.kind === 'file' ? descriptor.source.name : `${id}.json`;
   const download = async () => {
+    if (!snapshot) return;
     setStatus('');
     try {
       const { path } = await host.downloadAsset(artifactId, snapshot.ref, { name });
@@ -147,8 +156,9 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
   };
   return (
     <div className="dash-sheet-body">
-      <p className="dash-sheet-label">{sourceLabel(descriptor, actorName(descriptor.updated.by))}</p>
+      <p className="dash-sheet-label">{sourceLabel(descriptor, descriptor.updated ? actorName(descriptor.updated.by) : '')}</p>
       {descriptor.description && <p className="dash-sheet-description">{descriptor.description}</p>}
+      {live && descriptor.source.kind === 'query' && <LiveQuery id={id} title={descriptor.title} captured={descriptor.source} live={live} onReopen={onReopen} /> /* E3 M3 */}
       {mismatchNotes(descriptor).map((note) => (
         <p key={note} className="dash-sheet-note">
           {note}
@@ -162,7 +172,7 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
           </li>
         ))}
       </ul>
-      {view && (
+      {view && snapshot && (
         <div className="dash-sheet-shown" role="group" aria-label="Rows shown">
           <button type="button" className="doc-tool" aria-pressed={shown === 'view'} data-active={shown === 'view' ? '' : undefined} onClick={() => choose('view')}>
             {viewed?.ok ? `This view’s rows (${viewed.table.rows.length.toLocaleString('en-US')})` : 'This view’s rows'}
@@ -177,9 +187,11 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
         <button type="button" className="doc-tool" disabled={!table} onClick={() => void copy()}>
           Copy rows
         </button>
-        <button type="button" className="doc-tool" aria-label={`Download ${name}`} onClick={() => void download()}>
-          Download
-        </button>
+        {snapshot && hold !== 'unavailable' && (
+          <button type="button" className="doc-tool" aria-label={`Download ${name}`} disabled={hold !== 'held'} onClick={() => void download()}>
+            Download
+          </button>
+        )}
       </div>
       <p className="dash-sheet-status" role="status">
         {status}
@@ -191,7 +203,11 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
             {note}
           </p>
         ))}
-      {failed !== null ? (
+      {!snapshot ? (
+        <p className="dash-sheet-note">This query has not been fetched yet; there are no rows to show.</p>
+      ) : hold === 'unavailable' ? (
+        <p className="dash-sheet-note" role="alert">This snapshot is no longer available; open the source again to see the current one.</p>
+      ) : failed !== null ? (
         <p className="dash-sheet-note" role="alert">{`The rows could not be read: ${failed}`}</p>
       ) : shown === 'view' && viewed && !viewed.ok ? (
         <p className="dash-sheet-note" role="alert">{`This view cannot be drawn: ${viewed.error}`}</p>

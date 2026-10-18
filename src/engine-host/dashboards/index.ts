@@ -35,11 +35,13 @@ export function registerDashboards({ documents }: { documents: Pick<Documents, '
     afterUpdate(doc, info) {
       const outcome = base.afterUpdate!(doc, info);
       noted(info.artifactId, doc);
+      if (mainOf(info.artifactId) === null) store.reconcileQuerySnapshots(info.artifactId, doc); // E3: the snapshots' retention follows the datasets
       return outcome;
     },
     afterRestore(doc, info) {
       const outcome = base.afterRestore!(doc, info);
       noted(info.artifactId, doc);
+      if (mainOf(info.artifactId) === null) store.reconcileQuerySnapshots(info.artifactId, doc, { restored: true }); // E3: each query reset to the snapshot it names
       return outcome;
     },
     lastChange: (artifactId, datasetId) => changes.lastChange(artifactId, datasetId),

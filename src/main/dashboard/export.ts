@@ -8,7 +8,9 @@
 // dashboard is refused with its files. Word alone takes pictures: each distinct chart's SVG drawn once in a protected
 // capture window, with the governing system's faces, as the PNG fallback beside the SVG; a table is never a picture.
 // HTML and PDF pages declare the same faces, so a figure's authored family draws as the editor draws it (P3-E Decision
-// Log 37; B's own document pages and Word's font embedding are tracked separately).
+// Log 37; B's own document pages and Word's font embedding are tracked separately). E3 M3 fix: one clock captured with
+// the live state labels every view's query staleness, whatever the time its pages arrive; a version's export keeps its
+// saved labels.
 import { DATASET_LIMITS } from '@artifacts/dashboard/datasets';
 import { exportTheme, prepareViews, VIEW_CSS } from '@artifacts/dashboard/export';
 import { SnapshotReader } from '@artifacts/dashboard/snapshots';
@@ -64,11 +66,13 @@ function dashboardExporter(exporter: DocumentExporter, deps: DashboardExportDeps
       const window = exporter.format === 'docx' ? pictures({ signal: context.signal, facesCss }) : null;
       try {
         applyV2(doc, await context.state());
+        const now = request.versionId === undefined ? Date.now() : undefined; // E3 M3 fix: the export's one clock
         const reader = new SnapshotReader(pagesOf(deps.call, context.signal), request.artifactId, DATASET_LIMITS.datasets);
         const renderView = await prepareViews(doc, {
           read: (snapshot) => reader.read(snapshot),
           theme: exportTheme(context.system, dsOverrides(doc)),
           authorName: context.authorName ?? defaultAuthorName,
+          ...(now !== undefined && { now }), // E3 M3 fix
           ...(window && { picture: (svg: string, size: { width: number; height: number }) => window.take(svg, size) }),
         });
         if (context.signal.aborted) throw cancelled();

@@ -266,6 +266,10 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
 
   function targetOf(source: DirectSource, tool: ConnectorToolRef, artifactId: string, metadata: DirectToolMetadata): ConnectorRouteTarget {
     const call = async (args: Record<string, unknown>, context: ConnectorRouteCallContext): Promise<ConnectorRouteAnswer> => {
+      // E3 x P3-HD integration (the architect's merge ruling): route D carries no dataset sink in this landing, so dataset
+      // work (a page's or an agent's) is unavailable here and nothing is started. A plain call would bring the tool's raw
+      // result back to main, the page or the agent's answer, where E3 keeps it in the host and publishes it there.
+      if (context.dataset) return { ok: false, failure: 'unavailable', message: 'direct: route D publishes no dataset' };
       const sent = { artifactId, directory: source.directory, sourceId: source.sourceId, generation: source.generation, server: source.server, tool: tool.tool, arguments: args, fingerprint: context.fingerprint, mode: context.mode };
       const prepare = preparationOf(source, 'call'); // P3-HD M3b: after the broker's check, inside the operation
       const { result, credential } = await run('call', (operationId, prepared) => deps.call('connectors.directStart', { operationId, ...sent, ...(prepared && { credential: prepared }) }), DIRECT_OPERATION_DEADLINE_MS, context.signal, prepare);

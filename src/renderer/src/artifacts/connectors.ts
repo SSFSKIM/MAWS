@@ -109,12 +109,13 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): Con
 
     return {
       declareTools: (tools) => under(NO_LEASE, NO_LEASE, (leaseId) => call('connectors.declare', { leaseId, tools })),
-      callTool: (request) => under<ConnectorCallOutcome>(NO_LEASE, CLOSED, (leaseId) => call('connectors.call', { leaseId, request })),
-      watchTool: async (request, listener) => {
+      // E3: the owner's dataset sink rides beside the request, never inside it
+      callTool: (request, options) => under<ConnectorCallOutcome>(NO_LEASE, CLOSED, (leaseId) => call('connectors.call', { leaseId, request, ...(options && { dataset: options.dataset }) })),
+      watchTool: async (request, listener, options) => {
         if (closed) return NO_LEASE;
         starting += 1;
         try {
-          const start = await under(NO_LEASE, NO_LEASE, (leaseId) => call('connectors.watch', { leaseId, request }));
+          const start = await under(NO_LEASE, NO_LEASE, (leaseId) => call('connectors.watch', { leaseId, request, ...(options && { dataset: options.dataset }) /* E3 */ }));
           if (!start.ok) return start; // a close before the answer: `under` answered the lease refusal
           listeners.set(start.watchId, listener);
           for (const update of held.get(start.watchId) ?? []) {
@@ -133,7 +134,8 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): Con
         listeners.delete(watchId);
         return under(false, false, async (leaseId) => (await call('connectors.unwatch', { leaseId, watchId })).stopped);
       },
-      refreshWatch: (watchId) => under(false, false, async (leaseId) => (await call('connectors.refresh', { leaseId, watchId })).refreshing),
+      // E3 panel: the owner's probe rides beside the watch's id; without it, the command H sends
+      refreshWatch: (watchId, options) => under(false, false, async (leaseId) => (await call('connectors.refresh', { leaseId, watchId, ...(options?.probe !== undefined && { probe: options.probe }) })).refreshing),
       setVisible: (visible) => {
         void under(null, null, (leaseId) => call('connectors.visibility', { leaseId, visible })).catch(() => {});
       },

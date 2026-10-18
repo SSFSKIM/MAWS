@@ -16,6 +16,8 @@ import type { ArtifactStore } from '../documents/store';
 import type { DeadlineShape } from '../ipc';
 import type { EngineSession } from '../session';
 import { ConnectorCalls } from './calls';
+import type { DatasetRefreshRequests } from './dataset-requests'; // E3
+import { connectorDatasetSink } from './dataset-sink'; // E3
 import { ConnectorStatusCache } from './provenance'; // P3-HD
 import { DirectCalls } from './direct-calls'; // P3-HD M2
 import { DirectConnectionPool } from './direct-client'; // P3-HD M2
@@ -40,6 +42,7 @@ export interface ConnectorsSurfaceDeps {
   }; // the process table (P3-HD: and its launch facts)
   store: ArtifactStore | null; // null: the store failed to open this run
   calls?: ConnectorCalls; // tests
+  datasetRefresh?: DatasetRefreshRequests; // E3: the agents' refresh requests a dataset start may name (absent: none)
   statusCache?: ConnectorStatusCache; // P3-HD: tests
   direct?: DirectCalls; // P3-HD M2: tests
 }
@@ -60,6 +63,7 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
       session: (id) => deps.sessions.get(id as AppSessionId),
       store: () => store,
       completed: (operationId) => void emit('connectors.operation', { operationId }),
+      datasets: connectorDatasetSink({ store: () => store, requests: deps.datasetRefresh ?? null }), // E3
       statusCache, // P3-HD
     });
   // P3-HD M2: route D's host half over the same store and observations; its connections live for main's attachment
@@ -88,7 +92,7 @@ export function registerConnectors(on: HostOn, emit: HostEmit, client: Pick<Host
   serve('connectors.check', ({ artifactId, call }) => storeOf().checkConnectorCall(artifactId, call));
   serve('connectors.resolve', (input) => calls.resolve(input));
   serve('connectors.start', (input) => calls.start(input));
-  serve('connectors.take', ({ operationId }) => ({ outcome: calls.take(operationId) }));
+  serve('connectors.take', ({ operationId }) => calls.takeOperation(operationId)); // E3: a dataset operation's phase beside H's outcome
   serve('connectors.cancel', ({ operationId }) => ({ cancelled: calls.cancel(operationId) }));
   // P3-HD M2 start
   serve('connectors.directResolve', (input) => direct.resolve(input));

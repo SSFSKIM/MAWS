@@ -150,6 +150,8 @@ export default defineConfig({
             // P3-F1 (fix 2): the standalone tab's comment target and its pending notice, whose renders select the library,
             // layout and pending stores through hooks
             'src/renderer/src/tools/document/comment-session.test.tsx',
+            // E3 M3: the dashboard's live datasets as built, its editor rendering from its tab's live store
+            'src/renderer/src/tools/dashboard/live.compiled.test.tsx',
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

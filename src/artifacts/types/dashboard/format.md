@@ -16,6 +16,8 @@ The spec is a JSON object in single quotes; inside it write `&#39;` for an apost
 
 Every view draws the snapshot its dataset's descriptor names at the version shown, under a source label: the dataset's title, `from <file>`, `updated <time> by <who>` (times in UTC). Rebinding the id to a new file redraws every view that names it; the prose and comments around them stay. A view whose dataset or column is missing draws the reason in place and keeps its caption, comments and block id.
 
+A live dataset's source is a query: a read-only MCP tool (`server · tool` in its label) whose JSON result is a flat-object array, or an object with a `rows` array, read as a JSON file is. Its label says `not fetched` until the first refresh, then the fetch time; a refresh that fails keeps the previous rows and shows the error; `staleAfter` past the fetch time adds `stale since <time>`; with no live session that has the server it shows `paused: no live session`. Only the owner grants the tool. Each refresh is a new immutable snapshot; history keeps what its versions show, and live refresh keeps the latest two snapshots beyond those.
+
 `artifact_read` lists the datasets after the blocks (`datasets`: id, title, file, columns with types, rows, rowKey, updated, state) and, when a spec has a problem, `viewWarnings` per block id.
 
 ## Elements and attributes
@@ -48,6 +50,7 @@ A table view shows its first 25 rows, or `limit` rows up to 100, and says `first
 
 - A dataset file is at most 16,777,216 bytes (16 MiB), 200,000 rows and 256 columns; a column name at most 256 characters.
 - A dashboard holds at most 64 datasets.
+- A query's `schedule` is 30 to 86,400 seconds (absent: refreshed only when asked); `staleAfter` a positive whole number of seconds; its `args` at most 65,536 bytes of JSON.
 - A view spec: a `title` of at most 200 characters, up to 8 `y` columns, up to 256 values in an `in` filter, `limit` up to 200,000.
 - A table view shows at most 100 rows; exports show the same rows.
 - Everything in the document format reference's limits holds for a dashboard's tabs and edits.

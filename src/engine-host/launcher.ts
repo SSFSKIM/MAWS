@@ -29,6 +29,7 @@ import type { EngineTransport } from './transport';
 import { unsettledPrompts } from './prompt-history'; // P2-C
 import type { ObservedFactsService } from './observed-facts'; // P2-A
 import type { ArtifactStore } from './documents/store'; // P3-A (M6)
+import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 import { captureLocalKey, type ConnectorLocalKey } from './connectors/local-key'; // P3-HD
 
 export const REPLAY_PRELUDE = 'test/fixtures/engine/replay-handshake.jsonl'; // relative to the launcher's cwd
@@ -50,6 +51,7 @@ export interface LauncherDeps {
   hasClient?: () => boolean; // E10: the runtime's, handed to each session's bridges
   observedFacts?: ObservedFactsService; // P2-A (X17): each launch records what the engine reports
   artifacts?: () => ArtifactStore | null; // P3-A (M6): the artifact store the sessions' artifact tools write through
+  datasetRefresh?: Pick<DatasetRefreshRequests, 'ask'>; // E3: the registry the sessions' dataset refreshes ask main through
   // P3-HD: the local-scope key of a live launch's cwd, captured beside the probes, before the spawn (bounded, never failing
   // the launch: a failure is an unidentified key); tests inject it
   captureLocalKey?: (cwd: string) => Promise<ConnectorLocalKey>;
@@ -123,6 +125,7 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
         observedFacts: deps.observedFacts, // P2-A
         artifactScope, // P2-E1
         artifacts: deps.artifacts, // P3-A (M6)
+        datasetRefresh: deps.datasetRefresh, // E3
         connectorLocalKey, // P3-HD
       });
       deps.wire(session, plan, spec);

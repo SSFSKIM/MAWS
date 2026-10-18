@@ -5,6 +5,7 @@
 import type { Awareness } from '@y/protocols/awareness';
 import type { Actor } from '@shared/artifacts/actor';
 import type {
+  ConnectorCallOptions, // E3
   ConnectorCallOutcome,
   ConnectorCallRequest,
   ConnectorDeclareOutcome,
@@ -171,15 +172,22 @@ export interface ArtifactDocOption {
 export interface ConnectorSurface {
   // Adds `server · tool` pairs the page may call; answers everything the surface has declared.
   declareTools(tools: readonly ConnectorToolRef[]): Promise<ConnectorDeclareOutcome>;
-  // Runs a declared tool once, answering when it has (a tool may take minutes).
-  callTool(request: ConnectorCallRequest): Promise<ConnectorCallOutcome>;
+  // Runs a declared tool once, answering when it has (a tool may take minutes). E3
+  // (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): `options`, the trusted owner's alone (an artifact
+  // page's relay never passes it): the result becomes the dataset's snapshot in the host, and the outcome's `result` is
+  // the publication's metadata, never the rows.
+  callTool(request: ConnectorCallRequest, options?: ConnectorCallOptions): Promise<ConnectorCallOutcome>;
   // Refreshes a declared read-only tool every `intervalMs` (clamped to 30 s .. 24 h, at most 64 watches in the app) while
   // the surface is visible, each refresh's outcome to `listener`; one due while hidden runs once when shown. The listener
   // may hear a first refresh before the start's promise settles.
-  watchTool(request: ConnectorWatchRequest, listener: (update: ConnectorCallOutcome) => void): Promise<ConnectorWatchStart>;
+  // E3: `options`, the owner's dataset sink as for `callTool`, naming no `baseRevision` (each refresh takes the host's).
+  watchTool(request: ConnectorWatchRequest, listener: (update: ConnectorCallOutcome) => void, options?: ConnectorCallOptions): Promise<ConnectorWatchStart>;
   unwatchTool(watchId: string): Promise<boolean>;
   // A refresh now, when the watch is visible, granted and idle (after the owner started a session, say).
-  refreshWatch(watchId: string): Promise<boolean>;
+  // E3 panel (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md, Decision Log 17): `options.probe`, the trusted
+  // owner's alone (an artifact page's relay never passes it): whether its dataset watch still lives, nothing more (no
+  // wake, grant check, call or schedule change); false for a handle gone, another's, or not a dataset watch.
+  refreshWatch(watchId: string, options?: { probe?: boolean }): Promise<boolean>;
   // The trusted owner's alone (an artifact page never sets it): whether the page is on screen.
   setVisible(visible: boolean): void;
   close(): void;
@@ -210,6 +218,14 @@ export interface ArtifactHost {
   // by the displayed descriptor's ref) where they choose, `name` the suggestion; `path` null when they cancel. Main reads
   // and copies the bytes; the editor never fetches them.
   downloadAsset(artifactId: string, ref: string, options?: { name?: string }): Promise<{ path: string | null }>;
+  // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b; the ledger's E3 hold-IPC row): one hold over the
+  // snapshots `refs` names (1 to 64 of the artifact's assets), all or none, so their bytes outlast a refresh retiring
+  // them while this window still reads them (the source sheet's captured snapshots, the painted cache's). It is main's,
+  // bound to this window: released by `release` (once, however often called) or when the window closes or navigates.
+  // Rejects with nothing held when a ref is no longer available or the artifact's hold bounds are reached.
+  // `invalidated` resolves once the host's hold behind it is gone (the engine host restarted: holds live as long as its
+  // process), including a restart while the hold was being asked for; it never resolves after `release`.
+  holdDatasets(artifactId: string, refs: readonly string[]): Promise<{ release(): void; readonly invalidated: Promise<void> }>;
   identity(): { actor: Actor; name: string; color: string };
   // P3-H H4 (the X9 amendment, Decision Log 80): a page's connector surface, and the owner's grants of one artifact's
   // tools (the editor header's, never a page's). A grant is taken under the fingerprint of the route that has the tool

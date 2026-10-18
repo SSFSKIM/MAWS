@@ -65,6 +65,7 @@ const host: ArtifactHost = {
   copyAsset: async () => ({ assetId: '', ref: '' }), // P3-C (Decision Log 25)
   readDataset: async () => ({ columns: [], rows: [], total: 0, truncated: false }), // P3-E (E2 M2)
   downloadAsset: async () => ({ path: null }), // P3-E (E2 M3)
+  holdDatasets: async () => ({ release: () => {}, invalidated: new Promise<void>(() => {}) }), // E3: A's landed required member
   identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: 'var(--author-1)' }),
   // P3-H H4: the connector family, which these tests never reach
   openConnectors: () => {

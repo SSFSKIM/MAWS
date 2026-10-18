@@ -915,11 +915,11 @@ describe('ipc schema validates both directions', () => {
   // E5 end
   // E1 start: the maws tool server's commands and its pane request (P1 ledger §5)
   describe('E1 entries', () => {
-    it('adds the maws namespace: three engine-host commands and the pane request, all bridged', () => {
-      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */, 'maws.artifact.exported' /* P3-A M7 */]);
+    it('adds the maws namespace: three engine-host commands and the pane request, all bridged but E3’s main-only datasetRefreshed', () => {
+      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */, 'maws.artifact.exported' /* P3-A M7 */, 'maws.artifact.datasetRefreshed' /* E3 */]);
       for (const spec of Object.values(maws.commands)) expect(spec.owner).toBe('engine-host');
-      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */, 'maws.artifact.export' /* P3-A M7 */]);
-      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
+      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */, 'maws.artifact.export' /* P3-A M7 */, 'maws.artifact.datasetRefresh' /* E3 */]);
+      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands).filter((name) => !MAIN_ONLY_COMMANDS.includes(name as never))); // E3
     });
 
     it('validates the asks, an answer, a pane request and its answer', () => {
@@ -1499,7 +1499,7 @@ describe('ipc schema validates both directions', () => {
     it('the browser tools\' bridge left with the tools', () => {
       expect(Object.keys(commands).filter((name) => name.startsWith('maws.browser.'))).toEqual([]);
       expect(Object.keys(events).filter((name) => name.startsWith('maws.browser.'))).toEqual([]);
-      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
+      expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands).filter((name) => !MAIN_ONLY_COMMANDS.includes(name as never))); // E3
       expect([...NAMES.maws.events]).toEqual(Object.keys(maws.events));
       expect([...NAMES.browser.events]).toEqual(Object.keys(browser.events));
     });
@@ -1646,7 +1646,7 @@ describe('ipc schema validates both directions', () => {
 
     it('owns artifacts.* in the engine host but artifacts.open (main), keeps setDefaults and content main-only, and emits both events across the host wire', () => {
       const owners = Object.fromEntries(Object.entries({ ...artifacts.commands, ...spaces.commands }).map(([name, spec]) => [name, spec.owner]));
-      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open', 'artifacts.export' /* M7 */, 'artifacts.downloadAsset' /* P3-E (E2 M3): main's, E's Decision Log 18 */, 'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool' /* P3-H H3b: main's, the route's fingerprint and the revoke's abort */]);
+      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open', 'artifacts.export' /* M7 */, 'artifacts.downloadAsset' /* P3-E (E2 M3): main's, E's Decision Log 18 */, 'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool' /* P3-H H3b: main's, the route's fingerprint and the revoke's abort */, 'artifacts.holdDatasets', 'artifacts.releaseDatasets' /* E3: main's, a window's holds (E's Decision Log 48 (3)) */]);
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['artifacts.setDefaults', 'artifacts.content']));
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.setDefaults');
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.content');
