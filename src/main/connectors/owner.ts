@@ -76,6 +76,7 @@ export interface ConnectorOwner {
   reconnect(artifactId: string, sourceHandle: string): ConnectorOwnerAck;
   disconnect(connectionId: string): ConnectorOwnerAck;
   hostLost(): void; // main's attachment to the engine host ended: running actions end, rows are read again
+  hostStreaming(): void; // P3-F F-connectors 9: the engine host's connection streams again: rows are read again
   stop(): void;
 }
 
@@ -509,6 +510,10 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     hostLost() {
       for (const action of actions.values()) action.controller.abort();
       changed();
+    },
+    // P3-F F-connectors 9: rows an outage read as unavailable are read again once the host can answer them
+    hostStreaming() {
+      if (!stopped) changed();
     },
     stop() {
       if (stopped) return;

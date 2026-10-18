@@ -21,7 +21,9 @@
 // - The engine host leaving `ready` answers (and withdraws) every route E operation pending; each later call resolves
 //   afresh. Its events reach main only once its connection streams, so route E starts operations only then, and each
 //   time a connection starts streaming main reconciles what an event dropped before it: the pending operations'
-//   outcomes are taken, and every watch waiting for a grant has its grant re-read from the store.
+//   outcomes are taken, and every watch waiting for a grant has its grant re-read from the store. P3-F F-connectors 9:
+//   the owner's rows are invalidated then too, as they are on the host's loss, so a sheet that read them during the
+//   outage reads them again.
 // - E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R3): a window's call or watch may carry the owner's
 //   dataset sink beside its request, handed to the broker as it came. An agent's dataset refresh is announced by the host
 //   by its id alone (`maws.artifact.datasetRefresh`); main reads it (`artifacts.datasetRefreshRequest`), runs it through
@@ -222,6 +224,7 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
     engine.reconcile();
     direct?.reconcile(); // P3-HD
     broker.recheckGrants();
+    owner?.hostStreaming(); // P3-F F-connectors 9: the owner's rows, read during an outage, are read again
   });
   return {
     stop: () => {
