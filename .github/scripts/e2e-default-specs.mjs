@@ -79,10 +79,27 @@ const pool = async (jobs, width) => {
   return results;
 };
 
-// What `playwright test --list` collects for one selection: Map(spec path from the root -> Set of its tests, each by its
-// title path, which Playwright refuses to repeat within a file). Not by line and column: concurrent listings on a cold
-// transform cache can leave one without a spec's source map, so the same test reports its compiled position. Throws
-// when the listing fails or reports an error.
+// What a `playwright test --list` JSON report collects: Map(spec path from the root -> Set of its tests, each by its title
+// path, which Playwright refuses to repeat within a file). Not by line and column: concurrent listings on a cold transform
+// cache can leave one without a spec's source map, so the same test reports its compiled position. The identity is the JSON
+// array of the title components, so two tests share one only when their arrays are equal; Playwright's own check (empty
+// describe titles dropped, then joined) is coarser and reports that as a duplicate title, which listSelection throws on.
+export function collected(report, root) {
+  const specs = new Map();
+  const walk = (suite, titles, tests) => {
+    for (const spec of suite.specs ?? []) tests.add(JSON.stringify([...titles, spec.title]));
+    for (const child of suite.suites ?? []) walk(child, [...titles, child.title], tests);
+  };
+  for (const suite of report.suites ?? []) {
+    const tests = new Set();
+    walk(suite, [], tests);
+    specs.set(relative(root, resolve(report.config.rootDir, suite.file)), tests);
+  }
+  return specs;
+}
+
+// Runs `playwright test --list` for one selection and returns collected(its report). Throws when the listing fails or
+// reports an error.
 export async function listSelection(root, { env, args }) {
   const dir = mkdtempSync(join(tmpdir(), 'e2e-default-'));
   const output = join(dir, 'list.json');
@@ -97,17 +114,7 @@ export async function listSelection(root, { env, args }) {
     });
     const report = JSON.parse(readFileSync(output, 'utf8'));
     if (report.errors?.length > 0) throw new Error(`playwright test --list ${args.join(' ')} reported: ${report.errors.map((error) => error.message?.split('\n')[0]).join(' / ')}`);
-    const specs = new Map();
-    const walk = (suite, titles, tests) => {
-      for (const spec of suite.specs ?? []) tests.add([...titles, spec.title].join(' › '));
-      for (const child of suite.suites ?? []) walk(child, [...titles, child.title], tests);
-    };
-    for (const suite of report.suites ?? []) {
-      const tests = new Set();
-      walk(suite, [], tests);
-      specs.set(relative(root, resolve(report.config.rootDir, suite.file)), tests);
-    }
-    return specs;
+    return collected(report, root);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

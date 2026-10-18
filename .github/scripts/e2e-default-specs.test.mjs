@@ -14,7 +14,7 @@ import { promisify } from 'node:util';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const script = join(root, '.github/scripts/e2e-default-specs.mjs');
-const { defaultSpecs, listSelection, readScript } = await import(script);
+const { collected, defaultSpecs, listSelection, readScript } = await import(script);
 const { name: rootName, scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
 const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
@@ -204,6 +204,24 @@ test('every doubt falls back to the bare set, as a doubt', async () => {
   // The narrowed run must collect exactly the own specs: here a filter that also catches a claimed spec.
   const loose = listing(({ args }) => (args.length === 1 ? bareSet.filter((file) => args.includes(file)) : bareSet));
   assert.match((await defaultSpecs({ scripts: fixture, rootName, groups: ['a'], list: loose })).bare, /does not collect exactly them/);
+});
+
+test("a test is its whole title array: ' › same' at the top and 'same' in an anonymous describe stay two", () => {
+  // Playwright's duplicate-title check drops empty describe titles before joining, so it passes this pair.
+  const report = {
+    config: { rootDir: '/repo/e2e' },
+    suites: [
+      {
+        title: 'a.spec.ts',
+        file: 'a.spec.ts',
+        specs: [{ title: ' › same' }],
+        suites: [{ title: '', specs: [{ title: 'same' }] }],
+      },
+    ],
+  };
+  const files = collected(report, '/repo');
+  assert.deepEqual([...files.keys()], ['e2e/a.spec.ts']);
+  assert.equal(files.get('e2e/a.spec.ts').size, 2);
 });
 
 test('a spec its group lists only part of stays in default', async () => {
