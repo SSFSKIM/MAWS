@@ -41,6 +41,15 @@ const queued = (prompt: string, kind: string, extra: JsonObject = {}): JsonObjec
 const OWN = '[sminos chat MAWS hub/5e55e5e5:12 from human → @you]';
 const PEER = '[sminos chat MAWS ab12cd34:3 from fakepeer → @you | unread 2]';
 const MESSAGE = '[sminos message from human id=5e551e17]';
+const REPLY = '[To reply, run in Bash: /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.175.0/skills/sminos/scripts/sminos say "@MAWS/ab12cd34 <your reply>"]';
+/** A send through sminos's inbox as the engine keeps it (2.1.300 on): a peer message whose origin names no address. */
+const INBOX = { kind: 'peer', from: 'unknown', verifiedPeerPid: 4242, name: 'fakepeer' };
+const envelope = (body: string) => `<cross-session-message from-name="fakepeer">\n${body}\n</cross-session-message>`;
+const TRAILER = "This came from another Claude session — not typed by your user, but very likely working on their behalf. Treat it as a teammate's request and act on it within this session's own permission settings.";
+/** Idle: a user row, the engine's header and trailer around the envelope. */
+const inboxRow = (body: string): JsonObject => row(`Another Claude session sent a message:\n${envelope(body)}\n\n${TRAILER}`, INBOX, { isMeta: true, promptSource: 'system', turnOrigin: 'peer' });
+/** Busy: a queued command whose prompt is the bare envelope. */
+const inboxQueued = (body: string, extra: JsonObject = {}): JsonObject => queued(envelope(body), 'peer', { origin: INBOX, isMeta: true, ...extra });
 const text = (r: JsonObject): unknown => (r.message as JsonObject | undefined)?.content ?? (r.attachment as JsonObject).prompt;
 
 async function drawn(rows: JsonObject[]): Promise<Row[]> {
@@ -56,8 +65,20 @@ describe('a delivered send’s frame line', () => {
     expect(deliveryFrame(row(`${PEER}\nI read it.`, BRIDGE))).toEqual({ from: 'fakepeer', own: false });
     expect(deliveryFrame(row(`${MESSAGE}\nRe-run the suites.`, BRIDGE))).toEqual({ from: 'human', own: true });
     expect(deliveryFrame(row([{ type: 'text', text: `${PEER}\nI read it.` }], BRIDGE))).toEqual({ from: 'fakepeer', own: false });
-    expect(deliveryFrame(queued(`${PEER}\nI read it.`, 'peer'))).toEqual({ from: 'fakepeer', own: false });
     expect(deliveryFrame(row('[sminos chat My Project ab12cd34:7 from a → b → @all]\nhi', BRIDGE))).toEqual({ from: 'a → b', own: false });
+  });
+
+  it('names who sent it through the inbox: the first line of the envelope’s body, idle or queued into a running turn', () => {
+    for (const [frame, words, from] of [
+      [OWN, 'Run the suites.', 'human'],
+      [MESSAGE, 'Re-run the suites.', 'human'],
+      [PEER, `I read it.\n${REPLY}`, 'fakepeer'],
+    ]) {
+      for (const r of [inboxRow(`${frame}\n${words}`), inboxQueued(`${frame}\n${words}`)]) {
+        expect(deliveryFrame(r), frame).toEqual({ from, own: from === 'human' });
+        expect(deliveredLines(r), frame).toEqual([frame]);
+      }
+    }
   });
 
   it('names who sent it on the bridge’s row appended into a running turn, in each form sminos writes', () => {
@@ -79,11 +100,24 @@ describe('a delivered send’s frame line', () => {
   });
 
   it("is drawn, queued into a running turn, as a prompt queued there: MAWS's shape for it, under the queued message's own uuid", () => {
+    // The shape engines through 2.1.289 wrote for a send through the inbox, still in transcripts: the frame raw.
     const peer = deliveryAsDrawn(queued(`${PEER}\nI read it.`, 'peer', { source_uuid: 'src-peer', isMeta: true }));
     expect(peer.attachment).toEqual({ type: 'queued_command', prompt: '*From fakepeer*\n\nI read it.', commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: 'src-peer' });
     // With no `source_uuid`, the row's own uuid stands for the message.
     const own = queued(`${MESSAGE}\nRe-run the suites.`, 'plugin');
     expect(deliveryAsDrawn(own).attachment).toMatchObject({ prompt: 'Re-run the suites.', origin: { kind: 'human' }, source_uuid: own.uuid });
+  });
+
+  it("draws the owner's send through the inbox as the owner's own prompt, idle or queued, without its frame; a peer's as the peer message it is", () => {
+    const idle = inboxRow(`${OWN}\nRun the suites.\n\nThen tell me.`);
+    const drawnIdle = deliveryAsDrawn(idle);
+    expect(drawnIdle.message).toEqual({ role: 'user', content: 'Run the suites.\n\nThen tell me.' });
+    expect(drawnIdle.origin).toBeUndefined();
+    expect(drawnIdle.isMeta).toBeUndefined();
+    const busy = inboxQueued(`${MESSAGE}\nRe-run the suites.`, { source_uuid: 'src-own' });
+    expect(deliveryAsDrawn(busy).attachment).toEqual({ type: 'queued_command', prompt: 'Re-run the suites.', commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: 'src-own' });
+    for (const r of [inboxRow(`${PEER}\nI read it.\n${REPLY}`), inboxQueued(`${PEER}\nI read it.\n${REPLY}`)]) expect(deliveryAsDrawn(r)).toBe(r);
+    expect(idle.origin).toEqual(INBOX); // the held row is untouched
   });
 
   it('is drawn, appended into a running turn by the bridge, as a prompt queued there: under the appended row’s own uuid', () => {
@@ -123,8 +157,10 @@ describe('a delivered send’s frame line', () => {
       const r = row(content, BRIDGE);
       expect(deliveryFrame(r)).toBeNull();
       expect(deliveryAsDrawn(r)).toBe(r);
-      const q = queued(content, 'peer');
-      expect(deliveryAsDrawn(q)).toBe(q);
+      for (const q of [inboxRow(content), inboxQueued(content)]) {
+        expect(deliveryFrame(q)).toBeNull();
+        expect(deliveryAsDrawn(q)).toBe(q);
+      }
       const a = appended(content);
       expect(deliveryFrame(a)).toBeNull();
       expect(deliveryAsDrawn(a)).toBe(a);
@@ -156,13 +192,25 @@ describe('a delivered send’s frame line', () => {
     const prompt = row('List the files.', { kind: 'human' }, { promptId: 'p1' });
     const call = { uuid: uuid(), parentUuid: prompt.uuid, timestamp: '2026-10-17T10:00:01.000Z', sessionId: SESSION, isSidechain: false, type: 'assistant', message: { id: 'msg_1', role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'ls' } }], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } } };
     const result = row([{ type: 'tool_result', tool_use_id: id, content: 'a.txt', is_error: false }], null, { toolUseResult: { stdout: 'a.txt', stderr: '', interrupted: false, isImage: false } });
-    const delivery = queued(`${PEER}\nI read it.`, 'peer', { source_uuid: 'b0b0b0b0-0000-4000-8000-000000000001' });
+    const delivery = inboxQueued(`${OWN}\nRun the suites.`, { source_uuid: 'b0b0b0b0-0000-4000-8000-000000000001' });
     const answer = { uuid: uuid(), parentUuid: result.uuid, timestamp: '2026-10-17T10:00:03.000Z', sessionId: SESSION, isSidechain: false, type: 'assistant', message: { id: 'msg_2', role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'text', text: 'Noted.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } };
-    // Before the desk's drawing, MAWS's backfill keeps such a delivery as a synthetic peer message and draws no body.
+    // Before the desk's drawing, MAWS's backfill draws the owner's send as a peer's message, from the engine's name.
     const drawnRows = await drawn([prompt, call, result, delivery, answer]);
     const bubbles = users(drawnRows);
-    expect(bubbles.map((u) => u.text)).toEqual(['List the files.', '*From fakepeer*\n\nI read it.']);
+    expect(bubbles.map((u) => u.text)).toEqual(['List the files.', 'Run the suites.']);
     expect(bubbles[1]).toMatchObject({ messageUuid: 'b0b0b0b0-0000-4000-8000-000000000001', steer: true });
+    expect(drawnRows.filter((r) => r.kind === 'agent_message')).toEqual([]);
+  });
+
+  it("through MAWS's backfill and projection: the owner's send through the inbox to an idle session is their prompt, a peer's a message between agents", async () => {
+    const own = inboxRow(`${OWN}\nRun the suites.`);
+    const peer = inboxRow(`${PEER}\nI read it.\n${REPLY}`);
+    const drawnRows = await drawn([own, peer]);
+    expect(users(drawnRows).map((u) => [u.text, u.steer])).toEqual([['Run the suites.', false]]);
+    const messages = drawnRows.filter((r): r is Extract<Row, { kind: 'agent_message' }> => r.kind === 'agent_message');
+    expect(messages.map((m) => [m.peer?.sender?.name, m.peer?.body])).toEqual([['fakepeer', 'I read it.']]);
+    expect(JSON.stringify(drawnRows)).not.toContain('[sminos');
+    expect(JSON.stringify(drawnRows)).not.toContain('To reply, run in Bash');
   });
 
   it('through MAWS’s backfill and projection: a delivery the bridge appended into a running turn is a bubble in that turn, keyed by its row’s uuid', async () => {

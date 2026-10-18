@@ -10,8 +10,9 @@
 // `sminos.py`; a web send's writer, `hub/<member>`, has no session part and stands whole), or `[sminos message from
 // <via or from> id=<msg_id>]` for an event that carries a `msg_id` (`compose_frame`). The row must mark a delivery's
 // provenance (`delivery-frame.ts`): the bridge's plugin prompt as the user (an idle session), the bridge's row appended
-// into the running turn (a busy one: a meta user row from the plugin, its frame the only word that it is a delivery), or
-// a peer's or plugin's queued command; never a prompt typed at the terminal, another plugin's row, nor one that marks
+// into the running turn (a busy one: a meta user row from the plugin, its frame the only word that it is a delivery),
+// the peer message the engine made of a send through sminos's inbox (its frame the first line of the envelope's body),
+// or a peer's or plugin's queued command; never a prompt typed at the terminal, another plugin's row, nor one that marks
 // none. A steer's row has the bridge's appended shape too, but no frame: its result names the row it appended, and the
 // steer is matched by that uuid. Nothing is matched by text: a typed prompt is never a web send's row, however equal its
 // words, and a send whose row never comes (the session ended first) stays, its state saying so.

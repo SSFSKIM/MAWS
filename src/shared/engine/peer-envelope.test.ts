@@ -25,7 +25,7 @@ describe('parsePeerMessage', () => {
   it('reads the idle form: the header, the envelope attributes, the body inside the tags, the default trailer', () => {
     expect(parsePeerMessage(IDLE.message.content)).toEqual({
       kind: 'cross-session', from: 'uds:/tmp/cc-socks/10562.sock', fromSession: null, fromName: 'repo-b-gen1il-79', fromMode: 'prompting', fromPlugin: null,
-      hopChain: [], body: 'E7 probe: hello from B', midTurn: false, lineage: 'peer', replyable: true,
+      hopChain: [], body: 'E7 probe: hello from B', frame: null, midTurn: false, lineage: 'peer', replyable: true,
     });
   });
 
@@ -42,7 +42,7 @@ describe('parsePeerMessage', () => {
     const text = `Another Claude session sent a message:\n${ENVELOPE('from="uds:/tmp/cc-socks/1.sock" from-session="local_0a1b2c3d-1111" hop-chain="aaaaaaaaaaaaaaaaaaaaaaaa,bbbbbbbbbbbbbbbbbbbbbbbb" from-name="worker" from-mode="bypass" from-plugin="sminos"', 'line one\nline two')}\n\n${DEFAULT_TRAILER}`;
     expect(parsePeerMessage(text)).toEqual({
       kind: 'cross-session', from: 'uds:/tmp/cc-socks/1.sock', fromSession: 'local_0a1b2c3d-1111', fromName: 'worker', fromMode: 'bypass', fromPlugin: 'sminos',
-      hopChain: ['aaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbb'], body: 'line one\nline two', midTurn: false, lineage: 'peer', replyable: true,
+      hopChain: ['aaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbb'], body: 'line one\nline two', frame: null, midTurn: false, lineage: 'peer', replyable: true,
     });
   });
 
@@ -89,6 +89,22 @@ describe('parsePeerMessage', () => {
       expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', body)), body).toMatchObject({ body });
     // An in-process agent's message is not sminos's: its body is left whole.
     expect(parsePeerMessage(`<agent-message from="a1b2">\nhi\n${reply('MAWS/maws-fe')}\n</agent-message>`)).toMatchObject({ body: `hi\n${reply('MAWS/maws-fe')}` });
+  });
+
+  it("cuts sminos's frame line, the body's whole first line with the text after it, and keeps it as the message's frame", () => {
+    const SMINOS = '/Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.175.0/skills/sminos/scripts/sminos';
+    const reply = `[To reply, run in Bash: ${SMINOS} say "@MAWS/maws-fe <your reply>"]`;
+    for (const frame of ['[sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you | unread 2]', '[sminos chat MAWS hub/5e55e5e5:12 from human → @all]', '[sminos message from human id=5e551e17]']) {
+      expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', `${frame}\nRebase on main.\n${reply}`)), frame).toMatchObject({ frame, body: 'Rebase on main.' });
+    }
+    for (const body of [
+      'Rebase on main.', // no frame
+      '[sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you]', // a frame with no text after it
+      'Look: [sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you]\nhi', // not the whole line
+      'hi\n[sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you]\nthere', // not the first line
+      '[sminos wake from Cloud Infra id=383323af]\nhi', // no frame sminos writes now
+    ])
+      expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', body)), body).toMatchObject({ frame: null, body });
   });
 
   it('reads an in-process agent\'s <agent-message> wrapper, a hand-back among them', () => {

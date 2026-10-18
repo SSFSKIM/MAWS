@@ -10,12 +10,19 @@
 //   "plugin", name: "doperpowers"}` and no `asUser` (`isBridgeRow`), whatever the plugin asks, so the frame is the only
 //   word that it is one. The bridge's steers, interrupt rows and notes have the same shape, and none opens with a whole
 //   frame line;
-// - the other last hops queue the prompt as a peer's or a plugin's (`queued_command`).
+// - through sminos's inbox, the engine's messaging socket (a session with no bridge, or #233's fallback after an Esc),
+//   the engine keeps it as a peer message: a user row (idle) or a `queued_command` (busy) of origin `peer`, the frame
+//   the first line of its envelope's body (`parsePeerMessage`'s `frame`); an engine through 2.1.289 queued it raw, the
+//   frame the prompt's own first line;
+// - the bridge's busy submission before #233 is a `queued_command` of origin `plugin`.
 // A prompt typed at the terminal, another plugin's row, or a row that marks no origin, never is.
 //
 // The tail matches a send by its frame (`tail.ts`). The session view draws a delivered row without its frame line: the
-// owner's own send (`from human`) needs none, its bubble says who wrote it; a peer's draws it as a label, the sender's
-// name in its own first paragraph. The label is in the text, not beside the bubble, because a delivery that entered a
+// owner's own send (`from human`) needs none, its bubble says who wrote it. One that came through the inbox is drawn as
+// the owner's own words too, not as the peer message the engine made of it: the envelope is only the channel. A peer's
+// in an envelope is left to MAWS's peer drawing (a message between agents, its frame and reply line cut from the body
+// by `parsePeerMessage`, the row naming its sender); one through the bridge or queued raw draws its frame as a label, the
+// sender's name in its own first paragraph. The label is in the text, not beside the bubble, because a delivery that entered a
 // running turn — one the engine queued there, or one the bridge appended — is drawn as MAWS draws any prompt queued
 // there: a bubble in the turn, under the message's own uuid (a queued one's `source_uuid`, an appended row's own),
 // captioned "Sent during this turn", and that caption is MAWS's alone. MAWS's backfill would otherwise draw no body for
@@ -24,6 +31,7 @@
 // (`humanQueuedPrompt`). The text the session read is otherwise unchanged; only the drawing's copy of the row changes,
 // the held row stays verbatim for the tail. The owner's send whose words are the engine's interrupt marker whole keeps
 // its frame line: without it MAWS would read the bubble as the marker, drawing nothing and stopping the turn.
+import { parsePeerMessage, sminosFrameSender } from '@shared/engine/peer-envelope';
 import type { JsonObject } from 'desk-hub/protocol';
 import { isInterruptionMarker } from '../../../../src/renderer/src/transcript/model/user-text';
 
@@ -39,22 +47,34 @@ export function isBridgeRow(row: JsonObject): boolean {
 
 /**
  * Where a row's prompts are, when it marks a delivery's provenance: a user row's content, submitted as the user
- * (`submitted`) or appended into the running turn by the bridge (`appended`), or a queued command's prompt; null for
- * any other row.
+ * (`submitted`) or appended into the running turn by the bridge (`appended`); a queued command's prompt; or the frame
+ * and words of a peer message the engine made of one, idle or queued (`enveloped`). Null for any other row.
  */
-type Prompts = { kind: 'submitted' | 'appended'; content: string | unknown[] } | { kind: 'queued'; prompt: string };
+type Prompts =
+  | { kind: 'submitted' | 'appended'; content: string | unknown[] }
+  | { kind: 'queued'; prompt: string }
+  | { kind: 'enveloped'; frame: string; words: string; queued: boolean };
+
+/** The frame and words of a peer message whose envelope's body opens with sminos's frame, else null. */
+function enveloped(text: string, queued: boolean): Prompts | null {
+  const envelope = parsePeerMessage(text);
+  return envelope?.kind === 'cross-session' && envelope.frame !== null ? { kind: 'enveloped', frame: envelope.frame, words: envelope.body, queued } : null;
+}
 
 function deliveredPrompts(row: JsonObject): Prompts | null {
   if (row.type === 'user') {
     const origin = object(row.origin);
-    const kind = origin?.kind === 'plugin' && origin.asUser === true ? 'submitted' : isBridgeRow(row) ? 'appended' : null;
     const content = object(row.message)?.content;
-    return kind !== null && (typeof content === 'string' || Array.isArray(content)) ? { kind, content } : null;
+    if (typeof content !== 'string' && !Array.isArray(content)) return null;
+    if (origin?.kind === 'peer') return enveloped(typeof content === 'string' ? content : content.flatMap((block) => (isText(block) ? [block.text] : [])).join('\n'), false);
+    const kind = origin?.kind === 'plugin' && origin.asUser === true ? 'submitted' : isBridgeRow(row) ? 'appended' : null;
+    return kind !== null ? { kind, content } : null;
   }
   const attachment = object(row.attachment);
   if (row.type !== 'attachment' || attachment?.type !== 'queued_command' || typeof attachment.prompt !== 'string') return null;
   const origin = object(attachment.origin);
-  return origin?.kind === 'peer' || origin?.kind === 'plugin' ? { kind: 'queued', prompt: attachment.prompt } : null;
+  if (origin?.kind === 'peer') return enveloped(attachment.prompt, true) ?? { kind: 'queued', prompt: attachment.prompt };
+  return origin?.kind === 'plugin' ? { kind: 'queued', prompt: attachment.prompt } : null;
 }
 
 const firstLine = (text: string) => text.split('\n', 1)[0];
@@ -62,39 +82,31 @@ const isText = (block: unknown): block is { type: 'text'; text: string } => obje
 
 /**
  * The first lines of the prompts a row carries that may be deliveries — a user row's text or text blocks (never a tool's
- * result), a queued command's prompt — each with its text after it, as sminos writes a frame; none for a row that marks
- * no delivery's provenance.
+ * result), a queued command's prompt, each with its text after it as sminos writes a frame, or a peer message's frame —
+ * none for a row that marks no delivery's provenance.
  */
 export function deliveredLines(row: JsonObject): string[] {
   const prompts = deliveredPrompts(row);
   if (prompts === null) return [];
   const framed = (text: string) => (text.includes('\n') ? [firstLine(text)] : []);
+  if (prompts.kind === 'enveloped') return [prompts.frame];
   if (prompts.kind === 'queued') return framed(prompts.prompt);
   if (typeof prompts.content === 'string') return framed(prompts.content);
   return prompts.content.flatMap((block) => (isText(block) ? framed(block.text) : []));
 }
 
-const CHAT = /^\[sminos chat .+? \S+:\d+ from (.+) → @(?:you|all)(?: \| unread [1-9][0-9]*)?\]$/;
-const MESSAGE = /^\[sminos message from (.+) id=\S+\]$/;
-
-/** Who a frame line says sent the event, or null when the line is not a whole frame. */
-function senderOf(line: string): string | null {
-  return (CHAT.exec(line) ?? MESSAGE.exec(line))?.[1] ?? null;
-}
-
-/** The first prompt text of a delivered row, where its frame would be. */
-function firstPrompt(prompts: Prompts): string | null {
-  if (prompts.kind === 'queued') return prompts.prompt;
-  if (typeof prompts.content === 'string') return prompts.content;
-  return prompts.content.find(isText)?.text ?? null;
+/** The line where a delivered row's frame would be: its first prompt's first line, with text after it. */
+function frameLine(prompts: Prompts): string | null {
+  if (prompts.kind === 'enveloped') return prompts.frame;
+  const text = prompts.kind === 'queued' ? prompts.prompt : typeof prompts.content === 'string' ? prompts.content : (prompts.content.find(isText)?.text ?? null);
+  return text?.includes('\n') ? firstLine(text) : null;
 }
 
 /** The frame a delivered row opens with — who sent it, and whether that is the owner — or null for any other row. */
 export function deliveryFrame(row: JsonObject): { from: string; own: boolean } | null {
   const prompts = deliveredPrompts(row);
-  const text = prompts && firstPrompt(prompts);
-  if (!text?.includes('\n')) return null;
-  const from = senderOf(firstLine(text));
+  const line = prompts && frameLine(prompts);
+  const from = line ? sminosFrameSender(line) : null;
   return from === null ? null : { from, own: from === 'human' };
 }
 
@@ -117,23 +129,34 @@ export function asQueuedPrompt(row: JsonObject, prompt: string | JsonObject[]): 
 /**
  * The row as the session view draws it: a delivered row with its frame line dropped (the owner's own send) or drawn as
  * a label naming the peer who sent it, and a delivery that entered a running turn (queued there, or appended by the
- * bridge) in the shape of a prompt queued there, under the message's own uuid; any other row as it is.
+ * bridge) in the shape of a prompt queued there, under the message's own uuid. The owner's send that came through the
+ * inbox is drawn as their own prompt; a peer's, and any other row, as it is.
  */
 export function deliveryAsDrawn(row: JsonObject): JsonObject {
   const frame = deliveryFrame(row);
   if (frame === null) return row;
-  const cut = (text: string) => {
-    const words = text.slice(text.indexOf('\n') + 1);
-    if (frame.own && isInterruptionMarker(null, words)) return text; // words that are the engine's marker whole would read as one: kept framed
+  const drawnWords = (line: string, words: string) => {
+    if (frame.own && isInterruptionMarker(null, words)) return `${line}\n${words}`; // the engine's marker whole would read as one: kept framed
     return (frame.own ? '' : `*From ${literal(frame.from)}*\n\n`) + words;
   };
-  const prompts = deliveredPrompts(row)!;
-  if (prompts.kind === 'queued') {
+  const cut = (text: string) => drawnWords(firstLine(text), text.slice(text.indexOf('\n') + 1));
+  const asQueued = (prompt: string): JsonObject => {
     const attachment = { ...object(row.attachment)! };
     delete attachment.isMeta; // MAWS reads a meta queued prompt as context, not as a prompt
     const source = typeof attachment.source_uuid === 'string' && attachment.source_uuid !== '' ? attachment.source_uuid : row.uuid;
-    return { ...row, attachment: { ...attachment, prompt: cut(prompts.prompt), commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: source as string } };
+    return { ...row, attachment: { ...attachment, prompt, commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: source as string } };
+  };
+  const prompts = deliveredPrompts(row)!;
+  if (prompts.kind === 'enveloped') {
+    if (!frame.own) return row; // a peer's: MAWS draws it as a message between agents
+    const words = drawnWords(prompts.frame, prompts.words);
+    if (prompts.queued) return asQueued(words);
+    const drawn: JsonObject = { ...row, message: { ...object(row.message)!, content: words } };
+    delete drawn.origin; // a prompt of the owner's, not the peer message the engine made of it
+    delete drawn.isMeta;
+    return drawn;
   }
+  if (prompts.kind === 'queued') return asQueued(cut(prompts.prompt));
   const first = Array.isArray(prompts.content) ? prompts.content.findIndex(isText) : -1;
   const content =
     typeof prompts.content === 'string'

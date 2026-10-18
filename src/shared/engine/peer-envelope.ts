@@ -8,6 +8,10 @@
 // `pass3/e7-peer-a` seq 73 and 258, `e7-peer-transcripts/db45d92e…` line 74). The envelope is `<cross-session-message
 // …>` from another session or `<agent-message from="<agentId>">` from an in-process agent's SendMessage to the main
 // conversation (C8b, `test/fixtures/engine/handback-pointer.jsonl` seq 207).
+//
+// A message sminos sends through the engine's messaging socket opens its body with sminos's frame line, naming the
+// event, and ends it with a reply line; both are for the model. The body drawn cuts them (the agent_message row already
+// names the sender), and `frame` keeps the frame line, by which the desk knows a delivery of its own sends.
 import type { ContentBlock, EventPayload } from '../graph/events';
 import type { AgentId, MessageUuid } from '../graph/ids';
 
@@ -19,7 +23,8 @@ export interface PeerEnvelope {
   fromMode: string | null;
   fromPlugin: string | null;
   hopChain: string[];
-  body: string; // what lies inside the tags, as drawn: sminos's reply line, its last line when it carries one, dropped
+  body: string; // what lies inside the tags, as drawn: sminos's frame line and reply line, when it carries them, dropped
+  frame: string | null; // sminos's frame line the body opened with, naming the event it delivers; null for any other
   midTurn: boolean; // the header says "while you were working", or there is none (the bare envelope)
   lineage: 'peer' | 'descendant'; // descendant: the trailer says the sender is an agent inside this same session
   replyable: boolean; // false when the suffix says SendMessage cannot reach the sender (the host-injected lane)
@@ -49,6 +54,23 @@ const UNKNOWN_SENDER = 'unknown';
 // the sending machine's path and the address. It tells a model with no sminos context how to answer; no reader is shown
 // it, so the body drawn ends before it. Matched whole, as the body's last line only.
 const SMINOS_REPLY_LINE = /(?:^|\n)\[To reply, run in Bash: \/[^\n"]*\/sminos say "@[^\s"/]+\/[^\s"/]+ <your reply>"\]$/;
+// sminos's frame line, the first line of every event it pushes, followed by the event's text (doperpowers `sminos.py`:
+// `compose_chat_frame`, `compose_frame`): `[sminos chat <project> <writer_short>:<seq> from <from> → <@you | @all>[ |
+// unread N]]`, or `[sminos message from <via or from> id=<msg_id>]` for an event that carries a `msg_id`.
+const SMINOS_CHAT_FRAME = /^\[sminos chat .+? \S+:\d+ from (.+) → @(?:you|all)(?: \| unread [1-9][0-9]*)?\]$/;
+const SMINOS_MESSAGE_FRAME = /^\[sminos message from (.+) id=\S+\]$/;
+
+/** Who a sminos frame line says sent the event, or null when the line is not a whole frame. */
+export function sminosFrameSender(line: string): string | null {
+  return (SMINOS_CHAT_FRAME.exec(line) ?? SMINOS_MESSAGE_FRAME.exec(line))?.[1] ?? null;
+}
+
+/** A sminos message's text as drawn: its frame line (whole, the first, with the text after it) and its reply line cut. */
+function sminosParts(body: string): { frame: string | null; body: string } {
+  const first = body.split('\n', 1)[0]!;
+  const frame = body.includes('\n') && sminosFrameSender(first) !== null ? first : null;
+  return { frame, body: (frame === null ? body : body.slice(frame.length + 1)).replace(SMINOS_REPLY_LINE, '') };
+}
 
 export function parsePeerMessage(text: string): PeerEnvelope | AgentMessage | null {
   let rest = text.trim();
@@ -73,7 +95,7 @@ export function parsePeerMessage(text: string): PeerEnvelope | AgentMessage | nu
   return {
     kind: 'cross-session', from, fromSession: attributes.get('from-session') ?? null, fromName: attributes.get('from-name') ?? null,
     fromMode: attributes.get('from-mode') ?? null, fromPlugin: attributes.get('from-plugin') ?? null,
-    hopChain: attributes.get('hop-chain')?.split(',').filter((hop) => hop.length > 0) ?? [], body: body.replace(SMINOS_REPLY_LINE, ''),
+    hopChain: attributes.get('hop-chain')?.split(',').filter((hop) => hop.length > 0) ?? [], ...sminosParts(body),
     midTurn: header === null || header[0].includes('while you were working'),
     lineage: trailer.includes(DESCENDANT_TRAILER) ? 'descendant' : 'peer',
     replyable: !trailer.includes(HOST_INJECTED),

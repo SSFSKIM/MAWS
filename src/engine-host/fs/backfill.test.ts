@@ -692,6 +692,15 @@ describe('peer messages from disk (E7)', () => {
       const events = mapAll([rec({ type: 'attachment', uuid: 'q2', timestamp: at(1), attachment: { type: 'queued_command', prompt: envelope(body), source_uuid: 's2', commandMode: 'prompt', origin: origin(body), isMeta: true } })]);
       expect(only(events, 'peer.message')[0]).toMatchObject({ text: `Paste this to them:\n${REPLY}\nthen rebase.` });
     });
+
+    it('draws a message without its frame line either: the row already names its sender', () => {
+      const body = `[sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you]\nRebase on main.\n${REPLY}`;
+      for (const record of [
+        rec({ type: 'user', uuid: 'p3', timestamp: at(1), isMeta: true, origin: origin(body), message: { role: 'user', content: `Another Claude session sent a message:\n${envelope(body)}\n\n${TRAILER}` } }),
+        rec({ type: 'attachment', uuid: 'q3', timestamp: at(1), attachment: { type: 'queued_command', prompt: envelope(body), source_uuid: 's3', commandMode: 'prompt', origin: origin(body), isMeta: true } }),
+      ])
+        expect(only(mapAll([record]), 'peer.message')[0]).toMatchObject({ text: 'Rebase on main.', fromName: 'maws-fe' });
+    });
   });
 
   it('keeps a peer record carrying a tool result off the peer path', () => {
