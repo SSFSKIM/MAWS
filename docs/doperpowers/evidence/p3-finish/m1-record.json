@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 2,
-    "defer:pending": 121,
+    "defer:committed": 3,
+    "defer:pending": 120,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -276,7 +276,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L27; parent Decision Log 106): No supported native API/proven mechanism yet; preserve the case for a native capability pass. Owner: P4's native capability pass; revalidated at each Electron bump.",
       "remainingClause": "Revisit when the serialize addon carries links, or serialise links beside the checkpoint. Re-deferred 2026-10-07 (E11 1.6): a serialize-addon limit, by design. Owner: P2 (the terminal; revisit when the addon carries links). Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L26): a serialize-addon limit; revisit when the addon carries links. Owner: P3 (the terminal). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L27; parent Decision Log 106): No supported native API/proven mechanism yet; preserve the case for a native capability pass. Owner: P4's native capability pass; revalidated at each Electron bump.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "665c0db98ffff384bfa6e495479de33a889b051c"
     },
     {
       "line": 28,
@@ -286,8 +286,8 @@
       "triageReason": "Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L28; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
       "remainingClause": "The store is kept across hot updates (`import.meta.hot.data`), or the harness reloads on any change under `transcript/model/`. Re-deferred 2026-10-07 (E11 1.6): development only. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L27): development only (`pnpm dev:harness` hot update); no product effect. Owner: P3. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L28; parent Decision Log 106): Rare/hypothetical edge with no current daily-use failure; retain the recorded reproducer/closing condition for P4. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 29,
