@@ -139,6 +139,7 @@ export interface EngineIpcDeps {
   userData: string;
   replayEnabled: boolean; // MAWS_ENGINE_REPLAY === '1'
   replayRowMs?: number; // E10: MAWS_E2E_REPLAY_ROW_MS under MAWS_E2E=1, the pace of a replay's `in` rows (default 0, at once)
+  replayTranscripts?: string | null; // P3-F L242: the scratch store's projects a replay seeds transcripts into (./replay-transcript.ts)
   cwd?: string; // resolves relative replay paths and the prelude; default process.cwd()
   store?: SessionStateStore; // default FileSessionStateStore(userData), the P0 store
   table?: ProcessTable;
@@ -253,6 +254,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     userData: deps.userData,
     replayEnabled: deps.replayEnabled,
     replayRowMs: deps.replayRowMs, // E10
+    replayTranscripts: deps.replayTranscripts, // P3-F L242
     cwd: deps.cwd ?? process.cwd(),
     table,
     store,

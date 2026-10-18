@@ -19,6 +19,8 @@
 // What the person does to a plugin's drawing (presses, inputs, picks, a pane closed) is still held and matched in order.
 // E10 (Design 12): with `rowDelayMs` the replay waits that long before each `in` row it plays, so a replay streams at a
 // pace (a kept session goes on streaming while the app is away); without it, `in` rows play at once.
+// P3-F L242: `onFirstUser` hears the first `user` write the replay takes, as written: the moment the engine accepts a
+// session's first prompt, which is when it writes the session's transcript (the launcher's seed, ./replay-transcript.ts).
 import { isDeepStrictEqual } from 'node:util';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
@@ -108,7 +110,10 @@ function isReplayRead(request: { subtype: string; dry_run?: unknown }): boolean 
   return requestClassOf(request.subtype) === 'read' || (request.subtype === 'rewind_files' && request.dry_run === true);
 }
 
-export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[]; onHold?: (row: JournalRow) => void; surfaceReads?: boolean; rowDelayMs?: number }): ReplayTransport {
+export function replayEngine(
+  journal: JournalRow[],
+  opts: { prelude: JournalRow[]; onHold?: (row: JournalRow) => void; surfaceReads?: boolean; rowDelayMs?: number; onFirstUser?: (written: StdinFrame) => void },
+): ReplayTransport {
   const rows = journal;
   // R2: the recorded surface reads (their out row's index, key and the engine's answer), and the rows the cursor passes over
   const surfaceReads: { index: number; key: string; response: Frame }[] = [];
@@ -137,6 +142,7 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
   let held: JournalRow | null = null; // the `out` row `onHold` was last told about
   let paced = -1; // E10: the index of the `in` row whose delay has run
   let endPacing: (() => void) | null = null; // E10: ends a row's wait early (a kill), never a write
+  let tookUser = false; // P3-F L242: `onFirstUser` told
   let resolveExited!: (v: { code: number | null; signal: NodeJS.Signals | null }) => void;
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
 
@@ -223,7 +229,12 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
     if (!matches(recorded, written, idMap)) return endAsMismatch(describeOut(row));
     learnIds(recorded, written);
     cursor += 1;
-    waiters.shift()!.resolve();
+    const waiter = waiters.shift()!;
+    if (recorded.type === 'user' && !tookUser) {
+      tookUser = true;
+      opts.onFirstUser?.(waiter.frame);
+    }
+    waiter.resolve();
     return null;
   };
 

@@ -171,6 +171,23 @@ describe('side threads', () => {
     expect(await h.service.listIntents()).toEqual([]);
   });
 
+  // P3-F L242: a blank chat (H's no-message Start: a pinned engine id and no transcript yet) has no conversation to fork;
+  // `--resume <pin> --fork-session` would fail after the start answered, so the card would read a send that never was
+  it('refuses a parent with a pinned engine id and no transcript yet (a blank chat), Side and Fork alike, before anything is created', async () => {
+    h.trustDirectory(h.work);
+    const blank = h.index.sessions.upsertFromSummary(summary({ sessionId: SID, directory: h.work, customTitle: 'Blank' })).record; // no transcript
+    const refused = { status: 'refused', reason: 'no_engine_session', message: 'the session has no engine conversation to fork yet' };
+    expect(await h.service.openSideThread(blank.appId, { kind: 'comment', anchor, text: 'Why?', screenshot: null })).toMatchObject(refused);
+    expect(await h.service.fork(blank.appId, { kind: 'inPlace' }, { message: null, rewindTo: null })).toMatchObject(refused);
+    expect(h.host.launches).toEqual([]);
+    expect(h.host.calledWith('session.send')).toEqual([]);
+    expect(await h.service.listIntents()).toEqual([]);
+    h.writeTranscript(h.work, SID); // the engine wrote its first turn: the same parent forks
+    const outcome = await h.service.openSideThread(blank.appId, { kind: 'comment', anchor, text: 'Why?', screenshot: null });
+    expect(outcome).toMatchObject({ status: 'starting' });
+    expect(await h.settled(outcome.appSessionId)).toMatchObject({ phase: 'ready' });
+  });
+
   it('C10’s Fork carries fork lineage on its record', async () => {
     const parent = parentRecord();
     const outcome = await h.service.fork(parent.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
@@ -187,6 +204,7 @@ describe('side threads', () => {
       const parent = parentRecord();
       const first = await h.service.openSideThread(parent.appId, { kind: 'comment', anchor, text: 'Why?', screenshot: null });
       await h.settled(first.appSessionId);
+      h.writeTranscript(h.work, h.index.sessions.get(first.appSessionId)!.engineSessionId!); // the thread's first turn (P3-F L242)
       expect(launchOf(first.appSessionId).map((input) => input.artifactScope)).toEqual([[parent.appId]]);
       const nested = await h.service.openSideThread(first.appSessionId, { kind: 'btw', exchanges: [{ question: 'Q?', response: 'A' }], text: 'More.' });
       await h.settled(nested.appSessionId);

@@ -90,6 +90,27 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     expect(frameOf(items[2]!)).toMatchObject({ user_message_uuids: ['MINT-U'], user_message_uuid: 'MINT-U' });
   });
 
+  // P3-F L242: the moment the engine takes the first prompt, when it writes the session's transcript
+  it('tells onFirstUser the first user write it takes, once, as written', async () => {
+    const journal = [
+      row(1, 'out', { type: 'user', uuid: 'rec-u', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null }),
+      row(2, 'in', { type: 'result', user_message_uuids: ['rec-u'] }),
+      row(3, 'out', { type: 'user', uuid: 'rec-v', message: { role: 'user', content: 'again' }, parent_tool_use_id: null }),
+      row(4, 'in', { type: 'result', user_message_uuids: ['rec-v'] }),
+      row(5, 'meta', { event: 'exit', code: 0, signal: null }),
+    ];
+    const firstUser = vi.fn();
+    const transport = replayEngine(journal, { prelude, onFirstUser: firstUser });
+    const first: StdinFrame = { type: 'user', uuid: 'MINT-U', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null };
+    void transport.write(first);
+    await take(transport.frames, 1);
+    expect(firstUser).toHaveBeenCalledTimes(1);
+    expect(firstUser).toHaveBeenCalledWith(first);
+    void transport.write({ type: 'user', uuid: 'MINT-V', message: { role: 'user', content: 'again' }, parent_tool_use_id: null });
+    await take(transport.frames, 1);
+    expect(firstUser).toHaveBeenCalledTimes(1);
+  });
+
   it('matches a recorded control_cancel_request for a host-minted request by the id this run minted for it, and still refuses a cancel of another id', async () => {
     // a journal the host wrote under launch AAAAAAAA, replayed under launch BBBBBBBB
     const journal = [
