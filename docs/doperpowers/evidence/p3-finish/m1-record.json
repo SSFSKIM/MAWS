@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 101,
-    "defer:pending": 22,
+    "defer:committed": 102,
+    "defer:pending": 21,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1365,7 +1365,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L167; parent Decision Log 106): Closing clause requires extending a shared adapter/assets-version contract; no silent new contract in F. Ruled P4 at checkpoint 1 (parent Decision Log 106 (5)). Owner: P4.",
       "remainingClause": "The hook gains the restored version's provenance. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L167; parent Decision Log 106): Closing clause requires extending a shared adapter/assets-version contract; no silent new contract in F. Ruled P4 at checkpoint 1 (parent Decision Log 106 (5)). Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "bbc466b55daafb7ca8330d9dd87f19ccdd4d5d9d"
     },
     {
       "line": 169,
@@ -1375,8 +1375,8 @@
       "triageReason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L169; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "A `writeAs` option writing the main doc in the same frame, built as A's private `settle` does. Owner: A corrective brief after B lands, else P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L169; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 174,
