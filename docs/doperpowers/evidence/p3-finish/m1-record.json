@@ -1612,7 +1612,7 @@
       "commit": "d616b6f7dceeec022d8dfb6037c3396229cdeb3d"
     }
   ],
-  "range": "f75d4dbac..453ee1a9d (149 row commits, nothing else interleaved), then this records-only commit",
+  "range": "Authoritative scope: the 149 per-row commit ids listed in rows[].commit (first f396605d8, last 881562a30), each made on f75d4dbac or a later row commit, plus the records-only commits 7d9c8de2b and this correction. f75d4dbac..7d9c8de2b holds 151 commits: those 149 rows, 7d9c8de2b, and the controller's concurrent 453ee1a9d (DL107 triage/plan record: tracker-check.txt, triage-index.json, triage.txt, the P3-F plan; no tracker change), which is outside this wave's scope. The earlier statement that nothing else was interleaved was wrong.",
   "summary": {
     "preclosedRemoved": [
       56,
@@ -1653,7 +1653,7 @@
     "effectiveBins": "fix 53 / sitting 10 / close 9 / defer 124 / theirs 42 = 238 frozen open rows; 17 preclosed (16 removed, L230 untouched)",
     "tableRows": "tracker table 251 rows before this wave, 226 after (25 removals; 124 rows edited in place)"
   },
-  "validation": "Documentary only (no app, engine, gate or test run). Checked with a script against tracker-m0.json and the tracker at f75d4dbac: each removed frozen row is absent; each re-deferred row appears exactly once as its frozen text with only the appended sentence before the final cell border; L230 matches its frozen text; the whole tracker equals the base with exactly these 149 changes, so no fix, sitting or theirs row and no other row moved; each of the 149 commits touches only docs/tech-debt-tracker.md and this file, changes exactly one tracker row (numstat 0/1 for a removal, 1/1 for a re-deferral), carries no attribution, and its subject names its handle.",
+  "validation": "Documentary only (no app, engine, gate or test run). Checked with a script against tracker-m0.json and the tracker at f75d4dbac: each removed frozen row is absent; each re-deferred row appears exactly once as its frozen text with only the appended sentence before the final cell border; L230 matches its frozen text; the whole tracker equals the base with exactly these 149 changes (453ee1a9d touches no tracker line), so no fix, sitting or theirs row and no other row moved; each of the 149 commits touches only docs/tech-debt-tracker.md and this file, changes exactly one tracker row (numstat 0/1 for a removal, 1/1 for a re-deferral), carries no attribution, and its subject names its handle.",
   "notes": [
     "L56: P2-F 1.6 (ad89b5809) appended a re-deferral to the cua_repl session after the row's cua #102 closure; the closure is verified in code, so the trailing re-deferral was stale.",
     "L225: the recorded closure says \"the suffix pass runs after filtering\"; the code names labels over the unfiltered domain (render.ts:304-305, :364), so the clause is met despite that wording.",
