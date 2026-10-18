@@ -1,0 +1,50 @@
+{
+  "status": "five row commits source-complete; independent review and authoritative union pending, not accepted",
+  "executor": "af7fe2d9bf548028a",
+  "reviewer": "a69c0ca8f5888e14f",
+  "reviewBase": "4b0e1f1e3e2ba06dcb41f6bde1ba783499b8afa3",
+  "reviewHead": "2e0b4d22431e427861812c7fb5ec2128c0a7396d",
+  "reviewRound": 1,
+  "commits": {
+    "L187": "d560d807a",
+    "L170": "674c06661",
+    "L241": "f6bf5d21d",
+    "L154": "c7547b91f",
+    "L230": "2e0b4d224"
+  },
+  "changes": {
+    "L187": "Block restore-delete already correct; tab analog red. removedBody resolves earlier item via left chain. Existing block first-deleter semantics retained; reviewer considers bounded attribution consistency.",
+    "L170": "Guarded local appendTransaction link normalization before PM-Y; binding/attribution skip, no throwing validator or fingerprint/version change",
+    "L241": "History Escape focuses visible page after preview unmount; Comments unchanged",
+    "L154": "Card Reply uses existing frame onSending and settles success/refusal; narrowed original row explicitly not pane/main-tab composer",
+    "L230": "Design standalone context uses existing useArtifactCommentTarget, no-context guidance, beside-chat unchanged; prior bd8532a18 document/deck proof preserved"
+  },
+  "checks": {
+    "logs": "/private/tmp/maws-review/w-doc-a/",
+    "controllerRead": {
+      "L187-green.log": "20pass/2files exit0",
+      "L170-green.log": "17pass/3files exit0",
+      "L241-green.log": "52pass/3files exit0",
+      "L154-green.log": "146pass/8files exit0",
+      "L230-green.log": "56pass/4files exit0"
+    },
+    "workerReported": "RED tests meaningful except initial L241 false-green: final visibility/focus-spy RED overwrote it; neighbouring greens and named eslint exit0",
+    "notRun": "local typecheck/app/engine/GUI/e2e"
+  },
+  "P4Remainder": {
+    "status": "architect-approved explicit new row, outside frozen M0 denominator; controller append in this commit",
+    "row": "| 2026-10-18 | P3-F (W-DOC-A, from L154) | A message sent to a comment's Side thread from the Side pane's or a main tab's composer, rather than the comment card's Reply, is not recorded in the artifact's comment thread: those composers draw the thread through SessionPane with no card frame (so no `onSending`), and the artifact's replica may not be open in the window at all. | L154 narrowed to the card path at P3-F's W-DOC-A (c7547b91f; `src/renderer/src/side/card/CardThread.tsx` `useReply`; `src/renderer/src/side/ThreadView.tsx` draws the thread through `SessionPane`, whose composer only sends to the session). | A human message sent to a side thread whose lineage anchor is `artifact-comment` is appended to that artifact's thread through a host-side artifact-thread write (a new contract: the thread the anchor names written without an open editor, credited to the owner, not duplicating the card's own record), or the owner rules that only the card's Reply is recorded. Owner: P4. |",
+    "reason": "pane/tab composer has no card frame and may have no open artifact replica; host-side artifact-thread write requires new contract"
+  },
+  "gateGroups": [
+    "static",
+    "unit",
+    "probes",
+    "unit:darwin",
+    "e2e:document-app",
+    "e2e:document",
+    "e2e:design",
+    "e2e:side"
+  ],
+  "next": "Independent review/fix if needed; union with DECK. No original clause beyond card path silently closed."
+}
