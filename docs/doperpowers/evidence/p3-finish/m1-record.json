@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 71,
-    "defer:pending": 52,
+    "defer:committed": 72,
+    "defer:pending": 51,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1035,7 +1035,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L120; parent Decision Log 106): No supported native API/proven mechanism yet; preserve the case for a native capability pass. Owner: P4's native capability pass; revalidated at each Electron bump.",
       "remainingClause": "Descriptor-relative listing (a native helper or a later Node API) closes the window. Owner: P3 (the manifest reader). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L120; parent Decision Log 106): No supported native API/proven mechanism yet; preserve the case for a native capability pass. Owner: P4's native capability pass; revalidated at each Electron bump.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "cd5c2b665adca0fa7f43ba0da1290b23bf91e942"
     },
     {
       "line": 121,
@@ -1045,8 +1045,8 @@
       "triageReason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L121; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "A take-over case in the session harness pins the clear. Owner: P3 (acquisition). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L121; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 122,
