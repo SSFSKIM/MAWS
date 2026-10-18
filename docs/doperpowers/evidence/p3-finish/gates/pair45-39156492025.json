@@ -53,5 +53,7 @@
   "fullSetCounterAdvance": false,
   "paidSpendUsd": 0,
   "viewerContext": "viewer-confound.json: custody after17:45Z unknown; remote=none not proof; no failure cause inferred",
-  "newMasterUnitReading": "Only all tests passing with hover-card Timeout._onTimeout after MainArea.test.tsx teardown and ReferenceError window is not defined reads against b1110be77 master row, one DL59 relaunch, no new row."
+  "newMasterUnitReading": "Only all tests passing with hover-card Timeout._onTimeout after MainArea.test.tsx teardown and ReferenceError window is not defined reads against b1110be77 master row, one DL59 relaunch, no new row.",
+  "queueThresholdTask": "bb4lghff2",
+  "queueThreshold": "one queue-age check at19:26:55Z (created+30min), not a completion waiter"
 }
