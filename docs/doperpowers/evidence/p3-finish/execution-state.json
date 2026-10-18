@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M1 pair2 single repair union39133832247 running after clean independent frontier review",
+  "phase": "pair2 native frontier accepted by architect; mechanical TS fix to next normal union; DOC-A/DECK orienting",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -92,7 +92,7 @@
     ]
   },
   "W-MINI": {
-    "status": "single remaining repair union running; no further iterative native gate budget",
+    "status": "native source frontier accepted; close L200/L201, other rows narrow to accepted pins/counts; documentary updates running",
     "foreground": "package-script activation permitted; lane hold lifted; child DL13",
     "executor": "ab180409652104010",
     "claims": "pair2-claims.json",
@@ -110,12 +110,12 @@
     "reviewFixCommit": "5f115a09d",
     "nativeReadings": "gates/pair2-diagnostic-39130559347.json",
     "L277SceneStreak": {
-      "passed": 1,
+      "passed": 2,
       "required": 10,
       "runs": [
-        39130559347
-      ],
-      "basis": "scene pass after1235d4a77; native target entry true; other scene failure does not erase case-specific streak"
+        39130559347,
+        39133832247
+      ]
     },
     "repairAssessment": "a788b678f28592255",
     "diagnosticSupplement": "14c3e6fd6",
@@ -125,10 +125,17 @@
       "63cbc8db7",
       "7a23ef400"
     ],
-    "nativeRepairReviewer": "afefa3ce1540fa23a"
+    "nativeRepairReviewer": "afefa3ce1540fa23a",
+    "L199MustReadSceneStreak": {
+      "passed": 1,
+      "required": 10,
+      "runs": [
+        39133832247
+      ]
+    }
   },
   "W-STORE": {
-    "status": "actual restyle e2e passed39130559347; token-test correction05d1f824b verified locally; authoritative rerun pending",
+    "status": "full unit and actual restyle e2e pass39133832247; unrelated MINI test TS correction proved next normal static gate",
     "executor": "a53b2ea8e3417bc02",
     "claims": "pair2-claims.json",
     "rowCommits": [
@@ -202,6 +209,16 @@
     "completionTask": "bru1fzgmn",
     "queueThresholdTask": "b1xey6vm4",
     "log": "/tmp/maws-review/gates/p3f-mini-store-repair-ci.log",
-    "status": "running"
+    "status": "completed",
+    "conclusion": "failure",
+    "failure": "static TS2322 test callback only; all13 other groups success"
+  },
+  "W-DOC-A": {
+    "executor": "a00549767dfb02089",
+    "status": "orienting; path claims must be acknowledged before edits"
+  },
+  "W-DECK": {
+    "executor": "af7fe2d9bf548028a",
+    "status": "orienting; path claims must be acknowledged before edits"
   }
 }

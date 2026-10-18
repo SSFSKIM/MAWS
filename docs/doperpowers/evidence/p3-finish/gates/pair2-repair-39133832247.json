@@ -22,9 +22,9 @@
     "e2e:dashboard",
     "e2e:transcript"
   ],
-  "status": "running",
+  "status": "completed",
   "attempt": 1,
-  "conclusion": null,
+  "conclusion": "failure",
   "wrapperPid": 39371,
   "completionTask": "bru1fzgmn",
   "completionMethod": "kqueue process-exit event; no polling",
@@ -43,5 +43,110 @@
   },
   "budget": "No further MINI diagnosis gate after this frontier; hold proven work and report exact carries if unresolved",
   "counterPolicy": "No full-set credit; L2771/10 and L199must-read0/10 before run",
-  "paidSpendUsd": 0
+  "paidSpendUsd": 0,
+  "completedAt": "2026-10-18T14:21:17Z",
+  "wrapperExit": 1,
+  "terminalLines": [
+    "ci-gate: run 39133832247 attempt 1",
+    "ci-gate: run 39133832247 failure",
+    "p3f-gate-exit: 1"
+  ],
+  "afterGateEvidenceStatus": "empty before result records",
+  "logArchive": {
+    "path": "/private/tmp/p3f-pair2-repair-logs.wcjeyH/logs.zip",
+    "sha256": "6422f7199bb641084d09e9b931659a48463f132282a886521d8be3ecccf5f41c",
+    "readWithoutExtraction": true
+  },
+  "jobs": {
+    "static": {
+      "status": "failure",
+      "error": "Transcript.test.tsx169:28 TS2322 VitestUtils not Awaitable<void>, onTestFinished expression callback returns restoreAllMocks result",
+      "lint": "success",
+      "gateScriptChecks": 47
+    },
+    "unit": {
+      "passed": 20345,
+      "skipped": 73,
+      "filesPassed": 1527,
+      "filesSkipped": 7
+    },
+    "probes": {
+      "passed": 219,
+      "skipped": 0
+    },
+    "unit:darwin": {
+      "passed": 282,
+      "files": 14
+    },
+    "e2e:widgets": {
+      "passed": 28,
+      "skipped": 0
+    },
+    "e2e:default": {
+      "passed": 82,
+      "skipped": 154
+    },
+    "e2e:to-human": {
+      "passed": 2,
+      "skipped": 0
+    },
+    "e2e:document-app": {
+      "passed": 10,
+      "skipped": 0
+    },
+    "e2e:presentations": {
+      "passed": 17,
+      "skipped": 2
+    },
+    "e2e:transcript": {
+      "passed": 35,
+      "skipped": 0
+    },
+    "e2e:artifacts": {
+      "passed": 4,
+      "skipped": 1
+    },
+    "e2e:document": {
+      "passed": 9,
+      "skipped": 0
+    },
+    "e2e:dashboard": {
+      "passed": 11,
+      "skipped": 0
+    },
+    "e2e:design-systems": {
+      "passed": 8,
+      "skipped": 0
+    },
+    "packaged": "not selected; skipped"
+  },
+  "nativeReadings": {
+    "L199-paste": {
+      "caretEntry": "14:08:28.443Z native true; model23/34 copy selection",
+      "pasteEntry": "14:08:28.572Z native focused/contentsFocused true; model73/73 matches collapsed DOM at p1 end; original comment marks held/drawn launch plan",
+      "cutPasteEntry": "14:08:28.783Z native true; model81/81; original cut/copy/move assertions passed",
+      "disposition": "Model-aware readiness pin passes in foreground; no generic selection hook or product paste defect claimed. Earlier stale replacement inferred."
+    },
+    "L199-must-read": {
+      "entry": "14:00:14.955Z native focused/contentsFocused true",
+      "result": "scene passes after minimal handledFocus repair",
+      "streak": "1/10"
+    },
+    "L200": {
+      "activation": "14:05:56.683Z obtained true",
+      "entry": "14:05:56.686Z native focused/contentsFocused true",
+      "result": "Overview original assertions pass; named foreground clause satisfied"
+    },
+    "L201": "named widget case and group passed again",
+    "L217": "filmstrip original assertions pass second run; entry14:10:34.557Z foreground false/native false/opacity0. Source ordering pin passes, no measured product repair claimed.",
+    "L264": "default passed, named union not full-set credit",
+    "L277": {
+      "entry": "14:08:33.805Z native true",
+      "result": "restore scene passes",
+      "streak": "2/10"
+    }
+  },
+  "store": "Token guard and full unit now pass; actual doc/deck live restyle and retained pinned look passed again; holds5/5 in1305ms.",
+  "architectRuling": "Paste observational caret-readiness pin accepted; close L200/L201. L217 test-timing branch accepted, following-set monitoring remains; same-line failure reopens as product row/native trace, not a P4 carry. L264 full-set remainder. Lane-wide foreground not F prerequisite: CI-opt decides after landing/counts; per-group opt-ins stay. TS callback fix proved next DOC-A+DECK union, no third MINI gate.",
+  "next": "Mechanical void callback fix dispatched; documentary row update running, next pair orienting before disjoint path acknowledgment."
 }

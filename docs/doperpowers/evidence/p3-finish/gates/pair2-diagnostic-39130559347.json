@@ -111,7 +111,7 @@
     },
     "e2e:artifacts": {
       "passed": 4,
-      "skipped": 0
+      "skipped": 1
     },
     "e2e:presentations": {
       "passed": 17,
@@ -160,5 +160,6 @@
     "completionTask": "b7408uqe9",
     "completionTaskExit": 0,
     "wrapperExit": 1
-  }
+  },
+  "countCorrection": "Original artifacts skipped count corrected0->1 after reading exact summary line13:26:06.1777400Z; pass count4 unchanged."
 }
