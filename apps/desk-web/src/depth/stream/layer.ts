@@ -88,29 +88,44 @@ export class StreamingLayer {
    * snapshot is installed), so a block never leaves before its row is drawn. With neither, its step ended, and it goes.
    * A snapshot cut before a `block-row` the old subscription delivered still streams the block that row named: its copy
    * is dropped, and the block takes no more chunks, whether it was settled already or is still drawn awaiting its row.
-   * `held` says whether a named row is among the rows held now.
+   * `lands` says whether a named row will land without a page (one held now, or one still to come live); a block whose
+   * named row will not waits for `landing` instead, so it is never left drawn for a row that may never come.
+   *
+   * A snapshot older than what was drawn (a producer that went back) undoes none of it: each request keeps the higher
+   * of the two watermarks, so a chunk the drawing holds is not applied again, and a block both hold keeps the drawn text
+   * where the drawing's watermark is at or past the snapshot's. An ended request stays ended, whether or not the snapshot
+   * still streams it: the blocks its `step-end` dropped are not drawn again from the snapshot's copy, and it takes no
+   * more chunks.
    */
-  resume(streaming: readonly Streaming[], landing: string | null, held: (uuid: string) => boolean): void {
+  resume(streaming: readonly Streaming[], landing: string | null, lands: (uuid: string) => boolean): void {
     const before = this.requests;
     this.load(streaming);
     const loaded = this.requests;
     this.requests = new Map();
     // The requests in the order they first appeared: those drawn before, then those the gap started.
     for (const [key, old] of before) {
-      const request = loaded.get(key);
+      // An ended request is kept where the snapshot no longer streams it, so it still takes no chunk.
+      const request = loaded.get(key) ?? (old.ended ? this.request(old.turnId, old.agentId, old.step) : undefined);
+      let keepDrawn = false;
       if (request) {
         for (const index of old.named) {
           request.blocks.delete(index);
           request.named.add(index);
         }
+        if (old.ended) {
+          request.ended = true;
+          request.blocks.clear(); // the snapshot's copies of the blocks the step-end dropped
+        }
+        keepDrawn = old.upTo >= request.upTo;
+        request.upTo = Math.max(request.upTo, old.upTo);
       }
       for (const [index, block] of old.blocks) {
         const fresh = request?.blocks.get(index);
         if (fresh) {
-          request!.blocks.set(index, Object.assign(block, { kind: fresh.kind, text: fresh.text, toolName: fresh.toolName, settledBy: null }));
+          request!.blocks.set(index, keepDrawn ? block : Object.assign(block, { kind: fresh.kind, text: fresh.text, toolName: fresh.toolName, settledBy: null }));
           continue;
         }
-        const settledBy = block.settledBy !== null && held(block.settledBy) ? block.settledBy : landing;
+        const settledBy = block.settledBy !== null && lands(block.settledBy) ? block.settledBy : landing;
         if (settledBy === null) continue;
         const into = request ?? this.request(old.turnId, old.agentId, old.step);
         into.named.add(index);

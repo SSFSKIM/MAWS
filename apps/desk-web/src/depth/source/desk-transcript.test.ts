@@ -419,6 +419,28 @@ describe('the main transcript through the session plane', () => {
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
   });
 
+  it('a block named before the interruption, its row not yet in, keeps waiting for that row through a fresh snapshot cut before it', async () => {
+    // A row trails its block-row (the engine flushes its transcript every 100 ms): the interruption, and the fresh
+    // snapshot's cut, fall between them, so the row comes in the live part and the snapshot brings no row.
+    const script = scriptOf(recording.session, null);
+    const named = script.findIndex((item) => item.kind === 'block-row');
+    const { uuid } = script[named].body as { uuid: string };
+    plane.snapshot(script, 0);
+    await settle();
+    await step(script.slice(0, named + 1));
+    expect(drawnBy(uuid)).toBe(true);
+    plane.current.listener.interrupted();
+    plane.snapshot(script, named + 1);
+    await settle();
+    await settle();
+    expect(drawnBy(uuid)).toBe(true); // still drawn: its row is not in the store yet
+    check();
+    await step(script.slice(named + 1));
+    expect(seen(uuid)).toBe(true);
+    expect(drawnBy(uuid)).toBe(false);
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
   // The fixture's main transcript: row 15 is a response's thinking block and row 16 its text; row 21 is the last
   // response of a turn, and row 23 starts the next.
   it('an aborted response drops its partial text at its step-end and keeps what was written', async () => {

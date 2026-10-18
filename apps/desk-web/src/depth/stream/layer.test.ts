@@ -212,4 +212,46 @@ describe('the streaming layer', () => {
     layer.settle('r-named');
     expect(drawn(layer)).toEqual([]);
   });
+
+  it('a snapshot older than what it drew truncates nothing: the request keeps the drawn text and the higher watermark', () => {
+    const layer = new StreamingLayer();
+    layer.chunk(text(0, 0, 0, 'Hel'));
+    layer.chunk(text(0, 1, 0, 'lo, '));
+    layer.chunk(text(0, 2, 0, 'wor'));
+    const block = layer.blocks(null)[0];
+    // A producer that went back: its snapshot holds the request only through chunk 0.
+    layer.resume([{ turnId: 't1', agentId: null, step: 0, upTo: 0, blocks: [{ index: 0, kind: 'text', text: 'Hel', upTo: 0 }] }], null, () => false);
+    expect(drawn(layer)).toEqual([['text', 'Hello, wor']]);
+    expect(layer.blocks(null)[0]).toBe(block);
+    expect(layer.chunk(text(0, 1, 0, 'lo, '))).toBe(false); // sent again after the older snapshot: drawn already
+    expect(layer.chunk(text(0, 2, 0, 'wor'))).toBe(false);
+    expect(layer.chunk(text(0, 3, 0, 'ld.'))).toBe(true);
+    expect(drawn(layer)).toEqual([['text', 'Hello, world.']]);
+  });
+
+  it('an ended request stays ended through a snapshot older than its step-end: what the step-end dropped is not drawn again, and its chunks are not taken', () => {
+    const play = (layer: StreamingLayer) => {
+      layer.chunk(text(0, 0, 0, 'Written.'));
+      layer.blockRow(blockRow(0, 0, 'r0'));
+      layer.chunk(text(0, 1, 1, 'Half an ans'));
+      layer.stepEnd({ turnId: 't1', agentId: null, step: 0 });
+      expect(drawn(layer)).toEqual([['text', 'Written.']]);
+    };
+    // The older snapshot still streams the aborted block.
+    const layer = new StreamingLayer();
+    play(layer);
+    layer.resume([{ turnId: 't1', agentId: null, step: 0, upTo: 1, blocks: [{ index: 1, kind: 'text', text: 'Half an ans', upTo: 1 }] }], null, (uuid) => uuid === 'r0');
+    expect(drawn(layer)).toEqual([['text', 'Written.']]);
+    expect(layer.chunk(text(0, 2, 1, 'wer.'))).toBe(false);
+    expect(drawn(layer)).toEqual([['text', 'Written.']]);
+    layer.settle('r0');
+    expect(drawn(layer)).toEqual([]);
+
+    // A snapshot that no longer streams it: the request is still known as ended, so a chunk sent again opens nothing.
+    const quiet = new StreamingLayer();
+    play(quiet);
+    quiet.resume([], null, (uuid) => uuid === 'r0');
+    expect(quiet.chunk(text(0, 1, 1, 'Half an ans'))).toBe(false);
+    expect(drawn(quiet)).toEqual([['text', 'Written.']]);
+  });
 });
