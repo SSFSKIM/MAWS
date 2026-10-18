@@ -707,8 +707,9 @@ export class FakeMachine {
       case 'steer': {
         const depth = this.sessions.get(rpc.args.session)!;
         if (depth.mainTurn === null) return fail('idle', 'no turn is running to steer: send it instead');
-        // The bridge appends a steer (`$.session.append`), which the engine keeps meta with the plugin's origin.
-        const row = { ...userRow(depth.id, rpc.args.text), isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' } } as Row;
+        // The bridge appends a steer (`$.session.append`), which the engine keeps meta with the plugin's origin: the
+        // owner's words under the steer's own first line (doperpowers 7.180.0, DX5 `steer` [steer-line]).
+        const row = { ...userRow(depth.id, `[sminos steer from human]\n${rpc.args.text}`), isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' } } as Row;
         const outcome = this.traced(rpc, record, depth.id, { row: row.uuid }, row);
         depth.appendRow(null, row);
         return outcome;

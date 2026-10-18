@@ -189,6 +189,34 @@ describe('the rows off the live chain', () => {
     expect(user(rows, 'use the split store')).toMatchObject({ dropped: false, steer: true });
   });
 
+  it('a steer with its own line (7.180.0 on) is the same owner input by its words: undone, it draws them as not read; sent again on the chain, it draws once', async () => {
+    const c = new Chain();
+    const ended = c.end();
+    const abandoned = c.prompt('Fix the errors.');
+    const undone = c.steer('use the split store');
+    c.prompt('Fix the errors.', ended);
+    c.answer('On it.');
+    const kept = c.steer('mind the tests');
+    c.answer('Minding them.');
+    c.end();
+    const lone = await drawn(c.rows, [abandoned, undone]);
+    expect(bubbles(lone.rows)).toEqual(['use the split store', 'Fix the errors.', 'mind the tests']);
+    expect(user(lone.rows, 'use the split store')).toMatchObject({ dropped: true, steer: false, messageUuid: undone.uuid });
+    expect(user(lone.rows, 'mind the tests')).toMatchObject({ dropped: false, steer: true, messageUuid: kept.uuid });
+    const again = new Chain();
+    const end = again.end();
+    const first = again.prompt('Fix the errors.');
+    const lost = again.steer('use the split store');
+    again.prompt('Fix the errors.', end);
+    again.answer('On it.');
+    again.steer('use the split store');
+    again.answer('Using the split store.');
+    again.end();
+    const { rows } = await drawn(again.rows, [first, lost]);
+    expect(bubbles(rows)).toEqual(['Fix the errors.', 'use the split store']);
+    expect(user(rows, 'use the split store')).toMatchObject({ dropped: false, steer: true });
+  });
+
   it('a delivery the bridge appended again after an Esc is drawn once, the copy the engine read; one never appended again draws as not read', async () => {
     const c = new Chain();
     const ended = c.end();

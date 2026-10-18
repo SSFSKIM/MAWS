@@ -9,7 +9,7 @@
 //   loop's next model request: the engine keeps a plugin's appended row as a user row, `isMeta`, origin `{kind:
 //   "plugin", name: "doperpowers"}` and no `asUser` (`isBridgeRow`), whatever the plugin asks, so the frame is the only
 //   word that it is one. The bridge's steers, interrupt rows and notes have the same shape, and none opens with a whole
-//   frame line;
+//   frame line (a steer's own first line, `[sminos steer from human]`, names no event: `depth/source/bridge-rows.ts`);
 // - through sminos's inbox, the engine's messaging socket (a session with no bridge, or #233's fallback after an Esc),
 //   the engine keeps it as a peer message: a user row (idle) or a `queued_command` (busy) of origin `peer`, the frame
 //   the first line of its envelope's body (`parsePeerMessage`'s `frame`); an engine through 2.1.289 queued it raw, the

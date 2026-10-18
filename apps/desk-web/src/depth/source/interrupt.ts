@@ -23,7 +23,8 @@
 //   Bash call the interrupt stopped or could not stop.
 // A typed prompt, another plugin's row, or a row whose lines are not those never ends one, nor does a delivery frame.
 // Residual (the composite's writer's ruling, tech debt): a steer through a plugin older than #225 whose whole text is
-// one of these, since the bridge's steers are the same meta rows; #225's steer refuses such a text.
+// one of these, since the bridge's steers are the same meta rows; #225's steer refuses such a text, and from 7.180.0 a
+// steer's row opens with its own line (`bridge-rows.ts`, `STEER_LINE`), so its whole text is none of these.
 //
 // The bridge's record with "Task …" lines is multi-line, so MAWS's marker rule misses it. Its mapping takes it
 // normalized (`normalizeInterruptRow`, before MAWS's backfill sees it): its marker line alone, so the backfill reads the
