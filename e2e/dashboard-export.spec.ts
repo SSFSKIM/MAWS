@@ -79,10 +79,19 @@ async function docxParts(bytes: Buffer): Promise<{ zip: JSZip; document: string;
     pngs: await Promise.all(media.filter((name) => name.endsWith('.png')).map((name) => zip.file(name)!.async('uint8array'))),
   };
 }
-const exportedBy = (page: Page, artifactId: string, stem: string) => async (format: string) => {
-  const { path } = await ok<{ path: string }>(page, 'artifacts.export', { artifactId, format });
-  copyFileSync(path, `${PROOF}/${stem}.${format}`);
-  return readFileSync(path);
+/** The service's export of `format`: its bytes, its copy as evidence (`<stem>.<format>`, or `<stem>-<label>.<format>` for
+ * a later export of a format, so no export's evidence overwrites an earlier one's), and the exporter's own file under
+ * the store, by evidence name, in `files`. */
+const exportedBy = (page: Page, artifactId: string, stem: string) => {
+  const files = new Map<string, string>();
+  const exported = async (format: string, label?: string) => {
+    const { path } = await ok<{ path: string }>(page, 'artifacts.export', { artifactId, format });
+    const name = `${stem}${label === undefined ? '' : `-${label}`}.${format}`;
+    copyFileSync(path, `${PROOF}/${name}`);
+    files.set(name, path);
+    return readFileSync(path);
+  };
+  return Object.assign(exported, { files });
 };
 
 test('the four exports draw the editor’s figure and native table with snapshot times, from the menu and the service; a later replacement changes only later exports', async () => {
@@ -165,10 +174,19 @@ test('the four exports draw the editor’s figure and native table with snapshot
 
   await test.step('a replacement after the exports: the next export shows the new snapshot and time, the files written stay', async () => {
     await bindCsv(page, id, 'sales', { title: 'Sales', name: 'sales.csv', csv: NEW.csv, at: NEW.at, appSessionId: SESSION_A });
-    const md = (await exported('md')).toString('utf8');
+    const md = (await exported('md', 'replaced')).toString('utf8');
     expect(md).toContain('| 서울 | 310 |');
     expect(md).toContain(NEW_TIME);
-    expect(readFileSync(`${PROOF}/export-board.html`, 'utf8')).toContain(OLD_TIME);
+    // the exporter's own earlier files under the store, not the evidence copies: a new file for the new export, and each
+    // earlier one still the bytes it had when written (its evidence copy, taken then and untouched since)
+    const replaced = exported.files.get('export-board-replaced.md')!;
+    for (const name of ['export-board.html', 'export-board.md']) {
+      const file = exported.files.get(name)!;
+      expect(file, name).not.toBe(replaced);
+      expect(readFileSync(file).equals(readFileSync(`${PROOF}/${name}`)), `${name}: the exporter's file is unchanged`).toBe(true);
+    }
+    expect(readFileSync(exported.files.get('export-board.html')!, 'utf8')).toContain(OLD_TIME);
+    expect(readFileSync(exported.files.get('export-board.md')!, 'utf8')).toContain(OLD_TIME);
   });
   expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
