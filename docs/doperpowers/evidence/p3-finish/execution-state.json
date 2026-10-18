@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "DOC-A/DECK implementing disjoint approved paths; MINI TS lint slot-blocked; drag discriminator active",
+  "phase": "DOC-A/DECK implementing; MINI source and rows accepted with count remainders, TS proof in next union; drag B1 running",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -39,7 +39,7 @@
     "reviewRounds": 2
   },
   "dependencyInstall": "completed exit 0 under with-slot",
-  "dragDiscriminator": "A1 running39136242401; taskbffxxll3y, no result yet; wave gates retain priority",
+  "dragDiscriminator": "A1 drag18.2/18.8/19.1ms at loads4.34/4.31/4.41; B1 running39136925852 taskb03za34sw; no comparison yet",
   "commitLock": "/private/tmp/maws-p3f-commit.lock",
   "helper": "/private/tmp/p3f-commit-row.py",
   "paidSpendUsd": 0,
@@ -92,7 +92,7 @@
     ]
   },
   "W-MINI": {
-    "status": "native source frontier accepted; close L200/L201, other rows narrow to accepted pins/counts; documentary updates running",
+    "status": "source frontier and documentary updates accepted; source TS4b0e1f1e3 mechanically verified, next normal union proves typecheck",
     "foreground": "package-script activation permitted; lane hold lifted; child DL13",
     "executor": "ab180409652104010",
     "claims": "pair2-claims.json",
@@ -135,8 +135,20 @@
     },
     "tsFixLint": {
       "task": "bgmopgt3v",
-      "status": "queued on shared slots; exact void diff read",
-      "redundantWaiter": "bph5r69s0 stop requested; actual task auto-notifies"
+      "status": "completed",
+      "exit": 0,
+      "verification": "controller read Bash output eslint exit0; exact callback diff inspected",
+      "redundantWaiters": "worker reports bph5r69s0 and brq926ccm stopped; no repeated check"
+    },
+    "tsFixCommit": "4b0e1f1e3",
+    "documentaryCommits": {
+      "199": "0b4f2f07d",
+      "200": "5bf2421cc",
+      "201": "37dc9ca91",
+      "217": "1003b9c6b",
+      "264": "b9beae6ed",
+      "277": "0f2d04b9a",
+      "217-correction": "e9a818df2"
     }
   },
   "W-STORE": {

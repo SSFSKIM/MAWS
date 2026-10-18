@@ -153,5 +153,10 @@
     "task": "b1xey6vm4",
     "exit": 0,
     "stillQueuedAfter1800Seconds": []
+  },
+  "staticCorrection": {
+    "commit": "4b0e1f1e3",
+    "verification": "controller read exact callback-only diff and retained Bash eslint exit0",
+    "next": "authoritative typecheck in DOC-A/DECK union"
   }
 }
