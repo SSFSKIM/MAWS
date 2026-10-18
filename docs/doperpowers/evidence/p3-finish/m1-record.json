@@ -16,8 +16,8 @@
     "close:held": 1,
     "close:pending": 9,
     "defer:pending": 123,
-    "preclosed:committed": 4,
-    "preclosed:pending": 12,
+    "preclosed:committed": 5,
+    "preclosed:pending": 11,
     "preclosed:untouched": 1
   },
   "rows": [
@@ -51,15 +51,15 @@
       "action": "remove",
       "note": "Recorded closure intact: 'Closed 2026-10-16: scripts/ci-gate.sh --evidence (gate-offload Decision Log 48) uploads a green run's artefacts.'",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "5dda4ef6d24611d3931a408a3495d017c03e4be2"
     },
     {
       "line": 223,
       "bin": "preclosed",
       "action": "remove",
       "note": "Recorded closure intact: closed 2026-10-17 at E2's M6 tick ba05e4680 (on master).",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 224,
