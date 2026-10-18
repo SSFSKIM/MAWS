@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "all bounded pair4 repairs independently reviewed; current-source26-group shared pair4+pair5 gate next",
+  "phase": "shared pair4+pair5 current-source26-group run39156492025 active; MainArea test-only cleanup routed after launch for final pairs/freeze",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -547,5 +547,70 @@
   "nextCombinedGate": {
     "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:panel,e2e:side,e2e:to-human,e2e:transcript,e2e:default,e2e:browser,e2e:browser-comment,e2e:deliverables,e2e:library,e2e:available,e2e:terminal,e2e:agents,e2e:document-scale,e2e:design,e2e:dashboard-scale,e2e:dashboard,e2e:presentations-scale,e2e:artifacts-perf,packaged,e2e:connectors-direct",
     "status": "held for pair4 fixes/attribution; all reviewed current source, latest-master integration; no old-green credit on a changed tree"
+  },
+  "pair45Gate": {
+    "recordedAt": "2026-10-18T18:59:40Z",
+    "runId": 39156492025,
+    "attempt": 1,
+    "sourceCommit": "55d012a2e1245a872cf44764842fc155e3276aef",
+    "wrapperHead": "b1c6c53c2d0740a7a4eba1965da38ad68c52b4b4",
+    "createdAt": "2026-10-18T18:56:55Z",
+    "statusAtIdentityRead": "queued",
+    "conclusion": null,
+    "groups": [
+      "static",
+      "unit",
+      "probes",
+      "unit:darwin",
+      "e2e:document-app",
+      "e2e:document",
+      "e2e:panel",
+      "e2e:side",
+      "e2e:to-human",
+      "e2e:transcript",
+      "e2e:default",
+      "e2e:browser",
+      "e2e:browser-comment",
+      "e2e:deliverables",
+      "e2e:library",
+      "e2e:available",
+      "e2e:terminal",
+      "e2e:agents",
+      "e2e:document-scale",
+      "e2e:design",
+      "e2e:dashboard-scale",
+      "e2e:dashboard",
+      "e2e:presentations-scale",
+      "e2e:artifacts-perf",
+      "packaged",
+      "e2e:connectors-direct"
+    ],
+    "label": "p3f-pair45",
+    "completionTask": "byakt5a4b",
+    "completionMethod": "actual wrapper background Bash, automatic completion; no completion polling",
+    "wrapper": "/private/tmp/p3f-pair45-gate.sh",
+    "integration": {
+      "master": "b1110be77b024e3b8758353671e93552992184b5",
+      "merge": "55d012a2e1245a872cf44764842fc155e3276aef",
+      "trackerConflict": "append-only; resolved to exact ours plus exact three-line upstream suffix; incoming rows unchanged, no row discarded"
+    },
+    "reviewedRepairs": [
+      "f4f6a0b69 mechanical test/snapshots, a3683858e23dbb112 correct",
+      "3c475c9ed L242 fixtures plus fdfe73c31 standalone observational readiness, ad7e512b27334234f correct"
+    ],
+    "acceptance": "current-source shared pair4+pair5 union, not an artificial fix-only retry or whole set; own reds use DL59 afterward",
+    "nativeGreen": "pending",
+    "fullSetCounterAdvance": false,
+    "paidSpendUsd": 0,
+    "viewerContext": "viewer-confound.json: custody after17:45Z unknown; remote=none not proof; no failure cause inferred",
+    "newMasterUnitReading": "Only all tests passing with hover-card Timeout._onTimeout after MainArea.test.tsx teardown and ReferenceError window is not defined reads against b1110be77 master row, one DL59 relaunch, no new row."
+  },
+  "postPartitionIncomingRows": {
+    "source": "b1110be77b024e3b8758353671e93552992184b5",
+    "denominator": "all three outside immutable F M0",
+    "disclosure": "P3-owned, development StrictMode only; no F fix, carry with fix clause into next phase and section13 draft",
+    "DC9": "desk-owned, no action",
+    "MainArea": "P3 shell test-side cleanup assigned to a3e02495556068b4b after union launch; final-pairs/freeze window, hand-back unit proof, CI-opt repeat clause retained",
+    "decisionLog": "none"
   }
 }
