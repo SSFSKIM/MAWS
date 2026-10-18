@@ -237,7 +237,9 @@
   },
   "W-DECK": {
     "executor": "a00549767dfb02089",
-    "status": "claims acknowledged; implementing",
-    "claims": "pair3-claims.json"
+    "status": "source six commits complete; independent review running, not accepted",
+    "claims": "pair3-claims.json",
+    "reviewer": "a042b15ec9aa10fab",
+    "checkpoint": "waves/W-DECK-checkpoint.json"
   }
 }
