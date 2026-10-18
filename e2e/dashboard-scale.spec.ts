@@ -22,8 +22,9 @@
 //               read through the e2e-only preload getter window.__maws_processMemory) after the workload and no input,
 //               sampled on the 10 s marks 0 through 60 inclusive (each sample and its completion overhead recorded):
 //               any sample started at load 10 or more blocks the row; the later sample of the first consecutive pair
-//               both started at or after 30 s and within 5 %, else the sample started at the 60 s mark, ≤ 500 MB; a
-//               forced collection's figures, taken after the binding samples, are a diagnostic only
+//               both started at or after 30 s and within 5 %, else the sample of the 60 s mark, ≤ 500 MB; a sample
+//               started more than 1 s after its mark is kept and named but decides no pair (P3-F L249); a forced
+//               collection's figures, taken after the binding samples, are a diagnostic only
 // Admission (parent Decision Log 42): every trial follows a bounded settle toward a 1-minute load below 10; a timing row
 // (1 to 4) needs three admitted trials (started below 10), every one within its bound, at most five attempts; a trial at
 // 10 or more is excluded, and fewer than three admitted is `hardware-blocked`, never met; the median and the best are
@@ -37,7 +38,7 @@ import { cpus, platform, release, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { BENCH_DATASET, BENCH_ROWS, BENCH_SCATTER_POINTS, BENCH_VIEWS, benchCsv, benchMarkdown } from '../src/artifacts/dashboard/fixtures/bench';
-import { LOAD_BELOW, MEMORY_FLOOR_MS, MEMORY_LAST_MARK_MS, MEMORY_SPACING_MS, memoryVerdict, percentile, privateMB, replacementInterval, REQUIRED_TRIALS, scrollVerdict, timingVerdict, type Verdict } from './support/dashboard-scale';
+import { LOAD_BELOW, MEMORY_FLOOR_MS, MEMORY_LAST_MARK_MS, MEMORY_LATE_MS, MEMORY_SPACING_MS, memoryVerdict, percentile, privateMB, replacementInterval, REQUIRED_TRIALS, scrollVerdict, timingVerdict, type Verdict } from './support/dashboard-scale';
 import { collectGarbage, jsHeapMB, load1, processMemory } from './support/document-scale';
 import { REPO_ROOT } from './support/launch';
 import { startApp, type AgentCall, type DashboardApp } from './support/dashboards';
@@ -484,7 +485,7 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
       rows.write({ memory: { samples, judged, afterForcedCollection: collected } });
       rows.add({
         row: '6 renderer',
-        measure: `the renderer process's own private memory (process.getProcessMemoryInfo().private, Electron's documented renderer API) with the ${VIEWS}-view dashboard open after the scrolls and replacements, no input, sampled on the ${MEMORY_SPACING_MS / 1000} s marks 0 through ${MEMORY_LAST_MARK_MS / 1000} s: the later sample of the first consecutive pair both started at or after ${MEMORY_FLOOR_MS / 1000} s and within 5 %, else the sample started at the ${MEMORY_LAST_MARK_MS / 1000} s mark; every sample started below load ${LOAD_BELOW}`,
+        measure: `the renderer process's own private memory (process.getProcessMemoryInfo().private, Electron's documented renderer API) with the ${VIEWS}-view dashboard open after the scrolls and replacements, no input, sampled on the ${MEMORY_SPACING_MS / 1000} s marks 0 through ${MEMORY_LAST_MARK_MS / 1000} s: the later sample of the first consecutive pair both started at or after ${MEMORY_FLOOR_MS / 1000} s and within 5 % (a sample started more than ${MEMORY_LATE_MS / 1000} s after its mark kept and named, in no pair), else the sample of the ${MEMORY_LAST_MARK_MS / 1000} s mark; every sample started below load ${LOAD_BELOW}`,
         bound: '≤ 500 MB, idle from 30 s',
         limit: 500,
         unit: 'MB',
@@ -493,7 +494,7 @@ test('the dashboard scale gate on the 50,000-row bench: bind, cold open, a 10,00
         best: null,
         verdict: judged.verdict,
         admitted: samples.filter((sample) => sample.load < LOAD_BELOW).length,
-        trials: samples.map((sample) => ({ value: sample.mb, load: sample.load, loadAfter: sample.load, settle: [], note: `started ${(sample.startedAt / 1000).toFixed(1)} s, completed ${(sample.completedAt / 1000).toFixed(1)} s (overhead ${sample.completedAt - sample.startedAt} ms)` })),
+        trials: samples.map((sample, k) => ({ value: sample.mb, load: sample.load, loadAfter: sample.load, settle: [], note: `the ${(k * MEMORY_SPACING_MS) / 1000} s mark: started ${(sample.startedAt / 1000).toFixed(1)} s, completed ${(sample.completedAt / 1000).toFixed(1)} s (overhead ${sample.completedAt - sample.startedAt} ms)${judged.excluded.some((e) => e.mark === k * MEMORY_SPACING_MS) ? `; started more than ${MEMORY_LATE_MS / 1000} s late, in no deciding pair` : ''}` })),
         ...(judged.reason && { reason: judged.reason }),
         note: `after a forced collection (diagnostic only): private ${collected.privateMB} MB, working set ${collected.workingSetMB} MB, JS heap ${collected.jsHeapMB} MB`,
       });

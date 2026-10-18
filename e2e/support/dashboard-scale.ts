@@ -9,7 +9,8 @@
 // - the renderer's memory is its own documented `process.getProcessMemoryInfo().private` (src/preload/process-memory.ts),
 //   sampled on the 10 s marks 0 through 60: any sample started at load 10 or more blocks the row; the later sample of
 //   the first consecutive pair both started at or after 30 s and within 5 % is gated, else the 60 s sample; never a
-//   forced collection's.
+//   forced collection's. A sample started more than 1 s after its mark (a slow read delays the next mark, which then
+//   catches up) is kept and named, and decides no pair (P3-F L249).
 
 export const LOAD_BELOW = 10;
 export const LONG_TASK_MS = 50;
@@ -75,28 +76,37 @@ export const MEMORY_SPACING_MS = 10_000;
 export const MEMORY_FLOOR_MS = 30_000;
 /** The last mark, its sample the figure when no pair settles: samples start on the marks 0 through it, inclusive. */
 export const MEMORY_LAST_MARK_MS = 60_000;
+/** A sample started more than this after its mark is late: kept and named, never in the deciding pair (P3-F L249). */
+export const MEMORY_LATE_MS = 1_000;
 
 /**
  * The memory row (parent Decision Log 42(5) as amended after run 39003524044, whose 503.6/505.7 MB pair at 0 and 10 s
  * failed under the then-current policy and stays recorded so) over the samples started on the 10 s marks 0 through 60,
- * each with its start and completion (ms from the first sample's start), its start load and the renderer's private MB:
- * hardware-blocked by any sample started at load 10 or more, whatever came before or after; else the later sample of
- * the first consecutive pair both started at or after 30 s and within `tolerance`; else the sample started at the 60 s
- * mark, however long it took to complete. That figure is gated at `limit`; with neither, the row is unsettled.
+ * in mark order (the k-th sample is the one for the mark k × 10 s), each with its start and completion (ms from the first
+ * sample's start), its start load and the renderer's private MB: hardware-blocked by any sample started at load 10 or
+ * more, whatever came before or after; else the later sample of the first consecutive pair both started at or after
+ * 30 s and within `tolerance`, a pair with a late sample (started more than 1 s after its mark, P3-F L249) deciding
+ * nothing; else the sample of the 60 s mark, however late it started or long it took. That figure is gated at `limit`;
+ * with neither, the row is unsettled. Every sample stays in the input; the late ones are answered in `excluded` and named
+ * in the reason.
  */
-export function memoryVerdict(samples: readonly { startedAt: number; completedAt: number; load: number; mb: number }[], limit: number, tolerance = 0.05): { verdict: Verdict; value: number | null; reason?: string } {
-  const loaded = samples.filter((s) => s.load >= LOAD_BELOW);
-  if (loaded.length > 0) return { verdict: 'hardware-blocked', value: null, reason: `${loaded.length} sample(s) started at load ${LOAD_BELOW} or more (${loaded.map((s) => s.load).join(', ')})` };
+export function memoryVerdict(samples: readonly { startedAt: number; completedAt: number; load: number; mb: number }[], limit: number, tolerance = 0.05): { verdict: Verdict; value: number | null; reason?: string; excluded: { mark: number; startedAt: number; mb: number }[] } {
   const t0 = samples[0]?.startedAt ?? 0;
-  const judged = (value: number, how: string) => (value <= limit ? { verdict: 'met' as const, value, reason: how } : { verdict: 'failed' as const, value, reason: `${how}: ${value.toFixed(1)} MB over ${limit} MB` });
+  const markOf = (k: number) => k * MEMORY_SPACING_MS;
+  const isLate = (k: number) => samples[k]!.startedAt - t0 - markOf(k) > MEMORY_LATE_MS;
+  const excluded = samples.flatMap((s, k) => (isLate(k) ? [{ mark: markOf(k), startedAt: s.startedAt - t0, mb: s.mb }] : []));
+  const named = excluded.length === 0 ? '' : `; excluded from the deciding pair as started more than ${MEMORY_LATE_MS / 1000} s after its mark: ${excluded.map((e) => `the ${e.mark / 1000} s mark's sample started at ${seconds(e.startedAt)} (${e.mb.toFixed(1)} MB)`).join(', ')}`;
+  const loaded = samples.filter((s) => s.load >= LOAD_BELOW);
+  if (loaded.length > 0) return { verdict: 'hardware-blocked', value: null, reason: `${loaded.length} sample(s) started at load ${LOAD_BELOW} or more (${loaded.map((s) => s.load).join(', ')})${named}`, excluded };
+  const judged = (value: number, how: string) => (value <= limit ? { verdict: 'met' as const, value, reason: `${how}${named}`, excluded } : { verdict: 'failed' as const, value, reason: `${how}: ${value.toFixed(1)} MB over ${limit} MB${named}`, excluded });
   for (let i = 1; i < samples.length; i++) {
     const [a, b] = [samples[i - 1]!, samples[i]!];
-    if (a.startedAt - t0 < MEMORY_FLOOR_MS) continue;
+    if (a.startedAt - t0 < MEMORY_FLOOR_MS || isLate(i - 1) || isLate(i)) continue;
     if (Math.abs(b.mb - a.mb) <= tolerance * Math.max(a.mb, b.mb)) return judged(b.mb, `settled within 5 % at the samples started ${seconds(a.startedAt - t0)} and ${seconds(b.startedAt - t0)}`);
   }
-  const last = samples.find((s) => s.startedAt - t0 >= MEMORY_LAST_MARK_MS);
-  if (last) return judged(last.mb, `no pair from ${MEMORY_FLOOR_MS / 1000} s within 5 %; the sample started at the ${MEMORY_LAST_MARK_MS / 1000} s mark (${seconds(last.startedAt - t0)})`);
-  return { verdict: 'unsettled', value: null, reason: `no pair from ${MEMORY_FLOOR_MS / 1000} s within 5 % and no sample started at the ${MEMORY_LAST_MARK_MS / 1000} s mark: ${samples.map((s) => `${s.mb.toFixed(1)} MB at ${seconds(s.startedAt - t0)}`).join(', ')}` };
+  const last = samples[MEMORY_LAST_MARK_MS / MEMORY_SPACING_MS];
+  if (last) return judged(last.mb, `no pair from ${MEMORY_FLOOR_MS / 1000} s within 5 %; the sample of the ${MEMORY_LAST_MARK_MS / 1000} s mark (started ${seconds(last.startedAt - t0)})`);
+  return { verdict: 'unsettled', value: null, reason: `no pair from ${MEMORY_FLOOR_MS / 1000} s within 5 % and no sample of the ${MEMORY_LAST_MARK_MS / 1000} s mark: ${samples.map((s) => `${s.mb.toFixed(1)} MB at ${seconds(s.startedAt - t0)}`).join(', ')}${named}`, excluded };
 }
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
