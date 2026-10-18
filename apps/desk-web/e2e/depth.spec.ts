@@ -134,7 +134,8 @@ test('older rows page in when the reader reaches the top, and the reader stays w
   const { player, depth } = await openDepth(page, hub, { limit: 8 });
   await midAnswer(player, depth, 'Both sub');
   player.holdRows = true;
-  hub.dropConnections(); // a fresh snapshot of the newest rows only
+  // A fresh load: a snapshot of the newest rows only. (A reconnect would not do: it keeps every row drawn before it.)
+  await page.reload();
   await expect.poll(() => player.subscriptions()).toBe(2);
   await expect(streamingRows(depth).last()).toContainText('Both sub');
   await expect(depth).not.toContainText('Think briefly first');
