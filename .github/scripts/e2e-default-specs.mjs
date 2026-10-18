@@ -80,7 +80,9 @@ const pool = async (jobs, width) => {
 };
 
 // What `playwright test --list` collects for one selection: Map(spec path from the root -> Set of its tests, each by its
-// title path and location). Throws when the listing fails or reports an error.
+// title path, which Playwright refuses to repeat within a file). Not by line and column: concurrent listings on a cold
+// transform cache can leave one without a spec's source map, so the same test reports its compiled position. Throws
+// when the listing fails or reports an error.
 export async function listSelection(root, { env, args }) {
   const dir = mkdtempSync(join(tmpdir(), 'e2e-default-'));
   const output = join(dir, 'list.json');
@@ -97,7 +99,7 @@ export async function listSelection(root, { env, args }) {
     if (report.errors?.length > 0) throw new Error(`playwright test --list ${args.join(' ')} reported: ${report.errors.map((error) => error.message?.split('\n')[0]).join(' / ')}`);
     const specs = new Map();
     const walk = (suite, titles, tests) => {
-      for (const spec of suite.specs ?? []) tests.add(`${[...titles, spec.title].join(' › ')} @ ${spec.file}:${spec.line}:${spec.column}`);
+      for (const spec of suite.specs ?? []) tests.add([...titles, spec.title].join(' › '));
       for (const child of suite.suites ?? []) walk(child, [...titles, child.title], tests);
     };
     for (const suite of report.suites ?? []) {
