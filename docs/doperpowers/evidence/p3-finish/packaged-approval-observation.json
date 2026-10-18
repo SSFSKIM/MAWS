@@ -12,5 +12,7 @@
   "acceptance": "quiet combined relaunch is gate; recurrence with evidence becomes product row, pass is one unreproduced observation never fixed",
   "decisionLog": "none",
   "diagnosticCommit": "d31423307afbd479adaebaa9fa62e78c02cba81b",
-  "review": "a6c00dc1f0a527021 running; no local execution"
+  "review": "a6c00dc1f0a527021 initial P2 delayed poll verified; applied fixcdf54fbeb recheck correct/no material findings",
+  "diagnosticFix": "cdf54fbeb36c98c9e0c2f10a65b89e09e25b33f6",
+  "gate": "39165341280 active, no result yet"
 }

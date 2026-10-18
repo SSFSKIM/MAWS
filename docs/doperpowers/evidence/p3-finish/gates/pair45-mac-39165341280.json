@@ -1,0 +1,56 @@
+{
+  "recordedAt": "2026-10-18T20:57:54Z",
+  "runId": 39165341280,
+  "attempt": 1,
+  "sourceCommit": "cdf54fbeb36c98c9e0c2f10a65b89e09e25b33f6",
+  "wrapperHead": "c82767cdbbc1bb3c19fdb7df21f286f62f392dfc",
+  "createdAt": "2026-10-18T20:53:07Z",
+  "statusAtIdentityRead": "queued",
+  "conclusion": null,
+  "groups": [
+    "static",
+    "packaged",
+    "e2e:presentations-scale",
+    "e2e:artifacts-perf",
+    "e2e:document-scale"
+  ],
+  "class1a": "pool",
+  "runner": "macos",
+  "completionTask": "b6w1r4060",
+  "completionMethod": "actual wrapper background command, automatic notification, no completion poll",
+  "label": "p3f-pair45-mac",
+  "rule": "one DL59 relaunch, union with39156492025 greens and39162779550 static, current-tree static included; no unit job",
+  "integration": "corrected parentDL108 a963cf446 merged d81b68a67",
+  "review": {
+    "initial": "a6c00dc1f0a527021 accepted calibration, found P2 delayed20s poll due awaited post-click evidence",
+    "fix": "cdf54fbeb byace7bcff092c64bac, post-click diagnostic concurrent with original20s poll, immediate rejection handler",
+    "recheck": "same registered medium reviewer, exactcc9381f06..cdf54fbeb plus originald81b68a67 comparison; correct/no material findings, static only"
+  },
+  "quietRelay": {
+    "by": "architect relaying CI-opt",
+    "at": "20:51Z",
+    "loadSamples": [
+      {
+        "at": "2026-10-18T20:50:41Z",
+        "load1": 2.0
+      },
+      {
+        "at": "2026-10-18T20:51:11Z",
+        "load1": 2.27
+      }
+    ],
+    "noManimScenes": true,
+    "launcherHeldByQuietFlag": true,
+    "background": "one-core diagnostic loop and sminos daemon; record actual per-row loads",
+    "release": "architect releases CI-opt hold only after completed result relayed"
+  },
+  "boundaries": {
+    "drag": "DL10824ms calibration only; below16 product repair retained P4, old raw16ms readings unchanged",
+    "approval": "cause undetermined; one click/20s retained; pass unreproduced observation, recurrence product row with new evidence",
+    "announcement": "unchanged case; recurrence own DL59 red and gap fixed before hand-back",
+    "settleProtocol": "no implementation, deferred conditional row only",
+    "MainArea": "88/88 named proof; full-unit obligation remains final hand-back",
+    "fullSetCredit": false,
+    "paidSpendUsd": 0
+  }
+}

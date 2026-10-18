@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "parentDL108 merged/calibrationf690a54a4 committed; packaged approval diagnostic implementation and focused review pending; four-Mac relaunch prepared, awaiting architect quiet relay",
+  "phase": "quiet DL59 relaunch39165341280 active oncdf54fbeb after applied-source recheck and architect quiet relay; post-debt scale pairs still pending",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -1033,7 +1033,14 @@
     "nextRun": "one DL59 relaunch of packaged/document-scale/presentations-scale/artifacts-perf on same tree plus accepted packaged correction and parent DL108 drag calibration, only after architect relays CI-opt quiet hold and mini below5; no further run after quiet failure without architect rebase-versus-repair ruling"
   },
   "quietRelaunch": {
-    "script": "/private/tmp/p3f-pair45-mac-relaunch.sh",
+    "recordedAt": "2026-10-18T20:57:54Z",
+    "runId": 39165341280,
+    "attempt": 1,
+    "sourceCommit": "cdf54fbeb36c98c9e0c2f10a65b89e09e25b33f6",
+    "wrapperHead": "c82767cdbbc1bb3c19fdb7df21f286f62f392dfc",
+    "createdAt": "2026-10-18T20:53:07Z",
+    "statusAtIdentityRead": "queued",
+    "conclusion": null,
     "groups": [
       "static",
       "packaged",
@@ -1041,11 +1048,44 @@
       "e2e:artifacts-perf",
       "e2e:document-scale"
     ],
-    "launched": false,
-    "permissionCondition": "architect relay after CI-opt sees no manim scenes and mini load<5 twice30s apart; not yet received",
-    "knownBackground": "one-core diagnostic loop and sminos daemon remain; record per-row start load",
-    "hold": "manim-master-fa capped since20:29Z and quiet flag set per architect, not itself the quiet release",
-    "class1a": "pool; no unit job, MainArea full-unit obligation stays with hand-back",
-    "review": "a6c00dc1f0a527021 reviewing d81b68a67..d31423307, calibration and approval diagnostic"
+    "class1a": "pool",
+    "runner": "macos",
+    "completionTask": "b6w1r4060",
+    "completionMethod": "actual wrapper background command, automatic notification, no completion poll",
+    "label": "p3f-pair45-mac",
+    "rule": "one DL59 relaunch, union with39156492025 greens and39162779550 static, current-tree static included; no unit job",
+    "integration": "corrected parentDL108 a963cf446 merged d81b68a67",
+    "review": {
+      "initial": "a6c00dc1f0a527021 accepted calibration, found P2 delayed20s poll due awaited post-click evidence",
+      "fix": "cdf54fbeb byace7bcff092c64bac, post-click diagnostic concurrent with original20s poll, immediate rejection handler",
+      "recheck": "same registered medium reviewer, exactcc9381f06..cdf54fbeb plus originald81b68a67 comparison; correct/no material findings, static only"
+    },
+    "quietRelay": {
+      "by": "architect relaying CI-opt",
+      "at": "20:51Z",
+      "loadSamples": [
+        {
+          "at": "2026-10-18T20:50:41Z",
+          "load1": 2.0
+        },
+        {
+          "at": "2026-10-18T20:51:11Z",
+          "load1": 2.27
+        }
+      ],
+      "noManimScenes": true,
+      "launcherHeldByQuietFlag": true,
+      "background": "one-core diagnostic loop and sminos daemon; record actual per-row loads",
+      "release": "architect releases CI-opt hold only after completed result relayed"
+    },
+    "boundaries": {
+      "drag": "DL10824ms calibration only; below16 product repair retained P4, old raw16ms readings unchanged",
+      "approval": "cause undetermined; one click/20s retained; pass unreproduced observation, recurrence product row with new evidence",
+      "announcement": "unchanged case; recurrence own DL59 red and gap fixed before hand-back",
+      "settleProtocol": "no implementation, deferred conditional row only",
+      "MainArea": "88/88 named proof; full-unit obligation remains final hand-back",
+      "fullSetCredit": false,
+      "paidSpendUsd": 0
+    }
   }
 }

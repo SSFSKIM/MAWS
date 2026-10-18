@@ -1,0 +1,25 @@
+{
+  "status": "read-only preparation, not acceptance or actual reservations",
+  "sourceReviewed": "current working source through quiet-frontier; frozenS absent",
+  "worker": "aad2c9a3512ebc731",
+  "actualPaidSpendUsd": 0,
+  "outstandingPaidReservationsUsd": 0,
+  "plannedCapsUsd": {
+    "library": 0.1,
+    "document": 0.2,
+    "presentations": 0.15,
+    "designSystems": 0.15,
+    "design": 1.0,
+    "dashboard": 0.15,
+    "sendTo": 0.15
+  },
+  "plannedCapsTotalUsd": 1.9,
+  "heldDiagnosticAllocationUsd": 0.1,
+  "sessions": "one session.launch per selected spec, all turns within it; dashboard B is seam, send-to asserts no extra session",
+  "runner": "direct Playwright fromW, one worker/zero retries/forbid-only, quiet, MAWS_HARNESS0; unset build cache/executable/foreground/final-bundle flags; waitload20 before slot plus macbook-e2e lock; no package build prefix",
+  "evidence": "Playwright --output underE/live/<attempt>/test-results and list reporter, or separate HTML envdir underE; no harness output-dir override, scratch roots retained; document fixed test-results/document-live/live-run.txt must be copied separately; no seven-spec sibling evidence writes found",
+  "A15": "controller before/after each attempt in finally remains mandatory. Five specs built-in compare; send-to none; document after-check can be skipped on failure/cleanup error. Snapshot is digest/count of sorted temp-project keys, not whole-file hash; compareA15 distinguishes own scratch contamination from owner activity. Do not inspect credential values.",
+  "cost": "main-lane inbound result.total_cost_usd cumulative; count each paid session once, preserve raw precision. Document processCost path lacks conservative unsettled bookkeeping, so controller retains full reservation if receipts/copy/termination unresolved. No paid run before verified green p3f-final bundle on frozenS.",
+  "cleanup": "document ordinarily removes owned profile; journal copy must be preserved and verified. Other selected scratch evidence copied toE, no owner store edits.",
+  "engine": "installed version/relay/current load not verified by this preparation; preflight skip means blocked acceptance, not pass"
+}
