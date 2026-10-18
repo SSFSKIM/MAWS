@@ -43,6 +43,7 @@ const ATTRIBUTE = / ([a-z-]+)="([^"]*)"/g;
 const DESCENDANT_TRAILER = 'That "other Claude session" is an agent working inside this same session';
 const HOST_INJECTED = 'is a host session id that SendMessage cannot reach';
 const HANDBACK_FRAME = /^\[Subagent hand-back\][^\n]*The report follows:\n/;
+const UNKNOWN_SENDER = 'unknown';
 
 export function parsePeerMessage(text: string): PeerEnvelope | AgentMessage | null {
   let rest = text.trim();
@@ -99,14 +100,16 @@ export function messageText(content: string | ContentBlock[]): string {
 // The X1 event a peer `user` frame or record stands for beside its `user.message` (Design §4): `peer.message` for a
 // cross-session envelope, `subagent.message` for an in-process agent's. `origin` is the frame's or record's own
 // `origin` object, which fills what the text never carries (the hop chain) or lacks (Decision Log 22). Null when the
-// text is no envelope: the message then stays a plain bubble. A message with no address to answer is not replyable.
+// text is no envelope: the message then stays a plain bubble. A message with no address to answer is not replyable:
+// `unknown` is the engine's stand-in for a sender whose envelope gave none (sminos's delivery, `origin.from`), no address.
 export function peerEventsOf(text: string, messageUuid: MessageUuid | null, origin?: unknown): PeerMessagePayload | SubagentMessagePayload | null {
   const parsed = parsePeerMessage(text);
   if (parsed === null) return null;
   if (parsed.kind === 'agent') return { kind: 'subagent.message', direction: 'from_child', fromAgentId: parsed.fromAgentId as AgentId, toAgentId: null, text: parsed.body };
   const o = typeof origin === 'object' && origin !== null ? (origin as Record<string, unknown>) : {};
   const string = (value: unknown) => (typeof value === 'string' && value.length > 0 ? value : null);
-  const from = parsed.from || string(o.from) || '';
+  const address = (value: unknown) => (string(value) === UNKNOWN_SENDER ? null : string(value));
+  const from = address(parsed.from) ?? address(o.from) ?? '';
   const hopChain = Array.isArray(o.hopChain) && o.hopChain.every((hop) => typeof hop === 'string') ? (o.hopChain as string[]) : parsed.hopChain;
   return {
     kind: 'peer.message', messageUuid, from, fromSession: parsed.fromSession, fromName: parsed.fromName ?? string(o.name), fromMode: parsed.fromMode ?? string(o.fromMode),

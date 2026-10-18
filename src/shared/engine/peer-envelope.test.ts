@@ -127,6 +127,17 @@ describe('peerEventsOf', () => {
     expect(peerEventsOf('<cross-session-message>\nhi\n</cross-session-message>', null)).toMatchObject({ from: '', replyable: false }); // nothing to answer
   });
 
+  it("reads the engine's `unknown` sender as no address: sminos's delivery, idle or queued into a running turn, is not replyable", () => {
+    // The engine's origin for a peer frame whose envelope names no sender (sminos's), as it keeps it on the user row
+    // (idle) and on the queued_command attachment (busy).
+    const origin = { kind: 'peer', from: 'unknown', verifiedPeerPid: 4242, name: 'maws-fe', body: 'Rebase on main.' };
+    const idle = `Another Claude session sent a message:\n${ENVELOPE('from-name="maws-fe"', 'Rebase on main.')}\n\n${DEFAULT_TRAILER}`;
+    const busy = '<cross-session-message from-name="maws-fe">\nRebase on main.\n</cross-session-message>';
+    for (const text of [idle, busy]) expect(peerEventsOf(text, null, origin)).toMatchObject({ kind: 'peer.message', from: '', fromName: 'maws-fe', text: 'Rebase on main.', replyable: false });
+    // The same stand-in in the envelope itself is no address either.
+    expect(peerEventsOf(ENVELOPE('from="unknown"', 'hi'), null, origin)).toMatchObject({ from: '', replyable: false });
+  });
+
   it('gives the same payload for the live mid-turn frame and the disk attachment, prompt or rendered text', () => {
     const live = peerEventsOf(MID_TURN.message.content, MID_TURN.uuid as never, MID_TURN.origin);
     expect(live).toMatchObject({ kind: 'peer.message', midTurn: true, text: 'E7 probe: second message while you work' });
