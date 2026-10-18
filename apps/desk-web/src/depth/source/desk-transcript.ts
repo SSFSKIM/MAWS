@@ -137,8 +137,8 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
  * delivered send is drawn without its frame line, a peer's under a label naming it, and one that entered a running turn
  * as a prompt queued there (`conversation/delivery-frame.ts`); the held row keeps its frame. A steer the bridge appended
  * is drawn as the owner's prompt queued there too (`bridge-rows.ts`), and the bridge's wake as its own line in a turn
- * the session continued (`bridge-wake.ts`), recognized on the held row, before a delivery's drawing strips the frame
- * a lookalike of the wake's first line would otherwise be read past.
+ * the session continued (`bridge-wake.ts`), read off the held row: a delivery whose words open with the wake's line is
+ * no wake, and its drawn copy has lost the frame that says so.
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
   const mapped = steerAsDrawn(deliveryAsDrawn(normalizeInterruptRow(row)));
