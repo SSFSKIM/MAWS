@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 86,
-    "defer:pending": 37,
+    "defer:committed": 87,
+    "defer:pending": 36,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1200,7 +1200,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L146; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
       "remainingClause": "A fold matching APFS's, or the device-and-inode comparison extended to the stale sweep. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L146; parent Decision Log 106): Rare, transitional or already bounded store/editor edge without current data loss; broader repair/design is P4. Owner: P4.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "5fdbb8edb30bc7e0edbdba8357d145f8e06576f1"
     },
     {
       "line": 147,
@@ -1210,8 +1210,8 @@
       "triageReason": "Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L147; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
       "remainingClause": "Tracked changes derived from the attribution diff at export. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L147; parent Decision Log 106): Feature/design-sized or deliberately scoped-out behavior; P4 owns its stated design and proof. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 148,
