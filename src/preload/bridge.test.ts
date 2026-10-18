@@ -34,6 +34,14 @@ describe('preload bridge', () => {
     expect(transport.invoke).not.toHaveBeenCalled();
   });
 
+  // P3-F (artifact-protocol finding 6): main answers the host's export request; no page can
+  it('answers maws.artifact.exported with unknown_command without touching IPC', async () => {
+    const { transport } = fakeTransport();
+    const result = await loose(createBridge(transport)).invoke('maws.artifact.exported', { appSessionId: 'app-1', requestId: 'mcp-export', answer: { ok: false, error: 'fabricated' } });
+    expect(result).toMatchObject({ ok: false, error: { code: 'unknown_command' } });
+    expect(transport.invoke).not.toHaveBeenCalled();
+  });
+
   it('refuses prototype keys as command names', async () => {
     const { transport } = fakeTransport();
     const result = await loose(createBridge(transport)).invoke('constructor');

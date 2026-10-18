@@ -134,6 +134,16 @@ describe('main ipc router', () => {
     expect(isBridgedCommandName('engine.configure')).toBe(false);
   });
 
+  // P3-F (artifact-protocol finding 6): the answer to the host's export request is main's export service's alone, so a
+  // window that saw the request cannot settle it first
+  it('refuses a window’s maws.artifact.exported before host dispatch', async () => {
+    const dispatch = vi.fn(async () => ({ ok: true as const, value: { outcome: 'delivered' } }));
+    await load(DEV_URL, dispatch);
+    const fabricated = { appSessionId: 'app-1', requestId: 'mcp-export', answer: { ok: false, error: 'fabricated' } };
+    await expect(invoke(appWindow(), 'maws.artifact.exported', fabricated)).resolves.toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it('hands a host dispatcher the owner, the name and the validated input', async () => {
     const dispatch = vi.fn(async () => ({ ok: true as const, value: { pid: 7, uptimeMs: 1, hostVersion: '0' } }));
     await load(DEV_URL, dispatch);
