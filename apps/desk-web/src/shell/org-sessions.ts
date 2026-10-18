@@ -30,7 +30,9 @@ export type FeedHealth = { connected: boolean; caughtUp: boolean; pending: numbe
  * `stale`: its socket dropped after it caught up, so its sessions are as last seen; `current`: connected, caught up, and
  * every entry it holds checked. Refusals are reported apart: a current feed with refusals is current, less what failed.
  */
-export function feedState(h: FeedHealth): 'reading' | 'stale' | 'current' {
+export type FeedState = 'reading' | 'stale' | 'current';
+
+export function feedState(h: FeedHealth): FeedState {
   if (!h.connected) return h.caughtUp ? 'stale' : 'reading';
   return h.caughtUp && h.pending === 0 ? 'current' : 'reading';
 }

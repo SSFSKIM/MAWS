@@ -8,8 +8,12 @@
 // shows anyway — and no session, and opens no project. The view says how complete its roster is, as the project view
 // does: the projects still being read (backlog or verification), those whose socket dropped (their sessions shown as
 // last seen), and those holding events that failed verification (not drawn); "no session is running" is said only when
-// every project is connected, caught up and fully checked, with nothing refused.
+// every project is connected, caught up and fully checked, with nothing refused. A project whose roster was current
+// says nothing of a disruption shorter than the reader's grace (`QUIET_MS`, #61's rule: the composite's "A machine's
+// reconnect is invisible to the reader", MAWS #57) — a dropped socket, its backlog read again after the reconnect, a
+// live event still being checked — and keeps its rows as they were; past the grace it is said as it is.
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { QUIET_MS } from '../../depth/source/keeper';
 import { useStore } from 'zustand';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
@@ -18,7 +22,7 @@ import type { SessionGroup } from '../../log/projection';
 import { useProjectConnection } from '../../project/registry';
 import { orgWaiting } from '../../pwa/badge';
 import { useDeskLayout } from '../../shell/layout';
-import { feedState, mergeOrgGroups, ORG_GROUPS, type FeedHealth, type OrgGroup, type OrgSession } from '../../shell/org-sessions';
+import { feedState, mergeOrgGroups, ORG_GROUPS, type FeedState, type OrgGroup, type OrgSession } from '../../shell/org-sessions';
 import { SessionLabel } from '../../shell/SessionLabel';
 import { useDeskSessions, type DeskSession } from '../../shell/sessions';
 import { useGrid } from '../../state/grid';
@@ -26,8 +30,8 @@ import { UnlockForm } from '../key/UnlockForm';
 
 const HEADINGS: Record<OrgGroup, string> = { waiting: 'Waiting on you', working: 'Working', idle: 'Idle' };
 
-/** What one project's feed reports: its sessions grouped, and how far they can be taken as current. */
-type Fed = FeedHealth & { groups: Record<SessionGroup, DeskSession[]> };
+/** What one project's feed reports: its sessions grouped, how far they can be taken as current, and its refusals. */
+type Fed = { groups: Record<SessionGroup, DeskSession[]>; state: FeedState; refused: number };
 
 export function OrgView({ me }: { me: Me }) {
   const projects = useGrid((s) => s.projects);
@@ -43,7 +47,7 @@ export function OrgView({ me }: { me: Me }) {
     });
   }, []);
   const groups = useMemo(() => mergeOrgGroups(projects.filter((p) => fed[p.id]).map((p) => ({ project: p.id, name: p.name, groups: fed[p.id].groups }))), [projects, fed]);
-  const state = (id: string) => (fed[id] ? feedState(fed[id]) : 'reading');
+  const state = (id: string): FeedState => fed[id]?.state ?? 'reading';
   const reading = projects.filter((p) => state(p.id) === 'reading');
   const stale = projects.filter((p) => state(p.id) === 'stale');
   const refusing = projects.filter((p) => (fed[p.id]?.refused ?? 0) > 0);
@@ -111,10 +115,30 @@ const ProjectFeed = memo(function ProjectFeed({ project, report }: { project: st
   const connected = useStore(connection.live, (s) => s.connected);
   const pending = useStore(connection.log.store, (s) => s.entries.filter((e) => e.verdict === 'pending').length);
   const refusedCount = useStore(connection.log.store, (s) => refused(s).length);
-  useEffect(() => report(project, { groups, caughtUp, connected, pending, refused: refusedCount }), [project, groups, caughtUp, connected, pending, refusedCount, report]);
+  const state = useGraced(feedState({ connected, caughtUp, pending, refused: refusedCount }));
+  useEffect(() => report(project, { groups, state, refused: refusedCount }), [project, groups, state, refusedCount, report]);
   useEffect(() => () => report(project, null), [project, report]);
   return null;
 });
+
+/**
+ * A feed's state as the reader is told it: once the feed has been current, a disruption — any state but current — reads
+ * as current until it has lasted `QUIET_MS`, and as itself from then until the feed is current again. A feed never
+ * current is told as it is.
+ */
+function useGraced(raw: FeedState): FeedState {
+  const [wasCurrent, setWasCurrent] = useState(raw === 'current');
+  const [lapsed, setLapsed] = useState(false);
+  if (raw === 'current' && wasCurrent === false) setWasCurrent(true);
+  if (raw === 'current' && lapsed) setLapsed(false);
+  const disrupted = wasCurrent && raw !== 'current';
+  useEffect(() => {
+    if (!disrupted) return;
+    const timer = setTimeout(() => setLapsed(true), QUIET_MS);
+    return () => clearTimeout(timer);
+  }, [disrupted]);
+  return disrupted && !lapsed ? 'current' : raw;
+}
 
 /** "MAWS", "MAWS and mini", "MAWS, mini and arkho". */
 function names(projects: ReadonlyArray<{ name: string }>): string {

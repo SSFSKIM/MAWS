@@ -15,6 +15,7 @@ import { ProjectConnection } from '../../project/connection';
 import { parseRoute, routePath, useDeskLayout } from '../../shell/layout';
 import { useGrid } from '../../state/grid';
 import type { Me } from '../../hub/me';
+import { QUIET_MS } from '../../depth/source/keeper';
 
 const held = new Map<string, ProjectConnection>();
 const acquired: string[] = [];
@@ -204,17 +205,50 @@ it('names a project whose membership event fails its code, and claims no empty r
   expect(screen.queryAllByTestId('org-session')).toEqual([]);
 });
 
-it('marks the sessions of a project whose connection dropped after catching up as last seen, and claims no empty roster', async () => {
+// The reader rule of #61 (the composite's "A machine's reconnect is invisible to the reader", MAWS #57): a project whose
+// roster was current says nothing of a disruption shorter than `QUIET_MS` — a dropped socket, the backlog read again
+// after the reconnect, a live event still being checked — and past it says the project is stale and marks its rows.
+it('says nothing of a project socket gap shorter than the grace, its re-read after reconnecting included', async () => {
+  render(<OrgView me={me} />);
+  await waitFor(() => expect(screen.getAllByTestId('org-session')).toHaveLength(4));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    act(() => held.get(P1)!.live.setState({ status: 'connecting', connected: false })); // caughtUp stays true, as on a drop
+    act(() => vi.advanceTimersByTime(QUIET_MS - 1));
+    expect(screen.queryByTestId('org-stale')).toBeNull();
+    expect(screen.queryByTestId('org-reading')).toBeNull();
+    expect(screen.getAllByTestId('org-session').filter((r) => r.dataset.stale !== undefined)).toEqual([]);
+    // The reconnect: welcomed, its backlog read again, then caught up — the gap closes inside one grace.
+    act(() => held.get(P1)!.live.setState({ status: 'open', connected: true, caughtUp: false }));
+    expect(screen.queryByTestId('org-reading')).toBeNull();
+    act(() => held.get(P1)!.live.setState({ caughtUp: true }));
+    act(() => vi.advanceTimersByTime(QUIET_MS));
+    expect(screen.queryByTestId('org-stale')).toBeNull();
+    expect(screen.queryByTestId('org-reading')).toBeNull();
+    expect(screen.getAllByTestId('org-session')).toHaveLength(4);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('marks the sessions of a project whose socket stays dropped past the grace as last seen, and claims no empty roster', async () => {
   render(<OrgView me={me} />);
   await waitFor(() => expect(screen.getAllByTestId('org-session')).toHaveLength(4));
   expect(screen.queryByTestId('org-stale')).toBeNull();
-  act(() => held.get(P1)!.live.setState({ status: 'connecting', connected: false })); // caughtUp stays true, as on a drop
-  const stale = await waitFor(() => screen.getByTestId('org-stale'));
-  expect(stale.textContent).toContain('MAWS');
-  expect(stale.textContent).not.toContain('mini');
-  const rows = screen.getAllByTestId('org-session');
-  expect(rows.filter((r) => r.dataset.stale !== undefined).map((r) => r.dataset.session).sort()).toEqual([S.asks, S.works].sort());
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    act(() => held.get(P1)!.live.setState({ status: 'connecting', connected: false }));
+    act(() => vi.advanceTimersByTime(QUIET_MS));
+    const stale = screen.getByTestId('org-stale');
+    expect(stale.textContent).toContain('MAWS');
+    expect(stale.textContent).not.toContain('mini');
+    const rows = screen.getAllByTestId('org-session');
+    expect(rows.filter((r) => r.dataset.stale !== undefined).map((r) => r.dataset.session).sort()).toEqual([S.asks, S.works].sort());
+  } finally {
+    vi.useRealTimers();
+  }
 
+  // A project never current (dropped before this view saw it whole) is said at once: there is no roster to keep.
   cleanup();
   await emptyProjects();
   held.get(P2)!.live.setState({ status: 'connecting', connected: false });
