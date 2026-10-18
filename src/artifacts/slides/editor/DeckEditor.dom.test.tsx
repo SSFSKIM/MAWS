@@ -134,6 +134,34 @@ describe('the notes under a composition and the dialect’s limits (findings 1 a
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  // P3-F (L203): the refused text is the tab's (its session), not the field's: another slide and back, or the body
+  // unmounting on a tab switch, shows it again with its refusal, carried onto what changed meanwhile
+  it('notes refused for their length outlive the field: shown again, still refused, on the same slide and after a remount', () => {
+    const { doc, session, unmount } = mount();
+    const over = 'y'.repeat(4_000);
+    notesField().value = `Notes a${over}`;
+    fireEvent.input(notesField());
+    fireEvent.click(thumbs()[1]!);
+    expect(notesField().value).toBe('Notes b');
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(thumbs()[0]!);
+    expect(notesField().value).toBe(`Notes a${over}`);
+    expect(screen.getByRole('alert').textContent).toMatch(/4,007/);
+    unmount();
+    act(() => setNotes(doc, 'a', 'Opening: Notes a', 'remote'));
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    expect(notesField().value).toBe(`Opening: Notes a${over}`);
+    expect(screen.getByRole('alert').textContent).toMatch(/4,016/);
+    expect(readSlide(doc, 'a').notes).toBe('Opening: Notes a');
+    notesField().value = 'Opening: Notes a, shorter';
+    fireEvent.input(notesField());
+    expect(readSlide(doc, 'a').notes).toBe('Opening: Notes a, shorter');
+    expect(screen.queryByRole('alert')).toBeNull();
+    cleanup();
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    expect(notesField().value).toBe('Opening: Notes a, shorter');
+  });
+
   it('a composition whose rebased text passes the limit is refused too', () => {
     const { doc } = mount();
     const field = notesField();

@@ -9,6 +9,9 @@
 // tab's too (`later`): counted while it runs, so the tab's close guard waits for it (B's rule), and written only if the
 // session still takes writes when the work is done; a closed tab, a read-only replica or a version shown in place of
 // the live deck drops it.
+//
+// P3-F (L203): speaker notes the dialect refused (over its limit) are the tab's too, kept here per slide until written or
+// replaced, so the notes field shows them again when it mounts again; they are never written to the doc.
 import type { Awareness } from '@y/protocols/awareness';
 import { transact, type Doc } from '../../yjs';
 import { createDeckUndo, type DeckUndo } from '../../yjs/slides-undo';
@@ -56,6 +59,12 @@ export interface DeckPresence {
 
 const NONE: readonly string[] = Object.freeze([]);
 
+/** P3-F (L203): notes the dialect refused on a slide: the owner's text, and the slide's notes it was typed over. */
+export interface NotesDraft {
+  text: string;
+  from: string;
+}
+
 /** Times of one showing, read through the e2e seam (Acceptance 7's open-to-interactive). */
 export interface DeckTimings {
   openedAt: number;
@@ -77,6 +86,7 @@ export class DeckSession {
   readonly timings: DeckTimings;
   private disposed = false; // B4
   private writesHeld = false; // B4: the editor shows a version in place of the live deck
+  private readonly notesDrafts = new Map<string, NotesDraft>(); // L203
 
   constructor(
     readonly doc: Doc,
@@ -189,6 +199,16 @@ export class DeckSession {
   /** Makes the undo stack take another writer's origin as the editor's own (the text box's binding); returns the undo. */
   trackOrigin(origin: unknown): () => void {
     return this.undo.track(origin);
+  }
+
+  /** L203: the notes the dialect refused on a slide, kept until written or replaced; null without any. */
+  notesDraft(slideId: string): NotesDraft | null {
+    return this.notesDrafts.get(slideId) ?? null;
+  }
+  /** L203: keeps the refused notes of a slide, or with null forgets them (written, or short enough again). */
+  keepNotesDraft(slideId: string, draft: NotesDraft | null): void {
+    if (draft) this.notesDrafts.set(slideId, draft);
+    else this.notesDrafts.delete(slideId);
   }
 
   /** The composition hold: remote updates wait while an IME composes in the text box (no-op without a replica). */
