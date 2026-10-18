@@ -303,4 +303,20 @@ describe('an open async question', () => {
     grid.close();
     await m.close();
   });
+
+  it("a settlement of a request this hub never held pending still ends the log's question for it", async () => {
+    const grid = await GridClient.open(hub, ADMIN);
+    const m = await machine('open-u', A);
+    const feed = feeder(m, A);
+    await m.postOk([{ t: 'session', message: envelope(m, A, 'presence', presence('busy')) }]);
+    await m.postOk([feed(SESSION, 'question', asked('toolu_unheld'))]);
+    await summary(grid, A, { working: 1, waiting: 1 }, 'the question counted');
+
+    // Its raise never reached this hub (raised and settled while the uplink was away): the settlement alone ends it.
+    await settle(m, 'toolu_unheld', 'withdrawn');
+    await summary(grid, A, { working: 1, waiting: 0 }, 'the settlement');
+
+    grid.close();
+    await m.close();
+  });
 });
