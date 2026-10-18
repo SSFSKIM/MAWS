@@ -65,6 +65,18 @@
    ],
    "remaining": "`default` green on a full set (0 qualifying)",
    "closing": "Item 8's source is fixed (P3-F W-MINI, 2026-10-18: `openPalette` in shell.spec.ts waits for the palette's input to hold focus before every typed query), and the named `default` group passed in both W-MINI gates (39130559347, 39133832247). Remaining: `default` green on a full set (0 qualifying full sets so far). |"
+  },
+  "277": {
+   "action": "narrowed",
+   "sourceCommits": [
+    "1235d4a77"
+   ],
+   "gates": [
+    "39130559347",
+    "39133832247"
+   ],
+   "remaining": "streak 2/10; 8 more consecutive Mac scene passes, a failure resets it",
+   "closing": "The selection that failed (line 548 when logged) is the one made right after typing, before the restore. P3-F W-MINI (2026-10-18): `selectIn` waits on the editor's own state before setting the range (its document holds the paragraph shown and the host has acknowledged every edit), then on the editor's selection as well as the page's; the scene's selection step (`restore-scene-selection`) reports the page's selection and the editor's transactions on failure. Streak 2 of 10: the scene passed in gates 39130559347 and 39133832247 with native focus true. Remaining: 8 more consecutive Mac scene passes; a failure resets the streak. Until then a failure with this exact signature reads against this row like rows 199 to 201. |"
   }
  }
 }
