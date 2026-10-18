@@ -37,6 +37,7 @@ function plan(scenarioEnv) {
         GATE_E2E_RUNNER: '',
         CLASS1_E2E: '',
         LINUX_E2E: '',
+        POOL_E2E: '',
         LIBREOFFICE_E2E: '',
         ...scenarioEnv,
         GITHUB_OUTPUT: output,
@@ -69,4 +70,26 @@ test("the DefaultBeside: trailer's groups reach the e2e jobs, less default, e2e:
   assert.match(summary, /Default beside: side, library, tools\./);
   assert.equal(plan({}).outputs.default_beside, '[]');
   assert.equal(plan({ EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:default', INPUT_RUNNER: 'macos', HEAD_MESSAGE: relaunch }).outputs.default_beside, '[]');
+});
+
+test("a Linux lane's POOL_E2E groups run on the pool when class 1a does; the rest, and a macOS lane, keep the lane's runner", () => {
+  const lists = { CLASS1_E2E: 'library desk-web', LINUX_E2E: 'library desk-web', POOL_E2E: 'desk-web' };
+  const runners = (outputs) => Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, JSON.parse(entry.runner)]));
+  const box = ['self-hosted', 'ci-kit-pool', 'cpus-4'];
+  const hosted = 'ubuntu-24.04';
+  const mac = ['self-hosted', 'macOS', 'ARM64'];
+  const linuxRun = (trailers) => `ci-gate: test\n\nGates: e2e:library,e2e:desk-web\nRunner: linux${trailers}`;
+
+  const variable = plan({ ...lists, GATE_RUNNER: 'pool', HEAD_MESSAGE: linuxRun('') });
+  assert.deepEqual(runners(variable.outputs), { library: hosted, 'desk-web': box });
+  // No class-1a job asked for, yet the pool serves desk-web: pool-ensure runs.
+  assert.equal(variable.outputs.pool, 'true');
+  assert.match(variable.summary, /E2e lane: linux \(on the pool: desk-web\)\./);
+
+  assert.deepEqual(runners(plan({ ...lists, HEAD_MESSAGE: linuxRun('\nClass1a: pool') }).outputs), { library: hosted, 'desk-web': box });
+  const off = plan({ ...lists, GATE_RUNNER: 'pool', HEAD_MESSAGE: linuxRun('\nClass1a: linux') });
+  assert.deepEqual(runners(off.outputs), { library: hosted, 'desk-web': hosted });
+  assert.equal(off.outputs.pool, 'false');
+  assert.deepEqual(runners(plan({ ...lists, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:desk-web' }).outputs), { 'desk-web': mac });
+  assert.deepEqual(runners(plan({ ...lists, EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:desk-web', INPUT_RUNNER: 'linux', INPUT_CLASS1A: 'pool' }).outputs), { 'desk-web': box });
 });
