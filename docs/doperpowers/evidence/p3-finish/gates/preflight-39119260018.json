@@ -21,6 +21,28 @@
   "previousRun": 39115417793,
   "attempt": null,
   "conclusion": null,
-  "manifestCommit": null,
-  "log": "/tmp/maws-review/gates/p3f-union-preflight-retry1-ci.log"
+  "manifestCommit": "2c45e150fe9bc87c867f76feccaab1548933697f",
+  "log": "/tmp/maws-review/gates/p3f-union-preflight-retry1-ci.log",
+  "bundleInspection": {
+    "status": "verified preflight; inspection only, not final-source evidence",
+    "manifestCommit": "2c45e150fe9bc87c867f76feccaab1548933697f",
+    "buildCommit": "9f20ae45051fea888c4fe3fd2cfda679bb89a73c",
+    "variant": "plain",
+    "archiveSha256": "5310ef779134196e64391661e321a34624aef8d506e8d2e7fe5dc706926039ec",
+    "archiveBytes": 15520401,
+    "files": 853,
+    "uncompressedBytes": 56198913,
+    "extracted": false
+  },
+  "unitTiming": {
+    "conclusion": "success",
+    "jobId": 117651335816,
+    "jobSeconds": 590,
+    "baselineJobSeconds": 405,
+    "deltaJobSeconds": 185,
+    "testStepSeconds": 445,
+    "baselineTestStepSeconds": 281,
+    "deltaTestStepSeconds": 164,
+    "interpretation": "Successful pool unit job; whole named gate still pending. Observed delta, not pure compiler attribution; below25min."
+  }
 }

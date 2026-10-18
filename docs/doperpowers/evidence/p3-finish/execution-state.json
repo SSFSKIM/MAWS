@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M1 pair1 whole named preflight rerun running; record wave in parallel",
+  "phase": "M1 pair1 named preflight open; record wave and M2 draft approved",
   "W-T": {
     "status": "CI repairs committed and independently approved; authoritative union gate pending",
     "base": "1c007d713",
@@ -54,7 +54,10 @@
     "runId": 39119260018,
     "source": "2c45e150fe9bc87c867f76feccaab1548933697f",
     "waiter": "bq1uoj3jk",
-    "queueThresholdTask": "be6eddzs1"
+    "queueThresholdTask": "be6eddzs1",
+    "recoveryVerifiedAt": "2026-10-18T10:57:52Z",
+    "waiterPid": 73297,
+    "queueThresholdResult": "terminal117651335932,unit:darwin117651335971,connectors117651336007 queued over30min; architect notified"
   },
   "M1-record": {
     "executor": "a37d3b91c053340cd",
@@ -72,8 +75,17 @@
   },
   "M2-preparation": {
     "executor": "adeb9c47ffd6b1bc0",
-    "status": "draft corrected; independent procedure review pending; no owner steps run",
+    "status": "draft independently approved after one fix; final-source recheck remains; no owner steps run",
     "commit": "b9551cab8",
-    "reviewer": "adcc38ef2eb777453"
+    "reviewer": "adcc38ef2eb777453",
+    "fixCommit": "0a64bcb47",
+    "reviewRounds": 2
+  },
+  "W-MINI": {
+    "status": "not dispatched; first-pair acceptance pending",
+    "foreground": "package-script activation permitted; lane hold lifted; child DL13"
+  },
+  "W-STORE": {
+    "status": "not dispatched; paired with W-MINI after first-pair acceptance"
   }
 }
