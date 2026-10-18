@@ -1,55 +1,75 @@
-# The desk, DC9 — the session view: report (interim, 2026-10-17)
+# The desk, DC9 — the session view: report (2026-10-17)
 
-**Status: paused at the composite's writer's instruction for a cmux restart, mid-execution.** This is the controller's
-interim account. The living record is the plan,
-`docs/doperpowers/plans/2026-10-17-desk-dc9-session-view.md` (Progress, Decision Log, Surprises). The mechanics needed
-to resume (bases, heads, agent ids) are in the SDE ledger,
-`.doperpowers/sde/2026-10-17-desk-dc9-session-view/progress.md` (gitignored, in `/tmp/desk-dc9`).
+**Status: done.** Every milestone has been built and reviewed clean, the whole-branch xhigh panel's findings are fixed and
+re-reviewed, and the PR to `master` is open, not merged. The composite's writer merges and deploys it, hub first.
 
-Parent pin: composite `417b8d2d3` (MAWS `smns-erb`).
+- **Plan:** `docs/doperpowers/plans/2026-10-17-desk-dc9-session-view.md`. Its Progress, Decision Log, Surprises and
+  Outcomes are the full record.
+- **Composite:** `docs/doperpowers/specs/2026-10-15-desk-design.md`, child DC9, last pinned at `417b8d2d3`. Later
+  composite commits recorded DX8 as built, the tab list and the G3 amendment, all of which the plan already carries.
+- **Branch:** `desk-dc9`. Merge-base with `master`: `d94663760`.
+- **Mechanics:** the per-task reports, review packages and screenshots are in the SDE workspace
+  `.doperpowers/sde/2026-10-17-desk-dc9-session-view/` (gitignored, in `/tmp/desk-dc9`).
 
-## Where each piece stands
+## What landed
 
-| Piece | State | Where |
+| Piece | Range | Review |
 | --- | --- | --- |
-| S1: the ask tool classified as a question | Done. Reviewed clean (reviewer-medium), gate run 39045490193 green, PR open, merged into `desk-dc9` | [SSFSKIM/MAWS#26](https://github.com/SSFSKIM/MAWS/pull/26), branch `desk-ask-classify` @ `dd7c37ab9` |
-| S2: shell and monitor starts in MAWS's backfill | Parked by the composite's writer: no PR, branch pushed. Residue below | `desk-backfill-jobs` @ `f51cc2056` |
-| T0: mockups of the four taste surfaces | Done. Owner chose 1B, 2B and 4A, with Stop disabled | `mockups/desk/09-session-view.html` (merged) |
-| M1: the hub's `output`, the widened bodies, DX8 `output()` | Reviewed clean | `d2c8fec5..af560476`, fix `..89b2e560` |
-| M2: the fake machine's part | Reviewed clean, including the follow-ups: DC8's fixture at `48f254aa`, launch text read only without a `toolUseResult`, and the `rpcs.test.ts` flake fix | `36131d48..c4a17632`, then `97e3b111..458f60c1`, then `ec8021c6` |
-| M3: per-session owner and session view | Reviewed clean after three fix waves; merged | `desk-dc9-m3` `..55c6e118`, merge `582aecfd` |
-| M4: the channel around the view | Built, plus fix waves 1–2. **Re-review of fix wave 2 pending** | `desk-dc9`: `7e2bbe64`, `1b05db7a`, `e8f5c743` + `38791976` |
-| M5: the column | Built and green, not yet reviewed. **Pending:** desk-side normalization of the bridge's multi-line interrupt row (Decision Log) | `desk-dc9-m5` @ `ca591debe` (`/tmp/desk-dc9-m5`) |
-| M6: acceptance, phone bundle, gate, polish | Not started | plan M6 |
-| Whole-branch xhigh panel; merge `origin/master`; DC9 PR | Not started | the panel is handed up to the composite's writer |
+| S1: the ask tool classified as a question | `a2fc6a2c..dd7c37ab`, merged to master as #26 (`67710ddd`) | reviewer-medium clean; gate 39071873678 |
+| S2: shell and monitor starts in MAWS's backfill | **parked**: `desk-backfill-jobs` @ `f51cc205`, pushed, no PR | its review's open findings are in the residue |
+| T0: mockups of the four taste surfaces | `mockups/desk/09-session-view.html` | the owner chose 1B, 2B and 4A, with Stop disabled |
+| M1: the hub's `output` frame and kind, the widened bodies, DX8 `output()` | `d2c8fec5..af560476`, fix `..89b2e560` | task review clean |
+| M2: the fake machine as DC8's producer, and the `session-view` recording | `36131d48..c4a17632`; DC8's fixture follow-ups `97e3b111..458f60c1`; rpcs flake `ec8021c6` | clean |
+| M3: one owner per session, the session view, streaming in the report, history in the center | `36131d48..55c6e118` (branch `desk-dc9-m3`), merged `582aecfd` | clean after 3 fix waves |
+| M4: tail sends, inline requests, ask overlay, end marker, fallbacks, retired folds | `ec8021c6..38791976` | clean after 2 fix waves |
+| M5: the column's DX4 statuses, the jobs view, `output`, MCP names, the interrupt's end | `34d32461..4cca48d8` (branch `desk-dc9-m5`), merged `ec0e9013` | clean after 1 fix wave |
+| M6: the acceptance, the phone bundle, polish, gate | `d2772a0e..4f4495ad` | clean after 1 fix wave |
+| Whole-branch xhigh panel (`d9466376..79a8c812`, run by the composite's writer) | 4 P2s and the `$` escape fixed in `c4492a96`; debt rows `48ad4b43`; the high rung's 1 P2 fixed in `13ff05e7` | reviewer-high clean on the fix delta |
 
-## To resume
+DC9's acceptance, G1–G5, is mapped clause by clause in M6's task report: each clause, the test that proves it, and the
+producer it runs on. G6 is S1's PR. Two things cannot be proved against the fake machine:
+- DC8's machine side end to end. It waits for the deployment, and the hub ships first.
+- The n-0 fallback. It is proved on DC5's DX3 double, while the fake's own n-0 rule is proved in desk-hub's suite.
 
-1. Re-review M4's fix wave 2 (`1b05db7a..38791976`) with the M4 task reviewer.
-2. Resume M5's executor for the bridge-interrupt normalization. Then run M5's task review, merge `desk-dc9-m5` into
-   `desk-dc9` (`desk-transcript.ts` needs a small textual merge with M4's range deletions), and send the composite's
-   writer the final depth tab list (Subagents, Jobs, Diff, Info).
-3. Dispatch M6 (plan text).
-4. Run the whole-branch xhigh panel. Hand the pinned range to the composite's writer.
-5. Merge `origin/master`, push, and open the DC9 PR. It notes that it lands after #26.
-
-## Residue so far (for the composite's writer to register)
+## Residue (for the composite's writer to register)
 
 - **The MAWS app's disk-only background jobs** (one follow-up owning the whole feature). It covers:
-  - the parked backfill on `desk-backfill-jobs`;
+  - the backfill parked on `desk-backfill-jobs`;
   - a disk-only `session.events` read, which reverses C8b's documented line;
   - an exited rule for disk-only sessions;
   - dropping BackgroundTool's live gate and its product line;
-  - Stop hidden for reconstructed jobs.
+  - hiding Stop for reconstructed jobs.
 
-  Two open findings ride with it. A monitor's expiry attachment is lost on a branch rejoin
-  (`chain-follower.ts:512-515` skips attachments). And the backfill misses the preamble-form plain-row notification.
-- **maws-fe suggestions:**
-  - the bubble's delivery foot, which the owner wants proposed to MAWS's `UserRow`;
+  Open findings that ride with it:
+  - a monitor's expiry attachment is lost on a branch rejoin (`chain-follower.ts:512-515` skips attachments);
+  - the backfill misses the preamble-form plain-row notification.
+- **maws-fe, to propose to the MAWS app:**
+  - the bubble's delivery foot for `UserRow`;
   - a `QuestionRow` prop, to replace the desk's portal overlay;
-  - names in `agent_message` rows (tech-debt row);
-  - a disk-only async ask-mod question that stays "Not answered" in the desktop app.
-- **Web Stop** for jobs (DX6 RPC, hub route, machine side). It is the first follow-up after DC8 and DC9 land.
-- **A relayed DX4 `turn-end` kind** (DC8 producing it), more exact than ending a turn at its interrupt marker.
-- **The bridge's interrupt row** should write the engine's exact marker, with the "Task …" lines in a separate row.
-  The composite's writer dispatches this to doperpowers.
+  - names in `agent_message` rows (a tech-debt row);
+  - a disk-only async ask-mod question that stays "Not answered";
+  - a peer label's semantics: the bubble is still announced as "Your message".
+- **Web Stop for jobs.** It needs a DX6 RPC, a hub route and the machine side. It is the first follow-up after DC8 and
+  DC9.
+- **A relayed DX4 `turn-end` kind**, produced by DC8. It would be more exact than ending a turn at its interrupt marker.
+- **Lazy shiki and KaTeX on the phone**, loaded only when a message holds code or math.
+- **The bridge's async-answer prompt** ("The doperpowers plugin sent a message: …") still draws as a raw bubble. It
+  could get the frame-line treatment.
+
+## Tech-debt rows this branch adds to `docs/tech-debt-tracker.md`
+
+1. MAWS's live path types a command Monitor as `local_bash` (owner C3 or C8b).
+2. An idle or ended session's last open turn still reads "working" when the transcript never ended it (desk only).
+3. Agent names in `agent_message` rows (maws-fe).
+4. A steer of an exact interrupt marker through a plugin older than #225 ends a turn.
+5. The fake machine's output resolver does not refuse a `..` that follows a dangling symlink. The read stays inside
+   the root.
+6. When DX4's status equals the held status, the held end time stays.
+
+## Friction routed around
+
+- **The worktree guard.** Agents dispatched from this session inherit a guard that refuses `git -C` on other paths and
+  complex shell. So every reviewer read a diff file the controller wrote (`/tmp/desk-review/dc9-diff.zsh`).
+- **A cmux restart paused execution.** Every worker committed WIP first and the ledger carried every handle, so
+  nothing was lost or redone.
+- **A flake in DC3's `rpcs.test.ts`** (a setUp race) was fixed in a test-only commit, `ec8021c6`.
