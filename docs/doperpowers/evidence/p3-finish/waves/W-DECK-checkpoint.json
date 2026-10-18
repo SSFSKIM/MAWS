@@ -1,5 +1,5 @@
 {
-  "status": "six row commits source-complete; independent review and authoritative union pending, not accepted",
+  "status": "two verified review findings under fresh bounded fix wave; source removals not accepted",
   "executor": "a00549767dfb02089",
   "reviewer": "a042b15ec9aa10fab",
   "reviewBase": "f6bf5d21d1c15843bd29211158fa1a8bcd8aee0e",
@@ -36,5 +36,14 @@
     "noise": "normal SQLite experimental warning and Vitest performance advice retained",
     "notRun": "local typecheck/app/engine/GUI/e2e"
   },
-  "next": "Independent review; verified findings dispatched to fix worker; union with DOC-A incl actual LibreOffice compare. S-DRAG-FIDELITY and L216 unchanged."
+  "next": "Independent review; verified findings dispatched to fix worker; union with DOC-A incl actual LibreOffice compare. S-DRAG-FIDELITY and L216 unchanged.",
+  "reviewResult": "reviews/W-DECK-result.txt",
+  "fixWave": {
+    "executor": "a2097c2f1e042d41a",
+    "findings": [
+      "rebased valid notes draft appears saved while unwritten",
+      "same-actor same-minute transient not distinguishable by coarse attribution filter"
+    ],
+    "rule": "exact existing-data repair or explicit narrowed carry, no new persisted contract; one recheck"
+  }
 }

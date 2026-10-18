@@ -112,6 +112,13 @@
       "currentAtCommit": "0f2d04b9a",
       "currentReview": "Accepted native dispositions verified; L217 trailing baseline allowance correction pending",
       "reconciledAt": "2026-10-18T14:40:33Z"
+    },
+    "216": {
+      "original": "| 2026-10-16 | P3-C (landing) | The drag's move-to-frame p95 on the mini sits 1 to 3 ms above the pre-wave base at comparable load (base 15.4 at load 4.9; head 18.2 to 19.7 at loads 1.5 to 12) after B7's follow-up halved the overlay's measures per frame; the source is unidentified, and the absolute 16 ms and M10's preview rows (open 120.9, preview 68.1, heavy preview 120.1 at loads 17.7 to 31.7) are unmeasured below load 10. | C's Outcomes (Decision Log 75). | A bisection of the final wave over several trials per commit on a quiet machine, then the re-measures under the scale gate. Owner: P3-F. |",
+      "current": "| 2026-10-16 | P3-C (landing) | The drag's move-to-frame p95 on the mini sits 1 to 3 ms above the pre-wave base at comparable load (base 15.4 at load 4.9; head 18.2 to 19.7 at loads 1.5 to 12) after B7's follow-up halved the overlay's measures per frame; the source is unidentified, and the absolute 16 ms and M10's preview rows (open 120.9, preview 68.1, heavy preview 120.1 at loads 17.7 to 31.7) are unmeasured below load 10. | C's Outcomes (Decision Log 75). | P3-F (2026-10-18): the alleged 1 to 3 ms regression/bisection half closes as a measurement confound on the approved host-faithful A/B/A/B (runs39136242401,39136925852,39137361846,39137918574; original pins e50c8c924/f686e72b3, unchanged measurement under probe pins6120130ec/e2b81e967). Three trials each, drag loads2.50\u20134.41; pooled medians A19.10 and B19.15 ms, ranges A18.2\u201320.5/B18.5\u201320.1, direction reverses between pairs. No discernible product gap; no bisection jobs. Raw trials, start/end loads and log hashes: docs/doperpowers/evidence/p3-finish/drag-discriminator.json and its four result files. All12 trials still miss the absolute16ms bound below load10; this is not waived. Remaining: final-source host-faithful absolute, preview and heavy-preview measures. If final source fails the bound with no product gap, report parent-impact with the stand-in15.4ms at load4.9 beside host-faithful figures; the architect decides a P3 Decision Log acceptance/bound rebase versus repair, neither assumed by F (architect ruling2026-10-18). Heavy history was absent in the discriminator. Owner: P3-F for the final measures; architect for that parent decision. |",
+      "currentAtCommit": "a5e3d7323",
+      "currentReview": "architect accepted four-run confound; final parent-bound half retained",
+      "reconciledAt": "2026-10-18T15:05:42Z"
     }
   }
 }

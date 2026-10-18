@@ -1,5 +1,5 @@
 {
-  "status": "five row commits source-complete; independent review and authoritative union pending, not accepted",
+  "status": "independent review correct; native union pending",
   "executor": "af7fe2d9bf548028a",
   "reviewer": "a69c0ca8f5888e14f",
   "reviewBase": "4b0e1f1e3e2ba06dcb41f6bde1ba783499b8afa3",
@@ -32,7 +32,7 @@
     "notRun": "local typecheck/app/engine/GUI/e2e"
   },
   "P4Remainder": {
-    "status": "architect-approved explicit new row, outside frozen M0 denominator; controller append in this commit",
+    "status": "appended by controller in a5b5610d3; outside frozen M0 denominator",
     "row": "| 2026-10-18 | P3-F (W-DOC-A, from L154) | A message sent to a comment's Side thread from the Side pane's or a main tab's composer, rather than the comment card's Reply, is not recorded in the artifact's comment thread: those composers draw the thread through SessionPane with no card frame (so no `onSending`), and the artifact's replica may not be open in the window at all. | L154 narrowed to the card path at P3-F's W-DOC-A (c7547b91f; `src/renderer/src/side/card/CardThread.tsx` `useReply`; `src/renderer/src/side/ThreadView.tsx` draws the thread through `SessionPane`, whose composer only sends to the session). | A human message sent to a side thread whose lineage anchor is `artifact-comment` is appended to that artifact's thread through a host-side artifact-thread write (a new contract: the thread the anchor names written without an open editor, credited to the owner, not duplicating the card's own record), or the owner rules that only the card's Reply is recorded. Owner: P4. |",
     "reason": "pane/tab composer has no card frame and may have no open artifact replica; host-side artifact-thread write requires new contract"
   },
@@ -46,5 +46,6 @@
     "e2e:design",
     "e2e:side"
   ],
-  "next": "Independent review/fix if needed; union with DECK. No original clause beyond card path silently closed."
+  "next": "Independent review/fix if needed; union with DECK. No original clause beyond card path silently closed.",
+  "reviewResult": "reviews/W-DOC-A-result.txt"
 }
