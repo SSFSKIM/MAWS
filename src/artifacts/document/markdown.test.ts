@@ -575,22 +575,27 @@ describe('a line ending inside text', () => {
     expect(md.serialize(docOf([para('p1', schema.text('a'), hardBreak(), schema.text('b'))]))).toBe('a  \nb ^p1');
   });
 
-  it('is a hard line break in a reader’s Markdown, never the escape, and nothing after it reads as markup', () => {
-    const out = md.serialize(docOf([para('p1', schema.text('a\n# b\n\n- c\n'))]), { ids: false, forReaders: true });
+  // the reader's form is not lossless through the dialect's import: a backslash break reads back as a hardBreak and
+  // `<br>` as literal text (the export's contract states it), which the last assertions pin rather than hide
+  it('is a line break in a reader’s Markdown, never the escape, kept in a heading and at a block’s end, and nothing after it reads as markup', () => {
+    const out = md.serialize(docOf([para('p1', schema.text('\na\n# b\n\n- c\n'))]), { ids: false, forReaders: true });
     expect(out).not.toContain('&#10;');
-    expect(out).toBe('a\\\n\\# b\\\n\\\n\\- c');
+    expect(out).toBe('\\\na\\\n\\# b\\\n\\\n\\- c<br>');
     const back = md.parse(out);
     expect(back).toHaveLength(1);
     expect(back[0].toJSON().content).toEqual([
+      { type: 'hardBreak' },
       { type: 'text', text: 'a' },
       { type: 'hardBreak' },
       { type: 'text', text: '# b' },
       { type: 'hardBreak' },
       { type: 'hardBreak' },
-      { type: 'text', text: '- c' },
+      { type: 'text', text: '- c<br>' },
     ]);
-    const heading = schema.nodes.heading.create({ id: 'h1', level: 2 }, schema.text('a\n# b'));
-    expect(md.serialize(docOf([heading]), { ids: false, forReaders: true })).toBe('## a # b');
+    const heading = schema.nodes.heading.create({ id: 'h1', level: 2 }, schema.text('a\n# b\n'));
+    const written = md.serialize(docOf([heading]), { ids: false, forReaders: true });
+    expect(written).toBe('## a<br># b<br>');
+    expect(md.parse(written).map((block) => [block.type.name, block.textContent])).toEqual([['heading', 'a<br># b<br>']]);
     const code = schema.nodes.codeBlock.create({ id: 'c1', language: null }, schema.text('x\n# y'));
     expect(md.serialize(docOf([code]), { ids: false, forReaders: true })).toContain('x\n# y');
   });
@@ -618,6 +623,8 @@ describe('a line ending inside text', () => {
     expect(back.content![1].content).toHaveLength(1);
     expect(back.content![1].content![0].content).toEqual(broken('c', '- d'));
     expect(back.content![2].content).toEqual(broken('e', 'f', [{ type: 'bold' }]));
+    const ending = md.serialize(docOf([para('p4', schema.text('g\n', [schema.marks.bold.create()]))]), { ids: false, forReaders: true });
+    expect(ending).toBe('**g**<br>');
   });
 });
 

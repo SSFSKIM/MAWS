@@ -1,9 +1,11 @@
 // The Markdown export (D12 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): the agent's dialect (GFM plus the
 // kind's lossless forms, X26) with block ids and comment milestones off, so the file is plain GFM wherever GFM can say
-// the content and reads back through the import as the content it was written from. It is written for people to read
-// (`forReaders`, P3-F tracker L166): a line ending inside text is a hard line break rather than the agent read's
-// `&#10;`, so it reads back as a hardBreak. M8's linked-directory mirror writes a document's `.md` through it. Several
-// tabs are written in order, each introduced by its title as a top-level heading.
+// the content and reads back through the import as the content it was written from, with one exception. It is written
+// for people to read (`forReaders`, P3-F tracker L166): a line ending inside text is rendered as a line break (a
+// backslash break, or `<br>` in a heading and at a block's end) rather than the agent read's `&#10;`, and the import
+// reads that back as a hardBreak, or `<br>` as literal text: text holding a line ending does not read back exactly.
+// M8's linked-directory mirror writes a document's `.md` through it. Several tabs are written in order, each
+// introduced by its title as a top-level heading.
 import { docMarkdown } from '../markdown';
 import { schemaFor } from '../schema';
 import { tabsOf, type ExportSource, type ViewRenderer } from './source';

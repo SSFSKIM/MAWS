@@ -31,7 +31,7 @@
 //                 of the mark); an empty paragraph or heading holds one no-break space, and a text of only no-break
 //                 spaces one more than it has; a line ending inside text (not a hardBreak) is `&#10;`, so what follows
 //                 it never starts a line (P3-F, tracker L166). A reader's Markdown (`forReaders`, an export) writes it
-//                 as a hard line break instead
+//                 as Markdown's own line break instead (see `SerializeOptions.forReaders`)
 //   comments      `<c:ID>` where an open thread's text starts and `</c:ID>` where it ends (each closing tag names its
 //                 thread, so overlapping comments need no nesting; S5's read format), inside code too; ignored on
 //                 parse. A literal `<c:x>` in code is written `<\c:x>` (one more backslash) and read back as written.
@@ -59,8 +59,10 @@ export interface SerializeOptions {
   charts?: ReadonlyMap<string, string>;
   /**
    * P3-F (tracker L166): Markdown for people to read (an export; ids and milestones off): a line ending inside text is
-   * written as a hard line break (a backslash at the line's end; a space in a heading, which cannot break; none at a
-   * block's end), the next line's start escaped, never as the canonical `&#10;`. Code keeps its line ends either way.
+   * rendered as a line break, never as the canonical `&#10;`: CommonMark's hard line break (a backslash ending the line,
+   * the next line's start escaped) where the text goes on, and an inline `<br>` where Markdown cannot break a line (in a
+   * heading, and at a block's end, where a backslash would read literally). Code keeps its line ends either way. Not
+   * lossless: the dialect reads a backslash break back as a hardBreak and `<br>` as literal text.
    */
   forReaders?: boolean;
 }
@@ -98,7 +100,7 @@ const CODE_OPEN = '\uE009'; // around inline code a single-backtick span cannot 
 const CODE_CLOSE = '\uE00A';
 const SPACE_HOLDER = '\uE00B'; // a no-break space the text holds or the placeholder of an empty block: `&#160;`
 const SEPARATOR = '\uE00C'; // `<!---->`: lets `*` and `**` close before, or open after, a letter (read as nothing)
-const NEWLINE = '\uE00E'; // a line ending inside text: `&#10;` (P3-F, tracker L166)
+const NEWLINE = '\uE00E'; // a line ending inside text: `&#10;`, or a reader's `<br>` (P3-F, tracker L166)
 // The content's own characters of this alphabet: each is written as LITERAL and a letter (`a` for U+E000 … `p` for
 // U+E00F) before the sentinels go in and restored after they are gone, so a generated sentinel and a literal character
 // are never confused (the whole-branch review's P6); a parse does the same around its own sentinels.
@@ -211,8 +213,8 @@ function prepareInline(content: Json[], parent: Json, show: ReadonlySet<string>,
         text = escapeText(raw.replace(/\n/g, NEWLINE), { lineStart, lineEnd, inCell: cell });
         if (marks.length > 0) text = edges(text);
       } else {
-        // a reader's line break: each line escaped where it starts
-        const lines = (parent.type === 'heading' ? raw.replace(/\n/g, ' ') : raw).split('\n');
+        // a reader's line break: each line escaped where it starts; a heading cannot break a line, so it keeps `<br>`
+        const lines = parent.type === 'heading' ? [raw.replace(/\n/g, NEWLINE)] : raw.split('\n');
         lines.forEach((line, k) => {
           if (k > 0) out.push({ type: 'text', text: READER_BREAK });
           let piece = escapeText(line, { lineStart: lineStart || k > 0, lineEnd: lineEnd || k < lines.length - 1, inCell: cell });
@@ -224,8 +226,8 @@ function prepareInline(content: Json[], parent: Json, show: ReadonlySet<string>,
     }
     out.push({ ...node, text, marks: marks.length ? marks : undefined });
   });
-  // a hard line break ending a block would read as a backslash: a reader's block keeps none at its end
-  while (tables.forReaders && out.length > 0 && out[out.length - 1].text === READER_BREAK) out.pop();
+  // a hard line break ending a block would read as a literal backslash: a reader's block ends its lines with `<br>`
+  for (let k = out.length - 1; tables.forReaders && k >= 0 && out[k].text === READER_BREAK; k--) out[k] = { type: 'text', text: NEWLINE };
   for (const id of active.reverse()) pushSentinel(CLOSE, id, restMarks(content[content.length - 1]));
   return code ? out : separate(out);
 }
@@ -359,7 +361,7 @@ function restore(markdown: string, tables: Tables): string {
     .replaceAll(BREAK, '')
     .replaceAll(SPACE_HOLDER, '&#160;')
     .replaceAll(SEPARATOR, '<!---->')
-    .replaceAll(NEWLINE, '&#10;');
+    .replaceAll(NEWLINE, tables.forReaders ? '<br>' : '&#10;');
   const lines = text.split('\n').map((line, at) => {
     let row: string | null = null;
     let out = line.replace(SENTINEL, (match, index: string) => {

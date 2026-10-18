@@ -41,24 +41,30 @@ describe('exportMarkdown', () => {
   });
 
   // P3-F W-DOC-B (tracker L166, the architect's export condition): a line ending inside text reaches the reader as a
-  // line break, never as the agent read's `&#10;`, and nothing after it becomes structure; code keeps its raw line ends
+  // line break, never as the agent read's `&#10;`, in a heading and at a block's end too, and nothing after it becomes
+  // structure; code keeps its raw line ends. Read back through the import it is a hardBreak, or `<br>` as literal text:
+  // the export's one inexact read-back, pinned here as it is
   it('writes a line ending inside text as a line break, never the escape, and makes no structure of what follows it', () => {
     const md = exportMarkdown(
       sourceOf([
         { type: 'paragraph', content: [{ type: 'text', text: 'Title\n---\n\n# not a heading\n- not a list' }] },
         { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'One\nTwo' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Ends with a line ending\n' }] },
         { type: 'codeBlock', attrs: { language: null }, content: [{ type: 'text', text: 'x\n# y' }] },
       ]),
     );
     expect(md).not.toContain('&#10;');
-    expect(md).toContain('## One Two');
+    expect(md).toContain('\n\n## One<br>Two\n\n');
+    expect(md).toContain('\n\nEnds with a line ending<br>\n\n');
     expect(md).toContain('```\nx\n# y\n```');
     const back = importMarkdown(md);
-    expect(back.content.content.map((block) => block.type.name)).toEqual(['paragraph', 'heading', 'codeBlock']);
+    expect(back.content.content.map((block) => block.type.name)).toEqual(['paragraph', 'heading', 'paragraph', 'codeBlock']);
     const lines: string[] = [];
     back.child(0).forEach((node) => lines.push(node.type.name === 'hardBreak' ? '\n' : (node.text ?? '')));
     expect(lines.join('')).toBe('Title\n---\n\n# not a heading\n- not a list');
-    expect(back.child(2).textContent).toBe('x\n# y');
+    expect(back.child(1).textContent).toBe('One<br>Two');
+    expect(back.child(2).textContent).toBe('Ends with a line ending<br>');
+    expect(back.child(3).textContent).toBe('x\n# y');
   });
 
   it('refuses a tab the document does not have', () => {
