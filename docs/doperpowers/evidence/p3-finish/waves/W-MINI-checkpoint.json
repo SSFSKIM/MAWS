@@ -96,5 +96,13 @@
     "264": "b9beae6ed",
     "277": "0f2d04b9a",
     "217-correction": "e9a818df2"
+  },
+  "currentNativeCounters": {
+    "recordedAt": "2026-10-18T20:28:07Z",
+    "L277": "5/10",
+    "L199MustRead": "3/10",
+    "L217": "5 post-fix named scene passes; no required streak threshold, future same-signature product recurrence",
+    "fullSetCredit": 0,
+    "proof": "gates/pair45-39156492025.json plus pair4/45 raw default logs for filmstrip"
   }
 }

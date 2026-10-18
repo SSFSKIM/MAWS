@@ -113,15 +113,16 @@
     "reviewFixCommit": "5f115a09d",
     "nativeReadings": "gates/pair2-diagnostic-39130559347.json",
     "L277SceneStreak": {
-      "passed": 4,
+      "passed": 5,
       "required": 10,
       "runs": [
         39130559347,
         39133832247,
         39140360292,
-        39149994319
+        39149994319,
+        39156492025
       ],
-      "latestProof": "native=true18:03:55.542Z, scene passed; tracker documentary count update still pending"
+      "latestProof": "native=true19:03:32.799Z and restore passed; tracker updated5/10"
     },
     "repairAssessment": "a788b678f28592255",
     "diagnosticSupplement": "14c3e6fd6",
@@ -133,13 +134,14 @@
     ],
     "nativeRepairReviewer": "afefa3ce1540fa23a",
     "L199MustReadSceneStreak": {
-      "passed": 2,
+      "passed": 3,
       "required": 10,
       "runs": [
         39133832247,
-        39149994319
+        39149994319,
+        39156492025
       ],
-      "latestProof": "native=true18:00:33.375Z and case passed; tracker documentary count update still pending"
+      "latestProof": "native=true19:14:41.147Z and must-read passed; tracker updated3/10"
     },
     "tsFixLint": {
       "task": "bgmopgt3v",
@@ -160,13 +162,16 @@
     },
     "traceTypeFix": "dc0247612",
     "L217PostFixPasses": {
-      "passed": 3,
+      "passed": 5,
       "runs": [
         39130559347,
         39133832247,
-        39140360292
+        39140360292,
+        39149994319,
+        39156492025
       ],
-      "futureFailure": "product recurrence, never baseline"
+      "futureFailure": "product recurrence, never baseline",
+      "latestProof": "Controller read actual filmstrip-reorder native=true entries17:40:06.694Z(pair4) and19:21:23.512Z(pair45), followed by presentations.spec.ts168 case passes; pair4 overall default red on unrelated fork. Future same-signature failure remains product recurrence."
     }
   },
   "W-STORE": {
