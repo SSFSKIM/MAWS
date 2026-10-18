@@ -33,3 +33,29 @@ it("leaves out another session's questions, and a question whose call the view d
   expect(askedQuestions(S, [other], [call]).size).toBe(0);
   expect(askedQuestions(S, [question], []).size).toBe(0);
 });
+
+// The transcript's own answer (`ask-answer.ts`): the plugin's prompt while the session was idle, or a context attachment
+// on a tool's result or the human's prompt, each naming the call it answers.
+const idlePrompt = (text: string): JsonObject => ({
+  type: 'user', uuid: 'u2', origin: { kind: 'plugin', name: 'doperpowers' }, promptId: 'p2',
+  message: { role: 'user', content: `The doperpowers plugin sent a message:\n${text}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.` },
+});
+const context = (text: string, hookName: 'tool.call' | 'prompt.submit'): JsonObject => ({
+  type: 'attachment', uuid: 'c1', attachment: { type: 'hook_additional_context', content: [text], hookName, toolUseID: 'x-context', hookEvent: hookName === 'tool.call' ? 'PostToolUse' : 'UserPromptSubmit' },
+});
+const delivered = (summary: string) => `The human responded to your async AskUserQuestion (call ${CALL}): ${summary}`;
+
+it("reads the answers from the transcript's own delivery, by any of its routes, when the log has none: a question the log never named included", () => {
+  for (const row of [idlePrompt(delivered(SUMMARY)), context(delivered(SUMMARY), 'tool.call'), context(delivered(SUMMARY), 'prompt.submit')]) {
+    expect(askedQuestions(S, [question], [call, row]).get(CALL), JSON.stringify(row)).toMatchObject({ answers: { [QUESTIONS[0].question]: 'Stop it' }, answeredText: SUMMARY });
+    expect(askedQuestions(S, [], [call, row]).get(CALL)).toMatchObject({ answers: { [QUESTIONS[0].question]: 'Stop it' } });
+  }
+});
+
+it("prefers the log's answer to the transcript's, and reads no answer from a prompt the human typed that quotes one", () => {
+  const logged = `Your questions have been answered: "${QUESTIONS[0].question}"="Keep it running". You can now continue with these answers in mind.`;
+  const answered = ev('answered', { from: 'fakerec', src: CALL, text: logged });
+  expect(askedQuestions(S, [question, answered], [call, idlePrompt(delivered(SUMMARY))]).get(CALL)).toMatchObject({ answeredText: logged });
+  const typed: JsonObject = { type: 'user', uuid: 'u3', origin: { kind: 'human' }, message: { role: 'user', content: delivered(SUMMARY) } };
+  expect(askedQuestions(S, [question], [call, typed]).get(CALL)).toMatchObject({ answers: null, answeredText: null });
+});

@@ -121,8 +121,8 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
     foot: { running: session.presence?.record != null, ended, resumable: retiredBy(session) === null },
   };
 
-  // The ask mod's async questions the log knows, each waiting on its card below while its request is pending, or
-  // withdrawn once its request was settled so.
+  // The ask mod's async questions the log or the transcript knows, each waiting on its card below while its request is
+  // pending, or withdrawn once its request was settled so.
   const overlays = useMemo(
     () => questionOverlayFacts(askedQuestions(session.session, events, owner.main.heldRows()), known),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the held rows are read through their count and oldest row

@@ -64,6 +64,7 @@ import { OutputRequests } from '../jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
 import { deliveryAsDrawn, deliveryFrame } from '../../conversation/delivery-frame';
 import { withAppendedTurn } from './appended-turn';
+import { withAnswerLines } from './ask-answer';
 import { isMirrorLine, steerAsDrawn } from './bridge-rows';
 import { withWakeLine } from './bridge-wake';
 import { normalizeInterruptRow, withInterruptEnd } from './interrupt';
@@ -146,14 +147,16 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
  * is drawn as the owner's prompt queued there too (`bridge-rows.ts`), one appended while no turn ran taken by the turn
  * that starts next (`appended-turn.ts`), the bridge's mirror of either not at all, and the bridge's wake as its own line
  * in a turn the session continued (`bridge-wake.ts`), read off the held row: a delivery whose words open with the
- * wake's line is no wake, and its drawn copy has lost the frame that says so.
+ * wake's line is no wake, and its drawn copy has lost the frame that says so. The ask mod's answer to an async question
+ * is drawn as a line naming the answers where it reached the model, its idle prompt's turn one the session continued
+ * (`ask-answer.ts`).
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
   if (isMirrorLine(row)) return [];
   const mapped = steerAsDrawn(deliveryAsDrawn(normalizeInterruptRow(row)));
   const record = TranscriptRecordSchema.safeParse(mapped);
   if (!record.success) return [];
-  let events = withWakeLine(row, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx);
+  let events = withAnswerLines(row, withWakeLine(row, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx), ctx);
   if (events.some((event) => event.kind === 'subagent.message')) {
     events = events.map((event) => (event.kind === 'turn.started' && event.origin === 'peer' ? { ...event, origin: 'task-notification' } : event));
   }

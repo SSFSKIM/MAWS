@@ -3,8 +3,11 @@
 // its `src`. Joined here to the call the session's transcript holds — whose input carries the questions and their
 // headers as MAWS's question receipt reads them — and to the answer, read back from the log's text with MAWS's own
 // reader of the engine's summary (`askModAnswers`). The session view overlays its question rows with what this gives.
+// The transcript holds the answer too, wherever it reached the model (`ask-answer.ts`), naming its call: a question it
+// answers is overlaid as well, the log's question or not, and a log with no answer for it takes the transcript's.
 import type { JsonObject, LogEvent } from 'desk-hub/protocol';
 import { askModAnswers } from '../../../../src/renderer/src/transcript/model/ask-mod';
+import { askAnswers } from './ask-answer';
 import { writerSession } from './stream';
 
 export type AskedQuestion = {
@@ -47,6 +50,12 @@ export function askedQuestions(session: string, entries: readonly { event: LogEv
     if (writerSession(event.writer) !== session || typeof event.src !== 'string') continue;
     if (event.kind === 'question') asked.add(event.src);
     else if (event.kind === 'answered') answers.set(event.src, typeof event.text === 'string' ? event.text : '');
+  }
+  for (const row of rows) {
+    for (const { call, text } of askAnswers(row)) {
+      asked.add(call);
+      if (!answers.has(call)) answers.set(call, text);
+    }
   }
   const out = new Map<string, AskedQuestion>();
   if (asked.size === 0) return out;
