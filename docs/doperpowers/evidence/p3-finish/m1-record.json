@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 79,
-    "defer:pending": 44,
+    "defer:committed": 80,
+    "defer:pending": 43,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -1123,7 +1123,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L134; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
       "remainingClause": "The `@y/y` release note naming yjs#814; the special case removed with the tests green. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L134; parent Decision Log 106): Upstream binding/attribution limitation; keep the tested pin and rerun the reproducer at the next Yjs re-pin. Owner: P4; each Yjs re-pin reruns the reproducer.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "415150597ce96a653868638e9fcdd036b9dacc9b"
     },
     {
       "line": 135,
@@ -1133,8 +1133,8 @@
       "triageReason": "Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L135; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
       "remainingClause": "Each test's bound raised to its measured p99 under load 20, or the clock faked; the suite clean at load 20 without reruns. Owner: P3-F. Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L135; parent Decision Log 106): Bounded test/coverage cleanup not currently hiding a P3 failure; retain specific closing proof for the next relevant pass. Owner: P4.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 136,
