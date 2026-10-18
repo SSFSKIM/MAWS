@@ -15,8 +15,8 @@
   "counts": {
     "close:committed": 9,
     "close:held": 1,
-    "defer:committed": 29,
-    "defer:pending": 94,
+    "defer:committed": 30,
+    "defer:pending": 93,
     "preclosed:committed": 16,
     "preclosed:untouched": 1
   },
@@ -573,7 +573,7 @@
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L57; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
       "remainingClause": "E4c's `-run-dialog` wrap on every tab view (A-42, landed at 0f9c65d7) answers agent-held and unplaced tabs' dialogs whatever their preferences; for a placed human-held tab it delegates to Electron's handler, which offers no checkbox to an adopted pop-up, so the row closes when the wrap also bounds a repeated dialog there (Chrome's \"prevent additional dialogs\" per origin), or an Electron release applies the override to adopted children. Re-deferred 2026-10-07 (E11 1.6): needs a per-origin dialog bound (feature) or an Electron release; A-42's wrap covers agent-held and unplaced tabs. Owner: P2 (re-checked on each Electron bump). Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L63): needs an Electron release or a per-origin dialog bound (feature). Owner: each Electron bump (the in-app browser). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L57; parent Decision Log 106): Native/Electron behavior or missing API; revalidate at each Electron bump, not a speculative P3 change. Owner: each Electron bump.",
       "status": "committed",
-      "commit": "this row commit (its id is filled in by the next record write)"
+      "commit": "5e2fc288fd2baeb9395d23eb940a528b0cbcd33e"
     },
     {
       "line": 58,
@@ -583,8 +583,8 @@
       "triageReason": "Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner.",
       "appended": "Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L58; parent Decision Log 106): Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner. Owner: P4, through the in-app browser's owner lane.",
       "remainingClause": "Each divergence reproduced in `describe.test.ts` against Playwright's answer and fixed, or the name treated as doubt there. Re-deferred 2026-10-07 (E11 1.6): rare; E4d keeps spec-exact naming until a mismatch is shown. Owner: P2. Re-deferred 2026-10-10 (P2-F triage, `docs/doperpowers/evidence/p2-finish/triage.txt` L65): rare; spec-exact naming kept until a mismatch is shown. Owner: P3 (the in-app browser). Re-deferred 2026-10-18 (P3-F triage, `docs/doperpowers/evidence/p3-finish/triage.txt` L58; parent Decision Log 106): Browser feature/behavior pass rather than an artifact contract repair; route any future implementation through its browser owner. Owner: P4, through the in-app browser's owner lane.",
-      "status": "pending",
-      "commit": null
+      "status": "committed",
+      "commit": "this row commit (its id is filled in by the next record write)"
     },
     {
       "line": 59,
