@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # scripts/ci-gate.sh's retry of the jobs a spot preemption ended (docs/doperpowers/plans/2026-10-14-gate-offload.md
 # Decision Log 69, 70), sourced by it and by scripts/ci-gate-preemptions.test.mjs. It reads ci-gate.sh's REPO and run_id
-# and calls its await_run, which returns once the run's latest attempt has completed.
+# and calls its await_run, which returns once `gh run view` shows the run completed, and its finish, when the run's jobs
+# cannot be read.
 # shellcheck disable=SC2154,SC2034 # those are ci-gate.sh's, and so is printing the summary it sets
 
 # When GCE preempts a pool VM mid-job, GitHub concludes the job `failure`, as it does a red test, with the annotations
@@ -27,12 +28,34 @@ preempted_jobs() { # <the jobs>
 # sorted by name) and preemptions, the line naming each preempted job and how it ended (empty when none was).
 # One at a time because GitHub refuses a job rerun while the run is running; by name because a job's id changes with
 # every attempt. A job preempted on its rerun stays red.
+# Only an attempt the run API shows completed, its jobs read, is acted on: `gh run view`, which await_run trusts, can
+# still show the attempt before a rerun completed while the API shows the rerun's running, and a job not read has no id
+# to rerun it by. Anything else is read again once await_run returns; reads that keep failing end the gate red, as
+# await_run's do.
 settle_run() {
-  local rows found id name pending='' retried='' twice='' refused='' next rerun_err started
+  local rows found id name pending='' retried='' twice='' refused='' next rerun_err started observed run_status unread=0
   while :; do
     await_run
-    IFS=$'\t' read -r run_attempt conclusion < <(gh api "repos/$REPO/actions/runs/$run_id" --jq '"\(.run_attempt)\t\(.conclusion)"')
-    rows=$(gh api --paginate "repos/$REPO/actions/runs/$run_id/jobs?per_page=100" --jq '.jobs[] | [.id, (.conclusion // .status), (.runner_name // ""), .name] | @tsv')
+    # The attempt, its status and its conclusion from one observation of the run.
+    if observed=$(gh api "repos/$REPO/actions/runs/$run_id" --jq '"\(.run_attempt)\t\(.status)\t\(.conclusion)"'); then
+      IFS=$'\t' read -r run_attempt run_status conclusion <<<"$observed"
+    else
+      run_status=unread
+    fi
+    if [[ $run_status == completed ]] && ! rows=$(gh api --paginate "repos/$REPO/actions/runs/$run_id/jobs?per_page=100" --jq '.jobs[] | [.id, (.conclusion // .status), (.runner_name // ""), .name] | @tsv'); then
+      run_status=unread
+    fi
+    if [[ $run_status != unread ]]; then
+      unread=0
+    else
+      unread=$((unread + 1))
+      if ((unread >= 20)); then
+        echo "ci-gate: the jobs of run $run_id cannot be read" >&2
+        finish 1
+      fi
+    fi
+    # Not settled yet.
+    [[ $run_status == completed ]] || { sleep 1; continue; }
     jobs=$(printf '%s\n' "$rows" | cut -f2,4 | sort -k2)
     # In a cancelled run nothing is a preemption, and nothing found before is rerun.
     [[ $conclusion != cancelled ]] || break
@@ -41,19 +64,26 @@ settle_run() {
       [[ -n $name ]] || continue
       case " $retried " in
         *" $name "*) case " $twice " in *" $name "*) ;; *) twice+=" $name"; echo "ci-gate: $name preempted again in attempt $run_attempt; it stays red" ;; esac ;;
-        *) case " $pending $refused " in *" $name "*) ;; *) pending+=" $name" ;; esac ;;
+        *) case " $pending $refused " in *" $name "*) ;; *) pending+=" $name"; echo "ci-gate: $name preempted in attempt $run_attempt" ;; esac ;;
       esac
     done <<<"$found"
     next=${pending# }; next=${next%% *}
     [[ -n $next ]] || break
     pending=${pending# "$next"}
     id=$(printf '%s\n' "$rows" | awk -F'\t' -v name="$next" '$4 == name { print $1; exit }')
+    # gh reruns the whole run on an empty --job: a job is rerun by an id read for it, or not at all.
+    case $id in
+      '' | *[!0-9]*)
+        echo "ci-gate: $next has no job id in attempt $run_attempt to rerun it by; it stays red"
+        refused+=" $next"
+        continue ;;
+    esac
     if ! rerun_err=$(gh -R "$REPO" run rerun "$run_id" --job "$id" 2>&1); then
-      echo "ci-gate: $next preempted in attempt $run_attempt; its rerun was refused: $rerun_err"
+      echo "ci-gate: $next's rerun was refused: $rerun_err; it stays red"
       refused+=" $next"
       continue
     fi
-    echo "ci-gate: $next preempted in attempt $run_attempt; rerunning it alone as attempt $((run_attempt + 1))"
+    echo "ci-gate: rerunning $next alone as attempt $((run_attempt + 1))"
     # The rerun is accepted before the run reads as running again: wait for its attempt, so await_run does not return on
     # the one just read.
     for _ in $(seq 1 30); do
