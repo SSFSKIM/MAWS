@@ -2,6 +2,7 @@
 // whom the org holds them as. A request Access no longer admits (its session lapsed) is redirected to Access's sign-in
 // on another origin, which a fetch cannot follow, so it surfaces as `signed-out`.
 import type { MemberRecord, OrgRecord } from 'desk-hub/protocol';
+import { admissionOf } from './access';
 
 export type Me = { org: OrgRecord; member: MemberRecord };
 
@@ -18,8 +19,7 @@ export async function fetchMe(): Promise<Me> {
   } catch {
     throw new SignInError('unavailable');
   }
-  if (response.type === 'opaqueredirect' || response.status === 401) throw new SignInError('signed-out');
-  if (response.status === 403) throw new SignInError('not-a-member');
-  if (!response.ok) throw new SignInError('unavailable');
+  const admission = await admissionOf(response);
+  if (admission !== 'admitted') throw new SignInError(admission === 'unreachable' ? 'unavailable' : admission);
   return (await response.json()) as Me;
 }

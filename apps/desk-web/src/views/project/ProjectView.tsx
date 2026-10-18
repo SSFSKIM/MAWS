@@ -5,6 +5,7 @@
 // and the view says why. Events, requests, settlements, and deliveries whose code fails are reported, never drawn.
 import { useEffect, useState } from 'react';
 import { useStore } from 'zustand';
+import { useAccess } from '../../hub/access';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
 import { drawable, refused } from '../../log/project-log';
@@ -16,6 +17,7 @@ import { useSlot } from '../../shell/slots';
 import { phoneShowsList, usePhoneProject } from '../../shell/phone';
 import { useNarrow } from '../../shell/viewport';
 import { useGrid } from '../../state/grid';
+import { LapsedBanner } from '../access/SignInAgain';
 import { UnlockForm } from '../key/UnlockForm';
 import { DeskContext } from '../conversation/desk-context';
 import { ChannelView } from './ChannelView';
@@ -34,6 +36,7 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
   const keyState = useKeyHolder((s) => s.state);
   const logState = useStore(connection.log.store);
   const status = useStore(connection.live, (s) => s.status);
+  const lapsed = useAccess((s) => s.lapsed);
   const audit = useStore(connection.live, (s) => s.audit);
   const unverified = useStore(connection.conversation.store, (s) => s.unverified);
   const { sessions, groups } = useDeskSessions(connection);
@@ -80,9 +83,20 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
       data-connection={status}
       data-layout={narrow ? 'phone' : 'desktop'}
     >
-      {(!narrow || listed) && sidebar}
+      {(!narrow || listed) &&
+        (listed && lapsed !== null ? (
+          // The phone's channel list hides the center, and with it the center's banner.
+          <div className="flex min-h-0 flex-col">
+            <LapsedBanner lapse={lapsed} what="this project" />
+            {sidebar}
+          </div>
+        ) : (
+          sidebar
+        ))}
       <div className={['min-h-0 min-w-0 flex-col', listed ? 'hidden' : 'flex'].join(' ')}>
-        {status === 'connecting' && (
+        {lapsed !== null ? (
+          !listed && <LapsedBanner lapse={lapsed} what="this project" />
+        ) : status === 'connecting' && (
           <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-fg-muted" role="status">
             Connecting to the hub…
           </div>

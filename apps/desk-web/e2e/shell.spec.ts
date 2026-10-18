@@ -32,7 +32,7 @@ test('the grid draws its empty and reconnecting states as the approved mockup do
 
   hub.setGrid([summary()]);
   await expect(page.locator(`[data-project="${PROJECT}"]`)).toBeVisible();
-  hub.admit = 'not-a-member'; // every reconnection is refused: the grid holds its last counts
+  hub.admit = 'unreachable'; // the network drops every reconnection: the grid holds its last counts
   hub.dropConnections();
   await expect(page.getByTestId('grid-stale')).toContainText('Counts as of');
   await expect(page.locator(`[data-project="${PROJECT}"]`)).toBeVisible();

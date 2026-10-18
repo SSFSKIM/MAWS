@@ -32,6 +32,7 @@ import { retiredBy } from '../../conversation/capabilities';
 import { tailSends } from '../../conversation/tail';
 import { useSessionOwner } from '../../depth/owner/session-owner';
 import { DESK_ACTIONS } from '../../depth/view/actions';
+import { useAccess } from '../../hub/access';
 import { TranscriptPane, transcriptStatus, useKeptTranscript, type RowIndex } from '../../depth/view/TranscriptPane';
 import { sessionName } from '../../log/projection';
 import { useLanding } from '../../pwa/service-worker';
@@ -225,7 +226,9 @@ function WaitingPill({ list, count }: { list: RefObject<TranscriptListHandle | n
 /** The session view's status word, in the center's header: its transcript loading, reconnecting, paging, unavailable. */
 export function SessionStatus({ project, session, plane }: Pick<Props, 'project' | 'session' | 'plane'>) {
   const owner = useSessionOwner(project, session, plane);
-  const status = transcriptStatus(useKeptTranscript(owner.keeper));
+  const state = useKeptTranscript(owner.keeper);
+  const signedOut = useAccess((s) => s.lapsed !== null);
+  const status = signedOut && state.phase === 'reconnecting' ? 'Signed out' : transcriptStatus(state);
   return (
     <span className="shrink-0 text-ui-sm text-fg-muted" data-testid="session-status">
       {status}
