@@ -103,10 +103,19 @@
     "reviewer": "aef4b40cb8d4b7d76",
     "reviewRounds": 2,
     "checkpoint": "waves/W-MINI-checkpoint.json",
-    "reviewFixCommit": "5f115a09d"
+    "reviewFixCommit": "5f115a09d",
+    "nativeReadings": "gates/pair2-diagnostic-39130559347.json",
+    "L277SceneStreak": {
+      "passed": 1,
+      "required": 10,
+      "runs": [
+        39130559347
+      ],
+      "basis": "scene pass after1235d4a77; native target entry true; other scene failure does not erase case-specific streak"
+    }
   },
   "W-STORE": {
-    "status": "review findings addressed; unit token-only guard fails new test literals; native design-systems job success, detailed restyle proof reading pending",
+    "status": "actual restyle e2e passed39130559347; token-test correction05d1f824b verified locally; authoritative rerun pending",
     "executor": "a53b2ea8e3417bc02",
     "claims": "pair2-claims.json",
     "rowCommits": [
@@ -128,7 +137,8 @@
       "25b29e64f",
       "15863818e"
     ],
-    "finalGuardCommit": "5b5017f9d"
+    "finalGuardCommit": "5b5017f9d",
+    "tokenGuardFixCommit": "05d1f824b"
   },
   "baselineFold": {
     "merge": "25eb0e6a8",

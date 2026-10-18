@@ -83,10 +83,74 @@
     "e2e:dashboard",
     "e2e:design-systems"
   ],
-  "successfulJobCounts": "pending log readings; conclusions verified via jobs API",
+  "successfulJobCounts": {
+    "static": {
+      "gateScriptChecks": 47,
+      "typecheckAndLint": "success"
+    },
+    "probes": {
+      "passed": 219,
+      "skipped": 0
+    },
+    "unit:darwin": {
+      "passed": 282,
+      "files": 14
+    },
+    "e2e:widgets": {
+      "passed": 28,
+      "skipped": 0
+    },
+    "e2e:default": {
+      "passed": 82,
+      "skipped": 154,
+      "note": "default owns remaining specs including opt-in live/perf scenes; no full-set credit"
+    },
+    "e2e:document": {
+      "passed": 9,
+      "skipped": 0
+    },
+    "e2e:artifacts": {
+      "passed": 4,
+      "skipped": 0
+    },
+    "e2e:presentations": {
+      "passed": 17,
+      "skipped": 2
+    },
+    "e2e:dashboard": {
+      "passed": 11,
+      "skipped": 0
+    },
+    "e2e:design-systems": {
+      "passed": 8,
+      "skipped": 0,
+      "restyle": "actual document and deck editors restyle/live tokens and retained pinned look case262 passed"
+    }
+  },
   "packaged": "skipped because not selected",
   "afterGateEvidenceStatus": "empty after completion and before record write",
   "fullSetCounterAdvance": false,
   "paidSpendUsd": 0,
-  "acceptance": "pair2 not accepted; token-test fix and MINI native diagnoses/repairs pending; actual restyle test detail and other passing traces still to read"
+  "acceptance": "pair2 not accepted; unit correction committed and locally checked; MINI native diagnosis/repair and authoritative rerun pending. STORE actual restyle e2e passed.",
+  "logArchive": {
+    "path": "/private/tmp/p3f-pair2-completed-logs.fEkLX4/logs.zip",
+    "sha256": "391acfacfcf51a5919e300b8da27d63698792ad38a315d961c1bc56235f3733d",
+    "readWithoutExtraction": true
+  },
+  "completedAt": "2026-10-18T13:33:07Z",
+  "perRowReading": {
+    "L199": "paste and must-read failed; exact native readings in failures. Must-read foreground activation alone insufficient. No count advanced.",
+    "L200": "shell43 test passed but overview-focus native entry false at13:21:01.469 despite foreground=true/page.hasFocus=true; foreground proof still owed",
+    "L201": "widgets406 model-chip/Effort case passed; group launch native key, no target-action native sample",
+    "L217": "filmstrip case168 passed with native entry false, foreground=false, opacity0 at13:32:49.264; no foreground claim and causal disposition pending",
+    "L264": "shell cases and default passed; named gate is not required full set",
+    "L277": "restore scene passed with native entry true. Scene streak1/10 (case-based criterion, not whole-group or full-set pass); next run tracks consecutive case outcomes"
+  },
+  "holdsTimeoutDisposition": "Remote unit documents/holds.test.ts5/5 passed in1445ms; local timeout not reproduced, no source fix or invented baseline.",
+  "unitFix": {
+    "commit": "05d1f824b",
+    "scope": "DocumentPanel.test.tsx only; distinct live/pinned page-margin token values replace prohibited colour literals; guard unchanged",
+    "verification": "controller read complete diff; retained named test log24pass/3files; worker reports eslint exit0",
+    "review": "exact mechanical test correction; no third broad STORE review"
+  }
 }

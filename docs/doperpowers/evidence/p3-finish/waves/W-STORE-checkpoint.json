@@ -1,5 +1,5 @@
 {
-  "status": "implementation committed; independent review and authoritative union gate pending",
+  "status": "source review converged; native restyle proof passed; token-test guard correction committed; authoritative rerun pending",
   "base": "344d7131c",
   "executor": "a53b2ea8e3417bc02",
   "reviewer": "a64e6ed27a8f39b3f",
@@ -91,7 +91,7 @@
   ],
   "processDisposition": "Worker acknowledged folder-filter runs violated the named-file-only rule. Retained honestly, not represented as compliant named checks; no reruns merely to repair bookkeeping. holds timeout is not accepted as baseline from unchanged-file/isolated-green alone. Two unnecessary sleep waiters were reported: one exited0, the other stopped; worker reports no background work remains. Future checks must name files.",
   "lint": "Worker reports named-file eslint through same slot prefix green on every changed file, including e2e proof/helper.",
-  "notRun": "Local typecheck, e2e, app, engine, native PDF/font observation. S-RESTYLE e2e has not run anywhere.",
+  "notRun": "final-source/owner native font/PDF observation; no local app/e2e/typecheck",
   "gateGroups": [
     "static",
     "unit",
@@ -102,7 +102,7 @@
     "e2e:document",
     "e2e:presentations"
   ],
-  "acceptance": "Four tracker entries were removed by source commits; this is not authoritative acceptance before review and gate. Supplemental actual-editor/retained-appearance proof remains unverified.",
+  "acceptance": "four rows source-implemented; remote actual editor restyle proof passed, but unit correction requires authoritative rerun",
   "fixWave": {
     "executor": "a9b6e9e5eb14418ce",
     "commits": [
@@ -125,10 +125,17 @@
       "greenRail": 58
     },
     "scope": "Named individual files this wave; nonexistent restore.test.ts matched no suite and is not claimed as coverage.",
-    "reviewRound2": "reference/alias/paint repairs verified; one missed HTML-plus-path pre-read guard remains",
+    "reviewRound2": "all four initial findings and HTML-kind residue corrected; no remaining material finding",
     "next": "Remote union diagnostic/acceptance gate; typecheck/native/restyle evidence still pending",
     "noise": "Passed logs include normal SQLite ExperimentalWarning and Vitest transform-cache advice. They are not pristine output; these expected informational messages are not product defects. No blanket suppression or cache-feature work.",
     "finalGuardCommit": "5b5017f9d",
-    "finalGuardVerification": "Controller read complete two-line guard/regression diff and retained RED1fail/30skip then GREEN82pass logs. Exact round2 prescribed correction; no third broad review."
+    "finalGuardVerification": "Controller read complete two-line guard/regression diff and retained RED1fail/30skip then GREEN82pass logs. Exact round2 prescribed correction; no third broad review.",
+    "tokenGuardFix": {
+      "commit": "05d1f824b",
+      "passed": 24,
+      "files": 3,
+      "log": "/tmp/maws-review/p3f-store-fix/green-tokens-guard.log",
+      "review": "controller mechanically verified exact diff; named lint exit0 worker-reported"
+    }
   }
 }
