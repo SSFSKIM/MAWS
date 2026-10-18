@@ -4,21 +4,20 @@
 // tab's Mark-up surface while it is on screen, the boards in the design's governing design system (D's chain, as the
 // deck's: its own system, its Space's default, the owner's, else the bundled floor), and `onShown` once every board has
 // drawn while the body is visible. M5: the header's Export (./exports.ts), each entry reading the tab's state when chosen.
-// M4: comments go to the session the main area shows, through B's comment surface (P2's card with B's artifact target,
+// M4: comments go to the session the main area shows (P3-F: with none shown, the design's own context, as the deck's and
+// the document's), through B's comment surface (P2's card with B's artifact target,
 // the design kind and its board or element target), the replica held by the tab while the card's overlay writes; the
 // header's Version history and Comments and its open-thread count; the history over the tab's history api read through
 // the design model, its new-change pill counting the design's projection (C's `countChanges` hook, Decision Log 23).
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DesignWorkbench } from '@artifacts/design/editor/DesignWorkbench';
 import { countDesignChanges } from '@artifacts/design/history';
-import type { AppSessionId } from '@shared/graph/ids';
 import type { DeckSession } from '@artifacts/slides/editor/session';
 import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
-import { shownSession } from '../../panel/host';
-import { useLayout } from '../../stores/layout';
+import { useArtifactCommentTarget } from '../document/comment-session'; // P3-F (L230)
 import { useDocumentComments } from '../document/comments';
 import { chooseDeckSystem } from '../presentation/commands';
 import { useDeckSystem } from '../presentation/governing';
@@ -36,7 +35,7 @@ export function DesignMain(props: DesignEditorBodyProps) {
 }
 
 const NO_SESSION = () => () => {};
-const NO_APP_SESSION = '' as AppSessionId;
+const NO_TARGET = { context: { kind: 'none' } } as const; // P3-F (L230): unused while the target is unread (no comments offered)
 /** The panel open beside the world (the header shows it pressed); null before the design opens. */
 function useRail(session: DeckSession | null) {
   return useSyncExternalStore(session?.subscribe ?? NO_SESSION, () => session?.snapshot().rail ?? null);
@@ -61,9 +60,10 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
   }, [exportShown, exportBoard, activeBoard, state, artifactId]);
   useEditorHost(scope, designHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, rail, unresolved: snapshot.unresolved, history: state.designHistory !== null, exports }, commands));
 
-  // M4: comments go to the session the main area shows (its Side thread, or its conversation); none shown, none offered
-  const appSessionId = useLayout((s) => shownSession(s.main));
-  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_APP_SESSION, title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'design' });
+  // M4: comments go to the session the main area shows (its Side thread, or its conversation). P3-F (L230): with none
+  // shown, to the design's own context, as the document's and the deck's (P3-F1); not offered only while that is unread
+  const target = useArtifactCommentTarget(artifactId);
+  const comments = useDocumentComments({ artifactId, ...(target ?? NO_TARGET), title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'design' });
   // M4: the history over the tab's api and replica, the pill counting the design's projection
   const handle = snapshot.handle;
   const history = useMemo(() => (state.designHistory && handle ? { api: state.designHistory, handle, countChanges: countDesignChanges } : undefined), [state.designHistory, handle]);
@@ -122,7 +122,7 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
         onStage={onStage}
         onDrawn={onDrawn}
         onCanvases={state.setCanvases}
-        comments={appSessionId === null ? undefined : comments}
+        comments={target === null ? undefined : comments /* P3-F (L230) */}
         history={history}
         sessionTitle={state.sessionTitle}
         assetUrlAt={assetUrlAt}
