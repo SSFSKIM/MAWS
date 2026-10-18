@@ -27,6 +27,7 @@ const USAGE = `usage:
       --decisions <how>        recorded (default) | wait: hold at a recorded settlement until the web answers
       --member <id>            the member a recorded web answer names (default: the recording's placeholder)
       --read-only              refuse every RPC and deliver nothing from outside
+      --follow                 open the project as a follower (hello.follow): no presence; give it no --recording
       --keep-times             log events keep their recorded ts (default: when first written)
       --producer <daemon>      dc3 (default) | dc8: DX4's widened subagents body, jobs, MCP names, and output`;
 
@@ -62,6 +63,7 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
       decisions: { type: 'string', default: 'recorded' },
       member: { type: 'string' },
       'read-only': { type: 'boolean', default: false },
+      follow: { type: 'boolean', default: false },
       'keep-times': { type: 'boolean', default: false },
       producer: { type: 'string', default: 'dc3' },
     },
@@ -90,7 +92,7 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
     return 2;
   }
   const state = readState(values.state);
-  const dirs = values.recording?.length ? values.recording : [defaults.recording];
+  const dirs = values.recording?.length ? values.recording : values.follow ? [] : [defaults.recording];
   const sessionId = (i: number) => (values.session === 'new' ? randomUUID() : i === 0 ? values.session : undefined);
   let round = 0;
   let machine: FakeMachine | null = null;
@@ -115,6 +117,7 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
       onMemory: (memory) => writeState(values.state!, { ...state, memory }),
       decisions: values.decisions,
       readOnly: values['read-only'],
+      follow: values.follow,
       retime: !values['keep-times'],
       reconnect: true,
       producer: values.producer,

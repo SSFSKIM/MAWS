@@ -5,6 +5,10 @@
 //   - a `Machine` whose heartbeat and lease are shortened, so a lease can lapse within a test;
 //   - a `Machine` the suite terminates (`ctx.abort()`), as a crash or a runtime's reset would: no `closed` reaches its
 //     projects, only the lease's lapse;
+//   - a `Machine` armed to find itself replaced at its next probe, as an instance Cloudflare replaced under its stream
+//     would (Miniflare cannot route an object's new requests to a successor while the old instance streams on), one
+//     that probes once and says which instance answered, and one armed to throw from its next request to a path, as a
+//     reset object's call fails at the Worker;
 //   - a `Machine` armed to hold its next revocation's answer until the suite releases it, or to lose it once the
 //     revocation is stored;
 //   - a `Project` that says which instance answers (a woken object is a new one), and takes a lease's renewal or close
@@ -16,10 +20,12 @@
 //   - a `Project` that holds its archive lookups, lists its send queues, and queues a frame for any generation;
 //   - a `Project` armed to fail its next `forget`, as a failed RPC from the Registry would;
 //   - a `Registry` whose org record can be rewritten, as an object still on a deploy's previous version would make it;
-//   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand.
+//   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand;
+//   - a `Registry` that drops a project's row, as a hub from before machine projects lacks a machine's, and takes a
+//     project's summary report straight, as a late one would arrive.
 import { Machine as DeployedMachine, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
-import { Registry as DeployedRegistry } from '../../src/objects/registry';
+import { Registry as DeployedRegistry, type SummaryReport } from '../../src/objects/registry';
 import type { DownFrame, UpFrame } from '../../src/protocol/machine';
 import type { MachineContext } from '../../src/objects/project';
 import type { Env } from '../../src/env';
@@ -27,6 +33,9 @@ import type { ProjectRecord } from '../../src/protocol/identity';
 import {
   ABORT_REASON,
   MACHINE_ABORT_PATH,
+  MACHINE_FETCH_FAULT_PATH,
+  MACHINE_PROBE_PATH,
+  MACHINE_REPLACE_PATH,
   MEMBER_PATH,
   ORG_ROW_PATH,
   PROJECT_ARCHIVE_HOLD_PATH,
@@ -46,7 +55,9 @@ import {
   SEND_FAULT_PATH,
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
+  REPORT_PATH,
   TIMING_PATH,
+  UNREGISTER_PATH,
 } from './send-fault';
 
 export { default } from '../../src/worker';
@@ -66,6 +77,16 @@ export class Registry extends DeployedRegistry {
       });
       return new Response('added');
     }
+    if (url.pathname === REPORT_PATH) {
+      const { project, report } = (await request.json()) as { project: string; report: SummaryReport };
+      this.summary(project, report);
+      return Response.json(this.orgFrame().frame);
+    }
+    if (url.pathname === UNREGISTER_PATH) {
+      const { id } = (await request.json()) as { id: string };
+      this.ctx.storage.sql.exec('DELETE FROM projects WHERE id = ?', id);
+      return new Response('unregistered');
+    }
     if (url.pathname === ORG_ROW_PATH) {
       const { id, name } = (await request.json()) as { id: string; name: string };
       this.ctx.storage.sql.exec('UPDATE org SET id = ?, name = ?', id, name);
@@ -81,6 +102,7 @@ export class Registry extends DeployedRegistry {
 
 export class Machine extends DeployedMachine {
   private release: (() => void) | undefined;
+  private replacedArmed = false;
   private revokeRelease: (() => void) | undefined;
 
   async fetch(request: Request): Promise<Response> {
@@ -111,15 +133,38 @@ export class Machine extends DeployedMachine {
       return new Response('armed');
     }
     if (url.pathname === TIMING_PATH) {
-      this.ctx.storage.kv.put('timing', { heartbeatMs: Number(url.searchParams.get('heartbeatMs')), leaseMs: Number(url.searchParams.get('leaseMs')) });
+      const number = (name: string) => (url.searchParams.has(name) ? { [name]: Number(url.searchParams.get(name)) } : {});
+      this.ctx.storage.kv.put('timing', { ...number('heartbeatMs'), ...number('leaseMs'), ...number('graceMs'), ...number('probeMs') });
       return new Response('timed');
+    }
+    if (url.pathname === MACHINE_REPLACE_PATH) {
+      this.replacedArmed = true;
+      return new Response('armed');
+    }
+    if (url.pathname === MACHINE_PROBE_PATH) return Response.json({ life: this.life, current: await this.current() });
+    if (url.pathname === MACHINE_FETCH_FAULT_PATH) {
+      this.ctx.storage.kv.put('fetch-fault', url.searchParams.get('path') ?? '');
+      return new Response('armed');
+    }
+    if (this.ctx.storage.kv.get<string>('fetch-fault') === url.pathname) {
+      this.ctx.storage.kv.delete('fetch-fault');
+      throw new Error(`a failure the suite injected into the object's ${url.pathname}`);
     }
     if (url.pathname === MACHINE_ABORT_PATH) this.ctx.abort(ABORT_REASON);
     return super.fetch(request);
   }
 
+  /** A suite's timing over the deployed one; a shortened heartbeat shortens the grace with it unless one is given. */
   protected timing(): Timing {
-    return this.ctx.storage.kv.get<Timing>('timing') ?? super.timing();
+    const set = this.ctx.storage.kv.get<Partial<Timing>>('timing');
+    return set ? { ...super.timing(), graceMs: set.heartbeatMs ?? super.timing().graceMs, ...set } : super.timing();
+  }
+
+  /** Armed, the next probe finds the object replaced, once: the stream the machine opens next is the successor's. */
+  protected async replaced(): Promise<boolean> {
+    if (!this.replacedArmed) return super.replaced();
+    this.replacedArmed = false;
+    return true;
   }
 
   async revoke(clientId: string | null): Promise<number> {
@@ -241,7 +286,7 @@ export class Project extends DeployedProject {
     if (url.pathname === PROJECT_LIFE_PATH) return new Response(this.life);
     if (url.pathname === PROJECT_CALLS_PATH) return Response.json(this.ctx.storage.kv.get('calls') ?? { calls: 0, frames: 0 });
     if (url.pathname === PROJECT_LEASE_PATH) {
-      const { op, ...ctx } = (await request.json()) as { op: 'renew' | 'closed'; org: string; project: string; machine: string; generation: number; leaseMs: number };
+      const { op, ...ctx } = (await request.json()) as { op: 'renew' | 'closed'; org: string; project: string; machine: string; client: string; generation: number; leaseMs: number };
       if (op === 'renew') this.renew(ctx);
       else this.closed(ctx);
       return new Response('done');

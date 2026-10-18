@@ -1,6 +1,8 @@
 // DX2 — machine ↔ hub. One connection per machine, opened outbound and multiplexing its projects: an SSE stream down
 // (`GET /machine/stream`), held by the machine's `Machine` object, and frames up by POST (`POST /machine/frames`, one
 // JSON frame per line), each addressed to a project and routed by the Worker to that `Project` object.
+import type { MachineSummary } from './browser';
+import type { ProjectKind } from './identity';
 import type { LogEvent, Vector } from './log';
 import type { Part } from './parts';
 import type { Rpc, RpcOutcome } from './rpc';
@@ -17,8 +19,10 @@ export const HEARTBEAT_MS = 15_000;
 /**
  * How long a machine stays online in a project after its last renewal (the `hello` that opened the project on the
  * stream, then each `hb-ack` of that stream's generation): three heartbeat periods, the same span after which the
- * daemon gives its stream up as dead. A lease that lapses, or the close of the stream it belongs to, puts the machine
- * offline: its subscriptions end and its forwarded RPCs without a result become `uncertain`.
+ * daemon gives its stream up as dead. A lease that lapses puts the machine offline. The close of the stream it belongs
+ * to ends what that stream carried at once (its subscriptions end and its forwarded RPCs without a result become
+ * `uncertain`) and holds the machine online for one more heartbeat period, for its next stream's `hello` to take the
+ * lease over; past that it lapses (Project's `closed`).
  */
 export const LEASE_MS = 3 * HEARTBEAT_MS;
 
@@ -75,7 +79,20 @@ export type DownFrame =
    * bytes of the task's output file, under DX4's containment rule. A daemon older than DC8 passes it by.
    */
   | { t: 'output'; project: string; session: string; agentId: string | null; sub: string; taskId: string; tail: number }
+  | OrgFrame
   | Part;
+
+/** A project of the org's directory: a hub project (a `.smns` names it) or an enrolled machine's own, which names its
+ * machine; a retired one is a revoked machine's, kept for its log. */
+export type OrgProject = { id: string; name: string; kind: ProjectKind; machine?: string; retired: boolean };
+
+/**
+ * The org's directory: every project the Registry holds and every enrolled machine. Second on every stream, after
+ * `welcome` and before anything else; again whenever the Registry registers a project, retires or reactivates one, a
+ * machine is enrolled or revoked, or a machine's online state changes. Each is the directory whole: the latest
+ * replaces every earlier one. A daemon older than the org directory passes it by.
+ */
+export type OrgFrame = { t: 'org'; projects: OrgProject[]; machines: MachineSummary[] };
 
 /**
  * Why a daemon refused an event the hub sent it (DX1): its code does not verify (`bad-code`, which includes a `hub/`
@@ -113,8 +130,13 @@ export type UpFrame =
   | { t: 'hb-ack'; generation: number; at: string }
   /** An event the daemon refused on import (it kept it out of its log). Distinct from the hub's own `refused`. */
   | ({ t: 'rejected'; project: string } & Rejection)
-  /** Opens a project on this stream: the machine's vector, and the project's name from `.smns`. */
-  | { t: 'hello'; project: string; name: string; have: Vector }
+  /**
+   * Opens a project on this stream: the machine's vector, and the project's name from `.smns`. `follow: true` says the
+   * machine holds no checkout and no session of the project and opens it only to read and deliver (the org's
+   * directory): its lease starts and renews as any, but counts toward none of the project's machines, and it posts no
+   * presence. A hello without it (or `false`) holds the project, as before; a later hello on the stream changes which.
+   */
+  | { t: 'hello'; project: string; name: string; have: Vector; follow?: boolean }
   /** Only the machine's own writers' events (and `legacy/` from the archive machine), each writer's in seq order. */
   | { t: 'events'; project: string; events: LogEvent[] }
   /** A result the daemon's ledger holds; republished after every reconnect until `rpc-ack`. */

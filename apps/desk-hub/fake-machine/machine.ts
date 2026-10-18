@@ -17,7 +17,7 @@ import { deriveLogNonce, importOrgKey, inputSha256, seal, verify, verifyRpc, typ
 import { decodeEnrollmentCode, type Redeemed } from '../src/protocol/identity';
 import type { JsonObject } from '../src/protocol/json';
 import type { LogEvent, Vector } from '../src/protocol/log';
-import type { DownFrame, Refusal, RejectionReason, UpFrame } from '../src/protocol/machine';
+import type { DownFrame, OrgFrame, Refusal, RejectionReason, UpFrame } from '../src/protocol/machine';
 import { RPC_FRESHNESS_MS, type Rpc, type RpcError, type RpcName, type RpcOutcome } from '../src/protocol/rpc';
 import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from '../src/protocol/session';
 import { Link, LinkError, type Credentials } from './link';
@@ -40,6 +40,11 @@ export type FakeMachineOptions = {
   /** The `.smns` project id it opens, and the name it registers the project under. */
   project: string;
   projectName?: string;
+  /**
+   * Opens the project as a follower (DX2 `hello.follow`): a machine with no checkout and no session of it, which reads
+   * and delivers only. It posts no presence, its own or a session's; give it no recordings.
+   */
+  follow?: boolean;
   /** The sessions it replays, one per recording (`loadRecording`, `session` to rename one). */
   recordings?: Recording[];
   /** The member whose id replaces the recordings' member placeholder in a recorded settlement's `by`. */
@@ -215,15 +220,23 @@ export class FakeMachine {
     const answered = Promise.race([have, new Promise((_, reject) => this.onDrop.push(() => reject(new Error('the stream ended before the hub answered hello'))))]);
     // A write waits for this handshake's `have`, or for the stream's end, never longer.
     this.handshake = answered.then(() => undefined, () => undefined);
-    this.queue({ t: 'hello', project: this.project, name: this.options.projectName ?? this.options.recordings?.[0]?.name ?? 'fake', have: this.vector() });
+    const follow = this.options.follow === true;
+    this.queue({ t: 'hello', project: this.project, name: this.options.projectName ?? this.options.recordings?.[0]?.name ?? 'fake', have: this.vector(), ...(follow ? { follow } : {}) });
     await this.flush();
     const timer = setTimeout(() => void this.drop(), 15_000);
     await answered.finally(() => clearTimeout(timer));
     this.queue({ t: 'pending', project: this.project, raised: [...this.pending.values()].map((p) => p.raised) });
     for (const [nonce, r] of Object.entries(this.memory.unacked)) this.queue({ t: 'rpc-result', project: r.project, nonce, outcome: r.outcome });
-    this.queue({ t: 'session', message: { project: this.project, machine: this.name, session: null, kind: 'machine', sub: null, n: null, body: this.presence() } });
-    for (const depth of this.sessions.values()) this.sendPresence(depth);
+    if (!follow) {
+      this.queue({ t: 'session', message: { project: this.project, machine: this.name, session: null, kind: 'machine', sub: null, n: null, body: this.presence() } });
+      for (const depth of this.sessions.values()) this.sendPresence(depth);
+    }
     await this.flush();
+  }
+
+  /** The org's directory as the hub last sent it (DX2 `org`), or null before the first. */
+  get directory(): OrgFrame | null {
+    return (this.frames.findLast((f) => f.t === 'org') as OrgFrame | undefined) ?? null;
   }
 
   /** The machine's DX4 `machine` presence. */

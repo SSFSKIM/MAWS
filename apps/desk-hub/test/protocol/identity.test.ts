@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { base64urlEncode } from '../../src/protocol/base64url';
-import { decodeEnrollmentCode, encodeEnrollmentCode, isMachineName, machineNameKey, serviceTokenName, type EnrollmentCode } from '../../src/protocol/identity';
+import { decodeEnrollmentCode, encodeEnrollmentCode, isMachineName, machineNameKey, machineProjectId, serviceTokenName, type EnrollmentCode } from '../../src/protocol/identity';
+import machineProjects from '../../src/protocol/vectors/machine-project.json';
 
 const code = (): EnrollmentCode => ({
   hub: 'https://desk-hub.example.workers.dev',
@@ -65,5 +66,16 @@ describe('machine names', () => {
 
   it('names the machine’s service token after the org and the machine', () => {
     expect(serviceTokenName('o-1', 'SK.local')).toBe('desk-o-1-SK.local');
+  });
+});
+
+describe("a machine's project id (the committed vectors, written by generate-machine-project.py from Python's uuid)", () => {
+  it.each(machineProjects.vectors)('$why', ({ org, machine, id }) => {
+    expect(machineProjectId(org, machine)).toBe(id);
+  });
+
+  it('is a version 5 uuid of the URL namespace, and a .smns project id', () => {
+    expect(machineProjects.namespace).toBe('6ba7b811-9dad-11d1-80b4-00c04fd430c8');
+    for (const { id } of machineProjects.vectors) expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 });

@@ -1,8 +1,17 @@
 // The paths of the suites' seams (test/support/worker-under-test.ts); Node and workerd share them.
 /** Where the suites' `Machine` takes an armed send fault. */
 export const SEND_FAULT_PATH = '/__test/send-fault';
-/** Where the suites' `Machine` takes a shortened heartbeat and lease (`?heartbeatMs=&leaseMs=`), before its stream opens. */
+/** Where the suites' `Machine` takes a shortened heartbeat and lease (`?heartbeatMs=&leaseMs=`, and optionally
+ * `&graceMs=&probeMs=`), before its stream opens. */
 export const TIMING_PATH = '/__test/timing';
+/** Where the suites' `Machine` is armed to find itself replaced at its next probe, as an instance Cloudflare replaced
+ * under its stream would. */
+export const MACHINE_REPLACE_PATH = '/__test/replace';
+/** Where the suites' `Machine` probes once and says its own instance and the one the probe reached. */
+export const MACHINE_PROBE_PATH = '/__test/probe';
+/** Where the suites' `Machine` is armed to throw from its next request to a path (`?path=`), as a reset object's call
+ * fails at the Worker. */
+export const MACHINE_FETCH_FAULT_PATH = '/__test/fetch-fault';
 /** Where the suites' `Machine` is terminated: `ctx.abort()`, which ends the instance and its stream unannounced. */
 export const MACHINE_ABORT_PATH = '/__test/abort';
 /** The reason the suites' `Machine` aborts with. */
@@ -45,3 +54,8 @@ export const REVOKE_FAULT_PATH = '/__test/revoke-fault';
 export const REVOKE_HELD_PATH = '/__test/revoke-held';
 /** Where the suites' `Machine` releases a held revocation's answer: answers `released`, or `none` while none is held. */
 export const REVOKE_RELEASE_PATH = '/__test/revoke-release';
+/** Where the suites' `Registry` drops a project's row (`{id}`), as a hub from before machine projects never held one. */
+export const UNREGISTER_PATH = '/__test/unregister';
+/** Where the suites' `Registry` takes a project's summary report (`{project, report}`), as one delivered late would
+ * arrive, and answers the org's directory after it. */
+export const REPORT_PATH = '/__test/report';
