@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LogEvent } from 'desk-hub/protocol';
-import { landedItem, landingStatus } from './landing';
+import type { RequestRecord } from '../project/conversation';
+import { eventLanding, landedItem, landingStatus } from './landing';
 import type { StreamItem } from './stream';
 
 const event = (writer: string, seq: number, kind = 'message') => ({ ts: '2026-10-15T10:00:00.000Z', writer, seq, kind }) as unknown as LogEvent;
@@ -55,5 +56,32 @@ describe('landingStatus', () => {
 
   it('says a message the log does not hold is missing', () => {
     expect(landingStatus({ landing: message, found: false, ready: true, unverified: false })).toEqual({ kind: 'missing', text: 'This message is not in the log this browser holds.' });
+  });
+});
+
+describe('eventLanding', () => {
+  const logged = (kind: string, src: unknown) => ({ ...event('mini/s1', 7, kind), src }) as LogEvent;
+  const pending = (request: string, toolUseId?: string) =>
+    ({ key: request, request, machine: 'mini', raised: { request, session: 's1', tool: 'mcp__doperpowers__AskUserQuestion', input: {}, async: true, ...(toolUseId && { toolUseId }) }, at: 1, pending: true, terminalOnly: false, settled: null }) as unknown as RequestRecord;
+  const nowhere = { request: null, message: null, question: null };
+
+  it('lands a <message> on its transcript row, whatever the requests', () => {
+    expect(eventLanding(logged('message', 'row-uuid#0'), [pending('row-uuid#0')], false)).toEqual({ ...nowhere, message: 'row-uuid#0' });
+  });
+
+  it("lands a question on the card of the request a bridge raised for the same ask, by its id or its call's id", () => {
+    expect(eventLanding(logged('question', 'toolu_ask'), [pending('toolu_other'), pending('toolu_ask')], false)).toEqual({ ...nowhere, request: 'toolu_ask' });
+    expect(eventLanding(logged('question', 'toolu_ask'), [pending('request-7', 'toolu_ask')], true)).toEqual({ ...nowhere, request: 'request-7' });
+  });
+
+  it("lands a question no request waits for on its call's row, once the pending set is checked", () => {
+    expect(eventLanding(logged('question', 'toolu_ask'), [pending('toolu_other')], true)).toEqual({ ...nowhere, question: 'toolu_ask' });
+    expect(eventLanding(logged('question', 'toolu_ask'), [], false)).toEqual(nowhere); // its request may not be checked yet
+  });
+
+  it('lands nowhere for an event not held yet, one without a src, or another kind', () => {
+    expect(eventLanding(undefined, [], true)).toEqual(nowhere);
+    expect(eventLanding(logged('question', undefined), [], true)).toEqual(nowhere);
+    expect(eventLanding(logged('say', 'x'), [], true)).toEqual(nowhere);
   });
 });
