@@ -193,6 +193,49 @@ describe('the rows off the live chain', () => {
     expect(answers(rows)).toEqual(['Three steps.', 'Carefully done.']);
   });
 
+  it('a delivery appended while a tool ran was read once the call’s result was answered: a /rewind takes it with its turn', async () => {
+    const c = new Chain();
+    c.prompt('Plan the migration.');
+    c.answer('Three steps.');
+    const point = c.end();
+    const from = c.rows.length;
+    c.prompt('Do step one.');
+    const call = c.call('toolu_r1');
+    // The bridge appends under the call's assistant; the result goes in beside it, and the next response under the result.
+    c.delivery('5e551e17', 'Use the staging database.', call);
+    c.mirror('delivered', '[sminos message from human id=5e551e17]\nUse the staging database.');
+    c.result('toolu_r1', call);
+    c.answer('Step one done on staging.');
+    c.end();
+    const undone = c.rows.slice(from);
+    c.prompt('Do step one, carefully.', point);
+    c.answer('Carefully done.');
+    c.end();
+    const { rows } = await drawn(c.rows, undone);
+    expect(bubbles(rows)).toEqual(['Plan the migration.', 'Do step one, carefully.']);
+    expect(answers(rows)).toEqual(['Three steps.', 'Carefully done.']);
+  });
+
+  it('a delivery appended while a tool ran, its turn undone before the call’s result was answered, draws as not read', async () => {
+    const c = new Chain();
+    c.prompt('Plan the migration.');
+    c.answer('Three steps.');
+    const point = c.end();
+    const from = c.rows.length;
+    c.prompt('Do step one.');
+    const call = c.call('toolu_r2');
+    const delivery = c.delivery('5e551e17', 'Use the staging database.', call);
+    c.mirror('delivered', '[sminos message from human id=5e551e17]\nUse the staging database.');
+    c.result('toolu_r2', call);
+    const undone = c.rows.slice(from);
+    c.prompt('Do step one, carefully.', point);
+    c.answer('Carefully done.');
+    c.end();
+    const { rows } = await drawn(c.rows, undone);
+    expect(bubbles(rows)).toEqual(['Plan the migration.', 'Use the staging database.', 'Do step one, carefully.']);
+    expect(user(rows, 'Use the staging database.')).toMatchObject({ dropped: true, messageUuid: delivery.uuid });
+  });
+
   it('a response the engine dropped when a message reached its turn is not drawn; the message and the turn go on', async () => {
     const c = new Chain();
     c.prompt('Explain the bug.');

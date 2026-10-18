@@ -11,11 +11,11 @@
 //   before the session read it, and was not sent again, is drawn in place, dimmed, as a prompt the engine never ran
 //   (MAWS's dropped prompt, the desk's mount saying why: `UNDONE`), so the owner sees it was not read rather than lose
 //   it silently. It never draws as delivered or read.
-// "Before the session read it": no response was written under it (a row the model answered and a `/rewind` then undid
-// was read, and goes with its turn). "Sent again": a later owner input on the chain with the same words (an Esc's
-// prompt sent again as it was, a delivery the bridge appended again after an Esc, doperpowers #233); a prompt sent again
-// edited is no repeat, and its first wording draws as undone. Of several undone inputs with the same words, the last is
-// drawn.
+// "Before the session read it": no response was written under it, nor, for a row appended while a tool ran, under the
+// call's result (a row the model answered and a `/rewind` then undid was read, and goes with its turn). "Sent again": a
+// later owner input on the chain with the same words (an Esc's prompt sent again as it was, a delivery the bridge
+// appended again after an Esc, doperpowers #233); a prompt sent again edited is no repeat, and its first wording draws
+// as undone. Of several undone inputs with the same words, the last is drawn.
 //
 // The delivery frame's dedupe (`supersededDeliveries`, MAWS PR #42) is this rule's special case under a producer that
 // marks: a delivery appended again after an Esc left its first copy off the chain, repeated by the copy on it. It is
@@ -88,13 +88,33 @@ export function ownerInput(row: JsonObject): OwnerInput | null {
   return found;
 }
 
-/** The rows a response was written under: the session read them. A response the engine wrote itself (`<synthetic>`) reads nothing. */
+/** The assistant row that issued a tool result (a user row holding a `tool_result` block), or null for any other row. */
+function resultCall(row: JsonObject): string | null {
+  const content = row.type === 'user' ? object(row.message)?.content : null;
+  if (!Array.isArray(content) || !content.some((block) => object(block)?.type === 'tool_result')) return null;
+  const call = typeof row.sourceToolAssistantUUID === 'string' ? row.sourceToolAssistantUUID : row.parentUuid;
+  return typeof call === 'string' ? call : null;
+}
+
+/**
+ * The rows a response was written under: the session read them. A response the engine wrote itself (`<synthetic>`)
+ * reads nothing. A row the bridge appended while a tool ran goes in under the call's assistant, beside the call's result,
+ * and the next response descends from the result: the request it answered read the row all the same.
+ */
 function readRows(rows: readonly JsonObject[]): Set<string> {
   const read = new Set<string>();
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i];
     const answered = row.type === 'assistant' && object(row.message)?.model !== '<synthetic>';
     if ((answered || read.has(row.uuid as string)) && typeof row.parentUuid === 'string') read.add(row.parentUuid);
+  }
+  const answeredCalls = new Set<string>();
+  for (const row of rows) {
+    const call = resultCall(row);
+    if (call !== null && read.has(row.uuid as string)) answeredCalls.add(call);
+  }
+  for (const row of rows) {
+    if (typeof row.parentUuid === 'string' && answeredCalls.has(row.parentUuid)) read.add(row.uuid as string);
   }
   return read;
 }
