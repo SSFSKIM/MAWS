@@ -2,7 +2,8 @@
 // the browser's cover watch never sees it; the page is held covered by the surface's `begin`). Over the surface's rect it
 // lays the still, the drawing (an SVG in the surface's CSS px as measured when the still was taken, stretched with the
 // rect if the surface resizes meanwhile) and, 10 px above the bottom edge, the toolbar: the tool and the ink (two radio
-// groups), Undo, Clear, Cancel and Add to chat (Claude's annotate toolbar). Escape outside a text field discards.
+// groups), Undo, Clear, Cancel and Add to chat (Claude's annotate toolbar). Escape outside a text field discards, unless
+// a menu or dialog open over the shell answers it.
 import { RadioGroup } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Icon, PenIcon } from '../app/IconButton';
@@ -105,17 +106,31 @@ function MarkupOverlay({ session }: { session: MarkupSession }) {
   useEffect(() => {
     if (placed) root.current?.focus({ preventScroll: true }); // the keyboard to the overlay, out of whatever had it
   }, [placed]);
-  // Escape outside a text field discards the session, before anything under the overlay hears it (the composer's Esc Esc)
+  // Escape outside a text field discards the session. With the keyboard on the overlay (or nowhere) it does so before
+  // anything under the overlay hears the key (the composer's Esc Esc). With the keyboard elsewhere, in a menu or a dialog
+  // open over the shell, an Escape that layer answers is the layer's: Radix's layers hear it at the document, after the
+  // window's capture, so the overlay takes only an Escape that comes back to the window unanswered (P3-F, F-shell).
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
-      if (event.target instanceof Element && event.target.closest('[data-markup-text]')) return;
+    const discards = (event: KeyboardEvent) =>
+      event.key === 'Escape' && !event.isComposing && !event.defaultPrevented && !(event.target instanceof Element && event.target.closest('[data-markup-text]'));
+    const onOverlay = (target: EventTarget | null) => target === document.body || (target instanceof Node && root.current?.contains(target) === true);
+    const before = (event: KeyboardEvent) => {
+      if (!discards(event) || !onOverlay(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
       endMarkup();
     };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    const unanswered = (event: KeyboardEvent) => {
+      if (!discards(event)) return;
+      event.preventDefault();
+      endMarkup();
+    };
+    window.addEventListener('keydown', before, true);
+    window.addEventListener('keydown', unanswered);
+    return () => {
+      window.removeEventListener('keydown', before, true);
+      window.removeEventListener('keydown', unanswered);
+    };
   }, []);
 
   if (!rect) return null;

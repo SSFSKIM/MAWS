@@ -1,6 +1,7 @@
 // P3-G (§D4.2): the overlay over the surface: the still, the drawing in the five inks with Pen, Box, Arrow and Text,
 // Undo and Clear, Escape (outside a text field) discarding, Add to chat delivering.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { DropdownMenu } from 'radix-ui';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -145,6 +146,34 @@ describe('MarkupLayer', () => {
     accepts = true;
     await userEvent.click(add);
     await vi.waitFor(() => expect(useMarkup.getState().session).toBeNull());
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  // P3-F (F-shell, scalpel-4#1): the panel header's menus stay usable during a session (the overlay covers the surface
+  // only). An Escape the open menu answers closes the menu; the marks stay. One nothing answers still discards.
+  it('Escape with a menu open closes the menu and keeps the marks; the next Escape discards', async () => {
+    const user = userEvent.setup();
+    render(
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger>More actions</DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content>
+            <DropdownMenu.Item>Export</DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>,
+    );
+    await open();
+    drag([[310, 130], [320, 140]]);
+    await user.click(screen.getByRole('button', { name: 'More actions' }));
+    expect(screen.getByRole('menu')).toBeTruthy();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(useMarkup.getState().session).not.toBeNull();
+    expect(paths()).toEqual(['M10 10L20 20']);
+    expect(end).not.toHaveBeenCalled();
+    await user.keyboard('{Escape}');
+    expect(useMarkup.getState().session).toBeNull();
     expect(end).toHaveBeenCalledTimes(1);
   });
 
