@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
 import { actorKey } from '@shared/artifacts/actor';
+import { FILES_ROOT, readFiles } from '../files';
 import type { KindAdapter, ThreadChange } from '../host';
 import {
   applyV1,
@@ -36,7 +37,7 @@ import { DocIndex } from './block-index';
 import { applyEdit } from './patch-writer';
 import { readDocument } from './read';
 import { schemaFor } from './schema';
-import { addTab, deleteTab, listTabs } from './tabs';
+import { TABS, addTab, createDocument, deleteTab, listTabs } from './tabs';
 import { addThread, anchorOfMark, getThread, listThreads, locate, reply, resolve } from './threads';
 import { body, coveredIn, dupes, ids, marksOf, nodeOf, now, order, replica, seedDoc, sequence, textOf, TAB } from './writer.fixture';
 
@@ -852,5 +853,41 @@ describe('a thread marked in a deleted block', () => {
     const thread = getThread(host.live, 't9')!;
     expect(locate(host.live, thread)).toEqual(expect.objectContaining({ how: 'text', blockId: 'p2', index: 0 }));
     expect(thread.blockId).toBe('p2');
+  });
+});
+
+// P3-F document-model review (fable, P1): the tab restore keeps a held legacy dashboard held. A restore to the files an
+// older build wrote deletes the tab a later write created; the merged document then has files and no tab, which is the
+// hold's marker (src/artifacts/dashboard/legacy.ts), so no tab is restored there, nor by a resync restating the deletion.
+describe('the tab restore and a held legacy dashboard', () => {
+  const legacy = () => {
+    const seed = newDoc();
+    transact(seed, () => seed.get(FILES_ROOT).setAttr('index.html', '<p>old</p>'));
+    createDocument(seed, { title: 'Board', id: TAB }); // a document of today written over the files, which a restore takes back
+    return seed;
+  };
+  const revert = (doc: Doc) => transact(doc, () => doc.get(TABS).deleteAttr(TAB)); // the restore's revert, not the writer's guarded delete
+
+  it('a deletion of the tab over nonempty files (a restore to them) leaves the document held, with no tab', () => {
+    const adapter = adapterOf();
+    const host = new Host(legacy(), adapter);
+    const restorer = host.peer();
+    revert(restorer);
+    host.send(restorer, human);
+    expect(listTabs(host.live)).toEqual([]);
+    expect(Object.keys(readFiles(host.live))).toEqual(['index.html']);
+  });
+
+  it('a resync restating that deletion restores none either', () => {
+    const adapter = adapterOf();
+    const host = new Host(legacy(), adapter);
+    const restorer = host.peer();
+    revert(restorer);
+    host.send(restorer, human);
+    const peer = host.peer(); // saw the deletion; reconnects with a step 2 that restates it beside its own change
+    transact(peer, () => peer.get(FILES_ROOT).setAttr('notes.txt', 'x'));
+    host.receive(diffV1(peer, stateVector(host.live)), human, { step2: true });
+    expect(listTabs(host.live)).toEqual([]);
+    expect(Object.keys(readFiles(host.live)).sort()).toEqual(['index.html', 'notes.txt']);
   });
 });

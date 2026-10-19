@@ -152,7 +152,8 @@ export function deleteTab(doc: Doc, tabId: string, origin?: unknown): void {
 /**
  * Gives a document that has no tab one empty tab again: two replicas each deleting one of its last two tabs both pass
  * `deleteTab`'s guard, and the merged document has none (P3-F, document-model sweep#5); the host's repair calls this
- * after an update that deleted a tab. Its title is empty (the editor shows an untitled tab). Answers whether it wrote.
+ * after an update that deleted a tab of a document with no files (files and no tab is a held legacy dashboard, which
+ * keeps its hold). Its title is empty (the editor shows an untitled tab). Answers whether it wrote.
  */
 export function ensureTab(doc: Doc, generateID: () => string = nanoid8, origin?: unknown): boolean {
   if (listTabs(doc).length > 0) return false;

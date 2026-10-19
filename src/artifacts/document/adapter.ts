@@ -23,6 +23,7 @@
 // lands as that actor's update. Every hook reads the carry registry of the doc's own artifact, which A's service names
 // on every call (`info.artifactId`: the artifact's id, or its suggestion doc's key; D8, Decision Log 21).
 import type { Actor } from '@shared/artifacts/actor';
+import { readFiles } from '../files';
 import type { KindAdapter, RevertScope, ThreadChange, ThreadRow } from '../host';
 import { contentIdsOf, type Carry as AttributionCarry, type ContentIds, type Doc, type Node } from '../yjs';
 import { ContentString, ContentType, Item, YNode, createContentIds, createIdSet, decodeUpdate, findIndexSS } from '../yjs/document';
@@ -437,8 +438,9 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     stash.delete(doc);
     const { tops, inserted, threads, tabDeleted } = scan(doc, ids);
     // two replicas each deleting one of the last two tabs both passed the writer's guard: the merged document gets one
-    // empty tab again (P3-F document-model sweep#5); a document without tabs by design (a held legacy dashboard) is not touched
-    if (tabDeleted) ensureTab(doc, generateID);
+    // empty tab again (P3-F document-model sweep#5). Not when its files root is nonempty: files and no tab is a held
+    // legacy dashboard (dashboard/legacy.ts), which a restore to its files produces through the same deletion
+    if (tabDeleted && Object.keys(readFiles(doc)).length === 0) ensureTab(doc, generateID);
     const plan = planRepair(doc, inserted, registry, (node) => !!node._item && ids.inserts.has(node._item.id.client, node._item.id.clock));
     if (repairNeeded(plan)) provenance.push(...applyRepair(doc, plan, registry, generateID).carries);
     const live = [...tops].filter((top) => DocIndex.of(doc).position(top) >= 0);
