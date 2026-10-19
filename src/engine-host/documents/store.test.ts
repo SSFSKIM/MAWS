@@ -842,6 +842,27 @@ describe('ArtifactStore: restore (Decision Log 16)', () => {
     expect(rows()).toEqual(before);
     expect(service.loaded(later.id)).not.toBeNull(); // refused before anything was written: the doc was not reset
   });
+
+  // P3-F (store-versions scalpel-3#2): the bracketing auto and the revert are of one state, in one frame (Decision Log 16)
+  it('brackets the restore with an auto of the very state it reverts, so an edit landing as it is asked is kept or versioned', async () => {
+    const doc = await schemaAgnostic();
+    const at = (await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    await write(doc.id, agent, (d) => d.get('root').setAttr('title', 'Agent title'));
+    const restoring = store.restore(doc.id, at, human);
+    const typed = write(doc.id, other, (d) => d.get('notes').insert(0, 'typed meanwhile')); // a replica's update reaching the host now
+    const [result] = await Promise.all([restoring, typed]);
+    const versions = store.listVersions(doc.id);
+    const restore = versions.findIndex((v) => v.id === result.versionId);
+    const bracket = versions[restore - 1];
+    expect(bracket).toMatchObject({ kind: 'auto' });
+    expect(versions[restore].seq).toBe(bracket.seq + 1); // nothing landed unversioned between the bracket and the revert
+    const notes = (state: Uint8Array) => {
+      const d = newDoc();
+      applyV2(d, state);
+      return d.get('notes').toString();
+    };
+    expect([notes(service.readState(doc.id).state), notes(store.versionState(doc.id, bracket.id))]).toContain('typed meanwhile');
+  });
 });
 
 describe('ArtifactStore: the test writer on an html page (M7 fix wave 1)', () => {

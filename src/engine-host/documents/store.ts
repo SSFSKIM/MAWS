@@ -1505,7 +1505,8 @@ export class ArtifactStore {
     return (this.storage.db.prepare('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq DESC LIMIT 1').get(artifactId) as { actor: string } | undefined)?.actor ?? 'human';
   }
 
-  // An `auto` version now, when the doc moved since its last version (the scheduler; before a restore).
+  // An `auto` version now, when the doc moved since its last version (the scheduler; a restore writes its own in its
+  // frame, restore.ts).
   async autoVersion(artifactId: string): Promise<void> {
     const row = this.entity(artifactId);
     if (!row || row.deletedAt !== null || !isDocKind(row.kind) || this.closed) return;
