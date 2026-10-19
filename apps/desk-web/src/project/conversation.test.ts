@@ -202,6 +202,19 @@ describe('a request raised again after its settlement (MAWS #71)', () => {
     expect(asked(c)).toMatchObject({ pending: false, settled: { outcome: 'answered' } });
   });
 
+  it('is pending again when a pending set alone holds it again (a machine republishing its set sends no `raised`), and its answer settles it', async () => {
+    const c = await connect();
+    const raised = await hub.raise(PROJECT, 'mini', ask);
+    await withdraw();
+    await until(() => asked(c)?.settled != null);
+    hub.setPending(PROJECT, [{ machine: 'mini', raised, terminal_only: false }]);
+    await until(() => asked(c).pending);
+    expect(asked(c).settled).toBeNull();
+    await answer();
+    await until(() => asked(c).settled !== null);
+    expect(asked(c)).toMatchObject({ pending: false, settled: { outcome: 'answered' } });
+  });
+
   it('is pending in a tab opened after the withdrawal, which takes the withdrawal from the replay, and its answer settles it', async () => {
     await hub.raise(PROJECT, 'mini', ask);
     await withdraw();
