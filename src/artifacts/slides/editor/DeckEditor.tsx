@@ -181,7 +181,8 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     if (!mod || readOnly || preview) return; // M8: no undo in history (the live deck is not shown)
     const target = event.target as HTMLElement;
     if (event.defaultPrevented || target.isContentEditable) return; // the text box routes its own (M5)
-    if (target.tagName === 'INPUT' || target.tagName === 'SELECT') return; // a field keeps its own undo
+    // a field keeps its own undo (P3-F: a textarea too, a reply's or a version's note), but the notes' typing is the deck's
+    if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || (target.tagName === 'TEXTAREA' && !target.classList.contains('deck-notes-field'))) return;
     if (event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) session.redoStep();

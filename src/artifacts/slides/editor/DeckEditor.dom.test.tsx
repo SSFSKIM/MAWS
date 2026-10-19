@@ -11,6 +11,7 @@ import { flushLayout } from '../canvas';
 import { importSlide, readSlide, setNotes, slideOrder, writeDeckKeys } from '../model';
 import { DECK_LIMITS } from '../deck';
 import { loadSlide } from '../parse';
+import { addThread } from '../threads';
 import { DeckEditor } from './DeckEditor';
 import { DeckSession } from './session';
 
@@ -350,5 +351,23 @@ describe('what the editor shows, for the header’s Export (L233)', () => {
     await waitFor(() => expect(session.snapshot().shown).toBe('compare'));
     act(() => session.toggleRail('history'));
     await waitFor(() => expect(session.snapshot().shown).toBeNull());
+  });
+});
+
+// ---- P3-F (the slide-editor panel) ---------------------------------------------------------------------------------
+
+describe('the editor-wide ⌘Z (scalpel-4#2)', () => {
+  it('⌘Z in a comment’s reply field leaves the deck as it is and the field its own undo; in the notes it is still the deck’s', async () => {
+    const { doc, session } = mount();
+    notesField().value = 'Notes a, then more';
+    fireEvent.input(notesField()); // a deck edit to take back: one undo step
+    act(() => addThread(doc, { threadId: 't1', slideId: 'a', elementId: 't', quote: 'Slide a', by: { kind: 'human' }, at: 1 }));
+    act(() => session.toggleRail('comments'));
+    const reply = await screen.findByRole('textbox', { name: 'Reply' });
+    fireEvent.change(reply, { target: { value: 'Cut it' } });
+    expect(fireEvent.keyDown(reply, { key: 'z', metaKey: true })).toBe(true); // not cancelled: the field undoes its own typing
+    expect(readSlide(doc, 'a').notes).toBe('Notes a, then more');
+    expect(fireEvent.keyDown(notesField(), { key: 'z', metaKey: true })).toBe(false);
+    expect(readSlide(doc, 'a').notes).toBe('Notes a');
   });
 });
