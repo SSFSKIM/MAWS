@@ -63,6 +63,22 @@
       "owner": "P4 / design-scale measurement",
       "row": "| 2026-10-18 | P4 design-scale measurement (whole-task frame work) | `e2e/support/design-frames.ts:100-103` measures frame work as per-BeginFrame slices, so on a display whose vsync interval is under the 10 ms bound the row could never miss. P3-F's design-proof wave makes the row assert and record `display.hz <= 100` as a precondition and describe what it measures; the measurement itself is still slices. | Design-proof scale panel wf_2e164f70-43f scalpel-2#1 (P3); the architect's routing fixes the precondition now and logs the measurement. | Closes when the whole-task measurement (main-thread task durations overlapping the gesture window, unclipped) replaces the slices, with the row recalibrated on the mini when it lands. Owner: the design-scale proof's next change (P4). |",
       "source": "scale panel tracker routing, 2026-10-18"
+    },
+    {
+      "id": "S-AP-PATH-TOCTOU",
+      "logged": "2026-10-19T00:59:15Z",
+      "bin": "defer",
+      "owner": "P4 / tool-server path bounds",
+      "row": "| 2026-10-18 | P4 tool-server path bounds (final-component link race) | After P3-F's artifact-protocol #4 fix, `sourceUnderCwd` (`src/engine-host/tool-server/artifact-context.ts:133-138`) checks the real path but reads the named one, and the export re-checks `to` and then `copyFile`s, which follows a link placed at the final component between the two calls. Reachable only by something racing in the session's own cwd (in practice the agent, which has Bash anyway). | Artifact-protocol wave high review (fable) a25a5e4b, P3; P3-F records it rather than hardening now. | Closes when the source is read through its resolved path and the export destination is opened with O_NOFOLLOW (`O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW`) and streamed, with a race regression. Owner: the tool server's next change (P4). |",
+      "source": "artifact-protocol wave high review, 2026-10-18"
+    },
+    {
+      "id": "S-AP-PRESENCE-CROSS",
+      "logged": "2026-10-19T00:59:15Z",
+      "bin": "defer",
+      "owner": "P4 / document presence",
+      "row": "| 2026-10-18 | P4 document presence (old detach crossing a reconnect) | If an old connection's detach crossed the same client's reconnect, the host could remove that client's new presence. The artifact-protocol review found it unreachable in ordinary use: the host detaches synchronously before the port closes, and a reload or discard makes a new clientID; were it to occur, the 15 s awareness renewal re-sends the state, bounding the loss. | P3-F artifact-protocol #5 (3241445e5) worker report; high review (fable) a25a5e4b answer (b). | Closes when detach removes only presence entries whose clock is not newer than the detaching connection's last update for that client, with a crossing regression. Owner: the document presence's next change (P4). |",
+      "source": "artifact-protocol wave high review, 2026-10-18"
     }
   ]
 }

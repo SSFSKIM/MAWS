@@ -1,0 +1,28 @@
+{
+  "recordedAt": "2026-10-19T00:59:15Z",
+  "meaning": "interim class-1a proofs on branch commits during the fix waves (pool; --gates static,unit,probes,unit:darwin); not the hand-back; they supply remote GREEN for findings committed under the Decision Log 29 slot rule",
+  "runs": {
+    "p3f-waves1": {
+      "run": 39175062663,
+      "sha": "bc837f2360573702b3149e481997ff064f51b0da",
+      "conclusion": "failure",
+      "jobs": {
+        "static": "failure (one typecheck error, src/main/ipc/router.test.ts:141, fixed by 008c7d000)",
+        "unit": "success",
+        "unit:darwin": "success",
+        "probes": "success"
+      }
+    },
+    "p3f-waves2": {
+      "run": 39178022722,
+      "sha": "848693ed37a84a5018e37edeb63444015117c283",
+      "conclusion": "success",
+      "jobs": {
+        "static": "success",
+        "unit": "success",
+        "unit:darwin": "success",
+        "probes": "success"
+      }
+    }
+  }
+}

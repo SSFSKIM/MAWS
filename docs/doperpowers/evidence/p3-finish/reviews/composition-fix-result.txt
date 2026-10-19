@@ -46,3 +46,6 @@ incorrect — The fixture restore is byte-exact. The conformance test asserts ex
 
 ### Context outside this commit (not a finding)
 The normalizer still accepts calls to retired tools as recorded: the browser tools and `artifact_update` (normalizer-controls.ts:142-149). It has no such handling for the `deliverable` pane, so session journals on disk from before P3-L lose `maws.pane.shown` for `deliverable` calls. That was P3-L's choice; this commit documents it correctly and does not change it.
+
+
+Bounded recheck (2026-10-19T00:59:15Z): reviewer-medium on opus over 068f25725 and bc837f236: correct. One P3 comment nit (e2e/maws-tools.spec.ts header still says every case replays a live recording) folded into the editor-proof worker's e2e wave.

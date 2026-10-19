@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M3 fix waves: fifteen of twenty areas routed; waves running or queued; source not frozen",
+  "phase": "M3 fix waves: all twenty areas routed; waves, reviews and follow-ups in progress; source not frozen",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -1319,8 +1319,8 @@
   },
   "scaleReviewFixes": {
     "record": "scale-review/report.txt",
-    "routedAreas": 15,
-    "remainingAreas": 5,
+    "routedAreas": 20,
+    "remainingAreas": 0,
     "findings": 46,
     "trackerRows": [
       "S-SHOWPANE-RECAPTURE",
@@ -1328,7 +1328,9 @@
       "S-PPTX-SKEW",
       "S-DESIGN-NOTES-STOPS",
       "S-DESIGN-FRAME-SLICES",
-      "S-STORE-SUGGESTION-ATTRS"
+      "S-STORE-SUGGESTION-ATTRS",
+      "S-AP-PATH-TOCTOU",
+      "S-AP-PRESENCE-CROSS"
     ],
     "compositionFix": "91d4874fa2f799261fffe8208c8fc3b3d88f773d",
     "compositionFollowUp": [
@@ -1365,7 +1367,17 @@
       "42f327f55",
       "62d9feabb",
       "2f0e99a4c"
-    ]
+    ],
+    "interimGates": "gates/interim-class1a.json"
   },
-  "finalGatePreparation": "final-gate-preparation.json"
+  "finalGatePreparation": "final-gate-preparation.json",
+  "agentCeiling": {
+    "from": "2026-10-19T00:59:15Z",
+    "rule": "architect reading of A-13: up to four workers plus up to two read-only reviewers, six agents at most; reviewers run nothing heavy; vitest slots, commit lock, e2e lock and load rule unchanged; parent DL110 at landing"
+  },
+  "freezeEstimate": {
+    "sentAt": "2026-10-18T23:31Z",
+    "lastReviewLanding": "~2026-10-19T05:30Z (04:30-07:00)",
+    "S": "~06:30Z (05:30-08:00)"
+  }
 }
