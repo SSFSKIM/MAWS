@@ -89,7 +89,6 @@ interface Drag {
   blockId: string;
   source: Slot;
   view: ViewUnit[];
-  sourceBlocks: Slot[]; // the source's textblocks the copy holds, paired in order with the copy's for the block forwards
   late: Run[];
   node: Slot;
   name: string; // the source node's type: a re-insert as another type is a retype
@@ -298,7 +297,6 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
         blockId: id as string,
         source: itemOf(node),
         view: seenUnits(node, seen, step2),
-        sourceBlocks: textblocksY(node).filter((block) => seen(itemOf(block))).map(itemOf),
         late: lateRuns(node, seen, () => false),
         node: now,
         name: node.name,
@@ -455,7 +453,7 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
         // not the copy of what the replica saw (a unit already deleted here is matched by count alone, its character
         // collected): no carry, as for any other re-insert
         if (now.length !== drag.view.length || drag.view.some((unit, k) => unit.live && unit.ch !== now[k].ch)) continue;
-        const blocks = textblocksY(node).map(itemOf);
+        const unitAt = new Map(now.map((unit, k) => [slotKey(unit.slot), k]));
         const carry: Carry = {
           kind: node.name === drag.name ? 'move' : 'retype',
           blockId: drag.blockId,
@@ -463,7 +461,12 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
           to: now.map((unit) => unit.slot),
           source: drag.source,
           node: drag.node,
-          blocks: drag.sourceBlocks.slice(0, blocks.length).map((old, k): [Slot, Slot] => [old, blocks[k]]),
+          // each textblock of the copy with the view's counterpart of its node unit (a dead one too, so the blocks after
+          // it keep their own), the dragged block itself for its own textblock
+          blocks: textblocksY(node).map((block): [Slot, Slot] => {
+            const k = unitAt.get(slotKey(itemOf(block)));
+            return [k === undefined ? drag.source : drag.view[k].slot, itemOf(block)];
+          }),
         };
         registry.register([carry]);
         registry.activate(carry);
