@@ -223,7 +223,7 @@ function useReply(serial: number, child: AppSessionId, delivered: (result: Human
     const outcome = replyOutcomeOf(result);
     settled?.(outcome.kind !== 'refused'); // P3-F (L154)
     if (outcome.kind === 'refused' && cardGone(serial)) {
-      toast({ level: 'warning', text: COPY.replyRefusedAfterClose(outcome.reason), actions: [{ label: COPY.copyReply, run: () => void navigator.clipboard.writeText(content) }], dismissible: true });
+      offerReply(content, COPY.replyRefusedAfterClose(outcome.reason));
       return;
     }
     setSending(false);
@@ -240,4 +240,11 @@ function useReply(serial: number, child: AppSessionId, delivered: (result: Human
     void send();
   };
   return { text, setText, sending, refusal, canSend, send, onKeyDown };
+}
+
+// A late refusal's toast, the reply one click from the clipboard. Acting on a toast dismisses it (ToastHost), so a
+// write the clipboard refuses is said in a toast that offers the reply again (tech debt L117).
+function offerReply(content: string, text: string) {
+  const copy = () => navigator.clipboard.writeText(content).catch((error: unknown) => offerReply(content, COPY.replyNotCopied(error instanceof Error ? error.message : String(error))));
+  toast({ level: 'warning', text, actions: [{ label: COPY.copyReply, run: () => void copy() }], dismissible: true });
 }

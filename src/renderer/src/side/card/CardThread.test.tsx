@@ -375,6 +375,47 @@ describe('Reply through the human send seam', () => {
     expect(writeText).toHaveBeenCalledWith('Also the subtitle');
   });
 
+  // tech debt (L117): the clipboard refusing the reply is said, in the toast that still offers it (acting on a toast
+  // dismisses it, ToastHost's rule, so the offer moves to the failure's own toast)
+  it('a refused copy of a late-refused reply says so and keeps the reply one click from the clipboard', async () => {
+    await ready();
+    let answer!: (result: Awaited<ReturnType<typeof sendHumanPrompt>>) => void;
+    seam.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    await userEvent.type(replyField(), 'Also the subtitle{Enter}');
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Close' }));
+    await act(async () => answer({ disposition: 'refused', started: false, reason: 'The session has ended' }));
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      // a plain function, not a vi.fn: a mock's result tracking would handle the rejection itself
+      const written: string[] = [];
+      let refuse = true;
+      const writeText = async (text: string) => {
+        written.push(text);
+        if (refuse) throw new Error('Document is not focused.');
+      };
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+      const copyReply = async () => {
+        const notice = useNotices.getState().notices[0]!;
+        await act(async () => {
+          notice.actions.find((a) => a.label === 'Copy reply')!.run();
+          useNotices.getState().dismiss(notice.id); // as the host does on the action's click
+        });
+        await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      };
+      await copyReply();
+      const notices = useNotices.getState().notices;
+      expect(notices.map((n) => [n.level, n.text, n.actions.map((a) => a.label)])).toEqual([['warning', 'The reply was not copied: Document is not focused.', ['Copy reply']]]);
+      expect(unhandled).not.toHaveBeenCalled();
+      refuse = false;
+      await copyReply();
+      expect(written).toEqual(['Also the subtitle', 'Also the subtitle']);
+      expect(useNotices.getState().notices).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
   it('a reply the seam took after the card went says nothing', async () => {
     await ready();
     let answer!: (result: Awaited<ReturnType<typeof sendHumanPrompt>>) => void;

@@ -125,7 +125,14 @@ export interface MemoEntry {
   rows: Row[];
   work: TurnWork;
   overlay?: { receipts: TranscriptUi['receipts']; spills: TranscriptUi['spills']; rows: Row[] }; // the reader state laid over `rows` (derive.ts)
+  agents?: { read: AgentLookup | undefined }; // present when `rows` read the host's agent lookup: the one they read
 }
+
+// The agents the host knows beyond the loaded turns, by every task id, agent id and real name a message may address one
+// with (MAWS: the session's task graph, transcript/view/agent-lookup.ts; the desk: its own tree). A message row names an
+// agent from it only when no loaded turn launched one by that key. Replaced, never mutated: a turn whose rows read it
+// re-derives when it changes (derive.ts, rowsOfTurn).
+export type AgentLookup = ReadonlyMap<string, SubagentRef>;
 
 export interface HiddenBranch {
   fromTurn: TurnId;
@@ -164,6 +171,7 @@ export interface TranscriptState {
   // along the lineage, append-only, like `index`.
   sideThreads?: Map<AppSessionId, SideThreadOwner>;
   // E3 end
+  agents?: AgentLookup; // the host's agent lookup (withAgents); absent: none supplied
 }
 
 // E3
@@ -202,6 +210,16 @@ export function withUi(state: TranscriptState, ui: TranscriptUi): TranscriptStat
 export function withReaderState(state: TranscriptState, patch: Partial<Pick<TranscriptUi, 'receipts' | 'spills'>>): TranscriptState {
   if (state.lineage.latest !== null && state.lineage.latest !== state) throw new Error('withReaderState: this state is not its lineage’s latest');
   const next = { ...state, ui: { ...state.ui, ...patch } };
+  state.lineage.latest = next;
+  return next;
+}
+
+// A new state with the host's agent lookup replaced (the same lookup returns the state itself). Only the turns whose rows
+// read the lookup re-derive (derive.ts, rowsOfTurn). Joins the lineage like `withUi`.
+export function withAgents(state: TranscriptState, agents: AgentLookup | undefined): TranscriptState {
+  if (state.agents === agents) return state;
+  if (state.lineage.latest !== null && state.lineage.latest !== state) throw new Error('withAgents: this state is not its lineage’s latest');
+  const next = { ...state, agents };
   state.lineage.latest = next;
   return next;
 }
@@ -767,8 +785,8 @@ function apply(batch: Batch, event: SessionEvent): void {
 // cloned for this batch and given a new map, so a snapshot taken before the steer still reads `asked`), and that turn
 // re-derives, since the steer usually runs as a turn of its own (pass3/p1-maws-ask-async) and on the disk path it is
 // the only record of the answers. A steer naming no call this state holds answers nothing (the call always precedes
-// its steer). The first steer naming an ask wins. The message itself is placed as any other prompt: its bubble stays a
-// user row.
+// its steer). The first steer naming an ask wins. The message itself is placed as any other prompt (its turn, its fold);
+// derive draws no bubble for a steer that answered a capsule here, the capsule showing the answers.
 function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
   const text = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n');
   const steer = parseAskSteer(text);

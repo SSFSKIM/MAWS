@@ -580,6 +580,25 @@ describe('unstarted sessions', () => {
 });
 
 describe('before the layout has hydrated', () => {
+  // A relaunch drew "No open tabs" for a moment before the saved tabs arrived: the pane draws no empty state until the
+  // snapshot has applied, and then only when no tab came back.
+  it('draws no empty state until hydration, then the empty state when no tab came back', async () => {
+    const layoutMain = fakeClient({ 'layout.list': { keys: [] } });
+    useLayout.setState({ hydrated: false });
+    render(<Shell />);
+    const hydrating = useLayout.getState().hydrate(layoutMain.client, (id) => useSessions.getState().records.has(id));
+    await act(async () => {});
+    expect(layoutMain.pending('layout.get')).toBe(3); // the snapshot is still outstanding
+    expect(within(main()).queryByText('No open tabs')).toBeNull();
+    expect(within(main()).queryByRole('tabpanel', { name: 'No open tabs' })).toBeNull();
+    await act(async () => {
+      for (let i = 0; i < 3; i++) await layoutMain.reply('layout.get', { value: null });
+      await hydrating;
+    });
+    expect(within(main()).getByText('No open tabs')).toBeTruthy();
+    expect(within(main()).getByRole('tabpanel', { name: 'No open tabs' })).toBeTruthy();
+  });
+
   it('a session opened from the sidebar while layout.get is outstanding survives hydration', async () => {
     const user = userEvent.setup();
     // Saved before W5, so it still holds the Overview's tab, which hydration drops.

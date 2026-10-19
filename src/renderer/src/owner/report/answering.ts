@@ -10,8 +10,9 @@
 // a failed command (main's failure envelope, or a rejected invoke when the bridge is gone) is said where it was asked,
 // and a sent answer whose report failed is kept so that the report alone can be made again, never the prompt. It is
 // kept outside the card, since the transcript mounts only the rows in view: a card scrolled away and back, or one that
-// left while its send was out, still says it and can make it again.
-import { useState } from 'react';
+// left while its send was out, still says it and can make it again. So is the card's own send (tech debt L118): a card
+// remounted while its answer is out still says Sending… and offers nothing, so one click stays one answer, and it says
+// what that send answered.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, MawsBridge } from '@shared/ipc/schema';
@@ -106,37 +107,46 @@ function setUnreportedOf(markId: MarkId, update: (now: Unreported | null) => Unr
     return { byMark: changed };
   });
 }
-export const resetUnreportedAnswers = () => useUnreported.setState({ byMark: new Map() });
+
+// Each question's own sends, by its mark, for the life of the window: the one in flight, what the last send or cancel
+// answered, and the last answer (Retry's)
+interface Asked { busy: Answering['busy']; note: string | null; last: AnswerSend | null }
+const NOTHING_ASKED: Asked = { busy: null, note: null, last: null };
+const useAsked = create<{ byMark: ReadonlyMap<MarkId, Asked> }>(() => ({ byMark: new Map() }));
+const askedOf = (markId: MarkId) => useAsked.getState().byMark.get(markId) ?? NOTHING_ASKED;
+const setAskedOf = (markId: MarkId, change: Partial<Asked>) => useAsked.setState(({ byMark }) => ({ byMark: new Map(byMark).set(markId, { ...(byMark.get(markId) ?? NOTHING_ASKED), ...change }) }));
+
+export const resetQuestionAnswering = () => {
+  useUnreported.setState({ byMark: new Map() });
+  useAsked.setState({ byMark: new Map() });
+};
 
 // A question's actions for its card: null without a mark main knows (a block still streaming, or not derived yet),
 // since main can follow only a question it has.
 export function useQuestionAnswering(appSessionId: AppSessionId, markId: MarkId | null, head: string, client: MawsBridge = ipc): Answering {
   const holder = useSessions((s) => s.records.get(appSessionId)?.holder ?? null);
-  const [busy, setBusy] = useState<Answering['busy']>(null);
-  const [note, setNote] = useState<string | null>(null);
-  const [last, setLast] = useState<AnswerSend | null>(null);
+  const { busy, note, last } = useAsked((s) => (markId === null ? NOTHING_ASKED : (s.byMark.get(markId) ?? NOTHING_ASKED)));
   const unreported = useUnreported((s) => (markId === null ? null : (s.byMark.get(markId) ?? null)));
   if (markId === null) return { actions: {}, busy: null, note: null, unreported: null };
 
   const send = async (answer: AnswerSend): Promise<AnswerOutcome | null> => {
-    if (busy !== null) return null; // the same answer clicked twice: one send
+    if (askedOf(markId).busy !== null) return null; // the same answer clicked twice, on this card or a remounted one: one send
     const sessions = useSessions.getState();
-    setBusy(sessions.engine.get(appSessionId)?.process !== 'ready' && sessions.records.has(appSessionId) ? 'starting' : 'sending');
-    setNote(null);
-    setLast(answer);
+    setAskedOf(markId, { busy: sessions.engine.get(appSessionId)?.process !== 'ready' && sessions.records.has(appSessionId) ? 'starting' : 'sending', note: null, last: answer });
+    let note: string | null = null;
     try {
       const outcome = await sendAnswer(appSessionId, markId, answer, client);
       const { result } = outcome;
       // main says what kept an unanswered question's answer from going out; a follow-up's on an answered question, and
       // one main never heard of, the card says itself
-      if (result.disposition === 'refused') setNote(result.reason ?? null);
-      if (result.disposition === 'held') setNote(QUESTION.held(result.reason));
+      if (result.disposition === 'refused') note = result.reason ?? null;
+      if (result.disposition === 'held') note = QUESTION.held(result.reason);
       // a sent answer main never heard of is kept until its report is made; a newer sent answer's report supersedes it
       // (the older prompt is still the engine's, and main's legacy recognition reads it, Design §6)
       if (wentOut(result)) setUnreportedOf(markId, () => outcome.unreported === null ? null : { report: outcome.report, error: outcome.unreported, recording: false });
       return outcome;
     } finally {
-      setBusy(null);
+      setAskedOf(markId, { busy: null, note });
     }
   };
   // the kept report made again (the prompt never is); it is kept until main has it, and a newer sent answer's report
@@ -167,13 +177,13 @@ export function useQuestionAnswering(appSessionId: AppSessionId, markId: MarkId 
       ...(last !== null && unreported === null && { retry: () => void send(last) }),
       ...(unreported !== null && { recordAgain: () => void recordAgain(unreported) }),
       cancel: () => {
-        setNote(null);
+        setAskedOf(markId, { note: null });
         void client.invoke('ownerChannel.cancel', { appSessionId, markId }).then(
           (result) => {
-            if (!result.ok) setNote(result.error.message);
-            else if (result.value.outcome === 'already_delivering') setNote(QUESTION.alreadyOnItsWay);
+            if (!result.ok) setAskedOf(markId, { note: result.error.message });
+            else if (result.value.outcome === 'already_delivering') setAskedOf(markId, { note: QUESTION.alreadyOnItsWay });
           },
-          (error: unknown) => setNote(messageOf(error)),
+          (error: unknown) => setAskedOf(markId, { note: messageOf(error) }),
         );
       },
       ...(foreign !== null && canTakeOver(foreign) && { takeOver: () => void takeOverSession(appSessionId, foreign) }),

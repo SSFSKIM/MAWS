@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@shared/graph/events';
-import type { EventId } from '@shared/graph/ids';
+import type { AgentId, EventId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
 import { cellId, rowId, turnId } from '../transcript/model/keys';
 import type { Row } from '../transcript/model/rows';
@@ -317,6 +317,33 @@ describe('transcript store', () => {
     const group = rows.find((row) => row.kind === 'group');
     expect(group?.kind === 'group' && group.expanded && group.cells.some((cell) => cell.id === target)).toBe(true);
     expect(jump).toMatchObject({ rowId: group!.id, focus: target, align: 'center' });
+  });
+
+  // L197: the host's agent lookup for a key names an agent no loaded turn launched; set before the key attaches, it
+  // applies at the attach, and a key that starts over (a remount's staged restart, a source's reset) keeps it.
+  it('applies a key’s agent lookup to its rows, before or after the attach, and keeps it when the key starts over', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('s1', 'SendMessage', { to: 'a912e224', message: 'hi' });
+    b.end(['u1']);
+    const survey = { taskId: 'a912e224' as TaskId, agentId: 'a912e224' as AgentId, toolUseId: 'ag9' as ToolUseId, name: 'Survey src', glyph: 3, kind: 'agent' as const, subagentType: 'Explore' };
+    const lookup = new Map([['a912e224', survey]]);
+    const sent = () => {
+      store.getState().expandAll(KEY);
+      return store.getState().rows(KEY).find((row): row is Extract<Row, { kind: 'agent_message' }> => row.kind === 'agent_message')?.text;
+    };
+    const store = createTranscriptStore();
+    store.getState().setAgents(KEY, lookup);
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    expect(sent()).toBe('Sent message to Survey src: hi');
+    store.getState().setAgents(KEY, undefined);
+    expect(sent()).toBe('Sent to a912e224: hi');
+    store.getState().setAgents(KEY, lookup);
+    expect(sent()).toBe('Sent message to Survey src: hi');
+    store.getState().detach(KEY);
+    await store.getState().attach(KEY, pushSource(b.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }))).source); // staged restart
+    expect(store.getState().entries[KEY].state.seen.has(`disk:${b.events[0].id}` as EventId)).toBe(true);
+    expect(sent()).toBe('Sent message to Survey src: hi');
   });
 
   it('drops a duplicate event id in a live batch', async () => {

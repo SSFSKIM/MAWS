@@ -13,7 +13,7 @@ import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { compositeMarkup } from './composite';
 import type { Mark } from './drawing';
-import { markupSurfaceOf, onMarkupSurfaceRemoved, type MarkupSurface } from './surface';
+import { coverMarkupSurface, markupSurfaceOf, onMarkupSurfaceRemoved, type MarkupSurface } from './surface';
 
 export const MARKUP_COPY = {
   markUp: 'Mark up',
@@ -49,6 +49,7 @@ let starting = false;
 let serial = 0;
 let unwatch: (() => void) | null = null;
 let focusBefore: HTMLElement | null = null;
+let uncover: (() => void) | null = null; // the surface and the layers over it made live again
 let discarded = new AbortController(); // aborts when the session ends: a delivery still pending lands nothing
 
 const panelScope = (): EditorHostScope | null => {
@@ -62,8 +63,9 @@ export async function startMarkup(scope: EditorHostScope | null = panelScope()):
   if (starting || useMarkup.getState().session !== null || scope === null) return;
   if (shownSession() === null || useLayout.getState().regions.panel.collapsed) return;
   const surface = markupSurfaceOf(scope);
-  const box = surface?.element()?.getBoundingClientRect();
-  if (!surface || !box || box.width < 1 || box.height < 1) return;
+  const element = surface?.element() ?? null;
+  const box = element?.getBoundingClientRect();
+  if (!surface || !element || !box || box.width < 1 || box.height < 1) return;
   starting = true;
   let still: CapturedImage | null;
   try {
@@ -83,6 +85,7 @@ export async function startMarkup(scope: EditorHostScope | null = panelScope()):
     return;
   }
   focusBefore = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  uncover = coverMarkupSurface(element);
   discarded = new AbortController();
   useMarkup.setState({ session: { id: ++serial, scope, surface, still, label: surface.label(), size: { width: box.width, height: box.height } } });
   watch(scope, surface);
@@ -114,6 +117,8 @@ function finish(restoreFocus: boolean): MarkupSession | null {
   if (session === null) return null;
   unwatch?.();
   unwatch = null;
+  uncover?.(); // before any focus goes back under it
+  uncover = null;
   discarded.abort();
   useMarkup.setState({ session: null });
   session.surface.end();
@@ -150,16 +155,18 @@ export async function addMarkupToChat(marks: readonly Mark[], render: typeof com
     toast({ level: 'warning', text: MARKUP_COPY.composerBusy, actions: [], dismissible: true });
     return;
   }
-  // The composer that took the picture has the keyboard; queued for the session's next composer (none mounted, the card
-  // a pill), the keyboard goes back where it was, as on a discard (P3-F, F-shell).
+  // The composer that took the picture has the keyboard, once the session ended (it may lie under the overlay, in the
+  // floating card, inert until then); queued for the session's next composer (none mounted, the card a pill), the
+  // keyboard goes back where it was, as on a discard (P3-F, F-shell).
   if (useMarkup.getState().session === session) finish(delivered !== 'taken');
+  if (delivered === 'taken') useComposerStore.getState().focusTargets.get(target!)?.focusEditor();
 }
 
-// The picture to the session's mounted composer, which adds it to its draft, takes the label at the caret and the
-// keyboard (`taken`), or (none mounted, or it went while it was asked) to the composer store's queue, which the session's
-// next composer drains (`queued`). `refused`: a composer still mounted would not take it (a send in flight).
-// `discarded`: the session ended while the composer was asked; `signal` told the composer to stop, so nothing was
-// attached, and nothing is inserted or queued.
+// The picture to the session's mounted composer, which adds it to its draft and takes the label at the caret (`taken`;
+// the caller gives it the keyboard), or (none mounted, or it went while it was asked) to the composer store's queue,
+// which the session's next composer drains (`queued`). `refused`: a composer still mounted would not take it (a send in
+// flight). `discarded`: the session ended while the composer was asked; `signal` told the composer to stop, so nothing
+// was attached, and nothing is inserted or queued.
 async function deliver(appSessionId: AppSessionId, picture: Blob, label: string, signal: AbortSignal): Promise<'taken' | 'queued' | 'refused' | 'discarded'> {
   const name = picture.type === 'image/jpeg' ? 'mark-up.jpg' : 'mark-up.png';
   const file = new File([picture], name, { type: picture.type });
@@ -170,7 +177,6 @@ async function deliver(appSessionId: AppSessionId, picture: Blob, label: string,
     if (signal.aborted) return 'discarded'; // a composer answers false once aborted: it added nothing
     if (taken) {
       composer.insertText(text, { separated: true }); // a space first after a word, never joined to it
-      composer.focusEditor();
       return 'taken';
     }
     if (useComposerStore.getState().focusTargets.get(appSessionId) === composer) return 'refused';
@@ -183,6 +189,8 @@ async function deliver(appSessionId: AppSessionId, picture: Blob, label: string,
 export function resetMarkup(): void {
   unwatch?.();
   unwatch = null;
+  uncover?.();
+  uncover = null;
   discarded.abort();
   starting = false;
   focusBefore = null;

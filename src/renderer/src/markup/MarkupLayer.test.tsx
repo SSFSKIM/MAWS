@@ -21,9 +21,9 @@ const TAB = 'browser:1';
 const still: CapturedImage = { mediaType: 'image/png', data: 'c3RpbGw=', width: 1600, height: 1000 };
 let end: Mock<() => void>;
 
-// `live`: what the surface holds under the still (the DOM route's body, an editor in it)
-async function open(live?: (element: HTMLElement) => void): Promise<void> {
-  const element = document.body.appendChild(document.createElement('div'));
+// `live`: what the surface holds under the still (the DOM route's body, an editor in it); `element`: a surface already
+// laid out in the test's own shell
+async function open(live?: (element: HTMLElement) => void, element: HTMLElement = document.body.appendChild(document.createElement('div'))): Promise<void> {
   live?.(element);
   vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({ left: 300, top: 120, width: 800, height: 500, x: 300, y: 120, right: 1100, bottom: 620, toJSON: () => ({}) } as DOMRect);
   end = vi.fn<() => void>();
@@ -197,6 +197,77 @@ describe('MarkupLayer', () => {
     await user.tab({ shift: true });
     expect(document.activeElement, 'from the first control, round to the last').toBe(add);
     expect(layer.contains(document.activeElement)).toBe(true);
+  });
+
+  // tech debt (L257): the trap covers only keys pressed inside the overlay; focus that leaves it another way (a header
+  // menu closed with Escape gives the keyboard back to its trigger) must not be one Tab from hidden live content, so the
+  // covered surface and the card layers over its region are inert for the session's life
+  describe('what the overlay covers', () => {
+    // a panel region holding a header menu, the surface (a live editor in it) and a card's layer over it (its composer);
+    // beside it a main region's card layer and the toasts' viewport, which the overlay does not cover
+    function shell() {
+      const surface = { current: null as HTMLDivElement | null };
+      render(
+        <>
+          <section data-region="panel">
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger>More actions</DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content>
+                  <DropdownMenu.Item>Export</DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+            <div ref={surface} data-testid="surface">
+              <div contentEditable suppressContentEditableWarning aria-label="Live editor" />
+            </div>
+            <div data-markup-occluder="" data-testid="card layer">
+              <textarea aria-label="Card composer" />
+            </div>
+          </section>
+          <section data-region="main">
+            <div data-markup-occluder="" data-testid="main card layer" />
+          </section>
+          <ol data-toast-viewport="" data-markup-occluder="" data-testid="toasts" />
+        </>,
+      );
+      return surface.current!;
+    }
+    const inert = (id: string) => screen.getByTestId(id).hasAttribute('inert');
+
+    it('marks the surface and the card layer over it inert for the session’s life, and nothing the overlay leaves uncovered', async () => {
+      const surface = shell();
+      await open(undefined, surface);
+      expect(['surface', 'card layer', 'main card layer', 'toasts'].map(inert)).toEqual([true, true, false, false]);
+      await userEvent.keyboard('{Escape}');
+      expect(useMarkup.getState().session).toBeNull();
+      expect(['surface', 'card layer'].map(inert)).toEqual([false, false]);
+    });
+
+    it('Tab from the panel header after a closed menu never reaches the surface or the card’s composer', async () => {
+      const user = userEvent.setup();
+      const surface = shell();
+      await open(undefined, surface);
+      drag([[310, 130], [320, 140]]);
+      await user.click(screen.getByRole('button', { name: 'More actions' }));
+      await user.keyboard('{Escape}'); // the menu's: it closes, the keyboard back on its trigger, the marks kept
+      expect(useMarkup.getState().session).not.toBeNull();
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'More actions' }));
+      await user.tab();
+      await user.tab();
+      expect(surface.contains(document.activeElement), 'the live editor under the still').toBe(false);
+      expect(document.activeElement).not.toBe(screen.getByRole('textbox', { name: 'Card composer' }));
+    });
+
+    it('Add to chat gives the keyboard to a composer in the card layer once the layer is live again', async () => {
+      const surface = shell();
+      const composer = screen.getByRole('textbox', { name: 'Card composer' });
+      registerFocusTarget(A, { focusEditor: () => composer.focus(), focusFrame: vi.fn(), insertText: vi.fn(), attachFiles: async () => true });
+      await open(undefined, surface);
+      await userEvent.click(screen.getByRole('button', { name: 'Add to chat' }));
+      await vi.waitFor(() => expect(useMarkup.getState().session).toBeNull());
+      expect(document.activeElement).toBe(composer);
+    });
   });
 
   // P3-F (F-shell, scalpel-4#4): no composer mounted (the card closed to its pill), the picture is queued and the

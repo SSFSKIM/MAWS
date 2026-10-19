@@ -18,7 +18,8 @@ import { paceLine, type DirectLogin, type RoutingFacts } from '../../gateway/rou
 import { present as presentContext } from '../../widgets/ContextWidget';
 import { present as presentMcp } from '../../widgets/McpWidget';
 import { CONTEXT, MODEL } from '../../widgets/copy';
-import { liveModel, type ModelRow } from '../../widgets/model';
+import type { ModelRow } from '../../widgets/model';
+import { DEFAULT_ROW, modelAsk, type HeldAsk } from '@shared/sessions/model-label';
 import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
 import { contestLine, holderLine } from '../../attention/derive'; // W7
@@ -45,6 +46,7 @@ export interface SessionInfoInput {
   directLogin: DirectLogin | null;
   lane: Lane | null; // null without a status
   models: readonly ModelRow[] | null; // the session's listed catalogue, when C7 read one (an alias matched to its resolved id)
+  held: HeldAsk | null; // the model request this renderer holds for the session (widgets/model.ts `heldModel`), as the chip reads it
   windows: SessionWindows;
   budget: BudgetState | null; // C12: the engine host's memory budget, null before it answered
   browserTabs: { loaded: number; memoryKiB: number | null }; // E4a: the app's loaded browser tabs (the browser store's `loadedTabs`)
@@ -126,14 +128,18 @@ function engineSection({ record, status, digest, budget, browserTabs, observed, 
 
 function modelSection(input: SessionInfoInput): InfoSection {
   if (input.observed) return observedModelSection(input, input.observed); // P2-A
-  const { record, status, models } = input;
+  const { record, status, models, held } = input;
   const model = status?.model ?? record.model;
   const effort = status ? status.effort : record.effort;
-  // A set_model the engine accepted and no init frame has confirmed yet: the requested model, pending in the model
-  // widget's words, as the lane reads it. Without the catalogue an alias cannot be matched to its resolved id, so the
-  // resolved one shows (a set_model from this app always listed the catalogue first).
-  const pending = status !== null && models !== null && liveModel(models, status.model).pending;
-  const name = pending ? model.requested : (model.resolved ?? model.requested);
+  // A model asked for and not yet reported running, by the composer chip's and the selector's rule (`modelAsk`) over
+  // the request this renderer holds (an explicit Default, a choice the session is starting for): the model asked for,
+  // pending in the model widget's words; explicit Default names what the catalogue's `default` row runs. Without the
+  // catalogue an alias cannot be matched to its resolved id, so a request this renderer does not hold reads confirmed
+  // and the resolved one shows (a set_model from this app always listed the catalogue first).
+  const catalogue = models ?? [];
+  const ask = status === null ? null : modelAsk(held ?? undefined, status.model, catalogue);
+  const pending = ask !== null && ask.pending;
+  const name = ask !== null && ask.pending ? (ask.asked ?? catalogue.find((r) => r.value === DEFAULT_ROW)?.resolvedModel ?? DEFAULT_ROW) : (model.resolved ?? model.requested);
   const rows: InfoRow[] = [
     { label: INFO.main, value: name === null ? NONE : effort ? `${name} · ${effort}` : name, note: pending ? MODEL.pending : undefined },
     status?.subagentModel ? { label: INFO.subagents, value: status.subagentModel, note: INFO.subagentChosen } : { label: INFO.subagents, value: status ? INFO.subagentsInherit : NONE },

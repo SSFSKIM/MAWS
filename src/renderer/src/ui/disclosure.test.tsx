@@ -1,6 +1,7 @@
 // The shared disclosure motion (W8, T3) under happy-dom, which has no layout: the content's height is stubbed, and the
 // motion's start is read at the layout it forces, the moment before the transition is set.
 import { act, cleanup, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DisclosureBody, useDisclosureMotion } from './disclosure';
 
@@ -162,5 +163,38 @@ describe('useDisclosureMotion', () => {
     render(<Appearing />);
     expect(starts).toEqual([{ height: '0px', opacity: '0', transform: 'translateY(-8px)', transition: 'none' }]);
     expect(body()!.style.height).toBe(`${CONTENT_PX}px`);
+  });
+
+  // tech debt (L228): StrictMode (the dev servers) unmounts and remounts every effect once, clearing the motion's timer;
+  // the re-run layout effect arms it again, so the row still moves and then rests at its own height
+  describe('under StrictMode', () => {
+    function Appearing() {
+      const { ref } = useDisclosureMotion<HTMLDivElement>(true, { appear: true });
+      return <div ref={ref} data-testid="body" />;
+    }
+
+    it('a row that mounts in its opening motion runs it, then rests with no inline height or overflow', () => {
+      render(
+        <StrictMode>
+          <Appearing />
+        </StrictMode>,
+      );
+      expect(starts).toHaveLength(1);
+      expect(body()!.style.height).toBe(`${CONTENT_PX}px`);
+      expect(body()!.style.transition).toContain('height 300ms');
+      act(() => vi.advanceTimersByTime(300));
+      expect(body()!.getAttribute('style')).toBeNull();
+    });
+
+    it('under prefers-reduced-motion, the same row rests unstyled at once', () => {
+      vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)', addEventListener: () => {}, removeEventListener: () => {} }));
+      render(
+        <StrictMode>
+          <Appearing />
+        </StrictMode>,
+      );
+      expect(starts).toEqual([]);
+      expect(body()!.getAttribute('style')).toBeNull();
+    });
   });
 });

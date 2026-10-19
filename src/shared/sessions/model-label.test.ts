@@ -113,4 +113,13 @@ describe('the model a session asked for, and whether the engine has acknowledged
     expect(modelAsk({ value: null }, facts(null, 'claude-haiku-5-5'), []).pending).toBe(true);
     expect(modelAsk(undefined, facts('default', 'claude-haiku-5-5'), []).pending).toBe(false);
   });
+
+  // S-R2-r2-i1: a choice the session is starting for is pending through the acquisition and its set_model, even when
+  // it names the model the session last reported; that report predates the ask, so it acknowledges nothing.
+  it('a request held while its session starts is pending whatever the cached report says', () => {
+    expect(modelAsk({ value: 'haiku', starting: true }, facts(null, 'claude-haiku-5-5'), rows)).toEqual({ asked: 'haiku', explicit: true, pending: true });
+    expect(modelAsk({ value: 'haiku', starting: true }, facts('haiku', 'claude-haiku-5-5'), rows)).toEqual({ asked: 'haiku', explicit: true, pending: true });
+    expect(modelAsk({ value: null, starting: true }, facts(null, 'claude-opus-5-5[1m]'), rows)).toEqual({ asked: null, explicit: true, pending: true }); // Default, which Opus already runs
+    expect(modelAsk({ value: 'haiku', starting: false }, facts('haiku', 'claude-haiku-5-5'), rows).pending).toBe(false); // set_model accepted and reported
+  });
 });

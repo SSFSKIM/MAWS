@@ -640,6 +640,34 @@ describe('Make something new', () => {
     expect(useComposerStore.getState().prefills.get(S(8))).toEqual({ text: 'Make a document in the Space “Home”: ' });
   });
 
+  // P4: before the Spaces list has answered, a narrowed view's Ask Claude would start in the focused project with no
+  // Space words; it waits, disabled, until the Space is known, and stays so for a Space the list does not hold
+  it('Ask Claude from a narrowed Space is disabled until the Spaces list names the Space, then its prefill names it', async () => {
+    const creator = vi.fn(async () => S(9));
+    offs.push(registerSessionCreator(creator));
+    let answerSpaces: (() => void) | null = null;
+    answers['library.spaces'] = () => new Promise((resolve) => (answerSpaces = () => resolve(ok({ spaces }))));
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: HOME }));
+    render(<Library />);
+    const section = await screen.findByRole('region', { name: 'Make something new' });
+    const ask = () => within(within(section).getByRole('group', { name: 'Document' })).getByRole('button', { name: /^Ask Claude/ });
+    await waitFor(() => expect(answerSpaces).not.toBeNull());
+    expect((ask() as HTMLButtonElement).disabled).toBe(true);
+    await user.click(ask());
+    expect(creator).not.toHaveBeenCalled();
+
+    await act(async () => answerSpaces!());
+    await waitFor(() => expect((ask() as HTMLButtonElement).disabled).toBe(false));
+    expect(ask().getAttribute('aria-label')).toBe('Ask Claude to make a document in the Space “Home”');
+    await user.click(ask());
+    await waitFor(() => expect(creator).toHaveBeenCalledWith(null));
+    expect(useComposerStore.getState().prefills.get(S(9))).toEqual({ text: 'Make a document in the Space “Home”: ' });
+
+    act(() => setLibraryView({ spaceId: 'gone' })); // a Space the loaded list does not hold (deleted meanwhile)
+    expect((ask() as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('a kind whose editor lands later gains its New at once', async () => {
     render(<Library />);
     const section = await screen.findByRole('region', { name: 'Make something new' });

@@ -61,6 +61,16 @@ export function useDisclosureMotion<T extends HTMLElement>(open: boolean, option
 
   useLayoutEffect(() => {
     const element = ref.current;
+    // The motion's end: the element rests unstyled, and a closed body unmounts its content.
+    const end = (style: CSSStyleDeclaration, opening: boolean) =>
+      setTimeout(
+        () => {
+          running.current = null;
+          clear(style);
+          if (!opening) setClosing(false);
+        },
+        (opening ? OPEN_MOTION : CLOSE_MOTION).ms,
+      );
     if (reduced && running.current !== null) {
       // Reduced motion turned on under a running motion: it ends where it was going, now.
       clearTimeout(running.current);
@@ -68,7 +78,15 @@ export function useDisclosureMotion<T extends HTMLElement>(open: boolean, option
       if (element) clear(element.style);
       if (!moved.current && full) setTimeout(() => setClosing(false), 0);
     }
-    if (moved.current === open) return;
+    if (moved.current === open) {
+      // A re-run under a motion still drawn: React's StrictMode (the dev servers) unmounts and remounts every effect once,
+      // and the unmount cleared the timer, so the motion's end is armed again (tech debt L228).
+      if (running.current !== null && element) {
+        clearTimeout(running.current);
+        running.current = end(element.style, open);
+      }
+      return;
+    }
     moved.current = open;
     if (!element) return;
     const style = element.style;
@@ -99,11 +117,7 @@ export function useDisclosureMotion<T extends HTMLElement>(open: boolean, option
       style.opacity = open ? '1' : '0';
       style.transform = open ? 'none' : LIFT;
     }
-    running.current = setTimeout(() => {
-      running.current = null;
-      clear(style);
-      if (!open) setClosing(false);
-    }, ms);
+    running.current = end(style, open);
   }, [open, reduced, closedHeight, full]);
 
   useEffect(
