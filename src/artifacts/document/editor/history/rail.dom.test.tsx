@@ -6,7 +6,7 @@
 import type { Editor } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { StrictMode, type ComponentProps, type ReactNode } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { applyEdit } from '../../patch-writer';
@@ -554,6 +554,33 @@ describe('the owner’s actions', () => {
     expect(rows.some((text) => text?.startsWith('You'))).toBe(true);
     expect(rows.some((text) => text?.startsWith('Fix the build'))).toBe(true);
     for (const text of rows) expect(text).toMatch(/\d{1,2}:\d{2}\s?[AP]M/);
+  });
+
+  // The history-anchors review (scalpel-4#3): two sessions with no title are both "Claude", and edits in one minute read
+  // the same time; each session is its own row all the same.
+  it('lists two untitled sessions that edited in the same minute as a row each', async () => {
+    const other: Actor = { kind: 'session', appSessionId: '00000000-0000-4000-8000-0000000000a2' as AppSessionId };
+    const at = Date.UTC(2026, 9, 18, 9, 41);
+    const { editor } = await setup(
+      async ({ host: h, agentWrites }) => {
+        await agentWrites(agentAppends(' One.'));
+        h.write((doc) => (tabBody(doc, TAB)!.get(1) as { insert(i: number, s: string): void }).insert(0, 'Two. '), other);
+      },
+      { sessionTitles: {}, now: () => at },
+    );
+    const errors = vi.spyOn(console, 'error');
+    try {
+      act(() => void editor().commands.setTextSelection({ from: 1, to: endOf(editor(), 'p2') }));
+      act(() => void fireEvent.contextMenu(editor().view.dom));
+      click(screen.getByRole('menuitem', { name: 'Show editors' }));
+      await until(() => screen.queryByRole('dialog', { name: 'Editors' })?.querySelectorAll('li').length === 3, 'the editors');
+      const rows = [...screen.getByRole('dialog', { name: 'Editors' }).querySelectorAll('li')].map((li) => li.textContent);
+      expect(rows.filter((text) => text?.startsWith('Claude · ')), 'one row per session').toHaveLength(2);
+      expect(new Set(rows).size, 'the two read alike').toBe(2);
+      expect(errors.mock.calls.filter((call) => /same key/.test(String(call[0]))), 'no two rows share a key').toEqual([]);
+    } finally {
+      errors.mockRestore();
+    }
   });
 });
 

@@ -65,6 +65,8 @@ export interface Pill {
 }
 
 export interface ShownEditor {
+  /** The actor's key (`human`, `session:<id>`), one row each: two untitled sessions are both "Claude" in one minute. */
+  key: string;
   name: string;
   color: string;
   at: number;
@@ -300,7 +302,7 @@ export class HistoryController {
     const provenance = decodeMap(await this.api.attributions(0, LIVE));
     return showEditors({ doc, from, to, liveRoot, provenance }).map(({ who, at, kinds }) => {
       const author = authorOf(who, this.api.sessionTitle?.bind(this.api));
-      return { name: author.name, color: author.color, at, when: formatWhen(at), kinds };
+      return { key: who, name: author.name, color: author.color, at, when: formatWhen(at), kinds };
     });
   }
 

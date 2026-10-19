@@ -297,7 +297,7 @@ export class DeckHistoryController {
     const provenance = decodeMap(await this.api.attributions(0, LIVE));
     return elementEditors(this.handle.doc, slideId, elementId, provenance).map(({ who, at, kinds }) => {
       const author = authorOf(who, this.api.sessionTitle?.bind(this.api));
-      return { name: author.name, color: author.color, at, when: formatWhen(at), kinds };
+      return { key: who, name: author.name, color: author.color, at, when: formatWhen(at), kinds };
     });
   }
 

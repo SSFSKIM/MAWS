@@ -73,7 +73,7 @@ export function ShowEditorsMenu({ open, onShow, onClose }: { open: Open; onShow(
       ) : (
         <ul className="doc-editors-list">
           {open.editors.map((who) => (
-            <li key={`${who.name}-${who.at}`} className="doc-editors-row">
+            <li key={who.key} className="doc-editors-row">
               <span className="doc-author-chip" style={{ background: `var(${who.color})` }} aria-hidden />
               {who.name} · {who.when}
             </li>
