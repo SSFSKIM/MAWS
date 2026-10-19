@@ -2,7 +2,8 @@
 // DOM under the field, the combobox's popup (the field keeps the keyboard and names the highlighted row through
 // `aria-activedescendant`). Page strings (a history row's title and URL) render as text. The field holds the window's
 // cover while the list shows, so it draws over the page's frozen picture as an omnibox popup does. cua #90: a bookmark's
-// row carries the bookmark star where a history row carries the clock.
+// row carries the bookmark star where a history row carries the clock. P3-F (F-shell): the list stacks inside the
+// chrome, which rises over the floating card's layer while it holds the list (`data-address-suggestions`, Chrome.tsx).
 import type { AddressRow } from './address-rows';
 import { BROWSER_COPY } from '../copy';
 import { BookmarkIcon, ForwardIcon, HistoryIcon, SearchIcon } from '../icons';
@@ -13,6 +14,7 @@ export function Suggestions({ id, rows, highlighted, onRun }: { id: string; rows
   return (
     <ul
       id={id}
+      data-address-suggestions=""
       role="listbox"
       aria-label={BROWSER_COPY.addressSuggestions}
       className="absolute inset-x-0 top-full z-20 m-0 mt-1 list-none overflow-hidden rounded-md border border-border-strong bg-bg-overlay p-1 text-ui-sm text-fg shadow-(--shadow-float)"
