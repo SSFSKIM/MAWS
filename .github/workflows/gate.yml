@@ -261,7 +261,8 @@ jobs:
       # A measured group waits here, before its checkout, until the Mac's desktop has settled (MEASURED_E2E above).
       - if: matrix.measured && runner.os == 'macOS'
         uses: SSFSKIM/ci-kit/mac/settle@v1
-      - uses: actions/checkout@v7
+      - id: checkout
+        uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           e2e: 'true'
@@ -301,7 +302,9 @@ jobs:
           specs=()
           if [[ -s $RUNNER_TEMP/e2e-specs ]]; then while IFS= read -r spec; do specs+=("$spec"); done <"$RUNNER_TEMP/e2e-specs"; fi
           .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: ' "${display[@]}" pnpm "$SCRIPT" "${specs[@]}"
-      - if: failure() || needs.plan.outputs.evidence == 'true'
+      # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
+      # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
+      - if: (failure() || needs.plan.outputs.evidence == 'true') && steps.checkout.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: e2e-${{ matrix.slug }}

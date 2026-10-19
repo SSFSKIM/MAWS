@@ -219,5 +219,7 @@ test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml 
   const job = /\n {2}e2e:\n((?: {4}.*\n|\n)*?)(?= {2}\S|$)/.exec(workflow)[1];
   assert.match(job, /\n {4}timeout-minutes: \$\{\{ matrix\.measured && 45 \|\| 30 \}\}\n/);
   // The guard is the job's first step, before the checkout, and only for a measured group on a Mac.
-  assert.match(job, /\n {4}steps:\n(?: {6}#.*\n)* {6}- if: matrix\.measured && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {6}- uses: actions\/checkout@v7\n/);
+  assert.match(job, /\n {4}steps:\n(?: {6}#.*\n)* {6}- if: matrix\.measured && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {6}- id: checkout\n {8}uses: actions\/checkout@v7\n/);
+  // A job refused before its checkout uploads nothing: the Mac's persistent workspace still holds the last job's reports.
+  assert.match(job, /\n {6}- if: \(failure\(\) \|\| needs\.plan\.outputs\.evidence == 'true'\) && steps\.checkout\.outcome == 'success'\n {8}uses: actions\/upload-artifact@v7\n/);
 });
