@@ -1,0 +1,46 @@
+Recorded 2026-10-19T04:54:33Z. Editor-proof wave medium review (reviewer-medium on opus), cb37f142f^..14309d25f, twelve test-only commits (eleven findings plus the maws-tools.spec.ts header nit from the composition recheck). Verdict correct, no material findings (e2e typecheck passed at cc8a315a8, e2e/ identical to 14309d25f); its unfiled residual (a keystroke with no transaction now counts as a miss and forces the full drain; the recorded mini runs read none) needs no row. The scalpel-1#4 routed fallback is P4 row S-PRES-HOLD-SEAM.
+
+Reviewer report, verbatim:
+## Findings
+No material findings.
+
+## Verdict
+correct: I read each of the twelve commits in cb37f142f^..14309d25f against the code it relies on. The e2e typecheck passed (exit 0, /tmp/rv-ep-tsc.log). I ran it at worktree HEAD cc8a315a8, whose `e2e/` and `tsconfig.e2e.json` are byte-identical to 14309d25f. I found no new race, wrong selector, wrong count, over-broad cleanup or swallowed failure. None of the specs could be run, so what I say about runtime behaviour comes from reading the code.
+
+## What I checked on the lens items
+- **9d3c42258 (narrow selectIn):** this commit has no `pos + nodeSize - 1` arithmetic.
+  - It first waits until the model's paragraph `index` equals the DOM's `p[index]` and `unsaved === 0`.
+  - It then compares the page selection and the editor's `textBetween(from, to)` with the quote. This is the same code as document.spec.ts's selectIn (e2e/document.spec.ts:309-362).
+  - Paragraph 0 holds an inline image atom. Its node view (src/artifacts/document/editor/nodes/atom.ts, views.ts:196) renders no text, so the model and DOM paragraph texts stay equal.
+- **90e504f82 (live readiness waits):** caretAtEnd compares a collapsed `from === to === pos + nodeSize - 1` for the node whose `attrs.id` names the block. For the textblocks p1 and p2 that is the end of their content, the same arithmetic as caretAtEndOf (e2e/document.spec.ts:420).
+  - `end` is recomputed on every poll, so an agent batch landing in p1 mid-poll cannot make the check stale.
+  - showEditors compares the editor's selected text with the passage.
+- **04238d26e (counting user frames):** the host writes outbound `user` frames for more than prompts:
+  - async-ask answers (src/engine-host/session-maws.ts:182);
+  - relay steers (src/renderer/src/tools/agents/relay-store.ts:229);
+  - bash mode;
+  - /clear;
+  - queue drains (src/engine-host/queue.ts:451, :642).
+
+  None of these happens in document-live, and permissions and maws tool answers go out as control_response. So the "count above the pre-send count" check holds for this run.
+- **02cbcafee (the drain):** a keystroke still missing at the ceiling is counted from its keydown to the drain's end, in the same clocks keystrokeMeasures and paintedInB use.
+  - With n = 300, `stats` reads p95 at index 284, so 16 or more misses fail rows 3 and 4. That is "more than 5%", and it is consistent with the unchanged p95 ≤ 100 ms bounds.
+  - Decision Log 109 recalibrated only rows 1 p95, 7 enter and 8 renderer collected, so this change does not conflict with it.
+  - `verdictOf`'s marginal band cannot absorb a reading of 10 s or more.
+  - One residual, not filed: a keystroke with no transaction is now counted as a miss and forces the full 10 s drain. The old code dropped such keys. All three recorded mini runs read 0 such keys and 300 of 300 acked and painted.
+- **fbdfdf300 (heavy apply):** `unsaved` is `carried + unacked` (src/artifacts/provider/port.ts:109), so 0 means durable even mid-handshake.
+  - The port stays open only on the failing path. presentations-history fails at once there. presentations-scale records the failed row, returns, and the final failed-rows assertion fails the test. Nothing is hidden.
+- **21cb72725 (live spend):** `expect.soft` inside the catch-less finally records its failures and lets the run's own error propagate.
+  - liveSpend and chargeOf behave as in presentations-live.spec.ts:393-402 and send-to-live.spec.ts:342-349.
+  - The run sends four prompts, each awaited to its own turn end, so "four or more receipts" holds on a passing run.
+  - The journal is read before `maws.cleanup()`.
+- **f9754600b (group kill):** the server (which is the wrapper; `$$` in the log is the same pid) and the lifeline are spawned `detached` (src/engine-host/connectors/direct-stdio.ts:42-43). Their group ids are therefore their own pids and never the runner's group.
+  - The host itself is signalled only by pid.
+  - A missing or invalid pid gives NaN, which throws and is caught. No value can become `-0`.
+  - After a passing run the groups are already gone. Reuse of those pids within milliseconds is not plausible.
+- **c741ab0ef (header):** the header is accurate. It matches e2e/maws-tools.spec.ts:37-41, 399, 474 and 606-669, and the derived fixture's provenance row.
+- **Other commits:** cb37f142f, 90eb1bb8e, aa8316733 and 14309d25f (comment only) are as described.
+
+## Not verified
+- Runtime behaviour on Electron or the mini: whether the editor's selection takes the DOM caret within the polls; the drain's real duration and its effect on the row-5 window; receipts on a paid run; process-group teardown on macOS.
+- I did not run eslint.

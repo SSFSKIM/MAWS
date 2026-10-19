@@ -151,6 +151,62 @@
       "owner": "P4 / slide editor keyboard",
       "row": "| 2026-10-19 | P4 slide editor keyboard (stage to inspector with a middle selection) | After P3-F's slide-editor fix (7fae549e3) Tab leaves the stage only past either end of the level, so a keyboard user can carry only the first or last element's selection out to the inspector or notes; no trap remains (WCAG 2.1.2 holds). | Slide-editor wave worker A report, P3 residual. | Closes when a key moves focus off the stage with any selection kept (an F6-style landmark move or a shortcut that focuses the inspector), with a regression that a middle element's selection reaches the inspector by keyboard. Owner: the slide editor's next change (P4). |",
       "source": "slide-editor wave worker A, 2026-10-19"
+    },
+    {
+      "id": "S-MIRROR-RELINK-RECONCILE",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / library mirror",
+      "row": "| 2026-10-19 | P4 library mirror (no reconcile when a Space's link reaches a directory again) | After P3-F's keyOf fix (8c8116859), a link S to A that stops reaching A is keyed S and A's mirror is cleaned at the next step anywhere; when the owner points S back at A, a full rewrite is queued only if S was recorded failing in the window (a Space change or a step for that Space's own artifacts). With only other Spaces' steps in the window, A holds only artifacts that change afterwards until the next Space change or host start, and an agent's grep misses the rest. No owner file is removed or overwritten and no mirror file goes unowned; the mechanism predates the fix (a retarget to an existing directory has it), the fix adds the detach-then-restore path. Also the HeaderInput comment at ByteViewer.tsx:394-395 still says the version id is set 'when it is not the latest'. | Library follow-up recheck (opus), P3 and a comment nit. | Closes when a reconciliation is queued whenever a Space's path resolves to a different key than at its previous step (not keyed on 'no manifest held', which an away directory never has), with a regression for detach, other-Space activity, then restore; and the comment is corrected. Owner: the library mirror's next change (P4). |",
+      "source": "library follow-up recheck, 2026-10-19"
+    },
+    {
+      "id": "S-COMPILER-BAILOUT-DECK",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / presentation renderer",
+      "row": "| 2026-10-19 | P4 presentation renderer (React Compiler bailouts in the shipped build) | The React Compiler (babel-plugin-react-compiler 1.0.0, the build's options) skips `Presentation` (src/artifacts/slides/editor/present/Presentation.tsx: 'Existing memoization could not be preserved') and `DeckBody` (src/renderer/src/tools/presentation/DeckBody.tsx: `??=` unsupported) at HEAD before and after P3-F's slide-editor wave, so both ship uncompiled. Pre-existing; no defect observed. | Slide-editor wave worker B report (compile check /private/tmp/p3f-b-compile-check.cjs). | Closes when both compile with no bailout under the build's plugin options (the design-workbench review#2 pattern: replace the construct the compiler refuses), confirmed by running the plugin on the files. Owner: the presentation renderer's next change (P4). |",
+      "source": "slide-editor wave worker B, 2026-10-19"
+    },
+    {
+      "id": "S-PRES-HOLD-SEAM",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / presentations e2e seam",
+      "row": "| 2026-10-19 | P4 presentations e2e seam (composition-hold receipt) | e2e/presentations.spec.ts's composition-hold step still waits a fixed 300 ms after the remote 'Remote ' prepend before asserting the composing text box does not show it; nothing proves the tab's replica received and buffered the frame first, so a regressed hold whose broadcast arrives late still passes (the final merged-text check passes either way). P3-F's editor-proof wave (14309d25f) took the routed fallback: `__maws_presentations` answers only an open tab's timings and the deck tab's provider is module-private. | Editor-proof scale panel scalpel-1#4 (P3), routed fallback. | Closes when the presentations e2e seam (src/renderer/src/tools/presentation/e2e-seam.ts) answers an open deck tab's held or received frame count and the step polls it above zero before the negative check, in place of the fixed wait. Owner: the presentations e2e's next change (P4). |",
+      "source": "editor-proof wave worker, routed fallback, 2026-10-19"
+    },
+    {
+      "id": "S-MARKUP-INERT",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / mark-up overlay",
+      "row": "| 2026-10-19 | P4 mark-up overlay (covered surface not inert) | P3-F's shell fix (aa9c9796f) traps Tab only for keys pressed inside the mark-up overlay (`src/renderer/src/markup/MarkupLayer.tsx:194-202`); nothing marks the covered surface or the card's layer `inert`, so focus that leaves the overlay another way (a header menu closed with Escape returns focus to its trigger; Radix's F8 toast hotkey) is one Tab from hidden live content, where a document editor takes unseen keystrokes and, under the Escape split (ad29e501c), the card's composer answers Escape (interrupting a running turn) before the discard. Needs focus to leave the overlay first; the routing allowed the trap. | Shell wave medium review (opus), P3. | Closes when the session marks the surface element and the `[data-markup-occluder]` card layer `inert` for its lifetime (the trap may stay), with a regression that Tab from the panel header after a closed menu never reaches the surface or the composer. Owner: the mark-up overlay's next change (P4). |",
+      "source": "shell wave medium review, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-DRAG-CARRY-DELETION",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / document adapter drag carry",
+      "row": "| 2026-10-19 | P4 document adapter drag carry (a concurrent deletion in the dragged block drops the carry) | The P1 move-carry fix (cbadc36cd) pairs a drag's copy against the source's live units, so when another replica deleted characters in the dragged block that the dragger had not seen (the replace_text A to B reproducer), the length guard in `src/artifacts/document/adapter.ts` drops the carry: no carry, no forwards, and text a replica put into the source after the dragger's read is lost with the source (the P1 class, for that block). P3-F's fix (1f57ce89f, paired against a tombstone-inclusive view) and its remedies (fbc7680f7, ed3ea8f3e) were reverted under the architect's bound after the final high recheck found a further carry-path defect. | Document-model scale panel and wave review (P2); rechecks /tmp/maws-review/p3f-dm-recheck-fable.txt and p3f-dm-recheck2-fable.txt (E/reviews/document-model-recheck-*-result.txt). | Closes when such a drag keeps its carry and the late text, with regressions for the A to B reproducer, and the fix also keeps: (1) a drag delivered in a sync step 2 (the reconnect path, port.ts:8-15), whose delete set restates every old deletion, keeps its carry on a block with edit history; (2) after gc a countable tombstone merged with a non-countable one (Item.mergeWith ignores countable) never counts as a dead unit; (3) the block forwards stay positional when a seen empty nested textblock is tombstoned. Owner: the document adapter's next change (P4). |",
+      "source": "document-model final recheck and architect bound, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-TAB-DRAG-SOURCE",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / document editor tabs",
+      "row": "| 2026-10-19 | P4 document editor tabs (a tab drag names no source document) | After P3-F's document-editor fix (89a722814) a tab drop is refused only when this document lacks the dragged id (`src/artifacts/document/editor/Tabs.tsx:46-51`); a copy made through Duplicate or Make a copy (`store.duplicate`/`copyOf` applies the source's whole Y state, src/engine-host/documents/store.ts:483-497) has every tab id of its source, so with a document and its copy both showing tab strips (main and panel), a drag from one strip onto the other reorders the same-id tab in the document not dragged from, and that write saves and syncs. Not a regression (the same drop moved it before). Also theme.css:146-148's comment describes a cascade with D's document.css that never occurs (theme.css and D's sheet are never loaded together). | Document-editor wave medium review (opus), P3 and a comment nit. | Closes when the drag records its source document at onDragStart (a module-level {doc, id} or a per-strip token in the drag data) and drop compares it, with a regression dragging a tab between a document and its copy; and the comment is corrected. Owner: the document editor's next change (P4). |",
+      "source": "document-editor wave medium review, 2026-10-19"
+    },
+    {
+      "id": "S-PRESENT-EMBED-FOCUS",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / presenter window",
+      "row": "| 2026-10-19 | P4 presenter window (focus left in an embed after a bar click) | Since P3-F's slide-editor fixes (b916bb78e, cc8a315a8) the presenter bar cancels mousedown and blurs only focus inside the bar (`src/artifacts/slides/editor/present/Presentation.tsx:261-265`); if the presenter clicked into a sandboxed embed in the current pane (src/artifacts/slides/canvas/elements.ts:115-120), a later bar click no longer moves focus out of the iframe, so Space and Enter go to the embed instead of the show keys. Unverified whether an embed in the presenter's pane takes pointer events at all. | Slide-editor follow-up low recheck (opus), backlog note. | Closes when a bar mousedown also clears focus held by an embed (or the presenter's embeds take no focus), with a regression that Space after clicking an embed and then the bar advances the show. Owner: the presenter's next change (P4). |",
+      "source": "slide-editor follow-up recheck, 2026-10-19"
     }
   ]
 }

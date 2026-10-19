@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M3 fix waves: all twenty areas routed; waves, reviews and follow-ups in progress; source not frozen",
+  "phase": "M3 fix waves closed: all twenty areas fixed and reviewed; final interim gate, freeze and p3f-final next",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -1339,7 +1339,14 @@
       "S-PPTX-TABLE-OUTLINE",
       "S-DESIGN-ORDER-SETTLE",
       "S-DESIGN-SCALE-100HZ",
-      "S-SLIDE-STAGE-KEYBOARD-EXIT"
+      "S-SLIDE-STAGE-KEYBOARD-EXIT",
+      "S-MIRROR-RELINK-RECONCILE",
+      "S-COMPILER-BAILOUT-DECK",
+      "S-PRES-HOLD-SEAM",
+      "S-MARKUP-INERT",
+      "S-DOC-DRAG-CARRY-DELETION",
+      "S-DOC-TAB-DRAG-SOURCE",
+      "S-PRESENT-EMBED-FOCUS"
     ],
     "compositionFix": "91d4874fa2f799261fffe8208c8fc3b3d88f773d",
     "compositionFollowUp": [
@@ -1377,7 +1384,8 @@
       "62d9feabb",
       "2f0e99a4c"
     ],
-    "interimGates": "gates/interim-class1a.json"
+    "interimGates": "gates/interim-class1a.json",
+    "closedAt": "2026-10-19T04:54:33Z"
   },
   "finalGatePreparation": "final-gate-preparation.json",
   "agentCeiling": {
