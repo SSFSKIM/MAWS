@@ -18,7 +18,7 @@
 // - Two Spaces linked to one directory share its manifest (the desired set is per directory).
 // - A directory that fails (gone, unwritable, a link) is logged per Space and tried again at the next change, which
 //   reconciles the whole directory once it loads again; what the mirror owns there stays owned meanwhile. The linked
-//   directory itself is never created, and no write or removal passes through a link inside it.
+//   directory itself is never created, and no write or removal, the manifest's included, passes through a link inside it.
 // - At start every linked directory is reconciled against its manifest: what changed while the host was down.
 // - P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): a writer
 //   that declares `inputs` (what its output depends on beyond the revision) has them kept in the entry beside the
@@ -451,6 +451,7 @@ export class LibraryMirror {
   // Writes the manifest when it names a file, removes it (and an emptied `artifacts/`) when it names none.
   private save(dir: string, manifest: Manifest): void {
     const root = join(dir, MIRROR_DIR);
+    if (!realDirsUnder(root, MIRROR_MANIFEST)) throw new Error(`${root} is not a directory of its own (a link, or a file); nothing is written through it`); // relinked since it loaded
     const path = join(root, MIRROR_MANIFEST);
     const present = occupied(path); // a link there too, dangling or not
     if (present && (!lstatSync(path).isFile() || this.saved.get(dir) !== readFileSync(path, 'utf8'))) readManifest(path); // not ours since: left alone
