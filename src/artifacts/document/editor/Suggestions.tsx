@@ -1,6 +1,6 @@
 // D14: a suggestion replica rendered over the base, never edited or accepted locally. The service copies accepted
 // content with the suggester's binding; the editor supplies the binding's item-id ranges, grouped by top-level block.
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import type { ArtifactHost, DocumentHandle } from '../../host';
@@ -43,6 +43,8 @@ interface View {
   handle: DocumentHandle;
   renderer: DiffRenderer;
   serial: number;
+  /** The document tab the review was read for. */
+  tabId: string;
 }
 interface BlockSuggestion {
   from: number;
@@ -90,6 +92,15 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const readOnly = useReadOnly(base); // the store's, which the suggestion replica shares
+  // P3-F: the replica is the artifact's, open across document-tab switches; each read reviews the tab shown then, and a
+  // switch reads the new tab's review at once
+  const tab = useRef(tabId);
+  const switchTab = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => {
+    if (tab.current === tabId) return;
+    tab.current = tabId;
+    switchTab.current?.();
+  }, [tabId]);
   useEffect(() => {
     let closed = false;
     let serial = 0;
@@ -102,7 +113,9 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
     // transaction proposing something over the base refreshes. The renderer's coverage cannot say so: it keeps every
     // settled proposal's withdrawn inserts (M9 addendum fix wave).
     let listed = true;
-    let showing = false; // whether the review is on screen in place of the live editor
+    // whether the review is on screen in place of the live editor (across a tab switch, until the new tab's is read: a
+    // proposal there is shown at once, not held for a settle window anew)
+    let showing = false;
     let waiting: ReturnType<typeof setTimeout> | undefined; // a review held back until the person pauses
     let settling: { changes: string; since: number } | null = null; // the difference a review not yet shown last found
     setView(null);
@@ -122,7 +135,8 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
         renderers.add(renderer);
         const previous = current;
         current = renderer;
-        const body = tabBody(handle.doc, tabId);
+        const reviewed = tab.current;
+        const body = tabBody(handle.doc, reviewed);
         const changes = !renderer.attributed.isEmpty() && body !== undefined ? changeList(renderDiff(body, renderer)) : [];
         const pending = changes.length > 0;
         // A review not yet shown (the first check's included: a replica that opens mid-composition already holds what the
@@ -143,7 +157,7 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
         listed = shown;
         showing = shown;
         setError(null);
-        setView(shown ? { handle, renderer, serial: asked } : null);
+        setView(shown ? { handle, renderer, serial: asked, tabId: reviewed } : null);
         onPending(shown);
         // Unmounted Tiptap views are destroyed on their deferred teardown, before the old renderer is released.
         setTimeout(() => {
@@ -156,6 +170,12 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
     // A base change never adds a proposal; a suggestion replica's change refreshes when it proposes something.
     const onBase = () => void (listed && refresh());
     const onProposal = (_update: Uint8Array, _origin: unknown, _doc: Doc, tr: Transaction) => void ((listed || proposesOver(tr, base.doc)) && refresh());
+    // the review shown was the other tab's: the live page shows until the new tab's is read
+    switchTab.current = () => {
+      setView(null);
+      onPending(false);
+      void refresh();
+    };
     void host.open(artifactId, { doc: 'suggestions' }).then((opened) => {
       if (closed) return opened.close();
       handle = opened;
@@ -166,6 +186,7 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
     }).catch((cause: unknown) => { if (!closed) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => {
       closed = true;
+      switchTab.current = null;
       clearTimeout(waiting);
       leaveHold?.();
       handle?.doc.off('update', onProposal);
@@ -175,14 +196,14 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
       handle?.close();
       onPending(false);
     };
-  }, [artifactId, tabId, base, hold, host, onPending, retry]);
+  }, [artifactId, base, hold, host, onPending, retry]);
   const shownDoc = view?.handle.doc ?? null; // P3-E
   useEffect(() => {
     if (shownDoc) onDisplayedDocument?.(shownDoc);
   }, [shownDoc, onDisplayedDocument]);
   return <>
     {error && <div className="doc-banner" role="alert">Suggestions could not be loaded: {error}<button type="button" className="doc-tool" onClick={() => setRetry((n) => n + 1)}>Retry</button></div>}
-    {view && <Review key={`${artifactId}:${tabId}:${view.serial}`} view={view} artifactId={artifactId} tabId={tabId} host={host} editorHost={editorHost} pageScope={pageScope} readOnly={readOnly} renderChart={renderChart} /* P3-E */ />}
+    {view && <Review key={`${artifactId}:${view.tabId}:${view.serial}`} view={view} artifactId={artifactId} tabId={view.tabId} host={host} editorHost={editorHost} pageScope={pageScope} readOnly={readOnly} renderChart={renderChart} /* P3-E */ />}
   </>;
 }
 
