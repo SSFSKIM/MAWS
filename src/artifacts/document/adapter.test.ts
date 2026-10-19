@@ -891,3 +891,58 @@ describe('the tab restore and a held legacy dashboard', () => {
     expect(Object.keys(readFiles(host.live)).sort()).toEqual(['index.html', 'notes.txt']);
   });
 });
+
+// P3-F document-model review (fable, P2): a drag of a block that lost characters the dragger had not seen (the agent's
+// replace_text reached the host first) keeps its carry: the dragger's view is paired from the source's items in the
+// drag's delete set, tombstones included, so the copy's resurrected characters go again and the agent's new ones are
+// carried in.
+describe('a human drag of a block a concurrent replacement reached', () => {
+  const drag = (doc: Doc, id: string, after: string) => {
+    const pm = DocIndex.of(doc).pm(DocIndex.of(doc).find(id)!.top);
+    transact(doc, () => {
+      body(doc).delete(order(doc).indexOf(id), 1);
+      body(doc).insert(order(doc).indexOf(after) + 1, [pmnodeToDelta(pm)]);
+    });
+  };
+
+  it('ends with the replacement in the dragged copy and nothing resurrected', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const dragger = host.peer(); // drags without having seen the replacement
+    agentBatch(host, adapter, agent, agent1, [{ op: 'replace_text', block: 'p3', old: 'A', new: 'B' }]);
+    expect(textOf(host.live, 'p3')).toBe('B plain paragraph the human types into. Words to keep.');
+    drag(dragger, 'p3', 'c1');
+    host.send(dragger, human);
+    host.pull(dragger);
+    host.pull(agent);
+    const text = 'B plain paragraph the human types into. Words to keep.';
+    expect(textOf(host.live, 'p3')).toBe(text);
+    expect(marksOf(host.live, 'p3')).toBe('B plain paragraph the human types into. |Words[c:t4]| to keep.');
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('c1') + 1);
+    expect(adapter.stats().carries).toBe(1);
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(textOf(dragger, 'p3')).toBe(text);
+    expect(textOf(agent, 'p3')).toBe(text);
+  });
+
+  it('a replacement inside the block, and a stale keystroke after it, both land in the dragged copy', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const dragger = host.peer(); // sees neither the replacement nor the keystroke
+    const typist = host.peer(); // sees neither the replacement nor the drag
+    agentBatch(host, adapter, agent, agent1, [{ op: 'replace_text', block: 'p3', old: 'types into', new: 'writes in' }]);
+    drag(dragger, 'p3', 'p4');
+    host.send(dragger, human);
+    expect(textOf(host.live, 'p3')).toBe('A plain paragraph the human writes in. Words to keep.');
+    typeAt(typist, 'p3', 'end', ' Late.');
+    host.send(typist, human);
+    for (const doc of [agent, dragger, typist]) host.pull(doc);
+    const text = 'A plain paragraph the human writes in. Words to keep. Late.';
+    expect(textOf(host.live, 'p3')).toBe(text);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('p4') + 1);
+    expect(dupes(ids(host.live))).toEqual([]);
+    for (const doc of [agent, dragger, typist]) expect(textOf(doc, 'p3')).toBe(text);
+  });
+});
