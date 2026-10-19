@@ -207,7 +207,7 @@ describe('the HTML viewer', () => {
     await act(async () => pending.resolve(ok({ versions })));
     await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
     act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
-    await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 1 }]));
+    await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 1, ownFile: true }]));
   });
 
   // whole-branch review: a revision asked for is exported as that version even while it is the latest, so a publish
@@ -217,14 +217,14 @@ describe('the HTML viewer', () => {
     const first = mount('html');
     await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
     act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
-    await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 2 }]));
+    await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 2, ownFile: true }]));
     first.view.unmount();
 
     mount('html');
     await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
     act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
     await waitFor(() => expect(main.callsOf('artifacts.export')).toHaveLength(2));
-    expect(main.callsOf('artifacts.export')[1]).toEqual({ artifactId: ID, format: 'pdf' });
+    expect(main.callsOf('artifacts.export')[1]).toEqual({ artifactId: ID, format: 'pdf', ownFile: true }); // P4 (W1, L302): a file of its own
   });
 
   it('Reload mounts a new frame and reads the versions again', async () => {
@@ -382,7 +382,7 @@ describe('a version asked for from outside', () => {
       await waitFor(() => expect(main.callsOf('artifacts.versions')).toHaveLength(3));
       expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html'));
       act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
-      await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 3 }]));
+      await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 3, ownFile: true }]));
 
       versions = [...versions, version(4, 20)];
       names[20] = 'index.html';
@@ -391,7 +391,7 @@ describe('a version asked for from outside', () => {
       await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
       act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
       await waitFor(() => expect(main.callsOf('artifacts.export')).toHaveLength(2));
-      expect(main.callsOf('artifacts.export')[1]).toEqual({ artifactId: ID, format: 'pdf' });
+      expect(main.callsOf('artifacts.export')[1]).toEqual({ artifactId: ID, format: 'pdf', ownFile: true }); // P4 (W1, L302): a file of its own
     });
   });
 

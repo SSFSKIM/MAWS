@@ -122,17 +122,24 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
         // a File artifact keeps its file's own name; a page is named by its title
         defaultName = artifact.kind === 'file' ? fileNameOf(stored.name) : `${fileNameOf(artifact.title)}${extname(stored.name)}`;
       }
-      const to = await destination(defaultName, sender);
-      if (to === null) return { saved: false };
-      const temp = join(dirname(to), `.${randomUUID()}.tmp`);
+      // P4 (W1, L302): an export of its own file (`exportId`) is this save's alone, and nothing else collects the exports
+      // directory, so it goes once the save is done with it, copied, declined or failed; the cache name's never does
+      const own = 'export' in source && source.export.exportId !== undefined ? from : null;
       try {
-        await copyFile(from, temp);
-        await rename(temp, to);
-      } catch (error) {
-        await rm(temp, { force: true }).catch(() => {});
-        throw error;
+        const to = await destination(defaultName, sender);
+        if (to === null) return { saved: false };
+        const temp = join(dirname(to), `.${randomUUID()}.tmp`);
+        try {
+          await copyFile(from, temp);
+          await rename(temp, to);
+        } catch (error) {
+          await rm(temp, { force: true }).catch(() => {});
+          throw error;
+        }
+        return { saved: true, path: to };
+      } finally {
+        if (own !== null) await rm(own, { force: true }).catch(() => {});
       }
-      return { saved: true, path: to };
     },
   };
 }

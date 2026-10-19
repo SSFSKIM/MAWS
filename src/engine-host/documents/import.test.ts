@@ -180,6 +180,25 @@ describe('ArtifactStore.importArtifact (Decision Log 35f, 37b)', () => {
     expect(text(readFileSync(store.contentRef(ID).path))).toContain('v2');
   });
 
+  // P4 (W1, tracker 2026-10-14 L130): the retry's frame runs between the failed frame and the failed call's catch, which
+  // then finds the retry's rows and leaves the directory; the retry sweeps what no row names before it writes
+  it('keeps only the retry’s files when a retry of the same id overlaps a failed import, with another name and fewer versions', async () => {
+    const broken = htmlRecord({
+      versions: [
+        { at: now - 40 * DAY, actor: first, content: { bytes: page('v1'), name: 'a.html' } },
+        { at: now - 20 * DAY, actor: first, content: { bytes: page('v2'), name: 'a.html' } },
+        { at: now - 10 * DAY, actor: second, content: { bytes: new Uint8Array(ARTIFACT_MAX_BYTES + 1), name: 'a.html' } },
+      ],
+    });
+    const retry = htmlRecord({ versions: [{ at: now - 5 * DAY, actor: first, content: { bytes: page('r1'), name: 'b.html' } }] });
+    const [failed, landed] = await Promise.allSettled([store.importArtifact(broken), store.importArtifact(retry)]);
+    expect(failed).toMatchObject({ status: 'rejected', reason: { code: 'tooLarge' } });
+    expect(landed).toEqual({ status: 'fulfilled', value: { artifactId: ID, imported: true } });
+    const files = readdirSync(join(dir, ID, 'content'), { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
+    expect(files.map((entry) => join(entry.parentPath, entry.name))).toEqual([store.contentRef(ID).path]);
+    expect(text(readFileSync(store.contentRef(ID).path))).toContain('r1');
+  });
+
   it('leaves nothing when the import’s commit fails, rows, files or event, and a retry after it lands whole (M6a fix wave 1)', async () => {
     const changes: ArtifactChanged[] = [];
     store.onChange((change) => changes.push(change));

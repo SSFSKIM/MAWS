@@ -33,11 +33,13 @@ export const GENERATED_PATHS = ['tokens.css', 'office-theme.json'] as const;
 export const isGeneratedPath = (path: string): boolean => (GENERATED_PATHS as readonly string[]).includes(path);
 
 export type OriginRoute = 'default' | 'adopted' | 'derived' | 'imported' | 'blank';
-/** How a system came to exist: `key` names a bundled default, `from` the system it was adopted or imported from. */
+/** How a system came to exist: `key` names a bundled default, `from` the system it was adopted or imported from.
+ * P4 (W1, L277): `copiedFrom`, the title of the system a duplicate was copied from, beside the source's route and key. */
 export interface SystemOrigin {
   route: OriginRoute;
   key?: string;
   from?: string;
+  copiedFrom?: string;
   at: number;
 }
 export interface SystemMeta {
@@ -154,6 +156,13 @@ function metaOf(node: Node, law: string): SystemMeta | null {
 export function readOrigin(doc: Doc): SystemOrigin | null {
   const meta = roots(doc).meta;
   return meta.getAttr('formatVersion') === undefined ? null : ((meta.getAttr('origin') as SystemOrigin | undefined) ?? null);
+}
+
+/** P4 (W1, L277): a duplicate's origin names the system it was copied from, its route and key kept, so a copy of the
+ * house system still resolves by its key (chain.ts) while its readers can tell it from the original. */
+export function markCopied(doc: Doc, sourceTitle: string): void {
+  const origin = readOrigin(doc);
+  if (origin) transact(doc, () => roots(doc).meta.setAttr('origin', plain({ ...origin, copiedFrom: sourceTitle })));
 }
 
 export function readSystem(doc: Doc): SystemState {
@@ -700,6 +709,7 @@ export function createDesignSystemAdapter(options: SystemWriteOptions = {}): Kin
     kind: 'design_system',
     readFiles,
     publish: (live, base, sent, force) => publishSystem(live, base, sent, force, options),
+    copied: (doc, { title }) => markCopied(doc, title), // P4 (W1, L277)
   };
 }
 export const designSystemAdapter: KindAdapter = createDesignSystemAdapter();

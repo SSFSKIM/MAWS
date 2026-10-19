@@ -597,6 +597,19 @@ describe('the export service’s asset listing (Decision Log 45e)', () => {
     expect(await call('artifacts.assets', { artifactId: artifact.id })).toEqual({ assets: [{ ref: 'assets/logo.png', name: 'logo.png', mime: 'image/png', size: 3 }] });
     expect(await refusal('artifacts.assets', { artifactId: '55555555-5555-4555-8555-555555555555' })).toMatchObject({ issues: { reason: 'notFound' } });
   });
+
+  // P4 (W1, tracker 2026-10-18 L245 and 2026-10-14 L160): a version's listing is the assets that version pinned, so a
+  // retained version's export carries none uploaded after it; an unknown version is notFound
+  it('lists only the assets a version pinned when asked for that version', async () => {
+    const { artifact } = await call('artifacts.create', { kind: 'design', title: 'Site' });
+    await call('artifacts.uploadAsset', { artifactId: artifact.id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array([1, 2, 3]) });
+    const { versionId } = await call('artifacts.saveVersion', { artifactId: artifact.id, label: 'v1' });
+    await call('artifacts.uploadAsset', { artifactId: artifact.id, name: 'later.png', mime: 'image/png', bytes: new Uint8Array([4]) });
+    const logo = { ref: 'assets/logo.png', name: 'logo.png', mime: 'image/png', size: 3 };
+    expect(await call('artifacts.assets', { artifactId: artifact.id, versionId })).toEqual({ assets: [logo] });
+    expect(await call('artifacts.assets', { artifactId: artifact.id })).toEqual({ assets: [logo, { ref: 'assets/later.png', name: 'later.png', mime: 'image/png', size: 1 }] });
+    expect(await refusal('artifacts.assets', { artifactId: artifact.id, versionId: versionId + 100 })).toMatchObject({ issues: { reason: 'notFound' } });
+  });
 });
 
 describe('a deleted design system’s files while a version pins it (Decision Log 46)', () => {

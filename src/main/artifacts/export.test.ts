@@ -7,8 +7,22 @@ import type { MawsArtifactExport } from '@shared/ipc/schema/maws';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
+// P4 (W1, tracker 2026-10-14 L131): one step awaited before a `rename` of a given path completes, so a publication
+// issued before the deadline can be made to finish after it
+const slowRename = vi.hoisted(() => ({ path: null as string | null, wait: null as (() => Promise<void>) | null }));
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  const rename = (async (...args: Parameters<typeof actual.rename>) => {
+    await actual.rename(...args);
+    if (slowRename.path === null || String(args[1]) !== slowRename.path) return;
+    const wait = slowRename.wait;
+    slowRename.path = slowRename.wait = null;
+    await wait?.();
+  }) as typeof actual.rename;
+  return { ...actual, default: { ...actual, rename }, rename };
+});
 
-import { EXPORT_BUDGET_MS, EXPORT_QUEUE_MS, ExporterRegistry, printRequestAllowed, runExport, startExportService, type ExportContext, type Exporter, type ExportRequest, type ExportServiceDeps, type ExportSources } from './export';
+import { EXPORT_BUDGET_MS, EXPORT_QUEUE_MS, ExportBudget, ExporterRegistry, printRequestAllowed, runExport, startExportService, type ExportContext, type Exporter, type ExportRequest, type ExportServiceDeps, type ExportSources } from './export';
 
 const ID = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 const DOC = '1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e';
@@ -115,6 +129,18 @@ describe('runExport', () => {
     expect(await readdir(root)).toEqual([]);
   });
 
+  // P4 (W1, L131; A's Decision Log 44's residual): a rename issued before the deadline that completes after it answers the
+  // timeout, as the bridge already gave up on it, never a late success
+  it('answers the timeout when the publication’s rename completes after the deadline', async () => {
+    const registry = new ExporterRegistry();
+    registry.register(writing('html', 'pdf', () => '%PDF-1.7'));
+    const budget = new ExportBudget(500); // real mkdir and writeFile calls meet it under load, so the deadline falls after the publication starts
+    slowRename.path = request().path;
+    slowRename.wait = () => until(() => budget.expired);
+    expect(await runExport(registry, request(), sources(), budget)).toEqual({ ok: false, error: 'the export did not finish within 0.5 s' });
+    expect(slowRename.path).toBeNull(); // the rename ran
+  });
+
   it('puts nothing in place when the exporter fails after a write, and answers the blocked requests its printer counted', async () => {
     const registry = new ExporterRegistry();
     registry.register({ kind: 'document', format: 'pdf', run: async (req, ctx) => {
@@ -166,8 +192,12 @@ function fakeHost() {
         return answer({ bytes: bytes(`version ${(input as { versionId: number }).versionId}`) });
       case 'artifacts.state':
         return answer({ revision: liveRevision, bytes: bytes(`live@${liveRevision}`) });
-      case 'artifacts.assets':
-        return row ? answer({ assets: [{ ref: 'assets/a.png', name: 'a.png', mime: 'image/png', size: 3 }, { ref: 'assets/font.woff2', name: 'font.woff2', mime: 'font/woff2', size: 9 }] }) : { ok: false, error: { code: 'invalid_input', message: 'not found', issues: { reason: 'notFound', data: {} } } } as CommandResult<CommandName>;
+      case 'artifacts.assets': {
+        // P4 (W1, L245): a version's listing is what it pinned (here, the image alone)
+        const all = [{ ref: 'assets/a.png', name: 'a.png', mime: 'image/png', size: 3 }, { ref: 'assets/font.woff2', name: 'font.woff2', mime: 'font/woff2', size: 9 }];
+        const pinned = (input as { versionId?: number }).versionId === undefined ? all : all.slice(0, 1);
+        return row ? answer({ assets: pinned }) : { ok: false, error: { code: 'invalid_input', message: 'not found', issues: { reason: 'notFound', data: {} } } } as CommandResult<CommandName>;
+      }
       case 'artifacts.content': {
         const path = (input as { path?: string }).path;
         if (path === 'assets/a.png') return answer({ revision: 4, kind: row!.kind, name: 'a.png', size: 3, sha256: 'x', path: asset });
@@ -408,6 +438,22 @@ describe('the export’s snapshot and its asset reads (fix wave 1, the review’
       { ref: 'assets/a.png', name: 'a.png', mime: 'image/png', size: 3 },
       { ref: 'assets/font.woff2', name: 'font.woff2', mime: 'font/woff2', size: 9 },
     ]);
+  });
+
+  // P4 (W1, tracker 2026-10-18 L245 and 2026-10-14 L160): a retained version's export lists that version's assets, from
+  // the library and through the bridge alike, never the artifact's current ones
+  it('lists a version’s own assets for an exporter of that version', async () => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    registry.register(writing('document', 'pdf', async (_req, ctx) => JSON.stringify((await ctx.assets.list()).map((asset) => asset.ref))));
+    const service = startExportService(host.deps(registry));
+    const { path } = await service.exportForLibrary({ artifactId: DOC, format: 'pdf', versionId: 3 });
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(['assets/a.png']);
+    const asked = join(root, 'tool', 'notes-v3.pdf'); // where the host names the tool's file
+    host.emit(hostRequest({ artifactId: DOC, kind: 'document', revision: 5, versionId: 3, path: asked }));
+    await until(() => host.answered.length === 1);
+    expect(host.answered[0]!.answer).toMatchObject({ ok: true, path: asked });
+    expect(JSON.parse(await readFile(asked, 'utf8'))).toEqual(['assets/a.png']);
   });
 
   it('answers a missing asset null, and fails the export on any other failure to read one', async () => {

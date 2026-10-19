@@ -209,6 +209,28 @@ describe('the linked-directory mirror (M2)', () => {
     expect(listed()).toEqual([]);
   });
 
+  // P4 (tracker L136): the volume says which names are one entry, not a fold of the mirror's own. On APFS (this Mac's
+  // tmpdir) each pair is one entry that lowercasing after NFC tells apart; on a case-sensitive volume each is two names.
+  it.each([
+    ['Straße', 'STRASSE'],
+    ['οδος', 'οδοσ'], // a final sigma
+    ['ﬁle', 'file'], // a ligature
+  ])('keeps the mirror of an artifact renamed from %s to %s, one name or two on this machine’s filesystem (tracker L136)', async (before, after) => {
+    await startMirror();
+    const space = await linkedSpace();
+    const page = await store().create({ kind: 'html', title: before, spaceId: space.id, content: html('x') }, agent);
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(page)}.html`]);
+
+    await store().update(page.id, { title: after });
+    await mirror!.flush();
+    const renamed = `${mirrorSlug({ id: page.id, title: after })}.html`;
+    expect(listed()).toEqual([MIRROR_MANIFEST, renamed]);
+    expect(read(renamed)).toBe('<p>x</p>');
+    expect(manifest().artifacts[page.id].files).toEqual([renamed]);
+    expect(logs).toEqual([]);
+  });
+
   it('refuses a directory whose manifest path is a link, dangling or not, leaving the link and what it points at alone (fix wave 2)', async () => {
     const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
     try {
@@ -924,6 +946,116 @@ describe('the mirror over a directory that goes away, is relinked or is spelled 
       await mirror!.flush();
       expect(mirrored(b)).toEqual([MIRROR_MANIFEST, renamed].sort()); // a's file under the old name removed, never left unowned
       expect(Object.keys((JSON.parse(readFileSync(join(b, 'artifacts', MIRROR_MANIFEST), 'utf8')) as { artifacts: object }).artifacts)).toEqual([moved.id]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // P4 (tracker L249): a removal refused under a link fails rather than counting as done, so the entry outlives a pass
+  // under an `artifacts` relinked inside it, and once the owner puts the original back its files are the mirror's again
+  it.each([
+    ['keeps its name', 'Doc'],
+    ['is renamed', 'Doc renamed'],
+  ])('keeps owning an artifact’s files through a pass under an `artifacts` relinked during it, when the artifact %s, and writes them once the original is back (tracker L249)', async (_, title) => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
+    try {
+      let relink = false;
+      offs.push(
+        registerMirrorWriter('document', ({ artifact, doc }) => {
+          if (relink) {
+            relink = false;
+            renameSync(out(), join(project, 'artifacts-moved'));
+            symlinkSync(elsewhere, out()); // the owner relinks `artifacts/` while the mirror writes
+          }
+          return { files: { [`${mirrorSlug(artifact)}.md`]: doc!.get('root').toString() } };
+        }),
+      );
+      await startMirror();
+      const space = await linkedSpace();
+      const doc = await store().create({ kind: 'document', title: 'Doc', spaceId: space.id }, human);
+      await store().testWrite(doc.id, 'w1', [{ op: 'insertText', index: 0, text: 'v1' }], human);
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(doc)}.md`]);
+
+      relink = true;
+      if (title !== doc.title) await store().update(doc.id, { title });
+      await store().testWrite(doc.id, 'w2', [{ op: 'insertText', index: 0, text: 'v2 ' }], human);
+      await sleep(CHANGE_COALESCE_MS + 50);
+      await mirror!.flush();
+      expect(relink).toBe(false);
+      expect(readdirSync(elsewhere)).toEqual([]);
+
+      rmSync(out()); // the owner puts the original back in place
+      renameSync(join(project, 'artifacts-moved'), out());
+      await store().testWrite(doc.id, 'w3', [{ op: 'insertText', index: 0, text: 'v3 ' }], human);
+      await sleep(CHANGE_COALESCE_MS + 50);
+      await mirror!.flush();
+      const name = `${mirrorSlug({ id: doc.id, title })}.md`;
+      expect(listed()).toEqual([MIRROR_MANIFEST, name]);
+      expect(read(name)).toBe('v3 v2 v1');
+      expect(manifest().artifacts[doc.id].files).toEqual([name]);
+      expect(logs.filter((line) => line.includes("not the mirror's"))).toEqual([]);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it('writes a mirrored file over a link the owner put in its place at a later step, though the artifact did not change, leaving what the link points at alone (tracker L249)', async () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
+    try {
+      await startMirror();
+      const space = await linkedSpace();
+      const mine = await page('Page', space.id);
+      await mirror!.flush();
+      writeFileSync(join(elsewhere, 'theirs.html'), 'the owner’s file');
+      rmSync(out(file(mine)));
+      symlinkSync(join(elsewhere, 'theirs.html'), out(file(mine)));
+
+      await store().updateSpace(space.id, { name: 'Launch 2' }); // a later step; the artifact's revision has not moved
+      await mirror!.flush();
+      expect(lstatSync(out(file(mine))).isFile()).toBe(true);
+      expect(read(file(mine))).toBe('<p>Page</p>');
+      expect(mode(file(mine))).toBe(0o444);
+      expect(readFileSync(join(elsewhere, 'theirs.html'), 'utf8')).toBe('the owner’s file');
+      expect(logs).toEqual([]);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  // P4 (tracker L254): a Space whose path reaches another directory than at its previous step (its link restored, or
+  // retargeted at a directory that is there) is reconciled at the next step anywhere, not only at one that loads it
+  it.each([
+    ['restored after a step away', true],
+    ['retargeted at another directory', false],
+  ])('mirrors every artifact of a Space whose link reaches a directory again (%s) at the next step of another Space (tracker L254)', async (_, restored) => {
+    const root = mkdtempSync(join(tmpdir(), 'maws-mirror-links-'));
+    try {
+      const [a, c, link] = [join(root, 'a'), join(root, 'c'), join(root, 'link')];
+      mkdirSync(a);
+      mkdirSync(c);
+      symlinkSync(a, link);
+      const mirrored = (dir: string) => (existsSync(join(dir, 'artifacts')) ? readdirSync(join(dir, 'artifacts')).sort() : []);
+      await startMirror();
+      const linked = await linkedSpace('Linked', link);
+      const other = await linkedSpace('Other');
+      const [one, two] = [await page('One', linked.id), await page('Two', linked.id)];
+      const theirs = await page('Theirs', other.id);
+      await mirror!.flush();
+      const all = [MIRROR_MANIFEST, file(one), file(two)].sort();
+      expect(mirrored(a)).toEqual(all);
+
+      rmSync(link);
+      if (restored) {
+        await store().writeContent(theirs.id, html('Theirs 2'), agent); // only the other Space's steps meanwhile
+        await mirror!.flush();
+        expect(mirrored(a)).toEqual([]); // the link no longer reaches it: cleaned as a directory no Space links
+      }
+      symlinkSync(restored ? a : c, link);
+      await store().writeContent(theirs.id, html('Theirs 3'), agent);
+      await mirror!.flush();
+      expect(mirrored(restored ? a : c)).toEqual(all);
+      if (!restored) expect(mirrored(a)).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

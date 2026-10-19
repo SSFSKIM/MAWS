@@ -275,7 +275,9 @@ export class DocumentTabState {
     if (this.current.exporting?.phase === 'running' || shown === 'compare') return; // two versions compared: nothing is exported
     this.set({ exporting: { phase: 'running', format } });
     try {
-      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), pageSize });
+      // P4 (W1, L302): a file of its own, saved by its id, so Letter and A4 or the agent's export of the same revision and
+      // format between the two never swaps the file saved
+      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), pageSize, ownFile: true });
       if (!exported.ok) throw new Error(exported.error.message);
       const { revision, exportId } = exported.value;
       const saved = await this.deps.ipc.invoke('library.saveAs', { artifactId: this.artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) } } });

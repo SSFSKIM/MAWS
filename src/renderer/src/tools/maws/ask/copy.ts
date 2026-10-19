@@ -3,6 +3,20 @@ import type { AskCancelReason } from '@shared/maws/ask';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+// P4 (W1, L277): a system's source as a short phrase. A title is clipped by length alone, at most PHRASE_MAX characters,
+// cut at a word, since a dash or colon in a name ("Acme — Light", "Brand: Marketing") is part of it; the adopt route
+// records the law's sentence whole, so `from` is cut at its first break too (a parenthesis, a colon or semicolon that
+// ends a clause, a dash between words), which read as a cut fragment.
+const PHRASE_MAX = 48;
+const clip = (text: string): string => {
+  const head = text.trim();
+  if (head.length <= PHRASE_MAX) return head;
+  const cut = head.slice(0, PHRASE_MAX + 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > 0 ? cut.slice(0, space) : head.slice(0, PHRASE_MAX)).replace(/[\s.,]+$/, '')}…`;
+};
+const phrase = (text: string): string => clip(text.split(/\s+\(|:(?=\s|$)|;|\s[—–-]\s/)[0]!.trim() || text);
+
 export const SHEET = {
   title: 'Questions',
   rest: 'No open questions',
@@ -60,9 +74,10 @@ export const SHEET = {
   systemsUnread: "Couldn't read your design systems.",
   // F (L176): Submit found a picked system deleted since the pick, and sent nothing
   systemDeleted: (names: readonly string[]) => `${names.join(', ')} ${names.length === 1 ? 'was' : 'were'} deleted. Choose another design system.`,
-  systemOrigin: (origin: { route: string; from?: string } | null | undefined): string | null => {
+  systemOrigin: (origin: { route: string; from?: string; copiedFrom?: string } | null | undefined): string | null => {
     if (!origin) return null;
-    const from = origin.from ? ` from ${origin.from}` : '';
+    if (origin.copiedFrom) return `Copy of ${clip(origin.copiedFrom)}`; // P4 (W1, L277): a duplicate, whatever its source's route
+    const from = origin.from ? ` from ${phrase(origin.from)}` : '';
     switch (origin.route) {
       case 'default':
         return 'Built in';

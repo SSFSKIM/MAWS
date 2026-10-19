@@ -6,11 +6,12 @@
 // directory) gets a copy. Which kinds export to which formats is main's registry's to say (B and C register DOCX and
 // PPTX; M7 serves `html` as PDF and PNG): a pair it lacks answers `exportUnavailable`. Without a bridge (a host with no
 // session wiring, as in some tests) every export answers `exportUnavailable`.
-import { copyFile, mkdir } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { ARTIFACT_REFUSAL_REASONS, artifactExportName, parseToolArguments, TOOL_ERRORS, type ArtifactExportResult, type ArtifactRefusalReason } from '@shared/maws/tools';
-import { actorOf, answering, destinationUnderCwd, lineageOf, messageOf, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
+import { actorOf, answering, destinationUnderCwd, lineageOf, messageOf, openDestinationUnderCwd, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
 import type { HostBridge } from './bridge';
 import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './server';
 
@@ -67,9 +68,13 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
       const exported = answer.path;
       if (to !== null) {
         try {
-          await destinationUnderCwd('artifact_export', ctx.cwd, to); // P3-F: again, the directory may have moved during the export
-          await mkdir(dirname(to), { recursive: true });
-          await copyFile(exported, to);
+          // P3-F: checked again, the directory may have moved during the export; P4: written through no link
+          const copy = await openDestinationUnderCwd('artifact_export', ctx.cwd, to);
+          try {
+            await copy.writeFile(createReadStream(exported));
+          } finally {
+            await copy.close();
+          }
         } catch (error) {
           throw new ToolRefusal(`artifact_export: exported to ${exported}, but the copy to ${to} failed: ${messageOf(error)}`);
         }

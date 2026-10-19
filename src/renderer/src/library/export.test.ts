@@ -9,6 +9,7 @@ import { fail, installFakeMain, ok } from '../test-support/code';
 import { exportArtifact, resetExportFormats, saveArtifactCopy, useExportFormats } from './export';
 
 const A = '00000000-0000-4000-8000-000000000001';
+const E = '00000000-0000-4000-8000-0000000000e1'; // an export's own id, as main mints it
 const toasts = () => useNotices.getState().notices.filter((n) => n.kind === 'toast').map((n) => [n.level, n.text]);
 
 beforeEach(() => {
@@ -42,11 +43,12 @@ describe('the export formats', () => {
 
 describe('exporting', () => {
   it('exports the version asked and saves that export where the owner chooses', async () => {
-    const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: '/store/x/exports/7-pdf.pdf', revision: 7 }) : ok({ saved: true, path: '/Users/me/Downloads/Plan.pdf' })));
+    // P4 (W1, tracker 2026-10-19 L302): the export is a file of its own, which the save names by its id
+    const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: `/store/x/exports/7-pdf-${E}.pdf`, revision: 7, exportId: E }) : ok({ saved: true, path: '/Users/me/Downloads/Plan.pdf' })));
     await act(() => exportArtifact(A, 'pdf', 3));
     expect(main.calls).toEqual([
-      { name: 'artifacts.export', input: { artifactId: A, format: 'pdf', versionId: 3 } },
-      { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 7, format: 'pdf' } } } },
+      { name: 'artifacts.export', input: { artifactId: A, format: 'pdf', versionId: 3, ownFile: true } },
+      { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 7, format: 'pdf', exportId: E } } } },
     ]);
     expect(toasts()).toEqual([['info', 'Saved to /Users/me/Downloads/Plan.pdf']]);
   });
@@ -54,7 +56,7 @@ describe('exporting', () => {
   it('the live revision when no version is named; a refused export is told and nothing is saved; a cancelled save says nothing', async () => {
     const refused = installFakeMain(() => ({ ok: false, error: { code: 'invalid_input', message: 'MAWS cannot export a file artifact as pdf yet', issues: { reason: 'exportUnavailable', data: {} } } }));
     await act(() => exportArtifact(A, 'pdf'));
-    expect(refused.calls).toEqual([{ name: 'artifacts.export', input: { artifactId: A, format: 'pdf' } }]);
+    expect(refused.calls).toEqual([{ name: 'artifacts.export', input: { artifactId: A, format: 'pdf', ownFile: true } }]);
     expect(toasts()).toEqual([['warning', 'Couldn’t export: MAWS cannot export a file artifact as pdf yet']]);
 
     useNotices.setState({ notices: [] });

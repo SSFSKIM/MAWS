@@ -87,7 +87,8 @@ export interface ExportContext {
   // An asset's bytes by its ref (`assets/<name>`); null when the artifact has no such asset (any other failure rejects).
   readAsset(ref: string): Promise<{ bytes: Uint8Array; mime: string } | null>;
   // Every asset of the artifact, by ref, so an exporter can carry those its content does not name (P3-D's request,
-  // Decision Log 45e); empty when the artifact is gone (any other failure rejects).
+  // Decision Log 45e); a version's export, those the version pinned (P4 W1, L245); empty when the artifact is gone (any
+  // other failure rejects).
   assets: { list(): Promise<ExportAsset[]> };
   // A standalone page printed in the capture partition's hidden window, JavaScript off, on its own `@page` size; what it
   // names outside its own page, `maws-artifact:`, `data:`, `blob:` and `about:` is not loaded.
@@ -245,6 +246,10 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
       await rename(temp, path);
       temps.delete(temp);
     }
+    // P4 (W1, L131; Decision Log 44's residual): a rename issued in time can complete after the deadline, when the bridge
+    // has given up on the export: its late success is dropped for the timeout (the file stays where it landed; a retried
+    // export replaces it)
+    if (time.expired) throw new Error(`the export did not finish within ${time.ms / 1000} s`);
     return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }), ...(request.exportId !== undefined && { exportId: request.exportId }) /* P3-E, P3-H */ };
   } catch (error) {
     // P3-E (E1 M5; Decision Log 26): a refusal the exporter named (A's command failure) is kept for the caller
@@ -338,7 +343,8 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
           return { bytes: new Uint8Array(await time.within(readFile(found.value.path))), mime: mimeOf(found.value.name) };
         },
         listAssets: async () => {
-          const found = await time.within(call('artifacts.assets', { artifactId: request.artifactId }));
+          // P4 (W1, L245 and L160): a version's export lists the assets that version pinned
+          const found = await time.within(call('artifacts.assets', { artifactId: request.artifactId, ...(request.versionId !== undefined && { versionId: request.versionId }) }));
           if (!found.ok) {
             if ((found.error.issues as ArtifactRefusal | undefined)?.reason === 'notFound') return [];
             throw new Error(`the assets of ${request.artifactId} could not be listed: ${found.error.message}`);
