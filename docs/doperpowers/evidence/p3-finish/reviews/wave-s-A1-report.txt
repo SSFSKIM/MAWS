@@ -1,0 +1,73 @@
+## A1 report: the document editor's nodes and theme (F8's five parts, c29, F18/c11)
+
+All seven findings are fixed and committed on `worktree-agent-af4cd2993bc56e015`, one commit each, through the lock helper with the Sminos trailer. The unit tests are green. The e2e cases are written but not run.
+
+### Commits, in order
+
+| # | sha | finding | files |
+|---|---|---|---|
+| 1 | `2fb897a82` | c13, list markers | `theme.css`, `theme.dom.test.tsx`, `e2e/document-editor.spec.ts` |
+| 2 | `c27d507bc` | c14, inserted atoms keep the keyboard | `Toolbar.tsx`, `Toolbar.dom.test.tsx` (new), `e2e/document-editor.spec.ts` |
+| 3 | `92a9dcc35` | c20, mermaid palette | `nodes/views.ts`, `nodes/mermaid.ts`, `nodes.dom.test.tsx`, `nodes/mermaid.dom.test.ts` (new), `e2e/document-editor.spec.ts` |
+| 4 | `4407ae2d1` | c29, editors popover | `history/ShowEditors.tsx`, `chrome.css` (the `.doc-editors` block only, as you granted), `history/show-editors.dom.test.tsx` (new), `e2e/document-editor.spec.ts` |
+| 5 | `0fc9a0dc4` | c16, date chip | `nodes/atom.ts`, `nodes.dom.test.tsx`, `e2e/document-editor.spec.ts` |
+| 6 | `ca4f2ccaa` | c53, colour scheme | `theme.css`, `theme.dom.test.tsx`, `e2e/document-editor.spec.ts` |
+| 7 | `b0ec1fb81` | c11 / F18, link colour | see below |
+
+Commit 7 touches `theme.css`, `theme.dom.test.tsx`, `design-system/office.ts` and its test, `export/design-system.ts` and its test, `export/docx.ts` and its test, `export/html.test.ts`, `export/source.test.ts`, `e2e/document-editor.spec.ts`, `e2e/design-systems.spec.ts` and `e2e/support/design-restyle.ts`.
+
+Paths without a directory are under `src/artifacts/document/editor/`. Each commit carries only its own e2e case: I staged the spec file case by case.
+
+### Root causes and fixes that differ from the triage
+
+- **c14:** the cause was Tiptap's `chain().focus()`. When the page did not have the keyboard (the Insert menu used from the keyboard, Block style, another atom's field), it defers the page's focus to the next animation frame. That frame took the keyboard back from the field `editAtom` had just focused, so typing replaced the selected atom. The fix is in `Toolbar.tsx` only: the page is focused synchronously before every insert. The triage's `focusField` transaction meta in `atom.ts` was not needed.
+- **c16:** the line split was c14's cause: the Return went to the page while the chip was selected. The c16 commit makes the date field itself hold the chip:
+  - an empty or incomplete value no longer clears the date;
+  - Enter commits what the field shows;
+  - Escape puts back the chip's last date;
+  - both keys are prevented and stopped at the field, and the caret goes back synchronously right after the chip.
+  - The stop and the synchronous hand-back apply to every atom field, because the handler is shared.
+- **c20:** there were two leak routes.
+  - The drawing was made off the document, or before the page's design-system stylesheet arrived, and was never redrawn. The view now draws only once it is attached to the page, and redraws when the page's colours change. It listens for the same triggers as `page-ground.ts`.
+  - Mermaid is one shared instance that the transcript also configures with the dark app's palette. The page's colours now ride in each diagram's own `%%{init}%%` directive, placed after any front matter. A directive the source writes itself still wins.
+- **F18:**
+  - Links take `color: inherit`, the underline thickens on hover, and `:focus-visible` draws a 2px focus ring.
+  - `hlink` now comes from the text colour in `office.ts` and in the export's local table; a system that declares `hlink` keeps it.
+  - As you asked, Word's Hyperlink style takes the theme part's `hlink` (new helper `themeSlot`), falling back to the text colour. Both cases are pinned in `docx.test.ts`.
+  - PPTX links follow too, since PPTX takes its theme from `office.ts`.
+  - **Judgement call:** the focus ring uses `var(--ds-color-accent, var(--accent))`. A bare app token would break `theme.css`'s token rule and would vanish in the HTML export. Say if you want `currentColor` instead.
+  - **Not pre-approved:** I also edited `html.test.ts` and `source.test.ts`, the HTML export's tests. They proved an override reaches the export by reading the link's accent; they now read it from the highlight band. I counted them as "the tests for these files" because the export inlines `theme.css`.
+  - `e2e:design-systems` now reads the accent from the highlight band through `accentBand`/`markedBand`. `accentBand` throws when the box-shadow names no colour.
+
+### RED and GREEN logs (`/tmp/maws-review/`)
+
+| log | result |
+|---|---|
+| `p3f-document-a1-roundA-red.log` (c13, c20, c29) | 12 failed, 25 passed |
+| `p3f-document-a1-c14-red.log` (c14, against HEAD's `Toolbar.tsx`) | 7 failed of 7 |
+| `p3f-document-a1-roundA-green.log` | 69 of 69 in 6 files |
+| `p3f-document-a1-roundB-red.log` (c16, c53) | 3 failed, 27 passed |
+| `p3f-document-a1-roundB-green.log` | 69 of 69 in 4 files |
+| `p3f-document-a1-f18-red.log` | 9 failed, 47 passed |
+| `p3f-document-a1-f18-green.log` | 68 of 68 in 6 files |
+| `p3f-document-a1-green.log` (final batch: every editor and dashboard-editor DOM suite plus the export and office suites) | 362 of 362 in 36 files |
+
+The 7 Toolbar failures in the round A RED were a test-setup error. The test was rewritten afterwards, and `p3f-document-a1-c14-red.log` is c14's real RED.
+
+eslint is clean on every touched file. Narrow `tsc` runs over the web, node and e2e files show no errors in touched files. The few errors they report are in untouched files and come from declarations outside the narrow includes.
+
+### e2e group for each change (written, not run)
+
+- **`e2e:document`** (`e2e/document-editor.spec.ts`), one case each for c13, c14, c16, c20, c29, c53 and F18.
+- **`e2e:design-systems`**: the F18 probe change.
+
+### Findings not fixed
+
+None.
+
+### Tracker material
+
+- **Minor:** a document diagram's font is not carried in the directive, because mermaid's directive check blanks a value containing `-` (as in `-apple-system`). A render queued behind a transcript diagram can therefore take the app's UI font. With the MAWS tokens the UI and prose fonts are identical, so only a system with its own body font is affected.
+  - Closing condition: the font rides per render, and a test shows it survives a transcript reconfiguration.
+- **Minor, older than this wave:** the HTML export sets no `data-ground`, so a dark system's exported checklist boxes draw light (`html-render.ts:192` writes native checkboxes).
+  - Closing condition: the export writes the page's ground from the resolved `--ds-color-bg` (`isDarkGround`), with an `html.test.ts` case.

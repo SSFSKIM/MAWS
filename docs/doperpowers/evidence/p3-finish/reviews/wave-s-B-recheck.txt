@@ -1,0 +1,39 @@
+## Recheck of batch B fixes (949d4c435, d399c9e2a, 37c31c732)
+
+**Verdict: all three findings are closed. Nothing blocking or should-fix. One minor race, which is fine to log as debt.**
+
+### 949d4c435, trust notice detail (was should-fix): closed
+- [TrustCard.tsx](/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/renderer/src/sessions/TrustCard.tsx#L49) now has an exported `TrustDetails`. It is the card's old informational block moved verbatim into a fragment.
+- `TrustCard` puts it back inside the same `flex flex-col gap-2.5` wrapper, above the same three buttons. The composer card's DOM is therefore unchanged.
+- The notice ([comment-session.tsx](/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/renderer/src/tools/document/comment-session.tsx#L266)) renders the same component from the same `TrustState`. The two surfaces cannot disagree about what a click trusts. The notice shows: the folder, the home copy or the "Recorded in <configPath>" line, the repository line when `trustKey !== directory`, and the `found` list or `TRUST_GATES`.
+- Nothing the card showed before is missing from the notice, apart from the card's title and its Cancel button (the notice has Close instead).
+- The old one-line `TRUST_LOADS` is gone, with no remaining references.
+- The new unit test checks the repository line, the config path and the found entries.
+- The e2e case in `e2e/document-standalone.spec.ts:220` asserts `toContainText(s.repo)` on the notice, which still holds.
+
+### d399c9e2a, record vs intent (minor): closed
+- The comment in [session-context.ts](/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/renderer/src/artifacts/session-context.ts#L88) is now accurate for both cases.
+- The undock only happens in `resume`, which runs only for records: `context.kind === 'session'` requires a record, and a `previous` that is in `records`.
+- It needs `trust !== undefined`, a ready outcome and `kind === 'trust'`, so relay cards are untouched. A session holds one card, so a trust card there always asks this session's folder question.
+- The intent path (`start`) is unchanged, and the intent's card holding a pending message stays. The test checks this with a refusal of busy.
+- `undock` matches what `continueRecord` does on success. A record's message lives only in the composer draft (`releaseMessage` uses the record branch, and `acquire.ts:26` strips `dockMessage`), so nothing is lost.
+
+**[minor] Undock can cut off a composer-card continuation already in flight** ([session-context.ts:109](/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/renderer/src/artifacts/session-context.ts#L109))
+- The trigger: the owner presses "Trust and start" on the record's composer card, `continueRecord` is running, and the comment's resume reaches ready first and undocks the card.
+- Then `continueRecord`'s `current()` turns false (setup-actions.ts:150-161). Depending on timing, one of two things happens:
+  - the message is silently not sent; or
+  - it is sent but the composer is not cleared, which invites a duplicate send.
+- This needs presses on both surfaces at nearly the same time, so it is unlikely.
+- Fix: skip the undock while `useSetup.getState().continuing.has(appSessionId)`. Logging it in the tracker is reasonable.
+
+### 37c31c732, stale-answer test (minor, test only): closed
+- The test now captures the notice's `decide` through `usePendingComment`, replaces the notice with a later `startCommentSession`, then calls the stored `decide('accepted')`.
+- Without `if (!mine()) return;` in `decide` (comment-session.tsx:184), `run('accepted')` would send a second `session.start` for the existing session, and the `toHaveLength(1)` assertion would fail. The worker's RED log `/tmp/maws-review/p3f-b-fix3-red.log` shows exactly that failure (1 failed of 31, on this case).
+
+### What I ran and what I did not verify
+- **Ran:** `vitest run` on `comment-session.test.tsx`, `session-context.test.ts` and `src/renderer/src/sessions/`. All projects (renderer, renderer-compiled and the timing variants) passed: 27 files, 440 tests. This run did not change any tracked files; the untracked evidence `.txt` files already in the tree are not mine.
+- **Not verified:**
+  - I did not repeat the guard-removal RED run myself, since that would modify the tree. That conclusion rests on reading the code plus the worker's log.
+  - No e2e (`e2e:document-app`).
+  - No tsc or eslint.
+  - No visual check of the longer notice. The notice is `overflow-y-auto`, so a long found list scrolls.

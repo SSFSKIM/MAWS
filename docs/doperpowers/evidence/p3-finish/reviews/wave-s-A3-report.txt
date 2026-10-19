@@ -1,0 +1,35 @@
+A3 (F19, candidate 21): three commits are in, and the outline now holds 4 s after the agent's last batch commits (it was 1.5 s). Whether the outline draws end to end is not verified yet. The e2e that answers it is running on the Linux lane at ddc11b4f4 (e2e:document-app), and I'm handing back before its result as you asked.
+
+**Commits, in order**
+1. **ddc11b4f4, F19 step 1 (the reproduce).** Files: `e2e/document-presence.spec.ts` (new) and the `e2e:document-app` script line in `package.json`, the only line edited.
+   - **Build:** the harness build cannot script an agent write. Its #document page runs two editors over an in-memory host in the renderer, with no tool server and no host relay. So the case runs in the product build, through the host seam (`MAWS_DOCUMENT_PERF=1`, `document-perf.ts`), which calls the real `artifact_read` and `artifact_edit` as a session. No engine and no paid model.
+   - **Scene:** the document is open in an artifact main tab and in the pinned panel. One agent batch rewrites a sentence and inserts a block while the owner types in another paragraph.
+   - **Asserts:** a page-side MutationObserver records what each editor draws. In each editor the agent's `[data-agent-editing]` outline must appear on both blocks, with a solid computed outline and a label. The agent's caret bar must sit inside the outline. Both must go within 20 s.
+   - **Output:** it annotates the timeline (drawn, gone and up, in ms after the batch answered) and logs a `[document-presence]` line. On failure it dumps everything the editors drew.
+   - **Checks:** not run locally. A scoped tsc and eslint on the file are clean.
+2. **8c9d7e2ab, F19 step 2.** Files: `src/engine-host/tool-server/documents.ts`, `src/engine-host/tool-server/documents.test.ts`, `src/engine-host/documents/service.ts` (your extension of the claim; `store.ts` is untouched).
+   - `PRESENCE_EDITING_MS` goes from 1_500 to 4_000. The per-write re-arm is unchanged.
+   - **Turn-end cut:** this is the part you ruled into the step. Until now a turn end nulled every replica of the session at once, which cut a hold short. The expiring timer then set a stale name-only state back.
+   - **Hold:** a batch's publish, still in its commit frame, now marks the replica held (`holdPresence`). A turn end leaves a held replica to its hold and clears every other replica at once, as before. At expiry, `releasePresence` shows the agent's name with no outline during the turn, or nothing once the turn has ended.
+   - **Failure and refusal:** a write that fails after its frame published releases at once. A refused batch still reveals nothing, and the publish was not moved to the tool call's entry.
+3. **326d482df, comment only.** File: `e2e/document-live.spec.ts`. The comment at line 573 now names the 4 s hold and says why the 2 s window after the answer still catches every appearance. No code change.
+
+**RED and GREEN logs**
+- **RED:** `/tmp/maws-review/p3f-a3-red.log`, 2 failed and 54 skipped at HEAD.
+  - The hold: "still outlined 3 s after the batch: expected undefined to deeply equal [ 'p2' ]".
+  - The turn end: "the turn ended 1 s after the batch: the outline keeps the rest of its hold: expected undefined to deeply equal [ 'p2' ]".
+- **GREEN:** `/tmp/maws-review/p3f-a3-green.log`, 192 of 192 in 4 files: documents, service, store and artifact-publish.
+- **Neighbouring suites:** `/tmp/maws-review/p3f-a3-green-wide.log`, 39 of 39 in 7 suites that drive `artifact_edit`.
+- A narrow tsc and eslint on the touched files are clean.
+
+**D11 figures for the architect (P3 Decision Log 111)**
+- The hold after the last commit goes from 1.5 s to 4 s.
+- A turn that ends inside the hold used to clear the outline at once and set a name-only state back at 1.5 s. Now the outline stays to 4 s after the commit, then clears to nothing.
+- The up-time observed on the real path will be in the e2e's annotation.
+
+**Not settled inside the claim**
+- **The draw itself:** reading the code, I found no break anywhere from the tool to the renderer. If the run fails, resume me with the dump.
+- **Files a draw defect would touch:** `src/artifacts/document/editor/awareness.ts` (the Presence plugin and the cursor builder), the host relay in `src/engine-host/documents/service.ts`, and possibly `src/artifacts/provider/port.ts` (the renderer's awareness) or `src/artifacts/document/editor/chrome.css` (the outline and cursor CSS).
+
+**Tracker material**
+- **Low.** Say turn 1 ends with an outline still in its hold and turn 2 starts at once. If turn 2's `artifact_publish` sets a name-only presence on the same replica before that hold expires, the expiry erases it. A name-only state draws nothing in documents. Closing condition: `releasePresence` spares a presence set after the hold began.

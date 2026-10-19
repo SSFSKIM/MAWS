@@ -1,0 +1,35 @@
+Batch B (wave S) is done: F4 and F7 are committed on worktree-agent-af4cd2993bc56e015. Unit RED was taken first and GREEN is complete for both. The e2e cases are written but not run, as the rules require.
+
+**Commits, in order**
+1. `2466b4980`, c26 (F4, the owner's E1 mark). When a comment's session start in an untrusted Space folder meets the trust card, the notice now asks in the card's place: it names the folder, says what trust loads (HOME_TRUST_COPY for the home folder) and offers **Trust and start** and **Start without trusting**. The draft and the passage's mark stay. The click starts the same session again with the owner's answer, passed through the existing `StartOptions.trust`: `session.start` for an intent, `session.acquire` for a record. On ready the card opens on the same passage with Send to main chosen. Open session stays for the relay's card and for every refusal. Nothing is decided without the click.
+   - The trust card this window docked for that session (message null) is undocked when the owner answers. A card the composer docked with its own message is left alone, because main refuses the no-turn start while that prompt waits.
+   - Files: src/renderer/src/artifacts/session-context.ts, src/renderer/src/artifacts/session-context.test.ts, src/renderer/src/tools/document/comment-session.tsx, src/renderer/src/tools/document/comment-session.test.tsx, e2e/document-standalone.spec.ts.
+2. `9d65b2de2`, 8.2 with c65 and c66 (F7; closes S-DOC-EXPORT-PREVIEW). The document's and the dashboard's header Export now exports what is shown:
+   - During a version preview it exports that version (`versionId`).
+   - While two versions are compared it exports nothing, and the six entries are disabled.
+   - Otherwise it exports the live document.
+   - The flow follows the deck's exportDeck: `artifacts.export`, then `library.saveAs` (save panel at Downloads), then a "Saved to <path>" toast. A cancelled dialog says nothing. The dead "Exported <file>" item is gone (the 'done' phase is removed).
+   - Files: src/artifacts/document/editor/DocumentEditor.tsx, src/artifacts/document/editor/history/rail.dom.test.tsx, src/renderer/src/tools/document/DocumentPanel.tsx, header.ts, header.test.ts, tab-state.ts, tab-state.test.ts, e2e/document.spec.ts, e2e/dashboard-export.spec.ts.
+   - The dashboard needed no edit (its tab-state delegates to DocumentTabState), so dashboard/tab-state.ts is unchanged.
+   - The three files you approved got exactly the described edits. The only extra is that DocumentPanel.tsx's import line (line 8) also gains `type DocumentShown`, which the typed callback on line 94 needs.
+
+**RED and GREEN logs**
+- F4: RED /tmp/maws-review/p3f-comment-session-red.log (6 failed, 35 passed of 41). GREEN /tmp/maws-review/p3f-comment-session-green.log (71 of 71: comment-session under renderer and renderer-compiled, plus session-context).
+- F7: RED /tmp/maws-review/p3f-document-export-red.log (5 failed, 44 passed of 49). GREEN /tmp/maws-review/p3f-document-export-green.log (107 of 107 in 10 files: tab-state, header, rail, DocumentPanel, DashboardPanel, the dashboard's tab-preview-hold and tab-recapture, suggestions.dom).
+- eslint on the touched files is clean. A narrow tsc over them is clean. Its only errors are in threads.ts and collab.ts, files I did not touch, and they come from the narrow config.
+
+**Which e2e group proves each change**
+- F4: e2e:document-app, e2e/document-standalone.spec.ts. Two new cases, one per answer, each checking the notice, the kept mark, the card on the passage and the session's initialize `workspaceTrust`: `{accepted: true, directory}` after Trust and start, absent after Start without trusting.
+  - This is the riskiest case: no existing e2e replays a no-message start from a renderer surface. It uses the trust-bootstrap fixture, then a SideJournal holding only the handshake, on the direct route. If it fails at the gate, look first for a replay mismatch on that launch.
+- F7, document: e2e:document-app, the Export case in e2e/document.spec.ts. It runs with MAWS_E2E_SAVE_PATH and checks the saved PDF and its toast, the version's Markdown during its preview, the six entries disabled while comparing, and the live Markdown once history is left. Batch A2's link case is untouched.
+- F7, dashboard: e2e:dashboard, the first case of e2e/dashboard-export.spec.ts. Same checks, with the old snapshot (서울 120) during the preview. I added steps, not a test, so it still has the 4 tests that dashboard-acceptance.ts declares.
+
+**What I found, and what I could not do as asked**
+- c65's chip markup and trailing `&#160;` in the Markdown: the triage row rules them the dialect by design (spec §4.4; markdown.ts:105), so they are not routed to me and I did not touch them.
+- "With the draft text" in F4: the comment field never appeared, so the owner has typed nothing. What is kept is the comment's draft thread and its mark on the passage, and the card opens empty on it.
+- Export failures stay in the document header ("PDF export failed: …", dismissable), not in the deck's warning toast. The header's "Exporting …" word also stays, holding the menu, through the save dialog.
+
+**Tracker material**
+- **S-DOC-EXPORT-PREVIEW closure:** closed by `9d65b2de2` (F7). `DocumentTabState.export` passes the previewed version's id (DocumentEditor reports `shown`: {versionId}, 'compare' or null) and exports nothing while two versions are compared, with the header's six entries disabled, as the deck's (L233) and the design's (Decision Log 31) do. Regressions: tab-state.test.ts, header.test.ts, rail.dom.test.tsx. e2e: the Export case of e2e/document.spec.ts (e2e:document-app) and the first case of e2e/dashboard-export.spec.ts (e2e:dashboard).
+- **New residual, low, also true of the deck today:** `library.saveAs` finds the export by its cache name `<revision>-<format>.<ext>`. That name is shared by Letter and A4 and by the agent's `artifact_export` of the same revision and format, so a concurrent export between the export and the save could swap the file that gets saved.
+  - Closing condition: the owner's header exports, the deck's and the document's, take a file of their own (`ownFile: true` and its `exportId`) or an equivalent per-request name, with a regression where an interleaved export of the same revision and format leaves the saved file unchanged.

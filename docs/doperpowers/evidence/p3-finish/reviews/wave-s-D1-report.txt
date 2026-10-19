@@ -1,0 +1,76 @@
+All four D1 findings are fixed. There is one commit per finding on worktree-agent-af4cd2993bc56e015, each with the Sminos-Session trailer and nothing else. Every file I touched is committed. The remaining working-tree edits belong to other workers.
+
+**Commits, in order**
+
+1. `30fc75111` (F6: c58 and obs4). A float with no session in front no longer blanks the main area.
+   - Files:
+     - src/renderer/src/shell/floating.ts
+     - src/renderer/src/panel/PanelHeader.tsx
+     - src/renderer/src/shell/floating.test.ts
+     - src/renderer/src/shell/FloatingCard.test.tsx
+     - src/renderer/src/app/regions.test.ts
+     - src/renderer/src/panel/PanelHeader.test.tsx
+     - src/renderer/src/tools/browser/covering.test.ts (with your approval)
+     - src/renderer/src/tools/browser/chrome/chrome.test.tsx (with your approval)
+     - e2e/shell.spec.ts
+   - **Choice: refuse the float.** Keeping the panel docked while `floating` stays stored was rejected for two reasons:
+     - Every reader of the panel's place reads `regions` alone, through `panelInMain`: Shell, ArtifactTab's on-screen rule, session visibility, the browser cover, navigation, shell-actions and the harness. A derived dock would mean changing all of them to read `main` too.
+     - A stored float would come back unasked the next time a session's tab came to the front.
+   - **What happens now:**
+     - `floatPanel` refuses when there is no session and posts a toast, so ⌥⌘B and the divider say why.
+     - The header's Float button is disabled, and its label becomes the reason: "Select a session's tab to float it".
+     - A layout subscription docks any float that meets no shown session. That covers a float restored over an artifact tab, and Settings opened by ⌘, over the card.
+     - The dock runs in a microtask, before any paint. Written inside the listener, persistence would take a restored float's dock as the hydrated baseline and never write it.
+     - Nothing docks before hydration. No schema change and no settings version.
+   - Floating from a session tab is unchanged.
+
+2. `37fe3d6f2` (F16: obs7a). An artifact is now in one place as it moves.
+   - Files:
+     - src/renderer/src/tools/artifacts/RecordView.tsx
+     - src/renderer/src/tools/artifacts/ArtifactsTool.tsx
+     - src/renderer/src/main/Tab.tsx
+     - src/renderer/src/tools/artifacts/artifacts.test.tsx
+     - src/renderer/src/main/Tab.test.tsx (new)
+   - **Open in tab** calls `openArtifactTab`, then the record's Back, which goes through `askEditorHostClose`. If the guard refuses, the record stays and the main tab is open.
+   - **Show in panel** on an artifact main tab's context menu works like this:
+     - It targets the panel shown once the tab is gone: the session of the focused pane's next tab, computed with the close's own rule (`closeTab` in the layout model).
+     - With no session there, it falls back to the pinned Artifacts tab, which the no-session panel lists.
+     - With neither, the item is disabled with the reason "No session's panel to show it in". The reason is a hover title, as the sidebar menus do it.
+   - Two departures from the triage, and why:
+     - **The pinned-tab fallback widens "the focused pane's session".** With the artifact tab in front, that session is null. Without the fallback, the owner's own obs-7 setup (one artifact tab, Artifacts pinned) would get a disabled item. `openArtifactInPanel` now takes null for the pinned tab and never creates a pin.
+     - **The tab closes first, through its guards, and the panel opens only after.** If the panel opened first, `addTool` would switch main to that session while the tab was still in front (host.ts:333), and a refusing guard would leave the artifact in both places.
+   - The menu test is a new Tab.test.tsx rather than Shell.test.tsx. No existing test covered the tab menu, and Shell.test.tsx is outside my claim.
+
+3. `7973106da` (c2, the shell part of F3).
+   - Files: src/renderer/src/panel/summary/Summary.tsx and Summary.test.tsx.
+   - The "Session overview" label is now its own `shrink-0 whitespace-nowrap` span, so it no longer wraps. The title keeps `min-w-0 truncate`.
+
+4. `4fb71a1c6` (F12: X-1). Comment only.
+   - File: src/main/window-show.ts.
+   - Checked against the sources first:
+     - gate.yml sets MAWS_E2E_QUIET=1 on the packaged and e2e jobs and sets FOREGROUND on none.
+     - ci-gate.sh names neither.
+     - package.json opts in four scripts: the bare `e2e` (:21, which e2e:default runs), e2e:widgets (:39), e2e:to-human (:66) and e2e:document-app (:76).
+   - The comment now says so and cites Decision Log 76.
+
+**Logs**
+- RED: /tmp/maws-review/p3f-shell-d1-red.log. 16 of 136 failed, all for the expected reasons: F6 8, F16 7, c2 1.
+- GREEN: /tmp/maws-review/p3f-shell-d1-green.log, 136 of 136.
+- Browser GREEN: /tmp/maws-review/p3f-shell-d1-browser-green.log. covering and chrome, 43 of 43.
+- Neighbours: /tmp/maws-review/p3f-shell-d1-neighbours.log, 312 of 313. The one failure was covering.test.ts:46, which floated with no session; it is fixed in the F6 commit.
+- Final GREEN on the committed state: /tmp/maws-review/p3f-shell-d1-final-green.log, 268 of 268 across 11 files (the seven D1 files plus covering, chrome, MainArea and Shell).
+- eslint on the changed files is clean. The typecheck was not run locally; the pool gate supplies it.
+
+**E2e groups that prove each change** (none run here)
+- F6: e2e:default, which runs shell.spec.ts's new case "Float with no session in front: disabled with its reason, the action floats nothing, and Settings over the card docks it". Floating from a session should also be re-proved by e2e:panel, e2e:browser (acceptance 6) and e2e:deliverables (Mark up under the card). Their specs are unchanged, but they press Float with a session in front.
+- F16: no e2e group. The proof is the unit suite: MainArea with the real panel host and Artifacts tool.
+- c2 and F12: none.
+
+**For you (docs are yours)**
+- P3-G §D1.4's no-session row ("no card and no pill; the panel stays full-width; ⌥⌘B docks") no longer holds. Float is now refused with no shown session, and a float that meets none docks. This wants a dated Decision Log line.
+- The ballot caption (sitting-visual/ballot/index.html:284) is still to be corrected.
+
+**Tracker material**
+- Low: Show in panel has no e2e proof. It closes when an e2e case in a group that seeds artifacts (e2e:library or e2e:document-app) right-clicks an artifact main tab, chooses Show in panel, and sees the record in the panel with the tab gone.
+
+No finding was left unsound or unfixed inside the claim.

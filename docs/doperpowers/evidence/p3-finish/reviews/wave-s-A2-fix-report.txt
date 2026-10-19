@@ -1,0 +1,29 @@
+All three review minors are fixed, one commit each, each red before its fix and green after. I touched only link-click.ts, schema.ts and DocumentEditor.dom.test.tsx; the other modified files in the tree are A1's, and I left them alone.
+
+**Commits, in order**
+1. `8aced9a8a` — review minor 3, test hygiene. File: `src/artifacts/document/editor/DocumentEditor.dom.test.tsx`.
+   - The link cases' clicks are now read by a bubbling listener on `document`, which records `defaultPrevented` and then calls `preventDefault()`.
+   - The plain-click case no longer navigates happy-dom to example.com, so the suite makes no live request. The assertions are unchanged.
+   - RED: `/tmp/maws-review/p3f-a2-fix3-red.log`. With `-t "leaves a plain click|tabs"`, 8 tests passed but the log shows `GET https://example.com/brief 404 (Not Found)` twice and happy-dom's script-load error.
+   - GREEN: `/tmp/maws-review/p3f-a2-fix3-green.log`. With `-t "a link|tabs"`, 11 passed and no request is logged.
+2. `2a52dc61e` — review minor 1. Files: `editor/link-click.ts`, `DocumentEditor.dom.test.tsx`.
+   - The modifier is now ⌘ on a Mac and Ctrl elsewhere, read from `navigator.platform` on each press. That is the same convention as prosemirror-view's `selectNodeModifier`.
+   - A Mac's Ctrl-click is left to the context menu.
+   - The test stubs the platform: ⌘ on MacIntel and Ctrl on Win32 each open once and keep the selection. The new case shows Ctrl on MacIntel and ⌘ on Win32 are not consumed and open nothing. The read-only case runs as MacIntel.
+   - The e2e's `ControlOrMeta` click already uses the right modifier on each platform, so it is unchanged.
+   - RED: `/tmp/maws-review/p3f-a2-fix1-red.log` (1 failed, 4 passed): `MacIntel: expected { press: true, click: true } to deeply equal { press: false, click: false }`.
+   - GREEN: `/tmp/maws-review/p3f-a2-fix1-green.log` (the whole suite, 31 of 31).
+3. `4131e6c9a` — review minor 2. Files: `src/artifacts/document/schema.ts`, `DocumentEditor.dom.test.tsx`.
+   - `adjacentCell` now walks sibling cells and then rows, the way prosemirror-tables' `findNextCell` does, and no longer reads `TableMap`.
+   - Neither failure mode can happen now: an empty slot read as 0, or a cell missing from the map giving -1.
+   - Regression: a ragged table with rows [A1, B1] and [A2]. Shift-Tab from A1 leaves the selection where it was, and typing lands in A1 (first row `['A1x', 'B1']`).
+   - I did not write a separate test for the span-collision case (-1). The structural walk never reads the map, so it cannot reach that case.
+   - RED: `/tmp/maws-review/p3f-a2-fix2-red.log` (1 failed): `expected { type: 'text', anchor: 12, head: 20 } to deeply equal { type: 'text', anchor: 14, head: 14 }`, the selection spanning the whole first row.
+   - GREEN: `/tmp/maws-review/p3f-a2-fix2-green.log` (DocumentEditor, schema and fingerprint suites, 46 of 46).
+
+**Checks**
+- eslint on the three files is clean.
+- My narrow tsc over the touched files shows only the same two errors as before, in `collab.ts` and `threads.ts`. I didn't touch those files, and the errors look like a side effect of the narrow config.
+- No e2e change was needed. The e2e:document-app link case and the e2e:document table case stand as written.
+
+Nothing was left unfixed, and there is no new tracker material.

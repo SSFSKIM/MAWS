@@ -1,0 +1,33 @@
+All three review findings on batch E are fixed, one commit each, on worktree-agent-af4cd2993bc56e015. The unit suites are green; the two e2e changes are written but not run, as the rules require.
+
+## Commits, in order
+1. **a0c2d7a0a, review 1 (F17, blocking).** File: e2e/shell.spec.ts.
+   - The main shell case's Item 6 now asserts the title bar's chip, `page.getByRole('banner').locator('[data-toolbar-project]')`: first `toHaveText(USAGE_PROJECT)`, then `toHaveText('MAWS')` after the palette opens Charter + research.
+   - A grep of e2e/, test/ and src/ finds no other "Tabs of" or strip-label assertion. The only `[data-strip-project]` left is the tab-sets case's own check that the strip has none.
+   - There is no runnable RED: the red rests on reading, because the asserted buttons were deleted in d41994576 and no element carries that name now.
+   - The narrow e2e tsc is clean (/tmp/maws-review/p3f-batchE-fix1-tsc-e2e.log), and so is eslint on the spec.
+2. **61e256306, review 2 (F14, should-fix).** Files: transcript/view/markdown/Link.tsx, transcript/view/context.tsx (the action's comment only), App.tsx, links.test.tsx, sanitize.test.tsx, engine-surface/SurfaceTree.test.tsx.
+   - **Gate:** Link.tsx draws the chip only when `actions.openArtifactTab` is defined; otherwise it renders `<span>{children}</span>`. The desk supplies no such action, so it shows the link's text again.
+   - **Install:** App.tsx calls `setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab })` at module load, beside its other module-load provisions, so the host actions are in place before any surface renders. This is one import line plus the call. MAWS's standalone Markdown surfaces (BtwView, the ask sheet's previews, the Code tool's preview) and SurfaceTree now get a working chip that opens the main tab.
+   - `setHostActions` is imported from transcript/view/context.tsx, because transcript/index.ts is the frozen public surface. AskSheetTool and MarkdownView already import from that module.
+   - Regressions: with no openArtifactTab the link is its text, with no button and no open. Outside any Transcript, the host actions' openArtifactTab opens the main tab. The sanitize and SurfaceTree artifact cases now install the host actions as App.tsx does.
+3. **48f8c49de, review 3 (F17, minor).** Files: app/Toolbar.tsx, app/Toolbar.test.tsx.
+   - Shift+F10 on the focused chip prevents the key's default and sends a contextmenu event at the chip's bottom-left, which Radix opens as a right-click, as library/Rows.tsx:119 handles the key.
+   - Opened from the keyboard, Radix puts focus on the first item, so Enter reveals the project, or restores it first if it is hidden.
+   - Regression: Shift+F10 opens the menu with Reveal in sidebar focused, and Enter shows the sidebar and expands the row without opening a tab.
+
+## Logs and counts
+- RED: /tmp/maws-review/p3f-batchE-review-red.log, 6 failed, 454 passed of 460 in 16 files (renderer and renderer-compiled). Review 2's no-action case failed 4 times (two live modes in each of the two projects) with "expected <button …> to be null". Review 3's case failed twice with "Unable to find role=menuitem … Reveal in sidebar".
+- GREEN: /tmp/maws-review/p3f-batchE-review-green.log, 460 of 460: links, sanitize, SurfaceTree, Toolbar, Sidebar, MainArea, Shell and TranscriptSlot.
+- eslint on the touched files is clean. The narrow web, node and e2e tsc runs are clean (/tmp/maws-review/p3f-batchE-review-tsc-web.log).
+
+## Which e2e group proves each change (written, not run)
+- **Review 1: the default group**, e2e/shell.spec.ts, the main shell case's Item 6.
+- **Review 2:** the e2e:tools case from e69227c34 (e2e/maws-tools.spec.ts) still covers the transcript chip, which reads the registered actions. No e2e covers a standalone surface's chip.
+
+## Residuals (tracker material)
+- **S-HOST-ACTIONS-APP-WIRING (low).** App.tsx's module-load `setHostActions` line has no unit case of its own: App.test.tsx is a whole-app suite in the timing project and outside the claim. Its mechanism is covered by links.test.tsx's host-actions case. Closing condition: an App-level or e2e case where a Markdown surface outside a Transcript (the ask sheet's preview, or BtwView) shows a working artifact chip.
+- **The batch's earlier residuals stand, minus one.** S-DESK-ARTIFACT-CHIP is closed by review 2: the desk shows text again. Still open:
+  - S-ARTIFACT-LINK-PROMPT (medium-low): the always-on paragraph telling the agent to link artifacts, through launch-mapping or the maws server's MCP `instructions`, with a wire check.
+  - S-ARTIFACT-LINK-FRAGMENT (low): `#v<version>` and tab or block fragments are ignored, so a link opens the latest version.
+  - The architect's charter :183 amendment for F17.

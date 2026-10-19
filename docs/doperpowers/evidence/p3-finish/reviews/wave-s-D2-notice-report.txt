@@ -1,0 +1,22 @@
+The recheck's notice finding on 3b5ecadfb is fixed in one commit, test-first, which closes D2. Nothing in my claim is left uncommitted. The e2e assertion is written but not run; e2e:presentations proves it at the Mac gate.
+
+**Commit**
+- `60d91907c`, review 4 (F3, should-fix). Files: src/artifacts/slides/editor/chrome.css, src/artifacts/slides/editor/toolbar.dom.test.tsx, e2e/presentations.spec.ts.
+- `.deck-notice` is now `flex: 1000 1 0`. Beside the spacer's grow of 1 it takes 1000/1001 of the row's free space, so a notice that fits shows whole and the zoom controls stay at the row's end.
+- The floor is `.deck-notice:not(:empty) { min-width: min(12rem, 100%) }`, so it applies only while a notice shows. A shown notice with less room than that on its row moves to the next row whole. An empty notice keeps min-width 0, so it never forces a wrap. Without that scoping, an empty floored notice would have wrapped every toolbar that only just fits on one row.
+
+**Regression**
+- Unit, in toolbar.dom.test.tsx: for the deck's and the design workbench's toolbars, in both sheet orders:
+  - the spacer sits beside the notice;
+  - the notice's basis is zero and its grow is at least 100× the spacer's;
+  - an empty notice has min-width 0;
+  - the sheet holds the `.deck-notice:not(:empty)` floor of min(12rem, 100%).
+- The floor is read from the CSSOM rather than the computed cascade. happy-dom 20's `:empty` also matches an element that holds text (I probed it directly), so its cascade never applies `:not(:empty)`.
+- I did not write a pure model of the row split. The split is Chromium's flex line-breaking, and a model of it would restate these same values and my reading of the spec rather than prove the layout. A real-browser check replaces it.
+- e2e, in the transform-layer case of e2e/presentations.spec.ts: while the token-transform refusal shows in the main tab's toolbar, the spacer is at most 2 px wide and the notice is at least min(12rem, the row's inner width).
+- RED /tmp/maws-review/p3f-d2-r4-red.log, with chrome.css at 3b5ecadfb: 4 of 14 failed ("the notice's grow against the spacer's: expected 1 to be greater than or equal to 100"). GREEN /tmp/maws-review/p3f-d2-r4-green.log: 14 of 14.
+- Targeted typecheck and eslint of the touched files are clean.
+
+**Trade-off and tracker material**
+- The floor does what you asked: a notice shown on a row with less than 12rem left moves to a new row for its 6 s, taking the spacer and zoom with it. That brings back a row jump, but only when the alternative would be an unreadable refusal. No row needed.
+- Tracker material from the earlier D2 reports still stands (S-SLIDE-CLICK-TO-EDIT's IME clause); nothing new.

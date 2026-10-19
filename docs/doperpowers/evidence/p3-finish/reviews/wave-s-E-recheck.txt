@@ -1,0 +1,45 @@
+## Recheck of batch E's three fixes: a0c2d7a0a, 61e256306, 48f8c49de
+
+I found nothing blocking and nothing should-fix. Each commit closes its finding, and I found no regression. There is one minor gap, which the worker already logged.
+
+### a0c2d7a0a: the e2e locator (closes review P1)
+- **Locator:** `page.getByRole('banner').locator('[data-toolbar-project]')` is the same locator the tab-sets case already uses at e2e/shell.spec.ts:76.
+  - Toolbar renders a top-level `<header data-toolbar>` from Shell.tsx:29, so it has the banner role.
+  - Only one element carries `data-toolbar-project`, so strict mode is safe.
+  - The chip's text is just `project.name`, because the FolderIcon has no text. So the full-match `toHaveText` works.
+- **The two projects:**
+  - `USAGE_PROJECT` ('claude-usage-menubar') is the project's sidebar name.
+  - The first assertion runs after the empty-set poll shows `main.current` has switched to that project.
+  - The second runs after the poll that shows the palette brought MAWS's set back.
+  - Both are auto-retrying `toHaveText` waits, so they wait for the right moments.
+- **Not verified:** I did not run it, as instructed.
+
+### 61e256306: the chip gate and the host actions (closes review P2)
+- **Nothing overwrites the install at runtime.** Every `setHostActions` call is one of these:
+  - default-actions.ts:10. It runs at module load and necessarily before App.tsx's body, since App.tsx reads `DEFAULT_ACTIONS` on the same line.
+  - App.tsx:150 itself.
+  - Three test files. Each restores `DEFAULT_ACTIONS` in a finally block or a teardown.
+  - The harness, the desk and the other test files never call it.
+- **No reads happen too early.** The default context's `actions` is a getter, so `TranscriptActionsProvider` reads the installed value at render time.
+- **The desk:** apps/desk-web imports its own `./App`, never MAWS's App.tsx. It supplies neither `openArtifactTab` nor `setHostActions`, so it renders text everywhere.
+- **The transcript proper:**
+  - TranscriptSlot and DrillIn pass the registered actions, and App.tsx:273 registers `openArtifact` and `openArtifactTab` together.
+  - A plain click with a row session calls `openArtifact(session, …)` (the panel). A ⌘-click calls `openTab`.
+  - links.test.tsx pins both, and the e2e:tools chip case still goes through this path.
+- **No surface loses a working chip.** App.tsx:273 is the only place that supplies `openArtifact`, and it always supplies `openArtifactTab` with it. The only chips that became text are ones whose click already did nothing:
+  - the harness's `childTranscriptTool`, which mounts with DEFAULT_ACTIONS;
+  - the desk.
+- **Standalone surfaces:** BtwView, the ask sheet, MarkdownView, Plan.tsx outside a Transcript and SurfaceTree now draw a chip that opens the main tab. SurfaceTree's capture still routes the click through `registeredActions()`.
+- **Tests:** I ran links, sanitize, SurfaceTree and Toolbar in the `renderer` project: 73 of 73 pass.
+
+### 48f8c49de: Shift+F10 on the chip (closes review P3)
+- **No conflicting key handling:** nothing else under src/ handles F10.
+- **No double open:** `preventDefault` on the keydown stops a platform-native contextmenu from opening the menu a second time.
+- **Focus:**
+  - The synthetic contextmenu goes through Radix's trigger handler. The keydown sets Radix's keyboard flag, and a synthetic MouseEvent is not a pointer event, so the flag stays set and the first item gets focus.
+  - Escape returns focus to the chip.
+  - The reveal keeps its existing `onCloseAutoFocus` suppression, so focus stays on the revealed row.
+- **Test:** Toolbar.test.tsx pins the menu opening, the item's focus, and that Enter reveals the project without opening a tab.
+
+### Finding
+- **Minor: App.tsx:150 has no test of its own.** The only thing that would catch the line being removed is reading the code. In that case every MAWS standalone surface would quietly fall back to text, and no unit or e2e case would fail. links.test.tsx covers the mechanism, but not this wiring. The worker already logged this as S-HOST-ACTIONS-APP-WIRING, which is the right place for it.
