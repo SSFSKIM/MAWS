@@ -19,6 +19,7 @@ import { useSessions } from '../stores/sessions';
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
 import { dockPanel, floatPanel, useColumnWidth, useFloatingCard } from './floating';
+import { ChromePill } from './FloatingPill'; // P3-F (F-shell)
 import { MARKUP_COPY, resetMarkup, useMarkup } from '../markup/session'; // P3-G (M4)
 import { resetMarkupSurfaces, useRegionMarkupSurface } from '../markup/surface'; // P3-G (M4)
 import { EditorHostScopeContext } from '../panel/editor-host'; // P3-G (M4)
@@ -123,6 +124,23 @@ describe('the floating card in the Shell', () => {
     await user.click(pill);
     expect(card()).not.toBeNull();
     expect(composers()).toEqual([A]);
+  });
+
+  // P3-F (F-shell, scalpel-4#5): Close unmounts the focused Close button with the card; the pill it leaves takes the
+  // keyboard, the layer's or the one a browser chrome's row hosts, so focus never drops to the body
+  it.each([
+    ['the layer’s', false],
+    ['a browser chrome’s row’s', true],
+  ])('after Close, %s pill has the keyboard', async (_, hosted) => {
+    const user = userEvent.setup();
+    if (hosted) registerSlot('panelHost', () => <ChromePill />);
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    expect(card()).toBeNull();
+    const pill = screen.getByRole('button', { name: 'Show session card' });
+    expect(pill.dataset.floatingPill).toBe(hosted ? 'inline' : 'floating');
+    expect(document.activeElement).toBe(pill);
   });
 
   // P3-F L129: the panel header's Float names what a click does: over a card closed to its pill it brings the card back
