@@ -448,6 +448,94 @@
       "owner": "P4 / library mirror",
       "row": "| 2026-10-19 | P4 library mirror (a File artifact over 64 MiB that cannot be cloned is mirrored as nothing) | The owner ruled the 64 MiB mirror cap \"fix it\" (\"something in real use might have something bigger, so I would say fix it … production-level product for general use\"). Wave S (4bce76e3f, 542a69459) mirrors a File artifact over the cap by an APFS clone (`/bin/cp -c`, no shell, 2 s timeout) when the source is a regular file with no BSD flags on the same APFS volume as the linked folder; Node's `COPYFILE_FICLONE_FORCE` throws ENOSYS on macOS (Node 22, Electron 44's Node 24), so it cannot serve. Still mirrored as nothing, with a log line: a file over the cap on another volume or a non-APFS disk (exFAT, HFS+, SMB), a flagged file (a Finder lock), or a failed or timed-out clone. | P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row R.1:L142; the C2 worker's clone check on this Mac and the independent review of 4bce76e3f (the locked-file temp, fixed by 542a69459). | Closes when such a file is mirrored whole by an async or chunked copy outside the store barrier that never blocks the engine host's loop, keeping temp-then-rename, 0o444, the never-through-a-link rule and the failure contract (no temp left, the entry at revision -1), with a test that a forced clone refusal still mirrors a file over the cap whole. Constraint: the mirror's synchronous write path holds no unbounded buffer and runs no unbounded copy in the engine host. Owner: P4. |",
       "source": "P3-F wave S, the residual of L142"
+    },
+    {
+      "id": "S-DOC-AGENT-PRESENCE-LIVE",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / document agent presence",
+      "row": "| 2026-10-19 | P4 document agent presence (visible while the agent composes, not only at commit) | Spec §2 item 2 says \"the agent's cursor and the blocks it is editing are visible while it works\"; at the sitting the owner saw no agent cursor or editing-block marker in two passes (08:36Z and 08:37Z) while the sentence, the Risks section and the date cells changed at once. The build publishes presence with the committed write (D11, `src/engine-host/tool-server/documents.ts:345-370`), held 4 s after the last batch commits from wave S (8c9d7e2ab, `PRESENCE_EDITING_MS`; a turn end no longer cuts a held outline short). The real \"while\" is the model composing its tool input, which takes seconds; publishing at the tool call's entry changes nothing visible (the architect, 2026-10-19). The build's reading of D11 (\"while a batch runs\") is kept: nothing is revealed for a batch that is then refused. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 21; the architect's c21 ruling 2026-10-19; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c21. | Closes when the session's stream (the tool_use block's start, and the artifact id once the input names it) reaches the document's awareness, so the agent's presence shows while it composes an edit, with an e2e. Constraint: nothing of a refused batch is revealed; the engine stays unpatched (D-1). Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
+    },
+    {
+      "id": "S-SHOW-IN-PANEL-E2E",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / shell tests",
+      "row": "| 2026-10-19 | P4 shell tests (Show in panel has no e2e) | The artifact main tab's \"Show in panel\" (wave S F16, 37fe3d6f2 and a9239ae6b) is proven by unit tests with the real panel host and Artifacts tool (`src/renderer/src/main/Tab.test.tsx`, `src/renderer/src/tools/artifacts/artifacts.test.tsx`), not end to end. | The D1 worker's report, wave S. | Closes when an e2e case in a group that seeds artifacts (e2e:library or e2e:document-app) right-clicks an artifact main tab, chooses Show in panel and sees the record in the panel with the tab gone. Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-TAB-KEYBOARD",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / document editor tabs",
+      "row": "| 2026-10-19 | P4 document editor tabs (rename, move and delete have no keyboard path) | Wave S F15 (6b0f66f73) replaced the document tab row's ⋯ button, which the keyboard could reach, with a right-click menu and an inline × outside the tab order (tabIndex -1, as on the main-area tabs); a Mac has no context-menu key, so a keyboard-only owner can select and add tabs but not rename, move or delete one. | The A2 worker's report, wave S. | Closes when a focused tab offers those actions from the keyboard (for example F2 to rename and Delete or ⌫ to delete with the same confirmation, or a key that opens the tab's menu), with a DOM regression. Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
+    },
+    {
+      "id": "S-ASK-CLAUDE-SPACES-LOADING",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / library creation",
+      "row": "| 2026-10-19 | P4 library creation (Ask Claude before the Spaces list loads) | Ask Claude from a narrowed Space (wave S F5, d6bbd386e) starts in the Space's linked folder and names the Space; clicked before the Spaces list has loaded, it behaves as before (the focused project, no Space words). | The C1 worker's report, wave S. | Closes when Ask Claude is disabled until the narrowed Space is known, with a regression. Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
+    },
+    {
+      "id": "S-EXPORT-SAVE-CACHE-NAME",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / header exports",
+      "row": "| 2026-10-19 | P4 header exports (the save step finds the export by a shared cache name) | `library.saveAs` finds the export by its cache name `<revision>-<format>.<ext>`, which Letter and A4 and the agent's `artifact_export` of the same revision and format share, so a concurrent export between the export and the save could swap the file that is saved. True of the deck's header export and, since wave S F7 (9d65b2de2), of the document's and the dashboard's. | The B worker's report, wave S. | Closes when the owner's header exports take a file of their own (`ownFile: true` and its `exportId`, or an equivalent per-request name), with a regression where an interleaved export of the same revision and format leaves the saved file unchanged. Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
+    },
+    {
+      "id": "S-ARTIFACT-LINK-PROMPT",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / artifact links",
+      "row": "| 2026-10-19 | P4 artifact links (no always-on instruction to link artifacts) | Wave S F14 (e69227c34) renders `maws-artifact:<uuid>` links as chips and tells the agent about them in the artifact tools' descriptions and every kind's guide; the always-on paragraph the owner's observation 2 asked for (\"this adds to SessionStartHook for MAWS as instruction to hyperlink artifact\") stayed out of wave S because it changes the owner channel's `--append-system-prompt` that the to-human contract's classification and about ten pinned tests ride on. A session that never loads `artifact_create` or `artifact_list` is never told the link form. | Owner observation 2 (2026-10-19); the executor's ruling in wave S; the E worker's report. | Closes when the paragraph lands, either through the owner channel with the contract kept first (updating `src/main/owner/launch.test.ts`, `src/main/sessions/service.test.ts`, `e2e/to-human.spec.ts:188` and the byte checks of `e2e/to-human-live.spec.ts`) or through the maws server's MCP `instructions` once a probe shows the pinned engine renders an SDK server's instructions, with the wire check showing it in the session's prompt (D-1). Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
+    },
+    {
+      "id": "S-ARTIFACT-LINK-FRAGMENT",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / artifact links",
+      "row": "| 2026-10-19 | P4 artifact links (a link always opens the latest version) | A `maws-artifact:` link's fragment is parsed away (wave S F14, e69227c34), so every link opens the artifact's latest version; related to the 2026-10-14 P3-B row (`show_pane` cannot open a document at a tab or block). | The E worker's report, wave S; owner observation 2's plan (`#v<version>`). | Closes when a fragment grammar (version, tab, block) is defined and the chip passes it to `openArtifact`'s `at`, with a regression. Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-PASTE-COPYASSET",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / document paste",
+      "row": "| 2026-10-19 | P4 document paste (an image pasted from another document may not be copied; unverified) | P3 Decision Log 65 says the documents consume `artifacts.copyAsset` \"when B next touches its paste\"; no document source calls it (no call under `src/artifacts/document` or `src/renderer/src/tools/document`; the editor host offers `assetUrl`, `uploadAsset`, `identity` and `openExternal` only, `src/artifacts/document/editor/host-types.ts`), and no row carried the clause. What a document-to-document image paste stores (a foreign `maws-artifact:` URL, a re-upload or a copy) is not verified. | P3-F M5 lineage check (`docs/doperpowers/evidence/p3-finish/recomposition.txt`), P3 Decision Log 65. | Closes when a trace shows what such a paste stores and, if it is not a copy into the target document, the paste copies the asset through `artifacts.copyAsset`, with a regression that deleting the source document leaves the pasted image intact. Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
+    },
+    {
+      "id": "S-HOST-ACTIONS-APP-WIRING",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / transcript actions tests",
+      "row": "| 2026-10-19 | P4 transcript actions tests (the host actions' artifact-tab wiring has no App-level case) | Wave S F14's review fix (61e256306) installs `openArtifactTab` into the host actions at App.tsx's module load so Markdown surfaces outside a Transcript (the Side tool's answers, the ask sheet's previews, the Code tool's preview, plugin surfaces) draw a working artifact chip; the mechanism is covered in `links.test.tsx`, the App line itself by no case. | The E worker's fix report, wave S. | Closes when an App-level or e2e case shows a working artifact chip on a Markdown surface outside a Transcript. Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-DIAGRAM-FONT",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / document diagrams",
+      "row": "| 2026-10-19 | P4 document diagrams (a diagram can take the app's UI font) | Wave S c20 (92a9dcc35) carries the page's palette in each document diagram's own `%%{init}%%` directive because mermaid is one shared instance the transcript also configures; the font cannot ride there (mermaid's directive check blanks a value containing `-`, as in `-apple-system`), so a render queued behind a transcript diagram can take the app's UI font. With MAWS's own tokens the UI and prose fonts are the same; only a system with its own body font shows it. | The A1 worker's report, wave S. | Closes when the font rides per render and a test shows it survives a transcript reconfiguration. Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
+    },
+    {
+      "id": "S-HTML-EXPORT-GROUND",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / document HTML export",
+      "row": "| 2026-10-19 | P4 document HTML export (a dark system's exported checklist boxes draw light) | The HTML export sets no `data-ground`, so a dark-ground system's exported checklist boxes draw light (`src/artifacts/document/export/html-render.ts:192` writes native checkboxes); predates wave S, which fixed the editor's own colour scheme (c53, ca4f2ccaa). | The A1 worker's report, wave S. | Closes when the export writes the page's ground from the resolved `--ds-color-bg` (`isDarkGround`), with an `html.test.ts` case. Owner: P4. |",
+      "source": "P3-F wave S, the fix batches' residuals and reviews, 2026-10-19"
     }
   ]
 }
