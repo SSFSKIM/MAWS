@@ -162,10 +162,12 @@ const shown = () => sessionOfTab(activeTab(layout().main));
 
 // Floats the panel from any state; the card's composer takes the keyboard when it mounts. `width` is the divider drag's
 // restore value (§D1.6); nothing else writes the width, so docking brings the column back as it was. With no shown
-// session it floats nothing and says why (P3-F wave S, F6): the action and the divider have no button to disable.
+// session it floats nothing and says why (P3-F wave S, F6): the action and the divider have no button to disable. A
+// refused drag still puts its start back: the divider wrote its maximum on the way past it.
 export function floatPanel(patch: { width?: number } = {}): void {
   const session = shown();
   if (session === null) {
+    if (patch.width !== undefined) layout().setPanel({ width: patch.width });
     toast({ id: 'panel-float-no-session', level: 'info', text: FLOAT_COPY.noSession, actions: [], dismissible: true });
     return;
   }

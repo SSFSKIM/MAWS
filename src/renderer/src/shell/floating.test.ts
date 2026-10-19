@@ -99,7 +99,14 @@ describe('a float with no session to draw', () => {
 
   it.each([
     ['⌥⌘B', () => runAction('panel.float')],
-    ['the divider', () => floatPanel({ width: 520 })],
+    // The divider's Resizer has written its maximum by the time the drag passes it; the expand hands the drag's start
+    [
+      'the divider',
+      () => {
+        useLayout.getState().setPanel({ width: 640 });
+        floatPanel({ width: 444 });
+      },
+    ],
   ])('with an artifact tab in front, %s leaves the panel docked at its width and says why', (_, run) => {
     useLayout.setState({ main: showing(ARTIFACT) });
     enter('docked');

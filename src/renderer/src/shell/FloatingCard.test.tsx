@@ -227,6 +227,27 @@ describe('the floating card in the Shell', () => {
     expect(card()).not.toBeNull();
   });
 
+  // P3-F wave S (F6 review): the Resizer writes the width on every move, so the stored width is the maximum by the time
+  // the drag passes it; a float refused there puts the drag's start back, as a float does, rather than keeping the
+  // maximum (main pushed to its floor, and saved)
+  it('a drag of the divider past the maximum with an artifact tab in front floats nothing and keeps the drag’s start as its width', async () => {
+    installFakeMain(() => fail('not answered here'));
+    const artifact = { id: tabId({ kind: 'artifact', artifactId: 'deck-1' }), kind: 'artifact', artifactId: 'deck-1', pinned: false } as const;
+    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [artifact], activeTabId: artifact.id }] } } } });
+    render(<Shell />);
+    const divider = within(region('panel')).getByRole('separator', { name: 'Resize right panel' });
+    const max = Number(divider.getAttribute('aria-valuemax'));
+    act(() => void fireEvent.pointerDown(divider, { pointerId: 1, button: 0, clientX: 1000 }));
+    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - 380) - 39 }));
+    expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, width: max });
+    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - 380) - 40 }));
+    await act(async () => {});
+    expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, width: 380 });
+    expect(region('main').inert).toBe(false);
+    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
+    expect(useNotices.getState().notices.map((n) => n.text)).toContain(FLOAT_COPY.noSession);
+  });
+
   // M1 review: the card never covers the header or the tool strip (§D1.4). The layer starts where the host's tool body
   // does (its tabpanel, under whatever strip or header sits above it), measured, not at a fixed offset.
   it('anchors the layer at the top of the host’s tool body, so a card at its largest leaves the strip clear', () => {
