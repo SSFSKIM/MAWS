@@ -4,7 +4,7 @@
 // lift, arrows to move, Space to drop), and the slide gestures: new (blank, after the current slide), duplicate, hide,
 // delete. Hidden slides are dimmed; held slides badged with their reasons. Every gesture is one transaction and one
 // undo step (the session's `edit`).
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -15,7 +15,7 @@ import { DECK_LIMITS } from '../deck';
 import { moveSlide, setAttrs, ROOT } from '../model';
 import { slideTitle } from '../threads';
 import { addSlide, blankSlide, duplicateSlide, mintSectionKey, mintSlideId, removeSlide, setSection } from '../writers';
-import { reorderAnnouncements } from './announcements';
+import { useReorderAccessibility } from './announcements';
 import type { DeckView, SectionHeader, SlideEntry } from './deck-view';
 import type { DeckSession } from './session';
 import { SLIDE_W, SlideView } from './SlideView';
@@ -42,11 +42,7 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
   const ids = view.slides.map((s) => s.id);
   const scale = width / SLIDE_W;
   // a reorder as assistive technology hears it: the slides by position and title, over the order last drawn
-  const drawn = useRef(ids);
-  useLayoutEffect(() => {
-    drawn.current = ids;
-  });
-  const accessibility = useMemo(() => ({ announcements: reorderAnnouncements(() => drawn.current, (id, n) => C.reorderItem(n, slideTitle(session.doc, id))) }), [session]);
+  const accessibility = useReorderAccessibility(ids, (id, n) => C.reorderItem(n, slideTitle(session.doc, id)));
 
   // every thumbnail of the first showing laid out: reported once
   const canvases = useRef(new Map<string, SlideCanvas>());

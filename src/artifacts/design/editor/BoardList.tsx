@@ -11,7 +11,7 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { moveSlide } from '../../slides/model';
-import { reorderAnnouncements } from '../../slides/editor/announcements';
+import { useReorderAccessibility } from '../../slides/editor/announcements';
 import type { DeckSession } from '../../slides/editor/session';
 import { CANVAS_LIMITS } from '../canvas';
 import { boardLabel, type BoardView } from './boards';
@@ -85,15 +85,7 @@ export function BoardList(props: BoardListProps) {
   };
   // a reorder as assistive technology hears it (the filmstrip's): the boards by position and name, over the boards last
   // drawn; one object for the list's life, like the sensors' options
-  const accessibility = useMemo(
-    () => ({
-      announcements: reorderAnnouncements(
-        () => latest.current.boards.map((b) => b.id),
-        (id, n) => C.reorderItem(n, latest.current.boards.find((b) => b.id === id)?.title ?? ''),
-      ),
-    }),
-    [],
-  );
+  const accessibility = useReorderAccessibility(ids, (id, n) => C.reorderItem(n, boards.find((b) => b.id === id)?.title ?? ''));
   const full = boards.length >= CANVAS_LIMITS.boards;
 
   return (

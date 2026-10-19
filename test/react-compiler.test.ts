@@ -15,6 +15,8 @@ const babel = createRequire(createRequire(__filename).resolve('@vitejs/plugin-re
 const FILES: Record<string, string[]> = {
   'src/artifacts/slides/editor/present/Presentation.tsx': ['Presentation'],
   'src/renderer/src/tools/presentation/DeckBody.tsx': ['DeckBody'],
+  'src/artifacts/slides/editor/Filmstrip.tsx': ['Filmstrip'],
+  'src/artifacts/design/editor/BoardList.tsx': ['BoardList'],
 };
 
 /** The compiler's events for one file, compiled as plugin-react's transform does (its parser plugins for a .tsx). */
