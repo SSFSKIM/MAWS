@@ -41,6 +41,7 @@ function plan(scenarioEnv) {
         POOL_E2E: '',
         LIBREOFFICE_E2E: '',
         LIVE_E2E: '',
+        MEASURED_E2E: '',
         ...scenarioEnv,
         GITHUB_OUTPUT: output,
         GITHUB_STEP_SUMMARY: summary,
@@ -204,4 +205,19 @@ test("every LIVE_E2E group's spec skips on a flag the e2e job sets under live", 
     assert.equal(flags.length, 1, `${specs[0]} skips on one flag`);
     assert.ok(exported.includes(flags[0]), `${specs[0]} skips without ${flags[0]}, which the e2e job does not set under live`);
   }
+});
+
+// A measured group's job waits first for ci-kit's measured-job guard on a Mac, and gets the guard's 15-minute bound on
+// top of the usual 30 (Decision Log 75's posture go, automated).
+test('a MEASURED_E2E group is marked measured in its matrix entry, and gate.yml guards and times it by that mark', () => {
+  const { outputs } = plan({ MEASURED_E2E: 'artifacts-perf document-scale', HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:artifacts-perf,e2e:library\nRunner: macos' });
+  assert.deepEqual(Object.fromEntries(JSON.parse(outputs.e2e).map((entry) => [entry.group, entry.measured])), { 'artifacts-perf': true, library: false });
+
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  for (const group of /^ {2}MEASURED_E2E: (.*)$/m.exec(workflow)[1].split(/\s+/).filter(Boolean)) assert.ok(scripts[`e2e:${group}`], `e2e:${group} has a package script`);
+  const job = /\n {2}e2e:\n((?: {4}.*\n|\n)*?)(?= {2}\S|$)/.exec(workflow)[1];
+  assert.match(job, /\n {4}timeout-minutes: \$\{\{ matrix\.measured && 45 \|\| 30 \}\}\n/);
+  // The guard is the job's first step, before the checkout, and only for a measured group on a Mac.
+  assert.match(job, /\n {4}steps:\n(?: {6}#.*\n)* {6}- if: matrix\.measured && runner\.os == 'macOS'\n {8}uses: SSFSKIM\/ci-kit\/mac\/settle@v1\n {6}- uses: actions\/checkout@v7\n/);
 });

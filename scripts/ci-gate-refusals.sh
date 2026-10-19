@@ -4,9 +4,10 @@
 # runner, class1a, live, gates, default_beside and label.
 # shellcheck disable=SC2154 # those variables are ci-gate.sh's
 
-# When ci-kit's job-started check refused jobs on the mini (its `ci-kit: … rerun` line in a job's log, before any of the
-# job's steps ran), one line of the refused against the finished, green and red, and the relaunch of the refused and the
-# red on the same tree. Nothing when no job was refused.
+# When ci-kit refused jobs on the mini (its `ci-kit: … rerun` line in a job's log: the job-started check's, before any of
+# the job's steps ran, or the measured-job guard's, at a MEASURED_E2E group's first step when the desktop did not settle),
+# one line of the refused against the finished, green and red, and the relaunch of the refused and the red on the same
+# tree. Nothing when no job was refused.
 # A relaunch that takes e2e:default names, in --default-beside, every e2e group this run's `default` ran beside: its other
 # e2e jobs, as the plan made them, and the groups of its own --default-beside. The relaunch's `default` then runs the
 # specs this run's `default` ran, not also those of every group the relaunch leaves out (Decision Log 66).
