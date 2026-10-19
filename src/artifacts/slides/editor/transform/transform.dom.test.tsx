@@ -484,3 +484,15 @@ describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.
     expect(session.snapshot().selection).toEqual([]);
   });
 });
+
+describe('P3-F: a flow text element’s width only, Shift or not (scalpel-1#2)', () => {
+  it('a Shift-drag of a flow paragraph’s handle writes its width and no height', () => {
+    const doc = deck();
+    const ctx = gestureContext(doc, { title: [128, 128, 1664, 80], body: [128, 240, 1664, 45] });
+    const r = startResize(ctx, 'body', 'e', { x: 1792, y: 262 });
+    r.frame({ x: 1692, y: 262 }, { ...NO, shift: true });
+    r.end();
+    expect(styleOf(doc, 'body').width).toBe('1564px');
+    expect(styleOf(doc, 'body').height).toBeUndefined(); // a fixed height would clip or gap the text as it reflows
+  });
+});
