@@ -194,6 +194,15 @@ describe('ArtifactStore: entities, spaces and links', () => {
     await store.delete(system.id);
     expect(store.get(system.id)).toBeNull();
   });
+
+  // P3-F (artifact-protocol review, linkInWrite): a link that commits with a write is written inside that write's frame
+  it('refuses linkInWrite outside a write’s savepoint, as the op ledger’s record does, and writes it inside one', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Notes' }, human);
+    expect(() => store.linkInWrite(doc.id, sid('app-1'), 'edited')).toThrow(/outside a write's savepoint/);
+    expect(store.links(doc.id)).toEqual([]);
+    await service.inBatch(() => store.linkInWrite(doc.id, sid('app-1'), 'edited'));
+    expect(store.links(doc.id)).toEqual([{ artifactId: doc.id, appSessionId: 'app-1', role: 'edited', lastAt: now }]);
+  });
 });
 
 describe('ArtifactStore: byte kinds and assets (Decision Log 2, 7)', () => {

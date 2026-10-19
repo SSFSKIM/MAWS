@@ -601,8 +601,10 @@ export class ArtifactStore {
 
   // A session's link written in the frame of a write its caller holds open (a `writeAs`'s or a store write's `inFrame`),
   // so it commits with that write or not at all (P3-F, artifact-protocol finding 3: a publish links `edited` only with
-  // what it wrote, never on a refusal), and announced after that commit as `link`'s is.
+  // what it wrote, never on a refusal), and announced after that commit as `link`'s is. Outside a write's savepoint it
+  // throws, as the op ledger's `record` does: the link would commit on its own.
   linkInWrite(artifactId: string, appSessionId: AppSessionId, role: ArtifactSessionLink['role']): void {
+    if (!this.storage.frameOpen) throw new Error(`the ${role} link of ${artifactId} was written outside a write's savepoint: write it inside the savepoint of the write it commits with`);
     this.linkInFrame(artifactId, appSessionId, role, this.now());
     this.emit(artifactId, 'linked');
   }
