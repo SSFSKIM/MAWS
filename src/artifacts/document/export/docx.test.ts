@@ -101,6 +101,24 @@ describe('exportDocx', () => {
     expect(custom).toContain('<a:accent1><a:srgbClr val="0B5FFF"/></a:accent1>');
   });
 
+  // P3-F (sitting candidate 11, F18, the architect's ruling): Word draws a link from its Hyperlink style, so the style
+  // takes the theme part's link colour: the text's, or the colour a system declares for its links (dev.maws.office's
+  // hlink), in the runs as in the theme
+  it('colours links as the text, or as the link colour the system declares', async () => {
+    const hyperlink = (xml: Record<string, string>) => /<w:style w:type="character" w:styleId="Hyperlink">.*?<w:color w:val="([0-9A-F]{6})"\/>.*?<\/w:style>/s.exec(xml['word/styles.xml'])?.[1];
+    const house = await parts(await exportDocx(everyKindSource(), { tab: 'tab-1' }));
+    expect(hyperlink(house)).toBe('1F1E1B');
+    expect(house['word/theme/theme1.xml']).toContain('<a:hlink><a:srgbClr val="1F1E1B"/></a:hlink>');
+    const declared: DesignSystemExport<LocalTokens> = {
+      ...houseSystem,
+      name: 'Harbor',
+      officeThemeXml: (tokens, name, overrides) => houseSystem.officeThemeXml(tokens, name, overrides).replace(/<a:hlink>.*?<\/a:hlink>/, '<a:hlink><a:srgbClr val="0B5FFF"/></a:hlink>'),
+    };
+    const harbor = await parts(await exportDocx(everyKindSource(), { tab: 'tab-1', system: declared }));
+    expect(hyperlink(harbor)).toBe('0B5FFF');
+    expect(harbor['word/theme/theme1.xml']).toContain('<a:hlink><a:srgbClr val="0B5FFF"/></a:hlink>');
+  });
+
   it('prints on Letter by default and A4 when chosen, with the system’s margin', async () => {
     const letter = (await parts(await exportDocx(everyKindSource())))['word/document.xml'];
     expect(letter).toMatch(/<w:pgSz w:w="12240" w:h="15840"[^>]*\/>/);

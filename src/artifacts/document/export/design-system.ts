@@ -180,9 +180,14 @@ const SLOT_ROLE: Record<(typeof OFFICE_SLOTS)[number], DsName> = {
   accent4: '--ds-color-status-warn',
   accent5: '--ds-color-status-error',
   accent6: '--ds-color-border',
-  hlink: '--ds-color-accent',
+  hlink: '--ds-color-text', // P3-F (F18, the architect's ruling): a link is the text's colour, as D's office.ts derives it
   folHlink: '--ds-color-text-muted',
 };
+
+/** A colour slot of a DrawingML theme part (an `officeThemeXml`'s), as six uppercase hex digits; null when it has none. */
+export function themeSlot(themeXml: string, slot: (typeof OFFICE_SLOTS)[number]): string | null {
+  return new RegExp(`<a:${slot}><a:srgbClr val="([0-9A-Fa-f]{6})"/></a:${slot}>`).exec(themeXml)?.[1].toUpperCase() ?? null;
+}
 // Names Office cannot resolve to a face: CSS generic families and the platform's system-font aliases (D's list).
 const NOT_A_FACE = new Set(['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded', 'emoji', 'math', 'fangsong', '-apple-system', 'BlinkMacSystemFont']);
 

@@ -73,6 +73,7 @@ describe('values for Office', () => {
     expect(xml).toContain('<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="MAWS &amp; co">');
     expect(xml).toContain('<a:dk1><a:srgbClr val="1F1E1B"/></a:dk1><a:lt1><a:srgbClr val="FAF9F6"/></a:lt1>');
     expect(xml).toContain('<a:accent1><a:srgbClr val="C9663F"/></a:accent1>');
+    expect(xml).toContain('<a:hlink><a:srgbClr val="1F1E1B"/></a:hlink>'); // a link is the text's colour (P3-F, F18)
     expect(xml).toContain('<a:majorFont><a:latin typeface="Segoe UI"/><a:ea typeface="Malgun Gothic"/><a:cs typeface=""/></a:majorFont>');
     const derived = officeThemeXmlLocal({ properties: HOUSE_TOKENS.properties }, 'Derived');
     expect(derived).toContain('<a:minorFont><a:latin typeface="SF Pro Text"/>');
@@ -90,7 +91,7 @@ describe('values for Office', () => {
       '--ds-font-display': 'var(--elsewhere)',
     });
     expect(xml).toContain('<a:accent1><a:srgbClr val="0B5FFF"/></a:accent1>');
-    expect(xml).toContain('<a:hlink><a:srgbClr val="0B5FFF"/></a:hlink>');
+    expect(xml).toContain('<a:hlink><a:srgbClr val="112233"/></a:hlink>'); // the text role's, not the accent's (P3-F, F18)
     expect(xml).toContain('<a:dk1><a:srgbClr val="112233"/></a:dk1>');
     expect(xml).toContain('<a:lt1><a:srgbClr val="FAF9F6"/></a:lt1>'); // the gradient is not a colour: the system's stays
     expect(xml).toContain('<a:minorFont><a:latin typeface="Iowan Old Style"/>');

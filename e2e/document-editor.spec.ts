@@ -531,6 +531,34 @@ test.describe('the document editor', () => {
       });
     }
   });
+
+  // P3-F (sitting candidate 11, F18, the architect's ruling): a link is the colour of its text with its underline, no
+  // accent, hovered or not; hover thickens the underline
+  test('a link takes its text’s colour, hover thickening its underline', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    const WORDS = 'See the notes';
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+    await page.keyboard.type(WORDS);
+    for (let i = 0; i < WORDS.length; i += 1) await page.keyboard.press('Shift+ArrowLeft');
+    await bar.getByRole('button', { name: 'Link', exact: true }).click();
+    const address = bar.getByRole('textbox', { name: 'Link address' });
+    await address.fill('https://example.com/notes');
+    await address.press('Enter');
+    const link = content(page, 'a').locator('a[href="https://example.com/notes"]');
+    await expect(link).toHaveText(WORDS);
+    const text = await link.evaluate((el) => getComputedStyle(el.closest('p')!).color);
+    const look = () =>
+      link.evaluate((el) => {
+        const style = getComputedStyle(el);
+        return { color: style.color, underline: style.textDecorationColor, line: style.textDecorationLine, thickness: parseFloat(style.textDecorationThickness) || 0 };
+      });
+    const resting = await look();
+    expect(resting).toMatchObject({ color: text, underline: text, line: 'underline' });
+    await link.hover();
+    await expect.poll(async () => (await look()).thickness).toBeGreaterThan(resting.thickness);
+    expect(await look()).toMatchObject({ color: text, underline: text });
+  });
 });
 
 // One step of S4's 2-set model, as S7b's ime scenario sends it (spikes/p3-store/s7/electron/main.ts, `imeStep`).

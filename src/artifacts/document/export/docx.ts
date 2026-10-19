@@ -43,7 +43,7 @@ import type { Mark, Node as PMNode } from '@tiptap/pm/model';
 import { TableMap } from '@tiptap/pm/tables';
 import type { Actor } from '@shared/artifacts/actor';
 import { CALLOUT_TONES } from '../schema';
-import { dsValue, exportDesign, hexOf, houseSystem, officeFace, pageOf, twipsOf, type DsName, type ExportDesign } from './design-system';
+import { dsValue, exportDesign, hexOf, houseSystem, officeFace, pageOf, themeSlot, twipsOf, type DsName, type ExportDesign } from './design-system';
 import { imageSize } from './image-size';
 import { chipText } from './values';
 import { defaultAuthorName, tabsOf, type ExportOptions, type ExportSource, type ImageLoader } from './source';
@@ -568,6 +568,7 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
   });
 
   const text = color('--ds-color-text');
+  const theme = design.officeThemeXml();
   const heading = (role: 'h1' | 'h2' | 'h3' | 'title') => ({
     run: { font: { theme: 'headings' as const }, size: halfPoints(`--ds-type-${role}-size`), bold: bold(`--ds-type-${role}-weight`), color: text },
     paragraph: { spacing: { before: role === 'title' ? 0 : (twipsOf(value('--ds-space-5')) ?? 360), after: twipsOf(value('--ds-space-2')) ?? 120 }, keepNext: true },
@@ -624,13 +625,15 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
         heading1: heading('h1'),
         heading2: heading('h2'),
         heading3: heading('h3'),
-        hyperlink: { run: { color: color('--ds-color-accent'), underline: {} } },
+        // P3-F (F18, the architect's ruling): Word draws a link from this style, not from the theme's hlink slot, so the
+        // style takes that slot (the colour a system declares for its links, else its text colour) or the text's
+        hyperlink: { run: { color: themeSlot(theme, 'hlink') ?? text, underline: {} } },
       },
       paragraphStyles,
     },
     sections,
   });
-  const bytes = await Packer.pack(file, 'uint8array', false, [{ path: 'word/theme/theme1.xml', data: design.officeThemeXml() }]);
+  const bytes = await Packer.pack(file, 'uint8array', false, [{ path: 'word/theme/theme1.xml', data: theme }]);
   return comments.length > 0 && !comments.some((comment) => comment.parentId !== undefined) ? withCommentsExtended(bytes, comments) : bytes;
 }
 

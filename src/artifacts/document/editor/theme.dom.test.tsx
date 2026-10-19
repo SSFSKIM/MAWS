@@ -84,6 +84,27 @@ describe('the stylesheets', () => {
   });
 });
 
+// P3-F (sitting candidate 11, F18, the architect's ruling: the bundled systems' law gives the accent to the reader's one
+// action, never to a link): a link keeps its text's colour in every state, hover thickening its underline and keyboard
+// focus drawing a focus ring (hover and focus cannot be put on an element here; the e2e hovers one)
+describe('a link', () => {
+  const states = declarations(themeCss).filter((d) => /^\.ds-doc a(?::[\w-]+)?$/.test(d.selector));
+  const rule = (selector: string) => Object.fromEntries(states.filter((d) => d.selector === selector).map((d) => [d.property, d.value]));
+
+  it('takes no colour of its own in any state', () => {
+    expect(rule('.ds-doc a').color).toBe('inherit');
+    for (const { selector, property, value } of states) {
+      if (/color/.test(property) || property === 'text-decoration') expect(value, `${selector} { ${property}: ${value} }`).not.toMatch(/accent/);
+    }
+  });
+
+  it('thickens its underline on hover and draws a focus ring on keyboard focus', () => {
+    expect(rule('.ds-doc a')['text-decoration-line']).toBe('underline');
+    expect(parseFloat(rule('.ds-doc a:hover')['text-decoration-thickness'])).toBeGreaterThan(parseFloat(rule('.ds-doc a')['text-decoration-thickness']));
+    expect(rule('.ds-doc a:focus-visible').outline).toMatch(/^2px solid /);
+  });
+});
+
 describe('the author colours', () => {
   it('are app tokens defined for both themes, one per AUTHOR_COLORS entry', () => {
     const [light, dark] = tokensCss.split('[data-theme="dark"]');
@@ -222,7 +243,8 @@ describe('the rendered page without a design system', () => {
     scope.textContent = '.ds-doc { --ds-color-text: #123456; --ds-color-accent: #654321; }';
     expect(getComputedStyle(page).color).toBe('#123456');
     expect(getComputedStyle(container.querySelector('.ds-doc h1')!).color).toBe('#123456');
-    expect(getComputedStyle(container.querySelector('.ds-doc a')!).color).toBe('#654321');
+    // P3-F (sitting candidate 11, F18, the architect's ruling): a link is the colour of its text, never the accent
+    expect(getComputedStyle(container.querySelector('.ds-doc a')!).color).toBe('#123456');
     scope.remove();
   });
 

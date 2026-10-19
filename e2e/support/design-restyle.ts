@@ -18,6 +18,19 @@ export const deckHeadline = (stage: Locator) => stage.locator('[data-stage-slide
 /** The colour an element paints its text in. */
 export const paintedColor = (element: Locator) => element.evaluate((node) => getComputedStyle(node).color);
 
+/**
+ * The colour of a highlighted passage's band (theme.css: `.ds-doc mark`'s inset box-shadow, in the system's accent),
+ * where a document page paints its system's accent now that a link takes its text's colour (P3-F, F18). A band that
+ * names no colour fails here rather than reading as some colour.
+ */
+export const accentBand = (element: Locator) =>
+  element.evaluate((node) => {
+    const shadow = getComputedStyle(node).boxShadow;
+    const colour = /rgba?\([^)]*\)/.exec(shadow)?.[0];
+    if (!colour) throw new Error(`the highlight's band names no colour (box-shadow: ${shadow || 'none'})`);
+    return colour;
+  });
+
 type Marked = Element & { __mawsRestyleMark?: string };
 /**
  * Marks the element `element` resolves to now as `mark`: a property of the node itself, which no mutation observer (an
@@ -26,6 +39,8 @@ type Marked = Element & { __mawsRestyleMark?: string };
 export const markElement = (element: Locator, mark: string) => element.evaluate((node, m) => void ((node as Marked).__mawsRestyleMark = m), mark);
 /** The colour the element `element` resolves to paints its text in, and whether it is still the one marked `mark`. */
 export const markedColor = (element: Locator, mark: string) => element.evaluate((node, m) => ({ marked: (node as Marked).__mawsRestyleMark === m, color: getComputedStyle(node).color }), mark);
+/** The colour of the highlight band (accentBand's) the element `element` resolves to, and whether it is still the one marked `mark`. */
+export const markedBand = async (element: Locator, mark: string) => ({ marked: await element.evaluate((node, m) => (node as Marked).__mawsRestyleMark === m, mark), color: await accentBand(element) });
 
 /**
  * The system's accent recoloured as its page's hex field writes it (Palette through `setToken`: the accent's one
@@ -48,15 +63,16 @@ export async function recolourThroughReplica(page: Page, systemId: string, hex: 
 }
 
 /**
- * A reading-list passage whose link the document's theme sets in the system's accent (theme.css: `.ds-doc a`), as the
- * document editor's `insertContent` takes it.
+ * A reading-list passage with a highlighted link, as the document editor's `insertContent` takes it: the document's theme
+ * draws the highlight's band in the system's accent (theme.css: `.ds-doc mark`), while the link takes its text's colour
+ * (P3-F, F18).
  */
 export const READING_PASSAGE = [
   {
     type: 'paragraph',
     content: [
       { type: 'text', text: 'Before Monday, read chapter two of ' },
-      { type: 'text', text: 'the course reader', marks: [{ type: 'link', attrs: { href: 'https://example.edu/course-reader' } }] },
+      { type: 'text', text: 'the course reader', marks: [{ type: 'link', attrs: { href: 'https://example.edu/course-reader' } }, { type: 'highlight' }] },
       { type: 'text', text: ' and bring one question to the seminar.' },
     ],
   },

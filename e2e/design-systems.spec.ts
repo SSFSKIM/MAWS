@@ -37,7 +37,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { ACCENT_DECK, deckHeadline, headerAction, insertThroughEditor, markedColor, markElement, openFromLibrary, paintedColor, READING_PASSAGE, recolourThroughReplica, unacknowledged } from './support/design-restyle';
+import { accentBand, ACCENT_DECK, deckHeadline, headerAction, insertThroughEditor, markedBand, markedColor, markElement, openFromLibrary, paintedColor, READING_PASSAGE, recolourThroughReplica, unacknowledged } from './support/design-restyle';
 import { allowNext, fixtureRows, mcpResultOf, ofKind, PASS3, resultText, scene, show, type Frame, type McpResult, type Scene } from './support/maws-tools';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; issues?: unknown } };
@@ -257,8 +257,8 @@ test('a document fixture restyles with its system, its retained version keeps th
 // P3-F's S-RESTYLE (Acceptance 10 and 11 on the real editors, which the fixture above stands in for): B's document page
 // and C's deck stage, governed by one system, restyle with its live tokens with no write to either artifact, while a
 // version saved before the recolour previews in the revision it pinned. What is read is the artifacts' own content as
-// drawn: the document's link, which its theme sets in the accent, written by the owner through the real editor, and the
-// deck title set in the accent. A pane mounts only its active tab (Pane.tsx), so the two editors stand side by side in
+// drawn: the band of the document's highlighted passage, which its theme sets in the accent (its link takes its text's
+// colour, P3-F F18), written by the owner through the real editor, and the deck title set in the accent. A pane mounts only its active tab (Pane.tsx), so the two editors stand side by side in
 // a split while the accent changes, and each restyles in place: the very elements drawn before the change (marked
 // then) paint the new accent, which a remounted editor's fresh ones could not pass for.
 test('the real document and deck editors restyle with their system’s live tokens, and their retained versions keep the pinned look', async () => {
@@ -280,16 +280,16 @@ test('the real document and deck editors restyle with their system’s live toke
   expect(BEFORE).not.toBe(AFTER);
   const revision = async (artifactId: string) => (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId })).artifact.revision;
 
-  // the owner writes the reading list in the real document editor, its link drawn in the system's accent
+  // the owner writes the reading list in the real document editor, its highlight's band drawn in the system's accent
   const DOC_DRAWN = '.ds-doc .ProseMirror';
   const DECK_DRAWN = '[data-deck-editor] [data-stage-slide]';
   const docTab = await openFromLibrary(page, 'Reading list', doc.id, DOC_DRAWN);
   const docEditor = docTab.locator('.ds-doc [data-editor="live"]').first();
   await insertThroughEditor(docEditor, READING_PASSAGE);
-  const docLink = docTab.locator('.ds-doc [data-editor="live"] a', { hasText: 'the course reader' });
-  await expect(docLink).toBeVisible();
+  const docBand = docTab.locator('.ds-doc [data-editor="live"] mark', { hasText: 'the course reader' });
+  await expect(docBand).toBeVisible();
   await expect.poll(() => unacknowledged(docEditor), { timeout: 10_000, message: 'the passage reached the store' }).toBe(0);
-  await expect.poll(() => paintedColor(docLink), { message: 'the document’s link draws the system’s accent' }).toBe(BEFORE);
+  await expect.poll(() => accentBand(docBand), { message: 'the document’s highlight draws the system’s accent' }).toBe(BEFORE);
   // each artifact's version now pins the system as it is (X29), the document's holding the passage
   for (const artifactId of [doc.id, deck.id]) expect((await saveVersion(page, artifactId, 'Handed out')).designSystemRef).toEqual({ id: system.id, versionSeq: expect.any(Number) });
   const deckTab = await openFromLibrary(page, 'Lecture', deck.id, DECK_DRAWN);
@@ -304,16 +304,16 @@ test('the real document and deck editors restyle with their system’s live toke
     await expect(pane(0).locator(`[data-artifact-tab="${doc.id}"] ${DOC_DRAWN}`).first()).toBeVisible({ timeout: 15_000 });
     await expect(pane(1).locator(`[data-artifact-tab="${deck.id}"] ${DECK_DRAWN}`).first()).toBeVisible({ timeout: 15_000 });
     const headline = deckHeadline(deckTab);
-    await expect(docLink).toBeVisible();
+    await expect(docBand).toBeVisible();
     await expect(headline).toBeVisible();
-    await markElement(docLink, 'doc-link');
+    await markElement(docBand, 'doc-band');
     await markElement(headline, 'deck-headline');
-    expect(await markedColor(docLink, 'doc-link')).toEqual({ marked: true, color: BEFORE });
+    expect(await markedBand(docBand, 'doc-band')).toEqual({ marked: true, color: BEFORE });
     expect(await markedColor(headline, 'deck-headline')).toEqual({ marked: true, color: BEFORE });
     // the accent written as the system's page writes it, by a replica of the system that no pane shows: both panes keep
     // their tabs while the host brings the token to the editors' scopes
     await recolourThroughReplica(page, system.id, AFTER_HEX);
-    await expect.poll(() => markedColor(docLink, 'doc-link'), { timeout: 10_000, message: 'the document’s link, the one drawn before, restyles' }).toEqual({ marked: true, color: AFTER });
+    await expect.poll(() => markedBand(docBand, 'doc-band'), { timeout: 10_000, message: 'the document’s highlight, the one drawn before, restyles' }).toEqual({ marked: true, color: AFTER });
     await expect.poll(() => markedColor(headline, 'deck-headline'), { timeout: 10_000, message: 'the deck’s title, the one drawn before, restyles' }).toEqual({ marked: true, color: AFTER });
     expect({ doc: await revision(doc.id), deck: await revision(deck.id) }).toEqual(before);
     // one pane again for the version steps: the deck's tab, focused in the second pane, goes back to the first, and the
@@ -338,12 +338,12 @@ test('the real document and deck editors restyle with their system’s live toke
     await headerAction(page, 'Version history');
     await docTab.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Handed out/ }).click();
     await expect(docTab.getByRole('toolbar', { name: 'Version preview' })).toBeVisible({ timeout: 10_000 });
-    const versionLink = docTab.locator('.ds-doc[data-preview] [data-editor="preview"] a', { hasText: 'the course reader' });
-    await expect(versionLink).toBeVisible({ timeout: 10_000 });
-    await expect.poll(() => paintedColor(versionLink), { timeout: 10_000, message: 'the version’s link keeps the accent it pinned' }).toBe(BEFORE);
+    const versionBand = docTab.locator('.ds-doc[data-preview] [data-editor="preview"] mark', { hasText: 'the course reader' });
+    await expect(versionBand).toBeVisible({ timeout: 10_000 });
+    await expect.poll(() => accentBand(versionBand), { timeout: 10_000, message: 'the version’s highlight keeps the accent it pinned' }).toBe(BEFORE);
     // the live passage, back in view, still follows the live system
     await docTab.getByRole('toolbar', { name: 'Version preview' }).getByRole('button', { name: 'Back to document' }).click();
-    await expect.poll(() => paintedColor(docLink), { timeout: 10_000, message: 'the live link is in the live accent again' }).toBe(AFTER);
+    await expect.poll(() => accentBand(docBand), { timeout: 10_000, message: 'the live highlight is in the live accent again' }).toBe(AFTER);
   });
   expect(launch!.consoleErrors()).toEqual([]);
 });
