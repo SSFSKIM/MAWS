@@ -1,5 +1,5 @@
 P3-F owner results — blank template, no sitting step has been run
-Script: docs/doperpowers/evidence/p3-finish/owner-script.txt
+Script: docs/doperpowers/evidence/p3-finish/owner-script.txt (finalised at M4.2 against the final source 073d10446; this template follows its steps)
 Owner appointment: 2026-10-20 evening KST, one approximately three-hour sitting (170 minutes plus 10 minutes slack). Rest marks, not appointments.
 Every value below is entered by the owner at the sitting. A blank is not a pass, and a note or skipped step is not a pass. 'owner: not run' needs its precise reason in 'what was seen'.
 
@@ -19,8 +19,8 @@ codesign TeamIdentifier:
 Older MAWS quit before opening the new build: [ ] yes [ ] no
 Installed engine version (Settings > Engine > Binary):
 Session engine version per session used (Session info > Engine > Version / Binary; name the session):
-Final-source agent run summary supplied by architect:
-Recorder (MAWS_IME_TRACE) present in the final build, per M4.2: [ ] present [ ] absent
+Final-source agent run summary (owner-script PRE.2, inserted at M4.2) read: [ ] yes   its live-reruns line as read:
+Recorder (MAWS_IME_TRACE), per M4.2: present in the final source 073d10446 (owner-script T.1, an agent record); whether the owner's build traced is T.1's field below
 
 Preparation (no secrets)
 Project, OAuth server and harmless read tool:
@@ -31,7 +31,7 @@ Write-capable Notion connector and destination:
 Disposable design-system copy (name) assigned as the P3 sitting Space's default before 2.1 and 5.1 (Settings > Artifacts > By Space > 'Design system for P3 sitting'): [ ] yes [ ] no
 Settings > Artifacts values as found (owner 'Default design system' / the Space's), to put back after 6.3:
 Named document version saved before the recolour: [ ] yes [ ] no   Accent link and marked passage in the sample: [ ] yes [ ] no
-6.2b: recoloured system was the disposable copy [ ] yes [ ] no; main tab (old version) showed the old accent [ ] yes [ ] no; panel (live) showed the new accent [ ] yes [ ] no; any crossing or switch-away loss:
+6.2b: recoloured system was the disposable copy [ ] yes [ ] no; panel's Artifacts tool pinned before Open in tab [ ] yes [ ] no; main tab (old version) showed the old accent [ ] yes [ ] no; panel (live) showed the new accent [ ] yes [ ] no; any crossing or switch-away loss:
 
 step | surface/clause | pass | fail | note | owner: not run | what was seen | screenshot
 PRE.1 | all items: development-signed landed build | [ ] | [ ] | [ ] | [ ] | | |
@@ -53,13 +53,13 @@ PRE.2 | all items: evidence provenance | [ ] | [ ] | [ ] | [ ] | | |
 4.3 | item 4: artifact-wide restore | [ ] | [ ] | [ ] | [ ] | | |
 4.4 | item 4: new-change comparison and attribution | [ ] | [ ] | [ ] | [ ] | | |
 5.1 | item 5: dialect and editor | [ ] | [ ] | [ ] | [ ] | | |
-5.1b | item 5: speaker-notes limit, not-saved state and Save notes (panel plus main tab; prepared from source a5359afa8, not executed; recheck at M4.2) | [ ] | [ ] | [ ] | [ ] | | |
+5.1b | item 5: speaker-notes limit, not-saved state and Save notes (panel plus main tab, the panel's Artifacts tool pinned; prepared from source a5359afa8, rechecked at M4.2 against 073d10446; not executed) | [ ] | [ ] | [ ] | [ ] | | |
 5.2 | item 5: stale conflict and atomic publish | [ ] | [ ] | [ ] | [ ] | | |
 5.3 | item 5: history and comments | [ ] | [ ] | [ ] | [ ] | | |
 5.4 | item 5: export choices | [ ] | [ ] | [ ] | [ ] | | |
 6.1 | item 6: defaults and authoring | [ ] | [ ] | [ ] | [ ] | | |
 6.2 | item 6: live restyle | [ ] | [ ] | [ ] | [ ] | | |
-6.2b | item 6/4: old preview in a main tab beside the restyled live panel (source-derived procedure, not executed; recheck at M4.2) | [ ] | [ ] | [ ] | [ ] | | |
+6.2b | item 6/4: old preview in a main tab beside the restyled live panel (source-derived procedure, rechecked at M4.2 against 073d10446; not executed) | [ ] | [ ] | [ ] | [ ] | | |
 6.3 | item 6: default authority and ask | [ ] | [ ] | [ ] | [ ] | | |
 7.1 | item 7: artboards | [ ] | [ ] | [ ] | [ ] | | |
 7.2 | item 7: file-backed data | [ ] | [ ] | [ ] | [ ] | | |
@@ -86,11 +86,18 @@ R.3 | Irritations in the owner's own words, each with one route (wave S, tracker
 M.1 | Measure: what artifact work still sends you to Claude Desktop or a terminal (the concrete task and why), and whether the co-work layer is fit for the week's daily use: the Measure lines below | [ ] | [ ] | [ ] | [ ] | | |
 
 5.1b record (notes field and alert as seen at each step)
+Panel's Artifacts tool pinned before Open in tab: [ ] yes [ ] no
 a paste of 4,000 characters accepted, panel same:
 b ZZ appended in main: 4,002 alert, panel still 4,000:
 c panel cleared:
 d main shows ZZ, 'not saved yet' alert, Save notes shown, field not invalid, panel empty:
 e Save notes clicked once: alert gone, panel shows ZZ, still ZZ after switching slide and back:
+
+8.2 record (header Export while a version is previewed: the state each export actually held, live or the version shown)
+document:
+deck:
+design:
+dashboard:
 
 N.1 record, one editor at a time (partial syllables, candidate commit, caret, retained text; while the agent updated another block/element)
 document:
@@ -111,30 +118,30 @@ Notion: sending session and connector/tool named in its approval; account and de
 Editor-header Send-to: [ ] present [ ] absent; acceptable: [ ] yes [ ] no; routed by S-HEADER-SEND below
 
 T.1 fields (the trace itself stays with the owner and is not pasted here)
-Recorder present in the final build: [ ] yes [ ] no (then owner: not run)
+Recorder present in the owner's build (the final source has it, per M4.2; a log after the sample shows the build does): [ ] yes [ ] no (then owner: not run)
 Launched from Terminal.app with MAWS_IME_TRACE=1 on a fresh process, no older instance: [ ] yes [ ] no
 Symptom recurred in the terminal tab: [ ] yes [ ] no [ ] unclear; what was seen:
 ~/Library/Logs/MAWS/ime-trace.log exists after the sample: [ ] yes [ ] no
 Relaunched normally afterwards: [ ] yes [ ] no
 
-Rulings (R.1): one row per frozen handle or supplement; proposal per the script, rechecked against final code at M4.2
+Rulings (R.1): one row per frozen handle or supplement; proposal per the script, rechecked at M4.2 against final code and the final tracker at 073d10446
 handle | proposal | keep | fix now | P4 | owner words | route after sitting
 L32 catalogue | keep final recorded residue | [ ] | [ ] | [ ] | |
 L35 SessionStart floor | keep | [ ] | [ ] | [ ] | |
-L81 Terminal Korean | T.1 trace if the recorder is present, else owner: not run; P2 stays open | [ ] | [ ] | [ ] | |
+L81 Terminal Korean | T.1 trace (recorder present in the final source, M4.2); owner: not run only if the build leaves no trace; P2 stays open | [ ] | [ ] | [ ] | |
 L140 locale | keep shipped locale behaviour unless one locale per surface is chosen | [ ] | [ ] | [ ] | |
-L142 mirror cap | keep 64 MiB | [ ] | [ ] | [ ] | |
+L142 mirror cap | keep 64 MiB (the mirror's new P4 rows concern relinked folders, not the cap) | [ ] | [ ] | [ ] | |
 L175 HWP/HWPX | P4 | [ ] | [ ] | [ ] | |
 L183 DOCX embedding | P4, with the native reader observation | [ ] | [ ] | [ ] | |
 L202 embedded PPTX variant | P4 if the three shipped variants serve the task | [ ] | [ ] | [ ] | |
-L213 presenter/fonts/SVG | native pass/fail, then keep / fix now / P4 for any gap | [ ] | [ ] | [ ] | |
+L213 presenter/fonts/SVG | native pass/fail, then keep / fix now / P4 for any gap; P4 rows S-PRESENT-EMBED-FOCUS, S-PPTX-SKEW and S-PPTX-TABLE-OUTLINE bear on it | [ ] | [ ] | [ ] | |
 L267 mini ClaudeUsage polling | owner decides; F never operates its credentials | [ ] | [ ] | [ ] | |
 S-NATIVE-OAUTH | HD acceptance 4: A.1 | [ ] | [ ] | [ ] | |
 S-REAL-SEND | P3 DL95/97: A.2 | [ ] | [ ] | [ ] | |
 S-HEADER-SEND | DL95/97/105: currently library-only; keep library-only / fix now / P4 | [ ] | [ ] | [ ] | |
 S-DESIGN-TOOLBAR | keep E1's shipped wrap/density unless regrouping is requested | [ ] | [ ] | [ ] | |
-S-REPEATED-BARS | keep the current warning/layout after the deterministic warning fix | [ ] | [ ] | [ ] | |
-L180 retained-version design-system export | informed deferral, not a decision and not a vote: P4 owns the versioned-assets repair (DL106) | acknowledged [ ] | | | |
+S-REPEATED-BARS | keep the shipped warning and overlapping layout after the deterministic warning fix (same-side repeats only, bf42822f4), or fix now / P4 the side-by-side layout | [ ] | [ ] | [ ] | |
+L180 retained-version design-system export | informed deferral, not a decision and not a vote: the export carries every current asset (extra files only); P4 owns the versioned-assets repair (DL106; S-DS-VERSION-ASSETS) | acknowledged [ ] | | | |
 
 Taste checklist (R.2): [ ] keep / [ ] change, owner words; where DL97 or E DL41 already settled a proposal, keep confirms the built result
 L DL8 panel model:
