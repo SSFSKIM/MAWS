@@ -99,6 +99,19 @@ describe('exportHtml', () => {
     expect(dark).toContain('<span style="color:#F97583">const</span>'); // github-dark
   });
 
+  // P4 W1-B (tracker L308): the page's native controls (a checklist's boxes) draw in its ground's scheme, as the editor's
+  // do, the PDF's too (it prints this page)
+  it('writes the page’s ground, and a dark ground’s colour scheme', async () => {
+    const darkSystem = { ...houseSystem, tokens: { properties: { ...houseSystem.tokens.properties, '--ds-color-bg': '#1f1e1b' } } };
+    const dark = await exportHtml(everyKindSource(), { tab: 'tab-1', system: darkSystem });
+    const light = await exportHtml(everyKindSource(), { tab: 'tab-1' });
+    expect(dark).toContain('<main class="ds-doc" data-ground="dark">');
+    expect(dark).toMatch(/\.ds-doc \{ color-scheme: dark; \}/);
+    expect(light).toContain('<main class="ds-doc" data-ground="light">');
+    expect(light).not.toContain('color-scheme: dark');
+    expect(light).toMatch(/\.ds-doc \{[^}]*color-scheme: light;/); // the theme's own
+  });
+
   it('draws every block kind with the theme’s classes and the attributes the import reads', async () => {
     const html = await exportHtml(everyKindSource(), { tab: 'tab-1' });
     expect(html).toContain('<aside class="doc-callout" data-callout-tone="warn"><p>Mind the gap.</p></aside>');
