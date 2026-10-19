@@ -345,6 +345,37 @@ describe('the record view', () => {
     expect(listed()).toHaveLength(5);
   });
 
+  // review sweep#1: a move asked while another waits on the guard supersedes it, so the guard's answer lands the latest
+  // open (its version ask kept for its viewer); an open of the artifact shown withdraws the move waiting
+  it('a newer move while the guard answers supersedes the older: the latest open lands, and an open of the shown one stays', async () => {
+    const editor = testEditor({ guarded: true });
+    const { handle } = await mount({ target: NOTES.id });
+    await screen.findByText(`panel editor for ${NOTES.id} in panel:${TAB}`);
+    function Asked() {
+      const request = useVersionRequest(OTHER.id, 'panel');
+      return <p data-asked="">{request === null ? 'none' : JSON.stringify(request.at)}</p>;
+    }
+    render(<Asked />);
+    (editor.createState.mock.results[0]!.value as TestState).allowClose = true;
+    act(() => {
+      artifactsTool.open!(handle, { target: SPEC.id }); // waits on NOTES's guard
+      artifactsTool.open!(handle, { target: OTHER.id, at: { version: 2 } }); // asked meanwhile
+    });
+    await screen.findByText(`panel editor for ${OTHER.id} in panel:${TAB}`);
+    expect(editor.createState.mock.calls.map(([t]) => t.artifactId), 'the older move never landed').toEqual([NOTES.id, OTHER.id]);
+    expect(document.querySelector('[data-asked]')!.textContent).toBe('{"version":2}');
+
+    (editor.createState.mock.results[1]!.value as TestState).allowClose = true;
+    act(() => {
+      artifactsTool.open!(handle, { target: SPEC.id }); // waits on OTHER's guard
+      artifactsTool.open!(handle, { target: OTHER.id }); // the artifact shown
+    });
+    await settle();
+    expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: OTHER.id });
+    expect(editor.createState).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[data-asked]')!.textContent).toBe('"latest"');
+  });
+
   it('a guarded move the view left meanwhile, or a disposed instance, does not apply', async () => {
     const editor = testEditor({ guarded: true });
     const { handle } = await mount({ target: NOTES.id });
