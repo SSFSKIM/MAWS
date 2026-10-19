@@ -336,6 +336,18 @@ describe('the renderer’s ArtifactHost (M4)', () => {
     // P3-D (the P3 spec's Decision Log 59): at a named revision, the form a retained version pinned to a deleted system loads
     expect(h.artifacts.assetUrl(ARTIFACT, 'assets/a b.png', 7)).toBe(`maws-artifact://${ARTIFACT}/7/assets/a%20b.png`);
   });
+
+  // P3-F (F1): an editor's link leaves the app through main's one scheme-checked opener; what main refuses (a scheme
+  // other than http, https and mailto) is refused there and only logged here, never thrown into the editor
+  it('opens a link through layout.openExternal, a refusal logged and not thrown', async () => {
+    const h = harness();
+    expect(h.artifacts.openExternal).toBeTypeOf('function');
+    h.artifacts.openExternal!('https://example.com/brief');
+    h.answers.set('layout.openExternal', { ok: false, error: { code: 'internal', message: 'layout.openExternal opens http, https and mailto links only' } });
+    h.artifacts.openExternal!('file:///etc/hosts'); // a rejection left unhandled would fail the run
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.calls.filter((c) => c.name === 'layout.openExternal').map((c) => c.input)).toEqual([{ url: 'https://example.com/brief' }, { url: 'file:///etc/hosts' }]);
+  });
 });
 
 describe('document ports from the preload', () => {

@@ -227,6 +227,10 @@ export interface ArtifactHost {
   // process), including a restart while the hold was being asked for; it never resolves after `release`.
   holdDatasets(artifactId: string, refs: readonly string[]): Promise<{ release(): void; readonly invalidated: Promise<void> }>;
   identity(): { actor: Actor; name: string; color: string };
+  // P3-F (F1): a link an editor's owner opens (a modifier-click on it), handed to the environment's external opener: the
+  // renderer's is main's one scheme-checked `layout.openExternal` (http, https and mailto leave the app; the rest is
+  // refused there and only logged). Optional: a host with no outside to open into omits it, and the click opens nothing.
+  openExternal?(url: string): void;
   // P3-H H4 (the X9 amendment, Decision Log 80): a page's connector surface, and the owner's grants of one artifact's
   // tools (the editor header's, never a page's). A grant is taken under the fingerprint of the route that has the tool
   // now, so with no live route it answers `paused: noRoute`; a `read` grant needs a tool the route marks read-only

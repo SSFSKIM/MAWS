@@ -44,10 +44,11 @@ test.afterEach(async () => {
 // The panel's harness scenario (C8a): two synthetic sessions main serves, so a session's panel can hold tools.
 const SESSIONS = 'stub:test/fixtures/panel/harness-sessions.json';
 
-async function start(suggestions = false): Promise<Page> {
+// `env`: more of the launch's environment (P3-F: the open seam's log).
+async function start(suggestions = false, env: Record<string, string> = {}): Promise<Page> {
   mkdirSync('/tmp/maws-harness/a', { recursive: true }); // session A's directory in the scenario
   userData = mkdtempSync('/tmp/maws-e2e-document-');
-  launch = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: SESSIONS, ...(suggestions ? { MAWS_DOCUMENT_PERF: '1' } : {}) } });
+  launch = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: SESSIONS, ...(suggestions ? { MAWS_DOCUMENT_PERF: '1' } : {}), ...env } });
   const { page } = launch;
   await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
   return page;
@@ -219,6 +220,49 @@ test('an image uploaded as an asset renders in the editor through the maws-artif
   await expect(img).toHaveAttribute('src', /^maws-artifact:/, { timeout: 15_000 });
   await expect.poll(() => img.evaluate((el: HTMLImageElement) => (el.complete ? el.naturalWidth : -1)), { timeout: 15_000, message: 'the image loaded' }).toBe(2);
   expect(launch!.consoleErrors(), 'no CSP refusal, no load error').toEqual([]);
+});
+
+// P3-F (F1, the owner's N.3: "링크는 안열리고 cmd+click에도 컴포넌트가 선택됨"): ⌘-click on a link opens it through main's
+// one scheme-checked opener (under MAWS_E2E the seam logs `openExternal <url>` in place of the system browser), the press
+// leaving the selection as it was and selecting no node; a plain click opens nothing. In the main tab and in the panel,
+// each its own replica and editor.
+test('a link opens on ⌘-click through main’s opener in a main tab and in the panel, selecting nothing; a plain click opens nothing', async () => {
+  const seam = mkdtempSync('/tmp/maws-e2e-document-open-');
+  const openLog = join(seam, 'open.log');
+  try {
+    const page = await start(false, { MAWS_E2E_OPEN_LOG: openLog });
+    await pinArtifactsTool(page);
+    const { id, main } = await openInMain(page, 'Link notes');
+    const record = await openInPanel(page, id);
+    type LinkRoot = HTMLElement & { editor: { commands: { insertContent(value: string): boolean }; state: { selection: { toJSON(): unknown } } } };
+    const mainText = main.locator('.ds-doc .ProseMirror');
+    await mainText.evaluate((el) => (el as LinkRoot).editor.commands.insertContent('<p>Read <a href="https://example.com/brief">the brief</a> and <a href="https://example.com/notes">the notes</a>.</p>'));
+    await durable(main);
+    const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n').filter(Boolean) : []);
+    for (const [where, text] of [
+      ['main tab', mainText],
+      ['panel', record.locator('.ds-doc .ProseMirror')],
+    ] as const) {
+      await test.step(`${where}: ⌘-click opens the link and moves nothing, a plain click opens nothing`, async () => {
+        const brief = text.locator('a[href="https://example.com/brief"]');
+        await expect(brief).toBeVisible({ timeout: 15_000 });
+        const before = opened().length;
+        const selection = () => text.evaluate((el) => JSON.stringify((el as LinkRoot).editor.state.selection.toJSON()));
+        const held = await selection();
+        await brief.click({ modifiers: ['ControlOrMeta'] });
+        await expect.poll(() => opened().slice(before), { message: 'the link handed to main’s opener' }).toEqual(['openExternal https://example.com/brief']);
+        expect(await selection(), 'the selection after ⌘-click').toBe(held);
+        await expect(text.locator('.ProseMirror-selectednode'), 'no node selected').toHaveCount(0);
+        // a plain click places the caret and opens nothing: the next ⌘-click's line follows the first directly
+        await brief.click();
+        await text.locator('a[href="https://example.com/notes"]').click({ modifiers: ['ControlOrMeta'] });
+        await expect.poll(() => opened().slice(before)).toEqual(['openExternal https://example.com/brief', 'openExternal https://example.com/notes']);
+      });
+    }
+    expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    rmSync(seam, { recursive: true, force: true });
+  }
 });
 
 test('the document exports through A’s export service: Markdown, HTML, DOCX and a paged PDF on Letter and A4, from the Export menu and `artifacts.export`', async () => {

@@ -7,7 +7,7 @@ import type { ArtifactHost, DocumentHandle } from '../../host';
 export type { DocumentHandle };
 
 /** The part of `ArtifactHost` the editor calls: an image's URL, an upload, and who is typing. */
-export type EditorHost = Pick<ArtifactHost, 'assetUrl' | 'uploadAsset' | 'identity'>;
+export type EditorHost = Pick<ArtifactHost, 'assetUrl' | 'uploadAsset' | 'identity' | 'openExternal'>; // P3-F (F1): openExternal
 
 /**
  * A colour as CSS reads it. `actorDisplay` and `identity()` name the author colours by their custom property

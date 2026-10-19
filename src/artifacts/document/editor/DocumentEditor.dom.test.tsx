@@ -5,7 +5,7 @@
 import type { Editor, JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
 import { ynodeToPmnode } from '../../yjs/prosemirror';
 import { schemaFor } from '../schema';
@@ -224,6 +224,63 @@ describe('the toolbar', () => {
     act(() => void fireEvent.pointerDown(editor().view.dom));
     expect(menu(), 'the menu after a press in the page').toBeNull();
     expect(JSON.stringify(editor().getJSON())).toBe(before);
+  });
+});
+
+// P3-F (F1, the owner's N.3: "링크는 안열리고 cmd+click에도 컴포넌트가 선택됨"): ⌘-click or Ctrl-click on a link opens its href
+// through the host's external opener (main's scheme-checked one in the app) and is consumed there, so the press neither
+// moves the caret nor selects a node (ProseMirror's own modifier-click selected the whole paragraph). A plain click is
+// the page's, the caret placed as anywhere else. In every editor of the document (the read-only one too).
+describe('a link', () => {
+  const linked = doc({
+    type: 'paragraph',
+    attrs: { id: 'p1' },
+    content: [{ type: 'text', text: 'Read ' }, { type: 'text', text: 'the brief', marks: [{ type: 'link', attrs: { href: 'https://example.com/brief', title: null } }] }, { type: 'text', text: ' first.' }],
+  });
+  // a press on `target` as the page gets it, ProseMirror's handlers first (happy-dom has no layout to place a caret)
+  const clickWith = (target: Element, init: MouseEventInit, withPress = true) => {
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, ...init });
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init });
+    if (withPress) act(() => void target.dispatchEvent(down));
+    act(() => void target.dispatchEvent(click));
+    return { press: down.defaultPrevented, click: click.defaultPrevented };
+  };
+  const anchor = (editor: Editor) => editor.view.dom.querySelector('a[href]')!;
+
+  it('opens through the host on ⌘-click and on Ctrl-click, moving no caret and selecting nothing', async () => {
+    const openExternal = vi.fn();
+    const { editor } = await mount(linked, { ...owner, openExternal });
+    act(() => void editor().commands.setTextSelection(2));
+    for (const modifier of [{ metaKey: true }, { ctrlKey: true }]) {
+      expect(clickWith(anchor(editor()), modifier), JSON.stringify(modifier)).toEqual({ press: true, click: true });
+      expect(editor().state.selection.toJSON()).toEqual({ type: 'text', anchor: 2, head: 2 });
+    }
+    expect(openExternal.mock.calls).toEqual([['https://example.com/brief'], ['https://example.com/brief']]);
+  });
+
+  it('leaves a plain click to the page, opening nothing', async () => {
+    const openExternal = vi.fn();
+    const { editor } = await mount(linked, { ...owner, openExternal });
+    expect(clickWith(anchor(editor()), {}, false)).toEqual({ press: false, click: false });
+    const pos = editor().state.doc.textContent.indexOf('brief') + 1;
+    const handled = editor().view.someProp('handleClick', (handle) => handle(editor().view, pos, new MouseEvent('click', { button: 0 })));
+    expect(handled ?? false, 'a plain click taken from the page').toBe(false);
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('opens on ⌘-click in a read-only document too', async () => {
+    world = new World(linked);
+    const opened = openMemoryHandle(world.host, { log: () => {} });
+    handles.push(opened);
+    await whenSynced(opened);
+    const { handle, set } = readOnlySwitch(opened);
+    set(true);
+    const openExternal = vi.fn();
+    let current: Editor | null = null;
+    render(<DocumentEditor artifactId="doc1" handle={handle} host={{ ...owner, openExternal }} onEditor={(e) => (current = e)} />);
+    await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
+    expect(clickWith(anchor(current!), { metaKey: true })).toEqual({ press: true, click: true });
+    expect(openExternal.mock.calls).toEqual([['https://example.com/brief']]);
   });
 });
 
