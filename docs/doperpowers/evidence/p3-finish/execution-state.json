@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M4.1: S frozen; p3f-final running on S",
+  "phase": "M4.2: p3f-final green on S; bundle verified and extracted; paid reruns and the measurement gates under way",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -1414,7 +1414,12 @@
     "ref": "ci/p3f-final-de71da97",
     "run": 39202806940,
     "startedAt": "2026-10-19T05:06:06Z",
-    "status": "running",
-    "log": "/tmp/maws-review/gates/p3f-final-de71da97a-ci.log"
+    "status": "success",
+    "log": "/tmp/maws-review/gates/p3f-final-de71da97a-ci.log",
+    "record": "gates/p3f-final.json"
+  },
+  "postMerge": {
+    "merge": "073d10446a5f43f0ae8f818b2f0d650c710cc66c",
+    "record": "gates/post-merge.json"
   }
 }

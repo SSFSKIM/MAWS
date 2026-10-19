@@ -1,0 +1,16 @@
+{
+  "budgetUsd": "2.00",
+  "heldForDiagnosisUsd": "0.10",
+  "rule": "reserve each run's whole cap before it; settle from the receipted cumulative session cost counted once; an unreceipted or unresolved run keeps its whole reservation",
+  "entries": [
+    {
+      "attempt": "library-1",
+      "spec": "library-live.spec.ts",
+      "reservedUsd": "0.10",
+      "reservedAt": "2026-10-19T06:16:36Z",
+      "state": "reserved"
+    }
+  ],
+  "committedUsd": "0.10",
+  "availableUsd": "1.80"
+}
