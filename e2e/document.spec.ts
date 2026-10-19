@@ -6,8 +6,10 @@
 // host restart, after which the typing still lands; History lists A's versions, Save version adds a named one, and
 // Restore brings it back with the banner. The document exports through A's export service (M9's fix wave): `.md`,
 // `.html`, `.docx` and a `.pdf` beginning `%PDF-` with one page per tab on Letter and on A4, from the header's Export
-// menu (the header says the file written) and from `artifacts.export`; an image uploaded as an asset renders in the
-// editor through the `maws-artifact:` scheme under the app's CSP.
+// menu and from `artifacts.export`; an image uploaded as an asset renders in the editor through the `maws-artifact:`
+// scheme under the app's CSP. P3-F (8.2, F7): the header's Export saves where the owner chooses (main's save seam under
+// the e2e, MAWS_E2E_SAVE_PATH), the toast saying where, and exports what is shown: the version a preview shows, nothing
+// while two versions are compared, the live document again once history is left.
 // M9 (Acceptance 3 and 4): commented text copied through the Mac's pasteboard pastes without a second comment, a cut and
 // paste moves it, a real mouse drag keeps exactly one; A's restore brings back a deleted tab and the earlier text while
 // a reply posted after the version stays and a thread made after it shows orphaned.
@@ -265,54 +267,100 @@ test('a link opens on ⌘-click through main’s opener in a main tab and in the
   }
 });
 
-test('the document exports through A’s export service: Markdown, HTML, DOCX and a paged PDF on Letter and A4, from the Export menu and `artifacts.export`', async () => {
-  test.setTimeout(150_000);
-  const page = await start();
-  const { id, main } = await openInMain(page, 'Quarterly plan');
-  const mainHeader = page.locator('[data-region="main"] [data-editor-header]');
-  const mainText = main.locator('.ds-doc .ProseMirror');
+test('the document exports through A’s export service: Markdown, HTML, DOCX and a paged PDF on Letter and A4, from the Export menu (saved where the owner chooses, what is shown) and `artifacts.export`', async () => {
+  test.setTimeout(180_000);
+  const saved = mkdtempSync('/tmp/maws-e2e-document-saved-'); // P3-F (F7): where main's save seam puts the menu's exports
+  try {
+    const page = await start(false, { MAWS_E2E_SAVE_PATH: saved });
+    const { id, main } = await openInMain(page, 'Quarterly plan');
+    const mainHeader = page.locator('[data-region="main"] [data-editor-header]');
+    const mainText = main.locator('.ds-doc .ProseMirror');
 
-  // three tabs, each a page of its own in print
-  await mainText.click();
-  await page.keyboard.type('The launch waits for the review.');
-  for (const words of ['Budget notes for October.', '안녕하세요, 팀 여러분.']) {
-    await main.getByRole('button', { name: 'Add tab' }).click();
-    await expect(main.locator('.ds-doc .ProseMirror')).toHaveText('', { timeout: 10_000 });
-    await main.locator('.ds-doc .ProseMirror').click();
-    await page.keyboard.type(words);
+    // three tabs, each a page of its own in print
+    await mainText.click();
+    await page.keyboard.type('The launch waits for the review.');
+    for (const words of ['Budget notes for October.', '안녕하세요, 팀 여러분.']) {
+      await main.getByRole('button', { name: 'Add tab' }).click();
+      await expect(main.locator('.ds-doc .ProseMirror')).toHaveText('', { timeout: 10_000 });
+      await main.locator('.ds-doc .ProseMirror').click();
+      await page.keyboard.type(words);
+    }
+    await durable(main);
+
+    // P3-F (F7): the header's Export menu reaches A's service and saves where the owner chooses, the toast saying where; the
+    // header keeps no "Exported …" item
+    const pick = async (label: string) => {
+      await mainHeader.getByRole('button', { name: 'Export', exact: true }).click();
+      await page.getByRole('menuitem', { name: label, exact: true }).click();
+    };
+    const savedFile = (name: string) => join(saved, name);
+    const appears = (name: string, check: (bytes: Buffer) => boolean) =>
+      expect.poll(() => (existsSync(savedFile(name)) ? check(readFileSync(savedFile(name))) : false), { timeout: 60_000, message: `${name} saved` }).toBe(true);
+    await pick('PDF, A4 (.pdf)');
+    await appears('Quarterly plan.pdf', (bytes) => bytes.subarray(0, 5).toString('latin1') === '%PDF-');
+    expect(pdfPages(readFileSync(savedFile('Quarterly plan.pdf')))).toEqual({ pages: 3, width: 595, height: 842 });
+    await expect(page.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${savedFile('Quarterly plan.pdf')}`).first()).toBeVisible();
+    await expect(mainHeader.getByRole('button', { name: /^Exported / }), 'no finished export left in the header').toHaveCount(0);
+
+    // the four formats through the service's own command (the library's and the menu's route), Letter and A4
+    const exported = async (format: string, pageSize?: string) => {
+      const { path } = await ok<{ path: string; revision: number }>(page, 'artifacts.export', { artifactId: id, format, ...(pageSize ? { pageSize } : {}) });
+      return readFileSync(path);
+    };
+    const md = (await exported('md')).toString('utf8');
+    expect(md).toContain('The launch waits for the review.');
+    expect(md).toContain('안녕하세요, 팀 여러분.');
+    expect(md).not.toMatch(/\^[0-9a-z]{8}/); // no block ids in the file
+
+    const html = (await exported('html')).toString('utf8');
+    expect(html.startsWith('<!doctype html>')).toBe(true);
+    expect(html).toContain('Budget notes for October.');
+    expect(html).not.toContain('var(--ds-');
+
+    const docx = await exported('docx');
+    expect(docx.subarray(0, 2).toString('latin1')).toBe('PK');
+
+    const letter = await exported('pdf');
+    expect(letter.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    expect(pdfPages(letter)).toEqual({ pages: 3, width: 612, height: 792 }); // a tab a page, US Letter
+    const a4 = await exported('pdf', 'a4');
+    expect(pdfPages(a4)).toEqual({ pages: 3, width: 595, height: 842 }); // A4
+
+    await test.step('P3-F (8.2, F7): during a version preview the menu exports that version, while two are compared nothing, and the live document once history is left', async () => {
+      await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Three tabs' });
+      await main.locator('.ds-doc .ProseMirror').click(); // the third tab, the one shown
+      await page.keyboard.press('End');
+      await page.keyboard.type(' Added after the version.');
+      await durable(main);
+      await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'With the addition' });
+      await mainHeader.getByRole('button', { name: 'Version history' }).click();
+      const rail = main.getByRole('complementary', { name: 'Version history' });
+      await rail.getByRole('button', { name: /^Version Three tabs/ }).click();
+      const bar = main.getByRole('toolbar', { name: 'Version preview' });
+      await expect(bar).toBeVisible({ timeout: 10_000 });
+      await expect(mainHeader.locator('[data-header-saved]')).toHaveText('Read-only');
+      await pick('Markdown (.md)');
+      await appears('Quarterly plan.md', (bytes) => bytes.toString('utf8').includes('안녕하세요, 팀 여러분.'));
+      expect(readFileSync(savedFile('Quarterly plan.md'), 'utf8'), 'the version shown, not the live document').not.toContain('Added after the version.');
+
+      await rail.getByRole('button', { name: /^Version With the addition/ }).click({ modifiers: ['Shift'] });
+      await expect(bar.getByText('Three tabs → With the addition')).toBeVisible({ timeout: 10_000 });
+      await mainHeader.getByRole('button', { name: 'Export', exact: true }).click();
+      const items = page.getByRole('menuitem');
+      await expect(items).toHaveCount(6);
+      for (const item of await items.all()) await expect(item, 'two versions compared: nothing to export').toBeDisabled();
+      await page.keyboard.press('Escape');
+
+      await mainHeader.getByRole('button', { name: 'Version history' }).click();
+      await expect(bar).toBeHidden();
+      rmSync(savedFile('Quarterly plan.md'));
+      await pick('Markdown (.md)');
+      await appears('Quarterly plan.md', (bytes) => bytes.toString('utf8').includes('Added after the version.'));
+    });
+    expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    rmSync(saved, { recursive: true, force: true });
   }
-  await durable(main);
-
-  // the header's Export menu reaches A's service, and the header says the file it wrote
-  await mainHeader.getByRole('button', { name: 'Export' }).click();
-  await page.getByRole('menuitem', { name: 'PDF, A4 (.pdf)' }).click();
-  const done = mainHeader.getByRole('button', { name: /^Exported \S+\.pdf$/ });
-  await expect(done).toBeVisible({ timeout: 60_000 });
-
-  // the four formats through the service's own command (the library's and the menu's route), Letter and A4
-  const exported = async (format: string, pageSize?: string) => {
-    const { path } = await ok<{ path: string; revision: number }>(page, 'artifacts.export', { artifactId: id, format, ...(pageSize ? { pageSize } : {}) });
-    return readFileSync(path);
-  };
-  const md = (await exported('md')).toString('utf8');
-  expect(md).toContain('The launch waits for the review.');
-  expect(md).toContain('안녕하세요, 팀 여러분.');
-  expect(md).not.toMatch(/\^[0-9a-z]{8}/); // no block ids in the file
-
-  const html = (await exported('html')).toString('utf8');
-  expect(html.startsWith('<!doctype html>')).toBe(true);
-  expect(html).toContain('Budget notes for October.');
-  expect(html).not.toContain('var(--ds-');
-
-  const docx = await exported('docx');
-  expect(docx.subarray(0, 2).toString('latin1')).toBe('PK');
-
-  const letter = await exported('pdf');
-  expect(letter.subarray(0, 5).toString('latin1')).toBe('%PDF-');
-  expect(pdfPages(letter)).toEqual({ pages: 3, width: 612, height: 792 }); // a tab a page, US Letter
-  const a4 = await exported('pdf', 'a4');
-  expect(pdfPages(a4)).toEqual({ pages: 3, width: 595, height: 842 }); // A4
-  expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
 
 // ---- M9: comments through the real pasteboard and a real drag, and restore with conversations ------------------------

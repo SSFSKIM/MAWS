@@ -1,11 +1,13 @@
 // A dashboard's four exports in the product app (P3-E2 M5 of docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md,
 // acceptance 5 and M5's proof; P3-E Decision Logs 32, 33, 35 and 37; `pnpm e2e:dashboard`, MAWS_HARNESS=0).
-// - The owner draws a bar chart and a table over `sales` (Korean labels) in a main tab; the header's Export menu writes a
-//   PDF and A's `artifacts.export` (the library's route) writes all four. The HTML holds the very figure the editor drew
-//   (the same markup, parsed by the same engine) and the native table; Word holds the SVG with a PNG at twice its size
-//   beside it, the native table and the captions; Markdown the preview rows under the caption; the PDF's text (Poppler's
-//   pdftotext, as C's export group and M1 read PDFs) the captions, labels, table values and the snapshot's UTC time.
-//   A replacement after an export changes the next export only.
+// - The owner draws a bar chart and a table over `sales` (Korean labels) in a main tab; the header's Export menu saves a
+//   PDF where the owner chooses (main's save seam, MAWS_E2E_SAVE_PATH; the toast saying where) and A's `artifacts.export`
+//   (the library's route) writes all four. The HTML holds the very figure the editor drew (the same markup, parsed by
+//   the same engine) and the native table; Word holds the SVG with a PNG at twice its size beside it, the native table
+//   and the captions; Markdown the preview rows under the caption; the PDF's text (Poppler's pdftotext, as C's export
+//   group and M1 read PDFs) the captions, labels, table values and the snapshot's UTC time. A replacement after an
+//   export changes the next export only. P3-F (8.2, F7): during a version's preview the menu saves that version, its old
+//   snapshot and time; while two versions are compared it saves nothing; once history is left, the live data.
 // - Governed by a system with uploaded faces (the bundled Official's Noto Serif KR), the editor's figure is still the
 //   exports' figure byte for byte, naming the authored family, while the editor draws it in its scope's face; the HTML
 //   declares the face and the PDF embeds it (pdffonts).
@@ -16,7 +18,7 @@
 // Evidence (the files, the standalone page's picture, the PDF's first page) goes to test-results/dashboard-proof/.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import JSZip from 'jszip';
 import { asDocumentReplay } from './support/document-replay';
@@ -95,9 +97,21 @@ const exportedBy = (page: Page, artifactId: string, stem: string) => {
 };
 
 test('the four exports draw the editor’s figure and native table with snapshot times, from the menu and the service; a later replacement changes only later exports', async () => {
-  test.setTimeout(240_000);
-  app = await startApp(PROOF);
+  test.setTimeout(300_000);
+  // P3-F (F7): where main's save seam puts the menu's exports (evidence beside the rest)
+  const saved = resolve(PROOF, 'saved');
+  rmSync(saved, { recursive: true, force: true });
+  mkdirSync(saved, { recursive: true });
+  app = await startApp(PROOF, { MAWS_E2E_SAVE_PATH: saved });
   const { page, launch } = app;
+  const header = page.locator('[data-region="main"] [data-editor-header]');
+  const pick = async (label: string) => {
+    await header.getByRole('button', { name: 'Export', exact: true }).click();
+    await page.getByRole('menuitem', { name: label, exact: true }).click();
+  };
+  const savedFile = (name: string) => join(saved, name);
+  const appears = (name: string, check: (bytes: Buffer) => boolean) =>
+    expect.poll(() => (existsSync(savedFile(name)) ? check(readFileSync(savedFile(name))) : false), { timeout: 60_000, message: `${name} saved` }).toBe(true);
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'dashboard', title: 'Export board' });
   const id = artifact.id;
   const main = await openInMain(page, id);
@@ -112,11 +126,11 @@ test('the four exports draw the editor’s figure and native table with snapshot
   const editorTable = await views.nth(1).locator('.dash-figure > table').evaluate((el) => el.outerHTML);
   const exported = exportedBy(page, id, 'export-board');
 
-  await test.step('the header’s Export menu writes the PDF', async () => {
-    const header = page.locator('[data-region="main"] [data-editor-header]');
-    await header.getByRole('button', { name: 'Export' }).click();
-    await page.getByRole('menuitem', { name: 'PDF (.pdf)', exact: true }).click();
-    await expect(header.getByRole('button', { name: /^Exported \S+\.pdf$/ })).toBeVisible({ timeout: 60_000 });
+  await test.step('the header’s Export menu saves the PDF where the owner chooses, the toast saying where', async () => {
+    await pick('PDF (.pdf)');
+    await appears('Export board.pdf', (bytes) => bytes.subarray(0, 5).toString('latin1') === '%PDF-');
+    await expect(page.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${savedFile('Export board.pdf')}`).first()).toBeVisible();
+    await expect(header.getByRole('button', { name: /^Exported / }), 'no finished export left in the header').toHaveCount(0); // P3-F (c65)
   });
 
   await test.step('HTML: the editor’s figure and table, captions, the label with the snapshot time; nothing executable', async () => {
@@ -173,6 +187,7 @@ test('the four exports draw the editor’s figure and native table with snapshot
   });
 
   await test.step('a replacement after the exports: the next export shows the new snapshot and time, the files written stay', async () => {
+    await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Old data' }); // P3-F (F7): the version the preview step shows
     await bindCsv(page, id, 'sales', { title: 'Sales', name: 'sales.csv', csv: NEW.csv, at: NEW.at, appSessionId: SESSION_A });
     const md = (await exported('md', 'replaced')).toString('utf8');
     expect(md).toContain('| 서울 | 310 |');
@@ -187,6 +202,37 @@ test('the four exports draw the editor’s figure and native table with snapshot
     }
     expect(readFileSync(exported.files.get('export-board.html')!, 'utf8')).toContain(OLD_TIME);
     expect(readFileSync(exported.files.get('export-board.md')!, 'utf8')).toContain(OLD_TIME);
+  });
+
+  await test.step('P3-F (8.2, F7): during a version’s preview the menu saves that version’s data and time, while two are compared nothing, and the live data once history is left', async () => {
+    await durable(main);
+    await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'New data' });
+    await header.getByRole('button', { name: 'Version history' }).click();
+    const rail = main.getByRole('complementary', { name: 'Version history' });
+    await rail.getByRole('button', { name: /^Version Old data/ }).click();
+    const bar = main.getByRole('toolbar', { name: 'Version preview' });
+    await expect(bar).toBeVisible({ timeout: 15_000 });
+    await pick('Markdown (.md)');
+    await appears('Export board.md', (bytes) => bytes.toString('utf8').includes('| 서울 | 120 |'));
+    const previewed = readFileSync(savedFile('Export board.md'), 'utf8');
+    expect(previewed).toContain(OLD_TIME);
+    expect(previewed, 'the version shown, not the live data').not.toContain('| 서울 | 310 |');
+    copyFileSync(savedFile('Export board.md'), `${PROOF}/export-board-preview.md`);
+
+    await rail.getByRole('button', { name: /^Version New data/ }).click({ modifiers: ['Shift'] });
+    await expect(bar.getByText('Old data → New data')).toBeVisible({ timeout: 15_000 });
+    await header.getByRole('button', { name: 'Export', exact: true }).click();
+    const items = page.getByRole('menuitem');
+    await expect(items).toHaveCount(6);
+    for (const item of await items.all()) await expect(item, 'two versions compared: nothing to export').toBeDisabled();
+    await page.keyboard.press('Escape');
+
+    await header.getByRole('button', { name: 'Version history' }).click();
+    await expect(bar).toBeHidden();
+    rmSync(savedFile('Export board.md'));
+    await pick('Markdown (.md)');
+    await appears('Export board.md', (bytes) => bytes.toString('utf8').includes('| 서울 | 310 |'));
+    expect(readFileSync(savedFile('Export board.md'), 'utf8')).toContain(NEW_TIME);
   });
   expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });

@@ -12,6 +12,7 @@ import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { newDoc } from '@artifacts/yjs';
 import type { CommandName, EventName, MawsBridge } from '@shared/ipc/schema';
+import { useNotices } from '../../stores/notices'; // P3-F (F7)
 import { DocumentTabState, type DocumentTabDeps } from './tab-state';
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
@@ -43,7 +44,8 @@ function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
     invoke: (async (name: CommandName, input: unknown) => {
       calls.push([name, input]);
-      const value = name in answers ? answers[name] : name === 'artifacts.get' ? { artifact: row() } : undefined;
+      const given = name in answers ? answers[name] : name === 'artifacts.get' ? { artifact: row() } : undefined;
+      const value = typeof given === 'function' ? await (given as (input: unknown) => unknown)(input) : given; // P3-F (F7): an answer made from the input, or awaited
       if (value instanceof Error) return { ok: false, error: { code: 'internal', message: value.message } };
       return { ok: true, value };
     }) as MawsBridge['invoke'],
@@ -211,22 +213,73 @@ describe('a document tab’s state', () => {
     expect(gets()).toBe(before + 1);
   });
 
-  it('exports through the host with the page size chosen, its failure and its file said in the state', async () => {
-    const w = world();
+  // P3-F (8.2, F7; the deck's L233, the design's Decision Log 31): Export exports what the editor shows, through main's
+  // export service and then saved where the owner chooses, as the deck's Export saves, its outcome a toast.
+  it('exports what is shown, the live document or the version previewed, with the page size chosen, and saves it where the owner chooses', async () => {
+    useNotices.setState({ notices: [] });
+    const w = world({
+      'artifacts.export': (input: { versionId?: number; format: string }) => ({ path: `/u/artifacts/a/exports/${input.versionId === undefined ? 9 : 5}-${input.format}.x`, revision: input.versionId === undefined ? 9 : 5 }),
+      'library.saveAs': { saved: true, path: '/Users/o/Downloads/Launch plan.pdf' },
+    });
     const state = w.open();
     await ready(state);
+    const exporting = () => w.calls.filter(([name]) => name === 'artifacts.export' || name === 'library.saveAs');
     await state.export('pdf', 'a4');
-    expect(w.exported).toEqual([[A, 'pdf', undefined, { pageSize: 'a4' }]]);
-    expect(state.snapshot().exporting).toEqual({ phase: 'failed', format: 'pdf', message: 'exporting an artifact is not available yet' });
-    let finish!: (answer: { path: string }) => void;
-    w.setExport(() => new Promise((resolve) => (finish = resolve)));
+    expect(exporting()).toEqual([
+      ['artifacts.export', { artifactId: A, format: 'pdf', pageSize: 'a4' }],
+      ['library.saveAs', { artifactId: A, source: { export: { revision: 9, format: 'pdf' } } }],
+    ]);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Saved to /Users/o/Downloads/Launch plan.pdf']);
+    expect(state.snapshot().exporting, 'nothing left in the header: the toast said where it went').toBeNull();
+    expect(w.exported, 'never the export cache alone').toEqual([]);
+
+    state.setPreviewing(true, { versionId: 3 });
+    await state.export('md', 'letter');
+    expect(exporting().slice(2)).toEqual([
+      ['artifacts.export', { artifactId: A, format: 'md', versionId: 3, pageSize: 'letter' }],
+      ['library.saveAs', { artifactId: A, source: { export: { revision: 5, format: 'md' } } }],
+    ]);
+    state.setPreviewing(false, null);
+    await state.export('html', 'letter');
+    expect(exporting().slice(4)[0]).toEqual(['artifacts.export', { artifactId: A, format: 'html', pageSize: 'letter' }]);
+  });
+
+  it('exports nothing while two versions are compared', async () => {
+    const w = world({ 'artifacts.export': { path: '/u/x', revision: 9 }, 'library.saveAs': { saved: true, path: '/d/x' } });
+    const state = w.open();
+    await ready(state);
+    state.setPreviewing(true, 'compare');
+    expect(state.snapshot()).toMatchObject({ previewing: true, shown: 'compare' });
+    await state.export('pdf', 'letter');
+    expect(w.calls.filter(([name]) => name === 'artifacts.export' || name === 'library.saveAs')).toEqual([]);
+    expect(state.snapshot().exporting).toBeNull();
+  });
+
+  it('holds the menu while an export runs; a cancelled save says nothing, a failure is said in the header', async () => {
+    useNotices.setState({ notices: [] });
+    let finish!: (answer: unknown) => void;
+    let save: unknown = { saved: false };
+    let answer: () => unknown = () => new Promise((resolve) => (finish = resolve));
+    const w = world({ 'artifacts.export': () => answer(), 'library.saveAs': () => save });
+    const state = w.open();
+    await ready(state);
     const running = state.export('docx', 'letter');
+    await until(() => state.snapshot().exporting !== null, 'the export to start');
     expect(state.snapshot().exporting).toEqual({ phase: 'running', format: 'docx' });
-    finish({ path: '/u/artifacts/a/exports/7-docx.docx' });
+    finish({ path: '/u/artifacts/a/exports/7-docx.docx', revision: 7 });
     await running;
-    expect(state.snapshot().exporting).toEqual({ phase: 'done', format: 'docx', path: '/u/artifacts/a/exports/7-docx.docx' });
+    expect(state.snapshot().exporting).toBeNull();
+    expect(useNotices.getState().notices, 'a cancelled save dialog says nothing').toEqual([]);
+
+    answer = () => new Error('exporting an artifact is not available yet');
+    await state.export('pdf', 'a4');
+    expect(state.snapshot().exporting).toEqual({ phase: 'failed', format: 'pdf', message: 'exporting an artifact is not available yet' });
     state.dismissExport();
     expect(state.snapshot().exporting).toBeNull();
+    answer = () => ({ path: '/u/x', revision: 7 });
+    save = new Error('no export 7-pdf.pdf of a; export it again');
+    await state.export('pdf', 'letter');
+    expect(state.snapshot().exporting).toEqual({ phase: 'failed', format: 'pdf', message: 'no export 7-pdf.pdf of a; export it again' });
   });
 
   it('lets the tab close when everything is saved, waits for a save in flight, and asks when it does not land', async () => {

@@ -7,13 +7,18 @@
 // the rail the header toggles, an export's progress, and what still writes into the replica (the comment overlay
 // through its draft's withdrawal, a send in flight that records its message, Decision Log 27): the replica closes
 // only once nothing holds it and the host has acknowledged every edit.
+// P3-F (8.2, F7; the deck's L233, the design's Decision Log 31; c65, c66): Export exports what the editor shows, the
+// version its history previews (main reads that version's state and its pinned system) and nothing while two versions
+// are compared, else the live document; main's export service writes it and the file is then saved where the owner
+// chooses, as the deck's Export saves it (`artifacts.export`, then `library.saveAs`'s dialog at Downloads), the saved
+// path said in a toast and a cancelled dialog saying nothing.
 //
 // A replica never initialises its document: the host writes a new document's first tab in the create's own commit (the
 // document adapter's `initial`, A's seed hook), and the editor shows "Loading…" until that tab has arrived, then binds it.
 import { listTabs } from '@artifacts/document/tabs';
 import { listThreads, observeThreads } from '@artifacts/document/threads';
 import { onUpdate } from '@artifacts/yjs';
-import type { DocumentRail } from '@artifacts/document/editor/DocumentEditor';
+import type { DocumentRail, DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { MentionSource } from '@artifacts/document/editor/MentionPicker';
 import { actorKey } from '@shared/artifacts/actor';
@@ -22,6 +27,8 @@ import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/hos
 import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
+import { toast } from '../../stores/notices'; // P3-F (F7)
+import { VIEWERS_COPY } from '../artifacts/viewers/copy'; // P3-F (F7): the deck's words
 import type { DocumentExportFormat, ExportStatus } from './header';
 import { createHistoryApi } from './history-api';
 import { documentMentions } from './mentions';
@@ -71,6 +78,8 @@ export interface DocumentTabSnapshot {
   /** The document has waited past the bound for its first tab, which the host writes (shown in place of "Loading…"). */
   noContent: boolean;
   previewing: boolean;
+  /** P3-F (F7): what the editor shows, the version previewed or two compared (null: the live document); Export exports it. */
+  shown: DocumentShown;
   exporting: ExportStatus | null;
 }
 
@@ -102,7 +111,7 @@ export class DocumentTabState {
   ) {
     this.artifactId = target.artifactId;
     this.host = deps.host;
-    this.current = { ready: false, failed: null, handle: null, title: '', placement: {}, document: null, saving: false, unresolved: 0, suggestions: null, rail: null, saveVersionRequest: 0, noContent: false, previewing: false, exporting: null };
+    this.current = { ready: false, failed: null, handle: null, title: '', placement: {}, document: null, saving: false, unresolved: 0, suggestions: null, rail: null, saveVersionRequest: 0, noContent: false, previewing: false, shown: null, exporting: null };
     this.whenShown = new Promise((resolve) => (this.resolveShown = resolve));
     this.history = createHistoryApi({
       artifactId: this.artifactId,
@@ -245,8 +254,9 @@ export class DocumentTabState {
   requestSaveVersion(): void {
     this.set({ saveVersionRequest: this.current.saveVersionRequest + 1 });
   }
-  setPreviewing(previewing: boolean): void {
-    if (previewing !== this.current.previewing) this.set({ previewing });
+  setPreviewing(previewing: boolean, shown: DocumentShown = null): void {
+    const key = (of: DocumentShown) => (of === null || of === 'compare' ? of : of.versionId); // P3-F (F7)
+    if (previewing !== this.current.previewing || key(shown) !== key(this.current.shown)) this.set({ previewing, shown });
   }
 
   async setSuggestions(on: boolean): Promise<void> {
@@ -259,12 +269,19 @@ export class DocumentTabState {
     }
   }
 
+  /** P3-F (F7): the document as shown exported as `format` on `pageSize`, then saved where the owner chooses. */
   async export(format: DocumentExportFormat, pageSize: PageSize): Promise<void> {
-    if (this.current.exporting?.phase === 'running') return;
+    const { shown } = this.current;
+    if (this.current.exporting?.phase === 'running' || shown === 'compare') return; // two versions compared: nothing is exported
     this.set({ exporting: { phase: 'running', format } });
     try {
-      const { path } = await this.deps.host.export(this.artifactId, format, undefined, { pageSize });
-      if (!this.disposed) this.set({ exporting: { phase: 'done', format, path } });
+      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), pageSize });
+      if (!exported.ok) throw new Error(exported.error.message);
+      const { revision, exportId } = exported.value;
+      const saved = await this.deps.ipc.invoke('library.saveAs', { artifactId: this.artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) } } });
+      if (!saved.ok) throw new Error(saved.error.message);
+      if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path), actions: [], dismissible: true });
+      if (!this.disposed) this.set({ exporting: null });
     } catch (error) {
       this.deps.log(`document ${this.artifactId}: the ${format} export failed: ${messageOf(error)}`);
       if (!this.disposed) this.set({ exporting: { phase: 'failed', format, message: messageOf(error) } });
