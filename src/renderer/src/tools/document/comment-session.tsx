@@ -13,14 +13,21 @@
 // and directory at a time (a Comment meanwhile joins it), and the session it made is reused only in that directory. A
 // card opened on a session started for the comment starts on Send to main: a blank session has no conversation a side
 // thread could fork.
+// P3-F F4 (c26, the owner's E1 mark): a start that meets the trust card asks the owner in the notice itself, naming the
+// folder, with the composer card's two answers (Trust and start, Start without trusting); the comment's draft stays
+// meanwhile, and the owner's click starts the same session again with that answer (StartOptions.trust, the one way the
+// composer's card sends it), the card then opening on the same passage. Nothing here answers trust by itself. Open
+// session stays for every other card and refusal.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
 import { create } from 'zustand';
 import type { PassageRect } from '@artifacts/document/editor/comments/surface';
 import type { AppSessionId } from '@shared/graph/ids';
-import { NO_SESSION_CONTEXT, startArtifactSession, useArtifactSessionContext, type ArtifactSessionContext, type ArtifactSessionEnd } from '../../artifacts/session-context';
+import type { TrustState } from '@shared/sessions/trust'; // P3-F F4
+import { NO_SESSION_CONTEXT, startArtifactSession, useArtifactSessionContext, type ArtifactSessionContext, type ArtifactSessionEnd, type StartTrust } from '../../artifacts/session-context'; // P3-F F4: StartTrust
 import { useLibraryRow, useLibrarySpaces } from '../../library/store';
 import { shownSession } from '../../panel/host';
-import { SECONDARY } from '../../sessions/ui';
+import { HOME_TRUST_COPY } from '../../sessions/TrustCard'; // P3-F F4
+import { PRIMARY, QUIET, SECONDARY } from '../../sessions/ui'; // P3-F F4: PRIMARY, QUIET
 import { SIDE_COPY } from '../../side/copy';
 import { placeCard, pinOf, type CardStyle } from '../../side/card/placement';
 import { closeCard, useCommentCard } from '../../side/card/store';
@@ -30,6 +37,9 @@ const COPY = SIDE_COPY.card;
 const STARTING = 'Starting a session for this comment…';
 const COULD_NOT_START = 'The session did not start';
 const OPEN_SESSION = 'Open session';
+// P3-F F4: the trust question in the card's place, and what trust loads (the composer card's words, TrustCard.tsx)
+const TRUST_ASK = 'Trust this folder to start a session for this comment?';
+const TRUST_LOADS = 'Trust loads its settings, hooks, MCP servers and plugins, exactly as the terminal does.';
 
 // ---- the target --------------------------------------------------------------------------------------------------------
 
@@ -66,7 +76,11 @@ export function useArtifactCommentTarget(artifactId: string): ArtifactCommentTar
 
 // ---- the pending comment -----------------------------------------------------------------------------------------------
 
-type Notice = { status: 'none' | 'starting'; words: string } | { status: 'refused' | 'card'; words: string; appSessionId: AppSessionId | null };
+type Notice =
+  | { status: 'none' | 'starting'; words: string }
+  | { status: 'refused' | 'card'; words: string; appSessionId: AppSessionId | null }
+  // P3-F F4: the trust card's question, answered here by the owner's click (`decide`)
+  | { status: 'trust'; words: string; trust: TrustState; decide(trust: StartTrust): void };
 
 interface Pending {
   serial: number;
@@ -91,7 +105,8 @@ interface Starts {
 const starts = new Map<string, Starts>();
 const startKey = (artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>) => JSON.stringify([artifactId, context.path, context.projectId]);
 
-function startIn(artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>): Promise<ArtifactSessionEnd> {
+// P3-F F4: `trust`, the owner's answer to the trust card the last start met (a start already on its way is joined as is)
+function startIn(artifactId: string, context: Extract<ArtifactSessionContext, { kind: 'directory' }>, trust?: StartTrust): Promise<ArtifactSessionEnd> {
   const key = startKey(artifactId, context);
   let entry = starts.get(key);
   if (!entry) starts.set(key, (entry = { previous: null, running: null }));
@@ -99,7 +114,7 @@ function startIn(artifactId: string, context: Extract<ArtifactSessionContext, { 
   if (own.running) return own.running;
   const running = (async (): Promise<ArtifactSessionEnd> => {
     try {
-      const answer = await startArtifactSession(context, own.previous);
+      const answer = await startArtifactSession(context, own.previous, undefined, trust); // P3-F F4: trust
       if (answer.appSessionId !== null) own.previous = answer.appSessionId;
       return answer.status === 'starting' ? await answer.settled : answer;
     } catch (error) {
@@ -156,11 +171,21 @@ export function startCommentSession({ hostId, artifactId, threadId, label, conte
   const say = (notice: Notice) => {
     if (mine()) usePending.setState({ pending: { ...usePending.getState().pending!, notice } });
   };
-  void startIn(artifactId, context).then((end) => {
-    if (!mine()) return; // replaced, closed or gone meanwhile: the start's session stays for the next comment
-    if (end.status === 'ready') open(end.appSessionId); // the card's open clears the notice
-    else say({ status: end.status, words: end.words || COULD_NOT_START, appSessionId: end.appSessionId });
-  });
+  // P3-F F4: a start, with the owner's trust answer once the trust card asked for it
+  const run = (trust?: StartTrust) =>
+    void startIn(artifactId, context, trust).then((end) => {
+      if (!mine()) return; // replaced, closed or gone meanwhile: the start's session stays for the next comment
+      if (end.status === 'ready') open(end.appSessionId); // the card's open clears the notice
+      else if (end.status === 'card' && end.trust) say({ status: 'trust', words: TRUST_ASK, trust: end.trust, decide }); // P3-F F4
+      else say({ status: end.status, words: end.words || COULD_NOT_START, appSessionId: end.appSessionId });
+    });
+  // P3-F F4: the owner's click on one of the notice's answers; a notice already gone starts nothing
+  const decide = (trust: StartTrust) => {
+    if (!mine()) return;
+    say({ status: 'starting', words: STARTING });
+    run(trust);
+  };
+  run();
 }
 
 // ---- the notice --------------------------------------------------------------------------------------------------------
@@ -200,6 +225,7 @@ function Notice({ pending, locate, layoutKey, onClose }: NoticeProps) {
   useEffect(() => card.current?.focus(), []);
   const { notice } = pending;
   const session = 'appSessionId' in notice ? notice.appSessionId : null;
+  const trust = notice.status === 'trust' ? notice : null; // P3-F F4
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Escape' || event.nativeEvent.isComposing || event.defaultPrevented) return;
     event.preventDefault();
@@ -234,6 +260,21 @@ function Notice({ pending, locate, layoutKey, onClose }: NoticeProps) {
         <p role="status" className={`m-0 text-ui-sm ${notice.status === 'refused' ? 'text-danger' : 'text-fg-muted'}`}>
           {notice.words}
         </p>
+        {trust !== null && (
+          // P3-F F4: the folder and what trust loads, then the composer card's two answers
+          <>
+            <p className="m-0 font-mono text-ui-sm break-all text-fg">{trust.trust.directory}</p>
+            <p className="m-0 text-ui-sm text-fg-muted">{trust.trust.isHome ? HOME_TRUST_COPY : TRUST_LOADS}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className={PRIMARY} onClick={() => trust.decide('accepted')}>
+                Trust and start
+              </button>
+              <button type="button" className={QUIET} onClick={() => trust.decide('declined')}>
+                Start without trusting
+              </button>
+            </div>
+          </>
+        )}
         {session !== null && (
           <div className="flex justify-end">
             <button type="button" className={SECONDARY} onClick={() => useLayout.getState().openSession(session, { how: 'tab' })}>

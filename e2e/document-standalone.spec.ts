@@ -5,12 +5,20 @@
 // that session: Comment opens P2's card naming it, Side thread chosen, nothing started. The owner's own document in no
 // Space has no context: Comment shows the card's notice saying so, and Close withdraws the comment's mark. Captures:
 // `standalone-card-own-session`, `standalone-card-no-context`. No engine runs; every scratch directory is the case's own.
+// P3-F F4 (c26, the owner's E1 mark): the owner's document in a Space linked to an untrusted folder. Comment starts a
+// session there, which meets the trust card; the notice asks in the card's place, naming the folder, with Trust and
+// start and Start without trusting and the comment's mark kept, and the owner's answer starts that session (C10's replay
+// seam: the trust bootstrap's recording first for Trust and start, then a no-turn journal on the direct route), the card
+// then opening on the same passage with Send to main chosen. Capture: `standalone-card-trust`.
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, value } from './support/c7-replay';
 import { asDocumentReplay } from './support/document-replay';
-import { allowNext, idle, PASS3, recordedCwd, replay, scene, show, type Scene } from './support/maws-tools';
+import { allowNext, closeScene, idle, launchScene, PASS3, recordedCwd, replay, scene, scratchProject, show, type Scene } from './support/maws-tools';
+import { SideJournal } from './support/side-replay';
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -170,3 +178,74 @@ test('the owner’s document in no Space, opened as its own tab: Comment shows t
     await expect(marks(text), 'the unsent comment withdrawn with its mark').toHaveCount(0);
   });
 });
+
+// P3-F F4: the trust bootstrap the replay seam hands Trust and start's first launch (as e2e/sessions.spec.ts's case does)
+const BOOTSTRAP = `${PASS3}/trust-bootstrap-recorded.jsonl`;
+
+for (const [answer, trust] of [['Trust and start', 'accepted'], ['Start without trusting', 'declined']] as const) {
+  test(`the owner’s document in a Space linked to an untrusted folder: Comment asks for trust in the card’s place, and ${answer} opens the card on the passage`, async () => {
+    const scratch = scratchProject({ titles: [`P3-F F4: ${answer}`], label: `f4-trust-${trust}` });
+    const before = process.env.MAWS_E2E_REPLAY_FIXTURES;
+    try {
+      // C10's replay seam (MAWS_E2E_REPLAY_FIXTURES, handed through the runner's environment as e2e/browser-comment.spec.ts
+      // hands it): each launch takes the next journal. The comment's session starts with no message, so its journal is
+      // the handshake alone; Trust and start's bootstrap runs first.
+      const journals = join(scratch.root, 'journals');
+      mkdirSync(journals, { recursive: true });
+      const session = new SideJournal(randomUUID(), scratch.repo).write(journals, 'comment-session');
+      process.env.MAWS_E2E_REPLAY_FIXTURES = (trust === 'accepted' ? [BOOTSTRAP, session] : [session]).join(',');
+      let s: Scene;
+      try {
+        s = await launchScene(scratch);
+      } finally {
+        if (before === undefined) delete process.env.MAWS_E2E_REPLAY_FIXTURES;
+        else process.env.MAWS_E2E_REPLAY_FIXTURES = before;
+      }
+      try {
+        // the scratch config home has no `.claude.json`, so the folder is untrusted; new sessions take the direct route
+        // (the journal verifies direct, and no relay is asked)
+        value(await invoke(s.page, 'settings.set', { gateway: { defaultRoute: 'direct' } }));
+        const { space } = value(await invoke(s.page, 'spaces.create', { name: 'Untrusted folder', linkedDir: s.repo }));
+        const { artifact } = value(await invoke(s.page, 'artifacts.create', { kind: 'document', title: 'Space notes', spaceId: space.id }));
+        const tab = await openAsTab(s, 'Space notes', artifact.id);
+        const text = tab.locator('.ds-doc .ProseMirror');
+        await text.click();
+        await s.page.keyboard.type('The review is scheduled for Friday.');
+        await expect(text.locator('p')).toHaveText(['The review is scheduled for Friday.']);
+        await select(text, QUOTE);
+        await comment(tab);
+
+        const notice = s.page.locator('[data-comment-context]');
+        await expect(notice, 'the start met the trust card').toHaveAttribute('data-comment-context', 'trust', { timeout: 30_000 });
+        await expect(notice).toContainText(s.repo);
+        await expect(notice.getByRole('button', { name: 'Trust and start', exact: true })).toBeVisible();
+        await expect(notice.getByRole('button', { name: 'Start without trusting', exact: true })).toBeVisible();
+        await expect(notice.getByRole('button', { name: 'Open session' }), 'answered here, not in another session').toHaveCount(0);
+        await expect(s.page.locator('[data-comment-card]')).toHaveCount(0);
+        await expect(marks(text).filter({ hasText: QUOTE }), 'the comment’s mark kept while the card asks').toHaveCount(1);
+        if (trust === 'accepted') await test.info().attach('standalone-card-trust', { body: await s.page.screenshot(), contentType: 'image/png' });
+
+        await notice.getByRole('button', { name: answer, exact: true }).click();
+        const card = s.page.locator('[data-comment-card]');
+        await expect(card, 'the card opens once the session is ready').toBeVisible({ timeout: 60_000 });
+        await expect(notice).toHaveCount(0);
+        await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
+        await expect(card).toHaveAttribute('data-anchor-locator', QUOTE);
+        await expect(card.getByRole('radio', { name: 'Send to main' })).toBeChecked();
+        await expect(marks(text).filter({ hasText: QUOTE }), 'on the same passage, one mark').toHaveCount(1);
+        const started = (await card.locator('[data-card-parent]').getAttribute('data-card-parent')) as AppSessionId;
+        // the owner's answer reached the engine as the composer's card sends it: attested on Trust and start, absent without
+        const initialize = s.journal(started).find((row) => row.direction === 'out' && (row.frame as { request?: { subtype?: string } }).request?.subtype === 'initialize');
+        const attested = (initialize?.frame as { request?: { workspaceTrust?: unknown } } | undefined)?.request?.workspaceTrust;
+        if (trust === 'accepted') expect(attested).toEqual({ accepted: true, directory: s.repo });
+        else expect(attested).toBeUndefined();
+      } catch (error) {
+        await s.maws.cleanup();
+        throw error;
+      }
+      await closeScene(s);
+    } finally {
+      rmSync(scratch.root, { recursive: true, force: true });
+    }
+  });
+}
