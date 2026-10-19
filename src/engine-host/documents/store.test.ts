@@ -659,6 +659,45 @@ describe('ArtifactStore: versions (Decision Log 8)', () => {
     expect(upgraded).toMatchObject({ kind: 'named', label: 'Current', assetRefs: [asset.assetId] });
     expect(upgraded.designSystemRef).toBeUndefined();
   });
+
+  // P3-F (store-versions sweep#1): the pin is read only where a version row of the artifact is written (Decision Log 22b)
+  it('leaves the governing system’s history alone when markViewed finds the doc unmoved', async () => {
+    const system = await store.create({ kind: 'design_system', title: 'House style' }, human);
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# v1'));
+    const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: system.id }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'text'));
+    await store.markViewed(doc.id); // the doc moved: its auto version pins the system, writing the system's first
+    expect(store.listVersions(system.id)).toHaveLength(1);
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# v2')); // the system moves
+    const systemAt = store.get(system.id)!.updatedAt;
+    now += MIN;
+    await store.markViewed(doc.id); // the doc did not: no version of it, so nothing to pin
+    expect(store.listVersions(doc.id)).toHaveLength(1);
+    expect(store.listVersions(system.id)).toHaveLength(1);
+    expect(store.get(system.id)!.updatedAt).toBe(systemAt);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'more '));
+    await store.markViewed(doc.id); // a version written pins the system as it is now
+    expect(store.listVersions(system.id)).toHaveLength(2);
+    expect(store.listVersions(doc.id).at(-1)!.designSystemRef).toEqual({ id: system.id, versionSeq: store.revision(system.id) });
+  });
+
+  it('leaves the governing system’s history alone when a byte kind’s turn finds no auto version to upgrade', async () => {
+    const system = await store.create({ kind: 'design_system', title: 'House style' }, human);
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# v1'));
+    const page = await store.create({ kind: 'html', title: 'Page', designSystemId: system.id, content: { bytes: html('one') } }, agent); // an import version, pinning the system
+    expect(store.listVersions(system.id)).toHaveLength(1);
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# v2')); // the system moves
+    const systemAt = store.get(system.id)!.updatedAt;
+    now += MIN;
+    await store.endTurn(sid('app-1')); // the agent's write has an import version: no auto to upgrade, no version written
+    expect(store.listVersions(page.id).map((v) => v.kind)).toEqual(['import']);
+    expect(store.listVersions(system.id)).toHaveLength(1);
+    expect(store.get(system.id)!.updatedAt).toBe(systemAt);
+    await store.writeContent(page.id, { bytes: html('two') }, agent);
+    await store.endTurn(sid('app-1')); // its auto version becomes the turn's, pinning the system as it is now
+    expect(store.listVersions(page.id).map((v) => v.kind)).toEqual(['import', 'turn']);
+    expect(store.listVersions(page.id).at(-1)!.designSystemRef).toEqual({ id: system.id, versionSeq: store.revision(system.id) });
+  });
 });
 
 describe('ArtifactStore: restore (Decision Log 16)', () => {

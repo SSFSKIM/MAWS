@@ -1006,7 +1006,7 @@ export class ArtifactStore {
     const at = this.now();
     const { revision, state } = this.service.readState(row.id);
     const actor = typeof meta.actor === 'string' ? meta.actor : actorKey(meta.actor);
-    const id = this.versions.writeState(row.id, revision, state, { ...meta, actor, at, designSystemRef: this.pinInFrame(row), assetRefs: this.assetIds(row.id) }, options);
+    const id = this.versions.writeState(row.id, revision, state, this.withPin(row, { ...meta, actor, at, assetRefs: this.assetIds(row.id) }), options);
     // The state kept for the next delta lives as long as the doc stays loaded (the service's unload forgets it); a doc
     // read from the store without loading (a scheduled auto version after the idle unload, a design system's pin)
     // keeps none.
@@ -1027,6 +1027,15 @@ export class ArtifactStore {
     const revision = this.service.revision(system.id);
     if (this.versions.latest(system.id)?.seq !== revision) this.versionInFrame(system, { kind: 'auto', actor: this.lastWriter(system.id) }, { pinTarget: true });
     return { id: system.id, versionSeq: this.versions.latest(system.id)!.seq };
+  }
+
+  // `meta` with its design-system pin read only where the version store writes a row with it (P3-F store-versions
+  // sweep#1): a version that writes nothing (an `auto` at a revision already captured, a turn's checkpoint with no `auto`
+  // to upgrade) leaves the governing system's history and `updatedAt` alone, since Decision Log 22b writes the system's
+  // `auto` only for a version written. Read at most once.
+  private withPin<T extends object>(row: EntityRow, meta: T): T & { readonly designSystemRef: DesignSystemRef | null } {
+    let pin: { ref: DesignSystemRef | null } | null = null;
+    return Object.defineProperty(meta, 'designSystemRef', { enumerable: true, get: () => (pin ??= { ref: this.pinInFrame(row) }).ref }) as T & { readonly designSystemRef: DesignSystemRef | null };
   }
 
   // The live design system governing `target` as the registered chain names it (Decision Log 42), or null when the
@@ -1180,7 +1189,7 @@ export class ArtifactStore {
       const id = await this.service.inBatch(() =>
         isDocKind(row.kind)
           ? this.versionInFrame(row, meta)
-          : this.versions.checkpoint(row.id, this.contentRef(row.id).revision, { ...meta, actor: actorKey(actor), at: this.now(), designSystemRef: this.pinInFrame(row), assetRefs: this.assetIds(row.id) }),
+          : this.versions.checkpoint(row.id, this.contentRef(row.id).revision, this.withPin(row, { ...meta, actor: actorKey(actor), at: this.now(), assetRefs: this.assetIds(row.id) })),
       );
       if (id !== null) this.emit(artifactId, 'updated');
     }
