@@ -235,8 +235,9 @@ export class LibraryMirror {
     this.cleanUnlinked();
   }
 
-  // A linked directory's key: its real path; while it is away, the real path it last had, or its resolved path if this
-  // run never found it.
+  // A linked directory's key: its real path; while the path reaches nothing, the real path it last reached if that is
+  // away too (the directory itself is away), else its resolved path (never found this run, or a link on it removed or
+  // retargeted, so a directory the path no longer reaches is never written).
   private keyOf(linkedDir: string): string {
     const resolved = resolve(linkedDir);
     try {
@@ -244,7 +245,8 @@ export class LibraryMirror {
       this.realDirs.set(resolved, real);
       return real;
     } catch {
-      return this.realDirs.get(resolved) ?? resolved;
+      const real = this.realDirs.get(resolved);
+      return real !== undefined && !existsSync(real) ? real : resolved;
     }
   }
 

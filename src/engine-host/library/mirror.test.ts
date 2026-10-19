@@ -880,4 +880,32 @@ describe('the mirror over a directory that goes away, is relinked or is spelled 
       rmSync(elsewhere, { recursive: true, force: true });
     }
   });
+
+  it('stops writing into a directory the Space’s link no longer reaches, and mirrors where it points once that is there (library review keyOf)', async () => {
+    const links = mkdtempSync(join(tmpdir(), 'maws-mirror-links-'));
+    try {
+      const link = join(links, 'project');
+      symlinkSync(project, link); // the Space's path, a link to the project
+      await startMirror();
+      const space = await linkedSpace('Launch', link);
+      const first = await page('First', space.id);
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(first)]);
+
+      const later = join(links, 'later');
+      rmSync(link);
+      symlinkSync(later, link); // retargeted to a directory not there yet; the project stays on disk
+      const second = await page('Second', space.id);
+      await mirror!.flush();
+      expect(listed()).toEqual([]); // nothing written there, and its mirror removed as any directory no Space links
+      expect(logs.some((line) => line.includes('Launch') && line.includes(link))).toBe(true);
+
+      mkdirSync(later);
+      await store().writeContent(second.id, html('Second 2'), agent);
+      await mirror!.flush();
+      expect(readdirSync(join(later, 'artifacts')).sort()).toEqual([MIRROR_MANIFEST, file(first), file(second)].sort());
+    } finally {
+      rmSync(links, { recursive: true, force: true });
+    }
+  });
 });
