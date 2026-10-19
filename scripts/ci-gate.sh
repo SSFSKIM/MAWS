@@ -12,9 +12,10 @@
 # is rerun alone, once per job per run, and the script reports the run's final attempt: the line before the run's status,
 # `ci-gate: run <id> <conclusion>`, is `ci-gate: run <id> attempt <n>`, and a line before those names each preempted job
 # and how its rerun ended, one preempted again staying red (Decision Log 70). When the mini refused jobs (ci-kit's
-# job-started check: a dialog or the wrong app in front), the last line before the run's status names the refused, the
-# green and the red, and the --gates that relaunches the refused and the red on the same tree (Decision Log 58(c), 59(1)),
-# with --default-beside naming the run's other e2e groups when the relaunch takes e2e:default (Decision Log 66).
+# job-started check: a dialog or the wrong app in front; its measured-job guard: a MEASURED_E2E group's desktop not
+# settled within 15 minutes), the last line before the run's status names the refused, the green and the red, and the
+# --gates that relaunches the refused and the red on the same tree (Decision Log 58(c), 59(1)), with --default-beside
+# naming the run's other e2e groups when the relaunch takes e2e:default (Decision Log 66).
 #
 #   <worktree-or-sha>  a worktree path (its HEAD is tested) or a commit
 #   --gates            narrow to static, unit, unit:darwin, packaged (macOS), probes or e2e:<group>; default: class 1a

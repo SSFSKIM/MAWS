@@ -91,6 +91,8 @@ const macOnly = lane === 'linux' ? [...gates].filter((gate) => gate.startsWith('
 if (macOnly.length > 0) refuse(`${macOnly.join(', ')} run on the macOS runner (§3.1): ask with Runner: macos (ci-gate.sh --runner macos)`);
 
 const libreoffice = new Set(words(env.LIBREOFFICE_E2E));
+// The timing-measured groups: on a Mac their job waits first for the desktop to settle, with a longer timeout.
+const measured = new Set(words(env.MEASURED_E2E));
 // desk-web, the one POOL_E2E group, is one Playwright worker; a cpus-4 box is a c3d-highcpu-4 with 8 GB, where cpus-2's
 // e2-highcpu-2 has 2 GB for the build, two browsers and the hub double, at about the same price (Decision Log 68).
 const offMac = new Set(words(env.POOL_E2E));
@@ -100,7 +102,7 @@ const e2e = [...gates]
   .map((gate) => {
     const group = gate.slice(4);
     const runner = JSON.stringify(placed(group));
-    return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), runner };
+    return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), measured: measured.has(group), runner };
   });
 
 // Group names; an `e2e:` prefix, as --gates writes them, is read as the group.

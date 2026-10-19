@@ -3,7 +3,8 @@
 # trailer, choosing the e2e lane with a `Runner:` trailer and class 1a's runner with a `Class1a:` trailer; a relaunch of
 # part of a set names the whole set's other e2e groups in a `DefaultBeside:` trailer (Decision Log 66). An `Evidence: yes`
 # trailer keeps a green run's e2e reports (Decision Log 48); a `Live: yes` trailer runs the LIVE_E2E groups, and only
-# them, with their run flags on, a paid run each spec caps itself (Decision Log 75).
+# them, with their run flags on, a paid run each spec caps itself (Decision Log 75). On a Mac a MEASURED_E2E group first
+# waits for ci-kit's measured-job guard to find the desktop settled, and is refused, to be relaunched, when it has not.
 name: gate
 
 on:
@@ -68,6 +69,13 @@ env:
   # alone, since `default`'s bare `pnpm e2e` collects every one of their specs; any other run refuses them, since
   # design-live and dashboard-live would spend under their scripts' own flag (Decision Log 75).
   LIVE_E2E: library-live document-live presentations-live design-systems-live send-to-live design-live dashboard-live
+  # The timing-measured groups, whose bounds were calibrated on the mini at @2x with no viewer and no foreign load, so a
+  # result read under another posture is void (Decision Log 75's posture go). On a Mac each job's first step is ci-kit's
+  # measured-job guard (SSFSKIM/ci-kit/mac/settle, ci-kit's docs/mac-lane.md): it releases the job once two reads 30 s
+  # apart each show the 1-minute load under 5, the display at @2x, no Parsec viewer or screensharingd and no computer
+  # use, and after 15 minutes refuses it with ci-kit's `ci-kit: … rerun` line, which scripts/ci-gate.sh counts as refused
+  # and relaunches. Their job timeout adds those 15 minutes to the usual 30.
+  MEASURED_E2E: artifacts-perf document-scale presentations-scale
 
 defaults:
   run:
@@ -236,7 +244,7 @@ jobs:
     if: needs.plan.outputs.e2e != '[]'
     name: e2e:${{ matrix.group }}
     runs-on: ${{ fromJSON(matrix.runner) }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.measured && 45 || 30 }}
     strategy:
       fail-fast: false
       matrix:
@@ -250,7 +258,11 @@ jobs:
       MAWS_LIBRARY_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
       MAWS_LIVE_DOCUMENT: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
     steps:
-      - uses: actions/checkout@v7
+      # A measured group waits here, before its checkout, until the Mac's desktop has settled (MEASURED_E2E above).
+      - if: matrix.measured && runner.os == 'macOS'
+        uses: SSFSKIM/ci-kit/mac/settle@v1
+      - id: checkout
+        uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           e2e: 'true'
@@ -290,7 +302,9 @@ jobs:
           specs=()
           if [[ -s $RUNNER_TEMP/e2e-specs ]]; then while IFS= read -r spec; do specs+=("$spec"); done <"$RUNNER_TEMP/e2e-specs"; fi
           .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: ' "${display[@]}" pnpm "$SCRIPT" "${specs[@]}"
-      - if: failure() || needs.plan.outputs.evidence == 'true'
+      # Only after this job's own checkout: on the Mac the workspace persists between jobs and only the checkout's clean
+      # clears the last job's reports, so a job that failed before it (a refused measured group) would upload another's.
+      - if: (failure() || needs.plan.outputs.evidence == 'true') && steps.checkout.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: e2e-${{ matrix.slug }}
