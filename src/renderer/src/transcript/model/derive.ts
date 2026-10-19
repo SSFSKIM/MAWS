@@ -7,7 +7,7 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
+import { parseAskSteer, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
@@ -335,6 +335,15 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (event.kind === 'command.lifecycle') openerDropped = true;
   }
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
+  // An async ask's answers reach the engine as a steer of their envelope (`[MAWS ask <id>]` and the answered result's
+  // JSON, shared/maws/ask.ts). Once it has answered a capsule this state holds (the reducer's recordAskSteer, run when
+  // the steer arrived, so before this turn derives), the capsule reads Answered with the answers, and the envelope is no
+  // bubble: drawn, it read "Your message" holding raw JSON. A steer that answered nothing here keeps its bubble.
+  const answersHeldAsk = (event: Event<'user.message'>): boolean => {
+    const steer = state === null ? null : parseAskSteer(messageText(event.content));
+    const owner = steer === null ? undefined : state!.index.toolUses.get(steer.askId as ToolUseId);
+    return owner !== undefined && state!.turns.get(owner)?.askSteers?.has(steer!.askId) === true;
+  };
   // W1: a prompt waiting for the engine while another turn runs is a `next` steer (Enter while a turn runs); a `now`
   // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
   // it (the reducer re-derives every waiting turn when the running turn changes).
@@ -401,6 +410,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (originOf(event.origin) === 'peer' && parsePeerMessage(messageText(event.content)) !== null) {
           // E7: a message from another session or an in-process agent: its companion event (peer.message,
           // subagent.message) draws it; a peer text the parser refuses keeps its bubble below, so nothing is lost
+        } else if (answersHeldAsk(event)) {
+          // an async ask's answer: its capsule draws it (above)
         } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
           user = userRow(event, rowId.user(event.messageUuid), true);
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {

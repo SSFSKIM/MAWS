@@ -767,8 +767,8 @@ function apply(batch: Batch, event: SessionEvent): void {
 // cloned for this batch and given a new map, so a snapshot taken before the steer still reads `asked`), and that turn
 // re-derives, since the steer usually runs as a turn of its own (pass3/p1-maws-ask-async) and on the disk path it is
 // the only record of the answers. A steer naming no call this state holds answers nothing (the call always precedes
-// its steer). The first steer naming an ask wins. The message itself is placed as any other prompt: its bubble stays a
-// user row.
+// its steer). The first steer naming an ask wins. The message itself is placed as any other prompt (its turn, its fold);
+// derive draws no bubble for a steer that answered a capsule here, the capsule showing the answers.
 function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
   const text = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n');
   const steer = parseAskSteer(text);
