@@ -854,4 +854,30 @@ describe('the mirror over a directory that goes away, is relinked or is spelled 
     }
   });
 
+  it('writes a copy over a link the owner put in its place, leaving what the link points at alone (library scalpel-2#3)', async () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
+    try {
+      const copy = { read: () => new Uint8Array([5, 6]) };
+      offs.push(registerMirrorWriter('document', ({ doc }): MirrorOutput => ({ files: { 'd/text.txt': doc!.get('root').toString(), 'd/assets/a.bin': copy } })));
+      await startMirror();
+      const space = await linkedSpace();
+      const doc = await store().create({ kind: 'document', title: 'Doc', spaceId: space.id }, human);
+      await store().testWrite(doc.id, 'w1', [{ op: 'insertText', index: 0, text: 'v1' }], human);
+      await mirror!.flush();
+      expect([...readFileSync(out('d', 'assets', 'a.bin'))]).toEqual([5, 6]);
+      writeFileSync(join(elsewhere, 'theirs.bin'), 'the owner’s file');
+      rmSync(out('d', 'assets', 'a.bin'));
+      symlinkSync(join(elsewhere, 'theirs.bin'), out('d', 'assets', 'a.bin'));
+
+      await store().testWrite(doc.id, 'w2', [{ op: 'insertText', index: 0, text: 'v2 ' }], human);
+      await sleep(CHANGE_COALESCE_MS + 50);
+      await mirror!.flush();
+      expect(lstatSync(out('d', 'assets', 'a.bin')).isFile()).toBe(true);
+      expect([...readFileSync(out('d', 'assets', 'a.bin'))]).toEqual([5, 6]);
+      expect(mode('d', 'assets', 'a.bin')).toBe(0o444);
+      expect(readFileSync(join(elsewhere, 'theirs.bin'), 'utf8')).toBe('the owner’s file');
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
 });

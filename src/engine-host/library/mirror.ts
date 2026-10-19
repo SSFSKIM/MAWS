@@ -380,7 +380,7 @@ export class LibraryMirror {
         }
         // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 37 (1)): a copy already in place keeps
         // its bytes (they never change under its name); one the mirror lacks is read now
-        if (isMirrorCopy(data) && mine.has(file) && existsSync(target)) {
+        if (isMirrorCopy(data) && mine.has(file) && isFile(target)) {
           written.push(file);
           continue;
         }
@@ -580,6 +580,15 @@ function occupied(path: string): boolean {
   try {
     lstatSync(path);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+// A regular file is at `path`, never followed: a link in the place of a file the mirror owns is not that file.
+function isFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile();
   } catch {
     return false;
   }
