@@ -195,6 +195,34 @@ test.describe('the document editor', () => {
     await expect(replica(page, 'b').getByRole('tab')).toHaveText(['Tab 2', 'Notes']);
   });
 
+  // P3-F (sitting candidate 17): Tab from a table's last cell, ending in a date chip, adds a row, and the next typing lands
+  // in the new row's first cell (it landed after the chip of the row above)
+  test('Tab from a table’s last cell adds a row and the next typing lands in its first cell', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    const insert = async (item: string) => {
+      await bar.getByRole('button', { name: 'Insert', exact: true }).click();
+      await bar.getByRole('menuitem', { name: item, exact: true }).click();
+    };
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+    await insert('Table');
+    const rows = content(page, 'a').locator('table tr');
+    await expect(rows).toHaveCount(3);
+    const last = rows.nth(2).locator('td').last();
+    await last.click();
+    await insert('Date');
+    await page.keyboard.press('Escape');
+    await expect(last.locator('[data-node="date"]')).toHaveCount(1);
+    // the caret after the chip, as the owner's was
+    const box = (await last.locator('p').boundingBox())!;
+    await last.locator('p').click({ position: { x: box.width - 2, y: box.height / 2 } });
+    await page.keyboard.press('Tab');
+    await page.keyboard.type('Reviewer');
+    await expect(rows).toHaveCount(4);
+    await expect(rows.nth(3).locator('td').first()).toHaveText('Reviewer');
+    await expect(rows.nth(2)).not.toContainText('Reviewer');
+  });
+
   test('find highlights the matches and steps to the second', async () => {
     const { page } = maws;
     await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.caretAtEnd('a', 'title001'));

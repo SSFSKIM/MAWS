@@ -244,6 +244,48 @@ describe('the toolbar', () => {
   });
 });
 
+// P3-F (sitting candidate 17): Tab from a table's last cell adds a row and takes the caret into its first cell, where the
+// next typing lands. The new row's cells are empty (`block*`) until the cell fill's paragraph, so prosemirror-tables'
+// text selection had nowhere to stand in them and fell back into the cell left, after its date chip. An empty cell
+// already in the table (an agent's, an import's) is entered the same way.
+describe('Tab in a table', () => {
+  // every block with its id, as the writer stores an agent's table; Tab pressed as the page gets it (`keyboardShortcut`
+  // replays the steps of what the key dispatched, not its selection)
+  let n = 0;
+  const cell = (content: JSONContent[]): JSONContent => ({ type: 'tableCell', attrs: { id: `cell000${++n}` }, content });
+  const line = (id: string, ...content: JSONContent[]): JSONContent => ({ type: 'paragraph', attrs: { id }, content });
+  const table = (...rows: JSONContent[][]): JSONContent => ({ type: 'table', attrs: { id: 'table001' }, content: rows.map((cells, i) => ({ type: 'tableRow', attrs: { id: `row0000${i}` }, content: cells })) });
+  const rows = (editor: Editor): string[][] => {
+    const out: string[][] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === 'tableRow') out.push(Array.from({ length: node.childCount }, (_, i) => node.child(i).textContent));
+      return node.type.name !== 'tableRow';
+    });
+    return out;
+  };
+
+  it('from the last cell, ending in a date chip, adds a row and puts the caret in its first cell, where typing lands', async () => {
+    const chip = line('c2', { type: 'text', text: 'Due ' }, { type: 'date', attrs: { iso: '2026-10-12' } });
+    const { editor } = await mount(doc(para('p1', 'Before'), table([cell([line('c1', { type: 'text', text: 'Owner' })]), cell([chip])]), para('p2', 'After')));
+    const [[, due]] = rows(editor());
+    act(() => void editor().chain().focus().setTextSelection(endOf(editor(), 'c2')).run());
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'Tab' }));
+    type(editor(), 'Reviewer');
+    expect(rows(editor())).toEqual([
+      ['Owner', due],
+      ['Reviewer', ''],
+    ]);
+  });
+
+  it('enters an empty cell already in the table, where typing lands', async () => {
+    const { editor } = await mount(doc(para('p1', 'Before'), table([cell([line('c1', { type: 'text', text: 'Owner' })]), cell([])]), para('p2', 'After')));
+    act(() => void editor().chain().focus().setTextSelection(endOf(editor(), 'c1')).run());
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'Tab' }));
+    type(editor(), 'Reviewer');
+    expect(rows(editor())).toEqual([['Owner', 'Reviewer']]);
+  });
+});
+
 // P3-F (F1, the owner's N.3: "링크는 안열리고 cmd+click에도 컴포넌트가 선택됨"): ⌘-click or Ctrl-click on a link opens its href
 // through the host's external opener (main's scheme-checked one in the app) and is consumed there, so the press neither
 // moves the caret nor selects a node (ProseMirror's own modifier-click selected the whole paragraph). A plain click is
