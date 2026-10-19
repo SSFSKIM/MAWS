@@ -694,3 +694,44 @@ describe('a writer’s inputs and the mirror’s refresh (P3-C)', () => {
   });
 });
 // P3-C end
+
+// P3-F (the library panel's F-library wave): a directory away or relinked keeps what the mirror owns there and is never
+// written through; one directory spelled two ways is one directory; a link in a copy's place is not the copy.
+describe('the mirror over a directory that goes away, is relinked or is spelled two ways (P3-F)', () => {
+  const page = (title: string, spaceId: string) => store().create({ kind: 'html', title, spaceId, content: html(title) }, agent);
+  const file = (artifact: { id: string; title: string }) => `${mirrorSlug(artifact)}.html`;
+
+  it('keeps the entry of an artifact deleted while its directory is away, and removes its file once the directory is back (library sweep#1)', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    const gone = await page('Gone', space.id);
+    const kept = await page('Kept', space.id);
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, file(gone), file(kept)].sort());
+    const away = `${project}-away`;
+
+    renameSync(project, away);
+    try {
+      await store().delete(gone.id);
+      await mirror!.flush();
+    } finally {
+      renameSync(away, project);
+    }
+    await store().writeContent(kept.id, html('Kept 2'), agent); // a later change in the Space
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, file(kept)]);
+    expect(Object.keys(manifest().artifacts)).toEqual([kept.id]);
+
+    renameSync(project, away); // the last entry too
+    try {
+      await store().delete(kept.id);
+      await mirror!.flush();
+    } finally {
+      renameSync(away, project);
+    }
+    await store().updateSpace(space.id, { name: 'Launch 2' }); // a later change of the Space
+    await mirror!.flush();
+    expect(listed()).toEqual([]);
+  });
+
+});

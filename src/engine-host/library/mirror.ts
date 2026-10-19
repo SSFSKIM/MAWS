@@ -17,8 +17,8 @@
 //   owner's: the directory is refused (logged, as a failing one) and that entry never rewritten or removed.
 // - Two Spaces linked to one directory share its manifest (the desired set is per directory).
 // - A directory that fails (gone, unwritable, a link) is logged per Space and tried again at the next change, which
-//   reconciles the whole directory once it loads again; the linked directory itself is never created, and no write or
-//   removal passes through a link inside it.
+//   reconciles the whole directory once it loads again; what the mirror owns there stays owned meanwhile. The linked
+//   directory itself is never created, and no write or removal passes through a link inside it.
 // - At start every linked directory is reconciled against its manifest: what changed while the host was down.
 // - P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): a writer
 //   that declares `inputs` (what its output depends on beyond the revision) has them kept in the entry beside the
@@ -248,6 +248,13 @@ export class LibraryMirror {
     this.cleanUnlinked();
     for (const [known, manifest] of this.manifests) {
       if (known === dir || this.unlinked.has(known) || !manifest.artifacts[artifactId]) continue;
+      try {
+        this.load(known); // a directory away or refused keeps the entry, removed by the reconciliation its next load starts
+      } catch (error) {
+        this.failing.add(known);
+        this.log(`${artifactId} could not be removed from the mirror in ${known}: ${reasonOf(error)}`);
+        continue;
+      }
       try {
         this.remove(known, manifest, artifactId);
       } catch (error) {
