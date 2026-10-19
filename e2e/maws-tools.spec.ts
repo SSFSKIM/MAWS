@@ -595,10 +595,12 @@ test('an artifact link in the agent’s reply: a click opens it in the panel’s
     await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
     await expect(chip('Linked plan')).toBeVisible();
 
-    // an id no record answers to: the record's not-found notice, as the tool says it
+    // an id no record answers to: the record's not-found notice in its body, its title in the panel's header, as the tool
+    // says them (library/copy.ts's gone and goneTitle; the e2e project lists no renderer copy module)
     await chip('Old notes').click();
     const gone = s.panel.locator(`[data-artifact-record="${GONE}"]`);
-    await expect(gone.getByText('Artifact not found')).toBeVisible(); // library/copy.ts's goneTitle (the e2e project lists no renderer copy module)
+    await expect(gone.getByText('This artifact was deleted, or it is not in the library.')).toBeVisible();
+    await expect(s.panel.locator('[data-editor-header] [data-header-title]')).toHaveText('Artifact not found');
 
     // ⌘-click: the artifact in a main tab of its own
     await chip('Linked plan').click({ modifiers: ['Meta'] });
