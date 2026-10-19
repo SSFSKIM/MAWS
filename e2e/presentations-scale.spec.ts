@@ -388,20 +388,30 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
       }
       await closeTab(page, TITLE);
       const { artifact: heavy } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'presentation', title: 'Heavy deck' });
-      const apply = async (file: string) => {
+      // a state applied as an edit through a replica of its own; answers how many edits the host had still not
+      // acknowledged after 30 s. P3-F (editor-proof scalpel-1#2): the replica's port is closed only when none are left
+      // (closing it dropped them, and the version saved next snapshotted a truncated deck the preview row then timed), and
+      // a state left unacknowledged fails the row by name
+      const apply = async (file: string): Promise<number> => {
         const bytes = [...readFileSync(join(dir, file))];
-        await page.evaluate(async ([artifactId, state]) => {
+        return page.evaluate(async ([artifactId, state]) => {
           const docs = (window as unknown as DeckSeam).__maws_documents;
           const handle = await docs.open(artifactId as string);
           docs.applyState(handle, new Uint8Array(state as number[]));
           for (let i = 0; i < 600 && docs.state(handle).unsaved > 0; i++) await new Promise((r) => setTimeout(r, 50));
-          docs.close(handle);
+          const unsaved = docs.state(handle).unsaved;
+          if (unsaved === 0) docs.close(handle);
+          return unsaved;
         }, [heavy.id, bytes] as const);
       };
-      await apply('prev.bin');
-      await ok(page, 'artifacts.saveVersion', { artifactId: heavy.id, label: 'Three months ago' });
-      await apply('next.bin');
-      await ok(page, 'artifacts.saveVersion', { artifactId: heavy.id, label: 'Today' });
+      for (const [file, label] of [['prev.bin', 'Three months ago'], ['next.bin', 'Today']] as const) {
+        const unsaved = await apply(file);
+        if (unsaved > 0) {
+          rows.failed('5 preview heavy', measure, 'ms', 1000, '≤ 1,000 ms (M8’s bound)', `the heavy deck's ${file} was not acknowledged within 30 s (${unsaved} edits unsaved): not versioned, nothing previewed`);
+          return;
+        }
+        await ok(page, 'artifacts.saveVersion', { artifactId: heavy.id, label });
+      }
       await showLibrary(page);
       await page.locator('[data-library]').getByRole('article', { name: 'Heavy deck', exact: true }).click();
       const heavyTab = page.locator(`[data-region="main"] [data-artifact-tab="${heavy.id}"]`);
