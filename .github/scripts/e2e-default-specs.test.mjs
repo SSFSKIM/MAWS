@@ -69,7 +69,7 @@ for (const derivation of [whole, relaunch, widened]) derivation.catch(() => {});
 
 test("this tree: beside the macOS lane's other groups, default runs its own specs", async () => {
   const { specs, total } = await whole;
-  assert.equal(total, 75);
+  assert.equal(total, 76);
   assert.deepEqual(specs, [
     'e2e/agent-tools-live.spec.ts',
     'e2e/c11-live.spec.ts',
@@ -122,7 +122,7 @@ test("this tree: a relaunch of default and two groups, DefaultBeside naming the 
 
 test("this tree: the same relaunch without DefaultBeside still widens default by the specs of the groups it leaves out, read from the job's output", async () => {
   const [all, part] = await Promise.all([whole, widened]);
-  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 75 specs, beside 2 other e2e groups \(/);
+  assert.match(part.summary, /^#### e2e:default: its own \d+ of the bare set's 76 specs, beside 2 other e2e groups \(/);
   assert.deepEqual(all.specs.filter((spec) => !part.specs.includes(spec)), []);
   assert.ok(part.specs.includes('e2e/artifacts-store.spec.ts'), 'e2e:artifacts, absent from the relaunch, leaves its spec to default');
   assert.ok(!part.specs.includes('e2e/side.spec.ts') && !part.specs.includes('e2e/library.spec.ts'));
