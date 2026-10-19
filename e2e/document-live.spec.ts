@@ -254,9 +254,16 @@ async function structure(editor: Locator): Promise<Record<string, string>> {
 // The ids of every block inside block `id` (a row's cells and their paragraphs).
 const idsInside = (editor: Locator, id: string) => editor.evaluate((root, rowId) => Array.from(root.querySelectorAll(`[data-id="${rowId}"] [data-id]`)).map((el) => el.getAttribute('data-id')!), id);
 
+// The record editor element's Tiptap editor: its document (a block by its `id` attribute) and its own selection.
+type EditorRoot = HTMLElement & {
+  editor?: { state: { doc: { descendants(f: (node: { attrs: Record<string, unknown>; nodeSize: number }, pos: number) => boolean | void): void; textBetween(from: number, to: number, separator: string): string }; selection: { from: number; to: number } } };
+};
+
 // The caret at the end of block `id`'s text (the DOM selection collapsed after its last text node, which the editor reads
 // on selectionchange; End would stop at a wrapped line's end in the panel's narrow column), the editor focused.
-async function caretAtEnd(page: Page, editor: Locator, id: string): Promise<void> {
+// P3-F (editor-proof scalpel-1#5; tracker row 173's caretAtEndOf pin): done once the editor's own selection is that
+// caret, not after a fixed wait, so what is typed next lands at the block's end, never at the click's position.
+async function caretAtEnd(editor: Locator, id: string): Promise<void> {
   await editor.locator(`[data-id="${id}"]`).click();
   await editor.evaluate((root, blockId) => {
     const block = root.querySelector(`[data-id="${blockId}"]`)!;
@@ -272,7 +279,23 @@ async function caretAtEnd(page: Page, editor: Locator, id: string): Promise<void
     selection.removeAllRanges();
     selection.addRange(range);
   }, id);
-  await page.waitForTimeout(100);
+  await expect
+    .poll(
+      () =>
+        editor.evaluate((root, blockId) => {
+          const view = (root as EditorRoot).editor;
+          if (!view) return 'no editor on the element';
+          let end = -1;
+          view.state.doc.descendants((node, pos) => {
+            if (node.attrs.id === blockId) end = pos + node.nodeSize - 1;
+            return end < 0;
+          });
+          const { from, to } = view.state.selection;
+          return from === to && from === end ? 'at the end' : `the editor's selection ${from}–${to}, the block's end ${end}`;
+        }, id),
+      { timeout: 10_000, message: `the editor's own caret at the end of ${id}` },
+    )
+    .toBe('at the end');
 }
 
 // One step of S4's 2-set model through CDP (e2e/document-editor.spec.ts's `imeStep`, the owner's pace).
@@ -361,7 +384,20 @@ async function showEditors(page: Page, editor: Locator, id: string, text: string
     },
     [id, text] as const,
   );
-  await page.waitForTimeout(100); // the editor reads the DOM selection on selectionchange
+  // P3-F (editor-proof scalpel-1#5): the editor reads the DOM selection on selectionchange; the right-click goes once its
+  // own selection holds the text (Show editors reads the editor's), not after a fixed wait
+  await expect
+    .poll(
+      () =>
+        editor.evaluate((root) => {
+          const view = (root as EditorRoot).editor;
+          if (!view) return 'no editor on the element';
+          const { from, to } = view.state.selection;
+          return view.state.doc.textBetween(from, to, '\n');
+        }),
+      { timeout: 10_000, message: `the editor's own selection holds "${text}"` },
+    )
+    .toBe(text);
   await page.mouse.click(rect.x, rect.y, { button: 'right' });
   await page.getByRole('menu', { name: 'Selection' }).getByRole('menuitem', { name: 'Show editors' }).click();
   const dialog = page.getByRole('dialog', { name: 'Editors' });
@@ -451,7 +487,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     await watchPresence(editor);
     const editsBefore = calls(s).filter((c) => c.name === 'artifact_edit').length;
     const ended2 = await ask(s, PROMPTS.batch);
-    await caretAtEnd(page, editor, 'p2');
+    await caretAtEnd(editor, 'p2');
     const WORDS = ['안녕하세요', '한글', '입력', '테스트입니다', '문서를', '함께', '고칩니다'];
     let typed = '';
     const typingStarted = new Date().toISOString();
@@ -549,7 +585,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     expect(humanEditors[0]).toMatch(/^You · /);
 
     // 3: the owner changes the sentence the agent will quote, then the stale batch
-    await caretAtEnd(page, editor, 'p1');
+    await caretAtEnd(editor, 'p1');
     await page.keyboard.press('ArrowLeft');
     await page.keyboard.type(' again');
     await expect.poll(async () => (await blocks(editor)).p1).toBe('The launch moves to the following Tuesday. The team meets on Monday again.');
