@@ -497,3 +497,29 @@ describe('a block or a tab a restore brought back and someone deleted again', ()
   });
 });
 
+// P3-F document-model sweep#4: a selection inside formatted text names who formatted it. A format marker formats the text
+// after it up to the next marker of its key, so it counts wherever that text meets the selection; a marker ending a run
+// formats nothing after it.
+describe('Show editors inside formatted text', () => {
+  const seeded = () => {
+    const hub = new HistoryHub();
+    hub.write(HUMAN, (doc) => createDocument(doc, { title: 'Main', id: TAB, body: schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'abcdefghij' }] }] }) }));
+    return { hub, agent: hub.connect(AGENT_1) };
+  };
+  const editors = (hub: HistoryHub, from: number, to: number) =>
+    showEditors({ doc: ynodeToPmnode(body(hub.host), schemaFor()), from, to, liveRoot: body(hub.host), provenance: hub.attributions() }).map((e) => `${e.who === AGENT_1 ? 'agent' : e.who}:${e.kinds.join(',')}`);
+
+  it('names who bolded the paragraph when a word inside it is selected', () => {
+    const { hub, agent } = seeded();
+    agent.transact(() => block(agent, 'p1').format(0, 10, markFormat({ type: 'bold' })));
+    expect(editors(hub, 1, 11)).toEqual(['agent:fmt', `${HUMAN}:ins`]);
+    expect(editors(hub, 4, 7), "'def'").toEqual(['agent:fmt', `${HUMAN}:ins`]);
+  });
+
+  it('does not name who formatted only text before the selection', () => {
+    const { hub, agent } = seeded();
+    agent.transact(() => block(agent, 'p1').format(0, 3, markFormat({ type: 'bold' })));
+    expect(editors(hub, 7, 10), "'ghi', after the bold 'abc'").toEqual([`${HUMAN}:ins`]);
+  });
+});
+

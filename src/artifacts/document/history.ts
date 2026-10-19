@@ -6,7 +6,7 @@
 // on a node the diff inserts are not attribute changes. No DOM; the editor draws what this computes (editor/history).
 import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { applyV2, type Carry, type ContentMap, type Doc, type Node as YType } from '../yjs';
-import { ContentType, YNode, createDiffRenderer, newDocGcOff, type DiffRenderer } from '../yjs/document';
+import { ContentType, YNode, createDiffRenderer, newDocGcOff, type DiffRenderer, type Item } from '../yjs/document';
 import { ynodeToPmnode } from '../yjs/prosemirror';
 import { attributedNodes, schemaFor } from './schema';
 import { TABS, listTabs, tabBody, type TabInfo } from './tabs';
@@ -321,6 +321,23 @@ const authorOf = (ranges: Ranges, who: 'insert' | 'delete'): Array<{ who: string
 };
 
 /**
+ * Where the text a live format marker (at text index `start`) formats ends: at the next live marker of its key, else at
+ * the block's end. A marker clearing its key (the end of a run) formats nothing after it: `start`.
+ */
+function formattedUntil(marker: Item, start: number): number {
+  const format = marker.content;
+  if (!('key' in format) || !('value' in format) || format.value == null) return start;
+  let end = start;
+  for (let item = marker.right; item !== null; item = item.right) {
+    const content = item.content;
+    if (item.deleted) continue;
+    if (item.countable) end += item.length;
+    else if ('key' in content && content.key === format.key) break;
+  }
+  return end;
+}
+
+/**
  * "Show editors" for the selection [from, to) of the live editor's document: who inserted the visible content in the
  * range, who formatted it, who deleted content inside it, who last set the attributes of its blocks, of the containers
  * holding them (a task's checked state, a callout's tone) and of its inline nodes, each with their latest
@@ -357,7 +374,8 @@ export function showEditors({ doc, from, to, liveRoot, provenance }: { doc: PMNo
       if (item.deleted) {
         if (start > a && start < b) add(provenance.deletes.slice(client, clock, item.length), 'delete', 'del');
       } else if (!item.countable) {
-        if (start >= a && start <= b) add(provenance.inserts.slice(client, clock, item.length), 'insert', 'fmt');
+        // a format marker inside the selection, or one whose formatted text reaches into it from before
+        if (start <= b && (start >= a || formattedUntil(item, start) > a)) add(provenance.inserts.slice(client, clock, item.length), 'insert', 'fmt');
       } else if (end > a && start < b) {
         const s = Math.max(a, start) - start;
         const e = Math.min(b, end) - start;
