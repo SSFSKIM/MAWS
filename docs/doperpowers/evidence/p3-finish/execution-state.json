@@ -1330,7 +1330,13 @@
       "S-DESIGN-FRAME-SLICES",
       "S-STORE-SUGGESTION-ATTRS",
       "S-AP-PATH-TOCTOU",
-      "S-AP-PRESENCE-CROSS"
+      "S-AP-PRESENCE-CROSS",
+      "S-DS-VERSION-ASSETS",
+      "S-DASH-REFRESH-LOG",
+      "S-DOC-WRITER-REORDER",
+      "S-STORE-STAGED-LISTING",
+      "S-MIRROR-RESIDUALS",
+      "S-PPTX-TABLE-OUTLINE"
     ],
     "compositionFix": "91d4874fa2f799261fffe8208c8fc3b3d88f773d",
     "compositionFollowUp": [

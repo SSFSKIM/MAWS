@@ -1,0 +1,38 @@
+Recorded 2026-10-19T02:21:02Z. One medium review (reviewer-medium on opus) over both dashboard waves: dashboard-model 2d6357818..2f0e99a4c and dashboard-live-ui 06026aebb..c6c8caff8 plus 1e4d93d90. Verdict correct; its unlogged-catch note is P4 row S-DASH-REFRESH-LOG.
+
+Reviewer report, verbatim:
+## Findings
+- [P3] Log the error that candidate()'s new catch swallows — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/engine-host/dashboards/refresh.ts:151-153
+  The new backstop `} catch { return refused(UNREADABLE); }` turns any exception thrown while reading the rows into the fixed state "its rows could not be read", and it leaves no trace anywhere. Since `flat()` now refuses nested cells before `JSON.stringify` runs, the known overflow can no longer reach this catch. What can reach it is an exotic result (such as the test's throwing getter) or a real bug in `parseDataset`/`rowKeyProblem`. That bug would then look, to the owner and in the host log alike, like ordinary bad data from the tool. `log` is already in scope in `datasetRefresher`, and the same function logs other unexpected failures (the retired-snapshot collection a few lines below). The fix is one line: log the thrown error's message and keep the closed wording in the stored state. The severity is low because this only affects diagnosis, not behaviour.
+
+## Verdict
+correct — All eleven commits close their findings, and each regression was red before its fix (the RED/GREEN logs confirm the failure mode the worker reported). I found no changed output that another consumer depends on. The commit 848693ed3 that passed the gate is byte-identical to fb2779527 on every dashboard path. The only item is the P3 above, which does not block.
+
+**Fixes, and the worker's departures checked against the code**
+- **sweep#1 (blank labels):** `wrap` now always returns at least one line (`text.ts:46`), which fixes the legend and the pie list.
+  - Band labels are byte-identical: they always carry `anchor: 'middle'`, so `edgeAnchor(…lines[0])` is never reached, and `text([])` and `text([''])` write the same bytes.
+  - The only other change: the empty title of a small-multiples panel with a blank series name moves up one line. It was never a crash before.
+- **sweep#2 (small values shown as 0):** `formatValue` is used only inside `formatCell` (checked with grep). Cells, tips, value labels, end labels, category and series names, preview and export cells all go through it.
+  - Axis ticks (`tickLabels`, which already uses up to 6 decimals) and pie shares (`shareOf`) still use `formatNumber`.
+  - I checked the `toPrecision(3)` branch at its edges: 1e-6, the 0.005 boundary, the percent path with one decimal, -0 and NaN.
+- **sweep#3 (pie with two measures):** the refusal in `parseSpec` keeps the title. It reaches the renderer, `viewPreview`, the export (drawn in place, with a Markdown error line) and `normalizeSpec`, and nothing else in the repo writes a pie with more than one measure. `format.md` and its test now match the rule.
+- **scalpel-2#1 (stale rows under a lost hold):** after a loss, the hold goes from pending to held only through `take()` with `capture+1`, which remounts the component. So `rows = held ? source : null` matches the hold contract in `sheet.ts` ("nothing of the lost capture is shown or read meanwhile"). Download was already gated on the hold.
+- **scalpel-4#1 (nested cell overflowing the serializer):**
+  - Catching inside `candidate()` instead of moving it under `publish()`'s try/catch is right: that outer catch calls `scope.ended({error})` and rethrows, so it would never write the error state. The refused result goes through the normal write and ends the scope once, which the test proves.
+  - Refusing rows that are not records adds no new rejection, since `parse.ts:216-220` already refused both cases. Only the wording loses its "line N:" prefix.
+  - `queryRowsOf` has only one consumer (`refresh.ts`). The e2e `REFUSED`/`MALFORMED` strings are untouched, and nothing matches the old "line 1: record" text.
+- **scalpel-1#1 (recapture from the wrong document):** the live replica's `Doc` stays the same across a host restart (`DocumentTabState` opens the handle once and it reconnects itself), so `on === live` remains valid after a restart.
+  - After a preview has ended, re-holding the sheet's own captured descriptors keeps its `preview` flag (`take` spreads `this.current`). The sheet shows the unavailable alert if those snapshots are gone.
+  - When nothing was ever displayed (`on` and `shownDoc` both null), it behaves as before.
+- **scalpel-1#2 (Show current on a removed dataset):** the fallback can only be reached from the sheet's own live controls, which are hidden during a preview.
+- **scalpel-3#1 (Start settling while hidden):** the ids are recorded only when a Start settles while hidden and the query is manual. They are spent at the next `recover()` and refreshed only if the query is still `noRoute`. A surface always exists by then, so `recover` runs, and nothing is called while hidden.
+- **e2e edits:**
+  - The route-D comment is now true: the route D test below it publishes over the direct route, and the soak still asserts no `source` row and no request reaching the server.
+  - The export step now reads the exporter's own files, which are named by revision (`export.ts:433`). The replaced export gets a new path, and the evidence copies are not touched in between (the screenshot only loads one, and the PDF prints from a temp directory).
+  - No spec file was added. The only new file in the base range is an unrelated fixture from bc837f236.
+
+**What I could not verify**
+- I ran no tests, typecheck or lint, as instructed. I relied on the gate and on the logs in /tmp/maws-review.
+- The two e2e edits were checked by reading only. They have not been run on a Mac.
+- That the live `Doc` survives a restart is read from the code, not observed in the running app.
+- One case outside the routed scope, examined only briefly: a scheduled query whose watch could not start for want of a session, after a Start settles while hidden. The comment "(a watch has its own)" assumes `recover()`'s watch probe covers it.

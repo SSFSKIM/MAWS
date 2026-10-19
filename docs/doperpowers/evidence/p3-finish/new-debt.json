@@ -79,6 +79,54 @@
       "owner": "P4 / document presence",
       "row": "| 2026-10-18 | P4 document presence (old detach crossing a reconnect) | If an old connection's detach crossed the same client's reconnect, the host could remove that client's new presence. The artifact-protocol review found it unreachable in ordinary use: the host detaches synchronously before the port closes, and a reload or discard makes a new clientID; were it to occur, the 15 s awareness renewal re-sends the state, bounding the loss. | P3-F artifact-protocol #5 (3241445e5) worker report; high review (fable) a25a5e4b answer (b). | Closes when detach removes only presence entries whose clock is not newer than the detaching connection's last update for that client, with a crossing regression. Owner: the document presence's next change (P4). |",
       "source": "artifact-protocol wave high review, 2026-10-18"
+    },
+    {
+      "id": "S-DS-VERSION-ASSETS",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / artifact exports",
+      "row": "| 2026-10-18 | P4 artifact exports (a version's assets) | A design-system version export's zip carries assets uploaded after that version: `artifacts.assets` has no version filter, and the exporter (`src/main/design-systems/export.ts:18-23`) has no host call to map the version's `assetRefs` (asset ids) to refs. Extra files only; nothing is lost. | Exports-capture scale panel wf_306f7df2-89c scalpel-1#1 (P3); the architect ruled it a tracker row rather than a shared IPC input change hours before the freeze. | Closes when `artifacts.assets` takes an optional `versionId` (additive), `src/engine-host/documents/register.ts` filters by that version's `assetRefs`, and the artifact exporter passes it, with a regression that a version export omits a later upload. Owner: the artifact exporter's next change (P4). |",
+      "source": "exports-capture scale panel scalpel-1#1; architect ruling, 2026-10-18"
+    },
+    {
+      "id": "S-DASH-REFRESH-LOG",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / dashboard refresh",
+      "row": "| 2026-10-18 | P4 dashboard refresh (unlogged unreadable-rows catch) | P3-F's dashboard-model fix (2f0e99a4c) gives `candidate()` in `src/engine-host/dashboards/refresh.ts:151-153` a backstop that turns any exception while reading a result's rows into the fixed state 'its rows could not be read', with no log line, so a real bug in `parseDataset` or `rowKeyProblem` would read as ordinary bad data in the host log. Diagnosis only; behaviour is correct. | Dashboard waves medium review (opus), P3. | Closes when the catch logs the thrown error's message through the refresher's `log` while keeping the closed wording in the stored state. Owner: the dashboard refresher's next change (P4). |",
+      "source": "dashboard waves medium review, 2026-10-18"
+    },
+    {
+      "id": "S-DOC-WRITER-REORDER",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / document patch writer",
+      "row": "| 2026-10-18 | P4 document patch writer (out-of-order identified children) | With P3-F's id-first pairing (f684b9fe4) the edit planner can hand `src/artifacts/document/patch-writer.ts:146` non-monotone pairs; `patchChildren` writes an out-of-order child as a new node and deletes the old one. When the agent also edited that item in the same batch, no drag carry is installed, its text is credited to the agent and stale concurrent edits into the old item are lost. Exposed, not introduced: ids and comments now land on the right blocks, strictly better than before. | Document-model wave high review (fable), P3. | Closes when patchChildren moves an identified child in place (or the host installs a carry for an id-preserving reinsert with edits), with a reorder-plus-edit regression. Owner: the document writer's next change (P4). |",
+      "source": "document-model edit-plan wave, 2026-10-18"
+    },
+    {
+      "id": "S-STORE-STAGED-LISTING",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / artifact store maintenance",
+      "row": "| 2026-10-19 | P4 artifact store maintenance (staged-file listing errors) | P3-F's staged-tmp sweep (dcceb8d4c) wraps only the discard in `collectStaged` (`src/engine-host/documents/store.ts:1107`); `stagedBefore` (`bytes.ts:64-75`) does readdir/stat per entry unguarded, so a plain file named tmp or an entry removed by an outside actor between readdir and stat rejects `Maintenance.pass`, skipping that pass's retired-asset collection, vacuum and last-run write (retried next interval). Needs an external actor in the app's data directory. | Store-versions wave high review (fable), P3. | Closes when the listing is guarded as `collectRetiredAssets` is (a per-entry or whole try/catch with a log line), with an ENOTDIR/ENOENT regression. Owner: the store maintenance's next change (P4). |",
+      "source": "store-versions wave high review, 2026-10-19"
+    },
+    {
+      "id": "S-MIRROR-RESIDUALS",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / library mirror",
+      "row": "| 2026-10-19 | P4 library mirror (two residual staleness paths) | After P3-F's library wave: (1) `removeFile` refuses silently under an `artifacts/` relinked inside one step's awaits, so the entry is dropped and the original files are no longer tracked (matters only if the owner restores the original directory in place); (2) `readNow`'s currency check (`src/engine-host/library/mirror.ts:347`) uses `existsSync`, which follows links, so a link put in a mirror file's place is replaced only at the artifact's next revision. Both stay on mirror-owned names; no write goes through a link. | Library wave high review (fable), triage of the worker's residuals 1 and 2. | Closes when `removeFile` throws on a link so remove/write keep the entry at revision -1, and `readNow` checks `isFile` (lstat), each with a regression. Owner: the library mirror's next change (P4). |",
+      "source": "library wave high review, 2026-10-19"
+    },
+    {
+      "id": "S-PPTX-TABLE-OUTLINE",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / slide PPTX export",
+      "row": "| 2026-10-19 | P4 slide PPTX export (collapsed-table outline and radius, unverified) | P3-F's exports-capture wave (2d9c5b3d2, ca288580b) draws a table's own fill and outline as shapes, the outline inset by half its width and rounded by the table's radius. Under CSS 2.1's collapsed model half the outer border may lie outside the measured box, and Chromium may not round a collapsed table, so the PPTX outline could sit up to half a border width inside the canvas's (8 px at the 16 px maximum) or be rounded where the canvas is square; a letterboxed image's native shadow also falls around the picture frame, not the box. Not observed; unverified. | Exports-capture wave medium review (opus), could-not-verify items. | Closes when an offscreen Electron probe measures a collapsed table's outer border and radius, and the exporter matches it (no inset or no radius where Chromium draws none), with a regression. Owner: the slide exporter's next change (P4). |",
+      "source": "exports-capture wave medium review, 2026-10-19"
     }
   ]
 }

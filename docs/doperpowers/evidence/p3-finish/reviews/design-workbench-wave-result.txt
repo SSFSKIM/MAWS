@@ -1,0 +1,39 @@
+Recorded 2026-10-19T02:21:02Z. Design-workbench wave medium review (reviewer-medium on opus), b617903ea..36075a9ac. Verdict incorrect: a P2 (the forced order merge could invert a pair every order agreed on) and two P3s (the compiler bailout on the surface accessor object; a refused name commit kept its draft), fixed in eadd6bb7d, 410d15358 and 2f8113ea4; a bounded recheck covers them.
+
+Reviewer report, verbatim:
+## Findings
+- [P2] Keep pairs both sides agree on when forcing the board order — src/artifacts/design/order.ts:106-112
+  Under force, the settle loop only collects pairs the agent re-ordered. It then permutes those boards into sent order across the slots they occupy, so a settled board can jump over a board outside that set. That inverts a pair that base, sent and live all agree on, which is the "order neither side asked for" the finding was about. I ran the committed function directly: `mergeBoardOrder(['a','b','c','d'], ['a','c','b','d'], ['b','a','d','c'], [], true)` returns `['c','a','b','d']`. Base, sent and live all put a before c, and the agent only swapped b and c. The parent tree's forced result was `['b','a','c','d']`, which kept a before c. A second case: sent `[a,c,b,d]` with live `[b,d,a,c]` gives `['c','d','a','b']`, inverting both a/c and b/d. The settle step introduces such an inversion in 18 of the 576 four-board sent/live combinations and 1,149 of the 14,400 five-board ones. The new exhaustive test does not catch this because it asserts only pairs where sent differs from base. The scenario is a forced publish after an unforced clash, where the owner re-stacked other boards since the agent's read. The forced publish then writes fractional keys for that order with no clash reported. A fix that held in the same five-board brute force: under force, also count as lost any pair the result orders against the sent order, unless only the live side re-ordered it. This leaves zero agent pairs lost and zero agreed pairs inverted. It terminates by the same argument, and the unforced path is unaffected.
+- [P3] Publish the surface without an accessor object; it opts DesignWorkbench out of the React Compiler — src/artifacts/design/editor/DesignWorkbench.tsx:224-235
+  The `useMemo` object with `get current()` / `set current()` hits babel-plugin-react-compiler 1.0.0's `Todo` bailout: "(BuildHIR::lowerExpression) Handle get/set functions in ObjectExpression". The compiler then skips the whole component. I ran the plugin from the repo's node_modules on the committed file. The parent version compiles DesignWorkbench with 303 memo slots; the new one reports two CompileErrors and leaves it uncompiled. Nothing in CI catches this: the renderer build compiles `src/artifacts` (electron.vite.config.ts:91, plugin-react's default include), but the build does not fail on a Todo bailout, the react-hooks lint is not applied to `src/artifacts`, and the DOM suites run uncompiled. Behaviour stays correct, and the history test shows the detach/attach sequence works. The cost is that the editor's root component loses compiler memoization in the shipped app. The workbench was written to meet its bounds uncompiled, so this is a performance and maintainability regression, not a break. A callback ref that sets a plain `useRef` and calls `onStage` gives the same lifecycle (DeckEditor.tsx:137's pattern). World can keep reading the ref object, since a callback can be passed to the div's `ref` alongside it.
+- [P3] Reset the name field's draft when its commit is refused — src/artifacts/design/editor/BoardInspector.tsx:62,104-107
+  The new `writable()` guard stops the write, but `NameField` keeps its `draft` state, and the commit message says the draft is dropped. Scenario: type "Phone, tall" and the replica turns read-only (or the board turns held or missing). The blur writes nothing, but the disabled field keeps showing "Phone, tall" while the board is "Phone". `key={board.title}` does not remount it because the title did not change. When the lock lifts, the field re-enables with the stale text, and the next focus-and-blur commits it. C's `NumberField` does not have this problem: it clears its draft when `onCommit` returns `[]`. Impact is cosmetic plus a delayed write of text the user typed earlier. A fix is to return the result from `onCommit` and run `setDraft(title)` on refusal, mirroring the workbench rename's `false` return.
+
+## Verdict
+incorrect — The forced order merge closes the reported reproducer but can now invert pairs every side agreed on. I confirmed this by running the committed `order.ts`.
+
+**Checked:**
+- **Unforced merge:** unchanged; identical output to the parent across all 4- and 5-board permutations.
+- **Forced merge:** deterministic and terminates; the settled set grows every round. It never drops or duplicates a board, since sent order is de-duplicated by `parseCanvasJson`.
+- **Surface ref:**
+  - Under React 19, object-ref attach and detach call the setter on mount, unmount and StrictMode re-mount.
+  - A changed `onStage` gets the old object's `null` before the new object's element.
+  - The parent cannot keep a detached element.
+- **publish.ts:**
+  - The restack conflict uses sequence-based `movableIn` and clears once the agent re-reads `canvas.json`, so it cannot refuse a removal permanently.
+  - The arrival change counts the file correctly for every marker transition. The marker is not part of `canvas.json`, so leaving `CANVAS_PATH` out is right.
+- **Inspector and header:**
+  - The inspector rechecks cover the frame fields, the arrow steps, the preset select and the name field.
+  - The disabled Zoom to fit is a native disabled button (aria-disabled in the overflow menu), and `fitAll` also returns early while a version shows.
+
+**Departures:**
+- **Ties count as moves; Zoom to fit disabled rather than routed:** acceptable.
+- **Ref object instead of a callback ref:** works, but causes the compiler bailout above.
+- **"Settle within held slots" for the forced merge:** the source of the P2.
+
+**Not verified:**
+- I did not run the suites, lint, typecheck or e2e.
+- I did not check the compiler outcome through the actual vite build; I ran the plugin directly on the file.
+- I did not check Mark-up capture end to end, Activity or hidden-tab ref behaviour, or the intermediate tree at 50a0bc5a3.
+
+Scratch scripts are in /tmp/rev-dw-scripts. The extracted committed sources are in /tmp/rev-dw.

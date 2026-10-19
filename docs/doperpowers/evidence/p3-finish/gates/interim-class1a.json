@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-10-19T00:59:15Z",
+  "recordedAt": "2026-10-19T02:21:02Z",
   "meaning": "interim class-1a proofs on branch commits during the fix waves (pool; --gates static,unit,probes,unit:darwin); not the hand-back; they supply remote GREEN for findings committed under the Decision Log 29 slot rule",
   "runs": {
     "p3f-waves1": {
@@ -20,6 +20,18 @@
       "jobs": {
         "static": "success",
         "unit": "success",
+        "unit:darwin": "success",
+        "probes": "success"
+      }
+    },
+    "p3f-waves3": {
+      "run": 39185735129,
+      "sha": "6101c2ace",
+      "wrapper": "e97000c506bcdc2bcfc55a3878404d68d8206b9e",
+      "conclusion": "failure",
+      "jobs": {
+        "static": "success",
+        "unit": "failure (2 of 20,699: retention.test.ts:454, fixed by 829860908; legacy-writes.test.ts:143, the document-model P1 fixed by cdab1711a)",
         "unit:darwin": "success",
         "probes": "success"
       }

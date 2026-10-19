@@ -1,0 +1,49 @@
+Recorded 2026-10-19T02:21:02Z. Exports-capture wave medium review (reviewer-medium on opus), 34b169ebf..b075097cd. Verdict correct, no material findings; its unverified collapsed-table outline and letterbox shadow items are P4 row S-PPTX-TABLE-OUTLINE. Panel item 7 (a version export carries later assets) is P4 row S-DS-VERSION-ASSETS by the architect's ruling.
+
+Reviewer report, verbatim:
+## Findings
+No material findings.
+
+## Verdict
+correct. I read all six commits against the code they call and found no defect worth fixing. On the capture side, every destroy path leaves no timer or listener reading a destroyed window, `loadSettled` settles once and removes all three of its listeners, and every caller's new rejection is swallowed by the race that already gave the answer. The PPTX changes keep the gradient, undecorated-image and placeholder paths as they were, and the rotation and inset arithmetic is right.
+
+## What I checked, and what I could not verify
+
+**Capture lifetime (34b169ebf, f7d12eb58)**
+- **Timers and listeners.** `settled` now reads the window's contents once, before arming its timer. After that it only calls `contents.off` and `contents.once`, which are plain JavaScript event methods and still work on destroyed contents. Every read that happens after a destroy (`capturePage`, `setContentSize`) runs inside an async function, so it becomes a rejection rather than an uncaught throw from a bare timer.
+- **No double settle, no leaked listener.** Each of `finished`, `failed` and `gone` calls `off()`, which removes all three. A sub-frame `did-fail-load` is ignored without unhooking anything.
+- **Callers and the new rejection.**
+  - `captureArtifact`: covered by its `Promise.race` against the 20 s guard.
+  - The html PDF/PNG exporters, the presentations exporters and the design exporters: their runs go through `runExport`'s `time.within`.
+  - Dashboard pictures: the rejection travels through `Promise.all` in `src/artifacts/dashboard/export.ts:159`, then the same `within`.
+  - The deadline's own rejection wins each race. It fires in the same timer callback as `abort()`, while the window's rejection takes several hops to arrive (and an `rm` for the deck window).
+  - So no caller now shows an error where it used to time out quietly. A destroy from anywhere else, such as quitting the app, now answers at once instead of waiting out the guard.
+- **`withDeckWindow`'s abort against its `finally`.** `restrictRequests`' removal only deletes the entry if it still holds this call's own function (`policies.ts:222`), and webContents ids are never reused. So repeating the release can never remove another export's filter. The window destroy is guarded and `rm` uses `force`. If the abort lands during `load`'s `writeFile`, the abort's `rm` and the write can interleave. `use` still settles in that case (`live()` throws), so the `finally`'s second `rm` removes the directory.
+
+**PPTX (ca288580b, 2d9c5b3d2, f8e6dc630, b075097cd)**
+- **Table.** The objects come out in the order `[:fill under, native table, :border or side bars over]`, as the worker's report says. The fill shape sits at the table's box with no inset; the outline is inset by half its width. A rotated table still takes the `tree` picture in both `pictureJobs` and the mapping. A scaled table's paint is scaled by `atDrawnSize` first. pptxgenjs writes `<a:tblPr/>` with no table style, so cells without a fill are transparent and the fill underneath shows through.
+- **Gradient pictures.** For every tag except img, the `pictureJobs` condition is the same as before. The gradient `div`, text and table paths are unchanged, except that the table now uses its picture instead of discarding it.
+- **Decorated images.**
+  - Placeholders are excluded both by the `placeholder` flag and by `imageObject` checking for the placeholder first.
+  - An undecorated image gets no picture job and only two changes: a native shadow when it has a `box-shadow`, and the turned frame from item 5.
+  - The `self` capture draws the img's own content, its crop, radius and border. Its corners stay transparent because both the window and the slide background are transparent.
+- **Rotation centre.** I checked pptxgenjs's crop sizing: the frame's position is `x`/`y` and its size is `sizing.w`/`h`, so placing `turnedWith(placed.box, el.box, rotate)` is right for:
+  - `contain` and `scale-down`, with or without a crop;
+  - `cover`, `fill` and `none`, where the placed box is the element's box and nothing changes.
+  - I recomputed the reproducer and got a centre of (200, 50).
+- **Stroke inset.**
+  - It moves only boxes whose four borders match and produce a drawable line: a div, a text element, an `x-shape kind=rect` (a CSS box whose border is drawn inside it), and the new table outline.
+  - Boxes with uneven borders keep their geometry. Their text margins now add the border width, which is the item's other half.
+  - Text starts at border plus padding in both cases, and list indents still work out.
+  - The updated scaled-element test is intended, not a regression. Margins of padding + border − inset (= padding + √3) and a corner of 8√3 − √3 are exactly what the new rule gives for a 2√3 px border.
+
+**Could not verify**
+- **Where Chromium draws a collapsed table's outer border.** Under the CSS 2.1 collapsed model (§17.6.2), half of the outer border lies outside the table's measured box. If Electron's Chromium does this, `<id>:border` sits half a border width inside where the canvas draws it: at most 1 px for 1–2 px borders, but 8 px at the dialect's 16 px maximum. In that case a table's outline should not be inset.
+- **Whether Chromium rounds a collapsed table.** `format.md:114` advertises `border-radius` on `table`, and the PPTX now draws the table's fill and outline rounded. Chromium may not round a collapsed table (the worker raised the same question).
+- **Whether `did-fail-load` fires on a destroy mid-load.** The `destroyed` event exists in the typings (`electron.d.ts:16558`). The fix handles both answers.
+- **How PowerPoint renders the result.** Not checked: a picture's shadow following its alpha, and the shadow on cropped or turned frames.
+- **Why the three items above stayed open.** Settling them needs a small offscreen Electron script. The worktree sandbox blocked writing one outside the worktree, the brief ruled out tests, and the machine's load was about 60–80.
+- **Typecheck and lint.** I relied on the remote static green at 6101c2ace, which I confirmed contains b075097cd. I did not run any tests.
+
+**One minor observation (not a finding)**
+- A shadowed image with `object-fit: contain` (letterboxed, because its aspect differs from its box) now casts PowerPoint's shadow around the smaller picture frame. CSS casts it around the whole box. Before this change there was no shadow at all; it is worth a tracker row at most.
