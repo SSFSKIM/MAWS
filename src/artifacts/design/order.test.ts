@@ -31,6 +31,29 @@ describe('mergeBoardOrder', () => {
     expect(mergeBoardOrder(base, ['n', 'a', 'b', 'c', 'd'], ['b', 'a', 'c', 'd'], ['n'], false).desired).toEqual(['n', 'b', 'a', 'c', 'd']);
     expect(mergeBoardOrder(base, ['b', 'a', 'd'], base, [], false)).toEqual({ desired: ['b', 'a', 'c', 'd'], clashes: [] });
   });
+
+  it('forced, settles a pair the agent re-ordered by its sent order, where placing its moved board after its predecessor would not (design-workbench sweep#1)', () => {
+    // the agent moved a last; the owner put c first: a, after its sent predecessor c, would land before b
+    const [read, sent, live] = [['a', 'b', 'c'], ['b', 'c', 'a'], ['c', 'b', 'a']];
+    expect(mergeBoardOrder(read, sent, live, [], false).clashes).toEqual(['a', 'b']);
+    // a after both, as the agent sent it; the owner's c before b, which the agent did not re-order, kept
+    expect(mergeBoardOrder(read, sent, live, [], true)).toEqual({ desired: ['c', 'b', 'a'], clashes: [] });
+  });
+
+  it('forced, keeps every pair the agent re-ordered, whatever the owner did (every order of four boards on each side)', () => {
+    const orders = (ids: string[]): string[][] => (ids.length <= 1 ? [ids] : ids.flatMap((id) => orders(ids.filter((x) => x !== id)).map((rest) => [id, ...rest])));
+    const all = orders(base);
+    for (const sent of all)
+      for (const live of all) {
+        const { desired } = mergeBoardOrder(base, sent, live, [], true);
+        expect([...desired].sort(), `${sent} / ${live}`).toEqual([...base].sort());
+        for (const x of base)
+          for (const y of base) {
+            const [s, b, d] = [sent, base, desired].map((seq) => seq.indexOf(x) < seq.indexOf(y));
+            if (x !== y && s !== b) expect(d, `${sent} / ${live}: ${x} ${s ? 'before' : 'after'} ${y}`).toBe(s);
+          }
+      }
+  });
 });
 
 describe('movableIn', () => {
