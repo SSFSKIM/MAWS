@@ -6080,6 +6080,35 @@ a hub that connects into machines (§2).
   desk; the side says whose). The desktop and phone screenshots the
   owner saw before merging are under `mockups/desk/10-group-chat/`.
   Date/Author: 2026-10-19, the chat redraw (branch `desk-chat-render`).
+- Decision: The desk's remote capability is rebuilt as a phase of MAWS #52, not patched failure by failure. On
+  2026-10-19 the owner judged the desk's latency, speed and basic remote capability below standard: latency,
+  connection problems and resuming. A later phase rebuilds the remote protocol from the owner's research on how
+  Claude.ai built its Remote Control. Just as MAWS benchmarked Claude Desktop and Codex Desktop, the desk will
+  benchmark the Claude Code binary's Remote Control and claude.ai's RC surfaces. The destination is one web
+  interface for the agent workspace: a single client controls agents on many machines working on many projects.
+  The desk ports MAWS's desktop product side to the web and becomes the one surface for sessions across every
+  machine and project. Timing: not now; it is the goal the desk's work keeps in view.
+
+  Until that phase, failures are triaged in two ways:
+  - **Protocol-level** (latency, reconnects, stale RPCs, resume speed, the hub's open-state bookkeeping) goes to #52
+    as evidence, unless it blocks daily use.
+  - **Logic bugs** are fixed as found.
+
+  Two comments on #52 record this. The first holds the owner's words and the baseline: Resume ~30 s, one answer
+  refused `stale` after 60.5 s, reconnect after a deploy 1.4–2.0 s, first rows ~5 s against a 1.5 s budget. The
+  second holds the evening's diagnosis:
+  - the hub drops a project's open state while the stream stays up;
+  - the web resends an RPC after a reconnect with its original `created`, so it lands stale;
+  - about 25 s of a Resume pass after the session is already running, probably in the bridged subscription's
+    open.
+
+  The same diagnosis found the logic bugs fixed under the rule:
+  - Resume acted on a transcript-less `--bg` copy that had taken the seat's alias;
+  - the audit replay drew old `not-open` refusals as current failures.
+
+  Rejected then: fixing each protocol failure as it appears. Each fix would be rewritten by the rebuild, and the
+  baseline the benchmark needs would move under it.
+  Date/Author: 2026-10-19, the owner; folded by the design session.
 
 ## Outcomes & Retrospective
 
@@ -6133,7 +6162,13 @@ the Tracking Map and the Decision Log:
 
 **Left for later.**
 - The next phase is **MAWS #52**, from the owner's verdict: the desk becomes web MAWS plus a Claude Code
-  remote-control client. It is ticketed for a discussion before any design.
+  remote-control client. It is ticketed for a discussion before any design. On 2026-10-19 the owner widened it
+  (Decision Log, that date):
+  - the remote protocol is rebuilt from their research on Claude.ai's Remote Control;
+  - the desk benchmarks the Claude Code binary's Remote Control and claude.ai's RC surfaces;
+  - the destination is one web workspace where a single client controls agents on every machine and project.
+
+  The evidence gathered for it so far is on #52: the baseline table, and the diagnosed failures of 2026-10-19.
 - Its likely prerequisites: MAWS #36 (sign-in and hosting), #37 (machine join tokens) and #38 (the org key's split).
 - Phase 1 residue: MAWS #43, #44 and #45, and doperpowers #94, #95 and #96.
 - The sminos org directory (doperpowers #93) is specced and being built.
