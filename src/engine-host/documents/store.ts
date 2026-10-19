@@ -12,7 +12,7 @@ import { existsSync, statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
 import type { KindAdapter } from '@artifacts/host';
-import { applyV2, bindingVersion, decodeMap, encodeMap, mergeMaps, newDoc, type Doc } from '@artifacts/yjs';
+import { applyV2, bindingVersion, decodeMap, encodeMap, mergeMaps, newDoc, overlayMap, type Doc } from '@artifacts/yjs';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
 // P3-H start
 import * as z from 'zod';
@@ -28,7 +28,7 @@ import { Maintenance } from './maintenance';
 import { OpLedger, type OpScope } from './ops';
 import { restoreArtifact } from './restore';
 import { datasetRefsOf, isQuerySnapshotName, SnapshotRetention, type AssetHold } from './retention'; // E3
-import type { Committed, DocumentService, WriteOptions } from './service';
+import { mainOf, type Committed, type DocumentService, type WriteOptions } from './service';
 import type { SqliteDocumentStorage } from './storage';
 import { actorFromKey, VersionStore, type DesignSystemRef, type VersionKind } from './versions';
 
@@ -1137,10 +1137,14 @@ export class ArtifactStore {
   }
 
   // The merged attribution (encoded ContentMap) of every row overlapping [fromSeq, toSeq] (Decision Log 23a); the
-  // whole history of an open doc comes from the service's in-memory merge.
+  // whole history of an open doc comes from the service's in-memory merge. P4 (W1, L241 and L149): a suggestion doc's
+  // rows hold only what was written to it, while it holds its main doc's content too, so on every path its answer lays
+  // the main doc's whole merge beneath its own rows, as the service's provenance does (parent Decision Log 57(b)).
   attributions(artifactId: string, fromSeq: number, toSeq: number): Uint8Array {
     if (this.service.loaded(artifactId) && fromSeq <= 1 && toSeq >= this.service.revision(artifactId)) return encodeMap(this.service.provenance(artifactId));
-    return encodeMap(mergeMaps(this.storage.attributions(artifactId, fromSeq, toSeq).map(decodeMap)));
+    const own = mergeMaps(this.storage.attributions(artifactId, fromSeq, toSeq).map(decodeMap));
+    const main = mainOf(artifactId);
+    return encodeMap(main === null ? own : overlayMap(this.service.provenance(main), own));
   }
 
   // P3-E start (docs/doperpowers/plans/2026-10-16-p3-e-design-dashboard.md Decision Log 11 (1); E1's M2): a document an

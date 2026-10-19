@@ -1200,6 +1200,29 @@ describe('ArtifactStore: the change feed and attributions', () => {
     expect(insertedBy(first, humanChar)).toBeNull();
     expect(insertedBy(decodeMap(store.attributions(doc.id, r2, r2)), humanChar)?.actor).toBe('human');
   });
+
+  // P4 (W1, tracker 2026-10-18 L241 and 2026-10-14 L149): a suggestion doc holds its main doc's content, so its answer
+  // lays the main doc's rows beneath its own (parent Decision Log 57(b)) on every path: the whole history while loaded,
+  // a part of it while loaded, and the whole of it from storage once it is unloaded, with or without the main doc loaded
+  it('answers a suggestion doc’s attributions with its main doc’s beneath, loaded or not, whole or in part', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, agent, (d) => d.get('root').insert(0, 'agent'));
+    const key = service.suggestionDoc(doc.id);
+    const proposal = await write(key, other, (d) => d.get('root').insert(5, ' proposal'));
+    const live = newDoc();
+    applyV2(live, service.readState(key).state);
+    const mainChar = idAt(live.get('root'), 0)!;
+    const proposed = idAt(live.get('root'), 6)!;
+    const credits = (bytes: Uint8Array) => [insertedBy(decodeMap(bytes), mainChar)?.actor, insertedBy(decodeMap(bytes), proposed)?.actor];
+    const both = ['session:app-1', 'session:app-2'];
+    expect(credits(store.attributions(key, 0, proposal))).toEqual(both);
+    expect(credits(store.attributions(key, proposal, proposal))).toEqual(both);
+    reopen();
+    expect(service.loaded(key)).toBeNull();
+    expect(credits(store.attributions(key, 0, proposal))).toEqual(both);
+    service.live(doc.id);
+    expect(credits(store.attributions(key, 0, proposal))).toEqual(both);
+  });
 });
 
 describe('ArtifactStore: reads released after the batch they saw (Decision Log 33)', () => {
