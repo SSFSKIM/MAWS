@@ -119,10 +119,12 @@ describe('the PPTX mapping', () => {
     if (out.kind !== 'text') throw new Error('a text box');
     // 32 px × √(2 × 1.5) ≈ 55.4 px seen → 27.7 pt; letter spacing × 2 (across); line height × 1.5 (down)
     expect(out.text[0]!.options).toMatchObject({ fontSize: points(32 * Math.sqrt(3)), charSpacing: points(2), lineSpacing: points(60) });
-    // insets: left and right × 2, top and bottom × 1.5 (pptxgenjs's order l, r, b, t); the line and corner at the seen size
-    expect(out.options.margin).toEqual([points(40), points(40), points(15), points(15)]);
+    // insets: left and right × 2, top and bottom × 1.5 (pptxgenjs's order l, r, b, t), after the border (the path half
+    // the border inside the box: exports-capture scalpel-5#5); the line and corner at the seen size, the corner the path's
+    const half = Math.sqrt(3);
+    expect(out.options.margin).toEqual([points(40 + half), points(40 + half), points(15 + half), points(15 + half)]);
     expect(out.options.line).toMatchObject({ width: points(2 * Math.sqrt(3)) });
-    expect(out.options.rectRadius).toBeCloseTo(inches(8 * Math.sqrt(3)), 6);
+    expect(out.options.rectRadius).toBeCloseTo(inches(8 * Math.sqrt(3) - half), 6);
   });
 
   // fix wave 1 (finding 3): a region stretched into a box of another aspect scales each axis on its own
@@ -237,4 +239,54 @@ describe('the PPTX mapping: the final review', () => {
     const sequence = [...paragraph.matchAll(/<a:br\/>|<a:t>([^<]*)<\/a:t>/g)].map((m) => (m[0] === '<a:br/>' ? '|' : m[1])).filter((t) => t !== '').join('');
     expect(sequence).toBe('|LeadA||B|');
   });
+});
+
+// The exports-capture panel's findings (P3-F), each a regression drawn against where the canvas draws.
+describe('the PPTX mapping: the exports-capture panel', () => {
+  const cover = MEASURED.slides[0]!;
+  const body = MEASURED.slides[1]!;
+  const on = (slide: typeof cover) => (el: MeasuredElement, pictures = new Map<string, string>()) => pptxSlides(deck(), { slides: [{ ...slide, elements: [el] }] }, { variant: 'named', pictures, asset })[0]!.objects;
+  const onBody = on(body);
+  const NO_PAINT: MeasuredElement['paint'] = { fill: null, image: false, borders: [null, null, null, null], radius: 0, shadow: null, opacity: 1 };
+  /** Slide px from pptxgenjs's inches and points. */
+  const px = (inch: number) => inch * 144;
+  const pxOfPt = (pt: number) => pt * 2;
+  /** Within a point (2 px) of where the canvas draws it. */
+  const nearCanvas = (exported: number, canvas: number) => expect(Math.abs(exported - canvas), `${exported} px against the canvas's ${canvas} px`).toBeLessThanOrEqual(2);
+
+  // scalpel-5#5: PowerPoint centres an outline on its shape's path; the canvas draws a border inside the box (as the
+  // uneven bars are drawn) and sets the text after the border and the padding
+  it('scalpel-5#5: draws a 16 px border inside the box and sets a quote’s text after its 6 px left border', () => {
+    const black = { width: 16, style: 'solid', color: 'rgb(0, 0, 0)' };
+    const card: MeasuredElement = { ...body.elements[0]!, id: 'card', tag: 'div', box: { x: 100, y: 100, w: 400, h: 200 }, paint: { ...NO_PAINT, fill: 'rgb(255, 255, 255)', borders: [black, black, black, black], radius: 24 } };
+    const shape = named(onBody(card), 'card');
+    if (shape.kind !== 'shape') throw new Error('a shape');
+    const o = shape.options as { x: number; y: number; w: number; h: number; line: { width: number }; rectRadius: number };
+    const stroke = pxOfPt(o.line.width);
+    expect(stroke).toBe(16);
+    // the stroke's outer edge on the box's edge, its inner edge 16 px inside
+    nearCanvas(px(o.x) - stroke / 2, 100);
+    nearCanvas(px(o.y) - stroke / 2, 100);
+    nearCanvas(px(o.x) + px(o.w) + stroke / 2, 500);
+    nearCanvas(px(o.y) + px(o.h) + stroke / 2, 300);
+    nearCanvas(px(o.x) + stroke / 2, 116);
+    // the corner's outer curve keeps the box's 24 px radius
+    nearCanvas(px(o.rectRadius) + stroke / 2, 24);
+
+    const title = cover.elements[0]!;
+    const teal = { width: 6, style: 'solid', color: 'rgb(43, 122, 120)' };
+    const quote: MeasuredElement = { ...title, id: 'quote', tag: 'p', box: { x: 200, y: 400, w: 800, h: 120 }, paint: { ...NO_PAINT, borders: [null, null, null, teal] }, text: { ...title.text!, padding: [24, 32, 24, 32] } };
+    const objects = on(cover)(quote);
+    const text = named(objects, 'quote');
+    if (text.kind !== 'text') throw new Error('a text box');
+    const [left, right, bottom, top] = text.options.margin as [number, number, number, number];
+    // the text starts after the border and the padding: 200 + 6 + 32 on the left, 400 + 24 at the top
+    nearCanvas(px(text.options.x as number) + pxOfPt(left), 238);
+    nearCanvas(px(text.options.y as number) + pxOfPt(top), 424);
+    nearCanvas(px(text.options.x as number) + px(text.options.w as number) - pxOfPt(right), 968);
+    nearCanvas(px(text.options.y as number) + px(text.options.h as number) - pxOfPt(bottom), 496);
+    // the border its own bar, inside the box
+    expect(named(objects, 'quote:border-left').options).toMatchObject({ x: inches(200), w: inches(6) });
+  });
+  // (the exports-capture regressions end)
 });

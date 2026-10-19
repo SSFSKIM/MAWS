@@ -129,10 +129,12 @@ function shadowOf(paint: MeasuredPaint): PptxGenJS.ShadowProps | undefined {
 }
 
 /** The shape a painted box draws as: a rectangle, or a rounded one with its corner radius. */
-function boxShape(paint: MeasuredPaint, box: MeasuredBox): { shape: PptxGenJS.SHAPE_NAME; rectRadius?: number } {
-  const r = Math.min(paint.radius, box.w / 2, box.h / 2);
+function boxShape(radius: number, box: MeasuredBox): { shape: PptxGenJS.SHAPE_NAME; rectRadius?: number } {
+  const r = Math.min(radius, box.w / 2, box.h / 2);
   return r > 0.5 ? { shape: 'roundRect', rectRadius: inches(r) } : { shape: 'rect' };
 }
+/** `box` with each side moved `d` px in (its centre kept). */
+const inside = (box: MeasuredBox, d: number): MeasuredBox => (d ? { x: box.x + d, y: box.y + d, w: box.w - 2 * d, h: box.h - 2 * d } : box);
 
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
 /**
@@ -148,16 +150,23 @@ function turnedWith(part: MeasuredBox, owner: MeasuredBox, deg: number): Measure
   return { x: round6(px - part.w / 2), y: round6(py - part.h / 2), w: part.w, h: part.h };
 }
 
-/** A box's paint: its shape, fill, uniform line and shadow; a side drawn alone is its own bar (named `<id>:border-<side>`). */
-function paintObjects(el: MeasuredElement, withFill: boolean): { options: PptxGenJS.ShapeProps; shape: PptxGenJS.SHAPE_NAME; sides: PptxObject[] } {
+/**
+ * A box's paint: its shape, fill, uniform line and shadow; a side drawn alone is its own bar (named `<id>:border-<side>`).
+ * P3-F (exports-capture scalpel-5#5): PowerPoint centres a line on its shape's path, where the canvas draws a border
+ * inside the box (as the bars are drawn), so a uniform line's path lies half its width inside the box (`inset`), its
+ * corner the radius the stroke's middle follows; the shape's place is `options`' x, y, w and h.
+ */
+function paintObjects(el: MeasuredElement, withFill: boolean): { options: PptxGenJS.ShapeProps; shape: PptxGenJS.SHAPE_NAME; sides: PptxObject[]; inset: number } {
   const { paint, box } = el;
-  const { shape, rectRadius } = boxShape(paint, box);
-  const options: PptxGenJS.ShapeProps = { ...at(box), objectName: el.id, ...(rectRadius !== undefined && { rectRadius }), ...(el.rotate && { rotate: el.rotate }) };
+  const line = uniform(paint.borders) ? lineOf(paint.borders[0], paint.opacity) : undefined;
+  const inset = line ? paint.borders[0]!.width / 2 : 0;
+  const path = inside(box, inset);
+  const { shape, rectRadius } = boxShape(paint.radius - inset, path);
+  const options: PptxGenJS.ShapeProps = { ...at(path), objectName: el.id, ...(rectRadius !== undefined && { rectRadius }), ...(el.rotate && { rotate: el.rotate }) };
   const fill = withFill ? fillOf(paint.fill, paint.opacity) : undefined;
   options.fill = fill ?? { type: 'none' };
   const sides: PptxObject[] = [];
   if (uniform(paint.borders)) {
-    const line = lineOf(paint.borders[0], paint.opacity);
     if (line) options.line = line;
   } else {
     const names = ['top', 'right', 'bottom', 'left'] as const;
@@ -171,7 +180,7 @@ function paintObjects(el: MeasuredElement, withFill: boolean): { options: PptxGe
   }
   const shadow = shadowOf(paint);
   if (shadow) options.shadow = shadow;
-  return { options, shape, sides };
+  return { options, shape, sides, inset };
 }
 const painted = (paint: MeasuredPaint) => paint.fill !== null || paint.borders.some((b) => b !== null) || paint.shadow !== null;
 
@@ -229,11 +238,15 @@ function textObject(el: MeasuredElement, variant: PptxFontVariant, withFill: boo
   const runs = runsOf(text, variant, el.paint.opacity, listIndent);
   const hasText = runs.some((r) => r.text);
   if (!hasText && !painted(el.paint)) return [];
-  const { options: paint, shape, sides } = paintObjects(el, withFill);
+  const { options: paint, shape, sides, inset } = paintObjects(el, withFill);
+  // P3-F (exports-capture scalpel-5#5): the text is set after the border and the padding, as CSS sets it, measured from
+  // the box's path (`inset` inside the border's outer edge)
+  const borders = el.paint.borders.map((b) => b?.width ?? 0);
+  const content = text.padding.map((p, i) => p + borders[i]! - inset) as MeasuredText['padding'];
   const options: PptxGenJS.TextPropsOptions = {
-    ...at(el.box),
+    ...at(inside(el.box, inset)),
     objectName: el.id,
-    margin: insets(text.padding, listIndent),
+    margin: insets(content, listIndent),
     valign: text.valign,
     fit: 'none',
     // text the app sets on one line stays on one line: a substitute face a little wider runs past the box, not onto a
