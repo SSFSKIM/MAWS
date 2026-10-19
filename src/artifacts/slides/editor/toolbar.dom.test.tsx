@@ -126,5 +126,20 @@ describe('P3-F F3: the deck family’s toolbars wrap by whole controls', () => {
       expect(trigger.getAttribute('aria-label')).toBe('Text style');
       expect(getComputedStyle(trigger).minWidth).toBe('84px');
     });
+
+    // P3-F F3 review 2: a wrapping row places each item at its flex basis, so a notice at its text's width ("A deck holds
+    // at most 100 slides: delete one to add another.") would take a row of its own for as long as it shows, the zoom
+    // with it, and the stage would jump. With a zero basis it never breaks the row: it takes what the row has left
+    // beside the spacer and ellipsizes there, as before the row wrapped.
+    for (const which of ['the deck’s toolbar', 'the design workbench’s toolbar']) {
+      it(`${which}’s notice never takes a row of its own, ellipsized in what is left, sheets in the order ${order.join(', ')}`, () => {
+        sheets(order);
+        const { container } = render(TOOLBARS[which]!());
+        const notice = container.querySelector<HTMLElement>('.deck-toolbar > .deck-notice')!;
+        const s = getComputedStyle(notice);
+        expect({ basis: ['0', '0px', '0%'].includes(s.flexBasis) ? 'zero' : s.flexBasis || 'auto (unset)', grow: s.flexGrow, minWidth: s.minWidth }).toEqual({ basis: 'zero', grow: '1', minWidth: '0' });
+        expect([s.overflow, s.textOverflow, s.whiteSpace]).toEqual(['hidden', 'ellipsis', 'nowrap']);
+      });
+    }
   }
 });

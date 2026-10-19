@@ -450,7 +450,11 @@
   margin: 0 4px;
   background: var(--border);
 }
+/* a zero basis (P3-F F3 review): the row wraps by each item's basis, and a notice at its text's width would take a row of
+   its own while it shows, the zoom and the stage moving with it; it takes what the row leaves beside the spacer and
+   ellipsizes there */
 .deck-notice {
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   color: var(--fg-muted);
