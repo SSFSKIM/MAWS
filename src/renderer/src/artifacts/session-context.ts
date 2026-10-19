@@ -86,8 +86,9 @@ const NO_TURN = { requireEmptyMessage: true } as const;
 export type StartTrust = Exclude<TrustDecision, 'unanswered'>;
 
 // P3-F F4: the options of a Start, the owner's trust answer with them; answering it, the trust card this window docked
-// for the session goes (a card the composer docked with its own message stays: it is the composer's, and main refuses
-// a no-turn start while that prompt waits)
+// for the session goes. A card the composer docked with its own message is the composer's and stays here: for an intent,
+// main refuses the no-turn start while the intent's message waits (the refusal is the Start's answer); for a record the
+// message never left the composer's draft, so the start goes ahead and `resume` lets the card go once it is ready.
 function startOptions(appSessionId: AppSessionId, trust: StartTrust | undefined) {
   if (trust === undefined) return NO_TURN;
   const docked = useSetup.getState().cards.get(appSessionId);
@@ -102,7 +103,12 @@ async function resume(appSessionId: AppSessionId, client: MawsBridge, trust?: St
   } catch (error) {
     return { status: 'refused', appSessionId, words: error instanceof Error ? error.message : String(error) };
   }
-  if (outcome.status === 'ready') return { status: 'ready', appSessionId };
+  if (outcome.status === 'ready') {
+    // P3-F F4 (review B 2): the owner answered the question a record's trust card asks, and the session runs: the card goes,
+    // its text, if any, still the composer's draft (a record's card only undocks, as its Cancel does)
+    if (trust !== undefined && useSetup.getState().cards.get(appSessionId)?.kind === 'trust') useSetup.getState().undock(appSessionId);
+    return { status: 'ready', appSessionId };
+  }
   if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') return { status: 'card', appSessionId, words: cardWords(outcome), ...(outcome.status === 'needs_trust' && { trust: outcome.trust }) /* P3-F F4 */ };
   return { status: 'refused', appSessionId, words: acquisitionWords(outcome) ?? outcome.status };
 }

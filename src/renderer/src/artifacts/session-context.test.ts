@@ -185,12 +185,21 @@ describe('the owner’s Start', () => {
     expect(resumed.calls).toEqual([['session.acquire', { appSessionId: OWN, reason: 'read', options: { requireEmptyMessage: true, trust: 'declined' } }]]);
     expect(useSetup.getState().cards.has(OWN)).toBe(false);
 
-    // a card the composer docked with its own message is the composer's: it stays (main refuses the no-turn start)
+    // review B 2: an intent's card the composer docked with its own message is the composer's: it stays, main refusing the
+    // no-turn start while the intent's message waits
     const message = { content: 'Draft the summary.', display: 'Draft the summary.' };
+    useSetup.getState().dock(created, { kind: 'trust', trust: trust as never, message });
+    const busy = client({ 'session.start': { status: 'refused', appSessionId: created, reason: 'busy', message: 'A prompt is waiting in this session' } });
+    await startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, created, busy.bridge, 'accepted');
+    expect(useSetup.getState().cards.get(created)).toMatchObject({ kind: 'trust', message });
+
+    // a record's: its message never left the composer's draft (main keeps nothing for an acquisition), so the start goes
+    // ahead, and once the session is ready with the answer the card asking the same question goes
     useSetup.getState().dock(OWN, { kind: 'trust', trust: trust as never, message });
-    const busy = client({ 'session.acquire': { status: 'refused', appSessionId: OWN, reason: 'busy', message: 'A prompt is waiting in this session' } });
-    await startArtifactSession({ kind: 'session', appSessionId: OWN }, null, busy.bridge, 'accepted');
-    expect(useSetup.getState().cards.get(OWN)).toMatchObject({ kind: 'trust', message });
+    const ready = client({ 'session.acquire': { status: 'ready', appSessionId: OWN, launched: true, joined: false } });
+    await expect(startArtifactSession({ kind: 'session', appSessionId: OWN }, null, ready.bridge, 'accepted')).resolves.toEqual({ status: 'ready', appSessionId: OWN });
+    expect(ready.calls).toEqual([['session.acquire', { appSessionId: OWN, reason: 'read', options: { requireEmptyMessage: true, trust: 'accepted' } }]]);
+    expect(useSetup.getState().cards.has(OWN), 'the answered question’s card goes; its text is still the composer’s draft').toBe(false);
   });
 
   it('answers main’s refusal of a session holding a prompt with its words and the session to open', async () => {
