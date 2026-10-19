@@ -60,6 +60,8 @@ test('a project opens into its channels, the selected channel, and the depth slo
 
   const center = page.getByRole('region', { name: 'Channel' });
   await expect(center).toContainText('the migration is merged');
+  // The sessions' lifecycle folds behind its count (§4, 2026-10-19); opened, the retired line is there.
+  await center.getByTestId('quiet-run').getByRole('button').click();
   await expect(center).toContainText('doperpowers-1e retired by human');
   await expect.poll(() => hub.up.some((u) => u.frame.t === 'visibility' && u.frame.visible)).toBe(true); // the tab shows the project
 
