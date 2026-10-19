@@ -284,6 +284,21 @@ describe('Tab in a table', () => {
     type(editor(), 'Reviewer');
     expect(rows(editor())).toEqual([['Owner', 'Reviewer']]);
   });
+
+  // the review of c17: a ragged table (rows of unequal length, as an agent's `:::table` may store it until a local edit
+  // repairs it) leaves empty slots in its table map, which read as position 0; Shift-Tab from its first cell has no cell
+  // before it, and selected the whole first row
+  it('does nothing on Shift-Tab from a ragged table’s first cell, where typing stays', async () => {
+    const text = (value: string): JSONContent => ({ type: 'text', text: value });
+    const ragged = table([cell([line('a1', text('A1'))]), cell([line('b1', text('B1'))])], [cell([line('a2', text('A2'))])]);
+    const { editor } = await mount(doc(para('p1', 'Before'), ragged, para('p2', 'After')));
+    const at = endOf(editor(), 'a1');
+    act(() => void editor().chain().focus().setTextSelection(at).run());
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'Tab', shiftKey: true }));
+    expect(editor().state.selection.toJSON()).toEqual({ type: 'text', anchor: at, head: at });
+    type(editor(), 'x');
+    expect(rows(editor())[0]).toEqual(['A1x', 'B1']);
+  });
 });
 
 // P3-F (F1, the owner's N.3: "링크는 안열리고 cmd+click에도 컴포넌트가 선택됨"): ⌘-click (Ctrl-click off a Mac) on a link

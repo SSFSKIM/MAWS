@@ -9,7 +9,7 @@
 import { getSchema, Mark, mergeAttributes, Node, type AnyExtension, type Editor, type Extensions, type KeyboardShortcutCommand, type RawCommands } from '@tiptap/core';
 import type { Mark as PMMark, Node as PMNode, Schema, Slice } from '@tiptap/pm/model';
 import { Plugin, TextSelection, type EditorState } from '@tiptap/pm/state';
-import { isInTable, moveCellForward, selectionCell, TableMap } from '@tiptap/pm/tables'; // P3-F (c17)
+import { isInTable, moveCellForward, selectionCell } from '@tiptap/pm/tables'; // P3-F (c17)
 import type { Step } from '@tiptap/pm/transform'; // F (L170)
 import { Blockquote } from '@tiptap/extension-blockquote';
 import { Bold } from '@tiptap/extension-bold';
@@ -249,13 +249,22 @@ const guarded = <E extends AnyExtension>(ext: E): E =>
 // textblock (`block*`: the cells of a row just added, before the editor's cell fill gives them a paragraph; an agent's
 // or an import's empty cell) gets its empty paragraph in the same transaction, since prosemirror-tables' text selection
 // has nowhere to stand in it and falls back into the cell left (the typing then landed after the old cell's date chip).
-// The cell after (`dir` 1) or before the cell at `cellPos` in document order (the table map's distinct cell positions).
+// The cell after (`dir` 1) or before the cell at `cellPos` in document order: its row's next (previous) cell, else the
+// first (last) cell of the next (previous) row that has one; null at the table's end. Walked by structure, as
+// prosemirror-tables' own findNextCell does (not exported), never through the table map: a ragged table's empty slots
+// read 0 there and a cell lost to a span collision is missing (the review of c17).
 function adjacentCell(doc: PMNode, cellPos: number, dir: 1 | -1): number | null {
   const $cell = doc.resolve(cellPos);
-  const start = $cell.start(-1);
-  const cells = [...new Set(TableMap.get($cell.node(-1)).map)].sort((a, b) => a - b);
-  const next = cells[cells.indexOf(cellPos - start) + dir];
-  return next === undefined ? null : start + next;
+  const [row, table] = [$cell.parent, $cell.node(-1)];
+  if (dir > 0 && $cell.index() < row.childCount - 1) return cellPos + $cell.nodeAfter!.nodeSize;
+  if (dir < 0 && $cell.nodeBefore) return cellPos - $cell.nodeBefore.nodeSize;
+  let edge = dir > 0 ? $cell.after() : $cell.before(); // the far side of the current row
+  for (let at = $cell.index(-1) + dir; at >= 0 && at < table.childCount; at += dir) {
+    const other = table.child(at);
+    if (other.childCount > 0) return dir > 0 ? edge + 1 : edge - 1 - other.lastChild!.nodeSize;
+    edge += dir * other.nodeSize;
+  }
+  return null;
 }
 function enterCell(editor: Editor, dir: 1 | -1): boolean {
   if (!isInTable(editor.state)) return false;
