@@ -313,7 +313,10 @@ async function assertToolbarPlacement(page: Page): Promise<void> {
   const wordmark = page.locator('[data-sidebar-wordmark]');
   const newChat = page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true });
   const search = page.locator('[data-region="sidebar"]').getByRole('searchbox');
-  await expect(toolbar.getByText('MAWS', { exact: true })).toHaveCount(0);
+  // the wordmark is the sidebar's: no MAWS in the title bar but the project chip's name (P3-F wave S, F17), which is MAWS
+  // when that project's set is shown
+  const marks = toolbar.getByText('MAWS', { exact: true });
+  await expect.poll(() => marks.evaluateAll((els) => els.filter((el) => !el.closest('[data-toolbar-project]')).length), { message: 'no wordmark in the title bar' }).toBe(0);
   await expect(wordmark).toBeVisible();
   const [markBox, newBox, searchBox] = await Promise.all([wordmark, newChat, search].map((el) => el.boundingBox()));
   expect(newBox!.y).toBe(markBox!.y + markBox!.height);
