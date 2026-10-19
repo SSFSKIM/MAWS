@@ -475,4 +475,18 @@ describe('design-workbench fix wave', () => {
     expect(publish(doc, base, { [B2]: null }, true).out.conflicts).toEqual([]);
     expect(slideOrder(doc)).toEqual(['b1']);
   });
+
+  it('(scalpel-1#2) reports a missing-source board’s first file as added and changed when it is the empty board the model held', () => {
+    const doc = design();
+    const base = designFiles(doc);
+    publish(doc, base, sentWith(base, (c) => ((c.boards.later = { x: 0, y: 2000, w: 390, h: 844 }), c.order.push('later'))));
+    expect(isMissingSource(doc, 'later')).toBe(true);
+    const read = designFiles(doc);
+    const { out } = publish(doc, read, { [boardPath('later')]: '<section id="later"></section>' });
+    expect(out.conflicts).toEqual([]);
+    expect(out.added).toEqual([boardPath('later')]);
+    expect(out.changed).toContain(boardPath('later'));
+    expect(isMissingSource(doc, 'later')).toBe(false);
+    expect(designFiles(doc)[boardPath('later')]).toBeDefined();
+  });
 });

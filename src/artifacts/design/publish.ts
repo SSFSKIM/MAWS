@@ -400,9 +400,12 @@ function write(doc: Doc, input: Input, p: Plan, c: DeckHalf): CanvasPublishOutco
       manifest++;
     }
 
-  const changed = new Set((deck?.changed ?? []).map(fromDeck));
+  // a missing-source board given its file has a file it had not: added, whatever C wrote (a file equal to the empty board
+  // the model held, its base there, writes nothing)
+  const arrived = arrivals.map(boardPath);
+  const changed = new Set([...(deck?.changed ?? []).map(fromDeck), ...arrived]);
   if (manifest > 0) changed.add(CANVAS_PATH);
-  const added = new Set([...(deck?.added ?? []).map(fromDeck), ...arrivals.map(boardPath).filter((path) => changed.has(path))]);
+  const added = new Set([...(deck?.added ?? []).map(fromDeck), ...arrived]);
   return { changed: [...changed].sort(), conflicts: [], added: [...added].sort(), warnings, notes, held };
 }
 
