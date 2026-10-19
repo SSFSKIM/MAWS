@@ -219,8 +219,13 @@ export class LibraryMirror {
       if (key === old) continue;
       const manifest = this.manifests.get(old);
       const into = this.manifests.get(key);
-      if (manifest && into) for (const [artifactId, entry] of Object.entries(manifest.artifacts)) into.artifacts[artifactId] ??= entry;
-      else if (manifest) {
+      if (manifest && into) {
+        for (const [artifactId, entry] of Object.entries(manifest.artifacts)) {
+          const other = into.artifacts[artifactId];
+          // named by both: every file stays owned, at a revision none matches, so the next write removes what it no longer produces
+          into.artifacts[artifactId] = other ? { ...entry, revision: -1, files: [...new Set([...other.files, ...entry.files])] } : entry;
+        }
+      } else if (manifest) {
         this.manifests.set(key, manifest);
         const saved = this.saved.get(old);
         if (saved !== undefined) this.saved.set(key, saved);

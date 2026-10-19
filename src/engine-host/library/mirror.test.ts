@@ -908,4 +908,35 @@ describe('the mirror over a directory that goes away, is relinked or is spelled 
       rmSync(links, { recursive: true, force: true });
     }
   });
+
+  it('keeps every file either manifest named when two directories it knew become one (library review merge)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'maws-mirror-links-'));
+    try {
+      const [a, b] = [join(root, 'a'), join(root, 'b')];
+      mkdirSync(a);
+      mkdirSync(b);
+      const mirrored = (dir: string) => (existsSync(join(dir, 'artifacts')) ? readdirSync(join(dir, 'artifacts')).sort() : []);
+      const one = await linkedSpace('One', a);
+      const two = await linkedSpace('Two', b);
+      const moved = await page('Old', one.id);
+      await startMirror();
+      expect(mirrored(a)).toEqual([MIRROR_MANIFEST, file(moved)].sort());
+
+      renameSync(a, `${a}-away`); // away while the artifact moves to b under a new name: a's entry stays owned
+      await store().update(moved.id, { spaceId: two.id, title: 'New' });
+      await mirror!.flush();
+      const renamed = file({ id: moved.id, title: 'New' });
+      expect(mirrored(b)).toEqual([MIRROR_MANIFEST, renamed].sort());
+
+      rmSync(b, { recursive: true, force: true }); // the owner puts a's folder in b's place, a link left at a's name
+      renameSync(`${a}-away`, b);
+      symlinkSync(b, a);
+      await store().updateSpace(one.id, { name: 'One again' });
+      await mirror!.flush();
+      expect(mirrored(b)).toEqual([MIRROR_MANIFEST, renamed].sort()); // a's file under the old name removed, never left unowned
+      expect(Object.keys((JSON.parse(readFileSync(join(b, 'artifacts', MIRROR_MANIFEST), 'utf8')) as { artifacts: object }).artifacts)).toEqual([moved.id]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
