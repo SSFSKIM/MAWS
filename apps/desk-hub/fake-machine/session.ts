@@ -64,6 +64,9 @@ type Sub = {
   marks: Map<string, number>;
 };
 
+/** The plugin a session's bridge and ask run in: doperpowers before the sminos plugin existed, sminos from its 1.0.0. */
+export type BridgePlugin = 'doperpowers' | 'sminos';
+
 export type SnapshotOptions = {
   /** Runs while the snapshot is being built, after the subscription joined the live stream and before its rows are
    * read: what happens here (the replay going on) reaches the subscriber after the snapshot, never inside it twice. */
@@ -114,6 +117,8 @@ export class SessionDepth {
     /** The branch its working-tree diff is taken against (DX4 `diff`'s `base`). */
     readonly diffBase = 'main',
     readonly producer: Producer = 'dc3',
+    /** The plugin its bridge runs in, whose name its appended rows carry (`FakeMachineOptions.plugin`). */
+    readonly plugin: BridgePlugin = 'doperpowers',
   ) {
     this.rows.set('main', []);
   }
@@ -534,7 +539,7 @@ export class SessionDepth {
       isSidechain: false,
       timestamp,
       isMeta: true,
-      origin: { kind: 'plugin', name: 'doperpowers' },
+      origin: { kind: 'plugin', name: this.plugin },
       message: { role: 'user', content: [{ type: 'text', text: stopNote(taskId) }] },
     });
     return true;

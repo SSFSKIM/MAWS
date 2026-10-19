@@ -31,8 +31,9 @@ const turnOf = (rows: Row[], text: string) => rows.find((row) => row.kind === 'a
 const LINE = `${WAKE_SENDER}: ${WAKE_TEXT}`;
 
 describe('a row the bridge appended while no turn ran', () => {
-  it('a steer that lands after its turn’s end leaves that turn closed, waits as a prompt, and opens the turn the wake starts', async () => {
-    const c = new Chain();
+  // Under either plugin the bridge runs in: doperpowers before the roll, sminos after (doperpowers' sminos plugin design, §11).
+  it.each(['doperpowers', 'sminos'] as const)('%s: a steer that lands after its turn’s end leaves that turn closed, waits as a prompt, and opens the turn the wake starts', async (plugin) => {
+    const c = new Chain('c4a10000', plugin);
     c.prompt('List the files.');
     c.answer('Two files.');
     c.end();

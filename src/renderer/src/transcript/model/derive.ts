@@ -12,7 +12,7 @@ import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSch
 import { ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
-import { ASK_MOD_TOOL } from './classify'; // DC9
+import { isAskModTool } from './classify'; // DC9
 import { askModAnswers } from './ask-mod'; // DC9
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
@@ -474,9 +474,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         const agentId = record(event.structured).agentId;
         if (typeof agentId === 'string') agentIds.set(event.toolUseId, agentId as AgentId);
         const pending = pendingRows.get(event.toolUseId);
-        // DC9 start: doperpowers' ask tool keeps no structured answers, so they are read from its result's text, where the
+        // DC9 start: the ask mod's tool keeps no structured answers, so they are read from its result's text, where the
         // human's decline is the engine's refusal inside `<tool_use_error>`: an empty answer map (Skipped), not an error
-        const askMod = pending !== undefined && pending.use.toolName === ASK_MOD_TOOL;
+        const askMod = pending !== undefined && isAskModTool(pending.use.toolName);
         if (askMod && pending.answers === null) {
           const questions = record(pending.use.input).questions;
           pending.answers = askModAnswers(Array.isArray(questions) ? questions.map(record).map((q) => ({ question: str(q.question) })) : [], event);

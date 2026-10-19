@@ -267,8 +267,9 @@ describe('group state machine', () => {
 
 // DC9 (the desk, 2026-10-17): doperpowers' ask tool is a question as the built-in is. Its input is the built-in's plus
 // `async`; its result carries no structured answers, only the engine's summary text, which the row reads back.
-describe('doperpowers’ ask tool (mcp__doperpowers__AskUserQuestion)', () => {
-  const ASK = 'mcp__doperpowers__AskUserQuestion';
+// The sminos plugin (doperpowers' sminos plugin design, §11): the ask moves to a plugin of its own and is renamed
+// `mcp__sminos__AskUserQuestion`; a machine not yet rolled keeps the old name, so each reads alike, for good.
+describe.each(['mcp__doperpowers__AskUserQuestion', 'mcp__sminos__AskUserQuestion'])('the ask mod’s tool (%s)', (ASK) => {
   const QUESTIONS = [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red' }, { label: 'Blue' }] }];
   const ASYNC_RESULT = 'Your questions are waiting for the human; this call does not wait for them. Their answer will reach you in a later message that quotes each question. Go on with work that does not depend on it.';
   function asked(input: Record<string, unknown>, content: string, options: { isError?: boolean } = {}) {

@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
 import { isBridgeRow } from '../../conversation/delivery-frame';
-import { bridgeRowKind, markedSteerWords, STEER_LINE, steerAsDrawn, type BridgeRowKind } from './bridge-rows';
+import { bridgeRowKind, isMirrorLine, markedSteerWords, STEER_LINE, steerAsDrawn, type BridgeRowKind } from './bridge-rows';
 import { freshSource, subagentLookupOf } from './desk-transcript';
 
 /** The doperpowers fixtures MAWS vendors: DX4's vectors (written by doperpowers' `tests/sminos/dx4-jobs.gen.py`). */
@@ -105,6 +105,22 @@ describe("the plugin's appended rows", () => {
     const skill = { ...appended('Base directory for this skill: /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.120.0/skills/kairos\n\nYou are in kairos mode.'), turnCompanion: true, queuePriority: 'later' };
     expect(bridgeRowKind(skill)).toBeNull();
     expect(steerAsDrawn(skill)).toBe(skill);
+  });
+
+  it('reads the rows of a bridge running in either plugin, doperpowers before the roll or sminos after, and its mirror lines', () => {
+    // The sminos plugin (doperpowers' sminos plugin design, §11): the engine names an appended row, and the notice of its
+    // `$.ui.log`, by the plugin that wrote it.
+    for (const name of ['doperpowers', 'sminos']) {
+      const under = (text: string) => ({ ...appended(text), origin: { kind: 'plugin', name } });
+      expect(markedSteerWords(under(`${STEER_LINE}\nuse the split store`)), name).toBe('use the split store');
+      expect(bridgeRowKind(under('[Request interrupted by user]')), name).toBe('interrupt-marker');
+      expect(bridgeRowKind(under(STOP('bk3x9a1', 'the desk'))), name).toBe('stop-note');
+      expect(bridgeRowKind(under('use the split store')), name).toBe('steer');
+      for (const kind of ['steer', 'delivered']) {
+        expect(isMirrorLine({ type: 'system', subtype: 'informational', content: `${name}: ${kind}: use the split store`, level: 'notice' }), `${name} ${kind}`).toBe(true);
+      }
+    }
+    expect(isMirrorLine({ type: 'system', subtype: 'informational', content: 'another: steer: use the split store', level: 'notice' })).toBe(false);
   });
 
   it('draws a steer as the owner’s prompt queued into the running turn, under its row’s uuid; the others as they are', () => {

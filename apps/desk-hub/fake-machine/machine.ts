@@ -23,7 +23,7 @@ import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from 
 import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
-import { SessionDepth, type Producer, type SnapshotOptions } from './session';
+import { SessionDepth, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
 
 /** What a script answers an RPC with: an outcome, or undefined for the fake machine's own default. */
 export type RpcScript = { [N in RpcName]?: (rpc: Rpc<N>, machine: FakeMachine) => RpcOutcome<N> | undefined | Promise<RpcOutcome<N> | undefined> };
@@ -89,6 +89,13 @@ export type FakeMachineOptions = {
    * `output`; `dc3` (the default, as DC3 built it) sends each agent's id and meta alone and passes `output` by.
    */
   producer?: Producer;
+  /**
+   * The plugin its sessions' bridge and ask run in (doperpowers' sminos plugin design, §11): `doperpowers` (the default),
+   * a machine not yet rolled; `sminos`, one on sminos 1.0.0, whose bridge appends its rows under origin `sminos` and
+   * raises the ask as `mcp__sminos__AskUserQuestion` — a recorded ask under the old name is raised under the new one.
+   * The recordings' own rows are replayed as recorded.
+   */
+  plugin?: BridgePlugin;
 };
 
 /** What happened to an RPC this machine received, for a test to read. */
@@ -150,7 +157,7 @@ export class FakeMachine {
     );
     const where = { project: this.project, machine: this.name };
     for (const recording of options.recordings ?? []) {
-      const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false, this.diffBase(recording.session), this.producer);
+      const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false, this.diffBase(recording.session), this.producer, this.plugin);
       this.sessions.set(recording.session, depth);
       for (const step of recording.steps) this.timeline.push({ session: depth, step });
     }
@@ -159,7 +166,7 @@ export class FakeMachine {
     for (const trace of Object.values(this.memory.trace)) {
       if (trace.rpc === 'steer' && trace.row && trace.session) this.sessions.get(trace.session)?.appendRow(null, trace.row as Row);
       else if (trace.rpc === 'stop' && trace.session && typeof trace.result.taskId === 'string') this.sessions.get(trace.session)?.restoreStop(trace.result.taskId);
-      else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where, true, this.diffBase(trace.session), this.producer));
+      else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where, true, this.diffBase(trace.session), this.producer, this.plugin));
     }
   }
 
@@ -181,6 +188,10 @@ export class FakeMachine {
 
   private diffBase(session: string): string {
     return this.options.diffBase?.(session) ?? 'main';
+  }
+
+  private get plugin(): BridgePlugin {
+    return this.options.plugin ?? 'doperpowers';
   }
 
   private get producer(): Producer {
@@ -403,8 +414,10 @@ export class FakeMachine {
   }
 
   private async raise(session: string, draft: Omit<Raised, 'mac' | 'session'>): Promise<void> {
-    // A background subagent's window is the bridge's 3 s from now, whenever the recording ran.
-    const timed = draft.deadline ? { ...draft, deadline: new Date(Date.now() + 3000).toISOString() } : draft;
+    // A background subagent's window is the bridge's 3 s from now, whenever the recording ran; the ask is raised under
+    // the name the machine's plugin registers it by.
+    const named = draft.tool === OLD_ASK_TOOL ? { ...draft, tool: ASK_TOOL_IN[this.plugin] } : draft;
+    const timed = named.deadline ? { ...named, deadline: new Date(Date.now() + 3000).toISOString() } : named;
     const raised = await seal(this.key, 'raised', this.project, { ...timed, session } as Omit<Raised, 'mac'>);
     this.pending.set(raised.request, { session, raised });
     this.sendSessionWide({ project: this.project, machine: this.name, session, kind: 'raised', sub: null, n: null, body: raised });
@@ -722,7 +735,7 @@ export class FakeMachine {
         if (depth.mainTurn === null) return fail('idle', 'no turn is running to steer: send it instead');
         // The bridge appends a steer (`$.session.append`), which the engine keeps meta with the plugin's origin: the
         // owner's words under the steer's own first line (doperpowers 7.180.0, DX5 `steer` [steer-line]).
-        const row = { ...userRow(depth.id, `[sminos steer from human]\n${rpc.args.text}`), isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' } } as Row;
+        const row = { ...userRow(depth.id, `[sminos steer from human]\n${rpc.args.text}`), isMeta: true, origin: { kind: 'plugin', name: this.plugin } } as Row;
         const outcome = this.traced(rpc, record, depth.id, { row: row.uuid }, row);
         depth.appendRow(null, row);
         return outcome;
@@ -776,7 +789,7 @@ export class FakeMachine {
         if (!checkouts.some((c) => c.path === rpc.args.checkout)) return fail('unknown-checkout', `${rpc.args.checkout} is not a known checkout here`);
         const session = randomUUID();
         const alias = `fake-${session.slice(0, 4)}`;
-        const depth = new SessionDepth(session, null, (m) => this.queue({ t: 'session', message: m }), { project: this.project, machine: this.name }, true, this.diffBase(session), this.producer);
+        const depth = new SessionDepth(session, null, (m) => this.queue({ t: 'session', message: m }), { project: this.project, machine: this.name }, true, this.diffBase(session), this.producer, this.plugin);
         this.sessions.set(session, depth);
         await this.write(`rpc:${rpc.nonce}:joined`, `${this.name}/${session}`, {
           kind: 'joined', session, alias, name_source: 'seat', machine: this.name, cwd: rpc.args.checkout, worktree: rpc.args.worktree ?? '', role: rpc.args.brief, seat: alias, by: member,
@@ -955,7 +968,10 @@ function argumentProblem(rpc: Rpc): string | null {
   }
 }
 
-const QUESTION_TOOLS = new Set(['AskUserQuestion', 'mcp__doperpowers__AskUserQuestion']);
+/** The ask mod's tool as each plugin it has run in registers it (doperpowers' sminos plugin design, §11). */
+const ASK_TOOL_IN: Record<BridgePlugin, string> = { doperpowers: 'mcp__doperpowers__AskUserQuestion', sminos: 'mcp__sminos__AskUserQuestion' };
+const OLD_ASK_TOOL = ASK_TOOL_IN.doperpowers;
+const QUESTION_TOOLS = new Set(['AskUserQuestion', ...Object.values(ASK_TOOL_IN)]);
 
 /**
  * Whether a decision or an answer fits the request it names, as the bridge's decision route checks it (DX5): a question

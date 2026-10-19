@@ -58,6 +58,7 @@ describe('classification table', () => {
     expect(presentationOf('SendMessage')).toBe('agent_message');
     expect(presentationOf('AskUserQuestion')).toBe('question');
     expect(presentationOf('mcp__doperpowers__AskUserQuestion')).toBe('question'); // DC9: doperpowers' ask tool
+    expect(presentationOf('mcp__sminos__AskUserQuestion')).toBe('question'); // the same tool once it moved to the sminos plugin
     expect(presentationOf('ExitPlanMode')).toBe('plan');
     expect(presentationOf('Bash')).toBe('cell');
     expect(presentationOf('mcp__x__y')).toBe('cell');

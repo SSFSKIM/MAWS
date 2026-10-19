@@ -1,6 +1,7 @@
-// DC9 (the desk's session view, 2026-10-17; desk composite §9.1, §9.5): doperpowers' ask tool, the ask mod's
-// `mcp__doperpowers__AskUserQuestion` (doperpowers `hooks/mods/ask.tsx`), is a question as the built-in AskUserQuestion
-// is (`ASK_MOD_TOOL`, classify.ts). Its input is the built-in's plus `async`, which the question row reads as it stands.
+// DC9 (the desk's session view, 2026-10-17; desk composite §9.1, §9.5): the ask mod's tool (doperpowers
+// `hooks/mods/ask.tsx`, `sminos/hooks/mods/ask.tsx` once it moved to the sminos plugin), `mcp__sminos__AskUserQuestion`
+// or, before the move, `mcp__doperpowers__AskUserQuestion`, is a question as the built-in AskUserQuestion is
+// (`ASK_MOD_TOOLS`, classify.ts). Its input is the built-in's plus `async`, which the question row reads as it stands.
 // Its result is not: a plugin tool stores no structured answers (its `toolUseResult` is its text), so the answers are
 // read back from the text the call returned, which for a blocking ask is the engine's own AskUserQuestion summary
 // (`"<question>"="<answer>"` per answered question, joined `, `; 2.1.300 `mapToolResultToToolResultBlockParam`).

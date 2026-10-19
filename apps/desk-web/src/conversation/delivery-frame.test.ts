@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../../../src/renderer/src/stores/transcript';
 import type { Row } from '../../../../src/renderer/src/transcript/model/rows';
 import { freshSource, subagentLookupOf } from '../depth/source/desk-transcript';
-import { deliveredLines, deliveryAsDrawn, deliveryFrame, supersededDeliveries } from './delivery-frame';
+import { deliveredLines, deliveryAsDrawn, deliveryFrame, isBridgeRow, supersededDeliveries } from './delivery-frame';
 
 const SESSION = 'sess-1';
 const BRIDGE = { kind: 'plugin', name: 'doperpowers', asUser: true };
@@ -87,6 +87,18 @@ describe('a delivered send’s frame line', () => {
     expect(deliveryFrame(appended(`${MESSAGE}\nRe-run the suites.`))).toEqual({ from: 'human', own: true });
     expect(deliveryFrame(appended('[sminos message from kim id=5e551e17]\nRe-run the suites.'))).toEqual({ from: 'kim', own: false });
     expect(deliveredLines(appended(`${PEER}\nI read it.`))).toEqual([PEER]);
+  });
+
+  it('reads the bridge’s appended row under either plugin it runs in: doperpowers before the roll, sminos after', () => {
+    // The sminos plugin (doperpowers' sminos plugin design, §11): the bridge moves out of doperpowers, and the engine names
+    // its rows by the plugin that appended them.
+    for (const name of ['doperpowers', 'sminos']) {
+      const r = appended(`${OWN}\nRun the suites.`, { kind: 'plugin', name });
+      expect(isBridgeRow(r), name).toBe(true);
+      expect(deliveryFrame(r), name).toEqual({ from: 'human', own: true });
+      expect(deliveryAsDrawn(r).attachment, name).toMatchObject({ prompt: [{ type: 'text', text: 'Run the suites.' }], source_uuid: r.uuid });
+    }
+    expect(isBridgeRow(appended(`${OWN}\nRun the suites.`, { kind: 'plugin', name: 'another' }))).toBe(false);
   });
 
   it("is drawn as nothing for the owner's own send and as a label naming a peer, the rest of what the session read unchanged", () => {

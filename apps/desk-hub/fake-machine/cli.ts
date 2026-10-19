@@ -29,7 +29,8 @@ const USAGE = `usage:
       --read-only              refuse every RPC and deliver nothing from outside
       --follow                 open the project as a follower (hello.follow): no presence; give it no --recording
       --keep-times             log events keep their recorded ts (default: when first written)
-      --producer <daemon>      dc3 (default) | dc8: DX4's widened subagents body, jobs, MCP names, and output`;
+      --producer <daemon>      dc3 (default) | dc8: DX4's widened subagents body, jobs, MCP names, and output
+      --plugin <name>          doperpowers (default) | sminos: the plugin its bridge and ask run in (a rolled machine)`;
 
 function readState(path: string): State {
   return JSON.parse(readFileSync(path, 'utf8')) as State;
@@ -66,6 +67,7 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
       follow: { type: 'boolean', default: false },
       'keep-times': { type: 'boolean', default: false },
       producer: { type: 'string', default: 'dc3' },
+      plugin: { type: 'string', default: 'doperpowers' },
     },
   });
   if (!values.state || (command !== 'enroll' && command !== 'run')) {
@@ -89,6 +91,10 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
   }
   if (values.producer !== 'dc3' && values.producer !== 'dc8') {
     console.error('--producer is dc3 or dc8');
+    return 2;
+  }
+  if (values.plugin !== 'doperpowers' && values.plugin !== 'sminos') {
+    console.error('--plugin is doperpowers or sminos');
     return 2;
   }
   const state = readState(values.state);
@@ -121,6 +127,7 @@ export async function main(argv: string[], defaults: { recording: string }): Pro
       retime: !values['keep-times'],
       reconnect: true,
       producer: values.producer,
+      plugin: values.plugin,
     });
     await machine.connect();
     console.log(`${state.machine} connected to ${state.hub} (generation ${machine.generation}); project ${values.project}`);

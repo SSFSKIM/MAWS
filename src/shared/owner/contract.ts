@@ -92,8 +92,10 @@ export const carriesFullContract = (declared: number | null): boolean => declare
 
 // The supplement (P2-C2), appended beside a message-tool style. Such a style names the plugin's own ask tool, which a
 // headless (`-p`) launch, MAWS's, does not register; MAWS's `ask` tool is there instead. It says only what the style
-// cannot know here, so it never restates the style.
+// cannot know here, so it never restates the style. It names the ask tool by both names it has had: doperpowers' until
+// the ask moved to the sminos plugin (doperpowers' sminos plugin design, §11), sminos's after, so a style of either
+// release reads it right. A wording change, not a change of meaning: its version stays 1 (the rule at the top).
 export const TO_HUMAN_SUPPLEMENT_VERSION = 1;
 export const TO_HUMAN_SUPPLEMENT = `${SUPPLEMENT_HEADER(TO_HUMAN_SUPPLEMENT_VERSION)}
 
-This session runs in MAWS, whose human reads a report of it: only what you mark reaches them, so everything you want them to read, your answers included, goes inside \`<message>…</message>\`, the one mark here too. Ask the human with \`mcp__maws__ask\`: \`blocking: false\` when you can go on with other work while they decide (their answer arrives later as a user message naming the askId), \`blocking: true\` when you need the answer before your next step. \`mcp__doperpowers__AskUserQuestion\` is not available here; use the native AskUserQuestion only where \`mcp__maws__ask\` is missing. Write marks as plain text, never inside code blocks or inline code.`;
+This session runs in MAWS, whose human reads a report of it: only what you mark reaches them, so everything you want them to read, your answers included, goes inside \`<message>…</message>\`, the one mark here too. Ask the human with \`mcp__maws__ask\`: \`blocking: false\` when you can go on with other work while they decide (their answer arrives later as a user message naming the askId), \`blocking: true\` when you need the answer before your next step. Neither \`mcp__sminos__AskUserQuestion\` nor \`mcp__doperpowers__AskUserQuestion\` is available here; use the native AskUserQuestion only where \`mcp__maws__ask\` is missing. Write marks as plain text, never inside code blocks or inline code.`;
