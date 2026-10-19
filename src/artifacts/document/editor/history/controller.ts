@@ -99,6 +99,8 @@ const LIVE = Number.MAX_SAFE_INTEGER;
 
 const EMPTY: HistorySnapshot = { versions: null, selected: [], loading: false, preview: null, pill: null, banner: null, status: null, error: null };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** A version's heading over its preview: its name and time, or its time alone. */
+const versionHeading = (version: ArtifactVersion): string => (version.label ? `${version.label} · ${formatWhen(version.at)}` : formatWhen(version.at));
 
 export class HistoryController {
   private snapshot: HistorySnapshot = EMPTY;
@@ -163,10 +165,11 @@ export class HistoryController {
     this.liveTab = tabId;
   }
 
-  /** Reads the list again, and counts the new changes again if counting them failed. */
+  /** Reads the list again (a previewed version's heading with it), and counts the new changes again if counting them failed. */
   async refresh(): Promise<void> {
     try {
-      this.set({ versions: await this.api.versions() });
+      const versions = await this.api.versions();
+      this.set({ versions, ...this.headingFrom(versions) });
     } catch (error) {
       this.set({ error: message(error) });
     }
@@ -324,7 +327,7 @@ export class HistoryController {
       if (target.kind === 'version') {
         next = byId(target.versionId);
         prev = versions.filter((v) => v.seq < next!.seq || (v.seq === next!.seq && v.id < next!.id)).sort((a, b) => b.seq - a.seq || b.id - a.id)[0] ?? null;
-        title = next.label ? `${next.label} · ${formatWhen(next.at)}` : formatWhen(next.at);
+        title = versionHeading(next);
       } else if (target.kind === 'compare') {
         [prev, next] = target.versionIds.map(byId).sort((a, b) => a.seq - b.seq || a.id - b.id);
         title = `${versionTitle(prev)} → ${versionTitle(next)}`;
@@ -366,6 +369,17 @@ export class HistoryController {
     } catch (error) {
       if (load === this.load) this.set({ loading: false, error: message(error) });
     }
+  }
+
+  // A previewed version's heading as the list now names it (Name this version here, or a name given elsewhere), so it
+  // reads as the version's row does; nothing when it reads the same.
+  private headingFrom(versions: ArtifactVersion[]): Partial<HistorySnapshot> {
+    const loaded = this.loaded;
+    const target = loaded?.preview.target;
+    const version = target?.kind === 'version' ? versions.find((v) => v.id === target.versionId) : undefined;
+    if (!loaded || !version || versionHeading(version) === loaded.preview.title) return {};
+    loaded.preview = { ...loaded.preview, title: versionHeading(version) };
+    return { preview: loaded.preview };
   }
 
   // Publishes a preview with the view of its tab and Show changes setting (`fresh`: its moved and retyped blocks too).

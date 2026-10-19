@@ -75,6 +75,8 @@ export interface DeckHistorySnapshot {
 const LIVE = Number.MAX_SAFE_INTEGER;
 const EMPTY: DeckHistorySnapshot = { versions: null, selected: [], loading: false, preview: null, pill: null, banner: null, status: null, error: null };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** A version's heading over its preview: its name and time, or its time alone. */
+const versionHeading = (version: ArtifactVersion): string => (version.label ? `${version.label} · ${formatWhen(version.at)}` : formatWhen(version.at));
 
 /**
  * P3-E (E1 M4; the P3-E spec's Decision Log 23): an optional count for the new-change pill, read from the diff and its
@@ -146,9 +148,11 @@ export class DeckHistoryController {
     this.liveSlide = slideId;
   }
 
+  /** Reads the list again (a previewed version's heading with it), and counts the new changes again if counting them failed. */
   async refresh(): Promise<void> {
     try {
-      this.set({ versions: await this.api.versions() });
+      const versions = await this.api.versions();
+      this.set({ versions, ...this.headingFrom(versions) });
     } catch (error) {
       this.set({ error: message(error) });
     }
@@ -321,7 +325,7 @@ export class DeckHistoryController {
         next = byId(target.versionId);
         const shown = next;
         prev = versions.filter((v) => v.seq < shown.seq || (v.seq === shown.seq && v.id < shown.id)).sort((a, b) => b.seq - a.seq || b.id - a.id)[0] ?? null;
-        title = next.label ? `${next.label} · ${formatWhen(next.at)}` : formatWhen(next.at);
+        title = versionHeading(next);
       } else if (target.kind === 'compare') {
         [prev, next] = target.versionIds.map(byId).sort((a, b) => a.seq - b.seq || a.id - b.id) as [ArtifactVersion, ArtifactVersion];
         title = `${versionTitle(prev)} → ${versionTitle(next)}`;
@@ -366,6 +370,16 @@ export class DeckHistoryController {
     } catch (error) {
       if (load === this.load) this.set({ loading: false, error: message(error) });
     }
+  }
+
+  // A previewed version's heading as the list now names it (Name this version here, or a name given elsewhere), so it
+  // reads as the version's row does; nothing when it reads the same.
+  private headingFrom(versions: ArtifactVersion[]): Partial<DeckHistorySnapshot> {
+    const preview = this.snapshot.preview;
+    const target = preview?.target;
+    const version = target?.kind === 'version' ? versions.find((v) => v.id === target.versionId) : undefined;
+    if (!preview || !version || versionHeading(version) === preview.title) return {};
+    return { preview: { ...preview, title: versionHeading(version) } };
   }
 
   // Counts the changes since the last view, headless; a failure is kept on the pill and logged (refresh retries).

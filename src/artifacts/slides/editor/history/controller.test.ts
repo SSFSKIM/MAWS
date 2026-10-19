@@ -8,6 +8,7 @@ import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HistoryApi } from '../../../document/editor/history/api';
+import { formatWhen } from '../../../document/editor/history/model';
 import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, newDoc, onUpdate, stateV2, transact, type ContentMap, type Doc } from '../../../yjs';
 import { importSlide, setNotes, setStyle, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
@@ -201,6 +202,20 @@ describe('the deck’s history controller (D11)', () => {
     detach();
     expect(second.isDestroyed).toBe(true);
     expect(controller.getSnapshot().preview).toBeNull();
+  });
+
+  // The history-anchors review (scalpel-5#3): the preview's heading reads the version's new name once it is named, as
+  // the rail's row does.
+  it('names the previewed version, and the preview’s heading with it', async () => {
+    const h = deckHost(['a']);
+    const v = h.version('auto');
+    const controller = attach(h);
+    await until(() => controller.getSnapshot().versions !== null);
+    await controller.select(v.id);
+    expect(controller.getSnapshot().preview!.title).toBe(formatWhen(v.at));
+    expect(await controller.name('Before legal')).toBe(true);
+    expect(controller.getSnapshot().versions!.find((x) => x.id === v.id)!.label).toBe('Before legal');
+    expect(controller.getSnapshot().preview!.title).toBe(`Before legal · ${formatWhen(v.at)}`);
   });
 
   it('shows the editors of a live element by name, colour and time', async () => {

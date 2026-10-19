@@ -13,6 +13,7 @@ import { MemoryDocumentHost, openMemoryHandle, whenSynced } from '../memory-host
 import { until } from '../test-world';
 import type { HistoryApi } from './api';
 import { HistoryController } from './controller';
+import { formatWhen } from './model';
 import { MemoryHistory } from './memory-history';
 
 const AGENT: Actor = { kind: 'session', appSessionId: '00000000-0000-4000-8000-0000000000a1' as AppSessionId };
@@ -97,5 +98,19 @@ describe('a change count that fails', () => {
     await controller.recount(); // the pill's own retry
     expect(controller.getSnapshot().pill).toMatchObject({ count: 1, failed: null });
     expect(controller.getSnapshot().error).toBeNull();
+  });
+});
+
+// The history-anchors review (scalpel-5#3): the preview's heading reads the version's new name once it is named, as
+// the rail's row does.
+describe('Name this version', () => {
+  it('renames the preview’s heading with the version', async () => {
+    const { history, handle, turn } = await deletedTab();
+    const controller = attach(handle, history);
+    await controller.select(turn.id);
+    expect(controller.getSnapshot().preview!.title).toBe(formatWhen(turn.at));
+    expect(await controller.name('Before legal')).toBe(true);
+    expect(controller.getSnapshot().versions!.find((v) => v.id === turn.id)!.label).toBe('Before legal');
+    expect(controller.getSnapshot().preview!.title).toBe(`Before legal · ${formatWhen(turn.at)}`);
   });
 });
