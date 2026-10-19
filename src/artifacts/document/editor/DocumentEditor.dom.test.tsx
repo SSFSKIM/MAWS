@@ -284,6 +284,19 @@ describe('find', () => {
     expect(findCount()).toBe('2 of 2');
   });
 
+  // P3-F panel scalpel-2#1: Mod-F with the bar already open puts the keyboard back in its field, the query selected
+  it('takes the keyboard back to the open field on a second Mod-F, the query selected', async () => {
+    const { editor } = await mount(doc(para('p1', 'alpha beta'), para('p2', 'beta gamma')));
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'f', metaKey: true }));
+    const input = screen.getByRole('searchbox', { name: 'Find in document' }) as HTMLInputElement;
+    act(() => fireEvent.change(input, { target: { value: 'beta' } }));
+    act(() => input.blur()); // the keyboard went back to the page
+    expect(document.activeElement).not.toBe(input);
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'f', metaKey: true }));
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, 4]);
+  });
+
   // P3-F panel sweep#1: the bar's query goes with it to the editor shown, a version opened from History and the live
   // document again, matched there at once (the preview has its own editor, M9)
   it('keeps finding its query in the editor shown: a version from History, then the live document', async () => {

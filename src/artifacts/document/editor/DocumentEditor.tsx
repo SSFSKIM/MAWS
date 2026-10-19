@@ -400,11 +400,19 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
   }, [showing, editor, onShown, handle]);
 
   const toggleHistory = () => openRail(rail === 'history' ? null : 'history');
+  // P3-F: Find (Mod-F, the toolbar's) opens the bar, its field taking the keyboard as it mounts; with the bar open, the
+  // field takes it again, the query selected
+  const findField = useRef<HTMLInputElement>(null);
+  const openFind = () => {
+    setFindOpen(true);
+    findField.current?.focus();
+    findField.current?.select();
+  };
   const onKeyDown = (event: KeyboardEvent) => {
     const mod = event.metaKey || event.ctrlKey;
     if (mod && !event.altKey && event.key.toLowerCase() === 'f') {
       event.preventDefault();
-      setFindOpen(true);
+      openFind();
     } else if (mod && event.altKey && event.shiftKey && event.code === 'KeyH' && historyController) {
       event.preventDefault(); // Google Docs' chord for version history
       toggleHistory();
@@ -437,13 +445,13 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           editor={editor}
           artifactId={artifactId}
           host={host}
-          onFind={() => setFindOpen(true)}
+          onFind={openFind}
           comments={{ comment: comments ? () => commentRef.current() : null, railOpen: rail === 'comments', openCount, toggleRail: () => openRail(rail === 'comments' ? null : 'comments') }}
           history={historyController ? { open: rail === 'history', toggle: toggleHistory } : undefined}
           mentions={mentions}
         />
       )}
-      {findOpen && <FindBar editor={shown} onClose={() => setFindOpen(false)} />}
+      {findOpen && <FindBar ref={findField} editor={shown} onClose={() => setFindOpen(false)} />}
       <PageFrame
         editor={shown}
         live={editor}

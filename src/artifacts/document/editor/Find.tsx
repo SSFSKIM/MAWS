@@ -2,10 +2,11 @@
 // previous; Enter steps forward, Shift+Enter back, Escape closes and clears the highlights.
 import type { Editor } from '@tiptap/core';
 import { useEditorState } from '@tiptap/react';
-import { useEffect, useState, type KeyboardEvent } from 'react';
+import { useEffect, useState, type KeyboardEvent, type Ref } from 'react';
 import { findState } from './find-plugin';
 
-export function FindBar({ editor, onClose }: { editor: Editor; onClose(): void }) {
+/** `ref`: the field, which the owner focuses again (a second Mod-F). */
+export function FindBar({ editor, onClose, ref }: { editor: Editor; onClose(): void; ref?: Ref<HTMLInputElement> }) {
   const [query, setQuery] = useState('');
   const { count, current } = useEditorState({ editor, selector: ({ editor: e }) => findState(e.state) });
 
@@ -32,7 +33,7 @@ export function FindBar({ editor, onClose }: { editor: Editor; onClose(): void }
 
   return (
     <div className="doc-find" role="search">
-      <input type="search" aria-label="Find in document" placeholder="Find" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} />
+      <input ref={ref} type="search" aria-label="Find in document" placeholder="Find" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} />
       <span className="doc-find-count" role="status">
         {query ? (count === 0 ? 'No results' : `${current + 1} of ${count}`) : ''}
       </span>
