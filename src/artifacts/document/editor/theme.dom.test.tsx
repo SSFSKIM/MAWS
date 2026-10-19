@@ -2,6 +2,7 @@
 // colour in the editor's stylesheets; the page reads only the design system's names, each falling back to an app
 // token; with no `--ds-*` defined every computed colour of a rendered document is an app token's, and a design
 // system's value, once defined, wins over it.
+import type { JSONContent } from '@tiptap/core';
 import { DOMSerializer } from '@tiptap/pm/model';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -107,8 +108,18 @@ describe('the rendered page without a design system', () => {
     world?.destroy();
   });
 
-  async function mountEveryKind(): Promise<HTMLElement> {
-    world = new World(
+  async function mountPage(content: JSONContent, ready: string): Promise<HTMLElement> {
+    world = new World(content);
+    handle = openMemoryHandle(world.host, { log: () => {} });
+    await whenSynced(handle);
+    const host = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-1' });
+    const { container } = render(<DocumentEditor artifactId="doc1" handle={handle} host={host} renderDiagram={async () => '<svg></svg>'} />);
+    await until(() => container.querySelector(ready) !== null, 'the page');
+    return container;
+  }
+
+  function mountEveryKind(): Promise<HTMLElement> {
+    return mountPage(
       doc(
         { type: 'heading', attrs: { id: 'h1', level: 1 }, content: [{ type: 'text', text: 'Title' }] },
         { type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'link', marks: [{ type: 'link', attrs: { href: 'https://example.com' } }] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'code', marks: [{ type: 'code' }] }, { type: 'date', attrs: { iso: '2026-10-13' } }] },
@@ -119,14 +130,35 @@ describe('the rendered page without a design system', () => {
         { type: 'horizontalRule', attrs: { id: 'hr' } },
         { type: 'pending', attrs: { id: 'pe', intent: 'Next' } },
       ),
+      '.ds-doc table',
     );
-    handle = openMemoryHandle(world.host, { log: () => {} });
-    await whenSynced(handle);
-    const host = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-1' });
-    const { container } = render(<DocumentEditor artifactId="doc1" handle={handle} host={host} renderDiagram={async () => '<svg></svg>'} />);
-    await until(() => container.querySelector('.ds-doc table') !== null, 'the page');
-    return container;
   }
+
+  // P3-F (sitting candidate 13): the app's preflight takes every list's markers away, as Tailwind's does, and the page
+  // gives them back: discs, then circles and squares as bullets nest; numbers, then letters and numerals; a checklist
+  // keeps its boxes alone
+  it('draws list markers under the app’s preflight, a checklist without them', async () => {
+    const preflight = document.head.appendChild(document.createElement('style'));
+    preflight.textContent = 'ol, ul, menu { list-style: none; }';
+    try {
+      const item = (id: string, text: string, ...nested: JSONContent[]): JSONContent => ({ type: 'listItem', attrs: { id }, content: [para(`p${id}`, text), ...nested] });
+      const list = (type: 'bulletList' | 'orderedList', id: string, nested?: JSONContent): JSONContent => ({ type, attrs: { id }, content: [nested ? item(`i${id}`, id, nested) : item(`i${id}`, id)] });
+      const container = await mountPage(
+        doc(
+          list('bulletList', 'b1', list('bulletList', 'b2', list('bulletList', 'b3'))),
+          list('orderedList', 'o1', list('orderedList', 'o2', list('orderedList', 'o3'))),
+          { type: 'taskList', attrs: { id: 'k1' }, content: [{ type: 'taskItem', attrs: { id: 'ik1', checked: false }, content: [para('pk1', 'Task')] }] },
+        ),
+        '.ds-doc ul[data-type="taskList"]',
+      );
+      const markers = (selector: string) => [...container.querySelectorAll<HTMLElement>(selector)].map((el) => getComputedStyle(el).listStyleType);
+      expect(markers('.ds-doc ul:not([data-type="taskList"])')).toEqual(['disc', 'circle', 'square']);
+      expect(markers('.ds-doc ol')).toEqual(['decimal', 'lower-alpha', 'lower-roman']);
+      expect(markers('.ds-doc ul[data-type="taskList"]')).toEqual(['none']);
+    } finally {
+      preflight.remove();
+    }
+  });
 
   // Each app colour token as this engine computes it.
   function tokenColours(): Set<string> {

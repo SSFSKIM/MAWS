@@ -385,6 +385,21 @@ test.describe('the document editor', () => {
     await expect.poll(() => blockText(page, 'b', 'para0002')).toBe('The river runs north; the river is cold.');
     await expect(replica(page, 'b').getByRole('status', { name: 'Restored' })).toContainText('Restored from Clean draft');
   });
+
+  // P3-F (sitting candidate 13): the app's preflight takes every list's markers away; the page gives them back
+  test('bulleted and numbered lists draw their markers, a checklist its boxes alone', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    for (const button of ['Bulleted list', 'Numbered list', 'Checklist']) {
+      await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+      await bar.getByRole('button', { name: button, exact: true }).click();
+      await page.keyboard.type(`${button} item`);
+    }
+    const marker = (selector: string) => content(page, 'a').locator(selector).first().evaluate((el) => getComputedStyle(el).listStyleType);
+    expect(await marker('ul:not([data-type="taskList"])')).toBe('disc');
+    expect(await marker('ol')).toBe('decimal');
+    expect(await marker('ul[data-type="taskList"]')).toBe('none');
+  });
 });
 
 // One step of S4's 2-set model, as S7b's ime scenario sends it (spikes/p3-store/s7/electron/main.ts, `imeStep`).

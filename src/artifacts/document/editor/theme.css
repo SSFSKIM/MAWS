@@ -100,12 +100,32 @@
   padding: 0;
   font-size: inherit;
 }
+/* the markers, which the app's preflight takes from every list (P3-F, sitting candidate 13): discs, then circles and
+   squares as bullets nest; numbers, then letters and numerals; a checklist has its boxes instead */
 .ds-doc ul,
 .ds-doc ol {
   padding-left: var(--ds-space-5, calc(var(--space) * 6));
 }
+.ds-doc ul {
+  list-style-type: disc;
+}
+.ds-doc ul ul {
+  list-style-type: circle;
+}
+.ds-doc ul ul ul {
+  list-style-type: square;
+}
+.ds-doc ol {
+  list-style-type: decimal;
+}
+.ds-doc ol ol {
+  list-style-type: lower-alpha;
+}
+.ds-doc ol ol ol {
+  list-style-type: lower-roman;
+}
 .ds-doc ul[data-type="taskList"] {
-  list-style: none;
+  list-style-type: none;
   padding-left: var(--ds-space-1, var(--space));
 }
 .ds-doc ul[data-type="taskList"] li {
