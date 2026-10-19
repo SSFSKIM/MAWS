@@ -33,9 +33,11 @@ export interface HtmlExportOptions<T> extends ExportOptions<T> {
 }
 
 // What the page adds to the editor's theme: the printed page, a title per tab, an empty paragraph's line, the
-// placeholders' labels. `--ds-*` only, resolved with the theme.
-const pageCss = (page: { width: string; height: string; margin: string }) => `
-html, body { margin: 0; }
+// placeholders' labels, and a dark ground's colour scheme, so the native controls (a checklist's boxes) draw in the
+// page's ground (P4, tracker L308; the theme's own rule is keyed to the editor's `data-ground` and stripped below).
+// `--ds-*` only, resolved with the theme.
+const pageCss = (page: { width: string; height: string; margin: string }, dark: boolean) => `
+html, body { margin: 0; }${dark ? '\n.ds-doc { color-scheme: dark; }' : ''}
 body { background: var(--ds-color-bg); }
 .ds-doc { min-height: 100vh; }
 .ds-doc-page { max-width: ${page.width}; }
@@ -116,7 +118,7 @@ export async function exportHtml<T>(source: ExportSource, options: HtmlExportOpt
     tabs.length === 1
       ? renderBody(tabs[0].body, env)
       : tabs.map(({ id, title, body }) => `<section class="doc-tab" data-tab="${escapeAttr(id)}"><h1 class="doc-tab-title">${escapeText(title)}</h1>${renderBody(body, env)}</section>`).join('');
-  const css = design.resolveCss(`${themeForFile(themeCss)}\n${pageCss(pageOf(design, options.pageSize))}${options.viewCss ? `\n${options.viewCss}` : ''}`); // P3-E: + viewCss
+  const css = design.resolveCss(`${themeForFile(themeCss)}\n${pageCss(pageOf(design, options.pageSize), dark)}${options.viewCss ? `\n${options.viewCss}` : ''}`); // P3-E: + viewCss
   const imgSrc = options.images === 'reference' ? 'data: maws-artifact: https:' : 'data: maws-artifact:';
   return [
     '<!doctype html>',
@@ -131,7 +133,7 @@ export async function exportHtml<T>(source: ExportSource, options: HtmlExportOpt
     '</head>',
     '<body>',
     // no whitespace between blocks: the text's own whitespace is content (`data-whitespace`, read back by the import)
-    `<main class="ds-doc"><article class="ds-doc-page doc-content" data-whitespace="preserve">${content}</article></main>`,
+    `<main class="ds-doc" data-ground="${dark ? 'dark' : 'light'}"><article class="ds-doc-page doc-content" data-whitespace="preserve">${content}</article></main>`,
     '</body>',
     '</html>',
     '',

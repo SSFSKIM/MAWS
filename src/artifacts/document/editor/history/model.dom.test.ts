@@ -61,6 +61,36 @@ describe('a row', () => {
     expect(versionSummary(v({ at: 0, kind: 'auto' }))).toBeNull();
   });
 
+  // P4 W1-B (the tracker's "P4 version history lines"): a turn's tool lines name blocks (^id) and comments (c:id) by
+  // the words the rail's live document gives them, "a block" or "a comment" for one it no longer holds, and count in
+  // words; a line no tool wrote (a deck's publish line) and a note are shown as written
+  it('reads a turn’s tool lines in words, never ids', () => {
+    const words = { block: (id: string) => ({ p1: '“Intro”', p2: '“Next”', p3: 'the table “Region, Q1”' })[id] ?? null, thread: (id: string) => (id === 't1' ? '“Intro”' : null) };
+    const line = (summary: string) => versionSummary(v({ at: 0, kind: 'turn', summary }), words);
+    const bare = (summary: string) => versionSummary(v({ at: 0, kind: 'turn', summary })); // no live document given
+    expect(line('replaced ^p1')).toBe('Rewrote “Intro”');
+    expect(line('replaced ^p1 (+1 blocks)')).toBe('Rewrote “Intro” and added 1 block');
+    expect(line('inserted 1 block(s) after ^p1: ^p2')).toBe('Inserted “Next” after “Intro”');
+    expect(line('inserted 3 block(s) before ^p1: ^n1 ^n2 ^n3')).toBe('Inserted 3 blocks before “Intro”');
+    expect(line('deleted ^gone')).toBe('Deleted a block');
+    expect(line('replaced 1 occurrence(s) in ^p1')).toBe('Edited “Intro”');
+    expect(line('replaced 3 occurrence(s) in ^p1, ^p2')).toBe('Edited “Intro” and “Next”');
+    expect(line('replaced 4 occurrence(s) in ^p1, ^p2, ^p3, ^?')).toBe('Edited “Intro” and 3 more blocks');
+    expect(line('moved ^p2 after the start')).toBe('Moved “Next” to the start');
+    expect(line('moved ^p2 after ^p1 (by moving ^p1; a human is typing in ^p2)')).toBe('Moved “Next” after “Intro”');
+    expect(line('^p2 already after ^p1')).toBe('Kept “Next” in place');
+    expect(line('set cell (0, 2) of ^p3')).toBe('Edited row 1, column 3 of the table “Region, Q1”');
+    expect(line('set cell (0, 2) of ^gone')).toBe('Edited row 1, column 3 of a table');
+    expect(line('replied on c:t1\nresolved c:t1')).toBe('Replied to the comment on “Intro”'); // the first line
+    expect(line('resolved c:t1')).toBe('Resolved the comment on “Intro”');
+    expect(line('reopened c:gone')).toBe('Reopened a comment');
+    expect(bare('replied on c:t1')).toBe('Replied to a comment');
+    expect(bare('replaced 1 occurrence(s) in ^p1')).toBe('Edited a block');
+    expect(line('1 edits')).toBe('1 edit'); // a summary stored before summarizeTurn counted in words
+    expect(line('Published 1 slide (1 changed, 0 added, 0 removed)')).toBe('Published 1 slide (1 changed, 0 added, 0 removed)');
+    expect(versionSummary(v({ at: 0, kind: 'named', label: 'Draft', note: 'deleted ^p1 on purpose' }), words)).toBe('deleted ^p1 on purpose');
+  });
+
   it('names its author as actorDisplay does, with a session’s title when known', () => {
     expect(authorOf('human')).toEqual(actorDisplay({ kind: 'human' }));
     const session = { kind: 'session', appSessionId: SESSION } as const;

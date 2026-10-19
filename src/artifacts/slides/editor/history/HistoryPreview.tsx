@@ -17,7 +17,7 @@ import { measure } from '../transform/measure';
 import { slideOrderOf, type DeckHistoryController, type DeckPreview } from './controller';
 import { aliasFaces, aliasOverrides, type FaceAliases, type PreviewFaces } from './faces';
 import type { Doc } from '../../../yjs';
-import { HISTORY_COPY as C, keyLabel } from './copy';
+import { HISTORY_COPY as C, deckKeysLabel, keyLabel } from './copy';
 import './history.css';
 
 const STAGE_GUTTER = 48; // the editor's: px of app chrome around the fitted slide
@@ -73,7 +73,7 @@ export function HistoryPreview({ controller, preview, liveSystem, assets, faces,
       <div className="deck-editor-main" data-history-preview={preview.target.kind}>
         {preview.showChanges && preview.changes.deck && (
           <p className="deck-history-deck" role="status" data-focused={focus?.part === 'deck' ? '' : undefined}>
-            {C.deckChanged(preview.changes.deck.keys.map((k) => keyLabel(k.key)).join(', '))}
+            {C.deckChanged(deckKeysLabel(preview.changes.deck.keys.map((k) => k.key)))}
           </p>
         )}
         {preview.showChanges && change?.kind === 'removed' && <p className="deck-history-slide-note">{C.deletedSlide}</p>}

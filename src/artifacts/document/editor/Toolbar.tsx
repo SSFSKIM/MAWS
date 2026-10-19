@@ -141,6 +141,12 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
   useEffect(() => {
     if (uploadError) uploadErrorRow.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [uploadError]);
+  // P4: a paste whose images from another document could not be copied in says why in the same row (asset-paste.ts)
+  useEffect(() => {
+    const failed = ({ message }: { message: string }) => setUploadError(message);
+    editor.on('assetPasteFailed', failed);
+    return () => void editor.off('assetPasteFailed', failed);
+  }, [editor]);
   const run = () => editor.chain().focus();
   // every change is checked when it is made, not when its control was drawn (the store may have turned read-only since)
   const write = (change: () => unknown) => () => void (writable(editor) && change());

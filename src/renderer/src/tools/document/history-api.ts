@@ -5,12 +5,21 @@
 // the tab read from the artifact's row before the surface recorded this showing's view (the "See N new changes" pill
 // compares against the view before this one), and the time of the rail's own `markViewed` after it, which waits until
 // the document is first on screen (a document behind a maximised or floating panel is not viewed). New versions are
-// heard from `artifacts.changed` for this artifact, coalesced; the rail's failures go to the renderer's log.
+// heard from `artifacts.changed` for this artifact, coalesced; the rail's failures go to the renderer's log. P4 (tracker
+// L274): the surface says when the owner came back to the document while its editor stayed open (`returnedTo`), and the
+// rail looks again then.
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { ArtifactHost } from '@artifacts/host';
 import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
 
 const VERSIONS_QUIET_MS = 500; // a burst of writes re-reads the list once
+
+// The rails listening for the owner's returns, by the api each listens through.
+const returns = new WeakMap<HistoryApi, Set<() => void>>();
+/** P4 (tracker L274): the owner came back to the document `api` serves while its editor stayed open. */
+export function returnedTo(api: HistoryApi): void {
+  for (const listener of [...(returns.get(api) ?? [])]) listener();
+}
 
 export interface HistoryApiDeps {
   artifactId: string;
@@ -32,7 +41,8 @@ export function createHistoryApi({ artifactId, ipc, host, viewedAt, whenShown, s
     if (!result.ok) throw new Error(result.error.message);
     return result.value;
   };
-  return {
+  const listening = new Set<() => void>();
+  const api: HistoryApi = {
     versions: async () => (await call('artifacts.versions', { artifactId })).versions,
     lastViewedAt: async () => viewedAt.get(),
     versionState: (versionId) => host.versionState(artifactId, versionId),
@@ -63,8 +73,14 @@ export function createHistoryApi({ artifactId, ipc, host, viewedAt, whenShown, s
         timer = null;
       };
     },
+    onReturn: (listener) => {
+      listening.add(listener);
+      return () => listening.delete(listener);
+    },
     ...(sessionTitle ? { sessionTitle } : {}),
     log,
     ...(extraChanges ? { extraChanges } : {}), // P3-E
   };
+  returns.set(api, listening);
+  return api;
 }

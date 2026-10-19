@@ -40,6 +40,12 @@ export interface HistoryApi {
   now?(): number;
   /** New versions exist (an automatic or turn version, another window's save or restore): the list re-reads. */
   onVersions?(listener: () => void): () => void;
+  /**
+   * P4 (tracker L274): the owner came back to the document while its editor stayed open (a panel closed and reopened,
+   * the main region shown again from behind the panel), a look as the editor's first showing is: the rail offers the
+   * agent's changes since the last look and records this one. A return that remounts the editor looks by itself.
+   */
+  onReturn?(listener: () => void): () => void;
   /** Where the rail logs a failure it shows (the surface's log). */
   log?(line: string): void;
   /**

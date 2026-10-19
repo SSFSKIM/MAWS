@@ -150,14 +150,53 @@ function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: b
   if (inCell) out = out.replace(/\|/g, `${ESC}|`);
   if (lineStart) {
     out = out
-      // a heading, an item, a line of dashes (a thematic break; `*` and `_` are escaped already), a block, a marker
-      .replace(/^(\s*)(#{1,6}(?=\s|$)|[-+](?=\s)|-(?=(?:[ \t]*-){2,}[ \t]*$)|:::|\^)/, `$1${ESC}$2`)
+      // a heading, an item (an empty one too: `-` or `+` alone), a line of dashes (a thematic break; `*` and `_` are
+      // escaped already), a line of only `-` or of a lone `=` (a heading's underline after a hardBreak; `==` is escaped
+      // already), a block, a marker
+      .replace(/^(\s*)(#{1,6}(?=\s|$)|[-+](?=\s|$)|-(?=(?:[ \t]*-){2,}[ \t]*$|-+[ \t]*$)|=(?=[ \t]*$)|:::|\^)/, `$1${ESC}$2`)
       .replace(/^(\s*\d+)([.)])(?=\s|$)/, `$1${ESC}$2`)
       // a letter or roman marker with two spaces after it would read as an item (Decision Log 19)
       .replace(LETTERED_MARKER, `$1${ESC}$2`);
   }
   if (lineEnd) out = out.replace(new RegExp(`([ \\t])\\^(${ID})$`), `$1${ESC}^$2`);
   return out;
+}
+const restMarks = (node: Json | undefined): Mark[] => (node?.marks ?? []).filter((mark) => mark.type !== 'comment');
+/**
+ * Each text run's text escaped (P4, tracker L226). The runs the serializer writes side by side, with no mark delimiter
+ * between them (one set of marks; a comment's edge splits them, its milestone or nothing), are escaped as one text, so
+ * markup a comment's edge splits (`1` and `. x`, `x ` and `^ab`) is escaped as a whole; each escape stays in the run of
+ * the character it precedes, inside or outside the comment. Inline code is not escaped (undefined). A reader's line
+ * ending is kept, escaped where its next line starts; the canonical one is NEWLINE.
+ */
+function escapeRuns(content: Json[], tables: Tables, { cell, lines }: { cell: boolean; lines: boolean }): (string | undefined)[] {
+  const plain = (node: Json | undefined) => node?.type === 'text' && !(node.marks ?? []).some((mark) => mark.type === 'code');
+  const together = (a: Json, b: Json) => {
+    const [x, y] = [restMarks(a), restMarks(b)];
+    return x.length === y.length && x.every((mark) => y.some((other) => sameMark(mark, other)));
+  };
+  const escaped: (string | undefined)[] = [];
+  for (let start = 0, end = 1; start < content.length; start = end, end = start + 1) {
+    if (!plain(content[start])) continue;
+    while (end < content.length && plain(content[end]) && together(content[start], content[end])) end++;
+    const runs = content.slice(start, end).map((node) => (lines ? (node.text ?? '') : (node.text ?? '').replace(/\n/g, NEWLINE)));
+    const before = content[start - 1];
+    const lineStart = start === 0 || before?.type === 'hardBreak' || (tables.forReaders && before?.type === 'text' && (before.text ?? '').endsWith('\n'));
+    const lineEnd = end === content.length;
+    const parts = runs.join('').split('\n');
+    const text = parts.map((line, k) => escapeText(line, { lineStart: lineStart || k > 0, lineEnd: lineEnd || k < parts.length - 1, inCell: cell })).join('\n');
+    // back into the runs: a character goes to its run, an escape to the run of the character after it
+    let run = 0;
+    let left = runs[0].length;
+    const out = runs.map(() => '');
+    for (let k = 0; k < text.length; k++) {
+      while (left === 0 && run < runs.length - 1) left = runs[++run].length;
+      out[run] += text[k]; // code units: a run may end inside a surrogate pair
+      if (text[k] !== ESC) left--;
+    }
+    out.forEach((piece, k) => (escaped[start + k] = piece));
+  }
+  return escaped;
 }
 /**
  * CommonMark's hard line break, a backslash ending the line (P3-F, tracker L166): a hardBreak's form (Tiptap's two
@@ -183,7 +222,9 @@ function prepareInline(content: Json[], parent: Json, show: ReadonlySet<string>,
   const code = parent.type === 'codeBlock';
   const out: Json[] = [];
   let active: string[] = [];
-  const restMarks = (node: Json | undefined) => (node?.marks ?? []).filter((mark) => mark.type !== 'comment');
+  // a reader's line ending breaks its line, but in a heading or a table cell, which cannot (they keep `<br>`)
+  const lines = tables.forReaders && parent.type !== 'heading' && !cell;
+  const escaped = code ? [] : escapeRuns(content, tables, { cell, lines });
   const pushSentinel = (kind: string, id: string, marks: Json['marks']) => {
     tables.threads.push(id);
     out.push({ type: 'text', text: sentinel(kind, tables.threads.length - 1), ...(marks && marks.length ? { marks } : {}) });
@@ -221,25 +262,17 @@ function prepareInline(content: Json[], parent: Json, show: ReadonlySet<string>,
       // a single-backtick span cannot hold a backtick, and Markdown trims or moves its edge spaces: restore() fences it
       text = escapeLiteralMilestones(raw);
       if (/`|^\s|\s$/.test(raw)) text = `${CODE_OPEN}${text}${CODE_CLOSE}`;
+    } else if (!lines || !raw.includes('\n')) {
+      text = escaped[i]!;
+      if (marks.length > 0) text = edges(text);
     } else {
-      const before = content[i - 1];
-      const lineStart = i === 0 || before?.type === 'hardBreak' || (tables.forReaders && before?.type === 'text' && (before.text ?? '').endsWith('\n'));
-      const lineEnd = i === content.length - 1;
-      if (!tables.forReaders || !raw.includes('\n')) {
-        text = escapeText(raw.replace(/\n/g, NEWLINE), { lineStart, lineEnd, inCell: cell });
-        if (marks.length > 0) text = edges(text);
-      } else {
-        // a reader's line break: each line escaped where it starts; a heading or a table cell cannot break a line, so it
-        // keeps `<br>`
-        const lines = parent.type === 'heading' || cell ? [raw.replace(/\n/g, NEWLINE)] : raw.split('\n');
-        lines.forEach((line, k) => {
-          if (k > 0) out.push({ type: 'text', text: LINE_BREAK });
-          let piece = escapeText(line, { lineStart: lineStart || k > 0, lineEnd: lineEnd || k < lines.length - 1, inCell: cell });
-          if (marks.length > 0) piece = edges(piece);
-          if (piece) out.push({ ...node, text: piece, marks: marks.length ? marks : undefined });
-        });
-        return;
-      }
+      // a reader's line break, each line escaped where it starts (escapeRuns)
+      escaped[i]!.split('\n').forEach((line, k) => {
+        if (k > 0) out.push({ type: 'text', text: LINE_BREAK });
+        const piece = marks.length > 0 ? edges(line) : line;
+        if (piece) out.push({ ...node, text: piece, marks: marks.length ? marks : undefined });
+      });
+      return;
     }
     out.push({ ...node, text, marks: marks.length ? marks : undefined });
   });

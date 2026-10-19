@@ -203,6 +203,22 @@ describe('a parse', () => {
 // state is a top-level block; the probe that found the dialect's gaps, kept as its regression.
 /** The private-use characters the dialect's serializer and parser use as sentinels (U+E000 to U+E00F). */
 const SENTINEL_ALPHABET = Array.from({ length: 16 }, (_, k) => String.fromCharCode(0xe000 + k));
+/** P4 W1-B (tracker L226): markup-like text a comment's edge splits into runs, one paragraph each. */
+const COMMENT_SPLITS: Record<string, JSONContent> = (() => {
+  const c = (text: string, thread = 't1'): JSONContent => ({ type: 'text', text, marks: [{ type: 'comment', attrs: { threadId: thread } }] });
+  const t = (text: string): JSONContent => ({ type: 'text', text });
+  const p = (...content: JSONContent[]): JSONContent => ({ type: 'paragraph', content });
+  return {
+    commentSplitNumber: p(c('1'), t('. x')),
+    commentSplitMarker: p(t('x '), c('^ab')),
+    commentSplitHeading: p(c('#'), t(' x')),
+    commentSplitItem: p(t('-'), c(' x')),
+    commentSplitLettered: p(c('A'), t('.  Lincoln')),
+    commentSplitHighlight: p(c('a ='), t('=b='), c('=', 't2')),
+    commentSplitMath: p(t('cost $'), c('$5 and $'), t('$ more')),
+    commentSplitAfterBreak: p(t('a'), { type: 'hardBreak' }, c('1'), t(')'), c(' b', 't2')),
+  };
+})();
 
 describe('every stored state, one at a time', () => {
   const t = (text: string, marks?: JSONContent['marks']): JSONContent => ({ type: 'text', text, ...(marks ? { marks } : {}) });
@@ -296,6 +312,20 @@ describe('every stored state, one at a time', () => {
     textDashes: p(t('---')),
     itemDashes: { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('first')), p(t('---'))] }] },
     breakDashes: p(t('a'), { type: 'hardBreak' }, t('- - -')),
+    // P4 W1-B (tracker L225): list punctuation alone on its line is text, not an empty item, and after a hardBreak not a
+    // heading's underline either (a line of only `-` or of only `=` under a line of text)
+    textDash: p(t('-')),
+    textPlus: p(t('+')),
+    textDashSpace: p(t('-  ')),
+    itemDash: { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('+'))] }] },
+    quoteDash: { type: 'blockquote', content: [p(t('-'))] },
+    breakDash: p(t('foo'), { type: 'hardBreak' }, t('-')),
+    breakPlus: p(t('foo'), { type: 'hardBreak' }, t('+')),
+    breakTwoDashes: p(t('foo'), { type: 'hardBreak' }, t('--')),
+    breakEquals: p(t('foo'), { type: 'hardBreak' }, t('=')),
+    // P4 W1-B (tracker L226): a comment's edge inside markup-like text, the runs written side by side with no mark
+    // between them, reads as the text it is
+    ...COMMENT_SPLITS,
     // the whole-branch review's P6: the serializer's private-use sentinels are distinct from the same characters as text
     ...Object.fromEntries(
       SENTINEL_ALPHABET.map((char) => [
@@ -390,6 +420,27 @@ describe('every stored state, one at a time', () => {
   it.each(Object.entries(states))('%s, its blocks named', (_name, json) => {
     const doc = docOf([schema.nodeFromJSON(named(json))]);
     expect(stored(docOf(md.parse(md.serialize(doc))))).toEqual(stored(doc));
+  });
+});
+
+// P4 W1-B (tracker L226): the agent's read shows the comments, so the escape a split construct needs sits inside the
+// milestone with the character it escapes, the milestones where the comment's edges are, and the line's id after them
+describe('a comment’s edge inside markup-like text, its milestones shown', () => {
+  const milestones = new Set(['t1', 't2']);
+  it.each(Object.entries(COMMENT_SPLITS))('%s', (_name, json) => {
+    for (const block of [json, { ...json, attrs: { id: 'p1' } }]) {
+      const doc = docOf([schema.nodeFromJSON(block)]);
+      for (const ids of [true, false]) expect(stored(docOf(md.parse(md.serialize(doc, { ids, milestones }))))).toEqual(stored(doc));
+    }
+  });
+
+  it('writes the escape beside the character it escapes, inside or outside the comment', () => {
+    const read = (name: string, id: string | null = null) => md.serialize(docOf([schema.nodeFromJSON({ ...COMMENT_SPLITS[name], attrs: { id } })]), { milestones });
+    expect(read('commentSplitNumber')).toBe('<c:t1>1</c:t1>\\. x');
+    expect(read('commentSplitNumber', 'p1')).toBe('<c:t1>1</c:t1>\\. x ^p1');
+    expect(read('commentSplitMarker')).toBe('x <c:t1>\\^ab</c:t1>');
+    expect(read('commentSplitMarker', 'p1')).toBe('x <c:t1>\\^ab</c:t1> ^p1');
+    expect(read('commentSplitHighlight')).toBe('<c:t1>a \\=</c:t1>\\=b\\=<c:t2>\\=</c:t2>');
   });
 });
 

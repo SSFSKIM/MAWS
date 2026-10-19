@@ -15,11 +15,12 @@ import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { DesignSystemRef } from '../../../design-system/apply';
 import type { HistoryApi } from '../../../document/editor/history/api';
 import type { ShownEditor } from '../../../document/editor/history/controller';
-import { authorOf, formatWhen, newChangesBase, versionTitle } from '../../../document/editor/history/model';
+import { authorOf, formatWhen, newChangesBase, quoted, versionTitle, type SummaryWords } from '../../../document/editor/history/model';
 import type { DocumentHandle } from '../../../host';
 import { decodeMap, stateV2, type Doc } from '../../../yjs';
 import { changeStops, deckChanges, elementEditors, elementHistory, openDeckDiff, type ChangeStop, type DeckChanges, type DeckDiff, type ElementPlace, type KeyChange, type Touch } from '../../history'; // P3-E: elementHistory
 import { slideOrder } from '../../model';
+import { getThread } from '../../threads';
 
 export type DeckPreviewTarget = { kind: 'version'; versionId: number } | { kind: 'compare'; versionIds: [number, number] } | { kind: 'since'; versionId: number | null };
 
@@ -106,6 +107,9 @@ export class DeckHistoryController {
     return () => this.listeners.delete(listener);
   };
   getSnapshot = (): DeckHistorySnapshot => this.snapshot;
+
+  /** P4 W1-B: what B's rail names the deck's comments by in a turn's lines: each thread's quote in the live deck. */
+  words = (): SummaryWords => ({ block: () => null, thread: (id) => quoted(getThread(this.handle.doc, id)?.quote ?? '') });
 
   /**
    * The editor opened: follow restores (the banner) and new versions; the first time, read the list and the last view,

@@ -79,6 +79,17 @@ describe('artifact_create of a document', () => {
     expect(second.guide).toBeUndefined();
   });
 
+  // P4 W1-B (tracker L286; sitting candidate 8): a note made from markdown is stored from its first sentence, no block
+  // before it, whatever its content opens with
+  it('stores the content from its first block: nothing before it', async () => {
+    const create = documentCreateTool(deps());
+    const note = json<{ artifactId: string }>(await call(create, { kind: 'document', title: 'P3 sitting note', content: 'This note follows the P3 sitting.\n\n## Next steps\n\n- [ ] Book the room' }));
+    const doc = live(note.artifactId);
+    const tops = DocIndex.of(doc).tops(DocIndex.of(doc).tabIds()[0]);
+    expect(tops).toHaveLength(3);
+    expect(textOf(doc, tops[0].id!)).toBe('This note follows the P3 sitting.'); // a top block always has its id
+  });
+
   it('answers a repeated tool-use id with the first result and creates one artifact', async () => {
     const create = documentCreateTool(deps());
     const toolUseId = 'toolu_create_once' as ToolUseId;

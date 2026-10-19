@@ -5,7 +5,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { fakeClient } from '../../../../test/support/fake-client';
+import { record, status } from '../../../../test/support/builders';
+import { continueSetup } from '../sessions/setup-actions';
 import { useSetup } from '../sessions/store';
+import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { artifactSessionContext, startArtifactSession, type ArtifactSessionStart } from './session-context';
 
@@ -200,6 +204,37 @@ describe('the owner’s Start', () => {
     await expect(startArtifactSession({ kind: 'session', appSessionId: OWN }, null, ready.bridge, 'accepted')).resolves.toEqual({ status: 'ready', appSessionId: OWN });
     expect(ready.calls).toEqual([['session.acquire', { appSessionId: OWN, reason: 'read', options: { requireEmptyMessage: true, trust: 'accepted' } }]]);
     expect(useSetup.getState().cards.has(OWN), 'the answered question’s card goes; its text is still the composer’s draft').toBe(false);
+  });
+
+  // P4 W1-B (tracker L309): the owner pressed Trust and start on the composer's card, and a comment's resume carrying the
+  // same answer readies while that continuation runs: the card stays for the continuation, which sends the composer's
+  // message once and clears the composer, then lets the card go
+  it('leaves a record’s trust card to the continuation running for it, so the composer’s message is sent once', async () => {
+    const trust = { directory: '/work/app', trustKey: '/work/app', keyKind: 'directory', configPath: '/config/.claude.json', trusted: false, source: null, isHome: false, found: [] };
+    const message = { content: 'Draft the summary.', display: 'Draft the summary.' };
+    const ready = { status: 'ready', appSessionId: OWN, launched: true, joined: false };
+    const composer = fakeClient({ 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' }, 'session.history.append': undefined });
+    window.maws = composer.client;
+    try {
+      resetComposerStore();
+      useSessions.setState({ records: new Map([[OWN, record(OWN)]]), engine: new Map(), digests: new Map() });
+      useSetup.getState().dock(OWN, { kind: 'trust', trust: trust as never, message });
+
+      const continuing = continueSetup(OWN, { trust: 'accepted' }, message); // the composer card's Trust and start
+      await vi.waitFor(() => expect(composer.pending('session.acquire')).toBe(1));
+      const comment = client({ 'session.acquire': ready });
+      await expect(startArtifactSession({ kind: 'session', appSessionId: OWN }, null, comment.bridge, 'accepted')).resolves.toEqual({ status: 'ready', appSessionId: OWN });
+      expect(useSetup.getState().cards.get(OWN), 'the continuation’s card').toMatchObject({ kind: 'trust', message });
+
+      useSessions.getState().applyStatus({ appSessionId: OWN, status: status(OWN) });
+      await composer.reply('session.acquire', ready);
+      await expect(continuing).resolves.toEqual({ ok: true });
+      expect(composer.invoked('session.send')).toEqual([{ appSessionId: OWN, content: message.content }]);
+      expect(useComposerStore.getState().prefills.get(OWN)).toEqual({ text: '' });
+      expect(useSetup.getState().cards.has(OWN)).toBe(false);
+    } finally {
+      delete (window as { maws?: unknown }).maws;
+    }
   });
 
   it('answers main’s refusal of a session holding a prompt with its words and the session to open', async () => {

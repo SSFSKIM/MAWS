@@ -62,7 +62,11 @@ function paint(doc: PMNode, changes: Change[], current: number | null, carried: 
   if (carried.size > 0) {
     doc.descendants((node, pos) => {
       const kind = carried.get(node.attrs.id as string);
-      if (kind && !deleted(node)) decorations.push(Decoration.node(pos, pos + node.nodeSize, { 'data-carry': kind, 'data-carry-label': CARRY_LABEL[kind] }));
+      // P4 (tracker L238): only a block this comparison changed; the attributions read for it can hold the carry of an
+      // earlier move (a row reaching back past its start, a compacted one or its start version's own)
+      const end = pos + node.nodeSize;
+      const changed = () => changes.some((change) => change.from < end && change.to > pos);
+      if (kind && !deleted(node) && changed()) decorations.push(Decoration.node(pos, end, { 'data-carry': kind, 'data-carry-label': CARRY_LABEL[kind] }));
       return true;
     });
   }

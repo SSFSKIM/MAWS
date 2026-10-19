@@ -19,6 +19,7 @@ import { useArtifactCommentTarget } from './comment-session'; // P3-F1
 import { useDocumentComments } from './comments';
 import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useSystemFor } from './design-system'; // P3-D: useSystemFor
 import { documentHeader, type DocumentHeaderCommands } from './header';
+import { returnedTo } from './history-api'; // P4 (tracker L274)
 import type { DocumentTabState } from './tab-state';
 
 export type DocumentEditorProps = ArtifactEditorProps<DocumentTabState>;
@@ -90,6 +91,18 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     });
     return () => cancelAnimationFrame(frame);
   }, [visible, drawn, state, onShown]);
+  // P4 (tracker L274; amends L's Decision Log 15 for the document's rail): a return to the document while its editor
+  // stayed mounted (the panel closed and reopened, the main region shown again from behind the panel) is a look too,
+  // the rail's (`returnedTo`): its "See N new changes" and its record of the view. A remount (a main tab made active
+  // again) looks by itself; the surface's own view (`onShown`) stays once per showing.
+  const away = useRef(false);
+  useEffect(() => {
+    if (!visible) away.current ||= state.shown();
+    else if (away.current && drawn) {
+      away.current = false;
+      returnedTo(state.history);
+    }
+  }, [visible, drawn, state]);
   const onRailChange = useCallback((rail: DocumentRail) => state.setRail(rail), [state]);
   const onPreviewChange = useCallback((previewing: boolean, shown: DocumentShown) => state.setPreviewing(previewing, shown), [state]); // P3-F (F7): shown
 
