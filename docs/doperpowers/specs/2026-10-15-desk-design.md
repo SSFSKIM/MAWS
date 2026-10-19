@@ -476,6 +476,15 @@ unavailable; everything they sent the human is still in the log.
 ### 4. The web, phase 1
 
 - **Projects.** The home is the grid of the org's projects.
+  **[2026-10-19, owner]** By default it shows the active ones: a project
+  with a live session (`live`, DX3's grid) or waiting on you. Below the
+  tiles, "Show all (N)", N every project, reveals the rest and becomes
+  "Show active"; the browser keeps the choice in `localStorage`
+  (`desk.grid.all`, beside `desk.depth`). The sort, "All sessions", the
+  org's waiting count and the badge read every project either way, and a
+  machine project follows the same rule. A tile online with nothing
+  working or waiting says how many of its sessions are idle ("Quiet" with
+  none).
 - **A project.** Left: `# <project>`, then the sessions as direct
   channels, grouped by waiting on you / working / idle / ended (a session
   holding a pending request, or an open async question while its process
@@ -2626,7 +2635,7 @@ the web draws it as waiting in the terminal, without Allow or Deny. The web read
 
 **Grid** (`GridDown`, registry socket): `grid {projects: [ProjectSummary]}` on connect, then `summary {project}` for
 each change — a project registered, or a project's counts moving. `ProjectSummary` is `{id, name, machines,
-machines_online, working, waiting}`: `machines` every machine that has opened the project or reported its presence
+machines_online, working, waiting, live}`: `machines` every machine that has opened the project or reported its presence
 there, `machines_online` those with a fresh lease, `working` the sessions of online machines whose presence `status` is
 `busy` or `shell`, `waiting` those whose `status` is `waiting` (the session record's own words, as `sminos list`
 reads them). **[2026-10-18, owner]** `waiting` also counts, once, a session of an online machine holding an open async
@@ -2639,7 +2648,12 @@ retires) is not counted for it, and counts again once it runs, as a bridge's ask
 the web reads it the same way and keeps such a session under ended. The hub keeps the log's open questions as it
 stores each event (`log-store.ts` `open_questions`; events stored before that table are not read into it), and reports
 the summary again when a `question`, `answered` or `retired` moves them, or the pending set moves. Blocking questions
-and permission requests count as before, by presence. Each `Project` reports its counts to the `Registry` when they change. The grid takes nothing up. A frame above the frame bound (a `grid` of many
+and permission requests count as before, by presence. **[2026-10-19, owner]** `live` counts the sessions whose kept
+presence names a process (`record` not null) on every machine that holds the project, online or offline: a sleeping
+laptop's sessions are still where they are (its tile reads Offline), and a machine gone for good is revoked, which drops
+its sessions. A follower's presence is not counted. The Registry keeps it in `summaries.live`; a report without it (a
+`Project` on the version before) leaves the stored count. The web shows a project with `live` or `waiting` by default
+(§4). Each `Project` reports its counts to the `Registry` when they change. The grid takes nothing up. A frame above the frame bound (a `grid` of many
 projects) comes down as DX2 `part` frames, which the browser reassembles as it does on the project socket.
 
 **Built at M2:** the socket's admission (a registered project), `welcome.head`, `resume`, `log`, `caught-up`, `human`
@@ -3982,6 +3996,9 @@ What it does, as DX2 and DX4 have it:
   - `drop()` and `reconnect()` end the stream, as a daemon losing its network does; the hub ends its subscriptions
     and marks forwarded RPCs `uncertain`;
   - `answerHeartbeats = false` is a suspended daemon, whose lease lapses within 45 s;
+  - **[2026-10-19]** `end(session?)`: a session's process gone while the machine stays connected, its presence
+    published as null, as the daemon publishes a member whose process it no longer sees (every session, or the one
+    named);
   - `crashAfterEffect(match?)`: the next RPC it admits stops the machine after its effect (the request settled,
     the log event written) and before its outcome is recorded. A `FakeMachine` constructed with the same `memory` (and `fm.credentials`) then answers a retry of the
     nonce from the trace, without running it again;
@@ -6119,6 +6136,37 @@ a hub that connects into machines (§2).
   Rejected then: fixing each protocol failure as it appears. Each fix would be rewritten by the rebuild, and the
   baseline the benchmark needs would move under it.
   Date/Author: 2026-10-19, the owner; folded by the design session.
+- Decision: The grid shows the active projects by default, those with a
+  live session or waiting on the owner, and the rest behind "Show all
+  (N)" (owner, 2026-10-19; doperpowers' smns remote identity design, §5,
+  its MAWS milestone). That design makes every repository a project by
+  its remote, so the grid would otherwise list every repository the org
+  has used. The count is the hub's: `Project.reportSummary` counts as
+  `live` each presence row whose `record` is not null on the project's
+  holders, online or offline, and carries it as `SummaryReport.live`, the
+  Registry's `summaries.live`, and `ProjectSummary.live` (DX3's grid).
+  Offline machines count because a laptop that sleeps nightly would make
+  an online-only grid flap; a revoked machine's rows drop out. One Durable
+  Object storage change, the owner's approval given with the brief:
+  `summaries` gains `live INTEGER NOT NULL DEFAULT 0` through
+  `ADDED_COLUMNS`. A report without `live` keeps the stored count. The
+  upsert binds the count twice, `COALESCE(?, 0)` in its values and
+  `COALESCE(?, summaries.live)` in its update, because SQLite checks NOT
+  NULL before the conflict: the design's `COALESCE(excluded.live,
+  summaries.live)` refuses an older report's first insert (proved on
+  workerd: `NOT NULL constraint failed: summaries.live`). After the deploy
+  a project's `live` reads 0 until its `Project` reports again; every
+  connected machine's next stream brings that report within minutes of a
+  deploy, so only a project whose every machine is offline then waits
+  behind Show all until one comes back. The filter is the web's, a view
+  preference kept in `localStorage` (`desk.grid.all`); the `grid` frame
+  is unchanged. Rejected: the hub filtering the `grid` frame (Show all
+  would need a second frame); the grid acquiring every project's socket
+  and grouping sessions from the logs (the grid is the home and the
+  phone, drawn before any log loads). Not built: the design's optional
+  cut of the org view's sockets to active projects.
+  Date/Author: 2026-10-19, the remote identity design's MAWS milestone
+  (branch `desk-grid-active`).
 
 ## Outcomes & Retrospective
 
