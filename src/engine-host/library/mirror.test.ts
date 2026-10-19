@@ -1,7 +1,7 @@
 // The linked-directory mirror over a real store (the P3-L document, M2; Decision Log 12): a linked Space's artifacts
 // written read-only under `<linkedDir>/artifacts/` after each change settles, the manifest owning exactly what the
 // mirror wrote, and a host start bringing the directory up to date.
-import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -10,7 +10,7 @@ import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { openDocuments, type Documents } from '../documents';
 import { CHANGE_COALESCE_MS } from '../documents/store';
-import { LibraryMirror, MIRROR_MANIFEST } from './mirror';
+import { cloneFile, LibraryMirror, MIRROR_MANIFEST, type MirrorOptions } from './mirror';
 
 const human: Actor = { kind: 'human' };
 const agent: Actor = { kind: 'session', appSessionId: 'app-1' as AppSessionId };
@@ -22,7 +22,7 @@ let mirror: LibraryMirror | null;
 let logs: string[];
 const offs: (() => void)[] = [];
 
-function startMirror(options: { settleMs?: number; maxFileBytes?: number } = {}): Promise<void> {
+function startMirror(options: Omit<MirrorOptions, 'log'> = {}): Promise<void> {
   mirror = new LibraryMirror(documents, { log: (line) => logs.push(line), ...options });
   return mirror.start();
 }
@@ -349,21 +349,6 @@ describe('the linked-directory mirror (M2)', () => {
     expect(listed()).toEqual([MIRROR_MANIFEST, 'ok.md']);
     expect(manifest().artifacts[doc.id].files).toEqual(['ok.md']);
     expect(logs.filter((line) => line.includes('not a path the mirror writes'))).toHaveLength(3);
-  });
-
-  it('copies a file artifact under its own name prefixed by the slug, and mirrors one too large to copy as nothing', async () => {
-    await startMirror({ maxFileBytes: 16 });
-    const space = await linkedSpace();
-    const small = join(userData, 'data.csv');
-    writeFileSync(small, 'a,b\n1,2\n');
-    const big = join(userData, 'big.bin');
-    writeFileSync(big, new Uint8Array(17));
-    const data = await store().create({ kind: 'file', title: 'Data', spaceId: space.id, content: { path: small } }, agent);
-    const large = await store().create({ kind: 'file', title: 'Big', spaceId: space.id, content: { path: big } }, agent);
-    await mirror!.flush();
-    expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(data)}-data.csv`]);
-    expect(read(`${mirrorSlug(data)}-data.csv`)).toBe('a,b\n1,2\n');
-    expect(logs.some((line) => line.includes(large.id) && line.includes('too large'))).toBe(true);
   });
 
   it('logs a failing directory per Space and retries it at the next change', async () => {
@@ -938,5 +923,123 @@ describe('the mirror over a directory that goes away, is relinked or is spelled 
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+// P3-F (F10, tracker L142; the owner: "something in real use might have something bigger … production-level product for
+// general use"): a File artifact within the in-memory cap is copied through memory as before; one over it is cloned into
+// the mirror through the file system, and mirrored as nothing only when that clone fails. `cloneFile` stands in for the
+// file system's clone where a test needs one on any volume, or a failing one.
+describe('a File artifact over the in-memory cap (P3-F F10)', () => {
+  const temps = () => listed().filter((file) => /(^|\/)\.mirror-[^/]*\.tmp$/.test(file));
+  const fileArtifact = (title: string, path: string, spaceId: string) => store().create({ kind: 'file', title, spaceId, content: { path } }, agent);
+  // whether this test directory's volume can clone (the default clone refuses another volume or a file system that cannot)
+  const volumeClones = (): boolean => {
+    const dir = mkdtempSync(join(tmpdir(), 'maws-mirror-clone-probe-'));
+    try {
+      writeFileSync(join(dir, 'probe'), 'x');
+      cloneFile(join(dir, 'probe'), join(dir, 'clone'));
+      return readFileSync(join(dir, 'clone'), 'utf8') === 'x';
+    } catch {
+      return false;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('copies one within the cap through memory, never cloning it, and clones one over it whole, read-only', async () => {
+    const cloned: string[] = [];
+    await startMirror({ maxFileBytes: 16, cloneFile: (from, to) => (cloned.push(from), copyFileSync(from, to)) });
+    const space = await linkedSpace();
+    const small = join(userData, 'data.csv');
+    writeFileSync(small, 'a,b\n1,2\n');
+    const big = join(userData, 'big.bin');
+    writeFileSync(big, new Uint8Array(17).fill(7));
+    const data = await fileArtifact('Data', small, space.id);
+    const large = await fileArtifact('Big', big, space.id);
+    await mirror!.flush();
+    const bigName = `${mirrorSlug(large)}-big.bin`;
+    expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(data)}-data.csv`, bigName].sort());
+    expect(read(`${mirrorSlug(data)}-data.csv`)).toBe('a,b\n1,2\n');
+    expect([...readFileSync(out(bigName))]).toEqual(Array(17).fill(7));
+    expect(mode(bigName)).toBe(0o444);
+    expect(cloned).toEqual([big]); // the cap only chooses the path: the small file never spawns a clone
+    expect(logs.filter((line) => line.includes('mirrored as nothing'))).toEqual([]);
+  });
+
+  it('clones a 65 MiB file whole and byte-identical through the file system (skipped where the test volume cannot clone)', async (ctx) => {
+    if (!volumeClones()) ctx.skip('this volume cannot clone (not APFS on macOS, no reflink elsewhere): the clone is refused here, and the failure tests below cover that path');
+    await startMirror(); // the default cap and the default clone
+    const space = await linkedSpace();
+    const path = join(userData, 'take.mov');
+    const bytes = Buffer.alloc(65 * 1024 * 1024);
+    for (let at = 0; at < bytes.length; at += 4096) bytes[at] = (at >> 12) & 0xff;
+    writeFileSync(path, bytes);
+    const take = await fileArtifact('Take', path, space.id);
+    await mirror!.flush();
+    const name = `${mirrorSlug(take)}-take.mov`;
+    expect(listed()).toEqual([MIRROR_MANIFEST, name]);
+    expect(readFileSync(out(name)).equals(bytes)).toBe(true);
+    expect(mode(name)).toBe(0o444);
+    expect(logs).toEqual([]);
+  });
+
+  // each way the clone can fail (refused by its guard, cp not spawned, cp past its timeout), the temp it left removed
+  const failures: [string, () => Error][] = [
+    ['refused', () => Object.assign(new Error('the clone was refused: another volume'), { code: 'EXDEV' })],
+    ['not spawned', () => Object.assign(new Error('spawnSync /bin/cp ENOENT'), { code: 'ENOENT', syscall: 'spawnSync /bin/cp' })],
+    ['timed out', () => Object.assign(new Error('spawnSync /bin/cp ETIMEDOUT'), { code: 'ETIMEDOUT' })],
+  ];
+  it.each(failures)('mirrors one over the cap as nothing when its clone fails (%s): no temp, no folder made, and its earlier copy removed', async (_, failure) => {
+    let failing = true;
+    await startMirror({
+      maxFileBytes: 16,
+      cloneFile: (from, to) => {
+        if (!failing) return copyFileSync(from, to);
+        writeFileSync(to, 'part of it'); // a clone killed half-way leaves a partial temp
+        throw failure();
+      },
+    });
+    const space = await linkedSpace();
+    const big = join(userData, 'big.bin');
+    writeFileSync(big, new Uint8Array(17));
+    const large = await fileArtifact('Big', big, space.id);
+    await mirror!.flush();
+    expect(existsSync(out())).toBe(false); // nothing written, not even `artifacts/`
+    expect(logs.some((line) => line.includes(large.id) && line.includes(failure().message) && line.includes('mirrored as nothing'))).toBe(true);
+
+    failing = false;
+    writeFileSync(big, new Uint8Array(18));
+    await store().writeContent(large.id, { path: big }, agent);
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(large)}-big.bin`]);
+
+    failing = true;
+    writeFileSync(big, new Uint8Array(19));
+    await store().writeContent(large.id, { path: big }, agent);
+    await mirror!.flush();
+    expect(listed()).toEqual([]); // the stale copy removed (the leftover rule) with the manifest that named only it, no temp left
+  });
+
+  it('leaves no temp and the entry at revision -1 when the write after a clone fails, as any failed write', async () => {
+    await startMirror({ maxFileBytes: 16, cloneFile: (from, to) => copyFileSync(from, to) });
+    const space = await linkedSpace();
+    const big = join(userData, 'big.bin');
+    writeFileSync(big, new Uint8Array(17));
+    const large = await fileArtifact('Big', big, space.id);
+    await mirror!.flush();
+    const name = `${mirrorSlug(large)}-big.bin`;
+    rmSync(out(name));
+    mkdirSync(out(name)); // a folder of the owner's in its place: the rename over it fails
+    writeFileSync(out(name, 'owner.txt'), 'kept');
+
+    writeFileSync(big, new Uint8Array(18));
+    await store().writeContent(large.id, { path: big }, agent);
+    await mirror!.flush();
+    const entry = (JSON.parse(read(MIRROR_MANIFEST)) as { artifacts: Record<string, { revision: number; files: string[] }> }).artifacts[large.id];
+    expect(entry).toMatchObject({ revision: -1, files: [name] });
+    expect(temps()).toEqual([]);
+    expect(read(name, 'owner.txt')).toBe('kept');
+    expect(logs.some((line) => line.includes(large.id) && line.includes('could not be mirrored'))).toBe(true);
   });
 });
