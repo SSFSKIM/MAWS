@@ -164,6 +164,7 @@ function plan(doc: Doc, input: Input, force: boolean): Plan {
   for (const [path, text] of Object.entries(input.base)) if (boardIdOf(path) !== null) deckBase[slidePath(boardIdOf(path)!)] = text;
   const arrivals: string[] = [];
   const fileCreated = new Set<string>();
+  let restacked: Set<string> | null = null; // the boards the live order moved since the read, read once
   for (const [id, text] of input.boards) {
     const read = input.base[boardPath(id)] !== undefined;
     if (text === input.base[boardPath(id)]) continue; // the file as read: not the agent's change (C's rule)
@@ -172,6 +173,9 @@ function plan(doc: Doc, input: Input, force: boolean): Plan {
       removed.add(id);
       const [bb, lb] = [own(B.boards, id) as CanvasBoard | undefined, L.boards[id]!];
       if (bb && !force) for (const key of new Set([...Object.keys(bb), ...Object.keys(lb)])) if (stable(own(bb, key)) !== stable(own(lb, key))) conflict(`board ${id}: ${key} changed since your read`);
+      // its place, which the entry does not hold: a board the owner re-stacked since the read is refused, the mirror of a
+      // deleted board the agent's order moved (below), a tie that cannot tell its move from a neighbour's counting as one
+      if (!force && (restacked ??= movableIn(B.order, L.order)).has(id)) conflict(`board ${id}: order changed since your read`);
       if (read) deckSent[slidePath(id)] = null;
       else {
         // read as manifest-only: a file that arrived since is content the agent never saw (C's removal rule)

@@ -459,3 +459,20 @@ describe('Decision Log 38: C’s refusal on the single live pass writes nothing'
     expect(designFiles(doc)).toEqual(base);
   });
 });
+
+describe('design-workbench fix wave', () => {
+  it('(scalpel-1#1) refuses removing a board the owner re-stacked since the read, writing nothing; one left in its place goes; forced, the re-stacked one goes', () => {
+    const doc = design();
+    const base = designFiles(doc); // b1, b2, b3
+    transact(doc, () => Y.setSlideKey(doc, 'b2', 'order', '0')); // the owner: b2 to the front
+    expect(slideOrder(doc)).toEqual(['b2', 'b1', 'b3']);
+    const before = designFiles(doc);
+    const { out, updates } = publish(doc, base, { [B2]: null }); // its file and entry as read
+    expect(out.conflicts).toEqual([{ path: CANVAS_PATH, detail: 'board b2: order changed since your read' }]);
+    expect(updates).toBe(0);
+    expect(designFiles(doc)).toEqual(before);
+    expect(publish(doc, base, { [B3]: null }).out.conflicts).toEqual([]); // b3 stood still
+    expect(publish(doc, base, { [B2]: null }, true).out.conflicts).toEqual([]);
+    expect(slideOrder(doc)).toEqual(['b1']);
+  });
+});
