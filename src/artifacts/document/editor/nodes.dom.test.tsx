@@ -26,7 +26,7 @@ const drawn = async (source: string) => {
   diagrams.push(source);
   return `<svg data-rendered="${source.length}"></svg>`;
 };
-const make = (content: JSONContent, renderDiagram: (source: string) => Promise<string> = drawn) => {
+const make = (content: JSONContent, renderDiagram: (source: string) => Promise<string> = drawn, editable = true) => {
   editor = new Editor({
     element: document.body.appendChild(document.createElement('div')),
     coreExtensionOptions,
@@ -39,6 +39,7 @@ const make = (content: JSONContent, renderDiagram: (source: string) => Promise<s
       },
     }),
     content,
+    editable,
   });
   return editor;
 };
@@ -175,6 +176,35 @@ describe('chips', () => {
     select(e, 'mention');
     typeInto(view(e, 'mention').querySelector<HTMLInputElement>('[aria-label="Name"]')!, 'Ada Lovelace');
     expect(attrsOf(e, 'mention')).toMatchObject({ label: 'Ada Lovelace', ref: 'u1' });
+  });
+});
+
+// P3-F panel scalpel-3#2: a callout's tone and a Status chip are form controls the page draws; they follow the editor's
+// editability both ways (setEditable redraws no unchanged node), so a read-only page (a version, the suggestion review,
+// a read-only store) offers neither, and a page made writable offers both again
+describe('the callout tone and the Status select', () => {
+  const both = doc(
+    { type: 'callout', attrs: { id: 'c1', tone: 'note' }, content: [para('p1', 'Heads up')] },
+    { type: 'paragraph', attrs: { id: 'p2' }, content: [{ type: 'dropdown', attrs: { options: ['To do', 'Done'], value: 'To do' } }] },
+  );
+  const disabled = (e: Editor) => [view(e, 'callout').querySelector<HTMLSelectElement>('[aria-label="Callout tone"]')!.disabled, view(e, 'dropdown').querySelector('select')!.disabled];
+
+  it('are off while the editor is read-only and on while it is editable, following each change', () => {
+    const e = make(both);
+    expect(disabled(e)).toEqual([false, false]);
+    e.setEditable(false);
+    expect(disabled(e), 'made read-only').toEqual([true, true]);
+    e.setEditable(true);
+    expect(disabled(e), 'made editable again').toEqual([false, false]);
+  });
+
+  it('opened read-only, are off, and on once the editor is made editable', () => {
+    const e = make(both, drawn, false);
+    expect(disabled(e)).toEqual([true, true]);
+    e.setEditable(true);
+    expect(disabled(e)).toEqual([false, false]);
+    choose(view(e, 'dropdown').querySelector('select')!, 'Done');
+    expect(attrsOf(e, 'dropdown').value).toBe('Done');
   });
 });
 

@@ -2,7 +2,7 @@
 // math through KaTeX as the transcript renders it, mermaid diagrams drawn by a lazily loaded renderer, images through
 // the host's asset URL, the callout's tone, the three chips, and the labelled placeholders of `pending` and `chart`.
 // Plain DOM views: the schema module stays free of them (it is built in Node), and the editor attaches them by name.
-import type { NodeViewRenderer } from '@tiptap/core';
+import type { Editor, NodeViewRenderer } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { NodeView } from '@tiptap/pm/view';
 import katex from 'katex';
@@ -119,15 +119,36 @@ function diagramView(env: ViewEnvironment): NodeViewRenderer {
   };
 }
 
-function dropdownDraw(into: HTMLElement, node: PMNode, onChange: (value: string) => void): void {
+function dropdownDraw(into: HTMLElement, node: PMNode, editable: boolean, onChange: (value: string) => void): void {
   const select = element('select', 'doc-chip-select');
   select.setAttribute('aria-label', 'Status');
   const options = Array.isArray(node.attrs.options) ? (node.attrs.options as unknown[]).map(String) : [];
   const value = node.attrs.value == null ? '' : String(node.attrs.value);
   for (const choice of options.includes(value) || !value ? options : [value, ...options]) select.append(option(choice));
   select.value = value;
+  select.disabled = !editable;
   select.addEventListener('change', () => onChange(select.value));
   into.append(select);
+}
+
+// P3-F: a form control a node view draws (the callout's tone, a Status chip's select) follows the editor's editability.
+// `setEditable` redraws no unchanged node (ProseMirror keeps its view and calls no `update`), and Tiptap tells it as an
+// update, so the view follows the editor's updates, acting only on a change of editability, until it goes.
+function followEditable(editor: Editor, view: NodeView, apply: (editable: boolean) => void): NodeView {
+  let editable = editor.isEditable;
+  const follow = () => {
+    if (editor.isEditable === editable) return;
+    editable = editor.isEditable;
+    apply(editable);
+  };
+  editor.on('update', follow);
+  return {
+    ...view,
+    destroy() {
+      editor.off('update', follow);
+      view.destroy?.();
+    },
+  };
 }
 
 function calloutView(): NodeViewRenderer {
@@ -162,7 +183,7 @@ function calloutView(): NodeViewRenderer {
       stopEvent: (event) => header.contains(event.target as globalThis.Node | null),
       ignoreMutation: (mutation) => mutation.type !== 'selection' && (header.contains(mutation.target) || mutation.target === dom),
     };
-    return view;
+    return followEditable(editor, view, (editable) => void (tone.disabled = !editable));
   };
 }
 
@@ -186,16 +207,21 @@ export function nodeViews(env: ViewEnvironment): Record<string, NodeViewRenderer
     }),
     date: atomView({ inline: true, field: { attr: 'iso', label: 'Date', kind: 'date' }, draw: (into, node) => into.append(element('span', 'doc-chip', formatDate(node.attrs.iso))) }),
     mention: atomView({ inline: true, field: { attr: 'label', label: 'Name', kind: 'text' }, draw: (into, node) => into.append(element('span', 'doc-chip', `@${String(node.attrs.label ?? '')}`)) }),
-    dropdown: (props) =>
-      atomView({
+    dropdown: (props) => {
+      const view = atomView({
         inline: true,
         interactive: (dom) => dom.querySelector('select'),
         draw: (into, node) => {
           const chip = element('span', 'doc-chip');
-          dropdownDraw(chip, node, (value) => setAttr(props.editor, props.getPos, 'value', value));
+          dropdownDraw(chip, node, props.editor.isEditable, (value) => setAttr(props.editor, props.getPos, 'value', value));
           into.append(chip);
         },
-      })(props),
+      })(props);
+      return followEditable(props.editor, view, (editable) => {
+        const select = view.dom.querySelector('select');
+        if (select) select.disabled = !editable;
+      });
+    },
     pending: atomView({
       inline: false,
       field: { attr: 'intent', label: 'Intent', kind: 'text' },
