@@ -3,9 +3,10 @@
 // click), and the moves next, back, first and last through them.
 import { describe, expect, it } from 'vitest';
 import { newDoc, transact, type Doc } from '../../../yjs';
-import { importSlide, writeDeckKeys } from '../../model';
+import { importSlide, slideOrder, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
-import { firstPosition, hiddenAt, lastPosition, nextPosition, prevPosition, showSlides, slideSteps, startPosition } from './sequence';
+import { removeSlide } from '../../writers';
+import { firstPosition, hiddenAt, lastPosition, nextPosition, prevPosition, settlePosition, showSlides, slideSteps, startPosition } from './sequence';
 
 function deckOf(files: Record<string, string>): Doc {
   const doc = newDoc();
@@ -95,5 +96,17 @@ describe('the show’s order', () => {
   it('keeps a position whose slide was removed or whose builds shrank in the show', () => {
     const doc = deckOf(DECK);
     expect(nextPosition(doc, { slideId: 'builds', build: 9 })).toEqual({ slideId: 'entry', build: 0 });
+  });
+
+  // P3-F slide-editor scalpel-3#2: a removed slide mid-deck gives way to the show's next slide after it in the deck as last
+  // seen (here not the last slide), the last one to the slide before it; a slide never seen stands at the show's start
+  it('settles a position whose slide was removed on its neighbour in the deck as last seen', () => {
+    const doc = deckOf({ ...DECK, close: `<section id="close"><p id="w" style="font-size:40px">Close</p></section>` });
+    const seen = slideOrder(doc);
+    removeSlide(doc, 'builds');
+    expect(settlePosition(doc, { slideId: 'builds', build: 2 }, seen)).toEqual({ slideId: 'entry', build: 0 });
+    removeSlide(doc, 'close');
+    expect(settlePosition(doc, { slideId: 'close', build: 0 }, seen)).toEqual({ slideId: 'entry', build: 0 });
+    expect(settlePosition(doc, { slideId: 'gone', build: 0 }, seen)).toEqual({ slideId: 'intro', build: 0 });
   });
 });

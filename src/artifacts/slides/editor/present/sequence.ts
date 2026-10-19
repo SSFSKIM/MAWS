@@ -137,15 +137,21 @@ export function startPosition(doc: Doc, slideId: string | null): Position | null
   return firstPosition(doc);
 }
 
-/** The slide a position stands at in the show, by its place in the deck when its slide left the show. */
-function placeOf(doc: Doc, show: readonly string[], slideId: string): { index: number; inShow: boolean } {
+/**
+ * The slide a position stands at in the show, by its place in the deck when its slide left the show: a hidden slide's in
+ * the deck now, a removed one's in `seen`, the deck's order as last seen holding it (P3-F).
+ */
+function placeOf(doc: Doc, show: readonly string[], slideId: string, seen: readonly string[] = []): { index: number; inShow: boolean } {
   const index = show.indexOf(slideId);
   if (index >= 0) return { index, inShow: true };
-  const order = slideOrder(doc);
+  const live = slideOrder(doc);
+  const order = live.includes(slideId) ? live : seen;
   const from = order.indexOf(slideId);
-  // a slide hidden since: the show's next slide after it stands in its place; a removed one: the show's start
-  const after = from < 0 ? -1 : show.findIndex((id) => order.indexOf(id) > from);
-  return { index: after < 0 ? show.length : after, inShow: false };
+  // the show's next slide after it stands in its place, else (at the end) the one before it; a slide never seen: the
+  // show's start, as startPosition takes it
+  if (from < 0) return { index: 0, inShow: false };
+  const after = order.slice(from + 1).find((id) => show.includes(id));
+  return { index: after === undefined ? show.length : show.indexOf(after), inShow: false };
 }
 
 export function nextPosition(doc: Doc, pos: Position): Position | null {
@@ -164,10 +170,13 @@ export function prevPosition(doc: Doc, pos: Position): Position | null {
   return prev === undefined ? null : at(prev, slideSteps(doc, prev).clicks);
 }
 
-/** The position itself when it still stands in the show (its build within the slide's clicks), else the nearest one. */
-export function settlePosition(doc: Doc, pos: Position): Position | null {
+/**
+ * The position itself when it still stands in the show (its build within the slide's clicks), else the nearest one;
+ * `seen` is the deck's order as last seen holding the position's slide, where a slide removed since stood.
+ */
+export function settlePosition(doc: Doc, pos: Position, seen?: readonly string[]): Position | null {
   const show = showSlides(doc);
-  const { index, inShow } = placeOf(doc, show, pos.slideId);
+  const { index, inShow } = placeOf(doc, show, pos.slideId, seen);
   if (inShow) return at(pos.slideId, Math.min(pos.build, slideSteps(doc, pos.slideId).clicks));
   const near = show[index] ?? show[index - 1];
   return near === undefined ? null : at(near, 0);

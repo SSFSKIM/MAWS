@@ -11,12 +11,13 @@ import { removeSlide } from '../../writers';
 import { Presentation, type PresentRole } from './Presentation';
 
 const pin = (id: string, attrs = '') => `<p id="${id}" ${attrs} style="position:absolute; left:100px; top:100px; width:400px; font-size:40px">${id}</p>`;
-function deck(): Doc {
+function deck(extra: Record<string, string> = {}): Doc {
   const files: Record<string, string> = {
     one: `<section id="one" data-transition="fade"><h1 id="t1" style="font-size:96px">One</h1><aside>Say hello</aside></section>`,
     two: `<section id="two">${pin('a', 'data-build-in="fade"')}${pin('b', 'data-build-in="rise"')}</section>`,
     secret: `<section id="secret" hidden><p id="x" style="font-size:40px">Hidden</p></section>`,
     three: `<section id="three"><p id="z" style="font-size:40px">Three</p></section>`,
+    ...extra,
   };
   const doc = newDoc();
   transact(doc, () => {
@@ -110,6 +111,18 @@ describe('the show', () => {
     expect(s.container.querySelector('[data-present-notes]')!.textContent).toContain('New words');
     act(() => removeSlide(doc, 'two'));
     expect(s.at()).toBe('three/0');
+  });
+
+  // P3-F slide-editor scalpel-3#2: the removed slide sits mid-deck, so the slide after it is not also the last
+  it('gives a removed current slide’s place to the slide after it, there through later updates, and goes on from it', () => {
+    const doc = deck({ four: `<section id="four"><p id="w" style="font-size:40px">Four</p></section>` });
+    const s = show(doc, 'audience', { start: 'two' });
+    act(() => removeSlide(doc, 'two'));
+    expect(s.at()).toBe('three/0');
+    act(() => setNotes(doc, 'three', 'Still here'));
+    expect(s.at()).toBe('three/0');
+    key('ArrowRight');
+    expect(s.at()).toBe('four/0');
   });
 });
 

@@ -11,6 +11,7 @@ import { DesignSystemScope, type DesignSystemRef } from '../../../design-system/
 import { onUpdate, type Doc } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
 import type { AssetUrl } from '../../canvas';
+import { slideOrder } from '../../model';
 import { useDeckView } from '../deck-view';
 import { faceRules, useCanvasCss } from '../page-styles';
 import { openPresentChannel, type PresentChannel, type PresentMessage } from './channel';
@@ -60,14 +61,17 @@ function useDocVersion(doc: Doc): number {
 
 /**
  * What the views read of the live deck at a position: the position as the deck now has it (a slide removed or hidden
- * while the show runs gives way to its neighbour), the step after it, where it stands in the show and its notes. Read
- * per render with the replica's `version` as an input, so a memoizing compiler reads again after every update.
+ * while the show runs gives way to its neighbour, a removed one by its place in `seen`, the deck's order as last seen
+ * holding it), the step after it, where it stands in the show and its notes, and the deck's order while it holds the
+ * position's slide. Read per render with the replica's `version` as an input, so a memoizing compiler reads again after
+ * every update.
  */
-function readShow(doc: Doc, at: Position | null, version: number) {
-  const pos = at && settlePosition(doc, at);
+function readShow(doc: Doc, at: Position | null, seen: readonly string[], version: number) {
+  const pos = at && settlePosition(doc, at, seen);
   const settled = pos !== null && at !== null && pos.slideId === at.slideId && pos.build === at.build;
   const now = pos ?? firstPosition(doc);
   const show = showSlides(doc);
+  const order = slideOrder(doc);
   return {
     version,
     settled,
@@ -76,8 +80,11 @@ function readShow(doc: Doc, at: Position | null, version: number) {
     index: now ? show.indexOf(now.slideId) + 1 : 0,
     count: show.length,
     notes: now ? Y.readNotes(doc, now.slideId) : '',
+    holding: at !== null && order.includes(at.slideId) ? order : null,
   };
 }
+
+const sameIds = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
 
 /** How a move from `from` to `to` plays: one step forward or back (with its transition), else a jump. */
 function moveOf(doc: Doc, from: Position | null, to: Position): Pick<ShowState, 'move' | 'transition'> {
@@ -95,7 +102,11 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
   const [show, setShow] = useState<ShowState>(() => ({ pos: startPosition(doc, start), move: role === 'audience' ? 'enter' : 'jump', transition: null, black: false }));
   const [presenterShown, setPresenterShown] = useState(role === 'presenter');
   const [startedAt] = useState(() => Date.now());
-  const read = readShow(doc, show.pos, version);
+  // P3-F: the deck's order as last seen holding the show's slide, so a slide removed meanwhile gives way to the one after
+  // it (kept from render to render, React's derived-state pattern)
+  const [seen, setSeen] = useState<readonly string[]>(() => slideOrder(doc));
+  const read = readShow(doc, show.pos, seen, version);
+  if (read.holding && !sameIds(read.holding, seen)) setSeen(read.holding);
   const shown: ShowState = read.settled ? show : { pos: read.pos, move: 'jump', transition: null, black: show.black };
 
   // the other window: told every move, followed without telling it back
