@@ -342,5 +342,23 @@ describe('the PPTX mapping: the exports-capture panel', () => {
     // a placeholder keeps its flat stand-in, whatever its paint
     expect(jobsOf({ ...rounded, image: { ...rounded.image!, placeholder: true } })).toEqual([]);
   });
+  // scalpel-5#4: CSS turns the whole img about the element's centre; PowerPoint turns a picture about its own frame's
+  it('scalpel-5#4: turns a contained, cropped, off-centre picture about the element’s centre, where the canvas draws it', () => {
+    const logo = cover.elements.find((e) => e.id === 'logo')!;
+    // a 400 × 200 box, a square crop region (zoom 2 of a 400 × 400 picture), its focus at 25 %, a quarter turn
+    const turned: MeasuredElement = { ...logo, box: { x: 0, y: 0, w: 400, h: 200 }, rotate: 90, attrs: { ...logo.attrs, 'data-crop': '2 25% 50%' }, image: { ...logo.image!, natural: { w: 400, h: 400 }, fit: 'contain', position: [0.25, 0.5] } };
+    const out = named(on(cover)(turned), 'logo');
+    if (out.kind !== 'image') throw new Error('a picture');
+    const o = out.options as { x: number; y: number; rotate: number; sizing: { w: number; h: number } };
+    // unturned the region is drawn 200 × 200 at (50, 0), centred at (150, 100); the quarter turn about the element's
+    // centre (200, 100) takes that centre to (200, 50)
+    expect([px(o.sizing.w), px(o.sizing.h), o.rotate]).toEqual([200, 200, 90]);
+    nearCanvas(px(o.x) + 100, 200);
+    nearCanvas(px(o.y) + 100, 50);
+    // uncropped and contained the same: a 400 × 400 picture drawn 200 × 200 at (50, 0)
+    const whole = named(on(cover)({ ...turned, attrs: { alt: 'Logo' } }), 'logo');
+    nearCanvas(px((whole.options as { x: number }).x) + 100, 200);
+    nearCanvas(px((whole.options as { y: number }).y) + 100, 50);
+  });
   // (the exports-capture regressions end)
 });

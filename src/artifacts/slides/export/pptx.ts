@@ -305,9 +305,12 @@ function imageObject(el: MeasuredElement, ir: ElementIR | undefined, picture: st
     return [{ kind: 'image', name: el.id, options: { data: picture, ...at(el.box), objectName: el.id, altText: ir?.attrs.alt ?? '', ...(el.rotate && { rotate: el.rotate }), ...(transparency > 0 && { transparency }), ...(shadow && { shadow }) } }];
   }
   const placed = placeImage(el, natural);
+  // P3-F (exports-capture scalpel-5#4): CSS turns the img about the element's centre, PowerPoint the frame about its own:
+  // a frame smaller than the box (contained, off centre) is carried by the turn, as a border bar is
+  const frame = turnedWith(placed.box, el.box, el.rotate);
   const base: PptxGenJS.ImageProps = { data, objectName: el.id, altText: ir?.attrs.alt ?? '', ...(el.rotate && { rotate: el.rotate }), ...(shadow && { shadow }) };
   if (transparency > 0) base.transparency = transparency;
-  if (!placed.crop) return [{ kind: 'image', name: el.id, options: { ...base, ...at(placed.box) } }];
+  if (!placed.crop) return [{ kind: 'image', name: el.id, options: { ...base, ...at(frame) } }];
   // pptxgenjs's crop: `w`/`h` the whole picture and `sizing` the window in the same units, so the window lands at the box;
   // each axis scales on its own (a region stretched into a box of another aspect)
   const sx = placed.box.w / placed.crop.w;
@@ -318,8 +321,8 @@ function imageObject(el: MeasuredElement, ir: ElementIR | undefined, picture: st
       name: el.id,
       options: {
         ...base,
-        x: inches(placed.box.x),
-        y: inches(placed.box.y),
+        x: inches(frame.x),
+        y: inches(frame.y),
         w: inches(natural.w * sx),
         h: inches(natural.h * sy),
         sizing: { type: 'crop', x: inches(placed.crop.x * sx), y: inches(placed.crop.y * sy), w: inches(placed.box.w), h: inches(placed.box.h) },
