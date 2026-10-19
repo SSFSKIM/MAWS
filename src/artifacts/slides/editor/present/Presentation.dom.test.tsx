@@ -40,6 +40,11 @@ function show(doc: Doc, role: PresentRole, options: { paired?: boolean; start?: 
   return { ...utils, onEnd, artifactId, at: () => `${root().dataset.presentSlide}/${root().dataset.presentBuild}`, root };
 }
 const key = (k: string) => act(() => void fireEvent.keyDown(window, { key: k }));
+/** A key pressed on an element as Chromium does: its keydown, then a button's activation by Enter or Space unless cancelled. */
+const pressOn = (el: HTMLElement, k: string) =>
+  act(() => {
+    if (fireEvent.keyDown(el, { key: k }) && el instanceof HTMLButtonElement && (k === 'Enter' || k === ' ')) el.click();
+  });
 
 afterEach(cleanup);
 
@@ -94,6 +99,20 @@ describe('the show', () => {
     const paired = show(deck(), 'audience', { paired: true });
     key('p');
     expect(paired.container.querySelector('[data-present-view]')!.getAttribute('data-present-view')).toBe('audience');
+  });
+
+  // P3-F slide-editor scalpel-4#3: Enter and Space on a focused presenter button are the button's, so End ends the show
+  it('leaves Enter and Space to a focused presenter button; the arrows still drive the show, and a press keeps focus off the bar', () => {
+    const s = show(deck(), 'presenter');
+    const button = (name: string) => s.getByRole('button', { name });
+    pressOn(button('Black'), ' ');
+    expect([s.at(), s.root().hasAttribute('data-present-black')]).toEqual(['one/0', true]);
+    pressOn(button('End show'), 'ArrowRight');
+    expect(s.at()).toBe('two/0');
+    pressOn(button('End show'), 'Enter');
+    expect([s.at(), s.onEnd.mock.calls.length]).toEqual(['two/0', 1]);
+    // a pointer press does not move focus onto the bar, so the show's Space and Enter still follow a click on a button
+    expect(fireEvent.mouseDown(button('Next'))).toBe(false);
   });
 
   it('B shows black; Escape ends the show', () => {

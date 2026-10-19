@@ -163,6 +163,8 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const key = event.key;
+      // P3-F: Enter and Space on a focused button are its activation (End show ends it), not the show's next step
+      if ((key === 'Enter' || key === ' ') && event.target instanceof Element && event.target.closest('button')) return;
       if (key === 'ArrowRight' || key === 'ArrowDown' || key === ' ' || key === 'PageDown' || key === 'Enter') next();
       else if (key === 'ArrowLeft' || key === 'ArrowUp' || key === 'PageUp' || key === 'Backspace') back();
       else if (key === 'Home') go(firstPosition(doc), 'jump');
@@ -191,7 +193,8 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
     const following = read.following;
     body = (
       <div className="present-presenter" data-present-view="presenter">
-        <header className="present-bar">
+        {/* P3-F: a pointer press leaves focus where it was, so the show's Enter and Space still follow a click on a button */}
+        <header className="present-bar" onMouseDown={(event) => event.preventDefault()}>
           <Elapsed since={startedAt} />
           <span className="present-count" data-present-count>
             {C.count(read.index, read.count)}
