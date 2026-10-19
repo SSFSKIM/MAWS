@@ -11,6 +11,7 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { moveSlide } from '../../slides/model';
+import { useReorderAccessibility } from '../../slides/editor/announcements';
 import type { DeckSession } from '../../slides/editor/session';
 import { CANVAS_LIMITS } from '../canvas';
 import { boardLabel, type BoardView } from './boards';
@@ -82,6 +83,9 @@ export function BoardList(props: BoardListProps) {
     if (!over || active.id === over.id || readOnly) return;
     moveTo(String(active.id), ids.indexOf(String(over.id)));
   };
+  // a reorder as assistive technology hears it (the filmstrip's): the boards by position and name, over the boards last
+  // drawn; one object for the list's life, like the sensors' options
+  const accessibility = useReorderAccessibility(ids, (id, n) => C.reorderItem(n, boards.find((b) => b.id === id)?.title ?? ''));
   const full = boards.length >= CANVAS_LIMITS.boards;
 
   return (
@@ -110,7 +114,7 @@ export function BoardList(props: BoardListProps) {
       {boards.length === 0 ? (
         <p className="deck-quiet">{C.noBoards}</p>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} accessibility={accessibility}>
           <SortableContext items={ids} strategy={verticalListSortingStrategy} disabled={readOnly}>
             <ol className="design-boards-list" aria-label={C.boardsInOrder}>
               {boards.map((b, index) => (

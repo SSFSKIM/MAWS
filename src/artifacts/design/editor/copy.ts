@@ -19,6 +19,8 @@ export const DESIGN_COPY = {
   world: 'Design canvas',
   boards: 'Boards',
   boardsInOrder: 'Boards, back to front',
+  // W1: a board in a reorder's announcements, by its position and name (an untitled one by position)
+  reorderItem: (n: number, title: string) => (title ? `Board ${n}, ${title}` : `Board ${n}`),
   showBoards: 'Show boards',
   addBoard: 'Add board',
   preset: (label: string, w: number, h: number) => `${label} ${size(w, h)}`,

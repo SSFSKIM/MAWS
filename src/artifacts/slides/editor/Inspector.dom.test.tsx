@@ -24,11 +24,11 @@ const SLIDE = `<section id="a" style="background:#ffffff">
 <table id="tbl" style="position:absolute; left:1200px; top:700px; width:600px; font-size:28px"><tr id="r1"><th>A</th><th>B</th></tr><tr id="r2"><td>1</td><td>2</td></tr></table>
 </section>`;
 
-function deck(): Doc {
+function deck(slide = SLIDE): Doc {
   const doc = newDoc();
   transact(doc, () => {
     writeDeckKeys(doc, { v: 4, title: 'Q3', order: ['a'], faces: { lora: { family: 'Lora' } } });
-    const l = loadSlide(SLIDE);
+    const l = loadSlide(slide);
     if (!l.ok) throw new Error(`fixture: ${l.held.reasons.join('; ')}`);
     importSlide(doc, l.slide, 'a0');
   });
@@ -38,8 +38,8 @@ function deck(): Doc {
 afterEach(cleanup);
 
 type Measure = (id: string) => { x: number; y: number; w: number; h: number } | null;
-function mount(selection: string[] = [], options: { readOnly?: boolean; uploadAsset?: (file: File) => Promise<string>; measure?: Measure } = {}) {
-  const doc = deck();
+function mount(selection: string[] = [], options: { readOnly?: boolean; uploadAsset?: (file: File) => Promise<string>; measure?: Measure; slide?: string } = {}) {
+  const doc = deck(options.slide);
   const session = new DeckSession(doc);
   session.select(selection);
   const utils = render(
@@ -321,6 +321,51 @@ describe('the inspector', () => {
     expect(box('Fill colour').value).toBe('#eeeeee');
     act(() => void restyle(doc, 'a', 'box', { background: '#123456' }, 'remote'));
     expect(box('Fill colour').value).toBe('#123456');
+  });
+});
+
+// W1 (tech debt, 2026-10-19): the panel names what it edits as the toolbar does, and a token by its friendly name
+describe('names: the element by its type class, a token by the name its role goes by', () => {
+  const ROLES = `<section id="a">
+<h1 id="head" style="font-family:var(--ds-font-display); font-size:var(--ds-type-title-size); line-height:var(--ds-type-title-line); font-weight:var(--ds-type-title-weight)">Q3</h1>
+<h1 id="plain" style="font-size:64px">Plain</h1>
+<div id="grp" data-group="" style="position:absolute; left:100px; top:400px; width:400px; height:200px; border-radius:var(--ds-radius-md)"><p id="in" style="position:absolute; left:0px; top:0px; width:200px">In</p></div>
+<div id="card" style="position:absolute; left:600px; top:400px; width:300px; height:200px"></div>
+</section>`;
+  const heading = () => screen.getByRole('heading', { level: 2 }).textContent;
+  const shown = (name: string) => combo(name).selectedOptions[0]!;
+
+  it('a text element by its type class, as the Text style menu names it; the tag where it has none', () => {
+    mount(['head'], { slide: ROLES });
+    expect(heading()).toBe('Title');
+    cleanup();
+    mount(['plain'], { slide: ROLES });
+    expect(heading()).toBe('Heading 1');
+  });
+
+  it('a group as a group, any other box by its tag', () => {
+    mount(['grp'], { slide: ROLES });
+    expect(heading()).toBe('Group');
+    cleanup();
+    mount(['card'], { slide: ROLES });
+    expect(heading()).toBe('Box');
+  });
+
+  it('token fields show the friendly name, the token’s own name in the title, as the swatches do', () => {
+    mount(['head'], { slide: ROLES });
+    expect(box('Font size').placeholder).toBe('Title');
+    expect(box('Font size').title).toBe('Title (--ds-type-title-size)');
+    expect(box('Line height').placeholder).toBe('Title');
+    expect(shown('Font weight').text).toBe('Title');
+    expect(shown('Font weight').title).toBe('Title (--ds-type-title-weight)');
+    expect(shown('Font').text).toBe('Display (system)');
+    const panel = screen.getByRole('complementary', { name: 'Inspector' });
+    const words = [...panel.querySelectorAll('input, option, h2, h3, span, p')].map((e) => `${e.textContent ?? ''} ${(e as HTMLInputElement).placeholder ?? ''}`);
+    expect(words.filter((w) => w.includes('--ds-'))).toEqual([]);
+    cleanup();
+    mount(['grp'], { slide: ROLES });
+    expect(box('Corner radius').placeholder).toBe('Medium');
+    expect(box('Corner radius').title).toBe('Medium (--ds-radius-md)');
   });
 });
 

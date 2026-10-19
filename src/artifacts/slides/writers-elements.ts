@@ -458,6 +458,9 @@ export function routedOut(attrs: Readonly<Record<string, string>>, G: ReturnType
 export type NewKind = 'text' | 'heading' | 'bullets' | 'numbers' | `shape:${string}` | `icon:${string}` | `image:${string}` | `table:${number}x${number}` | 'line' | 'connector';
 
 const ACCENT = 'var(--ds-color-accent, #2b7a78)';
+// a shape starts as the system's raised surface with its hairline edge, which reads on any ground: the accent appears
+// once on a slide (the governing system's law), so it is the owner's pick in the fill menu, never a default
+const SURFACE = 'background:var(--ds-color-bg-raised, #ffffff); border:2px solid var(--ds-color-border, #e3e2df)';
 const at = (c: Pt, w: number, h: number) => `position:absolute; left:${Math.round(c.x - w / 2)}px; top:${Math.round(c.y - h / 2)}px`;
 const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
@@ -473,7 +476,7 @@ function markupOf(kind: NewKind, c: Pt): string {
   const [what, arg = ''] = [kind.slice(0, kind.indexOf(':')), kind.slice(kind.indexOf(':') + 1)];
   if (what === 'shape') {
     const [w, h] = arg === 'line' ? [400, 8] : arg.startsWith('arrow-') ? (arg === 'arrow-up' || arg === 'arrow-down' ? [150, 300] : [300, 150]) : [300, 200];
-    return `<x-shape kind="${escHtml(arg)}" style="${at(c, w, h)}; width:${w}px; height:${h}px; background:${ACCENT}"></x-shape>`;
+    return `<x-shape kind="${escHtml(arg)}" style="${at(c, w, h)}; width:${w}px; height:${h}px; ${SURFACE}"></x-shape>`;
   }
   if (what === 'icon') return `<x-icon name="${escHtml(arg)}" style="${at(c, 96, 96)}; width:96px; height:96px; color:${ACCENT}"></x-icon>`;
   if (what === 'image') return `<img src="${escHtml(arg)}" alt="" style="${at(c, 640, 360)}; width:640px; height:360px; object-fit:cover">`;

@@ -6,9 +6,10 @@
 // system's page tokens say otherwise, Decision Log 43). Headings are Word headings, lists Word numbering (bullets,
 // numbers from the list's start and style, task boxes as ☐ and ☒), tables Word tables with header rows, spans and
 // widths, links hyperlinks, pictures embedded through the caller's loader, and every thread whose passage is in the
-// file a Word comment on that passage with its messages as replies, resolved threads marked done. What Word has no
-// form for is written as text: math as its LaTeX, a diagram as its mermaid source under a label, a chart and a pending
-// block as their labelled placeholders, chips as what they show (P3-E: a chart the kind draws, `renderView`, is its SVG
+// file a Word comment on that passage with its messages as replies, resolved threads marked done; a thread whose
+// passage no tab holds (an orphan, a resolved thread whose text was deleted) a comment on its quote in a note at the
+// end, never on the body's text. What Word has no form for is written as text: math as its LaTeX, a diagram as its
+// mermaid source under a label, a chart and a pending block as their labelled placeholders, chips as what they show (P3-E: a chart the kind draws, `renderView`, is its SVG
 // with a PNG fallback or a native table, captioned and labelled, a block thread a Word comment on its caption). Tracked changes since a version are deferred (H3).
 // Pure: `docx` bundles its own zip and needs no Node built-in, so this runs in main or the renderer.
 import {
@@ -47,7 +48,7 @@ import { dsValue, exportDesign, hexOf, houseSystem, officeFace, pageOf, themeSlo
 import { imageSize } from './image-size';
 import { chipText } from './values';
 import { defaultAuthorName, tabsOf, type ExportOptions, type ExportSource, type ImageLoader } from './source';
-import { isBlockAnchor } from '../threads'; // P3-E
+import { isBlockAnchor, type Thread } from '../threads'; // P3-E
 import type { ExportView, ExportViewTable, ViewRenderer } from './source'; // P3-E
 
 export interface DocxExportOptions<T> extends ExportOptions<T> {
@@ -330,6 +331,13 @@ class Writer {
     });
   }
 
+  /** P4 L288: the note at the document's end, a line per thread whose passage is in no tab, its Word comments on it. */
+  removed(threads: readonly { thread: Thread; comments: number[] }[]): Paragraph[] {
+    return threads.map(({ thread, comments }) =>
+      this.placeholder(isBlockAnchor(thread.anchor) ? 'Removed block' : 'Removed passage', thread.quote.trim() ? `“${thread.quote}”` : '(not quoted)', { level: 0 }, comments),
+    );
+  }
+
   private placeholder(label: string, text: string, place: Place, comments: readonly number[] = []): Paragraph {
     return this.paragraph(this.commented(comments, [new TextRun({ text: `${label}: `, bold: true }), new TextRun({ text })]), { ...place, style: 'Placeholder' });
   }
@@ -527,12 +535,27 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
       if (node.type.name === 'chart' && typeof node.attrs.id === 'string') charts.add(node.attrs.id);
       return !node.isInline;
     });
+  // P4 L288: what any tab holds, exported or not (the threads' marks, the blocks' ids): a thread with no passage in the
+  // file whose passage or block no tab holds goes to the note at the end, the whole document's or its own tab's; one
+  // live in a tab left out of this export is that tab's
+  const held = new Set<string>();
+  for (const { body } of source.tabs)
+    body.descendants((node) => {
+      if (!node.isText && typeof node.attrs.id === 'string') held.add(`block:${node.attrs.id}`);
+      for (const mark of node.marks) if (mark.type.name === 'comment') held.add(`thread:${String(mark.attrs.threadId)}`);
+      return true;
+    });
+  const removed = (thread: Thread) =>
+    (options.tab === undefined || thread.tabId === options.tab) && !held.has(`thread:${thread.id}`) && !(isBlockAnchor(thread.anchor) && thread.blockId !== null && held.has(`block:${thread.blockId}`));
+  const note: { thread: Thread; comments: number[] }[] = [];
   const name = options.authorName ?? defaultAuthorName;
   const comments: ICommentOptions[] = [];
   for (const thread of source.threads) {
     const extent = extents.get(thread.id);
     const block = isBlockAnchor(thread.anchor) && thread.blockId !== null && charts.has(thread.blockId) ? thread.blockId : null; // P3-E
-    if ((!extent && block === null) || thread.messages.length === 0) continue;
+    const passageless = !extent && block === null;
+    if ((passageless && !removed(thread)) || thread.messages.length === 0) continue;
+    if (passageless) note.push({ thread, comments: [] });
     const root = comments.length;
     thread.messages.forEach((message, i) => {
       const id = comments.length;
@@ -548,6 +571,10 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
         // gives each comment's paragraph its `w14:paraId`, which commentsExtended.xml names (and Word's durable id)
         durableId: commentIdToParaId(id),
       });
+      if (passageless) {
+        note.at(-1)!.comments.push(id); // P4 L288
+        return;
+      }
       if (!extent) {
         writer.blockComments.set(block!, [...(writer.blockComments.get(block!) ?? []), id]); // P3-E
         return;
@@ -566,6 +593,7 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
       children: children.length ? children : [new Paragraph({})],
     };
   });
+  if (note.length > 0) sections.at(-1)?.children.push(...writer.removed(note)); // P4 L288: after the last tab
 
   const text = color('--ds-color-text');
   const theme = design.officeThemeXml();

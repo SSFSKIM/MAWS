@@ -15,7 +15,7 @@ import { DATASET_LIMITS } from '@artifacts/dashboard/datasets';
 import { exportTheme, prepareViews, VIEW_CSS } from '@artifacts/dashboard/export';
 import { SnapshotReader } from '@artifacts/dashboard/snapshots';
 import { dsOverrides } from '@artifacts/document/meta';
-import { defaultAuthorName } from '@artifacts/document/export/source';
+import { exportAuthorName } from '@artifacts/document/export/source';
 import { applyV2, newDoc } from '@artifacts/yjs';
 import type { ArtifactHost, DatasetPage } from '@artifacts/host';
 import { DOCUMENT_EXPORTERS, type DocumentExportContext, type DocumentExporter, type DocumentExportRequest } from '../artifacts/export-document';
@@ -32,6 +32,9 @@ export interface DashboardExportDeps {
   env: SeamEnv;
   /** Word's picture window; the protected capture window by default. */
   pictures?: OpenPictures;
+  /** A session's title as the UI names it (main's index): a file credits a session by it, "Claude" only without one
+   * (every session, when absent). */
+  sessionTitle?: (appSessionId: string) => string | undefined;
 }
 
 const cancelled = () => new Error('the export was cancelled');
@@ -52,6 +55,7 @@ function pagesOf(call: HostCall, signal: AbortSignal): Pick<ArtifactHost, 'readD
 /** B's `exporter` run for a dashboard: the captured state's views prepared, then B's run with them. */
 function dashboardExporter(exporter: DocumentExporter, deps: DashboardExportDeps): DocumentExporter {
   const pictures = deps.pictures ?? openFigurePictures(deps.env);
+  const titled = exportAuthorName(deps.sessionTitle);
   return {
     kind: 'dashboard',
     format: exporter.format,
@@ -64,6 +68,8 @@ function dashboardExporter(exporter: DocumentExporter, deps: DashboardExportDeps
       const facesCss = () => (faces ??= (async () => systemFacesCss(await deckSystem(request, deps), deps))());
       // Word's pictures: the window opened at the first chart, closed when the run ends
       const window = exporter.format === 'docx' ? pictures({ signal: context.signal, facesCss }) : null;
+      // P4 L287: the data's updater in every label, and a comment's author in Word, a session named by its title
+      const authorName = context.authorName ?? titled;
       try {
         applyV2(doc, await context.state());
         const now = request.versionId === undefined ? Date.now() : undefined; // E3 M3 fix: the export's one clock
@@ -71,14 +77,14 @@ function dashboardExporter(exporter: DocumentExporter, deps: DashboardExportDeps
         const renderView = await prepareViews(doc, {
           read: (snapshot) => reader.read(snapshot),
           theme: exportTheme(context.system, dsOverrides(doc)),
-          authorName: context.authorName ?? defaultAuthorName,
+          authorName,
           ...(now !== undefined && { now }), // E3 M3 fix
           ...(window && { picture: (svg: string, size: { width: number; height: number }) => window.take(svg, size) }),
         });
         if (context.signal.aborted) throw cancelled();
         const pageFaces = exporter.format === 'html' || exporter.format === 'pdf' ? await facesCss() : '';
         if (context.signal.aborted) throw cancelled();
-        await exporter.run(request, { ...context, renderView, viewCss: `${pageFaces}${VIEW_CSS}` });
+        await exporter.run(request, { ...context, authorName, renderView, viewCss: `${pageFaces}${VIEW_CSS}` });
       } finally {
         window?.close();
         doc.destroy();

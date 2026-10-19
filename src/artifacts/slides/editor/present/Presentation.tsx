@@ -6,7 +6,7 @@
 // audience window is the only one and P shows the presenter view in it. The two windows keep one position over a
 // `BroadcastChannel` (channel.ts). The deck is a live replica nobody writes here: an edit, an agent's republish, a slide
 // hidden or removed while the show runs shows at once, and the show stays where it can (sequence.ts).
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { DesignSystemScope, type DesignSystemRef } from '../../../design-system/apply';
 import { onUpdate, type Doc } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
@@ -131,53 +131,54 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
     };
   }, [artifactId, doc]);
 
-  const go = useCallback(
-    (to: Position | null, how?: Move) => {
-      const now = latest.current.shown;
-      if (!to) return;
-      const move = how === 'jump' ? { move: 'jump' as const, transition: null } : moveOf(doc, now.pos, to);
-      setShow({ pos: to, ...move, black: now.black });
-      channel.current?.post({ t: 'at', pos: to, black: now.black });
-    },
-    [doc],
-  );
-  const next = useCallback(() => {
+  // L255: plain functions; as useCallbacks they were memoization the React Compiler could not preserve, and it skipped
+  // the whole component in the shipped build
+  const go = (to: Position | null, how?: Move) => {
+    const now = latest.current.shown;
+    if (!to) return;
+    const move = how === 'jump' ? { move: 'jump' as const, transition: null } : moveOf(doc, now.pos, to);
+    setShow({ pos: to, ...move, black: now.black });
+    channel.current?.post({ t: 'at', pos: to, black: now.black });
+  };
+  const next = () => {
     const now = latest.current.shown.pos;
     if (now) go(nextPosition(doc, now));
-  }, [doc, go]);
-  const back = useCallback(() => {
+  };
+  const back = () => {
     const now = latest.current.shown.pos;
     if (now) go(prevPosition(doc, now));
-  }, [doc, go]);
-  const toggleBlack = useCallback(() => {
+  };
+  const toggleBlack = () => {
     const now = latest.current.shown;
     setShow({ ...now, move: 'jump', transition: null, black: !now.black });
     if (now.pos) channel.current?.post({ t: 'at', pos: now.pos, black: !now.black });
-  }, []);
-  const end = useCallback(() => {
+  };
+  const end = () => {
     channel.current?.post({ t: 'end' });
     latest.current.onEnd();
-  }, []);
+  };
 
+  // the show's keys, bound once: an Effect Event calls the latest render's functions
+  const onKey = useEffectEvent((event: KeyboardEvent) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const key = event.key;
+    // P3-F: Enter and Space on a focused button are its activation (End show ends it), not the show's next step
+    if ((key === 'Enter' || key === ' ') && event.target instanceof Element && event.target.closest('button')) return;
+    if (key === 'ArrowRight' || key === 'ArrowDown' || key === ' ' || key === 'PageDown' || key === 'Enter') next();
+    else if (key === 'ArrowLeft' || key === 'ArrowUp' || key === 'PageUp' || key === 'Backspace') back();
+    else if (key === 'Home') go(firstPosition(doc), 'jump');
+    else if (key === 'End') go(lastPosition(doc), 'jump');
+    else if (key === 'b' || key === 'B' || key === '.') toggleBlack();
+    else if (key === 'Escape') end();
+    else if ((key === 'p' || key === 'P') && role === 'audience' && !paired) setPresenterShown((on) => !on);
+    else return;
+    event.preventDefault();
+  });
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const key = event.key;
-      // P3-F: Enter and Space on a focused button are its activation (End show ends it), not the show's next step
-      if ((key === 'Enter' || key === ' ') && event.target instanceof Element && event.target.closest('button')) return;
-      if (key === 'ArrowRight' || key === 'ArrowDown' || key === ' ' || key === 'PageDown' || key === 'Enter') next();
-      else if (key === 'ArrowLeft' || key === 'ArrowUp' || key === 'PageUp' || key === 'Backspace') back();
-      else if (key === 'Home') go(firstPosition(doc), 'jump');
-      else if (key === 'End') go(lastPosition(doc), 'jump');
-      else if (key === 'b' || key === 'B' || key === '.') toggleBlack();
-      else if (key === 'Escape') end();
-      else if ((key === 'p' || key === 'P') && role === 'audience' && !paired) setPresenterShown((on) => !on);
-      else return;
-      event.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [doc, go, next, back, toggleBlack, end, role, paired]);
+    const listener = (event: KeyboardEvent) => onKey(event);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, []);
 
   const scope = (children: ReactNode) => (
     <DesignSystemScope system={system} medium="deck" overrides={deck.overrides} className="present-ds-scope">
@@ -193,8 +194,8 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
     const following = read.following;
     body = (
       <div className="present-presenter" data-present-view="presenter">
-        {/* P3-F: a pointer press never focuses a bar button and lets go of the focus one took from the keyboard, so the
-            show's Enter and Space follow a click on a button */}
+        {/* P3-F: a pointer press never focuses a bar button and lets go of any focus held (a button's from the keyboard,
+            L259: an embed's frame from a click), so the show's Enter and Space follow a click on the bar */}
         <header className="present-bar" onMouseDown={dropBarFocus}>
           <Elapsed since={startedAt} />
           <span className="present-count" data-present-count>
@@ -257,11 +258,14 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
   );
 }
 
-/** A press on the presenter bar: no focus moves to a button, and a button holding focus (a Tab onto the bar) lets it go. */
+/**
+ * A press on the presenter bar: no focus moves to a button, and whatever holds focus lets it go: a button a Tab put it on,
+ * or (L259) an embed's frame in the current pane, whose page would take every key typed after.
+ */
 function dropBarFocus(event: ReactMouseEvent<HTMLElement>): void {
   event.preventDefault();
   const focused = event.currentTarget.ownerDocument.activeElement;
-  if (focused instanceof HTMLElement && event.currentTarget.contains(focused)) focused.blur();
+  if (focused instanceof HTMLElement) focused.blur();
 }
 
 /** One view of the show, fitted to its box. Its ShowStage plays each move it is given (see stage.ts). */

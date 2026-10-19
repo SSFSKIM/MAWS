@@ -86,5 +86,11 @@ export function tabsOf(source: ExportSource, tab: string | undefined): ExportTab
   return [found];
 }
 
-/** How an export names an author: the session's title or "Claude", the human as "Owner" (never "You" in a file). */
-export const defaultAuthorName = (actor: Actor): string => (actor.kind === 'human' ? 'Owner' : actorDisplay(actor).name);
+/** How an export names an author: a session by its title (`sessionTitle`, main's index, as the UI names it) or "Claude"
+ * when it has none, the human as "Owner" (never "You" in a file). */
+export const exportAuthorName =
+  (sessionTitle?: (appSessionId: string) => string | undefined) =>
+  (actor: Actor): string =>
+    actor.kind === 'human' ? 'Owner' : actorDisplay(actor, sessionTitle?.(actor.appSessionId)).name;
+/** An export's author names without a title to look up: every session "Claude", the human "Owner". */
+export const defaultAuthorName = exportAuthorName();

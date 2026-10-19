@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { deckChanges, elementHistory, openDeckDiff } from '../slides/history';
-import { setStyle, setText, zOrder } from '../slides/model';
+import { setNotes, setStyle, setText, zOrder } from '../slides/model';
 import { applyV1, applyV2, attributionMap, contentIdsOf, mergeMaps, newDoc, onUpdate, stateV2, transact, type ContentMap, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { designChanges, designStops, type DesignChanges, type ElementMove } from './history';
@@ -234,5 +234,30 @@ describe('the design’s history projection', () => {
     expect(kinds(d, 'a')).toEqual([['added', 'e1']]);
     expect(boardOf(d, 'b')).toBeUndefined();
     expect(moved).not.toBe('e1');
+  });
+
+  it('stops ↑ ↓ at each run of a board’s (hidden) notes after its own change and its elements, as C’s deck does, one stop per change counted (L240)', () => {
+    const w = world(SEEDS.map((s) => (s.id === 'c' ? { ...s, notes: 'notes for the poster' } : s)));
+    const v = w.mark();
+    w.land('human', (doc) => setBoardFrame(doc, 'c', { x: 2100 }));
+    w.land(AGENT, (doc) => setNotes(doc, 'c', 'first, notes for the poster'));
+    w.land('human', (doc) => setNotes(doc, 'c', 'first, notes for the poster, last')); // apart from the first: a run of its own
+    const framed = w.project(v).d;
+    expect(boardOf(framed, 'c')).toMatchObject({ kind: 'changed', keys: [expect.objectContaining({ key: 'x' })], elements: [], notes: 2 });
+    expect(framed.count).toBe(3); // the frame, two notes runs
+    expect(designStops(framed)).toEqual([
+      { part: 'board', boardId: 'c' },
+      { part: 'notes', boardId: 'c', run: 0 },
+      { part: 'notes', boardId: 'c', run: 1 },
+    ]);
+    w.land('human', (doc) => setStyle(doc, 'c', 'far', { color: '#ff0000' }));
+    const { d } = w.project(v);
+    expect(d.count).toBe(4); // and the element
+    expect(designStops(d)).toEqual([
+      { part: 'board', boardId: 'c' },
+      { part: 'element', boardId: 'c', elementId: 'far' },
+      { part: 'notes', boardId: 'c', run: 0 },
+      { part: 'notes', boardId: 'c', run: 1 },
+    ]);
   });
 });

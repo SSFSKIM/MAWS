@@ -12,7 +12,7 @@ import { Button, ColourField, NumberField, Refusal, Row, Section, SelectField, T
 import { canAll, common, type Picked } from './selection';
 import {
   addStop, bareOf, BORDER_STYLES, borderWith, COLOUR_TOKENS, familyLabel, fillKind, firstColour, fontGroups, gradientValue, MAX_STOPS, MIN_STOPS,
-  parseBorder, parseGradient, parseShadow, pxOf, rawHint, SHADOW_DEFAULT, shadowValue, tokenValue, type Gradient, type Shadow,
+  parseBorder, parseGradient, parseShadow, pxOf, rawHint, SHADOW_DEFAULT, shadowValue, tokenLabel, tokenTitle, tokenValue, varName, type Gradient, type Shadow,
 } from './values';
 
 const pxOrNull = (n: number | null) => (n === null ? null : px(n));
@@ -314,6 +314,11 @@ const ALIGNS = [
   { value: 'right', label: C.align.right, glyph: '⇥' },
   { value: 'justify', label: C.align.justify, glyph: '☰' },
 ];
+/** A weight no list holds (a type class's token, by its friendly name), as a choice. */
+function weightChoice(value: string): Choice {
+  const token = varName(value);
+  return token === null ? { value, label: rawHint(value) } : { value, label: tokenLabel(token), title: tokenTitle(token) };
+}
 const normFamily = (v: string) => {
   const r = checkValue('font-family', v);
   return r.ok ? r.value : v;
@@ -331,8 +336,13 @@ export function Text() {
 
   const family = read('font-family');
   const groups = fontGroups(faces).map((g) => ({ label: g.label, choices: g.options.map((o) => ({ value: normFamily(o.value), label: o.label })) }));
-  const known = groups.some((g) => g.choices.some((c) => c.value === family.value));
-  const familyChoices: Choice[] = [{ value: '', label: C.inherited }, ...(family.value !== undefined && !known ? [{ value: family.value, label: familyLabel(family.value) }] : [])];
+  // a system face is its listed choice whatever fallback it was written with (every system defines the face)
+  const familyToken = varName(family.value);
+  const listed = groups.flatMap((g) => g.choices).find((c) => c.value === family.value || (familyToken !== null && varName(c.value) === familyToken));
+  const familyChoices: Choice[] = [
+    { value: '', label: C.inherited },
+    ...(family.value !== undefined && !listed ? [{ value: family.value, label: familyLabel(family.value), title: familyToken === null ? undefined : tokenTitle(familyToken) }] : []),
+  ];
   const size = read('font-size');
   const weight = read('font-weight');
   const lineHeight = read('line-height');
@@ -342,7 +352,7 @@ export function Text() {
     <Section title={C.text}>
       {has('font-family') && (
         <Row>
-          <SelectField label={C.font} value={family.value ?? ''} mixed={family.mixed} choices={familyChoices} groups={groups} onChange={(v) => refuse(set('font-family')(v === '' ? null : v, 'edit'))} />
+          <SelectField label={C.font} value={listed?.value ?? family.value ?? ''} mixed={family.mixed} choices={familyChoices} groups={groups} onChange={(v) => refuse(set('font-family')(v === '' ? null : v, 'edit'))} />
         </Row>
       )}
       <div className="deck-inspector-pair">
@@ -366,7 +376,7 @@ export function Text() {
               mixed={weight.mixed}
               choices={[
                 { value: '', label: C.inherited },
-                ...(weight.value !== undefined && !WEIGHTS.includes(weight.value) ? [{ value: weight.value, label: rawHint(weight.value) }] : []),
+                ...(weight.value !== undefined && !WEIGHTS.includes(weight.value) ? [weightChoice(weight.value)] : []),
                 ...WEIGHTS.map((w) => ({ value: w, label: `${w} ${C.weights[w]}` })),
               ]}
               onChange={(v) => refuse(set('font-weight')(v === '' ? null : v, 'edit'))}
