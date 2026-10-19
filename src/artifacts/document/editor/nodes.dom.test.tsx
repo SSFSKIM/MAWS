@@ -292,6 +292,28 @@ describe('leaving an atom’s field', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  // P3-F (wave S review of c16): macOS Korean input confirms a composing syllable with Return as two keydowns about 1 ms
+  // apart, the first composing (keyCode 229) and followed by compositionend, the second not (the owner's capture,
+  // docs/doperpowers/evidence/p2-finish/owner-ime-capture-2026-10-12-events.txt:47-55). Only the second leaves the field,
+  // so it never reaches the page as a Return of its own that splits the line after the atom.
+  it('leaves on the Return that ends a composition, not the composing one, the line kept whole', () => {
+    const e = make(doc({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Ask ' }, { type: 'mention', attrs: { kind: 'person', ref: 'u1', label: '' } }, { type: 'text', text: ' now' }] }));
+    select(e, 'mention');
+    const field = view(e, 'mention').querySelector<HTMLInputElement>('[aria-label="Name"]')!;
+    field.focus();
+    typeInto(field, '홍길동');
+    // each keydown goes where the keyboard is, as the browser sends it
+    const enter = (init: KeyboardEventInit) => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true, ...init }));
+    enter({ keyCode: 229, isComposing: true });
+    field.dispatchEvent(new CompositionEvent('compositionend', { data: '동', bubbles: true }));
+    enter({ keyCode: 13, isComposing: false });
+    expect(e.state.doc.childCount).toBe(1);
+    expect(e.state.doc.child(0).textContent).toBe('Ask  now');
+    expect(attrsOf(e, 'mention').label).toBe('홍길동');
+    expect(document.activeElement).toBe(e.view.dom);
+    expect(e.state.selection.empty && e.state.selection.from).toBe(atPos(e, 'mention') + 1);
+  });
+
   it('puts the caret right after an inline atom', () => {
     const e = make(doc({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Due ' }, { type: 'math', attrs: { latex: 'x' } }, { type: 'text', text: ' now' }] }));
     leave(e, 'math', 'LaTeX');

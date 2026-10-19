@@ -64,6 +64,9 @@ export const atomView =
         setAttr(editor, getPos, field.attr, control.value);
       });
       (control as HTMLElement).addEventListener('keydown', (event: KeyboardEvent) => {
+        // an input method's key is its own (P3-F, wave S review of c16): macOS Korean input ends a composition with a
+        // composing Return and then a plain one; leaving on the first would hand the second to the page, splitting the line
+        if (event.isComposing) return;
         // Escape, or Enter in a one-line field, hands the caret back to the document after the node: right after an
         // inline atom, in the nearest text after a block one (before it, or the atom itself, when nothing follows)
         const done = event.key === 'Escape' || (event.key === 'Enter' && !(control instanceof HTMLTextAreaElement && !event.metaKey && !event.ctrlKey));
