@@ -245,13 +245,16 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
    * The source as the replica whose deletions `seen` names saw it: its units in document order that the replica's update
    * deletes (what its copy holds, unit for unit). A unit already deleted here, by a replica the dragger had not seen, is
    * counted from its tombstone (gc keeps an item's length and whether it was countable, not its characters); a node the
-   * dragger had not seen is left out with its subtree.
+   * dragger had not seen is left out with its subtree. Not in a sync step 2: it restates the sender's whole delete set,
+   * so a tombstone the dragger still held cannot be told from an older one, and the live units alone are paired (a
+   * tombstone the dragger held then drops the carry, as before the tombstone view).
    */
-  function seenUnits(node: Node, seen: (slot: Slot) => boolean, out: ViewUnit[] = []): ViewUnit[] {
+  function seenUnits(node: Node, seen: (slot: Slot) => boolean, step2: boolean, out: ViewUnit[] = []): ViewUnit[] {
     for (let item = node._start; item !== null; item = item.right) {
       if (!item.countable) continue;
       const content = item.content;
       if (item.deleted) {
+        if (step2) continue;
         for (let k = 0; k < item.length; k++) {
           const slot: Slot = [item.id.client, item.id.clock + k];
           if (seen(slot)) out.push({ slot, ch: null, live: false });
@@ -265,7 +268,7 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
         const slot: Slot = [item.id.client, item.id.clock];
         if (!seen(slot)) continue;
         out.push({ slot, ch: null, live: true });
-        seenUnits(content.type as Node, seen, out);
+        seenUnits(content.type as Node, seen, step2, out);
       } else {
         for (let k = 0; k < item.length; k++) {
           const slot: Slot = [item.id.client, item.id.clock + k];
@@ -281,7 +284,7 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
    * of a dragged block is a drag of its own (its carry and forwards), but the text that reached the subtree is carried
    * once, by the outermost.
    */
-  function drags(live: Doc, inserted: Map<string, Slot>, deletes: ContentIds['deletes'], carried: Set<string>): Drag[] {
+  function drags(live: Doc, inserted: Map<string, Slot>, deletes: ContentIds['deletes'], carried: Set<string>, step2: boolean): Drag[] {
     if (inserted.size === 0) return [];
     const out: Array<Drag & { sourceNode: Node }> = [];
     const seen = (slot: Slot) => deletes.has(slot[0], slot[1]);
@@ -294,7 +297,7 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
       out.push({
         blockId: id as string,
         source: itemOf(node),
-        view: seenUnits(node, seen),
+        view: seenUnits(node, seen, step2),
         sourceBlocks: textblocksY(node).filter((block) => seen(itemOf(block))).map(itemOf),
         late: lateRuns(node, seen, () => false),
         node: now,
@@ -396,7 +399,7 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     const items = structs.filter((struct): struct is DecodedItem => struct instanceof Item) as unknown as DecodedItem[];
     const carriedNodes = new Set(performing.map((carry) => carry.node).filter((slot): slot is Slot => slot !== undefined).map(slotKey));
     const inserted = insertedBlocks(items);
-    const moved = ids.deletes.isEmpty() ? [] : drags(live, inserted, ds, carriedNodes);
+    const moved = ids.deletes.isEmpty() ? [] : drags(live, inserted, ds, carriedNodes, step2);
     const late = performing.map((carry) => lateEdits(live, carry, ds)).filter((entry): entry is Late => entry !== null);
     if (performing.length === 0 && moved.length === 0 && !registry.hasActive) return null;
     // Deletions that are part of a move are not edits: the moves this update performs (registered or a drag), and any

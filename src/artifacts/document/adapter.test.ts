@@ -993,3 +993,42 @@ describe('unplacedThreads', () => {
     expect(unplacedThreads(doc)).toEqual(['t9']);
   });
 });
+
+// P3-F document-model recheck (fable, P2): a drag delivered in a sync step 2 (an unacked drag the provider re-sends after
+// a reconnect) keeps its carry on a block with edit history. A step 2 restates the sender's whole delete set, so its
+// tombstones cannot be told from the dragger's own: the view is paired from the live units alone there, as before.
+describe('a human drag delivered in a sync step 2', () => {
+  const drag = (doc: Doc, id: string, after: string) => {
+    const pm = DocIndex.of(doc).pm(DocIndex.of(doc).find(id)!.top);
+    transact(doc, () => {
+      body(doc).delete(order(doc).indexOf(id), 1);
+      body(doc).insert(order(doc).indexOf(after) + 1, [pmnodeToDelta(pm)]);
+    });
+  };
+
+  it('keeps its carry on a block with earlier deletions: concurrent text and a later stale edit land in the dragged copy', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const editor = host.peer();
+    const at = textOf(editor, 'p3').indexOf(' the human');
+    transact(editor, () => nodeOf(editor, 'p3').delete(at, ' the human'.length)); // edit history: tombstones in the block
+    host.send(editor, human);
+    const dragger = host.peer(); // synced after that deletion; drags while disconnected
+    const typist = host.peer(); // stale for the drag
+    const agent = host.peer();
+    typeAt(agent, 'p3', 0, 'BEFORE '); // reaches the host while the dragger is away
+    host.send(agent, agent1);
+    drag(dragger, 'p3', 'c1');
+    host.receive(diffV1(dragger, stateVector(host.live)), human, { step2: true }); // the reconnect's step 2 carries the drag
+    expect(textOf(host.live, 'p3')).toBe('BEFORE A plain paragraph types into. Words to keep.');
+    expect(adapter.stats().carries).toBe(1);
+    typeAt(typist, 'p3', 'end', ' END');
+    host.send(typist, human);
+    for (const doc of [dragger, typist, agent]) host.pull(doc);
+    const text = 'BEFORE A plain paragraph types into. Words to keep. END';
+    expect(textOf(host.live, 'p3')).toBe(text);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('c1') + 1);
+    expect(dupes(ids(host.live))).toEqual([]);
+    for (const doc of [dragger, typist, agent]) expect(textOf(doc, 'p3')).toBe(text);
+  });
+});
