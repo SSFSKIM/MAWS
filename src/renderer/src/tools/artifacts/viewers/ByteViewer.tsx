@@ -233,10 +233,12 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   };
 
   // Fix wave 1: what an export or a copy takes, only once the shown version and its file are resolved (null during a
-  // read, a Reload or a remount), so a historical selection is never exported as the live revision. Whole-branch
-  // review: a revision asked for keeps its version id even while it is the latest, so a publish since the read is not
-  // what it exports; only the latest followed exports live.
-  const selection = ordered !== null && content !== null ? { revision: content.revision, versionId: shown && selected !== 'latest' ? shown.version.id : undefined } : null;
+  // read from nothing: the first, a Reload or a remount), so a historical selection is never exported as the live
+  // revision. Whole-branch review: a revision asked for keeps its version id even while it is the latest, so a publish
+  // since the read is not what it exports. Review of 1586d7eeb: a publish's re-read keeps the shown frame, so the latest
+  // followed exports live only while it shows the row's revision, else the version shown, as the actions' revision is.
+  const selection =
+    ordered !== null && content !== null ? { revision: content.revision, versionId: shown && (selected !== 'latest' || row?.revision !== content.revision) ? shown.version.id : undefined } : null;
   useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload: reload, connectors });
   useRegionMarkupSurface(bodyBox, title, body !== null); // P3-G (§D4.1): Mark-up over the drawn body
 

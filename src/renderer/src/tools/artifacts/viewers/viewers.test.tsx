@@ -367,6 +367,32 @@ describe('a version asked for from outside', () => {
       await answer();
       await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
     });
+
+    // the review of 1586d7eeb: while the frame shows the version read before, the latest followed exports that version,
+    // as Reveal, Open externally and Save a copy take its revision; once the new versions land it exports live again
+    it('exports the followed latest as the version shown until the re-read lands, then live', async () => {
+      row = { ...row, revision: 14 }; // the latest, v3, live
+      mount('html');
+      await waitFor(() => expect(main.callsOf('artifacts.versions')).toHaveLength(2));
+      await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
+      const reread = deferred<ReturnType<typeof ok>>();
+      versionsAnswer = () => reread.promise;
+      row = { ...row, revision: 20 };
+      await act(async () => main.emit('library.changed', { revision: 2 }));
+      await waitFor(() => expect(main.callsOf('artifacts.versions')).toHaveLength(3));
+      expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html'));
+      act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
+      await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 3 }]));
+
+      versions = [...versions, version(4, 20)];
+      names[20] = 'index.html';
+      await act(async () => reread.resolve(ok({ versions })));
+      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 20, 'index.html')));
+      await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
+      act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
+      await waitFor(() => expect(main.callsOf('artifacts.export')).toHaveLength(2));
+      expect(main.callsOf('artifacts.export')[1]).toEqual({ artifactId: ID, format: 'pdf' });
+    });
   });
 
   it('keeps the picker’s choice by its revision when an earlier version thins', async () => {
