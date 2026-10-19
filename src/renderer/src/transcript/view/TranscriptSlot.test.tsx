@@ -5,6 +5,8 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { askSteerText } from '@shared/maws/ask';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { resetQueueStore } from '../../stores/queue';
@@ -12,7 +14,7 @@ import { useSessions } from '../../stores/sessions';
 import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph';
 import { useTaskGraph } from '../../tools/agents/store';
 import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, TranscriptSlot, useTranscriptStore } from '../index';
-import { BASH_RESULT, builder, request, task, tool } from '../model/test-events';
+import { BASH_RESULT, builder, request, task, tool, uuid } from '../model/test-events';
 import type { Row } from '../model/rows';
 import { registeredActions } from './registry';
 
@@ -252,6 +254,35 @@ describe('TranscriptSlot', () => {
 
     unmount();
     expect(listeners.size).toBe(0); // the last attachment let the queue go
+  });
+
+  // L276: an async ask's answer goes out as a `next` steer, which a Stop while it waits for the turn's next tool
+  // boundary holds back into MAWS's queue. The steer reached the transcript, so the ask's capsule reads Answered and
+  // derive draws no bubble for it; the queued envelope is none at the tail either (it stays queued and sends as it is).
+  // A held message that answered no capsule here, an envelope naming another ask included, keeps its bubble.
+  it('draws no held bubble for an ask’s answer held back into the queue once its capsule reads Answered', async () => {
+    const id = 'app-slot-ask-held' as AppSessionId;
+    const questions: AskQuestion[] = [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] }];
+    const answers: AskAnswer[] = [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }];
+    const envelope = askSteerText('toolu_a', questions, answers);
+    const b = builder();
+    b.turn('u1', 'Set it up');
+    b.toolUse('toolu_a', 'mcp__maws__ask', { blocking: false, questions });
+    b.result('toolu_a', [{ type: 'text', text: JSON.stringify({ status: 'asked', askId: 'toolu_a' }) }]);
+    b.toolUse('t1', 'Bash', { command: 'sleep 1' });
+    b.emit('user.message', { messageUuid: uuid('u2'), content: envelope, isReplay: false, isSynthetic: false, origin: 'human', bash: null }); // the answer's steer
+    const held = (queueId: string, content: string) => ({ queueId, appSessionId: id, content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
+    const queue = { ...EMPTY, entries: [held('q-1', envelope), held('q-2', 'Then run the tests'), held('q-3', askSteerText('toolu_other', questions, answers))], withdrawn: ['u2'] };
+    const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? queue : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 9, complete: true } }));
+    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    render(<TranscriptSlot appSessionId={id} />);
+    await settle();
+    expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers });
+    const heldTexts = [...document.querySelectorAll('[data-pending="held"]')].map((bubble) => bubble.querySelector('[data-bubble]')?.textContent ?? '');
+    expect(heldTexts).toHaveLength(2);
+    expect(heldTexts[0]).toBe('Then run the tests');
+    expect(heldTexts[1]).toContain('[MAWS ask toolu_other]');
+    expect(document.body.textContent).not.toContain('[MAWS ask toolu_a]');
   });
 
   it('docks the latest registered request renderer in a pending request’s slot; its disposer restores the previous one, then the placeholder', async () => {

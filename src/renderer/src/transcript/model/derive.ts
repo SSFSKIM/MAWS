@@ -137,6 +137,19 @@ export function heldRow(entry: Pick<QueueEntry, 'queueId' | 'content' | 'created
   return { id: rowId.held(entry.queueId), turnId: null, at: entry.createdAt, kind: 'user', messageUuid: null, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: false, steer: false, dropped: false, pending: 'held', ...anchorOf(text) /* E3 */ };
 }
 
+// An async ask's answers reach the engine as a steer of their envelope (`[MAWS ask <id>]` and the answered result's
+// JSON, shared/maws/ask.ts): the ask a message's content answers that way, null for any other message.
+export const askSteerOf = (content: string | ContentBlock[]): string | null => parseAskSteer(messageText(content))?.askId ?? null;
+
+// Whether such a steer answered a capsule this state holds (the reducer's recordAskSteer): the capsule then reads
+// Answered with the answers, and the envelope is no bubble, neither the steer's own nor (L276) the held one a Stop
+// leaves in MAWS's queue with the same content while the steer waited for the running turn: drawn, it read "Your
+// message" holding raw JSON. A steer that answered nothing here keeps its bubble.
+export function askAnsweredHere(state: TranscriptState, askId: string): boolean {
+  const owner = state.index.toolUses.get(askId as ToolUseId);
+  return owner !== undefined && state.turns.get(owner)?.askSteers?.has(askId) === true;
+}
+
 // W1: what the session's transcript shows around its derived rows: no bubble for a prompt held back into MAWS's queue
 // (the engine reports it cancelled, and it is not lost: it waits in the queue), and the held messages at the tail.
 export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail: readonly Row[]): Row[] {
@@ -346,14 +359,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (event.kind === 'command.lifecycle') openerDropped = true;
   }
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
-  // An async ask's answers reach the engine as a steer of their envelope (`[MAWS ask <id>]` and the answered result's
-  // JSON, shared/maws/ask.ts). Once it has answered a capsule this state holds (the reducer's recordAskSteer, run when
-  // the steer arrived, so before this turn derives), the capsule reads Answered with the answers, and the envelope is no
-  // bubble: drawn, it read "Your message" holding raw JSON. A steer that answered nothing here keeps its bubble.
+  // an async ask's answer steer whose capsule this state answered is no bubble (askAnsweredHere; the reducer recorded
+  // it when the steer arrived, so before this turn derives)
   const answersHeldAsk = (event: Event<'user.message'>): boolean => {
-    const steer = state === null ? null : parseAskSteer(messageText(event.content));
-    const owner = steer === null ? undefined : state!.index.toolUses.get(steer.askId as ToolUseId);
-    return owner !== undefined && state!.turns.get(owner)?.askSteers?.has(steer!.askId) === true;
+    const askId = state === null ? null : askSteerOf(event.content);
+    return askId !== null && askAnsweredHere(state!, askId);
   };
   // W1: a prompt waiting for the engine while another turn runs is a `next` steer (Enter while a turn runs); a `now`
   // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes

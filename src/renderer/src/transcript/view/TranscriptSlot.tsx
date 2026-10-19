@@ -17,11 +17,13 @@
 // agent no loaded turn launched names it.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useEffect, useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useShownEffort } from '../../composer/effective-effort';
 import { useOwnerChannel } from '../../stores/owner-channel'; // P2-C
 import { attachQueue, EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
-import { heldRow } from '../model/derive';
+import { useTranscriptStore } from '../../stores/transcript'; // L276
+import { askAnsweredHere, askSteerOf, heldRow } from '../model/derive';
 import type { Row } from '../model/rows';
 import { ipcRewind, ipcSource } from '../source/ipc';
 import { useAgentLookup } from './agent-lookup'; // L197
@@ -43,7 +45,8 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
   const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
   const renderRequest = useRegisteredRequestRenderer(); // C7's card; the placeholder until it registers
   const source = ipcSource(appSessionId, agentId); // memoised per key
-  useAgentLookup(storeKeyOf(source), appSessionId); // L197: an agent no loaded turn launched, named from the session's task graph
+  const storeKey = storeKeyOf(source);
+  useAgentLookup(storeKey, appSessionId); // L197: an agent no loaded turn launched, named from the session's task graph
   const rewind = useMemo(() => (agentId === undefined ? ipcRewind(appSessionId) : undefined), [appSessionId, agentId]);
   // Where the session runs, from its record (its worktree's checkout when it has one): the engine's Bash input names no
   // cwd, so a shell call shows this, labelled as the session's directory. Not for a child agent's transcript: a
@@ -54,7 +57,18 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
   });
   useEffect(() => (agentId === undefined ? attachQueue(appSessionId) : undefined), [appSessionId, agentId]);
   const queue = useQueueStore((state) => (agentId === undefined ? (state.bySession.get(appSessionId) ?? EMPTY_QUEUE) : EMPTY_QUEUE));
-  const tail = useMemo(() => queue.entries.filter((entry) => entry.state === 'queued' && !entry.uncertain).map(heldRow), [queue.entries]);
+  const held = useMemo(() => queue.entries.filter((entry) => entry.state === 'queued' && !entry.uncertain), [queue.entries]);
+  // L276: an async ask's answer a Stop held back into the queue (its steer waited for the turn's next tool boundary) is
+  // no bubble once the transcript recorded it answering the ask's capsule, as derive draws none for the steer; it stays
+  // queued and sends as it is
+  const askIds = useMemo(() => held.map((entry) => askSteerOf(entry.content)), [held]);
+  const answered = useTranscriptStore(
+    useShallow((store) => {
+      const state = store.entries[storeKey]?.state;
+      return askIds.map((askId) => askId !== null && state !== undefined && askAnsweredHere(state, askId));
+    }),
+  );
+  const tail = useMemo(() => held.filter((_, i) => !answered[i]).map(heldRow), [held, answered]);
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   const effort = useShownEffort(appSessionId);
   const ownerLane = useOwnerChannel(agentId === undefined ? appSessionId : null)?.lane.on ?? false; // P2-C: a session's, never a child's
