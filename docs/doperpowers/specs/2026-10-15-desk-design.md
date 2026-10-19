@@ -2571,6 +2571,15 @@ log; and after each `caught-up`, the hub replays the record's latest 100 entries
 is written from `settled` alone — the side the bridge says the engine used, who answered, and when — never from the
 web's attempt, and its `settled` carries the bridge's code for the browser to check.
 
+**A raise against a settlement [2026-10-19, MAWS #71].** A request raised again after its settlement (DX4 `settled`,
+once per raise) is pending again, and the browser orders the two by its socket's order, which is the hub's: a
+settlement is sent (`session` `settled`, then `decided`) before the `pending` set without its request, so a `pending`
+set that holds a request came after every settlement of it the socket carried; and a decision replayed after
+`caught-up` was recorded before the connection's own `pending` set (on connect, ahead of any `resume`), or was sent to
+this socket live behind its `settled`. So a `raised`, or a `pending` set holding the request, ends the settlement the
+browser holds for it (and the browser's own decisions on the raise that settlement ended), and a `decided` for a
+request its latest `pending` set holds is passed over: it settled an earlier raise, or repeats the `settled` just taken.
+
 **`terminal_only`** is the hub's, computed by its own clock: a background subagent's request whose `raised.deadline`
 has passed. Such a request stays pending (nothing is settled at the deadline) but only the terminal can answer it, and
 the web draws it as waiting in the terminal, without Allow or Deny. The web reads it from `pending` and never compares
@@ -2658,7 +2667,7 @@ and `streaming` are that agent's own.
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
 | `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
 | `raised` | no | `{request, session, tool, input, agentId?, truncated?, deadline?, async?, toolUseId?, mac}`: `request` the call's tool-use id where the engine gives one (`toolu_…`; an ask-mod question's `toolu_plugin_…`), otherwise a synthetic `request-…`, opaque to every consumer, the DX6 digest included; `toolUseId` the transcript's tool-use id of the call the request belongs to, a non-empty string of at most 512 characters (else `bad-shape`), present only where it differs from `request` (the ask mod's blocking question, whose `request` is the engine dialog it opens inside its own call, a call no transcript row names), so `toolUseId ?? request` is always the id a transcript row carries, or a synthetic id no row carries; `deadline` ISO 8601 UTC with milliseconds (the producer converts DX5's epoch milliseconds); `async: true` for the ask mod's async question, answered or withdrawn, never denied; `agentId` the subagent that asked (absent for the main thread), a non-empty string; `truncated: true` when the bridge capped the input it shows, and the DX6 digest is over that capped input on both sides. The code covers every field, and the hub keeps and relays them as received; another form of `agentId`, `truncated`, `deadline`, or `async` is refused `bad-shape` |
-| `settled` | no | `{request, winner: "web" \| "terminal" \| "other", outcome, by, mac}`; taken once per request: the hub removes the request and records its decision from the first, and a `settled` for a request it already settled (a daemon that restarted between sending and recording it) is accepted without a second broadcast or decision; the settled ids are in storage, kept a month, so this holds across an eviction. **[2026-10-19, MAWS #65]** Once per raise: a request raised again after its settlement (the open ask a resumed session's bridge raises under its call's id) is pending again, and the next `settled` for it removes it and records its decision; the daemon sends that `settled` though it sent one for the id before, and never sends a `settled` after a later `raised` of the same request (a raise drops from its outbox any settlement of that request still unsent), so a `settled` that finds its request pending is of that raise, never an earlier one sent again |
+| `settled` | no | `{request, winner: "web" \| "terminal" \| "other", outcome, by, mac}`; taken once per request: the hub removes the request and records its decision from the first, and a `settled` for a request it already settled (a daemon that restarted between sending and recording it) is accepted without a second broadcast or decision; the settled ids are in storage, kept a month, so this holds across an eviction. **[2026-10-19, MAWS #65]** Once per raise: a request raised again after its settlement (the open ask a resumed session's bridge raises under its call's id) is pending again, and the next `settled` for it removes it and records its decision; the daemon sends that `settled` though it sent one for the id before, and never sends a `settled` after a later `raised` of the same request (a raise drops from its outbox any settlement of that request still unsent), so a `settled` that finds its request pending is of that raise, never an earlier one sent again. The browser orders a raise against a settlement as DX3 has it (a raise against a settlement, MAWS #71) |
 | `delivery` | no | `{event: {writer, seq}, session, outcome: "delivered" \| "recorded" \| "refused-read-only" \| "uncertain" \| "failed", reason, mac}`; a `recorded` for a closed terminal session can be followed by `delivered` for the same key after Resume; `uncertain` is a push whose frame was taken but never answered |
 | `compact` | no | `{rpc, phase: "start" \| "end", tokensBefore?, tokensAfter?, skip?, error?}`: a compaction's progress, from the bridge's DX5 `compact` events; `rpc` the nonce of the DX6 `compact` that asked for it, or null for one the session started itself; on `end`, `tokensBefore` and `tokensAfter` (null when the engine recorded none), or `skip` (a hook vetoed it), or `error` (the engine refused it) |
 
@@ -5074,6 +5083,28 @@ a hub that connects into machines (§2).
   old daemon's window, but it is a new column on `settled`, a Durable
   Object storage change, which goes to the owner).
   Date/Author: 2026-10-19, MAWS #65's executor; revised after its review.
+- Decision: The web draws a request raised again after its settlement as
+  pending, with its answer control, until a settlement of that raise
+  (MAWS #71; DX3 amended, a raise against a settlement, for DC9 and DC5).
+  Before, the web kept a request's latest settlement and drew it settled
+  whatever came after, and every connection takes the last 100 audit
+  records again at `caught-up`, so no tab could answer a resumed session's
+  re-raised ask while the hub counted it in `waiting` and the badge. The
+  order is the one the hub already sends on each socket, so nothing new
+  crosses the wire: a `raised`, or a `pending` set holding the request,
+  ends the settlement the web holds for it, and a `decided` for a request
+  the latest `pending` set holds is passed over. The tab's own RPCs on the
+  raise that settlement ended stop drawing the card (a late decision's
+  refusal on it would otherwise draw it settled). Built in
+  `apps/desk-web/src/project/conversation.ts`; this closes the tech-debt
+  tracker's DC9 row for it. Accepted: a request raised again and then
+  dropped by a machine's republished set, with no settlement, reads
+  `closed` in a tab that saw it live, and in a tab that connects later
+  reads with the earlier settlement the replay carries; neither is
+  answerable, as the hub no longer holds it. Rejected: ordering by the
+  audit record's `id` or `at` (a `raised` carries neither, and the
+  socket's order already gives the answer).
+  Date/Author: 2026-10-19, MAWS #71's executor.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or

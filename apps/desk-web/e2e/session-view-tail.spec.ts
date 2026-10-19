@@ -3,7 +3,8 @@
 // deliveries staged on DC5's DX3 double as the machine would publish them. A send not yet in the transcript is a bubble
 // at its tail with its delivery state in its foot, until its own framed row replaces it; the session's pending requests
 // are cards at the tail, answered in place and gone once settled, with an "N waiting ↓" pill for a reader scrolled
-// away; the ask mod's async question row carries the log's question and answer; an ended session ends with its marker
+// away; the ask mod's async question row carries the log's question and answer, and a question its resumed session
+// raises again after its withdrawal waits on its card again, after a reload too; an ended session ends with its marker
 // and Resume, a send it never received ahead of it. Where the session view cannot draw — a machine offline, a machine
 // that serves no transcript for the session — the channel is the one built from the log, its working record a label.
 //
@@ -209,6 +210,43 @@ test("an async question whose request was withdrawn unanswered reads as withdraw
   await expect(view.locator(`[data-tail-request="${raised.draft.request}"]`)).toHaveCount(0);
   await expect(question.getByTestId('question-withdrawn')).toHaveText('Withdrawn: the session moved on without an answer');
   await expect(question).not.toContainText('Waiting');
+});
+
+test('an async question raised again when its session resumes waits on its card again, after a reload too, and its answer settles it', async ({ page, hub }) => {
+  const { fm, view } = await openSession(page, hub);
+  const stage = logStager(hub, fm);
+  const raised = fm.playThrough((s) => s.k === 'raised' && s.draft.tool === ASK);
+  if (raised?.k !== 'raised') throw new Error('the recording raises no async question');
+  const asked = fm.recording.steps.findIndex((s) => s.k === 'log' && s.event.kind === 'question');
+  await stage(Math.max(fm.played, asked + 1));
+  const draft = { ...raised.draft, session: fm.session };
+  const card = view.locator(`[data-tail-request="${draft.request}"]`);
+  const question = view.locator('[data-row-id^="question:toolu_01ptPa1uE4qkTexQaiwjlnsO"]');
+  await hub.raise(PROJECT, MACHINE, draft);
+  await expect(card.getByRole('button', { name: 'Submit' })).toBeVisible();
+  // Its process ends: the bridge withdraws it.
+  await hub.settle(PROJECT, MACHINE, fm.session, { request: draft.request, winner: 'other', outcome: 'withdrawn', by: 'bridge' });
+  await expect(card).toHaveCount(0);
+  await expect(question.getByTestId('question-withdrawn')).toBeVisible();
+  // Resumed: its bridge raises the still-open ask again under its call's id.
+  await hub.raise(PROJECT, MACHINE, draft);
+  await expect(card.getByRole('button', { name: 'Submit' })).toBeVisible();
+  await expect(question).toContainText('Waiting for your answer · below');
+  // A reload takes the withdrawal again from the audit record's replay: the raise again still outranks it.
+  await page.reload();
+  await expect(view).toHaveAttribute('data-session', fm.session);
+  await expect(card.getByRole('button', { name: 'Submit' })).toBeVisible();
+  await expect(question).toContainText('Waiting for your answer · below');
+
+  await card.getByRole('radio', { name: 'Stop it' }).click();
+  await card.getByRole('button', { name: 'Submit' }).click();
+  await expect.poll(() => hub.rpcs(PROJECT).length).toBe(1);
+  const answer = hub.rpcs(PROJECT)[0];
+  expect(answer).toMatchObject({ rpc: 'answer', machine: MACHINE, args: { session: fm.session, answers: { 'Keep the mockup server running once the suites finish?': 'Stop it' } } });
+  hub.answerRpc(PROJECT, answer.nonce, { state: 'done', result: {} });
+  await hub.settle(PROJECT, MACHINE, fm.session, { request: draft.request, winner: 'web', outcome: 'answered', by: DOUBLE_MEMBER.id });
+  await expect(card).toHaveCount(0);
+  await expect(question).not.toContainText('Waiting for your answer · below');
 });
 
 test('a send from the composer stays at the tail, queued then delivered, until its own framed row arrives; a terminal prompt with its words never takes its place', async ({ page, hub }) => {
