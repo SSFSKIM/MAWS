@@ -2,7 +2,8 @@
 # Runs MAWS's class-1 gates for one tree on GitHub Actions (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.4, §3.6).
 #
 #   scripts/ci-gate.sh <worktree-or-sha> [--gates static,unit,unit:darwin,probes,e2e:<group>,…] [--runner linux|macos]
-#                      [--class1a linux|macos|pool] [--default-beside <groups>] [--evidence] [--label <name>] [--keep]
+#                      [--class1a linux|macos|pool] [--default-beside <groups>] [--evidence] [--live] [--label <name>]
+#                      [--keep]
 #
 # Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
@@ -28,13 +29,17 @@
 #                      specs the whole set's default ran. A name with no script, or a script the derivation cannot read,
 #                      makes default the bare `pnpm e2e` with a warning (default: none)
 #   --evidence         upload e2e reports on success as well as failure for this run (default: failure only)
+#   --live             a paid run on purpose: the live e2e groups (gate.yml's LIVE_E2E: library-live, document-live, …)
+#                      run rather than skip, the e2e job with MAWS_LIVE, MAWS_LIBRARY_LIVE and MAWS_LIVE_DOCUMENT at 1,
+#                      each spec within its own cap. --gates names live groups alone, the plan refusing any other gate
+#                      beside them, Decision Log 75 (default: off, the live specs skip)
 #   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
 #   --keep             leave the ci/ ref in place
 #
 # Every invocation pushes a fresh empty commit on top of the sha: its message carries a unique nonce (so the push always
 # triggers a run of its own and the run found is this one's) and, when given, the `Gates:`, `Runner:`, `Class1a:`,
-# `DefaultBeside:` and `Evidence:` trailers. The pushed tree is always the tested tree plus that one commit. A Linux
-# lane admits only the e2e groups green there (§3.1); the plan refuses the rest. The pool takes class 1a and the
+# `DefaultBeside:`, `Evidence:` and `Live:` trailers. The pushed tree is always the tested tree plus that one commit. A
+# Linux lane admits only the e2e groups green there (§3.1); the plan refuses the rest. The pool takes class 1a and the
 # POOL_E2E groups; the plan job, hosted, makes its box. Every gh call names the repository, so the script runs
 # from any directory.
 #
@@ -66,6 +71,7 @@ runner=${MAWS_GATE_RUNNER:-}
 class1a=''
 default_beside=''
 evidence=''
+live=''
 label=''
 keep=false
 while (($# > 0)); do
@@ -75,6 +81,7 @@ while (($# > 0)); do
     --class1a) class1a=${2:?--class1a needs linux, macos or pool}; shift 2 ;;
     --default-beside) default_beside=${2:?--default-beside needs a list of e2e groups}; shift 2 ;;
     --evidence) evidence=yes; shift ;;
+    --live) live=yes; shift ;;
     --label) label=${2:?--label needs a name}; shift 2 ;;
     --keep) keep=true; shift ;;
     -h | --help) usage ;;
@@ -131,6 +138,7 @@ trailers="Nonce: $(date +%s)-$$"
 [[ -n $class1a ]] && trailers+=$'\n'"Class1a: $class1a"
 [[ -n $default_beside ]] && trailers+=$'\n'"DefaultBeside: $default_beside"
 [[ -n $evidence ]] && trailers+=$'\n'"Evidence: $evidence"
+[[ -n $live ]] && trailers+=$'\n'"Live: $live"
 pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short" -m "$trailers") || exit 1
 
 run_id=''
@@ -154,7 +162,7 @@ interrupted() {
 }
 trap interrupted INT TERM
 
-echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}"
+echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}${live:+ (Live: $live)}"
 # The ref is this invocation's own and the commit fixed, so a forced re-push is idempotent: a transient rejection
 # (a remote index-pack race while another gate pushes, a "[remote rejected] (failed)") is retried twice; an
 # authentication failure is not (Decision Log 54).

@@ -33,16 +33,19 @@ function plan(scenarioEnv) {
         INPUT_RUNNER: '',
         INPUT_CLASS1A: '',
         INPUT_EVIDENCE: '',
+        INPUT_LIVE: '',
         GATE_RUNNER: '',
         GATE_E2E_RUNNER: '',
         CLASS1_E2E: '',
         LINUX_E2E: '',
         POOL_E2E: '',
         LIBREOFFICE_E2E: '',
+        LIVE_E2E: '',
         ...scenarioEnv,
         GITHUB_OUTPUT: output,
         GITHUB_STEP_SUMMARY: summary,
       },
+      stdio: 'pipe',
     });
     const outputs = Object.fromEntries(readFileSync(output, 'utf8').trim().split('\n').map((line) => {
       const separator = line.indexOf('=');
@@ -119,4 +122,75 @@ test('a macOS lane never takes a POOL_E2E group: the pool when class 1a is pool,
   // No variable at all: class 1a on hosted Linux, desk-web beside it.
   assert.deepEqual(runners(plan({ ...lists, HEAD_MESSAGE: macRun('') }).outputs), { library: mac, 'desk-web': hosted });
   assert.deepEqual(runners(plan({ ...lists, EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:library,e2e:desk-web', INPUT_RUNNER: 'macos', INPUT_CLASS1A: 'macos' }).outputs), { library: mac, 'desk-web': hosted });
+});
+
+// The plan's refusal: its exit status and its stderr line.
+function refusal(scenarioEnv) {
+  try {
+    plan(scenarioEnv);
+  } catch (error) {
+    return { status: error.status, stderr: String(error.stderr) };
+  }
+  assert.fail('the plan did not refuse');
+}
+
+// Decision Log 75: a live run spends on purpose, so it takes the live groups alone.
+const live = { LIVE_E2E: 'library-live send-to-live', CLASS1_E2E: 'default library', GATE_E2E_RUNNER: 'macos' };
+const livePush = (gates, trailers = '\nLive: yes') => `ci-gate: test\n\nGates: ${gates}${trailers}`;
+
+test('the Live: yes trailer, or the live input on a dispatch, turns live on for a set of live groups', () => {
+  const on = plan({ ...live, HEAD_MESSAGE: livePush('e2e:library-live,e2e:send-to-live') });
+  assert.equal(on.outputs.live, 'true');
+  assert.deepEqual(JSON.parse(on.outputs.e2e).map((entry) => entry.group), ['library-live', 'send-to-live']);
+  assert.match(on.summary, /Live: yes \(MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1\)\./);
+
+  const off = plan({ ...live, HEAD_MESSAGE: livePush('e2e:library-live', '') });
+  assert.equal(off.outputs.live, 'false');
+  assert.doesNotMatch(off.summary, /Live/);
+  assert.equal(plan({ ...live, HEAD_MESSAGE: livePush('e2e:library-live', '\nLive: no') }).outputs.live, 'false');
+  // Neither a trailer's opt-out nor no trailer at all needs a live set.
+  assert.equal(plan({ ...live, HEAD_MESSAGE: livePush('static,e2e:default', '\nLive: no') }).outputs.live, 'false');
+
+  const dispatch = { ...live, EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:library-live', INPUT_RUNNER: 'macos' };
+  assert.equal(plan({ ...dispatch, INPUT_LIVE: 'true' }).outputs.live, 'true');
+  assert.equal(plan({ ...dispatch, INPUT_LIVE: 'false', HEAD_MESSAGE: 'Live: yes' }).outputs.live, 'false');
+  assert.equal(plan({ ...dispatch, HEAD_MESSAGE: 'Live: yes' }).outputs.live, 'false');
+});
+
+test('a live run refuses any gate that is not a live group: e2e:default, a fake group, class 1a, the default set', () => {
+  const cases = [
+    [livePush('e2e:library-live,e2e:default'), /not e2e:default:/],
+    [livePush('e2e:library,e2e:send-to-live'), /not e2e:library:/],
+    [livePush('static,unit,probes,e2e:library-live'), /not static, unit, probes:/],
+    ['ci-gate: test\n\nLive: yes', /not the default set:/],
+  ];
+  for (const [message, named] of cases) {
+    const { status, stderr } = refusal({ ...live, HEAD_MESSAGE: message });
+    assert.equal(status, 1, message);
+    assert.match(stderr, /^gate-plan: a live run takes only the live e2e groups \(e2e:library-live, e2e:send-to-live\), /, message);
+    assert.match(stderr, named, message);
+    assert.match(stderr, /ask with Gates: naming those alone \(ci-gate\.sh --live --gates e2e:<group>,…\)/, message);
+  }
+  const dispatched = refusal({ ...live, EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:library-live,e2e:default', INPUT_RUNNER: 'macos', INPUT_LIVE: 'true' });
+  assert.equal(dispatched.status, 1);
+  assert.match(dispatched.stderr, /not e2e:default:/);
+});
+
+// The flags the e2e job sets under live are the ones the LIVE_E2E groups' specs skip without; a group whose spec gates
+// on another flag would build and skip under --live, as five of them did before it.
+test("every LIVE_E2E group's spec skips on a flag the e2e job sets under live", () => {
+  const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
+  const groups = /^ {2}LIVE_E2E: (.*)$/m.exec(workflow)[1].split(/\s+/).filter(Boolean);
+  const exported = [...workflow.matchAll(/^ {6}(MAWS_\w+): \$\{\{ needs\.plan\.outputs\.live == 'true' && '1' \|\| '' \}\}$/gm)].map((match) => match[1]);
+  assert.deepEqual(exported.sort(), ['MAWS_LIBRARY_LIVE', 'MAWS_LIVE', 'MAWS_LIVE_DOCUMENT']);
+  const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  for (const group of groups) {
+    const script = scripts[`e2e:${group}`];
+    assert.ok(script, `e2e:${group} has a package script`);
+    const specs = script.split(/\s+/).filter((word) => /^e2e\/.*\.spec\.ts$/.test(word));
+    assert.equal(specs.length, 1, `e2e:${group} runs one spec`);
+    const flags = [...readFileSync(join(root, specs[0]), 'utf8').matchAll(/test\.skip\(process\.env\.(MAWS_\w+) !== '1'/g)].map((match) => match[1]);
+    assert.equal(flags.length, 1, `${specs[0]} skips on one flag`);
+    assert.ok(exported.includes(flags[0]), `${specs[0]} skips without ${flags[0]}, which the e2e job does not set under live`);
+  }
 });
