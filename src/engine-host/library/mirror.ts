@@ -20,7 +20,9 @@
 // - Something at the manifest's path that is not a MAWS manifest (another file, a link, dangling or not) is the
 //   owner's: the directory is refused (logged, as a failing one) and that entry never rewritten or removed.
 // - Two Spaces linked to one directory share its manifest (the desired set is per directory). A directory is known by
-//   its real path, so two spellings of it (through a link, or by case on a case-insensitive volume) are one.
+//   its real path, so two spellings of it (through a link, or by case on a case-insensitive volume) are one. A Space
+//   whose path comes to reach another directory (a link on it restored or retargeted) is reconciled after the first
+//   step that sees it, whichever Space's artifact that step was for.
 // - A directory that fails (gone, unwritable, a link) is logged per Space and tried again at the next change, which
 //   reconciles the whole directory once it loads again; what the mirror owns there stays owned meanwhile. The linked
 //   directory itself is never created, and no write or removal, the manifest's included, passes through a link inside it
@@ -91,6 +93,7 @@ export class LibraryMirror {
   private readonly failing = new Set<string>(); // linked directories whose last load failed
   private readonly unlinked = new Set<string>(); // directories no Space links whose mirror is not yet fully removed
   private readonly saved = new Map<string, string>(); // per directory, the manifest as last written
+  private spaceKeys = new Map<string, string>(); // P4 (tracker L254): per linked Space, its directory's key at the last step
   private chain: Promise<void> = Promise.resolve();
   private reconcileQueued = false;
   private offs: (() => void)[] = [];
@@ -186,7 +189,7 @@ export class LibraryMirror {
   private async reconcileAll(): Promise<void> {
     const { store } = this.documents;
     const { spaces, artifacts } = await store.readCommitted(() => ({ spaces: store.listSpaces(), artifacts: store.list() }));
-    const linked = linkedDirs(spaces, (dir) => this.keyOf(dir));
+    const { linked } = this.linkedNow(spaces); // a key moved since is reconciled by this pass itself
     this.track(linked);
     for (const [dir, target] of linked) {
       const members = artifacts.filter((artifact) => artifact.spaceId !== undefined && target.spaceIds.has(artifact.spaceId));
@@ -220,6 +223,19 @@ export class LibraryMirror {
         this.saveLogged(dir, manifest);
       }
     }
+  }
+
+  // The linked directories by their keys now, each Space's kept for the next step. P4 (tracker L254): `moved` when a
+  // Space linked at the last step has another key now (its link restored, retargeted or removed), since nothing else
+  // loads the directory it reaches until a step for that Space's own artifacts, so its other artifacts would wait; a
+  // Space not linked at the last step is not compared, as linking it was a Space change, which reconciles.
+  private linkedNow(spaces: Space[]): { linked: ReturnType<typeof linkedDirs>; moved: boolean } {
+    const linked = linkedDirs(spaces, (dir) => this.keyOf(dir));
+    const keys = new Map<string, string>();
+    for (const [dir, { spaceIds }] of linked) for (const spaceId of spaceIds) keys.set(spaceId, dir);
+    const moved = [...keys].some(([spaceId, key]) => (this.spaceKeys.get(spaceId) ?? key) !== key);
+    this.spaceKeys = keys;
+    return { linked, moved };
   }
 
   // The head of every step: each directory this run knows, by its key now (one it knew by another, as one away since the
@@ -301,7 +317,9 @@ export class LibraryMirror {
     const { store } = this.documents;
     const { artifact, spaces } = await store.readCommitted(() => ({ artifact: store.get(artifactId), spaces: store.listSpaces() }));
     const space = artifact?.spaceId === undefined ? undefined : spaces.find((candidate) => candidate.id === artifact.spaceId);
-    this.track(linkedDirs(spaces, (dir) => this.keyOf(dir)));
+    const { linked, moved } = this.linkedNow(spaces);
+    this.track(linked);
+    if (moved) void this.reconcile(); // after this step
     const dir = artifact && space?.linkedDir !== undefined ? this.keyOf(space.linkedDir) : null;
     for (const [known, manifest] of this.manifests) {
       if (known === dir || this.unlinked.has(known) || !manifest.artifacts[artifactId]) continue;

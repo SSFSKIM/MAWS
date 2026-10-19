@@ -1023,6 +1023,43 @@ describe('the mirror over a directory that goes away, is relinked or is spelled 
     }
   });
 
+  // P4 (tracker L254): a Space whose path reaches another directory than at its previous step (its link restored, or
+  // retargeted at a directory that is there) is reconciled at the next step anywhere, not only at one that loads it
+  it.each([
+    ['restored after a step away', true],
+    ['retargeted at another directory', false],
+  ])('mirrors every artifact of a Space whose link reaches a directory again (%s) at the next step of another Space (tracker L254)', async (_, restored) => {
+    const root = mkdtempSync(join(tmpdir(), 'maws-mirror-links-'));
+    try {
+      const [a, c, link] = [join(root, 'a'), join(root, 'c'), join(root, 'link')];
+      mkdirSync(a);
+      mkdirSync(c);
+      symlinkSync(a, link);
+      const mirrored = (dir: string) => (existsSync(join(dir, 'artifacts')) ? readdirSync(join(dir, 'artifacts')).sort() : []);
+      await startMirror();
+      const linked = await linkedSpace('Linked', link);
+      const other = await linkedSpace('Other');
+      const [one, two] = [await page('One', linked.id), await page('Two', linked.id)];
+      const theirs = await page('Theirs', other.id);
+      await mirror!.flush();
+      const all = [MIRROR_MANIFEST, file(one), file(two)].sort();
+      expect(mirrored(a)).toEqual(all);
+
+      rmSync(link);
+      if (restored) {
+        await store().writeContent(theirs.id, html('Theirs 2'), agent); // only the other Space's steps meanwhile
+        await mirror!.flush();
+        expect(mirrored(a)).toEqual([]); // the link no longer reaches it: cleaned as a directory no Space links
+      }
+      symlinkSync(restored ? a : c, link);
+      await store().writeContent(theirs.id, html('Theirs 3'), agent);
+      await mirror!.flush();
+      expect(mirrored(restored ? a : c)).toEqual(all);
+      if (!restored) expect(mirrored(a)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 // P3-F (F10, tracker L142; the owner: "something in real use might have something bigger … production-level product for
