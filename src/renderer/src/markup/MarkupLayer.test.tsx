@@ -147,4 +147,18 @@ describe('MarkupLayer', () => {
     await vi.waitFor(() => expect(useMarkup.getState().session).toBeNull());
     expect(end).toHaveBeenCalledTimes(1);
   });
+
+  // P3-F (F-shell, scalpel-4#4): no composer mounted (the card closed to its pill), the picture is queued and the
+  // keyboard goes back where it was, not to the body with the overlay gone
+  it('Add to chat that queues the picture gives the keyboard back where it was', async () => {
+    const before = document.body.appendChild(document.createElement('button'));
+    before.textContent = 'Mark up';
+    before.focus();
+    await open();
+    expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Mark-up' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add to chat' }));
+    await vi.waitFor(() => expect(useMarkup.getState().session).toBeNull());
+    expect(useComposerStore.getState().attachmentQueue.get(A)).toHaveLength(1);
+    expect(document.activeElement).toBe(before);
+  });
 });

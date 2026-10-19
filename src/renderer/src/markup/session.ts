@@ -107,7 +107,8 @@ function watch(scope: EditorHostScope, surface: MarkupSurface): void {
   };
 }
 
-// The session ends: the surface unfrozen once. `restoreFocus` (a discard) gives the keyboard back where it was.
+// The session ends: the surface unfrozen once. `restoreFocus` (a discard, a queued picture) gives the keyboard back
+// where it was.
 function finish(restoreFocus: boolean): MarkupSession | null {
   const session = useMarkup.getState().session;
   if (session === null) return null;
@@ -143,20 +144,23 @@ export async function addMarkupToChat(marks: readonly Mark[], render: typeof com
   }
   if (useMarkup.getState().session !== session) return; // discarded meanwhile
   const target = shownSession();
-  const delivered = target === null ? 'delivered' : await deliver(target, picture, session.label, discarded.signal);
+  const delivered = target === null ? null : await deliver(target, picture, session.label, discarded.signal);
   if (delivered === 'discarded') return; // Escape, Cancel or another ending while the composer was asked: nothing landed
   if (delivered === 'refused') {
     toast({ level: 'warning', text: MARKUP_COPY.composerBusy, actions: [], dismissible: true });
     return;
   }
-  if (useMarkup.getState().session === session) finish(false);
+  // The composer that took the picture has the keyboard; queued for the session's next composer (none mounted, the card
+  // a pill), the keyboard goes back where it was, as on a discard (P3-F, F-shell).
+  if (useMarkup.getState().session === session) finish(delivered !== 'taken');
 }
 
-// The picture to the session's mounted composer, which adds it to its draft and takes the label at the caret, or (none
-// mounted, or it went while it was asked) to the composer store's queue, which the session's next composer drains.
-// `refused`: a composer still mounted would not take it (a send in flight). `discarded`: the session ended while the
-// composer was asked; `signal` told the composer to stop, so nothing was attached, and nothing is inserted or queued.
-async function deliver(appSessionId: AppSessionId, picture: Blob, label: string, signal: AbortSignal): Promise<'delivered' | 'refused' | 'discarded'> {
+// The picture to the session's mounted composer, which adds it to its draft, takes the label at the caret and the
+// keyboard (`taken`), or (none mounted, or it went while it was asked) to the composer store's queue, which the session's
+// next composer drains (`queued`). `refused`: a composer still mounted would not take it (a send in flight).
+// `discarded`: the session ended while the composer was asked; `signal` told the composer to stop, so nothing was
+// attached, and nothing is inserted or queued.
+async function deliver(appSessionId: AppSessionId, picture: Blob, label: string, signal: AbortSignal): Promise<'taken' | 'queued' | 'refused' | 'discarded'> {
   const name = picture.type === 'image/jpeg' ? 'mark-up.jpg' : 'mark-up.png';
   const file = new File([picture], name, { type: picture.type });
   const text = MARKUP_COPY.draft(label);
@@ -167,12 +171,12 @@ async function deliver(appSessionId: AppSessionId, picture: Blob, label: string,
     if (taken) {
       composer.insertText(text, { separated: true }); // a space first after a word, never joined to it
       composer.focusEditor();
-      return 'delivered';
+      return 'taken';
     }
     if (useComposerStore.getState().focusTargets.get(appSessionId) === composer) return 'refused';
   }
   queueComposerAttachment(appSessionId, { files: [file], text });
-  return 'delivered';
+  return 'queued';
 }
 
 // Tests.
