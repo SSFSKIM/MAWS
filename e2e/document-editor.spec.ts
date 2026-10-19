@@ -400,6 +400,25 @@ test.describe('the document editor', () => {
     expect(await marker('ol')).toBe('decimal');
     expect(await marker('ul[data-type="taskList"]')).toBe('none');
   });
+
+  // P3-F (sitting candidates 14 and 16): an atom inserted while the keyboard is outside the page (here on the toolbar's
+  // Block style) keeps the keyboard in its field, so the next keys write its content, not the paragraph's text
+  test('an atom inserted from the toolbar takes the next keys in its field, wherever the keyboard was', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+    await page.keyboard.type('Euler: ');
+    await bar.getByRole('combobox', { name: 'Block style' }).focus();
+    await bar.getByRole('button', { name: 'Insert', exact: true }).click();
+    await bar.getByRole('menuitem', { name: 'Math', exact: true }).click();
+    await expect(page.locator(':focus')).toHaveAttribute('aria-label', 'LaTeX');
+    await page.keyboard.type('E=mc^2');
+    await page.keyboard.press('Enter');
+    await expect(content(page, 'a').locator('[data-node="math"] .katex').last()).toBeVisible();
+    const shown = await json(page, 'a');
+    expect(shown).toContain('"latex":"E=mc^2"');
+    expect(shown).not.toContain('Euler: E=mc^2');
+  });
 });
 
 // One step of S4's 2-set model, as S7b's ime scenario sends it (spikes/p3-store/s7/electron/main.ts, `imeStep`).

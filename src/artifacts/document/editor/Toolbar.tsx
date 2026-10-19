@@ -5,7 +5,7 @@
 // P3-F1: one row in any width, the tools scrolling in a strip and the comment, history and find controls after it, the
 // menus placed by the toolbar so the strip does not clip them (toolbar-strip.ts).
 // An inserted atom (math, a diagram, a chip, a pending section) is selected with its field focused, so the person types
-// its content next.
+// its content next, wherever the keyboard was as the Insert menu was used (P3-F).
 import type { Editor, JSONContent } from '@tiptap/core';
 import { NodeSelection, Selection } from '@tiptap/pm/state';
 import { useEditorState } from '@tiptap/react';
@@ -49,6 +49,14 @@ function positionOf(editor: Editor, id: string): number {
   return at;
 }
 
+// The page takes the keyboard now, before an insert (P3-F, sitting candidates 14 and 16). Tiptap's `focus()` run while
+// the keyboard is outside the page (in the Insert menu, another atom's field, a toolbar control) defers the page's focus
+// to the next animation frame, which then took the keyboard back from the field an inserted atom had just given it: the
+// next keys went to the page with the atom selected (the LaTeX typed as text, a Return splitting the line).
+function focusPage(editor: Editor): void {
+  if (!editor.view.hasFocus()) editor.view.focus();
+}
+
 // Selects the atom at `pos` and puts the caret in its field.
 function editAtom(editor: Editor, pos: number): void {
   if (pos < 0) return;
@@ -59,7 +67,8 @@ function editAtom(editor: Editor, pos: number): void {
 
 function insertInline(editor: Editor, node: JSONContent, edit: boolean): void {
   if (!writable(editor)) return;
-  editor.chain().focus().insertContent(node).run();
+  focusPage(editor);
+  editor.chain().insertContent(node).scrollIntoView().run();
   const pos = editor.state.selection.from - 1;
   if (edit && editor.state.doc.nodeAt(pos)?.type.name === node.type) editAtom(editor, pos);
 }
@@ -67,14 +76,15 @@ function insertInline(editor: Editor, node: JSONContent, edit: boolean): void {
 function insertBlock(editor: Editor, node: JSONContent, then: 'edit' | 'inside'): void {
   if (!writable(editor)) return;
   const id = nanoid8();
+  focusPage(editor);
   editor
     .chain()
-    .focus()
     .insertContent({ ...node, attrs: { ...node.attrs, id } })
+    .scrollIntoView()
     .run();
   const pos = positionOf(editor, id);
   if (then === 'edit') editAtom(editor, pos);
-  else if (pos >= 0) editor.view.dispatch(editor.state.tr.setSelection(Selection.near(editor.state.doc.resolve(pos + 1)))); // the first textblock inside
+  else if (pos >= 0) editor.view.dispatch(editor.state.tr.setSelection(Selection.near(editor.state.doc.resolve(pos + 1))).scrollIntoView()); // the first textblock inside
 }
 
 /** The toolbar's comment controls (M4): Comment the selection (absent when commenting is not offered), and the rail. */
