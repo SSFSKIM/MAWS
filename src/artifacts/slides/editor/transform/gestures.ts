@@ -17,7 +17,7 @@
 //   Alt about the centre; the dragged edges snapped when nothing turns, scales or skews the element.
 // - rotate: the handle's angle, Shift by 15°, composed into the element's transform.
 // - endpoint: a pinned connector's end.
-// - marquee: the slide's children the rectangle touches.
+// - marquee: the slide's children the rectangle touches (with Shift, added at the selection's level).
 import {
   angleFromPointer,
   apply,
@@ -59,7 +59,7 @@ import { DECK_COPY as C } from '../copy';
 import type { SlideCanvas } from '../../canvas';
 import type { DeckSession } from '../session';
 import { boxInParent, containerMatrix, flowAxis, measure, measureAll, type Measured } from './measure';
-import { marquee as marqueeOf, slideTree, type SlideTree } from './selection';
+import { addHits, marquee as marqueeOf, slideTree, type SlideTree } from './selection';
 
 export interface GestureContext {
   session: DeckSession;
@@ -426,8 +426,7 @@ export function startMarquee(ctx: GestureContext, p0: Pt, base: readonly string[
   return {
     frame(p) {
       const rect = { x: Math.min(p0.x, p.x), y: Math.min(p0.y, p.y), w: Math.abs(p.x - p0.x), h: Math.abs(p.y - p0.y) };
-      const hit = marqueeOf(tree, bounds, rect);
-      ctx.session.select([...base, ...hit.filter((id) => !base.includes(id))]);
+      ctx.session.select(addHits(tree, base, marqueeOf(tree, bounds, rect)));
       return { guides: [], marquee: rect };
     },
     end() {},

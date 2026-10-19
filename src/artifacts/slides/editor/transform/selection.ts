@@ -113,6 +113,17 @@ export function marquee(tree: SlideTree, bounds: ReadonlyMap<string, Box>, rect:
   });
 }
 
+/**
+ * A Shift-marquee: its hits added to the selection at the selection's level, as a Shift-click adds (`pick`); hits at
+ * another level replace it, so a group's child and the group are never selected together (P3-F: one move then moved
+ * the child twice). Touching nothing keeps the selection.
+ */
+export function addHits(tree: SlideTree, selection: readonly string[], hits: readonly string[]): string[] {
+  if (!hits.length) return [...selection];
+  if (selection.length && tree.parentOf(selection[0]!) !== tree.parentOf(hits[0]!)) return [...hits];
+  return [...selection, ...hits.filter((id) => !selection.includes(id))];
+}
+
 /** Whether every element of the selection is pinned (the transform layer moves pinned elements by left/top). */
 export function allPinned(tree: SlideTree, selection: readonly string[]): boolean {
   return (

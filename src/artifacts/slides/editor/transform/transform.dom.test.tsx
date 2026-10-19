@@ -10,7 +10,7 @@ import { childLists, importSlide, readFlat, ROOT, slideFile, writeDeckKeys } fro
 import { loadSlide } from '../../parse';
 import { DeckEditor } from '../DeckEditor';
 import { DeckSession } from '../session';
-import { startFlowMove, startMove, startResize, startRotate, type GestureContext } from './gestures';
+import { startFlowMove, startMarquee, startMove, startResize, startRotate, type GestureContext } from './gestures';
 import { CLIPBOARD_TYPE, copySelection, pasteClipboard } from './clipboard';
 import { apply, applyLinear } from '../../geometry';
 import { selectionCommands } from './commands';
@@ -414,5 +414,32 @@ describe('fix wave 3: a transform that is a design-system token', () => {
     off();
     expect(n).toBe(0);
     expect(styleOf(doc, 't').transform).toBe('var(--ds-pose, scale(1.5))');
+  });
+});
+
+// ---------------------------------------------------------------- P3-F (the slide-editor panel)
+
+describe('P3-F: a Shift-marquee adds at the selection’s level (scalpel-1#1)', () => {
+  // the marquee's hits are the slide's own children: added to a group's child, they selected the child and its group
+  // together, and one move then moved the child twice (its group's delta and its own)
+  it('from inside a group the group replaces the selection, so one move moves the child once; at the slide’s level the hits are added', () => {
+    const doc = deck(`<section id="s" style="background:#ffffff">
+<div id="a" style="position:absolute; left:1200px; top:600px; width:100px; height:100px; background:#ff0000"></div>
+<div id="g" data-group="" style="position:absolute; left:100px; top:100px; width:200px; height:100px">
+<div id="k" style="position:absolute; left:0px; top:0px; width:100px; height:100px; background:#00ff00"></div></div></section>`);
+    const ctx = gestureContext(doc);
+    const across = (base: string[]) => {
+      const m = startMarquee(ctx, { x: 50, y: 50 }, base);
+      m.frame({ x: 250, y: 150 }, NO);
+      m.end();
+      return ctx.session.snapshot().selection;
+    };
+    expect(across(['a'])).toEqual(['a', 'g']);
+    expect(across(['k'])).toEqual(['g']);
+    const g = startMove(ctx, ctx.session.snapshot().selection, { x: 150, y: 150 });
+    g.frame({ x: 190, y: 150 }, { ...NO, meta: true });
+    g.end();
+    expect(styleOf(doc, 'g')).toMatchObject({ left: '140px', top: '100px' });
+    expect(styleOf(doc, 'k')).toMatchObject({ left: '0px', top: '0px' }); // moved once, with its group
   });
 });
