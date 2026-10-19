@@ -50,6 +50,7 @@ export function StreamView({ items, outbox, landed = null, workLabel = 'on a com
   const scroller = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLOListElement>(null);
   useAnchoringFallback(scroller, list);
+  const now = useDayClock();
   // A landing decides where the reader is: scrolled to its card.
   useEffect(() => {
     // Braced: Chrome's scrollIntoView returns a promise, which an effect must not return as its cleanup.
@@ -62,7 +63,7 @@ export function StreamView({ items, outbox, landed = null, workLabel = 'on a com
         {items.length === 0 && outbox.length === 0 && <li className="thread-column text-ui-sm text-fg-muted">Nothing here yet.</li>}
         {blocks.map((block) => (
           <li key={block.key} className="thread-column transcript-row" data-block={block.kind}>
-            <Block block={block} workLabel={workLabel} landed={landed} landedRow={landedRow} />
+            <Block block={block} now={now} workLabel={workLabel} landed={landed} landedRow={landedRow} />
           </li>
         ))}
         {outbox.map((sent) => (
@@ -94,6 +95,11 @@ export function StreamView({ items, outbox, landed = null, workLabel = 'on a com
  * the view is found among them at the scroll position now (so a scroll not yet reported counts), and the scroll position
  * moves by as much as that row's distance changed, before the frame is painted. At the tail, the origin follows. A list
  * that shrank has the browser clamp a reader at its oldest edge before this runs; they are left there, at the edge.
+ *
+ * A row is an item, not a block: a sender's run is one block holding many items, and a message arriving in the run the
+ * reader is in, or one of its items growing, changes that block's height from inside it, so measured whole it would
+ * hold the run's bottom and let the reader's row move. A block with no items in it (a day's separator, a folded quiet
+ * run) is its own row.
  */
 function useAnchoringFallback(scroller: RefObject<HTMLDivElement | null>, list: RefObject<HTMLOListElement | null>) {
   useLayoutEffect(() => {
@@ -111,7 +117,11 @@ function useAnchoringFallback(scroller: RefObject<HTMLDivElement | null>, list: 
       }
       // Read after any correction: a base read before the scroll would leave every distance off by it.
       const bottom = ol.getBoundingClientRect().bottom;
-      laidOut = [...ol.children].map((row) => [row, bottom - row.getBoundingClientRect().bottom]);
+      const rows = [...ol.children].flatMap((block) => {
+        const items = block.querySelectorAll('[data-item]');
+        return items.length > 0 ? [...items] : [block];
+      });
+      laidOut = rows.map((row) => [row, bottom - row.getBoundingClientRect().bottom]);
     });
     observer.observe(ol);
     return () => observer.disconnect();
@@ -127,10 +137,10 @@ function Item({ kind, offset, state, landed, landedRow, children }: { kind: stri
   );
 }
 
-function Block({ block, workLabel, landed, landedRow }: { block: ChatBlock; workLabel: string; landed: string | null; landedRow: RefObject<HTMLDivElement | null> }) {
+function Block({ block, now, workLabel, landed, landedRow }: { block: ChatBlock; now: number; workLabel: string; landed: string | null; landedRow: RefObject<HTMLDivElement | null> }) {
   switch (block.kind) {
     case 'day':
-      return <DayRow ts={block.ts} />;
+      return <DayRow ts={block.ts} now={now} />;
     case 'run':
       return <Run block={block} landed={landed} landedRow={landedRow} />;
     case 'human':
@@ -164,9 +174,41 @@ export function dayLabel(ts: string, now: number): string {
   return formats.shortDate(Date.parse(ts), now);
 }
 
-/** A day's separator, as the session view's time rows. Its "now" is the row's mount, as MAWS's tickers start theirs. */
-function DayRow({ ts }: { ts: string }) {
-  const [now] = useState(() => Date.now());
+/**
+ * The time the day separators are labelled against, one for the stream, changing only when the local day does: it is
+ * read again at the next local midnight (a second past, so the new day has begun), and when the page is shown again,
+ * since a phone's page sleeps through its timers and may wake on another day.
+ */
+function useDayClock(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const untilTomorrow = () => {
+      const at = new Date();
+      clearTimeout(timer);
+      timer = setTimeout(read, new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1).getTime() - at.getTime() + 1000);
+    };
+    const read = () => {
+      const at = Date.now();
+      // The same day keeps the same value, so the stream draws again only when a label can change.
+      setNow((was) => (dayOf(new Date(was).toISOString()) === dayOf(new Date(at).toISOString()) ? was : at));
+      untilTomorrow();
+    };
+    const shown = () => {
+      if (document.visibilityState === 'visible') read();
+    };
+    untilTomorrow();
+    document.addEventListener('visibilitychange', shown);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', shown);
+    };
+  }, []);
+  return now;
+}
+
+/** A day's separator, as the session view's time rows, labelled against the stream's day clock. */
+function DayRow({ ts, now }: { ts: string; now: number }) {
   const label = dayLabel(ts, now);
   return (
     <div role="separator" aria-label={label} className="transcript-time" data-testid="day">
@@ -177,10 +219,11 @@ function DayRow({ ts }: { ts: string }) {
 
 /**
  * Who a session's run is from: the alias it went out under, or — when its session has a title — the title, with that
- * alias muted beside it where it differs (`sessionName`); a run of requests alone, by the session as the sidebar names it.
+ * alias muted beside it where it differs (`sessionName`); a run of requests alone, by the session as the sidebar names it,
+ * or by its id's first eight characters while the sidebar does not know it yet (its `joined` not in the log yet).
  */
-function author(from: string | null, session: { title: string | null; alias: string } | undefined): { who: string; alias?: string } {
-  const alias = from ?? session?.alias ?? '';
+function author(from: string | null, session: { title: string | null; alias: string } | undefined, id: string | null): { who: string; alias?: string } {
+  const alias = from ?? session?.alias ?? id?.slice(0, 8) ?? '';
   return session?.title && session.title !== alias ? { who: session.title, alias } : { who: session?.title ?? alias };
 }
 
@@ -204,11 +247,14 @@ function RunHead({ who, alias, machine, ts }: { who: string; alias?: string; mac
 }
 
 function Run({ block, landed, landedRow }: { block: Extract<ChatBlock, { kind: 'run' }>; landed: string | null; landedRow: RefObject<HTMLDivElement | null> }) {
-  const { sessions } = useDesk();
+  const { connection, sessions } = useDesk();
   const session = block.session ? sessions.get(block.session) : undefined;
+  // The machine of a session the sidebar does not know yet is the one its request was raised on.
+  const asked = block.items.find((item) => item.kind === 'request')?.ref;
+  const raisedOn = useStore(connection.conversation.store, (s) => (asked === undefined ? undefined : s.requests[asked]?.machine));
   return (
     <div className="desk-chat-run" data-testid="run">
-      <RunHead {...author(block.from, session)} machine={session?.machine} ts={block.ts} />
+      <RunHead {...author(block.from, session, block.session)} machine={session?.machine ?? raisedOn} ts={block.ts} />
       {block.items.map((item) => (
         <Item key={item.key} kind={item.kind} offset={item.kind === 'request' ? undefined : item.offset} landed={item.key === landed} landedRow={landedRow}>
           <RunItemView item={item} />
@@ -283,13 +329,15 @@ function Human({ item }: { item: HumanItem }) {
   );
 }
 
-/** Where a send stands by its recipients' outcomes: held or failed only when every recipient's says so. */
+/**
+ * Where a send stands by its recipients' outcomes: tinted only when it reached none of them, every machine having held
+ * it back or failed, and failed when any failed, since a failure is what the owner may have to act on.
+ */
 function sendState(outcomes: Array<string | null>): string {
   if (outcomes.length === 0) return 'record';
   if (outcomes.some((o) => o === null)) return 'pending';
   if (outcomes.every((o) => o === 'delivered')) return 'delivered';
-  if (outcomes.every((o) => o === 'recorded' || o === 'refused-read-only')) return 'held';
-  if (outcomes.every((o) => o === 'failed')) return 'failed';
+  if (outcomes.every((o) => o === 'recorded' || o === 'refused-read-only' || o === 'failed')) return outcomes.includes('failed') ? 'failed' : 'held';
   return 'mixed';
 }
 
@@ -352,11 +400,22 @@ function Deliveries({ to, wake, outcomes }: { to: '*' | Recipient[]; wake: boole
 }
 
 /**
+ * The text doperpowers' ask mod returns for an ask answered with nothing (`answerText` in its `hooks/mods/ask.tsx`), which
+ * sminos records as the `answered` event's text.
+ */
+const NONE_ANSWERED = 'The user did not answer the questions.';
+
+/**
  * A session's question: its request card while a request for it is pending here (answerable in place, as at the
  * session view's tail); else MAWS's question receipt, one line per question reading "header (or the question) →
  * answer", the answers read from the log's `answered` with MAWS's own reader of the engine's summary, the headers from
  * the request where this browser saw it; a question not yet answered says what it waits for, or how its request was
  * settled without an answer.
+ *
+ * A line never holds text the reader did not parse, and never says "Not answered" of a question that was. An answer in
+ * another shape (MAWS's own steer, one line per question) reads "answered" on each line, the text whole in the foot; a
+ * summary that names some of the questions answered those alone, as the engine writes only the answers given. A request
+ * settled as answered whose `answered` event has not arrived yet reads "answered", its foot saying where.
  */
 function QuestionItem({ item }: { item: Extract<StreamItem, { kind: 'question' }> }) {
   const { connection, member } = useDesk();
@@ -366,23 +425,33 @@ function QuestionItem({ item }: { item: Extract<StreamItem, { kind: 'question' }
   const questions = raised.length > 0 ? raised : item.questions.map((question) => ({ question, header: '' }));
   const text = item.answered?.text ?? null;
   const read = text === null ? null : askModAnswers(questions, { content: text, isError: false });
-  // A single question's answer the summary does not frame (a plain text sminos recorded) is the answer as written.
-  const answers = read !== null && Object.keys(read).length > 0 ? read : text !== null && questions.length === 1 ? { [questions[0].question]: text } : null;
+  const parsed = read !== null && Object.keys(read).length > 0 ? read : null;
   const settled = record?.settled ?? null;
+  const waiting = text === null && settled === null;
+  // What a line reads when no answer to its question was read.
+  const unread =
+    text !== null
+      ? parsed !== null || text.trim() === NONE_ANSWERED
+        ? 'Not answered'
+        : 'answered'
+      : settled !== null
+        ? settled.outcome === 'answered'
+          ? 'answered'
+          : 'Not answered'
+        : 'waiting';
   const foot =
     text !== null
-      ? answers === null
+      ? unread === 'answered'
         ? `Answered: ${text}`
         : null
       : settled !== null
         ? settledText(settled.winner, settled.outcome, settled.by, member)
         : 'Waiting for an answer';
-  const waiting = text === null && settled === null;
   return (
     <section className="transcript-question desk-chat-question" aria-label="Question" data-testid="question" data-waiting={waiting ? '' : undefined}>
       <ul className="transcript-question-lines">
         {questions.map(({ question, header }) => {
-          const answer = answers?.[question];
+          const answer = parsed?.[question];
           return (
             <li key={question} className="transcript-question-line" title={question}>
               <span className="transcript-question-label" data-long={header ? undefined : ''}>
@@ -392,7 +461,7 @@ function QuestionItem({ item }: { item: Extract<StreamItem, { kind: 'question' }
                 →
               </span>
               <span className="transcript-question-answer" data-answer={answer === undefined ? 'none' : ''}>
-                {answer ?? (waiting ? 'waiting' : 'Not answered')}
+                {answer ?? unread}
               </span>
             </li>
           );

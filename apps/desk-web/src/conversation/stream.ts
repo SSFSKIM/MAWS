@@ -31,8 +31,10 @@ export type StreamItem =
   | { kind: 'system'; key: string; offset: number; event: LogEvent; session: string | null; subject: string; rest: string; text: string }
   | { kind: 'agents'; key: string; says: Entry[] }
   | { kind: 'work'; key: string; offset: number; session: string }
-  /** `request`: the request's id; `ref`: its key in the conversation's `requests`; `session`: the session that raised it. */
-  | { kind: 'request'; key: string; request: string; ref: string; session: string };
+  /** `request`: the request's id; `ref`: its key in the conversation's `requests`; `session`: the session that raised it.
+   * `ts`: a bound below its time, the time of the last log entry the browser held when it first saw it (null before any):
+   * a request carries no time of its own, and the daemon's frequent `state` events keep that entry close behind it. */
+  | { kind: 'request'; key: string; request: string; ref: string; session: string; ts: string | null };
 
 /**
  * A request as the stream places it: `key` is its key in the conversation's `requests` (machine, session, id); `at`
@@ -186,12 +188,19 @@ export function buildStream(
   const workBefore = (key: string, offset: number, session: string | null) => {
     if (channel.kind === 'session' && session === channel.session) push({ kind: 'work', key, offset, session });
   };
+  // The entry each placed request was first seen behind, read off every entry rather than the channel's (a direct
+  // channel draws few, the daemon's `state` events most often): the requests are placed in offset order, so one pass.
+  let behind = 0;
+  const tsBehind = (at: number): string | null => {
+    while (behind < entries.length && entries[behind].offset <= at) behind++;
+    return behind > 0 ? entries[behind - 1].event.ts : null;
+  };
   const placeUpTo = (offset: number) => {
     while (next < placed.length && placed[next].at < offset) {
       const r = placed[next];
       // A question with no `question` event (a native one) is an exchange item: the working record before it folds.
       if (r.question) workBefore(`work:request:${r.key}`, r.at, r.session);
-      push({ kind: 'request', key: `request:${r.key}`, request: r.request, ref: r.key, session: r.session });
+      push({ kind: 'request', key: `request:${r.key}`, request: r.request, ref: r.key, session: r.session, ts: tsBehind(r.at) });
       next++;
     }
   };

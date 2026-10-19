@@ -13,7 +13,7 @@ const at = (minutes: number) => new Date(Date.UTC(2026, 9, 19, 8, minutes)).toIS
 const event = (ts: string, kind: string, fields: Record<string, unknown> = {}): LogEvent => ({ ts, writer: `mini/${S1}`, seq: ++offset, kind, mac: { nonce: `n${offset}`, value: 'v' }, ...fields }) as LogEvent;
 const message = (session: string, from: string, minutes: number): StreamItem => ({ kind: 'message', key: `m${++offset}`, offset, event: event(at(minutes), 'message'), session, from, text: `said ${offset}` });
 const question = (session: string, from: string, minutes: number): StreamItem => ({ kind: 'question', key: `q${++offset}`, offset, event: event(at(minutes), 'question'), session, from, text: 'Which?', questions: ['Which?'], choices: [], request: 'toolu_1', ref: 'r', answered: null });
-const request = (session: string): StreamItem => ({ kind: 'request', key: `req${++offset}`, request: 'toolu_p', ref: 'rp', session });
+const request = (session: string, ts: string | null = null): StreamItem => ({ kind: 'request', key: `req${++offset}`, request: 'toolu_p', ref: 'rp', session, ts });
 const system = (session: string, subject: string, rest: string, minutes: number): StreamItem => ({ kind: 'system', key: `s${++offset}`, offset, event: event(at(minutes), 'joined'), session, subject, rest, text: `${subject} ${rest}` });
 const human = (minutes: number): StreamItem => ({ kind: 'human', key: `h${++offset}`, offset, event: event(at(minutes), 'human'), text: 'hi', to: '*', wake: false });
 const shape = (items: StreamItem[]) => chatBlocks(items).map((b) => (b.kind === 'run' ? `run:${b.from}:${b.items.length}` : b.kind === 'quiet' ? `quiet:${b.lines.map((l) => `${l.subject}[${l.says.length}]`).join(',')}` : b.kind));
@@ -34,6 +34,11 @@ describe('runs', () => {
     // opens the day and a run of its own.
     expect(blocks[0]).toMatchObject({ kind: 'run', from: null, ts: null });
     expect(blocks[2]).toMatchObject({ kind: 'run', from: 'maws-45' });
+  });
+
+  it("dates a request by the entry it was first seen behind, so one seen past the window does not join the sender's old run", () => {
+    expect(shape([message(S1, 'maws-45', 0), request(S1, at(3))])).toEqual(['day', 'run:maws-45:2']);
+    expect(shape([message(S1, 'maws-45', 0), request(S1, at(20))])).toEqual(['day', 'run:maws-45:1', 'run:null:1']);
   });
 });
 
@@ -62,6 +67,22 @@ describe('days', () => {
     // Local days: the two stand apart when midnight falls between them in this zone, else together.
     if (dayOf(late) === dayOf(early)) expect(blocks.map((b) => b.kind)).toEqual(['day', 'run']);
     else expect(blocks.map((b) => b.kind)).toEqual(['day', 'run', 'day', 'run']);
+  });
+
+  it('opens a new day for a request first seen after midnight, a few minutes after the run before it', () => {
+    const late = new Date(2026, 9, 18, 23, 58).toISOString();
+    const items: StreamItem[] = [{ kind: 'message', key: 'a', offset: 1, event: event(late, 'message'), session: S1, from: 'maws-45', text: 'late' }, request(S1, new Date(2026, 9, 19, 0, 1).toISOString())];
+    expect(chatBlocks(items).map((b) => b.kind)).toEqual(['day', 'run', 'day', 'run']);
+  });
+
+  it('keys each separator by the item that opened its day, since a writer whose clock is behind can put yesterday after today', () => {
+    const [today, yesterday] = [new Date(2026, 9, 19, 10).toISOString(), new Date(2026, 9, 18, 10).toISOString()];
+    const items: StreamItem[] = [
+      { kind: 'message', key: 'a', offset: 1, event: event(today, 'message'), session: S1, from: 'maws-45', text: 'today' },
+      { kind: 'message', key: 'b', offset: 2, event: event(yesterday, 'message'), session: S2, from: 'maws-fe', text: 'a clock behind' },
+      { kind: 'message', key: 'c', offset: 3, event: event(today, 'message'), session: S1, from: 'maws-45', text: 'today again' },
+    ];
+    expect(chatBlocks(items).flatMap((b) => (b.kind === 'day' ? [b.key] : []))).toEqual(['day:a', 'day:b', 'day:c']);
   });
 
   it('dates a run of agent traffic by its first message, and a working-record fold by nothing', () => {

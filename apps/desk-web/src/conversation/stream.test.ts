@@ -90,6 +90,21 @@ describe('the group chat', () => {
     expect(shape(items)).toEqual(['system:1', 'message:2', 'request:toolu_9', 'agents:3,4,5', 'human:6', 'question:7', 'agents:8', 'system:10', 'request:toolu_late']);
   });
 
+  it("dates a placed request by the last entry it was first seen behind, among every entry and not only the channel's", () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'joined', { ts: '2026-10-15T08:00:00.000Z', session: S1, alias: 'maws-45', machine: 'mini', seat: '' }), // 1
+      ev(`mini/${S1}`, 'message', { ts: '2026-10-15T08:01:00.000Z', from: 'maws-45', to: 'host', text: 'hi', src: 'r1#0' }), // 2
+      ev(`SK.local/${S2}`, 'state', { ts: '2026-10-15T08:07:00.000Z', session: S2, state: 'busy', machine: 'SK.local' }), // 3: not in S1's channel
+    ];
+    const items = buildStream({ kind: 'session', session: S1 }, entries, aliases, [placed('toolu_a', S1, 3), placed('toolu_b', S1, 1), placed('toolu_0', S1, 0)]);
+    expect(items.flatMap((i) => (i.kind === 'request' ? [[i.request, i.ts]] : []))).toEqual([
+      ['toolu_0', null], // seen before any entry
+      ['toolu_b', '2026-10-15T08:00:00.000Z'],
+      ['toolu_a', '2026-10-15T08:07:00.000Z'],
+    ]);
+  });
+
   it("joins a question event only to its own session's request: another session's request under the same id stays its own card", () => {
     const items = buildStream({ kind: 'group' }, log(), aliases, [placed('toolu_1', S1, 2), placed('toolu_1', S2, 2)]);
     expect(shape(items)).toEqual(['system:1', 'message:2', 'request:toolu_1', 'agents:3,4,5', 'human:6', 'question:7', 'agents:8', 'system:10']);

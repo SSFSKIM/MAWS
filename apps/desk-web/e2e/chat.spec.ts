@@ -24,9 +24,16 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(SHOTS, `${name}.png`) });
 }
 
-/** `minutes` after a base: yesterday's base is 24 hours ago, today's an hour ago. */
-const yesterday = (minutes: number) => new Date(Date.now() - 24 * 3600_000 + minutes * 60_000).toISOString();
-const today = (minutes: number) => new Date(Date.now() - 3600_000 + minutes * 60_000).toISOString();
+/**
+ * `minutes` after local noon, yesterday's or today's: the scene's two days stay two whenever the suite runs, which times
+ * counted back from now do not near midnight. A time later today than now is harmless; the chat only prints clocks.
+ */
+const noon = (daysAgo: number, minutes: number) => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysAgo, 12, minutes).toISOString();
+};
+const yesterday = (minutes: number) => noon(1, minutes);
+const today = (minutes: number) => noon(0, minutes);
 
 const ASK_OPEN = 'toolu_ask_fix';
 const ASK_DONE = 'toolu_ask_trace';

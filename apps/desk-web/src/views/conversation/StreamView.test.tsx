@@ -1,13 +1,14 @@
 // @vitest-environment happy-dom
 // A link in a message opens in a new tab, cut off from this page (`noopener`), through the browser's own TranscriptActions
 // around MAWS's Markdown — never MAWS's IPC defaults, which the desk does not load.
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { Delivery, LogEvent } from 'desk-hub/protocol';
+import type { Delivery, LogEvent, Raised, Settled } from 'desk-hub/protocol';
+import { dateFormats } from '../../../../../src/renderer/src/app/date-format';
 import { VECTOR_PROJECT as PROJECT } from '../../../test/vectors';
 import { memoryLogRecord } from '../../log/record';
 import { ProjectConnection } from '../../project/connection';
-import { deliveryKey } from '../../project/conversation';
+import { deliveryKey, requestKey, type RequestRecord } from '../../project/conversation';
 import type { DeskSession } from '../../shell/sessions';
 import { useGrid } from '../../state/grid';
 import type { StreamItem } from '../../conversation/stream';
@@ -17,6 +18,7 @@ import { StreamView } from './StreamView';
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 it('opens a link in a message in a new tab, without opener', async () => {
@@ -110,8 +112,9 @@ const system = (seq: number, subject: string, rest: string, minutes = 0): Extrac
   rest,
   text: `${subject} ${rest}`,
 });
-const draw = (items: StreamItem[], sessions = new Map<string, DeskSession>()) => {
+const draw = (items: StreamItem[], sessions = new Map<string, DeskSession>(), requests: Record<string, RequestRecord> = {}) => {
   const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
+  connection.conversation.store.setState({ requests });
   render(
     <DeskContext.Provider value={{ connection, member: 'm', sessions }}>
       <StreamView items={items} outbox={[]} />
@@ -167,21 +170,81 @@ const question = (seq: number, answered: string | null, questions = ['Which colu
   answered: answered === null ? null : { text: answered, event: { ts: at(1), writer: `mini/${SESSION}`, seq: seq + 1, kind: 'answered', mac: { nonce: 'a', value: 'v' } } as LogEvent },
 });
 
-it("draws an answered question as MAWS's receipt, the answers read from the engine's summary, a plain text as the one question's answer", () => {
+it("draws an answered question as MAWS's receipt, the answers read from the engine's summary and any other text whole in the foot", () => {
   const summary = 'Your questions have been answered: "Which column do we keep?"="user_id". You can now continue with these answers in mind.';
-  const connection = draw([question(1, summary), question(3, 'owner_id', ['Which column do we keep?'], 'r2'), question(5, null, ['Ship it?'], 'r3')]);
+  const partial = 'Your questions have been answered: "Which column?"="user_id". You can now continue with these answers in mind.';
+  const connection = draw([
+    question(1, summary),
+    question(3, 'owner_id', ['Which column do we keep?'], 'r2'),
+    question(5, null, ['Ship it?'], 'r3'),
+    question(7, 'The user did not answer the questions.', ['Ship it?'], 'r4'),
+    question(9, partial, ['Which column?', 'Which table?'], 'r5'),
+  ]);
   const receipts = screen.getAllByTestId('question');
-  expect(receipts).toHaveLength(3);
-  const line = (receipt: Element) => receipt.querySelector('.transcript-question-line')!;
-  expect(line(receipts[0]).textContent).toBe('Which column do we keep?→user_id');
-  expect(receipts[0].querySelector('[data-testid="question-settled"]')).toBeNull(); // nothing to add to the line
-  expect(line(receipts[1]).textContent).toBe('Which column do we keep?→owner_id');
+  expect(receipts).toHaveLength(5);
+  const lines = (receipt: Element) => [...receipt.querySelectorAll('.transcript-question-line')].map((l) => [l.textContent, l.querySelector('[data-answer]')!.getAttribute('data-answer')]);
+  const foot = (receipt: Element) => receipt.querySelector('[data-testid="question-settled"]')?.textContent ?? null;
+  expect(lines(receipts[0])).toEqual([['Which column do we keep?→user_id', '']]);
+  expect(foot(receipts[0])).toBeNull(); // nothing to add to the line
+  // A text the reader does not parse (a plain text, MAWS's own steer) is never put on a line: it is answered, and the
+  // foot has it whole.
+  expect(lines(receipts[1])).toEqual([['Which column do we keep?→answered', 'none']]);
+  expect(foot(receipts[1])).toBe('Answered: owner_id');
   // Open, with no request raised to this browser: waiting, and it says so.
-  expect(line(receipts[2]).textContent).toBe('Ship it?→waiting');
+  expect(lines(receipts[2])).toEqual([['Ship it?→waiting', 'none']]);
   expect(receipts[2].getAttribute('data-waiting')).toBe('');
   expect(receipts[2].querySelector('[data-testid="question-waiting"]')!.textContent).toBe('Waiting for an answer');
+  // The ask mod's words for an ask answered with nothing: the lines say it, and the foot adds nothing.
+  expect(lines(receipts[3])).toEqual([['Ship it?→Not answered', 'none']]);
+  expect(foot(receipts[3])).toBeNull();
+  // A summary names only the questions answered: the one it leaves out was not.
+  expect(lines(receipts[4])).toEqual([
+    ['Which column?→user_id', ''],
+    ['Which table?→Not answered', 'none'],
+  ]);
+  expect(foot(receipts[4])).toBeNull();
   expect(screen.queryByText('Open question')).toBeNull();
   expect(screen.queryByText(/Your questions have been answered/)).toBeNull();
+  connection.stop();
+});
+
+/** A request this browser saw for a question, settled. */
+const settledRequest = (ref: string, outcome: Settled['outcome'], header = 'Ship'): RequestRecord => {
+  const raised = { request: 'toolu_q', session: SESSION, tool: 'mcp__doperpowers__AskUserQuestion', input: { questions: [{ question: 'Ship it?', header, options: [{ label: 'yes' }, { label: 'no' }], multiSelect: false }] }, async: true, mac: { nonce: 'n', value: 'v' } } as Raised;
+  return { key: ref, request: 'toolu_q', machine: 'mini', raised, at: 0, pending: false, terminalOnly: false, settled: { request: 'toolu_q', winner: 'web', outcome, by: 'm', mac: { nonce: 's', value: 'v' } } };
+};
+
+it('draws a question whose request was settled answered, its answer not in the log yet, as answered, and one withdrawn as not answered', () => {
+  const connection = draw([question(1, null, ['Ship it?'], 'r1'), question(3, null, ['Ship it?'], 'r2')], new Map(), { r1: settledRequest('r1', 'answered'), r2: settledRequest('r2', 'withdrawn') });
+  const [answered, withdrawn] = screen.getAllByTestId('question');
+  expect(answered.querySelector('.transcript-question-line')!.textContent).toBe('Ship→answered');
+  expect(answered.querySelector('[data-answer]')!.getAttribute('data-answer')).toBe('none');
+  expect(answered.querySelector('[data-testid="question-settled"]')!.textContent).toBe('Answered from the web by you');
+  expect(withdrawn.querySelector('.transcript-question-line')!.textContent).toBe('Ship→Not answered');
+  expect(withdrawn.querySelector('[data-testid="question-settled"]')!.textContent).toBe('Withdrawn');
+  connection.stop();
+});
+
+it('names a run of requests alone, from a session the sidebar does not know yet, by its id and the machine it was raised on', () => {
+  const key = requestKey({ machine: 'macbook', session: SESSION, request: 'toolu_p' });
+  const raised = { request: 'toolu_p', session: SESSION, tool: 'Bash', input: { command: 'ls' }, mac: { nonce: 'n', value: 'v' } } as Raised;
+  const record: RequestRecord = { key, request: 'toolu_p', machine: 'macbook', raised, at: 0, pending: true, terminalOnly: false, settled: null };
+  const connection = draw([{ kind: 'request', key: `request:${key}`, request: 'toolu_p', ref: key, session: SESSION, ts: null }], new Map(), { [key]: record });
+  const head = screen.getByTestId('said');
+  expect(head.querySelector('[data-testid="said-who"]')!.textContent).toBe(SESSION.slice(0, 8));
+  expect(head.textContent).toContain('@macbook');
+  connection.stop();
+});
+
+it('labels the day separators against a clock that turns at local midnight', () => {
+  const day = new Date(at(0));
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  vi.setSystemTime(new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 30));
+  const connection = draw([system(1, 'maws-45', 'joined on mini')]);
+  const formats = dateFormats();
+  expect(screen.getByRole('separator').textContent).toBe(formats.day(0));
+  act(() => void vi.advanceTimersByTime(32_000));
+  expect(screen.getByRole('separator').textContent).toBe(formats.day(1));
   connection.stop();
 });
 
@@ -216,6 +279,34 @@ it("draws each recipient's delivery outcome with the machine's reason when it wa
   // Delivered says no more on the line; its reason is there on hover.
   expect(line(rests).textContent).toBe('maws-45: delivered');
   expect(line(rests).getAttribute('title')).toBe('pushed to the live session');
+  connection.stop();
+});
+
+it('tints a send reaching none of its recipients as failed when any failed, else as held, and leaves a send that reached one untinted', () => {
+  const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
+  const [a, b] = ['67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a'];
+  const to = [
+    { session: a, alias: 'maws-45' },
+    { session: b, alias: 'maws-fe' },
+  ];
+  const sent = (seq: number) => ({ ts: '2026-10-15T08:00:00.000Z', writer: 'hub/4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', seq, kind: 'human', from: 'human', to, text: `send ${seq}`, mac: { nonce: `n${seq}`, value: 'v' } }) as LogEvent;
+  const outcomes = (event: LogEvent, [x, y]: [Delivery['outcome'], Delivery['outcome']]) => ({
+    [deliveryKey(event)]: Object.fromEntries(
+      [
+        [a, x],
+        [b, y],
+      ].map(([session, outcome]) => [session, { event: { writer: event.writer, seq: event.seq }, session, outcome, reason: 'r', mac: { nonce: `d${event.seq}${session}`, value: 'v' } } as Delivery]),
+    ),
+  });
+  const events = [sent(1), sent(2), sent(3)];
+  connection.conversation.store.setState({ deliveries: { ...outcomes(events[0], ['refused-read-only', 'failed']), ...outcomes(events[1], ['recorded', 'refused-read-only']), ...outcomes(events[2], ['delivered', 'failed']) } });
+  render(
+    <DeskContext.Provider value={{ connection, member: 'm', sessions: new Map() }}>
+      <StreamView items={events.map((event) => ({ kind: 'human' as const, key: `h${event.seq}`, offset: event.seq, event, text: String(event.text), to, wake: false }))} outbox={[]} />
+    </DeskContext.Provider>,
+  );
+  const bubbles = screen.getAllByRole('region').filter((e) => e.classList.contains('desk-chat-send'));
+  expect(bubbles.map((bubble) => bubble.getAttribute('data-state'))).toEqual(['failed', 'held', 'mixed']);
   connection.stop();
 });
 

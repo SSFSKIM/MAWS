@@ -25,7 +25,10 @@ export type ChatBlock =
 /** How long after a sender's last item its next one still stands under the same header. */
 export const RUN_WINDOW_MS = 5 * 60_000;
 
-const tsOf = (item: StreamItem): string | null => (item.kind === 'agents' ? (item.says[0]?.event.ts ?? null) : item.kind === 'request' || item.kind === 'work' ? null : item.event.ts);
+/** An item's time: a request's is the bound below it the stream gives it, so an old run or a past day does not take
+ * it in; a working-record fold has none. */
+const tsOf = (item: StreamItem): string | null =>
+  item.kind === 'agents' ? (item.says[0]?.event.ts ?? null) : item.kind === 'request' ? item.ts : item.kind === 'work' ? null : item.event.ts;
 
 /** The local calendar day of a time, for the separators. */
 export function dayOf(ts: string): string {
@@ -43,7 +46,9 @@ export function chatBlocks(items: readonly StreamItem[], options: { window?: num
     const ts = tsOf(item);
     if (ts !== null && dayOf(ts) !== day) {
       day = dayOf(ts);
-      blocks.push({ kind: 'day', key: `day:${day}`, ts });
+      // Keyed by the item that opened the day, not the day: the log is in offset order, and a writer whose clock is
+      // behind can put yesterday after today, so one day may open twice.
+      blocks.push({ kind: 'day', key: `day:${item.key}`, ts });
       run = null;
     }
     const last = blocks.at(-1);
