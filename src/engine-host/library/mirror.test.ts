@@ -791,4 +791,67 @@ describe('the mirror over a directory that goes away, is relinked or is spelled 
     }
   });
 
+  it('keeps two Spaces linked to one directory by two spellings in one manifest (library scalpel-2#2)', async () => {
+    const links = mkdtempSync(join(tmpdir(), 'maws-mirror-links-'));
+    try {
+      const alias = join(links, 'alias');
+      symlinkSync(project, alias); // the same directory, spelled through a link
+      const one = await linkedSpace('One');
+      const two = await linkedSpace('Two', alias);
+      const a = await page('A', one.id);
+      const b = await page('B', two.id);
+      await startMirror();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(a), file(b)].sort());
+      expect(Object.keys(manifest().artifacts).sort()).toEqual([a.id, b.id].sort());
+
+      await store().updateSpace(one.id, { name: 'One again' }); // a later reconciliation
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(a), file(b)].sort());
+      await store().updateSpace(two.id, { linkedDir: null });
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(a)]);
+      expect(logs).toEqual([]);
+    } finally {
+      rmSync(links, { recursive: true, force: true });
+    }
+  });
+
+  it('knows a directory away since the start under its real path once it is back: what it missed is mirrored, nothing else rewritten (library scalpel-2#2)', async () => {
+    const links = mkdtempSync(join(tmpdir(), 'maws-mirror-links-'));
+    const away = `${project}-away`;
+    try {
+      const alias = join(links, 'alias');
+      symlinkSync(project, alias);
+      const space = await linkedSpace('Launch', alias);
+      const still = await page('Still', space.id);
+      const gone = await page('Gone', space.id);
+      const kept = await page('Kept', space.id);
+      await startMirror();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(still), file(gone), file(kept)].sort());
+      const inode = lstatSync(out(file(still))).ino;
+      mirror!.close();
+
+      renameSync(project, away);
+      let added: { id: string; title: string } | undefined;
+      try {
+        await startMirror(); // its first load fails: known by the spelling it is linked by
+        await store().delete(gone.id);
+        added = await page('Added', space.id);
+        await mirror!.flush();
+      } finally {
+        renameSync(away, project);
+      }
+      await store().writeContent(kept.id, html('Kept 2'), agent); // a later change in the Space
+      await mirror!.flush();
+      await store().updateSpace(space.id, { name: 'Launch 2' });
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(still), file(kept), file(added!)].sort());
+      expect(read(file(kept))).toBe('<p>Kept 2</p>');
+      expect(lstatSync(out(file(still))).ino).toBe(inode); // never removed and written again
+    } finally {
+      rmSync(links, { recursive: true, force: true });
+      rmSync(away, { recursive: true, force: true });
+    }
+  });
+
 });
