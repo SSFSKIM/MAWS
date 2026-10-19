@@ -1,5 +1,6 @@
-// P3-F slide-editor (scalpel-2#1): the deck's body over its tab's replica, under happy-dom. The header's Present is
-// offered only while the deck has a slide to show, following the deck live.
+// P3-F slide-editor (scalpel-2#1, scalpel-2#2): the deck's body over its tab's replica, under happy-dom. The header's
+// Present is offered only while the deck has a slide to show, following the deck live, and a deck with no slide at all
+// records the owner's view as a drawn first slide does.
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { Awareness } from '@y/protocols/awareness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -75,5 +76,12 @@ describe('the deck body', () => {
     cleanup();
     resetEditorHosts();
     expect((await mount(deckOf([]))).present()?.disabled).toBe(true);
+  });
+
+  // scalpel-2#2: the empty deck's stage draws no slide canvas, so it never reported drawn and whenShown never resolved
+  it('records the owner’s view of a deck with no slide once its stage shows', async () => {
+    const { state, onShown } = await mount(deckOf([]));
+    await waitFor(() => expect(onShown).toHaveBeenCalledTimes(1));
+    expect(state.markShown()).toBe(false); // the showing is already marked: the history rail's wait is over
   });
 });

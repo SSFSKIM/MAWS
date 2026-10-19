@@ -9,12 +9,14 @@
 // writes; the header counts the open threads.
 // M8: the header's Version history and the editor's history (the tab's history api over the tab's replica).
 // P3-F (L233): the header's Export exports what the editor shows (the session's `shown`), read when an entry is chosen.
-// P3-F: Present is offered while the deck has a slide to show (the show's own reading), following the deck live.
+// P3-F: Present is offered while the deck has a slide to show (the show's own reading), following the deck live; a deck
+// with no slide is shown once its stage shows the empty deck (no slide is drawn to report it).
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ArtifactHost } from '@artifacts/host';
 import { DeckEditor } from '@artifacts/slides/editor/DeckEditor';
 import { showSlides } from '@artifacts/slides/editor/present/sequence';
 import type { DeckSession } from '@artifacts/slides/editor/session';
+import { slideOrder } from '@artifacts/slides/model';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useLibraryList, useLibraryRow } from '../../library/store';
@@ -104,12 +106,14 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   }, []);
   useRegionMarkupSurface(stage, `“${title}”`, visible && stageShown);
 
-  // the owner's view (L's `onShown`, then markViewed): once per showing, once the first slide is drawn while visible
+  // the owner's view (L's `onShown`, then markViewed): once per showing, once the first slide is drawn while visible, or
+  // (P3-F) once the stage shows a deck with no slide, which draws none
   const [drawn, setDrawn] = useState(false);
+  const empty = useDeckCount(opened, (doc) => slideOrder(doc).length) === 0;
   useEffect(() => {
-    if (!visible || !drawn) return;
+    if (!visible || !(drawn || empty)) return;
     if (state.markShown()) onShown();
-  }, [visible, drawn, state, onShown]);
+  }, [visible, drawn, empty, state, onShown]);
   const session = snapshot.session;
   const onDrawn = useCallback(() => setDrawn(true), []);
   // M8: the deck's history over the tab's replica and history api
