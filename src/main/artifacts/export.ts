@@ -245,6 +245,10 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
       await rename(temp, path);
       temps.delete(temp);
     }
+    // P4 (W1, L131; Decision Log 44's residual): a rename issued in time can complete after the deadline, when the bridge
+    // has given up on the export: its late success is dropped for the timeout (the file stays where it landed; a retried
+    // export replaces it)
+    if (time.expired) throw new Error(`the export did not finish within ${time.ms / 1000} s`);
     return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }), ...(request.exportId !== undefined && { exportId: request.exportId }) /* P3-E, P3-H */ };
   } catch (error) {
     // P3-E (E1 M5; Decision Log 26): a refusal the exporter named (A's command failure) is kept for the caller

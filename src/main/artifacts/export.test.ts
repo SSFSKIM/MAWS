@@ -7,8 +7,22 @@ import type { MawsArtifactExport } from '@shared/ipc/schema/maws';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
+// P4 (W1, tracker 2026-10-14 L131): one step awaited before a `rename` of a given path completes, so a publication
+// issued before the deadline can be made to finish after it
+const slowRename = vi.hoisted(() => ({ path: null as string | null, wait: null as (() => Promise<void>) | null }));
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  const rename = (async (...args: Parameters<typeof actual.rename>) => {
+    await actual.rename(...args);
+    if (slowRename.path === null || String(args[1]) !== slowRename.path) return;
+    const wait = slowRename.wait;
+    slowRename.path = slowRename.wait = null;
+    await wait?.();
+  }) as typeof actual.rename;
+  return { ...actual, default: { ...actual, rename }, rename };
+});
 
-import { EXPORT_BUDGET_MS, EXPORT_QUEUE_MS, ExporterRegistry, printRequestAllowed, runExport, startExportService, type ExportContext, type Exporter, type ExportRequest, type ExportServiceDeps, type ExportSources } from './export';
+import { EXPORT_BUDGET_MS, EXPORT_QUEUE_MS, ExportBudget, ExporterRegistry, printRequestAllowed, runExport, startExportService, type ExportContext, type Exporter, type ExportRequest, type ExportServiceDeps, type ExportSources } from './export';
 
 const ID = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
 const DOC = '1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e';
@@ -113,6 +127,18 @@ describe('runExport', () => {
     await until(() => late !== null);
     await expect(late).rejects.toThrow(/cancelled/);
     expect(await readdir(root)).toEqual([]);
+  });
+
+  // P4 (W1, L131; A's Decision Log 44's residual): a rename issued before the deadline that completes after it answers the
+  // timeout, as the bridge already gave up on it, never a late success
+  it('answers the timeout when the publication’s rename completes after the deadline', async () => {
+    const registry = new ExporterRegistry();
+    registry.register(writing('html', 'pdf', () => '%PDF-1.7'));
+    const budget = new ExportBudget(500); // real mkdir and writeFile calls meet it under load, so the deadline falls after the publication starts
+    slowRename.path = request().path;
+    slowRename.wait = () => until(() => budget.expired);
+    expect(await runExport(registry, request(), sources(), budget)).toEqual({ ok: false, error: 'the export did not finish within 0.5 s' });
+    expect(slowRename.path).toBeNull(); // the rename ran
   });
 
   it('puts nothing in place when the exporter fails after a write, and answers the blocked requests its printer counted', async () => {
