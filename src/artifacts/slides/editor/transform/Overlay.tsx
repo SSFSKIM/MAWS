@@ -52,6 +52,10 @@ function keyOf(node: object | undefined): number {
 }
 
 const DRAG_START_PX = 3; // screen px a press moves before it is a drag
+// P3-F F9 review 3: Hangul jamo (U+1100–11FF, U+3130–318F, U+A960–A97F, U+D7B0–D7FF) and syllables (U+AC00–D7A3) are an
+// input method's output. The stage is not editable, so no input method composes there; such a key typed raw over the
+// element would garble the word the box then composes ("ㅎㅏㄴ글" for "한글"), so it enters no edit, as before F9.
+const HANGUL = /[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7a3\ud7b0-\ud7ff]/;
 const HIT_SLACK_PX = 8; // screen px around a connector's line that hit it
 
 interface Pending {
@@ -323,7 +327,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       } else if (mod && key.toLowerCase() === 'a') {
         session.select(selectAll(tree, sel));
         done();
-      } else if (!mod && !e.isComposing && [...key].length === 1 && sel.length === 1 && !readOnly && isText(tree.element(sel[0]!)?.tag)) {
+      } else if (!mod && !e.isComposing && [...key].length === 1 && !HANGUL.test(key) && sel.length === 1 && !readOnly && isText(tree.element(sel[0]!)?.tag)) {
         // P3-F F9 (c43): a printable key on the one selected text element enters its edit carrying the key, which the
         // text box types over the text it opens with selected (a key typed on a selection replaces it); ⌫ above still
         // deletes the element, as in Slides and Canva

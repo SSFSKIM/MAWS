@@ -505,8 +505,9 @@ describe('P3-F: a flow text element’s width only, Shift or not (scalpel-1#2)',
 // selected, a printable key enters its edit carrying the key, typed over the text as a key typed on a selection
 // replaces it (Slides, Canva, Keynote, PowerPoint); the typed words were dropped. ⌫ and Delete still delete the element
 // (the executor's ruling: the triage row's Backspace clause not taken, as ⌫ on a selected object deletes it in those
-// apps); a group, a non-text element, several elements, a read-only stage, ⌘ or Ctrl, a composing IME and a named key
-// type nothing and enter nothing (level picking unchanged).
+// apps); a group, a non-text element, several elements, a read-only stage, ⌘ or Ctrl, a composing IME, a named key and
+// a Hangul key (review 3: an input method's output, which the stage does not compose) type nothing and enter nothing
+// (level picking unchanged).
 describe('P3-F F9: a key typed on the one selected text element', () => {
   const SLIDE_WITH_GROUP = `<section id="s" style="background:#ffffff">
 <h2 id="title" style="font-size:64px">Title</h2>
@@ -552,12 +553,12 @@ describe('P3-F F9: a key typed on the one selected text element', () => {
     expect(plain(doc, 'title')).toBe('Hi !');
     act(() => session.editText(null));
     act(() => session.select(['inner'])); // where a double-click on the group drills
-    act(() => void key(stage, { key: '한' }));
+    act(() => void key(stage, { key: 'O', shiftKey: true }));
     expect(session.snapshot().editingText).toBe('inner');
-    expect(plain(doc, 'inner')).toBe('한');
+    expect(plain(doc, 'inner')).toBe('O');
   });
 
-  it('types nothing and enters nothing on a group, a non-text element, two elements, with ⌘ or Ctrl, while composing, or for a named key', () => {
+  it('types nothing and enters nothing on a group, a non-text element, two elements, with ⌘ or Ctrl, while composing, for a named key or a Hangul key', () => {
     const { doc, session, stage } = mount();
     const unchanged = (why: string) => {
       expect(session.snapshot().editingText, why).toBeNull();
@@ -574,6 +575,13 @@ describe('P3-F F9: a key typed on the one selected text element', () => {
       [['title'], { key: 'Dead' }],
       [['title'], { key: 'F5' }],
       [['title'], { key: 'Shift', shiftKey: true }],
+      // review 3: with a Korean input source the non-editable stage engages no input method, so a key arrives as the
+      // layout's jamo (or a syllable): typed raw it would garble the word the box then composes ("ㅎㅏㄴ글" for "한글")
+      [['title'], { key: 'ㅎ' }], // U+314E, compatibility jamo
+      [['title'], { key: 'ᄒ' }], // U+1112, a leading jamo
+      [['title'], { key: 'ꥠ' }], // U+A960, jamo extended-A
+      [['title'], { key: 'ힰ' }], // U+D7B0, jamo extended-B
+      [['title'], { key: '한' }], // U+D55C, a composed syllable
     ] as const) {
       act(() => session.select(selection));
       act(() => void key(stage, init));
