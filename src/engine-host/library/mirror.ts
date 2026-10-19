@@ -13,16 +13,18 @@
 // - The manifest `<linkedDir>/artifacts/.maws-mirror.json` names every file the mirror wrote, per artifact, with the
 //   revision and slug it wrote them at. A rename, a move out of the Space, a delete or an unlink removes exactly those
 //   files; a file at a target name that the manifest does not own is left alone (logged), never overwritten. An
-//   artifact whose revision and slug match its entry, with its files present, is not rewritten. A name that the volume
-//   resolves to the very entry of one the mirror owns (on APFS: by case or Unicode normalization, ß and SS, a final
-//   sigma) is that file, so such a rename keeps it; any other name, an owner's hard link included, is not.
+//   artifact whose revision and slug match its entry, with its files present (regular files, not links), is not
+//   rewritten. A name that the volume resolves to the very entry of one the mirror owns (on APFS: by case or Unicode
+//   normalization, ß and SS, a final sigma) is that file, so such a rename keeps it; any other name, an owner's hard
+//   link included, is not.
 // - Something at the manifest's path that is not a MAWS manifest (another file, a link, dangling or not) is the
 //   owner's: the directory is refused (logged, as a failing one) and that entry never rewritten or removed.
 // - Two Spaces linked to one directory share its manifest (the desired set is per directory). A directory is known by
 //   its real path, so two spellings of it (through a link, or by case on a case-insensitive volume) are one.
 // - A directory that fails (gone, unwritable, a link) is logged per Space and tried again at the next change, which
 //   reconciles the whole directory once it loads again; what the mirror owns there stays owned meanwhile. The linked
-//   directory itself is never created, and no write or removal, the manifest's included, passes through a link inside it.
+//   directory itself is never created, and no write or removal, the manifest's included, passes through a link inside it
+//   (a removal refused so is a failed one: the file stays owned).
 // - At start every linked directory is reconciled against its manifest: what changed while the host was down.
 // - P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): a writer
 //   that declares `inputs` (what its output depends on beyond the revision) has them kept in the entry beside the
@@ -362,7 +364,8 @@ export class LibraryMirror {
     const writer = mirrorWriterFor(artifact.kind);
     const inputs = writer?.inputs?.(artifact); // P3-C (Decision Log 29)
     const entry = manifest.artifacts[artifactId];
-    if (entry && entry.revision === revision && entry.inputs === inputs && entry.slug === mirrorSlug(artifact) && entry.files.every((file) => existsSync(join(root, file)))) return null; // current
+    // current; P4 (tracker L249): each file a regular one, so a link put in a file's place is written over at the next step
+    if (entry && entry.revision === revision && entry.inputs === inputs && entry.slug === mirrorSlug(artifact) && entry.files.every((file) => isFile(join(root, file)))) return null;
     if (!writer) return { artifact, revision, inputs, content: null, assets: [] };
     const assets = store.listAssets(artifactId).map(({ ref, name, mime, size, sha256 }) => ({ ref, name, mime, size, sha256 }));
     if (isDocKind(artifact.kind)) return { artifact, revision, inputs, content: { state: service.readState(artifactId).state }, assets };
@@ -732,9 +735,11 @@ export function cloneFile(from: string, to: string): void {
   execFileSync('/bin/cp', ['-c', '--', from, to], { stdio: ['ignore', 'ignore', 'pipe'], timeout: MIRROR_CLONE_TIMEOUT_MS });
 }
 
-// Removes one file, then each parent folder it leaves empty, up to (and including) `artifacts/` itself.
+// Removes one file, then each parent folder it leaves empty, up to (and including) `artifacts/` itself. P4 (tracker
+// L249): one under a link is refused, as a failed removal (thrown), so its name stays owned at revision -1 rather than
+// being dropped as removed; the file is the mirror's again if the owner puts the original folder back in place.
 function removeFile(root: string, file: string): void {
-  if (!realDirsUnder(root, file)) return;
+  if (!realDirsUnder(root, file)) throw new Error(`${join(root, file)} lies under a link; not removed`);
   rmSync(join(root, file), { force: true });
   removeEmpty(root, dirname(join(root, file)));
 }

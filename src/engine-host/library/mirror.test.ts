@@ -951,6 +951,78 @@ describe('the mirror over a directory that goes away, is relinked or is spelled 
     }
   });
 
+  // P4 (tracker L249): a removal refused under a link fails rather than counting as done, so the entry outlives a pass
+  // under an `artifacts` relinked inside it, and once the owner puts the original back its files are the mirror's again
+  it.each([
+    ['keeps its name', 'Doc'],
+    ['is renamed', 'Doc renamed'],
+  ])('keeps owning an artifact’s files through a pass under an `artifacts` relinked during it, when the artifact %s, and writes them once the original is back (tracker L249)', async (_, title) => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
+    try {
+      let relink = false;
+      offs.push(
+        registerMirrorWriter('document', ({ artifact, doc }) => {
+          if (relink) {
+            relink = false;
+            renameSync(out(), join(project, 'artifacts-moved'));
+            symlinkSync(elsewhere, out()); // the owner relinks `artifacts/` while the mirror writes
+          }
+          return { files: { [`${mirrorSlug(artifact)}.md`]: doc!.get('root').toString() } };
+        }),
+      );
+      await startMirror();
+      const space = await linkedSpace();
+      const doc = await store().create({ kind: 'document', title: 'Doc', spaceId: space.id }, human);
+      await store().testWrite(doc.id, 'w1', [{ op: 'insertText', index: 0, text: 'v1' }], human);
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(doc)}.md`]);
+
+      relink = true;
+      if (title !== doc.title) await store().update(doc.id, { title });
+      await store().testWrite(doc.id, 'w2', [{ op: 'insertText', index: 0, text: 'v2 ' }], human);
+      await sleep(CHANGE_COALESCE_MS + 50);
+      await mirror!.flush();
+      expect(relink).toBe(false);
+      expect(readdirSync(elsewhere)).toEqual([]);
+
+      rmSync(out()); // the owner puts the original back in place
+      renameSync(join(project, 'artifacts-moved'), out());
+      await store().testWrite(doc.id, 'w3', [{ op: 'insertText', index: 0, text: 'v3 ' }], human);
+      await sleep(CHANGE_COALESCE_MS + 50);
+      await mirror!.flush();
+      const name = `${mirrorSlug({ id: doc.id, title })}.md`;
+      expect(listed()).toEqual([MIRROR_MANIFEST, name]);
+      expect(read(name)).toBe('v3 v2 v1');
+      expect(manifest().artifacts[doc.id].files).toEqual([name]);
+      expect(logs.filter((line) => line.includes("not the mirror's"))).toEqual([]);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it('writes a mirrored file over a link the owner put in its place at a later step, though the artifact did not change, leaving what the link points at alone (tracker L249)', async () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
+    try {
+      await startMirror();
+      const space = await linkedSpace();
+      const mine = await page('Page', space.id);
+      await mirror!.flush();
+      writeFileSync(join(elsewhere, 'theirs.html'), 'the owner’s file');
+      rmSync(out(file(mine)));
+      symlinkSync(join(elsewhere, 'theirs.html'), out(file(mine)));
+
+      await store().updateSpace(space.id, { name: 'Launch 2' }); // a later step; the artifact's revision has not moved
+      await mirror!.flush();
+      expect(lstatSync(out(file(mine))).isFile()).toBe(true);
+      expect(read(file(mine))).toBe('<p>Page</p>');
+      expect(mode(file(mine))).toBe(0o444);
+      expect(readFileSync(join(elsewhere, 'theirs.html'), 'utf8')).toBe('the owner’s file');
+      expect(logs).toEqual([]);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
 });
 
 // P3-F (F10, tracker L142; the owner: "something in real use might have something bigger … production-level product for
