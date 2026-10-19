@@ -154,6 +154,11 @@ const watched = (page: Page) => page.evaluate(() => {
   return { mounts, disarms, writes };
 });
 const count = (events: TraceEvent[], type: string) => events.filter((e) => e.type === type).length;
+// a case's trace, in the report; printed too under MAWS_IME_VERBOSE=1 (the findings quote them)
+function note(annotation: { type: string; description: string }) {
+  test.info().annotations.push(annotation);
+  if (process.env.MAWS_IME_VERBOSE === '1') console.log(`[ime] ${annotation.type}: ${annotation.description}`);
+}
 
 test('ARMED: a selected text element’s box is focused and editable with its caret hidden, and the stage keeps every other selection (I1)', async () => {
   test.setTimeout(120_000);
@@ -208,16 +213,17 @@ for (const mode of ['clear', 'select'] as const) {
     const root = await l.page.evaluateHandle(() => document.activeElement);
     await l.ime.type(HANGEUL);
     const sameRoot = await l.page.evaluate((r) => r === document.activeElement, root);
+    const typed = await watched(l.page);
     await l.clickSlide(EMPTY); // the composition finished by the press, the element left (T9)
     const events = await stopTrace(l.page);
-    test.info().annotations.push({ type: `trace (${mode})`, description: signature(events).join(' | ') });
+    note({ type: `trace (${mode})`, description: signature(events).join(' | ') });
     await expect.poll(() => l.text('a')).toBe('한글');
     expect((await l.text('a')).normalize('NFC')).toBe('한글');
     const typing = events.slice(0, events.findIndex((e) => e.type === 'pointerdown'));
     // one text box, focused throughout, armed once and edited once; two syllables composed on it
     expect(sameRoot).toBe(true);
     expect(count(typing, 'focusin') + count(typing, 'focusout')).toBe(0);
-    expect(await watched(l.page)).toEqual(expect.objectContaining({ mounts: 0, disarms: 1 }));
+    expect(typed).toEqual(expect.objectContaining({ mounts: 0, disarms: 1 }));
     expect(count(events, 'compositionstart')).toBe(2);
     expect(count(events, 'compositionend')).toBe(2);
     expect(new Set(events.filter((e) => e.type.startsWith('composition')).map((e) => e.target))).toEqual(new Set(['textbox:a']));
@@ -228,7 +234,7 @@ for (const mode of ['clear', 'select'] as const) {
     expect(first.textAfter).toBe(mode === 'clear' ? '' : 'Hello');
     const start = events.find((e) => e.type === 'compositionstart')!;
     expect(start.textBefore).toBe(mode === 'clear' ? '' : 'Hello');
-    expect(events.find((e) => e.type === 'compositionupdate')?.textAfter).toBe('ㅎ');
+    expect(events.find((e) => e.type === 'input')?.textAfter).toBe('ㅎ'); // the first jamo is the box's whole text
   });
 }
 
@@ -252,7 +258,7 @@ test('ARMED: a first jamo arriving bare, then a composition replacing it, ends a
   await l.ime.type(HANGEUL.slice(2));
   await l.clickSlide(EMPTY);
   const events = await stopTrace(l.page);
-  test.info().annotations.push({ type: 'trace (bare first jamo)', description: signature(events).join(' | ') });
+  note({ type: 'trace (bare first jamo)', description: signature(events).join(' | ') });
   await expect.poll(() => l.text('a')).toBe('한글');
   expect(events.find((e) => e.type === 'keydown')).toEqual(expect.objectContaining({ key: 'ㅎ', keyCode: 71, textBefore: 'Hello', textAfter: '' }));
 
@@ -299,7 +305,7 @@ test('a composition in one box, then a press on another: the first keeps its syl
   await l.click('b');
   await expect.poll(() => l.focus()).toBe('textbox:b');
   const events = await stopTrace(l.page);
-  test.info().annotations.push({ type: 'trace (press mid-composition)', description: signature(events).join(' | ') });
+  note({ type: 'trace (press mid-composition)', description: signature(events).join(' | ') });
   await expect.poll(() => l.text('a')).toBe('하');
   expect(await l.text('b')).toBe('World');
   await l.ime.type(HANGEUL.slice(0, 1));
@@ -381,7 +387,9 @@ test('⌘ keys while ARMED: a key the page cancels never reaches the menu, the r
   }
 
   // The Edit menu by the mouse, as its role items act (webContents' copy, paste and undo, which the native items' copy:,
-  // paste: and undo: reach): on the armed element, never its text.
+  // paste: and undo: reach): Copy and Paste act on the armed element, never its text. Undo does not reach the deck: Blink
+  // runs its Undo command only while its own undo stack holds an edit, so with nothing typed natively it sends no
+  // `historyUndo` for the box to claim (today's gap, the stage's too; findings.txt, "The Edit menu's Undo").
   await withNativeClipboard(app, ['Hello', ''], async () => {
     expect(await l.focus()).toBe('textbox:a');
     const command = (name: 'copy' | 'paste' | 'undo') => app.evaluate(({ BrowserWindow }, n) => BrowserWindow.getAllWindows()[0]!.webContents[n](), name);
@@ -394,9 +402,26 @@ test('⌘ keys while ARMED: a key the page cancels never reaches the menu, the r
     expect(pasted).toHaveLength(1);
     expect(pasted[0]).not.toBe('a');
     await expect.poll(() => l.focus()).toBe(`textbox:${pasted[0]}`); // the pasted text element, armed in its turn
+    await startTrace(l.page);
     await command('undo');
+    await l.page.waitForTimeout(300);
+    const undone = await stopTrace(l.page);
+    note({ type: 'Edit › Undo while armed', description: signature(undone).join(' | ') || '(no event)' });
+    expect(undone.filter((e) => e.type === 'beforeinput')).toEqual([]);
+    expect(await l.count()).toBe(6);
+    await l.ime.command('z'); // the keyboard's ⌘Z is the box's: the paste undone
     await expect.poll(() => l.count()).toBe(5);
     expect(await l.text('a')).toBe('Hello');
+    // the stage alike: a nudge of the shape, Edit › Undo does nothing, ⌘Z undoes it
+    await l.click('s');
+    await l.ime.rawKey({ key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 });
+    const top = async () => (await l.page.evaluate((a) => (window as unknown as Seam).__maws_presentations.slide(a, 'ime'), l.id)).children.find((c) => c.id === 's')?.style.top;
+    await expect.poll(top).toBe('501px');
+    await command('undo');
+    await l.page.waitForTimeout(300);
+    expect(await top()).toBe('501px');
+    await l.ime.command('z');
+    await expect.poll(top).toBe('500px');
   });
 });
 
@@ -427,10 +452,12 @@ test('the L1 fixture replays through CDP to the events it recorded (the trace lo
   await l.click('a');
   await expect.poll(() => l.focus()).toBe('textbox:a');
   await startTrace(l.page);
-  const report = await replayTrace(l.ime, fixture, l.clickSlide);
+  // from the first key: the press that armed the box is the case's own
+  const typed = { ...fixture, events: fixture.events.slice(fixture.events.findIndex((e) => e.type === 'keydown')) };
+  const report = await replayTrace(l.ime, typed, l.clickSlide);
   const events = await stopTrace(l.page);
-  test.info().annotations.push({ type: `replay of ${fixture.source}`, description: report.calls.join(' | ') });
+  note({ type: `replay of ${fixture.source}`, description: report.calls.join(' | ') });
   expect(report.skipped).toEqual([]);
-  expect(signature(events)).toEqual(signature(fixture.events.filter((e) => e.t >= (fixture.events.find((f) => f.type === 'keydown')?.t ?? 0))));
+  expect(signature(events)).toEqual(signature(typed.events));
   await expect.poll(() => l.text('a')).toBe('한글');
 });

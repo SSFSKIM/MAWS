@@ -202,9 +202,12 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
     const document = node.ownerDocument;
     const onPointerDown = (event: Event) => {
       const at = event.target as Node | null;
-      // P4-B2 spike: a press in the armed box begins the edit, the caret at the press (T3, roughly: no drag from it)
+      // P4-B2 spike: a press in the armed box begins the edit, the caret at the press (T3, roughly: no drag from it); a
+      // press elsewhere on the stage is the stage's, whose selection ends the edit (ending it here first would arm the
+      // box again for the moment between, writing its selection while a composition may still be ending)
       if (at && armedNow.current && node.contains(at)) return session.editText(elementId);
       if (at && (node.contains(at) || bar.current?.contains(at))) return;
+      if (at && armedMode() !== null && node.closest('[data-stage-surface]')?.contains(at)) return;
       session.editText(null);
     };
     document.addEventListener('pointerdown', onPointerDown, true);
@@ -233,7 +236,7 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false,
   // P4-B2 spike: armed again after an edit (Escape), its selection as it is armed (the effect above set it at the mount)
   const wasArmed = useRef(armed);
   useEffect(() => {
-    if (armed && !wasArmed.current && mounted && !mounted.editor.isDestroyed) armSelection(mounted.editor, true);
+    if (armed && !wasArmed.current && mounted && !mounted.editor.isDestroyed && !mounted.editor.view.composing) armSelection(mounted.editor, true);
     wasArmed.current = armed;
   }, [armed, mounted]);
 

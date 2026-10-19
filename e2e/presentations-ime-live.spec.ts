@@ -19,7 +19,7 @@ import { launchMaws, type MawsLaunch } from './support/launch';
 
 const LIVE = process.env.MAWS_IME_LIVE === '1';
 const DIR = process.env.MAWS_IME_LIVE_DIR ?? '/tmp/maws-ime-live';
-const MODE = process.env.MAWS_IME_LIVE_MODE === 'select' ? 'select' : 'clear';
+const MODE: 'clear' | 'select' = process.env.MAWS_IME_LIVE_MODE === 'select' ? 'select' : 'clear';
 const CASES = (process.env.MAWS_IME_LIVE_CASES ?? 'L0,L1,L2,L3,L4,L5,L6,L7,L8').split(',').map((c) => c.trim());
 const WAIT_MS = 15 * 60_000; // per case, for the driver
 

@@ -104,7 +104,9 @@ export class Ime {
   /** ⌘ with a letter, carrying macOS's key code, so a key the page does not cancel reaches the app's menu. */
   async command(letter: string, options: { shift?: boolean } = {}): Promise<void> {
     const key = letterKey(letter);
-    await this.rawKey({ key: letter, code: key.code, keyCode: key.keyCode, native: key.native, unmodifiedText: letter, modifiers: 4 | (options.shift ? 8 : 0) });
+    // as macOS builds ⌘C's NSEvent: characters and charactersIgnoringModifiers both the letter (no char event follows)
+    await this.cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: letter, code: key.code, windowsVirtualKeyCode: key.keyCode, nativeVirtualKeyCode: key.native, text: letter, unmodifiedText: letter, modifiers: 4 | (options.shift ? 8 : 0) });
+    await this.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: letter, code: key.code, windowsVirtualKeyCode: key.keyCode, nativeVirtualKeyCode: key.native, modifiers: 4 | (options.shift ? 8 : 0) });
   }
 }
 
@@ -239,6 +241,21 @@ export function signature(events: readonly TraceEvent[]): string[] {
   });
 }
 
+/**
+ * Whether the composition that ends at or after `i` ended inside a key's handling (the input method committed it), not
+ * by a press or a focus change since the last key (the composition finished as focus left).
+ */
+function committed(events: readonly TraceEvent[], i: number): boolean {
+  let at = i;
+  while (at < events.length && events[at]!.type !== 'compositionend') at++;
+  for (let j = at - 1; j >= 0; j--) {
+    const type = events[j]!.type;
+    if (type === 'keydown') return true;
+    if (type === 'pointerdown' || type === 'focusout') return false;
+  }
+  return false;
+}
+
 /** What a replay could not reproduce from a trace (an event with no CDP entry point), named per event. */
 export interface ReplayReport {
   calls: string[];
@@ -256,11 +273,9 @@ export async function replayTrace(ime: Ime, trace: ImeTrace, click: (slide: { x:
   const calls: string[] = [];
   const skipped: string[] = [];
   const events = trace.events;
-  let lastKey = -Infinity;
   for (let i = 0; i < events.length; i++) {
     const e = events[i]!;
     if (e.type === 'keydown') {
-      lastKey = i;
       if (e.keyCode === 229) {
         const key = letterKey(TWO_SET[e.key ?? ''] ?? 'a');
         await ime.cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: e.key, code: e.code ?? key.code, windowsVirtualKeyCode: 229 });
@@ -272,12 +287,13 @@ export async function replayTrace(ime: Ime, trace: ImeTrace, click: (slide: { x:
         calls.push(`rawKey ${e.key}${text ? ' typed' : ''}`);
       }
     } else if (e.type === 'compositionupdate') {
+      // a commit's own update (its text set as the composition, then ended, within the key) comes with the commit
+      const next = events.slice(i + 1).find((n) => n.type.startsWith('composition') || n.type === 'keydown');
+      if (next?.type === 'compositionend' && next.data === e.data && committed(events, i)) continue;
       await ime.compose(e.data ?? '');
       calls.push(`compose ${e.data}`);
     } else if (e.type === 'compositionend') {
-      // inside a key's handling (no press or focus change since the key): the input method committed it
-      const sinceKey = events.slice(lastKey + 1, i);
-      if (lastKey >= 0 && !sinceKey.some((n) => n.type === 'pointerdown' || n.type === 'focusout')) {
+      if (committed(events, i)) {
         await ime.commit(e.data ?? '');
         calls.push(`commit ${e.data}`);
       }
