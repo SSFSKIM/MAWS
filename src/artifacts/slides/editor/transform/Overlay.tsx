@@ -6,6 +6,9 @@
 // F9's printable key on a selected text element, typed into its edit) and the clipboard while the stage has focus.
 // Gestures are gestures.ts's; which element a press picks is selection.ts's.
 // M7: the comment pins (../comments/Pins.tsx), at each commented element's top-right; a press on a pin is the pin's.
+// P4-B2's spike S-IME (../armed.ts): with the prototype on and `armable`, one selected text element's text box mounts
+// ARMED; the stage's element keys and its clipboard then take the keys from that box first (§4.4: element shortcuts
+// take priority over the editor, gated on `!isComposing && keyCode !== 229`).
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import type { SlideCanvas } from '../../canvas';
 import { apply, applyLinear, HANDLES, union, type Box, type Guide, type Handle, type Pt } from '../../geometry';
@@ -15,6 +18,7 @@ import type { ElementWrites } from '../../writers-elements';
 import { writeElements } from '../../writers-elements';
 import { CommentPins } from '../comments/Pins';
 import { DECK_COPY as C } from '../copy';
+import { armedBox, useArmedMode } from '../armed';
 import type { DeckSession } from '../session';
 import { copySelection, pasteClipboard, type ClipboardContext, type ImportAsset } from './clipboard';
 import { selectionCommands } from './commands';
@@ -38,8 +42,13 @@ export interface OverlayProps {
   /** The deck's artifact, named on what is copied, and how a paste brings another deck's pictures over (fix wave 1). */
   artifactId?: string;
   importAsset?: ImportAsset;
-  /** The text box for a text element edited in place, drawn inside the overlay (made anew when its node is). */
-  renderText?: (elementId: string, canvas: SlideCanvas) => ReactNode;
+  /**
+   * The text box for a text element edited in place, drawn inside the overlay (made anew when its node is). P4-B2 spike:
+   * `armed` while it is mounted ARMED on the selected element, before any edit.
+   */
+  renderText?: (elementId: string, canvas: SlideCanvas, armed: boolean) => ReactNode;
+  /** P4-B2 spike: whether a selected text element's box may mount ARMED here (the deck's stage; not yet a board). */
+  armable?: boolean;
 }
 
 // a key per drawn node, so the text box mounts again on a node the canvas made anew (a tag an agent changed)
@@ -67,11 +76,17 @@ interface Pending {
   pointerId: number;
 }
 
-export function Overlay({ session, canvas, slideId, scale, readOnly, surface, frame, onNotice, renderText, artifactId, importAsset }: OverlayProps) {
+export function Overlay({ session, canvas, slideId, scale, readOnly, surface, frame, onNotice, renderText, artifactId, importAsset, armable = false }: OverlayProps) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   const version = useDocVersion(session);
   const selection = state.selection;
   const editing = state.editingText;
+  // P4-B2 spike: the one selected text element whose box is mounted ARMED, if any; the box shown is its or the edit's
+  const armedMode = useArmedMode();
+  const one = selection.length === 1 ? selection[0]! : null;
+  const armedId =
+    armable && armedMode !== null && !readOnly && editing === null && one !== null && canvas?.node(one) !== undefined && isText(slideTree(session.doc, slideId).element(one)?.tag) ? one : null;
+  const textId = editing ?? armedId;
   const [measured, setMeasured] = useState<Map<string, Measured>>(new Map());
   const [shown, setShown] = useState<Frame | null>(null);
   const gesture = useRef<Gesture | null>(null);
@@ -119,14 +134,22 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     [frame, scale],
   );
 
-  // a text edit ended (Escape, a click elsewhere): the keys come back to the stage
-  const wasEditing = useRef<string | null>(null);
+  // a text edit ended (Escape, a click elsewhere): the keys come back to the stage (P4-B2 spike: unless the box stays,
+  // armed again; an armed box gone, its keys come back too)
+  const wasText = useRef<string | null>(null);
   useEffect(() => {
     const el = surface.current;
     const active = el?.ownerDocument.activeElement;
-    if (wasEditing.current !== null && editing === null && el && (!active || active === el.ownerDocument.body || canvas?.root.contains(active))) el.focus({ preventScroll: true });
-    wasEditing.current = editing;
-  }, [editing, surface, canvas]);
+    if (wasText.current !== null && textId === null && el && (!active || active === el.ownerDocument.body || canvas?.root.contains(active))) el.focus({ preventScroll: true });
+    wasText.current = textId;
+  }, [textId, surface, canvas]);
+  // P4-B2 spike: the armed box's caret and selection drawn transparent (textbox.css), set before the box first paints
+  useLayoutEffect(() => {
+    const el = surface.current;
+    if (!el || armedId === null) return;
+    el.setAttribute('data-armed', '');
+    return () => el.removeAttribute('data-armed');
+  }, [armedId, surface]);
 
   // ---- pointer
   useEffect(() => {
@@ -276,17 +299,19 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     const fromStage = (e: Event) => e.target === el;
     const notice = (reason: string | null) => reason && onNotice?.(reason);
 
-    const onKey = (e: KeyboardEvent) => {
-      if (!fromStage(e)) return;
+    // the element keys, from the stage or (P4-B2 spike) the armed box; true when a key was taken
+    const stageKey = (e: KeyboardEvent): boolean => {
       const c = ctx();
-      if (!c) return;
+      if (!c) return false;
       const tree = slideTree(session.doc, slideId);
       const sel = session.snapshot().selection.filter((id) => tree.has(id));
       const mod = e.metaKey || e.ctrlKey;
       const cmds = selectionCommands(c, sel, readOnly);
+      let taken = false;
       const done = () => {
         e.preventDefault();
         e.stopPropagation();
+        taken = true;
       };
       const key = e.key;
       if (key === 'Escape') {
@@ -334,11 +359,33 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
         session.editText(sel[0]!, { typed: key });
         done();
       }
+      return taken;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (fromStage(e)) stageKey(e);
+    };
+    // P4-B2 spike: the armed box's keys, before its editor's own (a listener on an ancestor, in the capture phase). The
+    // first printable or keyCode-229 keydown clears the content and begins the edit in place, its default left to insert
+    // the key or let the input method compose (T10, T11); Enter edits with all selected (T12); ⌘Z and ⌘Y stay the box's
+    // (the deck's stack), ⌘C, ⌘X and ⌘V the Edit menu's (the armed clipboard below); the element keys are the stage's.
+    const onArmedKey = (e: KeyboardEvent) => {
+      const box = armedBox(session);
+      if (!box || !(e.target instanceof Node) || !box.root.contains(e.target)) return;
+      const mod = e.metaKey || e.ctrlKey;
+      if (e.isComposing || e.keyCode === 229) box.replace();
+      else if (!mod && [...e.key].length === 1) box.replace();
+      else if (e.key === 'Enter' && !mod) {
+        e.preventDefault();
+        e.stopPropagation();
+        box.editAll();
+      } else if (!(mod && /^[zyxcv]$/i.test(e.key)) && stageKey(e)) e.stopPropagation();
     };
 
     const doc = el.ownerDocument;
+    // the stage's clipboard takes the Edit menu's commands while the stage, or (P4-B2 spike) an armed box, has focus
+    const takes = () => doc.activeElement === el || (doc.activeElement !== null && armedBox(session)?.root === doc.activeElement);
     const onCopy = (cut: boolean) => (e: ClipboardEvent) => {
-      if (doc.activeElement !== el) return;
+      if (!takes()) return;
       const c = ctx();
       if (!c) return;
       const sel = session.snapshot().selection;
@@ -347,7 +394,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     const copy = onCopy(false);
     const cut = onCopy(true);
     const paste = (e: ClipboardEvent) => {
-      if (doc.activeElement !== el || readOnly) return;
+      if (!takes() || readOnly) return;
       const c = ctx();
       if (!c) return;
       void pasteClipboard(e, c, session.snapshot().selection).then((result) => {
@@ -358,10 +405,24 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     // Chromium enables its Copy, Cut and Paste commands on a focus that holds no text selection only when the page takes
     // them (a cancelled `beforecopy`, `beforecut`, `beforepaste`): the stage takes them while it has focus
     const enable = (needsSelection: boolean) => (e: Event) => {
-      if (doc.activeElement === el && (!needsSelection || session.snapshot().selection.length > 0)) e.preventDefault();
+      if (takes() && (!needsSelection || session.snapshot().selection.length > 0)) e.preventDefault();
     };
     const beforeCopy = enable(true);
     const beforePaste = enable(false);
+    // P4-B2 spike: an armed box's clipboard events reach the stage's handlers before its editor's (which would paste the
+    // text into it, or in mode `select` copy and cut its text)
+    const armedClip = (handle: (e: ClipboardEvent) => void) => (e: ClipboardEvent) => {
+      if (armedBox(session)?.root !== doc.activeElement) return;
+      e.stopPropagation();
+      handle(e);
+    };
+    const armedCopy = armedClip(copy);
+    const armedCut = armedClip(cut);
+    const armedPaste = armedClip(paste);
+    el.addEventListener('keydown', onArmedKey, true);
+    el.addEventListener('copy', armedCopy, true);
+    el.addEventListener('cut', armedCut, true);
+    el.addEventListener('paste', armedPaste, true);
     el.addEventListener('keydown', onKey);
     doc.addEventListener('copy', copy);
     doc.addEventListener('cut', cut);
@@ -370,6 +431,10 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     doc.addEventListener('beforecut', beforeCopy);
     doc.addEventListener('beforepaste', beforePaste);
     return () => {
+      el.removeEventListener('keydown', onArmedKey, true);
+      el.removeEventListener('copy', armedCopy, true);
+      el.removeEventListener('cut', armedCut, true);
+      el.removeEventListener('paste', armedPaste, true);
       el.removeEventListener('keydown', onKey);
       doc.removeEventListener('copy', copy);
       doc.removeEventListener('cut', cut);
@@ -443,7 +508,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       {shown?.marquee && <div className="deck-marquee" data-marquee style={boxStyle(shown.marquee)} />}
       {shown?.ghost && <div className="deck-ghost" style={boxStyle(shown.ghost)} />}
       {shown?.insertion && <div className="deck-insertion" data-insertion style={boxStyle(shown.insertion)} />}
-      {editing !== null && canvas && renderText && <Fragment key={keyOf(canvas.node(editing))}>{renderText(editing, canvas)}</Fragment>}
+      {textId !== null && canvas && renderText && <Fragment key={keyOf(canvas.node(textId))}>{renderText(textId, canvas, editing === null)}</Fragment>}
       {canvas && <CommentPins canvas={canvas} slideId={slideId} scale={scale} version={version} />}
     </div>
   );

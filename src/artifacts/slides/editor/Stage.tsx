@@ -76,7 +76,8 @@ export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanv
                     onNotice={onNotice}
                     artifactId={artifactId}
                     importAsset={importAsset}
-                    renderText={(elementId, stageCanvas) => <TextBox session={session} canvas={stageCanvas} slideId={slide.id} elementId={elementId} readOnly={readOnly || slide.held !== null} />}
+                    renderText={(elementId, stageCanvas, armed) => <TextBox session={session} canvas={stageCanvas} slideId={slide.id} elementId={elementId} readOnly={readOnly || slide.held !== null} armed={armed} />}
+                    armable /* P4-B2 spike: the ARMED prototype, when the e2e seam turns it on */
                   />,
                 )}
               </div>

@@ -13,6 +13,16 @@
   cursor: text;
 }
 
+/* P4-B2's spike S-IME (armed.ts): an armed box is focused and editable with its caret, and in mode `select` its
+   selected text, drawn transparent; the stage's frame says it is selected. */
+.deck-stage[data-armed] .deck-textbox {
+  caret-color: transparent;
+}
+.deck-stage[data-armed] .deck-textbox::selection,
+.deck-stage[data-armed] .deck-textbox *::selection {
+  background: transparent;
+}
+
 .deck-markbar {
   position: absolute;
   z-index: 10;

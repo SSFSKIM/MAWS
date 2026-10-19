@@ -8,6 +8,9 @@
 // box is one step (`noteTyping` before each of the owner's writes), a format change is a step of its own, and ⌘Z goes to
 // the stack, never to the browser's or the binding's own undo. While an IME composes, remote frames wait (the
 // provider's hold, parent Decision Log 33 to 35) until ProseMirror has ended the composition.
+//
+// P4-B2's spike S-IME (./armed.ts): with the prototype on, a text box also mounts ARMED, on a selected text element
+// before any edit: focused with its caret hidden and no mark bar, its first key turning it into the edit in place.
 import { Editor, Extension } from '@tiptap/core';
 import { Plugin, TextSelection } from '@tiptap/pm/state';
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type FormEvent, type KeyboardEvent, type Ref, type SyntheticEvent } from 'react';
@@ -19,6 +22,7 @@ import { bindSlideText } from '../../yjs/slide-text';
 import type { SlideCanvas } from '../canvas';
 import type { DeckSession } from './session';
 import { hexColor, httpsHref, slideTextExtensions, type Gesture } from './text-schema';
+import { armedMode, registerArmed } from './armed';
 import './textbox.css';
 
 export const TEXTBOX_COPY = {
@@ -61,10 +65,17 @@ export interface TextBoxProps {
   slideId: string;
   elementId: string;
   readOnly?: boolean;
+  /** P4-B2 spike: mounted ARMED (the element selected, not yet edited); false once a key or a press began the edit. */
+  armed?: boolean;
 }
 
-export function TextBox({ session, canvas, slideId, elementId, readOnly = false }: TextBoxProps) {
+export function TextBox({ session, canvas, slideId, elementId, readOnly = false, armed = false }: TextBoxProps) {
   const [mounted, setMounted] = useState<{ editor: Editor; node: HTMLElement } | null>(null);
+  // read by the editor's listeners without making the box mount again: ARMED turning into the edit is a flag's flip
+  const armedNow = useRef(armed);
+  useLayoutEffect(() => {
+    armedNow.current = armed;
+  }, [armed]);
   const bar = useRef<HTMLDivElement>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   // fix wave 1: an edit the slide's text budget refuses, shown until the next edit that fits
@@ -139,10 +150,25 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
       ],
     });
     binding.bind(editor.view);
-    // the text selected, so a fresh placeholder is typed over
-    const size = editor.state.doc.content.size;
-    editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 1, Math.max(1, size - 1))));
+    // the text selected, so a fresh placeholder is typed over (P4-B2 spike: armed in mode `clear`, the caret at the start)
+    armSelection(editor, armedNow.current);
     editor.view.focus();
+    // P4-B2 spike: the armed box's acts, which the stage's keys reach while it is armed
+    const unregister = registerArmed(session, {
+      elementId,
+      root: editor.view.dom,
+      armed: () => armedNow.current && !editor.isDestroyed,
+      replace: () => {
+        const size = editor.state.doc.content.size;
+        // the first block kept, emptied: the key's own insertion or composition then lands in it
+        if (armedMode() === 'clear' && size > 2) editor.view.dispatch(editor.state.tr.delete(1, size - 1));
+        session.editText(elementId);
+      },
+      editAll: () => {
+        armSelection(editor, false);
+        session.editText(elementId);
+      },
+    });
     // P3-F F9: the keys the owner typed on the selected element before this box took the focus, typed over that
     // selection as a typed key replaces it; and any that reach the stage while the box is open, at its selection
     const typeIn = () => {
@@ -176,6 +202,8 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
     const document = node.ownerDocument;
     const onPointerDown = (event: Event) => {
       const at = event.target as Node | null;
+      // P4-B2 spike: a press in the armed box begins the edit, the caret at the press (T3, roughly: no drag from it)
+      if (at && armedNow.current && node.contains(at)) return session.editText(elementId);
       if (at && (node.contains(at) || bar.current?.contains(at))) return;
       session.editText(null);
     };
@@ -187,6 +215,7 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
     setMounted({ editor, node });
 
     return () => {
+      unregister();
       stopTyped();
       clearTimeout(settle);
       resize?.disconnect();
@@ -200,6 +229,13 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
       canvas.endTextEdit(elementId);
     };
   }, [session, canvas, slideId, elementId, readOnly]);
+
+  // P4-B2 spike: armed again after an edit (Escape), its selection as it is armed (the effect above set it at the mount)
+  const wasArmed = useRef(armed);
+  useEffect(() => {
+    if (armed && !wasArmed.current && mounted && !mounted.editor.isDestroyed) armSelection(mounted.editor, true);
+    wasArmed.current = armed;
+  }, [armed, mounted]);
 
   // the bar above the element (below it when the element is at the top), in the overlay's pixels
   useLayoutEffect(() => {
@@ -215,8 +251,15 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
     el.dataset.side = below ? 'below' : 'above';
   });
 
-  if (!mounted || readOnly) return null;
+  if (!mounted || readOnly || armed) return null;
   return <MarkBar ref={bar} editor={mounted.editor} node={mounted.node} session={session} refused={refused} />;
+}
+
+/** The selection a box opens with: all its text, or (P4-B2 spike, armed in mode `clear`) the caret at its start. */
+function armSelection(editor: Editor, armed: boolean): void {
+  const { doc } = editor.state;
+  const caret = armed && armedMode() === 'clear';
+  editor.view.dispatch(editor.state.tr.setSelection(caret ? TextSelection.create(doc, 1) : TextSelection.create(doc, 1, Math.max(1, doc.content.size - 1))));
 }
 
 /**

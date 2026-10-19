@@ -17,6 +17,7 @@ import { setDeckOverride } from '@artifacts/slides/writers';
 import { deckScalars } from '@artifacts/yjs/slides';
 import { onUpdate } from '@artifacts/yjs';
 import type { DeckTimings } from '@artifacts/slides/editor/session';
+import { setArmedPrototype, type ArmedMode } from '@artifacts/slides/editor/armed';
 import { openDeckTabs } from './tab-state';
 
 export type DeckSeamEdit =
@@ -54,6 +55,10 @@ export interface PresentationsSeam {
   presence: { show(artifactId: string, slideId: string, elementIds: string[]): Promise<void>; clear(): Promise<void> };
   /** M5: an agent republishing one slide every `intervalMs` (the second slide on), until stopped; answers how many. */
   agent: { start(artifactId: string, intervalMs: number): Promise<void>; stop(): Promise<number> };
+  /** P4-B2's spike S-IME: the ARMED prototype on in one mode, or off (null), in every deck editor of the window. */
+  armed(mode: ArmedMode | null): void;
+  /** P4-B2's spike: each open tab's selection and the text element edited, if any. */
+  editorState(artifactId: string): { surface: string; selection: string[]; editingText: string | null }[];
 }
 
 declare global {
@@ -125,6 +130,14 @@ export function installPresentationsSeam(win: Window, host: () => ArtifactHost):
     dragProbe: dragProbe(win),
     presence: remotePresence(host),
     agent: agentRepublishing(host),
+    armed: setArmedPrototype,
+    editorState: (artifactId) =>
+      openDeckTabs()
+        .filter((tab) => tab.artifactId === artifactId)
+        .flatMap((tab) => {
+          const state = tab.snapshot().session?.snapshot();
+          return state ? [{ surface: tab.surface, selection: [...state.selection], editingText: state.editingText }] : [];
+        }),
   };
 }
 
