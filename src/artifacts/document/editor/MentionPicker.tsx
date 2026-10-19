@@ -48,12 +48,16 @@ export function MentionPicker({ source, onPick, onClose }: { source: MentionSour
   }, [source, query]);
 
   const targets = results?.targets ?? [];
+  // P3-F (X26): a key of an IME composition is the IME's (the Hangul commit Enter, a cancelling Escape); Enter picks only
+  // from the results of the query in the field, and is the field's while they are still on their way
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.nativeEvent.isComposing) return;
     if (event.key === 'Escape') onClose();
     else if (event.key === 'ArrowDown' && targets.length > 0) setAt((at + 1) % targets.length);
     else if (event.key === 'ArrowUp' && targets.length > 0) setAt((at - 1 + targets.length) % targets.length);
-    else if (event.key === 'Enter' && targets[at]) onPick(targets[at]);
-    else return;
+    else if (event.key === 'Enter') {
+      if (results?.query === query && targets[at]) onPick(targets[at]);
+    } else return;
     event.preventDefault();
   };
   const optionId = (i: number) => `${list}-${i}`;

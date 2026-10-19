@@ -345,6 +345,41 @@ describe('the mention picker', () => {
     act(() => void fireEvent.click(results().getByRole('option', { name: /Fix the build/ })));
     expect(mentionAttrs(editor())).toMatchObject({ kind: 'session', ref: 'app-1', label: 'Fix the build' });
   });
+
+  // P3-F panel scalpel-1#1 (X26): the Hangul IME's commit Enter is the composition's, and an Enter picks only from the
+  // results of the query in the field: composed on to 김민수 while 김민's results still show, nothing is inserted until
+  // 김민수's arrive
+  it('inserts nothing on a composing Enter, nor from results of an older query', async () => {
+    const people: MentionTarget[] = [
+      { kind: 'person', ref: 'p-minji', label: '김민지' },
+      { kind: 'person', ref: 'p-minsu', label: '김민수' },
+    ];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const editor = await mountWith({
+      search: async (query) => {
+        if (query === '김민수') await held;
+        return people.filter((p) => p.label.includes(query));
+      },
+    });
+    insert('Mention');
+    const field = screen.getByRole('combobox', { name: 'Mention' });
+    act(() => void fireEvent.change(field, { target: { value: '김민' } }));
+    await until(() => results().queryAllByRole('option').length === 2, 'the results for 김민');
+    act(() => void fireEvent.change(field, { target: { value: '김민수' } })); // the composition goes on; its search is out
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150)); // past the search's quiet window
+    });
+    act(() => void fireEvent.keyDown(field, { key: 'Enter', isComposing: true })); // the IME's commit Enter
+    expect(mentionAttrs(editor()), 'a mention on the composing Enter').toBeNull();
+    act(() => void fireEvent.keyDown(field, { key: 'Enter' })); // the Enter after it, 김민's results still shown
+    expect(mentionAttrs(editor()), 'a mention from the older query’s results').toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Mention' })).not.toBeNull();
+    await act(async () => release());
+    await until(() => results().queryAllByRole('option').length === 1, 'the results for 김민수');
+    act(() => void fireEvent.keyDown(field, { key: 'Enter' }));
+    expect(mentionAttrs(editor())).toMatchObject({ kind: 'person', ref: 'p-minsu', label: '김민수' });
+  });
 });
 
 // M8 fix wave 1: a new document's first tab is the host's; two editors open on the empty document wait for it, both bind
