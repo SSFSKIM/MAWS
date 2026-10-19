@@ -9,8 +9,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
+import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph';
+import { useTaskGraph } from '../../tools/agents/store';
 import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, TranscriptSlot, useTranscriptStore } from '../index';
-import { BASH_RESULT, builder, request, tool } from '../model/test-events';
+import { BASH_RESULT, builder, request, task, tool } from '../model/test-events';
 import type { Row } from '../model/rows';
 import { registeredActions } from './registry';
 
@@ -172,6 +174,46 @@ describe('TranscriptSlot', () => {
     expect(document.querySelector('.transcript-shell')).not.toBeNull();
     expect(document.querySelector('.transcript-shell-meta')).toBeNull();
     expect(invoke.mock.calls.map(([name]) => name)).not.toContain('session.queue.list'); // a child's transcript has no queue
+  });
+
+  // L197: a child agent's transcript holds none of its siblings' Agent calls, so a SendMessage to one names it from the
+  // session's task graph (what the store holds; the slot opens no watch of its own), pushed again only when the agents
+  // it names change.
+  it('names an agent the transcript never launched from the session’s task graph, and re-pushes only when the agents change', async () => {
+    const id = 'app-slot-child-lookup' as AppSessionId;
+    const agent = 'agent-writer' as AgentId;
+    const c = builder();
+    c.turn('c1', 'Coordinate');
+    c.toolUse('s1', 'SendMessage', { to: 'a912e224', message: 'ready?' });
+    c.end(['c1']);
+    const events = c.events.map((event) => ({ ...event, agentId: agent }));
+    const invoke = vi.fn((name: string) =>
+      Promise.resolve(
+        name === 'session.events' || name === 'session.appEvents' ? { ok: true, value: { events: [], lastSeq: 0, complete: true } } : { ok: true, value: { events, complete: true } },
+      ),
+    );
+    (window as { maws?: MawsBridge }).maws = { invoke, on: vi.fn(() => () => {}) } as unknown as MawsBridge;
+    const entries = useTaskGraph.getState().entries;
+    onTestFinished(() => useTaskGraph.setState({ entries }));
+    const g = builder();
+    g.emit('subagent.started', { taskId: task('a912e224'), toolUseId: tool('ag9'), description: 'Survey src', subagentType: 'Explore', isBackground: true, spawnDepth: 1, prompt: 'go' });
+    const graph = (more: Parameters<typeof applyTaskEvents>[1] = []) => applyTaskEvents(applyTaskEvents(emptyGraph(), g.events), more);
+    const put = (next: ReturnType<typeof graph>) => act(() => useTaskGraph.setState({ entries: new Map([[id, { ...(useTaskGraph.getState().entries.get(id) ?? { phase: 'live', launchId: null, lastSeq: null, error: null, disk: { agents: null, runs: null, error: null, runsError: null }, pendingStops: new Map() }), graph: next }]]) }));
+    render(<TranscriptSlot appSessionId={id} agentId={agent} />);
+    const key = `${id}:${agent}`;
+    await settle();
+    const sent = () => {
+      act(() => useTranscriptStore.getState().expandAll(key));
+      return useTranscriptStore.getState().rows(key).find((row) => row.kind === 'agent_message')?.text;
+    };
+    expect(sent()).toBe('Sent to a912e224: ready?'); // no graph yet
+    put(graph());
+    expect(sent()).toBe('Sent message to Survey src: ready?');
+    const lookup = useTranscriptStore.getState().entries[key]!.state.agents;
+    g.emit('subagent.progress', { taskId: task('a912e224'), description: 'Reading one.txt', usage: { totalTokens: 10, toolUses: 1, durationMs: 5 }, lastToolName: 'Read', summary: null });
+    put(graph()); // the graph changed, the agents it names did not
+    expect(useTranscriptStore.getState().entries[key]!.state.agents).toBe(lookup);
+    expect(invoke.mock.calls.map(([name]) => name)).not.toContain('fs.subagents'); // no watch of its own
   });
 
   // The held tail and the withdrawn-steer filter read C7's queue store, which the slot attaches itself: a session's

@@ -8,7 +8,7 @@ import type { AgentId, MessageUuid } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf } from '../transcript/model/derive';
 import { foldedInReport, reportViewOf } from '../owner/report/project'; // P2-C (2026-10-09)
-import { applyEvents, createState, RECEIPT_APPLIED, withReaderState, withUi, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
+import { applyEvents, createState, RECEIPT_APPLIED, withAgents, withReaderState, withUi, type AgentLookup, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
 import { attachSource, type Attachment } from '../transcript/source/hydrate';
 import type { TranscriptSource } from '../transcript/source/types';
@@ -51,7 +51,11 @@ export interface TranscriptStore {
   attach(key: string, source: TranscriptSource, options?: { agentId?: AgentId | null }): Promise<void>;
   retry(key: string): Promise<void>; // hydrate a failed key again from its source, keeping its attachments
   detach(key: string): void;
-  drop(key: string): void; // release every attachment and forget the state
+  drop(key: string): void; // release every attachment and forget the state, and the key's agent lookup
+  // L197: the agents the host knows beyond the key's loaded turns (MAWS: the session's task graph, transcript/view/
+  // agent-lookup.ts; the desk: its tree), naming a message to or from one no loaded turn launched. Kept for the key
+  // across its restarts and resets, until set again; undefined clears it.
+  setAgents(key: string, agents: AgentLookup | undefined): void;
   rows(key: string): Row[];
   lastAssistantLine(key: string): string | null;
   activity(key: string): TurnActivity[]; // what each turn did whatever the reader disclosed (C8's summary); stable while no turn changes
@@ -187,6 +191,11 @@ interface Attached {
 
 export function createTranscriptStore() {
   const attachments = new Map<string, Attached>();
+  const lookups = new Map<string, AgentLookup>(); // L197: each key's host agent lookup, applied to every state it starts
+  const fresh = (key: string, agentId: AgentId | null, ui?: TranscriptUi): TranscriptState => {
+    const state = createState(null, agentId);
+    return withAgents(ui === undefined ? state : { ...state, ui }, lookups.get(key));
+  };
   let nonce = 0;
   return create<TranscriptStore>()((set, get) => {
     const entry = (key: string) => get().entries[key] as TranscriptEntry | undefined;
@@ -199,7 +208,7 @@ export function createTranscriptStore() {
     // recorded on the key (hydrate.ts has already unsubscribed and cleared its buffer) and `retry` starts over.
     const hydrate = (key: string, attached: Attached): Promise<void> => {
       attached.attachment?.detach();
-      let staged: TranscriptState | null = attached.restartUi === null ? null : { ...createState(null, attached.agentId), ui: attached.restartUi };
+      let staged: TranscriptState | null = attached.restartUi === null ? null : fresh(key, attached.agentId, attached.restartUi);
       let stagedAt = 0;
       const attachment = attachSource(attached.source, {
         apply(events) {
@@ -221,7 +230,7 @@ export function createTranscriptStore() {
         () => {
           if (!current()) return;
           if (staged !== null) {
-            const state = staged;
+            const state = withAgents(staged, lookups.get(key)); // a lookup set while staging applies too
             staged = null; // later batches apply to the installed state
             attached.restartUi = null;
             // A jump asked for during the round trip (C5 remounting a kept session at an attention item's row) was
@@ -307,7 +316,7 @@ export function createTranscriptStore() {
         if (existing) release(existing);
         const kept = entry(key);
         if (!kept) {
-          const state = createState(null, options.agentId ?? null);
+          const state = fresh(key, options.agentId ?? null);
           set({ entries: { ...get().entries, [key]: { state, rows: rowsOf(state), phase: 'hydrating', error: null, following: true, working: false, clock: null, jump: null } } });
         } else put(key, { phase: 'hydrating', error: null });
         // Starting a kept key over (no holder left): the snapshot is the whole history, and after an exit or a child's
@@ -321,7 +330,7 @@ export function createTranscriptStore() {
           if (attachments.get(key) !== attached) return;
           attached.restartUi = null; // an explicit reset empties the key at once
           attached.stagedJump = null;
-          const state = createState(null, attached.agentId);
+          const state = fresh(key, attached.agentId);
           put(key, { state, localAssistantInk: undefined, phase: 'hydrating', error: null, clock: null, jump: null });
           hydrate(key, attached);
         }) ?? null;
@@ -346,9 +355,17 @@ export function createTranscriptStore() {
         const attached = attachments.get(key);
         if (attached) release(attached);
         attachments.delete(key);
+        lookups.delete(key);
         const entries = { ...get().entries };
         delete entries[key];
         set({ entries });
+      },
+
+      setAgents(key, agents) {
+        if (agents === undefined) lookups.delete(key);
+        else lookups.set(key, agents);
+        const current = entry(key);
+        if (current && current.state.agents !== agents) put(key, { state: withAgents(current.state, agents) });
       },
 
       rows: (key) => entry(key)?.rows ?? NO_ROWS,

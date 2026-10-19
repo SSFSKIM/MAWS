@@ -13,6 +13,8 @@
 // local (`Transcript`'s). Absent, the slot draws as before.
 // P2-C (2026-10-09): a session's slot follows its owner channel (`stores/owner-channel.ts`) and tells the transcript
 // whether the lane is on, which the report view and the report module read.
+// L197: the slot gives the transcript the session's agents from its task graph (agent-lookup.ts), so a message to an
+// agent no loaded turn launched names it.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useEffect, useMemo } from 'react';
 import { useShownEffort } from '../../composer/effective-effort';
@@ -22,9 +24,10 @@ import { useSessions } from '../../stores/sessions';
 import { heldRow } from '../model/derive';
 import type { Row } from '../model/rows';
 import { ipcRewind, ipcSource } from '../source/ipc';
+import { useAgentLookup } from './agent-lookup'; // L197
 import type { TranscriptActions } from './context';
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
-import { Transcript } from './Transcript';
+import { storeKeyOf, Transcript } from './Transcript';
 
 export interface TranscriptSlotProps {
   appSessionId: AppSessionId;
@@ -40,6 +43,7 @@ export function TranscriptSlot({ appSessionId, agentId, className, startAt, pres
   const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
   const renderRequest = useRegisteredRequestRenderer(); // C7's card; the placeholder until it registers
   const source = ipcSource(appSessionId, agentId); // memoised per key
+  useAgentLookup(storeKeyOf(source), appSessionId); // L197: an agent no loaded turn launched, named from the session's task graph
   const rewind = useMemo(() => (agentId === undefined ? ipcRewind(appSessionId) : undefined), [appSessionId, agentId]);
   // Where the session runs, from its record (its worktree's checkout when it has one): the engine's Bash input names no
   // cwd, so a shell call shows this, labelled as the session's directory. Not for a child agent's transcript: a
