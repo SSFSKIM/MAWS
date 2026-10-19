@@ -24,7 +24,7 @@ import { acquireSession, refusalWords } from '../../sessions/acquire'; // P2-A
 import { availabilityRefusal } from '../../sessions/availability'; // P2-A
 import { locationPath, type HookResult, type ModelInfo, type SetupIntentHook, type SetupProject } from '../setup-intent';
 import { ENDED, MESSAGE_HELD, STARTING } from '../submit/submit-state';
-import { aliasOf, chipLabel, DEFAULT_ROW, modelAsk } from '@shared/sessions/model-label';
+import { aliasOf, chipLabel, DEFAULT_ROW, modelAsk, type HeldAsk } from '@shared/sessions/model-label';
 
 export interface ChipBinding<V, O = never> {
   value: V;
@@ -135,8 +135,9 @@ export interface LiveReads {
   git?: GitBranchAnswer | null; // W9 (H2): git's answer for the session's directory, null until it has one
   refresh?: () => void;
   // P2-F wave S (the review of S-chip): the model this renderer asked for and the engine has not reported since, held
-  // for the selector and the chip alike (widgets/model.ts `heldModel`; `value` null: Default); none when absent
-  asked?: { value: string | null } | null;
+  // for the selector and the chip alike (widgets/model.ts `heldModel`; `value` null: Default, `starting` while the
+  // session starts for it); none when absent
+  asked?: HeldAsk | null;
 }
 
 // `list_permission_rules`'s workspace directories as paths (the wire types them loosely: a path, or an object naming one).

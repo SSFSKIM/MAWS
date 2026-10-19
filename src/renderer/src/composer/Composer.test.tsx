@@ -516,6 +516,23 @@ describe("composer DOM under C5's dispatcher", () => {
       await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet')); // nothing applied: the request is gone
     });
 
+    // S-R2-r2-i1: the report the session last made predates the choice, so it acknowledges nothing until set_model is accepted
+    it('choosing the model the session last reported is marked while the session starts for it, until set_model is accepted', async () => {
+      live(A, { status: { process: 'exited', model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } });
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+      await choose(/^Haiku/);
+      await waitFor(() => expect(fake.pending('session.acquire')).toBe(1)); // the start is held
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
+      live(A, { status: { process: 'ready', model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } });
+      await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A, launched: true, joined: false }));
+      await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
+      expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'); // acquired, set_model in flight
+      live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the host's status after the answer
+      await act(() => fake.reply('session.setModel', SET));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+    });
+
     it('a model chosen before the engine has reported any is marked until it does', async () => {
       live(A, { status: { model: { requested: null, resolved: null }, gateway: direct } });
       mount([{ index: 0, id: A }]);
