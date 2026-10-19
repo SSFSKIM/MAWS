@@ -236,7 +236,8 @@ export const commands = {
   // P3-H (P3 Decision Log 91, the X31 `ownFile` row): `ownFile`, or a design's export (E's Decision Log 33), is a file
   // of its own: main mints `exportId` before it renders, names the file `<revision>-<format>-<exportId>.<ext>` and
   // answers the id beside its path, so no later export of the same revision and format replaces it. It lives under the
-  // artifact's export storage as the cache files do. Send to is the caller that sets it.
+  // artifact's export storage as the cache files do. P4 (W1, L302): Send to sets it, and so do the header exports
+  // (deck, document, dashboard), the HTML viewer's Export and the library's, each saving its file by `exportId`.
   'artifacts.export': main(
     z.strictObject({
       artifactId: Id,

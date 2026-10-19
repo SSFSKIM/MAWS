@@ -36,9 +36,12 @@ export const DECK_EXPORTS: readonly DeckExport[] = [
 /** The deck as `shown` (L233: the version previewed, else the live deck) exported as `entry` asks, then saved where the owner chooses. */
 export async function exportDeck(artifactId: string, entry: DeckExport, shown: DeckShown = null, client: MawsBridge = ipc): Promise<void> {
   if (shown === 'compare') return; // two versions compared: nothing is exported
-  const exported = await client.invoke('artifacts.export', { artifactId, format: entry.format, ...(entry.fonts && { fonts: entry.fonts }), ...(shown && { versionId: shown.versionId }) });
+  // P4 (W1, L302): a file of its own (`ownFile`), saved by its id, so an export of the same revision and format between
+  // the two (the agent's `artifact_export`, another option) never swaps the file saved
+  const exported = await client.invoke('artifacts.export', { artifactId, format: entry.format, ...(entry.fonts && { fonts: entry.fonts }), ...(shown && { versionId: shown.versionId }), ownFile: true });
   if (!exported.ok) return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
-  const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision: exported.value.revision, format: entry.format } } });
+  const { revision, exportId } = exported.value;
+  const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format: entry.format, ...(exportId !== undefined && { exportId }) } } });
   if (!saved.ok) return toastFailure(VIEWERS_COPY.exportFailed(saved.error.message));
   if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path), actions: [], dismissible: true });
 }

@@ -121,6 +121,9 @@ export const commands = {
   'library.read': main(ContentAt.extend(FilesReadInputSchema.pick({ offset: true, length: true, hash: true }).shape), FilesReadOutputSchema),
   // M5b: the native save dialog at ~/Downloads/<the artifact's title or the file's name>, the source copied to the
   // chosen path (a temporary file beside it renamed over it); `saved: false` when the dialog was cancelled.
+  // P4 (W1, L302): saving an export by its `exportId` uses it up, main removing that file once the save returns,
+  // whether it copied, was cancelled or failed (a design export's file included), so a second save of the same id
+  // answers "no export ... export it again".
   'library.saveAs': main(
     z.strictObject({ artifactId: Id, source: LibrarySaveSourceSchema }),
     z.discriminatedUnion('saved', [z.strictObject({ saved: z.literal(true), path: z.string() }), z.strictObject({ saved: z.literal(false) })]),

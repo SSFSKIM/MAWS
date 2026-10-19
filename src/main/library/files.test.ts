@@ -1,7 +1,7 @@
 // The viewers' and the library's reach to a byte kind's stored file (files.ts): the formats the exporter registry
 // serves, the stored file resolved through the host, Open externally and Reveal (with the e2e seam's log), and Save as…
 // of an export or of the stored file (with the e2e seam's folder).
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -128,6 +128,30 @@ describe('library files', () => {
     const cancelled = createLibraryFiles(deps({ kind: 'html', title: 'Page', files: {} }));
     await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } })).resolves.toEqual({ saved: false });
     await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 8, format: 'pdf' } } })).rejects.toThrow(/no export/);
+  });
+
+  // P4 (W1, tracker 2026-10-19 L302): an export of its own file is found by its id, whatever another export of the same
+  // revision and format wrote at the cache name meanwhile, and the save removes it once copied or declined, since
+  // nothing else collects the exports directory; the cache name's file is never the save's to remove
+  it('saves an export of its own by its id, past another export at the cache name, and removes it once saved or cancelled', async () => {
+    const exports = join(dir, 'artifacts', ID, 'exports');
+    mkdirSync(exports, { recursive: true });
+    const OWN = '00000000-0000-4000-8000-0000000000e1';
+    const own = join(exports, artifactExportName(7, 'pdf', OWN));
+    const cached = join(exports, artifactExportName(7, 'pdf'));
+    writeFileSync(own, '%PDF letter');
+    writeFileSync(cached, '%PDF a4, the agent’s'); // the interleaved export of the same revision and format
+    const chosen = join(dir, 'chosen.pdf');
+    const files = createLibraryFiles(deps({ kind: 'document', title: 'Plan', files: {} }, { showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: chosen })) }));
+    await expect(files.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf', exportId: OWN } } })).resolves.toEqual({ saved: true, path: chosen });
+    expect(readFileSync(chosen, 'utf8')).toBe('%PDF letter');
+    expect(readdirSync(exports)).toEqual([artifactExportName(7, 'pdf')]);
+
+    writeFileSync(own, '%PDF letter again');
+    const cancelled = createLibraryFiles(deps({ kind: 'document', title: 'Plan', files: {} }));
+    await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf', exportId: OWN } } })).resolves.toEqual({ saved: false });
+    await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } })).resolves.toEqual({ saved: false });
+    expect(readdirSync(exports)).toEqual([artifactExportName(7, 'pdf')]);
   });
 
   it('saves a copy of a File artifact under its own name, into the e2e seam’s folder without a dialog', async () => {

@@ -7,6 +7,7 @@ import { installFakeMain, ok } from '../../test-support/code';
 import { DECK_EXPORTS, deckExports, exportDeck } from './exports';
 
 const A = '00000000-0000-4000-8000-000000000001';
+const E = '00000000-0000-4000-8000-0000000000e1'; // an export's own id, as main mints it
 const toasts = () => useNotices.getState().notices.filter((n) => n.kind === 'toast').map((n) => [n.level, n.text]);
 
 beforeEach(() => useNotices.setState({ notices: [] }));
@@ -21,14 +22,16 @@ describe('the deck’s Export menu', () => {
   });
 
   it('exports with the entry’s fonts and saves that export where the owner chooses', async () => {
-    const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: '/store/x/exports/7-pptx.pptx', revision: 7 }) : ok({ saved: true, path: '/Users/me/Downloads/Deck.pptx' })));
+    // P4 (W1, tracker 2026-10-19 L302): each export takes a file of its own and the save names it by its id, so an export
+    // of the same revision and format between the two (the agent's, the other paper) never swaps the file saved
+    const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: `/store/x/exports/7-pptx-${E}.pptx`, revision: 7, exportId: E }) : ok({ saved: true, path: '/Users/me/Downloads/Deck.pptx' })));
     await act(() => exportDeck(A, DECK_EXPORTS.find((e) => e.id === 'pptx-basic')!));
     await act(() => exportDeck(A, DECK_EXPORTS.find((e) => e.id === 'pdf')!));
     expect(main.calls).toEqual([
-      { name: 'artifacts.export', input: { artifactId: A, format: 'pptx', fonts: 'basic' } },
-      { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 7, format: 'pptx' } } } },
-      { name: 'artifacts.export', input: { artifactId: A, format: 'pdf' } },
-      { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 7, format: 'pdf' } } } },
+      { name: 'artifacts.export', input: { artifactId: A, format: 'pptx', fonts: 'basic', ownFile: true } },
+      { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 7, format: 'pptx', exportId: E } } } },
+      { name: 'artifacts.export', input: { artifactId: A, format: 'pdf', ownFile: true } },
+      { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 7, format: 'pdf', exportId: E } } } },
     ]);
     expect(toasts()).toEqual([
       ['info', 'Saved to /Users/me/Downloads/Deck.pptx'],
@@ -51,9 +54,9 @@ describe('the deck’s Export menu', () => {
     await act(() => exportDeck(A, pdf, null));
     await act(() => exportDeck(A, pdf, 'compare')); // two versions compared: nothing is exported
     expect(main.calls).toEqual([
-      { name: 'artifacts.export', input: { artifactId: A, format: 'pdf', versionId: 3 } },
+      { name: 'artifacts.export', input: { artifactId: A, format: 'pdf', versionId: 3, ownFile: true } },
       { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 4, format: 'pdf' } } } },
-      { name: 'artifacts.export', input: { artifactId: A, format: 'pdf' } },
+      { name: 'artifacts.export', input: { artifactId: A, format: 'pdf', ownFile: true } },
       { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 4, format: 'pdf' } } } },
     ]);
   });
