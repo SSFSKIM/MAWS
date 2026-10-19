@@ -2,6 +2,8 @@
 // design-systems.spec.ts reads off a real document page and a real deck stage. A colour is compared as the window paints
 // it (`rgb(…)`), whatever form a token's value was written in.
 import { expect, type Locator, type Page } from '@playwright/test';
+import { colorFromHex } from '@artifacts/design-system/color';
+import { documents } from './documents';
 
 /** A one-slide deck whose title is set in the system's accent, as `__maws_presentations.seed` takes its files. */
 export const ACCENT_DECK: Record<string, string> = {
@@ -15,6 +17,35 @@ export const deckHeadline = (stage: Locator) => stage.locator('[data-stage-slide
 
 /** The colour an element paints its text in. */
 export const paintedColor = (element: Locator) => element.evaluate((node) => getComputedStyle(node).color);
+
+type Marked = Element & { __mawsRestyleMark?: string };
+/**
+ * Marks the element `element` resolves to now as `mark`: a property of the node itself, which no mutation observer (an
+ * editor's own) sees, so a later read tells this element from one drawn since, as a remounted editor's would be.
+ */
+export const markElement = (element: Locator, mark: string) => element.evaluate((node, m) => void ((node as Marked).__mawsRestyleMark = m), mark);
+/** The colour the element `element` resolves to paints its text in, and whether it is still the one marked `mark`. */
+export const markedColor = (element: Locator, mark: string) => element.evaluate((node, m) => ({ marked: (node as Marked).__mawsRestyleMark === m, color: getComputedStyle(node).color }), mark);
+
+/**
+ * The system's accent recoloured as its page's hex field writes it (Palette through `setToken`: the accent's one
+ * attribute on the `tokens` node, the stored token with the colour `colorFromHex` reads as its value), through a replica
+ * of the system that the window's own ArtifactHost opens (the renderer's documents seam), so nothing on screen changes
+ * while the host brings the token to every scope that shows the system. Resolves once the host acknowledged it.
+ */
+export async function recolourThroughReplica(page: Page, systemId: string, hex: string): Promise<void> {
+  const seam = documents(page);
+  const replica = await seam.open(systemId);
+  try {
+    const { attrs } = await seam.json(replica, 'tokens');
+    const keys = Object.keys(attrs).filter((key) => key === 'color.accent' || key === 'color.accent.$root');
+    expect(keys, 'the system stores its accent under one key').toHaveLength(1);
+    await seam.setAttr(replica, keys[0]!, { ...(attrs[keys[0]!] as Record<string, unknown>), $value: colorFromHex(hex) }, 'tokens');
+    await expect.poll(async () => (await seam.state(replica)).unsaved, { message: 'the host acknowledged the accent' }).toBe(0);
+  } finally {
+    await seam.close(replica);
+  }
+}
 
 /**
  * A reading-list passage whose link the document's theme sets in the system's accent (theme.css: `.ds-doc a`), as the
