@@ -296,6 +296,32 @@ describe('the preview', () => {
     ]);
   });
 
+  // P4 W1-B (tracker L238): once compaction merges the rows, the one spanning a comparison's start brings an earlier
+  // move's carry with it, and the rows as written do too (the range's start is inclusive: the row of the start
+  // version's own seq, here the move's); a block the comparison did not change is not labelled, a block it moved still is
+  it.each([true, false])('labels only the blocks the comparison changed when a row reaches back past its start (compacted: %s)', async (compacted) => {
+    await setup(async ({ host: h, history: hist, agentWrites }) => {
+      hist.version('named', HUMAN, { label: 'Before' });
+      let carries: ReturnType<typeof applyEdit>['carries'] = [];
+      await agentWrites((agent) => (carries = applyEdit(agent.doc, [{ op: 'move', id: 'p1', after: 'p3' }]).carries));
+      hist.carryLast(carries);
+      hist.version('turn', AGENT, { summary: 'Moved the first' });
+      await agentWrites(agentAppends(' Later.')); // the third paragraph, second after the move
+      hist.version('turn', AGENT, { summary: 'Added a word' });
+      if (compacted) hist.compact(0, h.revision);
+    });
+    await openHistory();
+    const labels = () => [...document.querySelectorAll<HTMLElement>('.ProseMirror [data-carry]')].map((el) => [el.dataset.carryLabel, el.textContent]);
+    click(row('.*Added a word'));
+    await previewing();
+    await until(() => document.querySelector('.ProseMirror [data-change-block]')?.textContent === 'The third paragraph. Later.', 'the change');
+    expect(labels()).toEqual([]);
+    click(row('.*Moved the first'));
+    await previewing();
+    await until(() => labels().length > 0, 'the label');
+    expect(labels()).toEqual([['Moved', 'The first paragraph.']]);
+  });
+
   it('draws a version with the design-system tokens it pinned', async () => {
     const system = '00000000-0000-4000-8000-0000000000d5';
     await setup(
