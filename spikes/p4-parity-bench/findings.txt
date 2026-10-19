@@ -1,0 +1,242 @@
+# P4-A1 — The parity bench: findings
+
+Parent: docs/doperpowers/plans/2026-10-19-p4-smoothing.md, child P4-A1 (§5; §2 item 11; §4.2's parity-bench paragraph,
+binding on the decision rule; contracts X34 and X39; Decision Logs 10, 16, 17 and 19), parent pin blob
+f3ac0e8cfd701a95e4dde4a2b847bf1e04e49189 at master bb8b9de7d. Root spec docs/charter.md. A spike: findings, never a
+merge of a verdict; the harness lands as a live spec.
+
+Status: phase 1 of 2 (Decision Log 19), the harness, done 2026-10-19. No record run has happened and no verdict exists.
+The decision rule below is fixed before any record run. The record run is phase 2, in a GUI hold the architect
+schedules (§7 "The record run").
+
+The question, in the owner's words (Decision Log 10): if Claude Desktop is equally slow from server round trips and
+output time, MAWS has no problem; if not, something else is wrong. The verdict decides whether the edit-protocol child
+P4-A3 exists, and it is a close criterion: P4 closes only at parity on every judged task (Decision Log 17).
+
+
+## 1. The decision rule (fixed 2026-10-19, before any record run)
+
+Tasks and cells. Four tasks, the prompt verbatim in both apps (tasks.json, which both arms read): B1 a one-word fix in
+the document's schedule paragraph; B3 a rewrite of its introduction paragraph at about the same length; B5 a date
+change on slide 2 of a six-slide deck; B7 a slide added after slide 2 with a title and three bullets. A cell is one
+task in one arm (MAWS, Desktop). The artifacts are equivalent seeds in each app's native form (seed/; §4). The only
+words that differ between the apps' prompts are the artifact's handle ({ref}): MAWS's `maws-artifact:` link, Desktop's
+file name or artifact name.
+
+The measure decided on: send to edit landed, per edit, from each app's own engine transcript through the one parser
+(parse.py):
+- send is the engine's human `user` record (the engine's clock; the host's in both apps), so neither driver's latency
+  counts;
+- edit landed is the `tool_result` record of the turn's first successful landing call (MAWS: `artifact_edit`,
+  `artifact_publish`; Desktop: `Edit`, `Write`, `MultiEdit`, `Artifact`, Cowork's `update_artifact`).
+
+Repetitions. At least five valid repetitions per cell, each a fresh session, the two arms interleaved in the order of
+§7 fixed now, the cache state recorded per repetition. A repetition is valid when its edit landed and the checker
+(check.py, one set of rules for both apps, read from the artifact before and after the turn) passed. An invalid
+repetition is listed with its reason, never dropped silently. A cell short of five valid repetitions is run again in
+the same hold, never judged short.
+
+Reported per cell: the median with the spread (minimum, quartiles, maximum) of send to edit landed, and beside it, per
+edit, §4.2's breakdown: requests, input tokens (the context size), first-byte wait, generation time and output tokens,
+server hold, tool execution; send to first token; send to turn end.
+
+The verdict, per task, with no middle band: MAWS's median send-to-edit-landed above 1.2 times Desktop's median means
+Desktop is faster on that task; otherwise parity. (§4.2; the architect's "about 20 %" made one threshold by Decision
+Log 16.2.)
+
+What voids a cell's verdict: the model (the request's `model`), `output_config.effort` or the thinking type differing
+between the arms, read from the records (parse.py `verdicts`). Recorded beside the verdict and not voiding it: the cache
+state, the route, the load, the permission mode, the engine versions, the requested context variant. The route differs
+by design: MAWS runs through the owner's relay (the gateway route, as the owner runs it) and Desktop's Code sessions go
+direct (§3); the relay's first-byte overhead is therefore inside MAWS's numbers and, if the breakdown names it, it is a
+cause outside the levers.
+
+What follows (binding, Decision Logs 10, 16.2 and 17):
+- parity on every judged task closes the question and tracker row 296 (its closing line written at A1's landing,
+  Decision Log 10's form);
+- Desktop faster on a judged task: the breakdown names the cause. A cause among the deferred levers (patch publish for
+  decks and designs, the request diet, the context diet; §9) returns as P4-A3, and P4 closes only when MAWS's median is
+  within 1.2 times Desktop's on that task, re-measured on this harness. A cause outside them (the relay's first byte,
+  the user scope's tool count, a server hold) becomes a tracker row, never A3;
+- a kind Desktop lacks altogether: its MAWS components are reported, with no verdict.
+
+
+## 2. The measurement-only rule
+
+Where Desktop's arm cannot be pinned to the owner's setting (Opus 5.5 at the owner's `effortLevel`, xhigh for
+claude-opus-5-5 in ~/.claude/settings.json), MAWS's arm for that cell is pinned to Desktop's actual setting, read from
+Desktop's own records for that cell (the transcript's per-record `effort`, Cowork's audit `system/init`, the session's
+local_<id>.json), never from what the picker showed. The MAWS repetitions run with MAWS_BENCH_PIN=<model>:<effort>;
+their manifests carry `pin` and `measurementOnly: true` and the report marks the cell.
+
+The cell is judged under the same 1.2 times rule at that setting, and its verdict stands as the task's result for the
+close criterion, marked measurement-only, since no comparison at the owner's setting exists for that task. No effort
+decision follows from it (Decision Log 8): it argues neither for tuning MAWS's effort nor for changing the owner's. (This
+reading of "recorded as such" is the executor's; the architect may rule otherwise before the run.)
+
+
+## 3. Which artifact kinds the owner's Desktop offers (R-6)
+
+Read from records on this MacBook, read-only, 2026-10-19 (nothing written in the owner's account or files). Desktop is
+2.42304.2, updated today; its engine is 2.1.299 ("[CCD] Initialized with version 2.1.299", ~/Library/Logs/Claude/
+main.log 15:01 local). Source citations are to the readable 2.42304.0 (`CD:` = ~/claude-desktop-re/readable/
+app-2.42304.0/).
+
+| Kind or gate | Code session (the owner's user scope) | Cowork | Evidence |
+|---|---|---|---|
+| Server-hosted Slides, Design, Docs, Dashboard (the engine's `Artifact` tool) | OFF, by the owner's own `enableArtifact: false` in ~/.claude/settings.json ("off in any of managed, --settings or user settings wins"; Desktop's flag settings carry no `enableArtifact`, `CD:main-process/index.chunk-CFJssAFf.js:84700-84745`) | not settled by any record; inferred ON (frame artifacts follow the account feature `cobalt_plinth`, `CD:web/app/v1/shared-6-Cby4X-ms.js:11981-11988`; Cowork's per-session config dir does not read the owner's setting) | the gates underneath are on: `cachedGrowthBookFeatures.tengu_cobalt_plinth = true` in ~/.claude.json, account feature `cobalt_plinth` available; a Desktop Code session used `Artifact` on 2026-08-23 (engine 2.1.237); the Code sessions of 2026-09-25 and 2026-10-01 carry no `Artifact` |
+| Cowork local HTML artifacts (`mcp__cowork__create_artifact`, `update_artifact`) | absent | not settled; inferred OFF in new sessions (gate 2940196192 is on but applies only while frame artifacts are off, `CD:CB6cNSrW.js:13463-13471`) | no Cowork session since 2026-07-04 |
+| Eager tool streaming | ON (the owner's env `CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING=1`; the 2026-10-01 session marks every tool eager) | ON (gate 714014285 true in Desktop's fcache, written 2026-10-19) | |
+| `show_widget` | ON (a remote `visualize` server in the 2026-10-01 session) | not read | `desktop-prep.py kinds` on that transcript |
+| Claude Docs connector (hosted MCP: create, read, query, export, delete, batch, guide, update) | ON on 2026-10-01; today not settled, since the owner's settings now carry `disableClaudeAiConnectors: true` | not read | `desktop-prep.py kinds` on the 2026-10-01 transcript lists it |
+| Plain files (.md, .html) edited with Edit or Write | ON | ON | the engine's own tools |
+
+What this means for the cells:
+- Documents (B1, B3): a Code session on the plain file doc.md, on the owner's user scope like MAWS's arm, Opus 5.5 at
+  xhigh pinned in the picker, Auto mode. This is the kind a Desktop Code session offers for a document today; the
+  hosted Docs connector is not a document Desktop draws in its own UI and is off under `disableClaudeAiConnectors`.
+- Decks (B5, B7): Desktop's deck kind is the server-hosted Slides artifact, which a Code session lacks only by the
+  owner's `enableArtifact: false`. Three ways, the owner's to choose before the hold (§7 preconditions):
+  (a) Cowork's Slides artifact, the spec's anticipated path (§4.2), with no setting changed. Cowork's effort looked
+      pinnable in the source (`LocalAgentModeSessions.setEffort`; the first-party clamp passes it through), against
+      the spec's assumption; if the hold finds it pinnable to xhigh the cell is judged normally, else it is
+      measurement-only (§2). Its scope differs from MAWS's (a per-session config dir, Cowork's own system prompt);
+  (b) the owner removes `enableArtifact: false` for the hold, so a Code session on the owner's scope gets the Slides
+      artifact. This is the closest comparison, but it changes the owner's settings and may add the `Artifact` tool to
+      MAWS's own sessions too (whether the engine offers it outside entrypoint `claude-desktop` is not verified);
+  (c) a Code session on the plain file deck.html. Same scope and engine, but a plain file is not a deck kind and its
+      edit is a string patch, so it measures the engine's file editing rather than a deck protocol.
+  The executor recommends (a), reporting (c) beside it only if the hold has time; the result names the kind used.
+- What the record run reads first, before any timed repetition: one untimed probe session per surface it will use
+  (asked to list its tools), read with `python3 -I spikes/p4-parity-bench/desktop-prep.py kinds <transcript or
+  audit.jsonl>`. It settles `Artifact` in Cowork, Cowork's local HTML artifacts, the Docs connector, and the engine
+  version Desktop then runs. The Cowork probe also reads the model and effort Cowork actually ran at.
+
+
+## 4. The one parser (parse.py), and its validation
+
+What it reads: an engine transcript (both apps), plus where present MAWS's X8 journal (per request `ttft_ms` on
+`message_start`, block stops, `message_delta`, `tools/call` to `control_response`), ClaudeUsage's relay log (first
+byte, total, upstream gap per request, joined by request id), Cowork's audit (`result.ttft_ms`). It prints aggregates
+only. `turns` tabulates a transcript, `edit` measures one repetition from its manifest, `report` builds the per-edit
+rows, the cells (medians and spread), the controls and the verdict.
+
+Validated on the sitting's records (read-only; nothing copied): the note session's transcript
+(~/.claude/projects/-private-tmp-p3-sitting-project/720e2008-….jsonl, engine 2.1.303, 35 human turns, 192 `api-request`
+records), its X8 journal (~/Library/Application Support/MAWS/engine-host/journal/97989a60-…/gstpcfz3.jsonl) and the
+relay logs of 2026-10-19 (191 rows joined):
+- with the relay it reproduces the grounding's §3.1 table (research/p4-edit-speed/sitting-table.md) turn for turn:
+  send to first block, send to edit landed, send to turn end, API calls, first-byte wait, generation, post-tool hold,
+  output and thinking tokens, context, to within 0.1 s (rounding);
+- the journal alone agrees with the relay: per request first byte within 0.04 to 0.13 s (median 0.07 s, the relay
+  sitting upstream of the engine), the turn's hold median 0.00 s (at most 0.64 s), generation median 0.15 s;
+- the transcript alone, Desktop's case, gives the decision measure, send to turn end, requests and tokens exactly (no
+  difference on any of the 14 edit turns); its first-byte estimate runs high by a median 0.25 s per request (p90
+  0.93 s), about 1.4 s per turn, which its generation figure gives back; holds are not separable from it, so Desktop's
+  breakdown reports the symmetric tool span (tool_use record to tool_result) where MAWS's splits hold and execution.
+On Desktop records: the newest Desktop Code session on disk (2026-10-01, d04310a8-…, entrypoint `claude-desktop`, engine
+2.1.284, claude-opus-5-5 at xhigh, Auto mode) parses with no `api-request` records (requests grouped by request id, sent
+at the preceding record), its effort, cache state and mode read; it made no edit, so no landing was measured. Desktop's
+current engine 2.1.299 writes no `api-request` records (they begin at 2.1.300), which is the path just validated. No
+Cowork audit exists after July, so the audit path is untested on real records.
+
+Learned from the journal while validating: the engine writes `tools/call` to MAWS as soon as the response's end reaches
+it and only then the `message_delta` and `message_stop` stream events, so the stream's end is the earlier of the two
+(parse.py uses it). And in auto mode every MAWS call waits for the response's end (the server's verdict) before it runs,
+so the post-tool hold falls inside MAWS's send-to-edit-landed; a Desktop session in Accept-edits mode runs `Edit` without
+that wait. The permission mode is therefore a control the hold sets to Auto in Desktop (§7), and it is reported per cell.
+
+
+## 5. The MAWS arm (e2e/bench-edit-live.spec.ts)
+
+Under MAWS_LIVE=1, parameterised by task (MAWS_BENCH_TASKS) and repetition (MAWS_BENCH_REPS, MAWS_BENCH_REP_FROM); each
+repetition a fresh session in the bench's folder, started as the composer's first Send starts one, told the artifact by
+its `maws-artifact:` link, on a working copy of the pristine seed; the content exported before and after, the checker,
+the session stopped, a manifest, the parser's row and X34's reading of the journal (`readToolSpans`,
+test/live/support/tool-time.ts, built to the interface ledger's shape). The scope: `owner` (the arm of record: no
+CLAUDE_CONFIG_DIR, so the engine reads and writes the owner's ~/.claude like any MAWS session) or `mirror` (the default:
+a scratch config home with the owner's settings cut to model, effort, permissions, auto-mode rules and non-secret env).
+The seeds: the deck through the window's deck seam; the document by one Haiku `artifact_create`, checked word for word
+against seed/document.md.
+
+Smoke, 2026-10-19 on this MacBook (scope mirror, engine 2.1.304, the relay, Opus 5.5 at xhigh from the owner's settings,
+one repetition per task; smoke-2026-10-19/ holds the run's log and the parser's report):
+
+| Task | Check | Send to edit landed | First token | Turn end | Requests | Output tokens | MAWS tool time (X34) | US$ |
+|---|---|---|---|---|---|---|---|---|
+| B1 | pass | 7.98 s | 1.70 s | 10.33 s | 4 | 443 | read 15 ms, edit 19 ms | 0.169 |
+| B3 | pass | 19.57 s | 1.44 s | 23.84 s | 4 | 2,202 | read 16 ms, edit 20 ms | 0.140 |
+| B5 | pass | 9.11 s | 0.89 s | 12.78 s | 6 | 1,098 | read 16, describe 2, publish 31, read 10 ms | 0.269 |
+| B7 | pass | 10.33 s | 0.79 s | 14.25 s | 6 | 1,371 | read 11, describe 3, publish 15, read 10 ms | 0.278 |
+
+These are not record-run numbers (one repetition, the mirror scope's 13.5K-token context against the owner scope's
+larger one). Spend in this phase: US$0.955 (the smoke US$0.862 with its Haiku seed; an earlier shakedown on B1 pinned to
+sonnet:low US$0.093).
+
+
+## 6. The Desktop arm
+
+desktop-prep.py is the non-GUI half: `before` lays the pristine doc.md and deck.html in the arm's folder and prints the
+exact prompt; `after` finds Desktop's own records for the session (Code: claude-code-sessions/<account>/<org>/
+local_<id>.json's `cliSessionId`, then ~/.claude/projects/<slug>/<id>.jsonl; Cowork: local-agent-mode-sessions/…/
+audit.jsonl and its private transcript), copies the edited artifact, runs the checker and writes the manifest; `kinds`
+is the first read of §3. Dry-run end to end against a fake Desktop store (a stand-in transcript) through `report`.
+desktop-driver.js is the GUI half for `cua_repl`: written, not run (no GUI automation in this phase). Its labels are
+Desktop 2.42304's in English and Korean (the owner's Desktop runs ko-KR); `bench.probe()` checks each against the live
+accessibility tree as the hold's first step.
+
+
+## 7. The record run
+
+The host: the MacBook. Desktop 2.42304.2 is installed, running and signed in there to the owner's account (the cached
+account id c07e5b82…, org 0b4c585b…), the owner's user scope and the relay live there, and the sitting ran there. The
+Mac mini has Desktop 2.2553.1 (an August build with engine 2.1.275, last used 2026-09-21, the same cached account id) and
+would need an update and a sign-in check in its GUI first; it remains the alternative if the MacBook's load or the
+owner's go rules the MacBook out. The MacBook's 1-minute load was about 20 to 28 on 10 cores during this phase's runs (65 at the 15-minute average earlier); it is recorded
+per repetition and both arms share it through the interleaving.
+
+Preconditions, each confirmed at the hold's start:
+1. The owner's go for cua on the MacBook (the architect obtains it).
+2. Claude Desktop signed in to the owner's account (confirm in its GUI); Code sessions set to Opus 5.5, effort Extra
+   high (매우 높음), permission mode Auto (자동) on every session (the saved landing default is Accept edits).
+3. "MAWS parity bench", X39's one project for the bench in the owner's Anthropic account: for the Code sessions the
+   folder /tmp/maws-parity-bench/MAWS parity bench (Desktop groups Code sessions by folder; each session is also
+   bridged to claude.ai by Remote Control); for Cowork, if the decks run there, a Cowork Space or claude.ai project of
+   that name. Deleted after the run: the Code sessions, the Cowork tasks and the Space or project, every Slides artifact
+   the bench made. No sharing, no invites.
+4. The owner's two calls: the deck surface (§3: (a) Cowork, (b) `enableArtifact` removed for the hold, or (c) plain
+   deck.html), and the MAWS arm on the owner's real ~/.claude (MAWS_BENCH_SCOPE=owner: the engine writes the bench
+   sessions' transcripts under ~/.claude/projects and the bench folder's entry in ~/.claude.json, as any MAWS session
+   would; the harness writes nothing there).
+5. The relay (ClaudeUsage) answering /api/hello; this branch built (`scripts/e2e-build.sh plain`); MAWS_E2E_QUIET=1
+   and lockf /tmp/macbook-e2e.lock for every MAWS repetition; no other MAWS e2e or heavy run on the host.
+
+The hold's first step (untimed): `bench.probe()`; the probe sessions and `desktop-prep.py kinds` (§3); the MAWS seeds
+(one MAWS invocation that seeds the bench profile, MAWS_BENCH_PROFILE kept for the whole run); for Cowork decks, the
+Slides seed made from seed/maws-deck by an untimed Cowork turn, titled as tasks.json's deck title, and the operation of `Artifact` that publishes read from that turn's record (desktop-prep's `after --landing-actions Artifact=<op>`, so the parser does not take a read for the landing).
+
+The interleaving order, fixed now (random.Random(20261019) over the four tasks per round; the first arm alternates per
+round; rounds 5 and 6 complete any cell an invalid repetition left short, and run only as far as needed):
+
+  round 1 (MAWS first):    B3, B1, B7, B5
+  round 2 (Desktop first): B1, B5, B7, B3
+  round 3 (MAWS first):    B3, B1, B7, B5
+  round 4 (Desktop first): B3, B7, B1, B5
+  round 5 (MAWS first):    B1, B7, B3, B5
+  round 6 (Desktop first): B3, B7, B1, B5
+
+Each MAWS repetition: `MAWS_LIVE=1 MAWS_BENCH_SCOPE=owner MAWS_BENCH_TASKS=<task> MAWS_BENCH_REP_FROM=<round>
+MAWS_BENCH_OUT=<run> MAWS_BENCH_PROFILE=<run>/maws-profile lockf /tmp/macbook-e2e.lock pnpm exec playwright test
+e2e/bench-edit-live.spec.ts` (MAWS_HARNESS=0, after one build). Each Desktop repetition: desktop-driver.js's three steps
+(§6). After the last: `python3 -I spikes/p4-parity-bench/parse.py report <run> --json <run>/report.json`, the verdict
+written into this file under the rule of §1.
+
+The hold's length: about 2.5 to 3 hours. Setup and first reads 30 minutes; a round about 16 minutes (a MAWS repetition
+about 1.5 minutes with the app's launch, a Desktop one about 2.5 minutes with the folder, picker and mode); five rounds
+80 minutes and a sixth if needed; Cowork deck repetitions add about 2 minutes each for the seed and the follow-up that
+writes the deck's files; cleanup 15 minutes. It can split into two windows (documents, then decks).
+
+Expected spend: about US$15 to 25 at list price, on the owner's subscription accounts in practice. MAWS on the owner's
+scope about US$0.25 to 0.45 per repetition (the smoke's US$0.14 to 0.28 at the mirror's smaller context), 24 at most;
+Desktop's Code sessions about US$0.3 to 0.6 each at the owner's scope (the 2026-10-01 session opened at 54K tokens), 24
+at most; the probes and seeds about US$2. No cap was set; the spend is reported from the receipts.
