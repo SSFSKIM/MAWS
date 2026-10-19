@@ -3,6 +3,7 @@
 // selection. happy-dom lays nothing out, so the boxes the gestures measure are given to the nodes here (offsets from
 // each element's own px style); the real layout, paint and pointer are the e2e's.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { newDoc, onUpdate, transact, type Doc } from '../../../yjs';
 import { SlideCanvas } from '../../canvas';
@@ -441,5 +442,45 @@ describe('P3-F: a Shift-marquee adds at the selection’s level (scalpel-1#1)', 
     g.end();
     expect(styleOf(doc, 'g')).toMatchObject({ left: '140px', top: '100px' });
     expect(styleOf(doc, 'k')).toMatchObject({ left: '0px', top: '0px' }); // moved once, with its group
+  });
+});
+
+describe('P3-F: Tab leaves the stage past its last element (scalpel-4#1, WCAG 2.1.2 no keyboard trap)', () => {
+  function mount(doc: Doc) {
+    const session = new DeckSession(doc, 0);
+    const { container } = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    const stage = container.querySelector('[data-stage-surface]') as HTMLElement;
+    stage.focus();
+    return { session, stage, notes: screen.getByRole('textbox', { name: 'Speaker notes' }), user: userEvent.setup() };
+  }
+
+  it('Tab walks the slide’s elements, then leaves for the next control; Shift+Tab walks back and leaves before the first', async () => {
+    const { session, stage, notes, user } = mount(deck());
+    for (const id of ['title', 'body', 'a', 'b']) {
+      await user.tab();
+      expect([session.snapshot().selection, document.activeElement]).toEqual([[id], stage]);
+    }
+    await user.tab();
+    expect(document.activeElement).toBe(notes);
+    expect(session.snapshot().selection).toEqual(['b']); // leaving changes nothing on the slide
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(stage);
+    for (const id of ['a', 'body', 'title']) {
+      await user.tab({ shift: true });
+      expect([session.snapshot().selection, document.activeElement]).toEqual([[id], stage]);
+    }
+    await user.tab({ shift: true });
+    expect(document.activeElement).not.toBe(stage);
+    expect(stage.compareDocumentPosition(document.activeElement!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it('an empty slide captures neither Tab nor Shift+Tab', async () => {
+    const { session, stage, notes, user } = mount(deck(`<section id="s" style="background:#ffffff"></section>`));
+    await user.tab();
+    expect(document.activeElement).toBe(notes);
+    stage.focus();
+    await user.tab({ shift: true });
+    expect(stage.compareDocumentPosition(document.activeElement!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(session.snapshot().selection).toEqual([]);
   });
 });

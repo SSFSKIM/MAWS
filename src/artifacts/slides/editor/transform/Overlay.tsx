@@ -290,8 +290,12 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
           done();
         }
       } else if (key === 'Tab' && !mod) {
-        session.select(tabNext(tree, sel, e.shiftKey));
-        done();
+        // P3-F: past the last element (before the first with Shift) the key is the browser's: focus leaves the stage
+        const next = tabNext(tree, sel, e.shiftKey);
+        if (next) {
+          session.select(next);
+          done();
+        }
       } else if (key === 'Enter' && sel.length === 1 && !readOnly) {
         const kids = tree.childrenOf(sel[0]!);
         if (isText(tree.element(sel[0]!)?.tag)) session.editText(sel[0]!);
