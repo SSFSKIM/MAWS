@@ -946,3 +946,32 @@ describe('a human drag of a block a concurrent replacement reached', () => {
     for (const doc of [agent, dragger, typist]) expect(textOf(doc, 'p3')).toBe(text);
   });
 });
+
+// P3-F document-model review (fable, P3): text replayed into a losing copy (a run that reached the block before a drag)
+// is matched to the kept copy by its origin, so a winner whose base already holds that run does not get it again.
+describe('the id repair and a losing copy’s replayed text', () => {
+  it('does not insert a run the winner was made with again', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const other = host.peer();
+    const dragger = host.peer(); // drags without having seen the run
+    const agent = host.peer(); // sees the run, not the drag
+    typeAt(other, 'p3', 0, 'BEFORE ');
+    host.send(other, human);
+    host.pull(agent);
+    const pm = DocIndex.of(dragger).pm(DocIndex.of(dragger).find('p3')!.top);
+    transact(dragger, () => {
+      body(dragger).delete(order(dragger).indexOf('p3'), 1);
+      body(dragger).insert(order(dragger).indexOf('c1') + 1, [pmnodeToDelta(pm)]);
+    });
+    host.send(dragger, human);
+    expect(textOf(host.live, 'p3')).toBe('BEFORE A plain paragraph the human types into. Words to keep.');
+    const moved = applyEdit(agent, [{ op: 'move', id: 'p3', after: 'h1' }]); // the original, the run in it
+    adapter.registerCarries(ARTIFACT, moved.carries);
+    host.send(agent, agent1);
+    expect(order(host.live).filter((id) => id === 'p3')).toHaveLength(1);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('h1') + 1);
+    expect(textOf(host.live, 'p3')).toBe('BEFORE A plain paragraph the human types into. Words to keep.');
+    expect(dupes(ids(host.live))).toEqual([]);
+  });
+});

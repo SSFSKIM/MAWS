@@ -147,8 +147,8 @@ function carryCopyEdits(doc: Doc, registry: CarryRegistry, loser: Node, winner: 
       pendingSlots = [];
     };
     for (const { slot, ch } of charSlots(block)) {
-      const source = recL.base.get(slotKey(slot));
-      const won = source && sourceToWinner.get(originKey(source));
+      const source = recL.base.get(slotKey(slot)) ?? slot; // a run replayed into the loser is in the origins, not its base
+      const won = sourceToWinner.get(originKey(source));
       if (won) {
         flush();
         const at = locateSlot(doc, won);
