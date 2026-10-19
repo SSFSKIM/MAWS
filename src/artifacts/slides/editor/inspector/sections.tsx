@@ -104,6 +104,9 @@ export function Arrange() {
 
 const FLAT_ONLY = new Set(['tr', 'x-shape', 'hr']);
 const ACCENT = COLOUR_TOKENS.find((t) => t.name === '--ds-color-accent')!;
+// P3-F: a fill switched on starts as the system's raised surface (the house's white), which its text colour reads on and
+// a dark system or a Theme switch restyles; never a literal colour (X28)
+const SURFACE = COLOUR_TOKENS.find((t) => t.name === '--ds-color-bg-raised')!;
 
 export function Fill() {
   const { picked, style } = useInspector();
@@ -120,7 +123,7 @@ export function Fill() {
   ];
   const switchTo = (next: string) => {
     if (next === kind || next === 'other') return;
-    const base = (p: Picked) => firstColour(p.style.background) ?? '#ffffff';
+    const base = (p: Picked) => firstColour(p.style.background) ?? tokenValue(SURFACE);
     if (next === 'none') refuse(style(() => ({ background: null }), 'edit'));
     else if (next === 'colour') refuse(style((p) => ({ background: base(p) }), 'edit'));
     else refuse(style((p) => ({ background: gradientValue({ angle: 180, stops: [{ color: base(p), at: 0 }, { color: tokenValue(ACCENT), at: 100 }] }) }), 'edit'));
