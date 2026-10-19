@@ -1,0 +1,112 @@
+# P4-A2 — The agent experience (2026-10-19)
+
+> **Parent:** `docs/doperpowers/plans/2026-10-19-p4-smoothing.md` (the P4 composite spec), child **P4-A2**, §5 "P4-A2 — The agent experience — plan"; acceptance §2 items 9 and 10. Parent pin: blob `e604e6f4a1ef834c818649a0f573666c1e409747` at master `151826d9a`. Binding on this child: §4.2's "edit shown as it is written" paragraph (the four rules) and "tool-time guard" paragraph (the guard's definition); contracts X35 and X34 (owner), the X1 and X6 amendments through the P4 interface ledger (`docs/doperpowers/plans/2026-10-19-p4-interface-ledger.md` §2, §3, §8), X8 as the reader; Decision Logs 6, 7, 9, 13, 15, 16, 19 and 21. Grounding: `research/p4-edit-speed-grounding.md` §2 (the edit path: the deltas already on hand, the normaliser dropping the tool name, the tool server's `tools/call` carrying `claudecode/toolUseId`) and §5 (what MAWS controls). P3's binding inheritance: P3 §4.4's batch semantics and the editor-wide composition hold (`holdRemote`, X24), P3-B's D11 as Decision Log 13 amends it.
+>
+> Executor branch: `p4-a2` in worktree `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a0034edf95c88730a`, off origin/master at 151826d9a. The architect lands to master, orders the merge against P4-A1 (Decision Log 19: A1 builds `readToolSpans`; see M7 for what this branch does when A1 has not landed) and writes the ledger, the tracker and the spec from the hand-back. This document is the child's standalone record: what it decided, what it found, what it proved.
+
+## Purpose
+
+The owner's complaint: while the agent edits a document nothing visible happens for 7 to 56 s, then the edit lands at once (owner-results R.3; the grounding §2.4: the 12:06 deck edit streamed its slide from 12:07:01, finished at 12:07:09 and appeared at 12:07:23). The owner chose to see the edit as it is written, provisionally, accepting that a refused batch is seen and then withdrawn (Decision Log 6). This child lands two of the three things §4.1 puts in track A's "agent experience": the edit shown as it is written for the document editor (X35: the tool name kept on `content_block_start`, presence from the first delta, the provisional layer under the four rules) and the tool-time guard every paid live spec reads (X34: one helper, the named tools, the provisional bounds confirmed from the heavy fixture). The third, the per-session launch profile, waits for W2-A's L94 and the slide and design editors' layer (gate G2) waits for P4-B2; both are named below as later milestones and not built in this dispatch.
+
+Turn time is unchanged. What changes is the time to the first visible change: from the call's completion to first-token time.
+
+## Progress
+
+- 2026-10-19 (dispatch, ~23:40Z): grounding read (the spec, the ledger, the grounding's §2, the code of the normaliser, the tool server, the document service, the port provider and its frames, the document editor, the live and conformance harnesses, the document presence e2e and the perf seam). This document written. Branch `p4-a2`.
+- (filled per milestone below)
+
+## Scope and what the code says (M0 grounding)
+
+Everything the parent decided is taken as decided. What follows is the residue the section leaves to the child, each grilled against the code on master at 151826d9a.
+
+**The stream.** `EngineSession.record` journals every frame and runs it through the normaliser (`src/engine-host/session.ts:605`); `Normalizer.streamEvent` turns each `content_block_delta` into `assistant.block.delta {blockIndex, blockType, inputJsonDelta, …}` (`src/engine-host/normalizer.ts:258-285`) but keeps of a `tool_use` block's `content_block_start` only its index and type (`normalizer.ts:265-269`). The wire frame carries `{type: 'tool_use', id, name, input: {}}` (`spikes/protocol-probe/fixtures/reads.jsonl` seq 134). The `tools/call` that follows carries `params._meta["claudecode/toolUseId"]` (`pass3/p1-sdk-mcp-roundtrip.jsonl` seq 71; `src/engine-host/tool-server/server.ts` `McpToolContext.toolUseId`), so the block's `id` is what joins the deltas to the call. The X1 amendment therefore keeps both: `assistant.block.delta` gains `toolUseId` and `toolName` (null on every other block type), additive.
+
+**The host's write path.** `artifactEditTool` (`src/engine-host/tool-server/documents.ts:259-382`) resolves the ref (`store.resolve(ref, lineage)`), runs the write inside `store.withOp` → `store.service.writeAs(writeId, actor, edit, {inFrame})`; `writeAs` (`src/engine-host/documents/service.ts:309`) applies the edit inside the storage frame, `integrated` appends the row and gets its global seq (`service.ts:891-918`), `relay` queues the `update` frame to every connection but the writer's (`service.ts:922-926`), then `inFrame(hostDoc.revision)` runs with the commit's seq; the outbox flushes at the batch commit (`service.ts:948-988`), so nothing is revealed before. A refusal (`staleTargets`, a stale `baseRevision`, a held dashboard) is `refusedAfterCommit`. Presence today is published inside `inFrame` (`agent.setPresence({...presence, cursor, editing: {blocks}})`) and held `PRESENCE_EDITING_MS` (4 s) after the answer (`documents.ts:348-379`).
+
+**The port and its frames (X24).** `src/artifacts/provider/frames.ts`: `step1`, `step2`, `update`, `awareness`, `ack {frames, revision}`, `restored`; no `update` carries its row's seq and the provider learns a revision only from an `ack` (`port.ts:310`), which only a connection that sent content receives, and which passes the composition hold. Under the hold the provider buffers `step2`, `update` and a trailing `restored` and applies them in order at release, consecutive updates merged (`port.ts:250-280`); awareness and acks pass. y-prosemirror applies a Y update to the editor state synchronously inside `applyV1` (its observer dispatches within the transaction's cleanup), so when `process()` returns, the page already shows the write.
+
+**The editor.** `DocumentEditor` builds one `JointHold` per handle (the live replica and the suggestion replica), `TabEditor` configures `Collaboration` with `hold`, `Presence` reads the others' awareness and outlines `[data-agent-editing]` blocks (`src/artifacts/document/editor/awareness.ts`), and the comments overlay reads a `layoutKey` `${editor.instanceId}:${layout}` where `layout` bumps through `moved`, coalesced to one per animation frame (`DocumentEditor.tsx:522-582`). The Presence plugin already dispatches decoration-only transactions while the owner composes (the live run's G2 and G4: the outline drawn during Korean composition, the human's text exact), which is the evidence that a decoration elsewhere does not disturb the composition.
+
+**The tests' seams.** `document-presence.spec.ts` drives a real `artifact_edit` as a session through the perf seam (`MAWS_DOCUMENT_PERF=1`, `src/engine-host/documents/kinds/document-perf.ts`), with a page-side `MutationObserver` recorder; the live run `document-live.spec.ts` composes Korean through CDP IME steps while the agent's batch lands and asserts the human's text exact and the stale batch refused whole. The conformance harness (`src/engine-host/conformance/session-harness.ts` `scriptedSession`) runs an `EngineSession` over a scripted transport with a `MemoryJournal` whose rows are the X8 shape; a pushed `control_request mcp_message tools/call` reaches the real `MawsToolServer` and its `control_response` is written through the transport and journaled.
+
+**The guard's inputs.** The X8 journal row is `{seq, direction, at, frame}` (`src/engine-host/journal.ts`); the call is the `in` row whose frame is `control_request {request_id, request: {subtype: 'mcp_message', message: {method: 'tools/call', params: {name, arguments, _meta}}}}` and the answer the `out` row `control_response {response: {request_id, response: {mcp_response}}}` with the same `request_id`. The live specs reach the journal through `statusOf(page, id).journalPath` (`e2e/support/c7-live.ts:185`) and read it with `journal(path)`. Seven paid specs drive `artifact_*` calls: `dashboard-live`, `design-live`, `design-systems-live`, `document-live`, `library-live`, `p1-live`, `presentations-live`. The heavy corpora exist: `benchDesignFiles()` (E1's 24-board board, `src/artifacts/design/fixtures/bench.ts`), `benchDeckFiles(100)` (`src/artifacts/slides/fixtures/bench.ts`), `seedDocument(sections)` (S7's corpus, `e2e/support/document-seed.ts`).
+
+## Design (the residue, decided here)
+
+**R1. The event's shape (X35).** One batch streams several ops, each with its own target, so the frame carries the batch's ops in op order rather than one target and one text: `{toolUseId, appSessionId, artifactId, kind, state: 'streaming' | 'committed' | 'dropped', commitSeq?, at, ops: ProvisionalOp[]}` where a `ProvisionalOp` is one of `replace_text {block: string | null, old, text}`, `replace_block {block, text}`, `insert {after?, before?, text}`, `set_cell {table, row, col, text}`, `delete {block}`, `move {block}`; `text` is the op's cumulative streamed `new` or `markdown` so far, so a frame replaces the one before it. The ledger's `target: {block?} | {paths?} | {view?}` is kept as the per-op target for G2's kinds (`paths` for a publish's files, `view` for a dataset) in the shared type `src/shared/artifacts/provisional.ts`. Reported for the ledger.
+
+**R2. The channel.** The frame rides the document port as a host-only frame `MSG_PROVISIONAL = 102` (`[102, json]`), decoded by the provider and raised through `DocumentHandle.onProvisional(listener)`. One port carries the Y frames and the layer, so their order is the port's order and the composition hold sees both.
+
+**R3. Rule 2's mechanism.** `update` frames gain `seq` (the row's global seq) and `step2` gains `revision` (the doc's revision at the diff), additive; the provider keeps `integrated`, the highest seq it has applied through content frames (never advanced by an ack, which passes the hold), exposed in `SaveState.integrated`. The host sends the `committed {commitSeq}` frame from the write's own frame, queued **ahead of the write's update frames** in the service outbox (`DocumentService.announceWrite`, valid only inside a write), so it is revealed with the commit and arrives first; the renderer records the pending withdrawal and withdraws in the provider's state listener once `integrated >= commitSeq`, in the same task as the update's application. Under the hold the `committed` frame passes (it is not content) and the update is buffered; at release the update applies and the withdrawal runs in the same `process()`: no gap, no flash, and nothing vanishes during a composition. A reconnect's `step2` carries `revision >= commitSeq` and withdraws the same way. An X24 additive touch; reported for the ledger.
+
+**R4. What passes the hold.** `streaming` and `dropped` frames pass the hold like awareness: the layer keeps moving while the owner composes elsewhere (rule 4 forbids the composing block, not the page), and a refusal withdraws at once (the owner accepted a seen-then-withdrawn batch). Only the withdrawal on commit waits, through R3.
+
+**R5. The target.** A `replace_text` without `block` is resolved on the host once `old` has parsed (it precedes `new` in the schema and in every observed call): the first top-level block whose text holds the quote, through `DocIndex`; none found, `block: null` and the renderer draws nothing for that op (the transcript shows the call). Named blocks are passed as named. `delete` and `move` stream no text; presence outlines them.
+
+**R6. Presence.** From the frame in which `artifact` parses, the emitter publishes `{...actorDisplay(actor), editing: {blocks}}` on the session's replica (`store.service.replica`, held with `holdPresence` so a turn end mid-stream leaves it to the hold) and extends `blocks` as targets resolve; the tool's own commit publishes its cursor and blocks as today and the 4 s hold after the answer is unchanged. A `dropped` releases the presence to the idle name. The actor and colour are the committed write's (`actorDisplay` over the session actor).
+
+**R7. Suggest mode.** `mode` follows `ops` in the schema; when `mode: 'suggest'` parses (or the artifact's `agentEditsAsSuggestions` is set at the first frame), the layer's doc is the suggestion doc: a layer already drawn on the main doc is dropped there and continues on the suggestion doc.
+
+**R8. When the layer ends.** `committed` from the tool's `inFrame`; `dropped` from the tool's refusal (every refusal path, including a write that failed), from a `tool.result` for the id that no `committed` preceded (the engine denied or the model abandoned the call), from the turn's end (`turn.ended`) and from the process's exit. A call that never arrives (the stream aborted by an interrupt) ends at the turn's end.
+
+**R9. The parser.** A tolerant partial-JSON reader (`src/shared/maws/partial-json.ts`): the accumulated text is completed (an open string closed, a dangling key or comma dropped, open containers closed, a cut `\u` escape dropped) and parsed; run per 16 ms batch tick, not per delta.
+
+**R10. The layer's drawing (the document editor).** A Tiptap extension `Provisional` beside `Presence`: `replace_text` dims the matched `old` range inline and draws the streamed text after it in the agent's colour; `replace_block` and `set_cell` draw a labelled provisional block after the target (the target dimmed for `replace_block`); `insert` draws it after or before the anchor. Widgets are non-editable, take no focus and no selection; an op whose target is the block the owner is composing in is not drawn while the composition stands (the plugin tracks `compositionstart`/`compositionend`) and is drawn after. The decoration set changing calls the editor's `moved`, so `layoutKey` bumps once per animation frame; nothing writes Y, no version, provenance or history changes (rule 1). The label is the agent's name as presence names it.
+
+**R11. The guard's home.** `test/live/support/tool-time.ts` holds the constants, `readToolSpans` (built here to the ledger's shape because A1 has not landed; the architect keeps one when both have) and `expectToolTime`; the seven live specs call `guardToolTime(journalPath)` after their last turn. The heavy fixture is `e2e/tool-time-heavy-live.spec.ts` as the ledger names it: a Playwright spec that launches no app and drives the real tool server through `scriptedSession` over a temporary store, added to gate.yml's `LIVE_E2E` and `package.json` so it runs on every gate that runs live specs. The render bound is set from this branch's live timings (M8) or, failing a run, from the latest recorded live journals, stated in the hand-back.
+
+**R12. The layer's e2e.** The perf seam gains `stream {session, toolUseId, name, deltas, tickMs?}`, feeding the session's emitter the partial-JSON pieces as the normaliser would, so `e2e/document-provisional.spec.ts` (group `document-app`) proves the four rules without a model; the paid run (M8) proves them on the installed engine.
+
+## Plan of Work
+
+### M1 — X1: the tool name and id on the delta
+`Normalizer.streamEvent` keeps `{index, type, id, name}` per started block; `assistant.block.delta` gains `toolUseId: ToolUseId | null` and `toolName: string | null`. Tests: `normalizer.test.ts` over `reads.jsonl` (a Bash tool_use: name and id on its deltas, null on text and thinking deltas); the fidelity test unchanged.
+
+### M2 — The partial-JSON reader
+`src/shared/maws/partial-json.ts`: `readPartialJson(text): unknown | undefined`. Tests: every cut point of a recorded `artifact_edit` input parses to a prefix-consistent value; cut inside an escape, a key, after a comma, inside nested arrays.
+
+### M3 — X24: the frame, the seq and the handle
+`frames.ts`: `update.seq?`, `step2.revision?`, `MSG_PROVISIONAL`; `port.ts`: `integrated`, `onProvisional`, the frame passing the hold; `DocumentService.announceWrite` (ahead of the write's frames, revealed with the commit) and `broadcast` (now, to every connection of a loaded doc); `DocumentHandle.onProvisional` in `src/artifacts/host.ts` and the renderer's `Replica`. Tests: frames round trip; the provider's `integrated` under a hold and across a reconnect; the service's order (committed before the update on the port; nothing before the commit).
+
+### M4 — The host emitter
+`src/engine-host/tool-server/provisional.ts`: `ProvisionalEmitter` fed `assistant.block.delta` events (through `SessionMaws.observe` from `EngineSession.react`), `tool.result`, `turn.ended`, `processExited`; `committed`/`dropped` called by `artifactEditTool` (and the publish and dataset tools' refusals and commits, host-side only, their renderers being G2's). Wired through `mawsTools` deps. Tests over the document world: presence at the first `artifact` frame; the first streaming frame at the first `new` character; targets by name and by quote; committed ahead of the update with the commit's seq; dropped on each ending; suggest-mode retarget.
+
+### M5 — The document editor's layer
+`src/artifacts/provisional/{types,layer}.ts` (the hook over the handle's listener and the provider's state), `src/artifacts/document/editor/provisional.ts` (the extension), CSS in `chrome.css`; wired in `extensions.ts` and `DocumentEditor.tsx`. DOM tests: each op's decoration; the composing block skipped then drawn; withdrawal only at `integrated >= commitSeq`; no Y write (the doc's state vector unchanged across the layer's life); `onGrow` coalesced.
+
+### M6 — The layer's e2e (unpaid)
+The perf seam's `stream`; `e2e/document-provisional.spec.ts` in `e2e:document-app`: presence after the first delta; the provisional text at the target before the call; the swap without a gap (no recorder sample where the target shows neither); the refused batch withdrawn with the document's blocks and `artifacts.versions` unchanged; the composition case (CDP IME steps in another block while the stream and the commit land: the layer stays until the hold releases, the human's text exact, then the swap).
+
+### M7 — The guard
+`test/live/support/tool-time.ts` and its test over `p1-sdk-mcp-roundtrip.jsonl`; the seven live specs; `e2e/tool-time-heavy-live.spec.ts` (the 24-board design publish, the 100-slide deck publish, a 200-page document batch, each over the scripted transport), gate.yml's `LIVE_E2E` and the package script; the heavy fixture run locally under a slot to confirm the provisional bounds, its numbers recorded here beside the constants.
+
+### M8 — The live run (paid)
+`document-live.spec.ts` extended: the 200-page seed through the perf seam, a page-side recorder of the layer, the assertions of §5 A2's acceptance (presence within one delta of the call's start, the provisional text before the call completes, the swap once integrated, the refusal withdrawn with nothing in the document or its history, the composition case), the guard read at the end. Run through `--live` or on the MacBook under the lock; the spend reported.
+
+### M9 — Reviews and hand-back
+reviewer-medium (opus) after M1–M5 and after M6–M8; reviewer-high (fable) over the whole branch; fix waves by sub-workers; the hand-back.
+
+### Later milestones (named, not built here)
+- **M-P — The per-session launch profile** (after W2-A's L94): `--settings` carrying flag-level `enabledPlugins` and `outputStyle`, hooks through `disableAllHooks`, `--setting-sources` keeping `user`, the user scope the default, no effort; the X6 amendment; R-7's wire probe (the `init` record shows the user scope's model and effort plus the chosen plugins and style; nothing under a scratch `~/.claude` changed); the chooser as a shell-surface item.
+- **G2 — The slide and design editors' layer** (after P4-B2): `SlideProvisional` and `BoardProvisional` drawing the publish's files as far as they parse beneath the stage's ARMED and EDIT states; the dashboard view's layer with it.
+
+## Acceptance (this dispatch's share of §5 A2 and §2 items 9, 10)
+
+- Item 9, the document half: presence from the first delta; the provisional layer at the target block, never written to the document, replaced by the real text only once the replica has integrated the commit's update, withdrawn without trace on refusal, the composition never touched; first visible change at first-token time. Evidence: M4 and M5's unit tests, M6's e2e, M8's live run.
+- Item 10: every paid live spec that drives an `artifact_*` call reads the guard over the named tools and fails above the bound; the heavy cases pass under it over the scripted transport. Evidence: M7's test, the seven specs' guard lines, the heavy fixture's first run.
+- Not this dispatch: the launch profile (M-P), G2.
+
+## Surprises & Discoveries
+
+- (filled as found)
+
+## Decision Log
+
+1. **2026-10-19, the event's shape carries the batch's ops** (R1): a document batch targets several blocks; one target per frame would need an op index outside the ledger's shape anyway. The ledger's single-target form is kept per op for G2's kinds.
+2. **2026-10-19, the committed notice goes ahead of the write's frames** (R3): the only order in which the withdrawal can run in the same task as the update's application, which is what "no gap, no flash" needs; sending it after would let a rendering opportunity fall between the real text's arrival and the layer's removal.
+3. **2026-10-19, `integrated` never advances on an ack** (R3): an ack passes the hold while the content it counts is buffered; advancing on it would withdraw the layer before the write shows, a gap during a composition.
+4. **2026-10-19, `readToolSpans` built here to the ledger's shape** (R11): A1 has not pushed a branch carrying `test/live/support/tool-time.ts`; the guard cannot wait for it, and the ledger's shape is what both code against (P4 Decision Log 19). The architect keeps one at the merge.
+
+## Outcomes & Retrospective
+
+- (filled at hand-back)
