@@ -103,7 +103,9 @@ the hub deployed, checked by hand and recorded with evidence in Outcomes.
 
 1. **Projects.** Signed in through Access, the grid lists every project
    whose `.smns` names the hub; each card's machines-online and
-   working/waiting counts match `sminos list` run on each machine, within
+   working/waiting counts match `sminos list` run on each machine (but for
+   a session holding an open async question, which `sminos list` reads as
+   busy and the grid counts as waiting too: DX3's grid, 2026-10-18), within
    2 seconds of a change.
 2. **Messages.** A `<message>` span written by a session on machine A is in
    the project's group chat within 2 seconds of the session's turn writing
@@ -475,7 +477,9 @@ unavailable; everything they sent the human is still in the log.
 
 - **Projects.** The home is the grid of the org's projects.
 - **A project.** Left: `# <project>`, then the sessions as direct
-  channels, grouped by waiting on you / working / idle / ended, each named
+  channels, grouped by waiting on you / working / idle / ended (a session
+  holding a pending request, or an open async question while its process
+  runs, is waiting on you, its state word unchanged: 2026-10-18), each named
   by its title — the harness's "Session name", which its machine publishes
   as `titled` (smns §3, §5) — with its machine and whether that is online
   after it, and under it, muted, its alias, the name `@` addresses (alias
@@ -2575,7 +2579,17 @@ each change — a project registered, or a project's counts moving. `ProjectSumm
 machines_online, working, waiting}`: `machines` every machine that has opened the project or reported its presence
 there, `machines_online` those with a fresh lease, `working` the sessions of online machines whose presence `status` is
 `busy` or `shell`, `waiting` those whose `status` is `waiting` (the session record's own words, as `sminos list`
-reads them). Each `Project` reports its counts to the `Registry` when they change. The grid takes nothing up. A frame above the frame bound (a `grid` of many
+reads them). **[2026-10-18, owner]** `waiting` also counts, once, a session of an online machine holding an open async
+question, while its `status` stays `busy` (its engine works on, and it counts as `working` too): a pending request the
+bridge raised `async`, or a log `question` (from the session's feed, `src` the ask's id) with no `answered` of the same
+`src` from the session since, asked since the session's latest `retired` (an ask dies with its process), that the plane
+has not settled (a bridge's ask is the request its call's id names). A log question counts only while its session's
+process lives: a session whose kept presence says `record: null` (no process, as a stopped seat's, which never
+retires) is not counted for it, and counts again once it runs, as a bridge's ask is withdrawn when its process ends;
+the web reads it the same way and keeps such a session under ended. The hub keeps the log's open questions as it
+stores each event (`log-store.ts` `open_questions`; events stored before that table are not read into it), and reports
+the summary again when a `question`, `answered` or `retired` moves them, or the pending set moves. Blocking questions
+and permission requests count as before, by presence. Each `Project` reports its counts to the `Registry` when they change. The grid takes nothing up. A frame above the frame bound (a `grid` of many
 projects) comes down as DX2 `part` frames, which the browser reassembles as it does on the project socket.
 
 **Built at M2:** the socket's admission (a registered project), `welcome.head`, `resume`, `log`, `caught-up`, `human`
@@ -2630,7 +2644,7 @@ and `streaming` are that agent's own.
 | --- | --- | --- |
 | `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming, usage, jobs, mcp}` (**[2026-10-17]** `subagents` entries widened, `jobs` and `mcp` added, as the `subagents` row below): `usage` is the bridge's last `usage` (DX5) on a main-transcript subscription, null when the session has no bridge or none has come yet, and absent on a subagent's; rows of the sub's transcript newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, one per model request still streaming, `{turnId, agentId, step, model?, upTo, blocks: [{index, kind, text, upTo, id?, name?}]}` holding only its content blocks without a `block-row` yet, below (`step` the model request's ordinal in the turn; `model` what the request was sent with, absent when its start was not seen; the entry's `upTo` the `chunkIndex` of the last chunk applied to the message, -1 for none, and **the watermark**: `chunkIndex` counts across the whole message, so a chunk at or below it is already in the text, whichever block it belongs to; `index` the content block's, the same `index` its chunks and its `block-row` carry; `kind` one of `text`, `thinking` (redacted thinking included), `tool`; `text` the partial text, a tool block's being its argument JSON streamed so far, unparsed until its row; a block's `upTo` informational only; `id` and `name` the call's `tool_use_id` and tool name, on a tool block only). An entry whose `blocks` is empty can remain until its step ends and is skipped. **[2026-10-18]** `offChain: string[]` lists the uuids among `rows` that are off the session's live chain. It is always present and may be empty (the live chain, below) |
 | `row` | yes | `{row, agentId, offChain?, onChain?}`: a transcript row verbatim; `agentId` the subagent whose transcript holds it, or null. **[2026-10-18]** `offChain` lists the rows this row took off the live chain: the rows left behind by a branch it starts, oldest first, plus the row itself when it is written off the chain. `onChain` lists the rows it put back. Each is present only when non-empty |
-| `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0 |
+| `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk, t?}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0. **[2026-10-18, MAWS #57]** `t`, a number, is the bridge's DX5 event stamp in ms since the epoch on the machine's clock: the plane passes it through, and the hub relays it verbatim. The web uses it only for its chunk-to-drawn latency readout, which compares two clocks. Producers older than doperpowers #246 (7.183.3) don't send it, and the web records nothing for those chunks |
 | `block-row` | yes | `{uuid, turnId, agentId, step, index}`: the engine wrote the row `uuid` for content block `index` of that step; sent before the row itself arrives |
 | `step-end` | yes | `{turnId, agentId, step}`: that model request ended — finished, aborted, or cut off by its turn's end — from DX5's `step end` or `turn complete`; sent after every `block-row` of the step, so a block of it still without one never gets one, and the browser drops its partial text |
 | `rows` | yes | `{rows, before, more, offChain}`: older rows of the sub's transcript, newest first, answering a `rows` request; **[2026-10-18]** `offChain` as in the snapshot, for the page's rows |
@@ -3626,19 +3640,25 @@ committed. The endpoints, the signed-in member's own (types `PushKey`, `PushSubs
 | `GET /api/push/subscriptions` | `200 {subscriptions: PushSubscriptionRecord[]}`: the member's own | |
 
 **When the hub pushes.** A `raised` request new to the hub (raised live, or first seen in a republished `pending`
-set), and a `message` log event uploaded by a machine and stored for the first time within ten minutes of its `ts` (so
-a machine's first sync of an old backlog pushes nothing), each push once to every subscribed device of every member
+set), and a `message` (**[2026-10-18]** or `question`) log event uploaded by a machine and stored for the first time
+within ten minutes of its `ts` (so a machine's first sync of an old backlog pushes nothing), each push once to every
+subscribed device of every member
 of the org who has no browser socket showing the project (DX3 `visibility`, kept in the socket's attachment, so a
 hibernated object still holds it) — and to none of a member who has one. The payload, `PushNotice` in `browser.ts`,
 carries only what points to a card, since the service worker holds no org key and could check nothing it drew:
 `{v: 1, project, name, session, alias, kind, request?, event?, waiting}` — `name` the project's name as the grid
 shows it, so a notification says where; `kind` `question` (an `AskUserQuestion`, the ask mod's tool, or an `async`
-request), `permission` (any other request), or `message`; `request` the raised request's id,
-or `event` the message's `{writer, seq}`; `alias` the session's, from its feed's latest event's `from` (null when the
+request, or a `question` event), `permission` (any other request), or `message`; `request` the raised request's id,
+or `event` the log event's `{writer, seq}` (a `message`'s, or a `question`'s); `alias` the session's, from its feed's latest event's `from` (null when the
 hub holds none); `waiting` the org's waiting count once the push's own event is counted, the sum of the grid's
 `ProjectSummary.waiting` over the org's projects, which the service worker sets as the app icon's badge (the app sets
 it again from the grid whenever it is open, so an answered request clears). A push service answering 404 or 410 has dropped the subscription, and the hub deletes it; any other
 failure is passed over (the push is not retried).
+**[2026-10-18]** A question pushes once per ask. A bridge's async ask reaches the hub twice, as a `raised` request and
+as the `question` event its log export writes (`src` the call's id: the request's `toolUseId` where it names one,
+else the request's id), on the uplink's two planes in either order; whichever the hub takes first pushes, and the other is passed over
+(the ask's id kept an hour, `session-store.ts` `asked`). MAWS's async ask (`mcp__maws__ask`) is never raised, so its
+event is its one push. Messages and permission requests are unaffected.
 
 **Wrapped keys** (§6; the hub stores them and never sees the org key). The browser draws the org key at random when the
 org's first method is set up, and for each unlock method derives a wrapping key (a passkey: from its PRF output; a
@@ -4950,6 +4970,62 @@ a hub that connects into machines (§2).
   every measured reconnect needs and a closed machine reading online that
   much longer.
   Date/Author: 2026-10-18, MAWS #57's executor.
+  2026-10-18, the design session: shipped as MAWS #58 (hub), #61 (web) and
+  doperpowers #246 (DX4's chunk `t`), deployed together as `hub@0e6c2d41
+  web@master.0e6c2d41`. With them, Workers Logs went on with per-request
+  logs off (MAWS #60, the owner's choice), so the hub's stream-cause lines
+  are kept. The web's own share, measured in CI against the DX3 double: a
+  session view's first rows 142 ms after subscribe; an owner message's row
+  57 ms; a session's `<message>` drawn 36 ms after it is logged; a raised
+  question 23 ms. The budgets proposed for the deployment, p95 end to end:
+  an owner message reaches its session within 1 s; a session's message or
+  request is drawn within 2 s; first rows within 1.5 s; a streaming chunk
+  within 500 ms. Each is confirmed with the web's latency readout
+  (`?latency`, `window.deskLatency()`). Left for after the org directory
+  lands: fewer uplink restarts on a plugin roll (restart on the uplink's own
+  modules' content, not every script's; or start the new uplink before the
+  old one leaves), and the 60 s restart gaps a 15 s grace cannot hide.
+- Decision: An open async question counts in the badge and the grid's
+  `waiting` until it is answered; the session's state word stays what it
+  is, busy while it works (owner, 2026-10-18). Before it the count read
+  presence alone, which never says waiting for a non-blocking ask, so a
+  push after a question could carry 0 and clear the badge; #59 counted the
+  question in its own push only. Both kinds of async ask count alike: the
+  ask mod's, raised by a bridge (`async`) and logged, and MAWS's
+  `mcp__maws__ask`, which exists in the log alone. An ask is open while a
+  bridge holds it raised, or while the log holds its `question` with no
+  `answered` of the same `src` from the session and no `retired` of the
+  session since, unless the plane settled it; the count is of sessions, so
+  one ask learned both ways counts once (DX3's grid). A log question counts
+  only while its session's process lives: a session whose kept presence
+  says `record: null` (a stopped seat, which never retires, so the log
+  holds its ask open) is not counted for it, and counts again once it
+  runs, as a bridge's ask is withdrawn when its process ends; the web
+  reads it the same way and keeps such a session under ended, where the
+  phone's Resume bar and the tail's end marker are. The hub keeps the
+  log's side in `open_questions` (session, ask; machine), maintained in the
+  transaction that stores each event, so a backlog's events apply in each
+  feed's order; the protocol's `questionEffect` is the one reading of an
+  event, shared by the hub and the web, whose sidebar puts such a session
+  under waiting on you as a pending request does. Not backfilled: of the
+  asks open at the deploy, a bridge's counts from the pending set anyway,
+  and a log-only one (MAWS's ask, exported since doperpowers 7.182.0 the
+  same day) goes uncounted until it is answered; reading every stored body
+  in each project's first wake would count that one, and with it every
+  older ask whose end the log does not hold, for as long as its session is
+  not retired. Rejected: counting asks per request rather than per session
+  (the count has always been of sessions); a settlement deleting the log's
+  row in place of the count's check (a withdrawn ask's event can reach the
+  hub after its settlement, on the other plane, and would open it again).
+  Bounds: a settlement is kept a month (`settled`), so a bridge's ask
+  withdrawn with no `answered` or `retired` counts again after a month if
+  its session runs that long (a stopped one's is not counted; tracked in
+  `docs/tech-debt-tracker.md`); and
+  an ask a `retired` closed stays closed though a resumed session's ask mod
+  reads it back from its transcript (a bridge raises it again, and it
+  counts from the pending set).
+  Date/Author: 2026-10-18, the owner's ruling; built by the delegated
+  executor.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or

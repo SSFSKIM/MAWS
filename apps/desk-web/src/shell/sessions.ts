@@ -5,8 +5,9 @@ import { useMemo } from 'react';
 import { useStore } from 'zustand';
 import type { SessionPresence } from 'desk-hub/protocol';
 import { drawable } from '../log/project-log';
-import { groupOf, groupSessions, projectSessions, type Liveness, type ProjectedSession, type SessionGroup } from '../log/projection';
+import { groupOf, groupSessions, openQuestions, projectSessions, type Liveness, type OpenQuestion, type ProjectedSession, type SessionGroup } from '../log/projection';
 import type { LiveState, ProjectConnection } from '../project/connection';
+import { requestKey, type ConversationState } from '../project/conversation';
 
 export type DeskSession = ProjectedSession & {
   project: string;
@@ -19,17 +20,23 @@ export type DeskSession = ProjectedSession & {
   machineReadOnly?: boolean;
 };
 
-function livenessOf(live: LiveState, session: ProjectedSession): Liveness {
+/**
+ * What the session plane says of a session now, with the async questions its log holds open (`asking`, by session):
+ * one the plane settled (a bridge's ask is its call's request, and its settlement reaches this tab before or without
+ * the log's `answered`) no longer waits on anyone, as the hub's count has it.
+ */
+export function livenessOf(live: LiveState, requests: ConversationState['requests'], asking: ReadonlyMap<string, OpenQuestion[]>, session: ProjectedSession): Liveness {
   const machine = live.machines[session.machine];
+  const settled = (q: OpenQuestion) => requests[requestKey({ machine: q.machine, session: session.session, request: q.ask })]?.settled != null;
   return {
     presence: live.presence[session.session],
     machineOnline: machine?.online,
     pending: live.pending.filter((p) => p.verified && !p.terminal_only && p.raised.session === session.session).length,
+    questions: (asking.get(session.session) ?? []).filter((q) => !settled(q)).length,
   };
 }
 
-function view(project: string, live: LiveState, session: ProjectedSession): DeskSession {
-  const liveness = livenessOf(live, session);
+function view(project: string, live: LiveState, session: ProjectedSession, liveness: Liveness): DeskSession {
   const machineOnline = liveness.machineOnline ?? null;
   const machineReadOnly = live.machines[session.machine]?.policy?.read_only === true;
   return { ...session, project, group: groupOf(session, liveness), presence: machineOnline === false ? null : (liveness.presence ?? null), machineOnline, machineReadOnly };
@@ -39,17 +46,21 @@ function view(project: string, live: LiveState, session: ProjectedSession): Desk
 export function useDeskSessions(connection: ProjectConnection): { sessions: Map<string, DeskSession>; groups: Record<SessionGroup, DeskSession[]> } {
   const logState = useStore(connection.log.store);
   const live = useStore(connection.live);
+  const requests = useStore(connection.conversation.store, (s) => s.requests);
   return useMemo(() => {
-    const projected = projectSessions(drawable(logState));
-    const groups = groupSessions(projected, (s) => livenessOf(live, s));
+    const entries = drawable(logState);
+    const projected = projectSessions(entries);
+    const asking = openQuestions(entries);
+    const liveOf = (s: ProjectedSession) => livenessOf(live, requests, asking, s);
+    const groups = groupSessions(projected, liveOf);
     const sessions = new Map<string, DeskSession>();
-    for (const s of projected.values()) sessions.set(s.session, view(connection.project, live, s));
+    for (const s of projected.values()) sessions.set(s.session, view(connection.project, live, s, liveOf(s)));
     const viewOf = (s: ProjectedSession) => sessions.get(s.session)!;
     return {
       sessions,
       groups: { waiting: groups.waiting.map(viewOf), working: groups.working.map(viewOf), idle: groups.idle.map(viewOf), ended: groups.ended.map(viewOf) },
     };
-  }, [connection.project, logState, live]);
+  }, [connection.project, logState, live, requests]);
 }
 
 export function useDeskSession(connection: ProjectConnection, session: string): DeskSession | null {

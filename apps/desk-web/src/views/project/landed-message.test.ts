@@ -1,9 +1,10 @@
 // A notification's landing on a `<message>` in the session view (DC9 M6): the log's `message` event names its
 // transcript row and span (`src`, `<row uuid>#<span>`), and the view jumps to that row's text as MAWS's own mark anchors
-// do (its store's `jumpToMessage`, by message uuid and block index).
+// do (its store's `jumpToMessage`, by message uuid and block index). An async question's `question` event names its call
+// (`src`, the tool-use id), and the view jumps to the row MAWS keys by that id.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
-import { landingStep, messageAnchor } from './landed-message';
+import { callRow, landingStep, messageAnchor } from './landed-message';
 
 const UUID = '97c46522-2127-4fe7-a56d-1e9c5c006b95';
 const assistant = (content: JsonObject[], extra: JsonObject = {}): JsonObject => ({ uuid: UUID, type: 'assistant', message: { id: 'msg_1', role: 'assistant', content }, ...extra });
@@ -38,16 +39,33 @@ describe("a landing's message anchor", () => {
   });
 });
 
+describe("a landing's call row", () => {
+  it("is the row MAWS keys by the call's id: the ask mod's question row, MAWS's own ask capsule", () => {
+    const asks = assistant([
+      { type: 'text', text: 'Asking.' },
+      { type: 'tool_use', id: 'toolu_mod', name: 'mcp__doperpowers__AskUserQuestion', input: {} },
+      { type: 'tool_use', id: 'toolu_maws', name: 'mcp__maws__ask', input: {} },
+    ]);
+    expect(callRow('toolu_mod', [asks])).toBe('question:toolu_mod');
+    expect(callRow('toolu_maws', [asks])).toBe('ask:toolu_maws');
+  });
+
+  it('is none while no held row holds the call', () => {
+    expect(callRow('toolu_mod', [])).toBeNull();
+    expect(callRow('toolu_mod', [assistant([{ type: 'tool_use', id: 'toolu_other', name: 'mcp__maws__ask', input: {} }])])).toBeNull();
+    expect(callRow('toolu_mod', [{ uuid: UUID, type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_mod', content: 'x' }] } }])).toBeNull();
+  });
+});
+
 describe("a landing's next step", () => {
-  const anchor = { messageUuid: UUID as never, blockIndex: 0 };
   it('jumps once the row is held and the store is live; waits while it hydrates', () => {
-    expect(landingStep({ anchor, live: true, more: true, loadingOlder: false })).toBe('jump');
-    expect(landingStep({ anchor, live: false, more: false, loadingOlder: false })).toBe('wait');
+    expect(landingStep({ held: true, live: true, more: true, loadingOlder: false })).toBe('jump');
+    expect(landingStep({ held: true, live: false, more: false, loadingOlder: false })).toBe('wait');
   });
   it('pages toward a row not held while older rows exist, waits while a page is out, and is missing once none are left', () => {
-    expect(landingStep({ anchor: null, live: true, more: true, loadingOlder: false })).toBe('page');
-    expect(landingStep({ anchor: null, live: true, more: true, loadingOlder: true })).toBe('wait');
-    expect(landingStep({ anchor: null, live: true, more: false, loadingOlder: false })).toBe('missing');
-    expect(landingStep({ anchor: null, live: false, more: false, loadingOlder: false })).toBe('wait'); // not in yet
+    expect(landingStep({ held: false, live: true, more: true, loadingOlder: false })).toBe('page');
+    expect(landingStep({ held: false, live: true, more: true, loadingOlder: true })).toBe('wait');
+    expect(landingStep({ held: false, live: true, more: false, loadingOlder: false })).toBe('missing');
+    expect(landingStep({ held: false, live: false, more: false, loadingOlder: false })).toBe('wait'); // not in yet
   });
 });

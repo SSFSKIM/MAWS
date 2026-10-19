@@ -1,5 +1,5 @@
 // A Web Push as the desk's service worker reads it (§4, DX7's `PushNotice`): only what points to a card — the project,
-// the session and its alias, the kind, and the request's id or the message's `{writer, seq}`. The worker holds no org
+// the session and its alias, the kind, and the request's id or the log event's `{writer, seq}`. The worker holds no org
 // key, so it can check nothing it draws: the notification says who wants what and opens the app at the card, which
 // verifies the code and the digest as everywhere else. It carries no Allow or Deny (§6).
 //
@@ -34,16 +34,16 @@ export function parseNotice(value: unknown): Notice | null {
   if (n.v !== 1 || !isText(n.project) || !isText(n.session) || !KINDS.has(n.kind as string)) return null;
   if (n.alias !== null && typeof n.alias !== 'string') return null;
   const base = { v: 1 as const, project: n.project, session: n.session, alias: n.alias, ...(isCount(n.waiting) && { waiting: n.waiting }), ...(isText(n.name) && { name: n.name }) };
-  if (n.kind === 'message') {
-    const event = n.event as Record<string, unknown> | undefined;
-    if (typeof event !== 'object' || event === null || !isText(event.writer) || !isSeq(event.seq)) return null;
-    return { ...base, kind: 'message', event: { writer: event.writer, seq: event.seq } };
-  }
-  if (!isText(n.request)) return null;
-  return { ...base, kind: n.kind as 'question' | 'permission', request: n.request };
+  const e = n.event as Record<string, unknown> | undefined;
+  const event = typeof e === 'object' && e !== null && isText(e.writer) && isSeq(e.seq) ? { writer: e.writer, seq: e.seq } : null;
+  if (n.kind === 'message') return event && { ...base, kind: 'message', event };
+  if (isText(n.request)) return { ...base, kind: n.kind as 'question' | 'permission', request: n.request };
+  // A question the log reported before any bridge raised it, or one nothing raises (MAWS's async ask): its event.
+  if (n.kind === 'question' && event) return { ...base, kind: 'question', event };
+  return null;
 }
 
-/** The app's URL for the notice's card: the session's direct channel, with the request or message to open. */
+/** The app's URL for the notice's card: the session's direct channel, with the request or the log event to open. */
 export function noticeUrl(notice: Notice): string {
   const path = `/p/${encodeURIComponent(notice.project)}/s/${encodeURIComponent(notice.session)}`;
   const query = notice.event ? new URLSearchParams({ writer: notice.event.writer, seq: String(notice.event.seq) }) : new URLSearchParams({ request: notice.request ?? '' });

@@ -740,7 +740,7 @@ describe('an app replay of pass3/p1-sdk-mcp-roundtrip (E0a Q1)', () => {
   it('handshakes the maws server, lists every maws tool and answers the probe-only echo_file as an unknown tool', async () => {
     const fixture = loadJournal('pass3', 'p1-sdk-mcp-roundtrip');
     const spec = launchSpec({ appSessionId: 'replay-p1-sdk-mcp' as never, sessionId: null, model: null, replay: 'pass3/p1-sdk-mcp-roundtrip' });
-    const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: FIXTURE_ENGINE_VERSION });
+    const plan = buildLaunch(spec, { PATH: '/usr/bin', HOME: '/Users/x' }, { relayUrl: RELAY_URL, bin: ENGINE_BIN, engineVersion: FIXTURE_ENGINE_VERSION, spawnerPid: 4242 });
     const journal = new MemoryJournal();
     const events: SessionEvent[] = [];
     const recorded = (seq: number) => fixture.find((r) => r.seq === seq)!.frame as { request_id: string; request: { message: { id?: number } }; message: { content: string } };

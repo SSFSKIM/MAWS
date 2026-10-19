@@ -1,0 +1,252 @@
+// The desk's latency instrument (desk ticket #57): every hop between a session and the web that the frames already
+// carry a timestamp for, measured always and shown only when asked. Each path keeps its last `RING` samples in a ring
+// buffer (no allocation per sample), counters keep the reconnects, and nothing is drawn or logged until the readout is
+// on: `localStorage['desk.latency'] = '1'` or a `?latency` query, read at load. Then each sample is logged as one
+// `console.info('[desk latency] <path> <ms>')` line and a small overlay lists each path's n, p50, p95 and max
+// (`LatencyOverlay.tsx`). `window.deskLatency()` returns the same numbers for a scripted read, on or off.
+//
+// Two clocks. A path within the browser is timed on `performance.now()`. A path that starts on another clock — the Mac's
+// engine timestamp on a row, the machine's `ts` on a log event, the bridge's `t` on a chunk — is timed as the browser's
+// `Date.now()` less that stamp, so it carries the skew between the two clocks; its label says so ("cross-clock").
+//
+// "Drawn" is the next animation frame after the store the view reads has applied the change: React commits a store's
+// update before the frame, and the frame is the one that paints it. Samples that wait for a frame are batched into one
+// frame callback. A hidden page paints nothing and its browser suspends the frames while rows and chunks keep coming, so
+// nothing waits for a frame while the page is hidden, and at most `PENDING` samples wait for any one frame.
+
+/** How many samples each path keeps: its last ones. */
+export const RING = 200;
+
+/** Every path the instrument measures, with what its numbers mean. */
+export const PATHS = {
+  'owner.ack': 'owner message: sent → human-ack (web↔hub)',
+  'owner.delivered': 'owner message: sent → delivered outcome in (web→hub→machine→session, and back)',
+  'owner.row': 'owner message: sent → its row in the transcript (cross-clock: browser → Mac engine timestamp)',
+  'session.message': "session's message or question: logged → drawn (cross-clock: machine ts → browser)",
+  'request.drawn': 'permission prompt or question: raised in → drawn (web)',
+  'request.row': "permission prompt or question: its call's row → drawn (cross-clock: Mac engine timestamp → browser)",
+  'view.snapshot': 'session view: subscribe sent → snapshot in (web↔hub↔machine)',
+  'view.drawn': 'session view: snapshot in → first rows drawn (web)',
+  'view.first-rows': 'session view: subscribe sent → first rows drawn',
+  'stream.chunk': 'streaming chunk: bridge stamp → drawn (cross-clock: Mac → browser)',
+  'stream.row': 'live row: engine timestamp → drawn (cross-clock: Mac → browser)',
+  'resume.gap': 'subscription resume: disruption → fresh snapshot merged',
+} as const;
+export type LatencyPath = keyof typeof PATHS;
+
+/** Every count the instrument keeps. */
+export const COUNTS = {
+  'socket.reconnects': "the project socket welcomed again after a drop",
+  'subscription.resumes': 'a transcript subscription resumed from a fresh snapshot after a disruption',
+} as const;
+export type LatencyCount = keyof typeof COUNTS;
+
+export type PathStats = { label: string; n: number; p50: number; p95: number; max: number };
+export type LatencyReport = { on: boolean; paths: Partial<Record<LatencyPath, PathStats>>; counts: Partial<Record<LatencyCount, number>> };
+
+/** The value at percentile `p` (0–100) of ascending `sorted`, by nearest rank; NaN when empty. */
+export function percentile(sorted: ArrayLike<number>, p: number): number {
+  if (sorted.length === 0) return Number.NaN;
+  const rank = Math.ceil((p / 100) * sorted.length);
+  return sorted[Math.min(sorted.length, Math.max(1, rank)) - 1];
+}
+
+/** A path's last `RING` samples. */
+class Ring {
+  private readonly samples = new Float64Array(RING);
+  private next = 0;
+  size = 0;
+
+  push(ms: number): void {
+    this.samples[this.next] = ms;
+    this.next = (this.next + 1) % RING;
+    this.size = Math.min(RING, this.size + 1);
+  }
+
+  /** The samples held, ascending (a copy: read only when asked). */
+  sorted(): Float64Array {
+    return this.samples.slice(0, this.size).sort();
+  }
+}
+
+/** An owner's send's event, once the hub stored it: what a delivery frame names it by. */
+export type SendRef = { writer: string; seq: number; wake: boolean };
+
+/** An owner's send, from its sending until its row, delivery and acknowledgement are measured. */
+type Send = { sentPerf: number; sentWall: number; wake: boolean; ref: SendRef | null; delivered: boolean; row: boolean };
+
+/** How many sends, calls and awaited draws are remembered at most: older ones are forgotten unmeasured. */
+const REMEMBERED = 64;
+
+/** How many samples wait for one frame at most: those past it are not taken. */
+export const PENDING = 512;
+
+const now = () => performance.now();
+/** The page is hidden (a background tab): nothing it draws is painted. Under Node there is no page. */
+const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+const nextFrame = (callback: () => void) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(callback) : setTimeout(callback, 0));
+
+export class LatencyRecorder {
+  /** The readout is on: each sample is logged and the overlay is told. */
+  on = false;
+  private readonly rings = new Map<LatencyPath, Ring>();
+  private readonly counts = new Map<LatencyCount, number>();
+  private readonly listeners = new Set<() => void>();
+  /** Samples waiting for the next frame: their paths, their starts, and which clock each start is on. */
+  private readonly framePaths: LatencyPath[] = [];
+  private readonly frameStarts: number[] = [];
+  private readonly frameWall: boolean[] = [];
+  private frameAsked = false;
+  /** The owner's sends by nonce, then by their event once acknowledged. */
+  private readonly sends = new Map<string, Send>();
+  /** When each tool call's row was written (its engine timestamp, ms), by tool-use id: a raised request's anchor. */
+  private readonly calls = new Map<string, number>();
+
+  constructor(private readonly log: (line: string) => void = (line) => console.info(line)) {}
+
+  /** One sample of `path`; a non-finite one (a stamp absent or unparseable) is not kept. */
+  record(path: LatencyPath, ms: number): void {
+    if (!Number.isFinite(ms)) return;
+    let ring = this.rings.get(path);
+    if (!ring) this.rings.set(path, (ring = new Ring()));
+    ring.push(ms);
+    if (!this.on) return;
+    this.log(`[desk latency] ${path} ${Math.round(ms)}`);
+    this.changed();
+  }
+
+  /**
+   * Records `path` at the next frame, from `start` on the browser's clock (`performance.now()`), or on the wall clock
+   * (`Date.now()`) when `wall`; not while the page is hidden, nor past the `PENDING` samples already waiting for it.
+   */
+  drawn(path: LatencyPath, start: number, wall = false): void {
+    if (!Number.isFinite(start) || hidden() || this.framePaths.length >= PENDING) return;
+    this.framePaths.push(path);
+    this.frameStarts.push(start);
+    this.frameWall.push(wall);
+    if (this.frameAsked) return;
+    this.frameAsked = true;
+    nextFrame(() => {
+      this.frameAsked = false;
+      const perf = now();
+      const wallNow = Date.now();
+      for (let i = 0; i < this.framePaths.length; i++) this.record(this.framePaths[i], (this.frameWall[i] ? wallNow : perf) - this.frameStarts[i]);
+      this.framePaths.length = 0;
+      this.frameStarts.length = 0;
+      this.frameWall.length = 0;
+    });
+  }
+
+  count(name: LatencyCount): void {
+    this.counts.set(name, (this.counts.get(name) ?? 0) + 1);
+    if (this.on) this.changed();
+  }
+
+  // The owner's message: sent, acknowledged, delivered, and its row.
+
+  /** A web `human` handed to the socket (or held for it), by its seal's nonce. */
+  humanSent(nonce: string, wake: boolean): void {
+    this.sends.set(nonce, { sentPerf: now(), sentWall: Date.now(), wake, ref: null, delivered: false, row: false });
+    this.forgetOldest(this.sends);
+  }
+
+  /** The hub stored it as event `(writer, seq)`. */
+  humanAcked(nonce: string, event: { writer: string; seq: number }): void {
+    const send = this.sends.get(nonce);
+    if (!send) return;
+    this.record('owner.ack', now() - send.sentPerf);
+    send.ref = { writer: event.writer, seq: event.seq, wake: send.wake };
+  }
+
+  /** A delivery outcome came in: the first `delivered` of an owner's send is its delivery. */
+  delivery(event: { writer: string; seq: number }, outcome: string): void {
+    if (outcome !== 'delivered') return;
+    const send = this.sendOf(event);
+    if (!send || send.delivered) return;
+    send.delivered = true;
+    this.record('owner.delivered', now() - send.sentPerf);
+    this.done(send);
+  }
+
+  /** The owner's sends acknowledged and not yet found in a transcript: `matches` says whether a row is one's delivery. */
+  ownerRow(matches: (ref: SendRef) => boolean, timestamp: unknown): void {
+    for (const send of this.sends.values()) {
+      if (send.ref === null || send.row || !matches(send.ref)) continue;
+      send.row = true;
+      this.record('owner.row', parseTime(timestamp) - send.sentWall);
+      this.done(send);
+      return;
+    }
+  }
+
+  // A raised request's anchor.
+
+  /** A tool call's row is held: when it was written, for the request it may raise. */
+  noteCall(toolUseId: string, timestamp: unknown): void {
+    const at = parseTime(timestamp);
+    if (!Number.isFinite(at) || this.calls.has(toolUseId)) return;
+    this.calls.set(toolUseId, at);
+    this.forgetOldest(this.calls);
+  }
+
+  /** When the call `toolUseId` was written, if a transcript held its row. */
+  callAt(toolUseId: string): number | undefined {
+    return this.calls.get(toolUseId);
+  }
+
+  // Reading.
+
+  report(): LatencyReport {
+    const paths: LatencyReport['paths'] = {};
+    for (const [path, ring] of this.rings) {
+      const sorted = ring.sorted();
+      paths[path] = { label: PATHS[path], n: sorted.length, p50: round(percentile(sorted, 50)), p95: round(percentile(sorted, 95)), max: round(sorted[sorted.length - 1]) };
+    }
+    return { on: this.on, paths, counts: Object.fromEntries(this.counts) };
+  }
+
+  /** Called after each sample while the readout is on. */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private changed(): void {
+    for (const listener of this.listeners) listener();
+  }
+
+  private sendOf(event: { writer: string; seq: number }): Send | undefined {
+    for (const send of this.sends.values()) if (send.ref?.writer === event.writer && send.ref.seq === event.seq) return send;
+    return undefined;
+  }
+
+  private done(send: Send): void {
+    if (!send.delivered || !send.row) return;
+    for (const [nonce, held] of this.sends) if (held === send) this.sends.delete(nonce);
+  }
+
+  private forgetOldest(map: Map<string, unknown>): void {
+    while (map.size > REMEMBERED) map.delete(map.keys().next().value!);
+  }
+}
+
+const parseTime = (value: unknown): number => (typeof value === 'string' ? Date.parse(value) : typeof value === 'number' ? value : Number.NaN);
+const round = (ms: number) => Math.round(ms * 10) / 10;
+
+/** Whether the readout was asked for: `localStorage['desk.latency'] = '1'`, or `?latency` in the address. */
+export function latencyAsked(): boolean {
+  try {
+    return localStorage.getItem('desk.latency') === '1' || new URLSearchParams(location.search).has('latency');
+  } catch {
+    return false;
+  }
+}
+
+/** The desk's one instrument, which every hop records into. */
+export const latency = new LatencyRecorder();
+
+/** Turns the readout on when asked, and gives scripts `window.deskLatency()`. */
+export function installLatency(): void {
+  latency.on = latencyAsked();
+  (window as unknown as { deskLatency: () => LatencyReport }).deskLatency = () => latency.report();
+}

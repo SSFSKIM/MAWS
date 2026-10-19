@@ -1,7 +1,7 @@
 // What the Info tab says of a session's context use and cost, from DX4 `usage` (the Decision Log, 2026-10-15): the one
 // source of both on the web. Null — the session has no bridge, or none has reported yet — reads "unavailable (no
 // bridge)"; a piece the usage leaves out (the window's fill before a response reported it; the cost where the engine
-// keeps no ledger) reads unavailable on its own; undefined is not known yet (before the snapshot, or after a reset).
+// keeps no ledger) reads unavailable on its own; undefined is not known yet (before the first snapshot).
 import type { Usage } from 'desk-hub/protocol';
 
 export const UNAVAILABLE = 'unavailable';

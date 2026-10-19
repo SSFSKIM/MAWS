@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LogEvent } from 'desk-hub/protocol';
 import { requestKey } from '../project/conversation';
-import { buildStream, placedRequest, type PlacedRequest, type StreamItem } from './stream';
+import { buildStream, crossProject, placedRequest, type PlacedRequest, type StreamItem } from './stream';
 
 const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b'; // maws-45 @mini
 const S2 = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a'; // maws-fe @SK.local
@@ -174,5 +174,46 @@ describe('a direct channel', () => {
     const entries = [ev(`hub/${M}`, 'human', { from: 'human', member: M, to: '*', text: 'status', created: 'x' })];
     expect(buildStream({ kind: 'session', session: S1 }, entries, aliases, [])).toEqual([]);
     expect(shape(buildStream({ kind: 'group' }, entries, aliases, []))).toEqual(['human:1']);
+  });
+});
+
+// The org directory (smns org directory §6, M5): a cross-project message is written twice — the delivering event in the
+// destination's log, carrying `from_project`, and a copy in the sender's own log, marked `copy` with the delivering
+// event's position. A session's move between projects is a `retired` with reason `moved` and the new project's id.
+describe('across projects', () => {
+  const HERE = '0d6c1f2e-6a43-4f43-9b1a-6f1d6a5b2c11';
+  const THERE = 'a5c3c1de-7a5e-5d2b-9f3a-2c6b7e1d4f20';
+  const at = (fields: Record<string, unknown>) => ({ ts: 't', writer: `mini/${S1}`, seq: 1, kind: 'say', mac: { nonce: 'n', value: 'v' }, from: 'maws-45', text: 'hi', ...fields }) as LogEvent;
+
+  it("tells the sender's copy by its `copy` key, its destination the delivering event's project", () => {
+    expect(crossProject(at({ to: [{ session: S2, alias: 'mini-7c', project: THERE }], copy: `${THERE}:mini/${S2}:4` }), HERE)).toEqual({ to: THERE });
+    // A copy whose position does not parse still names its recipients' project.
+    expect(crossProject(at({ to: [{ session: S2, alias: 'mini-7c', project: THERE }], copy: 'x' }), HERE)).toEqual({ to: THERE });
+  });
+
+  it('tells a delivering event from another project by its origin, and an event of this project as neither', () => {
+    expect(crossProject(at({ to: [{ session: S2, alias: 'maws-fe' }], from_project: THERE }), HERE)).toEqual({ from: THERE });
+    expect(crossProject(at({ to: [{ session: S2, alias: 'maws-fe' }], from_project: HERE }), HERE)).toBeNull();
+    expect(crossProject(at({ to: [{ session: S2, alias: 'maws-fe' }] }), HERE)).toBeNull();
+    expect(crossProject(at({ to: '*', from_project: 42 }), HERE)).toBeNull();
+  });
+
+  it('draws a move as the project the session moved to, by name', () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '' }),
+      ev(`mini/${S1}`, 'retired', { session: S1, by: '', reason: 'moved', project: THERE }),
+    ];
+    const names = (id: string) => (id === THERE ? 'doperpowers' : id.slice(0, 8));
+    expect(buildStream({ kind: 'group' }, entries, aliases, [], { projectName: names }).at(-1)).toMatchObject({ kind: 'system', text: 'maws-45 moved to doperpowers' });
+  });
+
+  it('draws no line for a relocated joined, which only refreshes where a member works', () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '' }),
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '', cwd: '/w/x', relocated: true }),
+    ];
+    expect(shape(buildStream({ kind: 'group' }, entries, aliases, []))).toEqual(['system:1']);
   });
 });

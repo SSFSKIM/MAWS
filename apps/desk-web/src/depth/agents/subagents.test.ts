@@ -159,14 +159,14 @@ describe('the subagent tree from the main subscription', () => {
     expect(treeOf(main.tasks()).map((agent) => agent.status)).toEqual(['completed', 'completed']);
   });
 
-  it('a fresh snapshot after a reset gives the tree live play gave at the same point', async () => {
+  it('an interruption keeps the tree, and its fresh snapshot gives the tree live play gave at the same point', async () => {
     const middle = rowAt(script, notificationOf(KETTLE.agentId).uuid) + 1;
     main.sub.snapshot(script, 0);
     await settle();
     await main.step(script.slice(0, middle));
     const live = treeOf(main.tasks());
-    main.sub.listener.reset();
-    expect(treeOf(main.tasks())).toEqual([]);
+    main.sub.listener.interrupted();
+    expect(treeOf(main.tasks())).toEqual(live);
     main.sub.snapshot(script, middle);
     await settle();
     expect(treeOf(main.tasks())).toEqual(live);
@@ -226,9 +226,12 @@ describe('a subagent’s transcript through its own subscription', () => {
         open.sub.snapshot(script, 0);
         await settle();
         await open.step(script.slice(0, middle));
-        expect(open.drawnText().join('')).not.toBe('');
-        open.sub.listener.reset();
-        expect(open.drawnText()).toEqual([]);
+        const drawn = open.drawnText();
+        expect(drawn.join('')).not.toBe('');
+        const rowsBefore = open.rows();
+        open.sub.listener.interrupted();
+        expect(open.drawnText()).toEqual(drawn); // kept until the fresh snapshot
+        expect(open.rows()).toBe(rowsBefore);
         open.sub.snapshot(script, middle + 1);
         await settle();
         await open.step(script.slice(middle + 1));
@@ -241,7 +244,7 @@ describe('a subagent’s transcript through its own subscription', () => {
         open.sub.snapshot(script, 0);
         await settle();
         await open.step(script.slice(0, firstText + 2));
-        open.sub.listener.reset();
+        open.sub.listener.interrupted();
         const lost = firstText + 6;
         open.sub.snapshot(script, lost);
         await settle();
@@ -296,12 +299,13 @@ describe('the main thread and a subagent, apart', () => {
 
   const drawn = (open: Open) => ({ rows: open.rows(), streaming: open.controller.state.getState().streaming, phase: open.controller.state.getState().phase, tasks: open.tasks() });
 
-  it('a subagent’s reset and end never touch the main thread’s view', async () => {
+  it('a subagent’s interruption and end never touch the main thread’s view', async () => {
     const before = drawn(main);
     const subscriptions = plane.subs.length;
-    sub.sub.listener.reset();
+    const subRows = sub.rows();
+    sub.sub.listener.interrupted();
     await settle();
-    expect(sub.rows()).toEqual([]);
+    expect(sub.rows()).toBe(subRows); // its own view keeps what it drew
     expect(drawn(main)).toEqual(before);
     expect(main.rows()).toBe(before.rows); // the same state object: nothing in it moved
     sub.sub.snapshot(subScript, midSub + 1);
@@ -316,11 +320,12 @@ describe('the main thread and a subagent, apart', () => {
     expect(main.rows()).toEqual(await freshRows(rowsOf(mainScript), null));
   });
 
-  it('the main thread’s reset and end never touch the subagent’s view', async () => {
+  it('the main thread’s interruption and end never touch the subagent’s view', async () => {
     const before = drawn(sub);
-    main.sub.listener.reset();
+    const mainRows = main.rows();
+    main.sub.listener.interrupted();
     await settle();
-    expect(main.rows()).toEqual([]);
+    expect(main.rows()).toBe(mainRows); // its own view keeps what it drew
     expect(drawn(sub)).toEqual(before);
     expect(sub.rows()).toBe(before.rows);
     main.sub.listener.end({ reason: 'machine-offline' });

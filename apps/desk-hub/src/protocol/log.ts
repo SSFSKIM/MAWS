@@ -100,3 +100,25 @@ export function writerMachine(writer: string): string | null {
   const slash = writer.indexOf('/');
   return slash > 0 ? writer.slice(0, slash) : null;
 }
+
+/** What one log event does to the async questions its session holds open (`questionEffect`). */
+export type QuestionEffect = { kind: 'question' | 'answered'; machine: string; session: string; ask: string } | { kind: 'retired'; session: string };
+
+/**
+ * What a log event does to the async questions its session holds open, which the hub's waiting count and the web's
+ * "waiting on you" both read (owner, 2026-10-18). An async ask (the ask mod's with `async`, MAWS's `mcp__maws__ask`
+ * with `blocking` false) reaches the log as a `question` from the asking session's feed, `src` the ask's id (its call
+ * id, or MAWS's askId), and its answer as an `answered` from the same feed with the same `src`. The session's `retired`
+ * from its own feed (as smns reads membership) ends every ask it holds: an ask dies with its process. Null for any other
+ * event, and for a feed that is no session's (`hub/`, `legacy/`, a machine's `human`).
+ */
+export function questionEffect(event: LogEvent): QuestionEffect | null {
+  const machine = writerMachine(event.writer);
+  const session = machine === null ? 'human' : event.writer.slice(machine.length + 1);
+  if (machine === null || session === 'human') return null;
+  if (event.kind === 'retired') return event.session === session ? { kind: 'retired', session } : null;
+  // An ask's id is a request's when a bridge raised it too (DX4 `raised.request`, at most 512 characters).
+  const ask = event.src;
+  if ((event.kind === 'question' || event.kind === 'answered') && typeof ask === 'string' && ask !== '' && ask.length <= 512) return { kind: event.kind, machine, session, ask };
+  return null;
+}

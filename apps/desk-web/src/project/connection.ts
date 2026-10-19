@@ -2,7 +2,8 @@
 // session, machines, the pending set, the hub's refusals — the conversation's state (`Conversation`: requests,
 // deliveries, RPCs, the outbox, compactions), and the socket that feeds them. The socket starts only once the browser's
 // record is read, so its first resume is after the last offset the record holds. What the web issues — a `human`, an
-// RPC — is sealed here with the org key (DX1, DX6) and never leaves unsealed.
+// RPC — is sealed here with the org key (DX1, DX6) and never leaves unsealed. A session's message or question arriving
+// live is timed from its `ts` until it is verified and drawn (`latency/latency.ts`).
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   inputSha256,
@@ -25,8 +26,9 @@ import {
   type SessionPresence,
   type Settled,
 } from 'desk-hub/protocol';
+import { latency } from '../latency/latency';
 import type { LogRecord } from '../log/record';
-import { ProjectLog } from '../log/project-log';
+import { ProjectLog, type ProjectLogState } from '../log/project-log';
 import { HumanRefused, ProjectClient, type ConnectionStatus } from '../hub/project-client';
 import { Conversation, type RequestRecord } from './conversation';
 
@@ -73,6 +75,8 @@ export class ProjectConnection {
   private pendingRaw: PendingRequest[] = [];
   /** The hub's head at the latest `welcome`: a request seen before the backlog is in belongs at least there. */
   private head = 0;
+  /** Live log events from a session, by offset, with their `ts`, until they verify and are drawn (`latency.ts`). */
+  private readonly untold = new Map<number, number>();
 
   constructor(
     readonly project: string,
@@ -97,6 +101,9 @@ export class ProjectConnection {
           this.conversation.restart();
         },
         log: (entries) => {
+          // A session's message or question, live (the backlog after a resume is not timed): timed until it is drawn.
+          if (this.live.getState().caughtUp)
+            for (const { offset, event } of entries) if ((event.kind === 'message' || event.kind === 'question') && !event.writer.startsWith('hub/')) this.untold.set(offset, Date.parse(event.ts));
           this.log.receive(entries);
           for (const { event } of entries) {
             const nonce = (event.mac as { nonce?: unknown } | undefined)?.nonce;
@@ -124,6 +131,21 @@ export class ProjectConnection {
       },
     });
     this.client.onRpcState((frame) => this.conversation.rpcState(frame.nonce, frame.state, frame.outcome));
+    this.log.store.subscribe((state) => this.told(state));
+  }
+
+  /** The session events awaited that the log now has a verdict on: each verified one is drawn at the next frame. */
+  private told(state: ProjectLogState): void {
+    if (this.untold.size === 0) return;
+    const oldest = Math.min(...this.untold.keys());
+    for (let i = state.entries.length - 1; i >= 0 && state.entries[i].offset >= oldest; i--) {
+      const { offset, verdict } = state.entries[i];
+      const ts = this.untold.get(offset);
+      if (ts === undefined || verdict === 'pending') continue;
+      this.untold.delete(offset);
+      if (verdict === 'ok' && !state.locked) latency.drawn('session.message', ts, true);
+    }
+    while (this.untold.size > 64) this.untold.delete(this.untold.keys().next().value!);
   }
 
   /** Reads the browser's record, then opens the socket; a second call does nothing. */

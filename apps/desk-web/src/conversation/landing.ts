@@ -1,12 +1,36 @@
 // Landing on a card from a tapped notification (§4): the push only pointed to it, so the channel finds the card among
 // what it draws — and it draws only what verified — and otherwise says why it is not there: still checking, settled
 // before the page opened, failed verification, or not in the log.
+import type { LogEvent } from 'desk-hub/protocol';
 import type { ProjectLogState } from '../log/project-log';
-import type { ConversationState } from '../project/conversation';
+import type { ConversationState, RequestRecord } from '../project/conversation';
 import type { Landing } from '../sw/notice';
 import type { StreamItem } from './stream';
 
 export type LandingStatus = { kind: 'shown' } | { kind: 'checking' | 'gone' | 'unverified' | 'missing'; text: string };
+
+/** Where the session view lands a log event: a request's card at its tail, or a transcript row (`message`'s, `question`'s). */
+export type EventLanding = { request: string | null; message: string | null; question: string | null };
+
+const NOWHERE: EventLanding = { request: null, message: null, question: null };
+
+/**
+ * Where the session view, which draws the transcript's rows and the pending requests' cards rather than the log's items,
+ * lands the log event a notification named: a `<message>` on its transcript row (`message`, the event's `src`); a
+ * `question` on the card of the request a bridge raised for the same ask (`request`, the pending request whose id or
+ * tool-use id is the event's `src`), and with no such request (MAWS's own async ask is never raised, and an answered
+ * ask's request is settled) on its call's row (`question`, the call's id) — but only once the pending set is checked,
+ * so a request not checked yet does not send the view to the call first. `pending` is the session's pending requests.
+ */
+export function eventLanding(event: LogEvent | undefined, pending: readonly RequestRecord[], checked: boolean): EventLanding {
+  if (typeof event?.src !== 'string') return NOWHERE;
+  const src = event.src;
+  if (event.kind === 'message') return { ...NOWHERE, message: src };
+  if (event.kind !== 'question') return NOWHERE;
+  const raised = pending.find((r) => r.request === src || r.raised.toolUseId === src);
+  if (raised) return { ...NOWHERE, request: raised.request };
+  return checked ? { ...NOWHERE, question: src } : NOWHERE;
+}
 
 /** The key of the stream item the landing names, or null when the channel draws no such card. */
 export function landedItem(landing: Landing, items: StreamItem[]): string | null {

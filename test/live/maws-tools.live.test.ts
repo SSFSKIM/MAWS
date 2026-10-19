@@ -218,7 +218,7 @@ describe('the maws tool server, live (E1 M2)', () => {
     if (case1 === null) ctx.skip('case 1 did not record a session');
     const { repo, engineSessionId } = case1!;
     const captured = { ...withoutClaudeVariables(await captureShellEnvironment()), CLAUDE_CONFIG_DIR: g.home }; // E11 W-E: no inherited CLAUDE*
-    const env = buildEnvironment(liveSpec(repo, { subagentModel: null }), captured, RELAY_URL);
+    const env = buildEnvironment(liveSpec(repo, { subagentModel: null }), captured, RELAY_URL, process.pid);
     delete env.CLAUDE_CODE_ENTRYPOINT; // a terminal launch, not the SDK's
     const prompt = 'Reply with the names of the tools you have whose names start with mcp__maws, or NONE if there are none.';
     const args = ['-p', '--resume', engineSessionId, '--output-format', 'stream-json', '--verbose', '--model', 'haiku', prompt];

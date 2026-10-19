@@ -31,6 +31,7 @@ const session = (id: string, alias: string): DeskSession => ({
   status: null,
   state: null,
   joinedAt: 1,
+  joinedTs: '',
   group: 'waiting',
   presence: { record: { status: 'waiting' }, bridge: true },
   machineOnline: true,

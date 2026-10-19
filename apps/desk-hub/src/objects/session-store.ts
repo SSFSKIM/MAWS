@@ -1,7 +1,7 @@
 // What a project's session plane keeps in its `Project` object's storage (SQLite), so it survives an eviction while
 // sockets stay open, a hibernation, and a restart (§2): each machine's lease and presence, each session's latest
 // presence, the pending set, the latest delivery outcome per event and recipient, the RPC records by nonce, the
-// browsers' subscriptions, and the machines revoked from the org. The logic that moves these lives in `project.ts`; this is their storage and nothing else.
+// browsers' subscriptions, the machines revoked from the org, and the asks a question was pushed for. The logic that moves these lives in `project.ts`; this is their storage and nothing else.
 import type { Delivery, MachinePresence, Raised, SessionMessage } from '../protocol/session';
 import type { Rpc, RpcOutcome, RpcState } from '../protocol/rpc';
 
@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS rpcs (
 CREATE INDEX IF NOT EXISTS rpcs_by_machine ON rpcs (machine, state);
 CREATE TABLE IF NOT EXISTS settled (
   machine TEXT NOT NULL, session TEXT NOT NULL, request TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (machine, session, request));
+CREATE TABLE IF NOT EXISTS asked (
+  machine TEXT NOT NULL, session TEXT NOT NULL, ask TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (machine, session, ask));
 CREATE TABLE IF NOT EXISTS revoked (machine TEXT PRIMARY KEY, generation INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS subs (
   sub TEXT PRIMARY KEY, socket TEXT NOT NULL, machine TEXT NOT NULL, session TEXT NOT NULL, agent_id TEXT,
@@ -34,6 +36,12 @@ const RPC_RECORD_MS = 24 * 3600 * 1000;
 
 /** How long a settled request's id is kept to recognize its `settled` sent again: a month, past any daemon's restart. */
 const SETTLED_MS = 30 * 24 * 3600 * 1000;
+
+/** How long a pushed question's ask id is kept, so its other report pushes nothing (`markAsked`): an hour. The two
+ * reports of one ask (a bridge's `raised` and the log's `question` event) arrive within seconds of each other, on the
+ * uplink's two planes, and the event pushes only within ten minutes of its `ts` (project.ts `PUSH_FRESH_MS`); the
+ * hour covers both with room for a machine's clock running ahead or a plane reconnecting late. */
+const ASKED_MS = 60 * 60 * 1000;
 
 /** `closed`: the stream it belongs to closed, so nothing of that generation renews it again (a lapse alone may be
  * renewed: a daemon back from a suspension on a stream that held). `follow`: its latest `hello` said the machine only
@@ -163,6 +171,20 @@ export class SessionStore {
     this.sql.exec('DELETE FROM settled WHERE at < ?', now - SETTLED_MS);
     const known = this.sql.exec('SELECT 1 FROM settled WHERE machine = ? AND session = ? AND request = ?', machine, session, request).toArray().length > 0;
     if (!known) this.sql.exec('INSERT INTO settled (machine, session, request, at) VALUES (?, ?, ?, ?)', machine, session, request, now);
+    return !known;
+  }
+
+  /** Whether a settlement of the request is kept (for a month: `SETTLED_MS`). */
+  isSettled(machine: string, session: string, request: string): boolean {
+    return this.sql.exec('SELECT 1 FROM settled WHERE machine = ? AND session = ? AND request = ?', machine, session, request).toArray().length > 0;
+  }
+
+  /** Marks a question pushed for the ask `ask` of a session; false when it already was, so the ask's other report (its
+   * `raised` or its log `question`, whichever came second) pushes nothing. */
+  markAsked(machine: string, session: string, ask: string, now: number): boolean {
+    this.sql.exec('DELETE FROM asked WHERE at < ?', now - ASKED_MS);
+    const known = this.sql.exec('SELECT 1 FROM asked WHERE machine = ? AND session = ? AND ask = ?', machine, session, ask).toArray().length > 0;
+    if (!known) this.sql.exec('INSERT INTO asked (machine, session, ask, at) VALUES (?, ?, ?, ?)', machine, session, ask, now);
     return !known;
   }
 

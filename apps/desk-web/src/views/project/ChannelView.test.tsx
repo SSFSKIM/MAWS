@@ -4,18 +4,19 @@
 // whose session's machine is online the center is the session view (DC9), its own chunk, stood in for here: what it
 // draws is its own suite's; the log-built stream is the center of a session whose machine is offline.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importOrgKey, type LogEvent } from 'desk-hub/protocol';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../../test/vectors';
 import { memoryLogRecord } from '../../log/record';
 import { ProjectConnection } from '../../project/connection';
+import { useLanding } from '../../pwa/service-worker';
 import type { DeskSession } from '../../shell/sessions';
 import { DeskContext } from '../conversation/desk-context';
 import { ChannelView } from './ChannelView';
 
 vi.mock('./SessionView', () => ({
-  default: function SessionView({ session }: { session: DeskSession }) {
-    return <section data-testid="session-view" data-session={session.session} />;
+  default: function SessionView({ session, landedRequest, landedQuestion }: { session: DeskSession; landedRequest?: string | null; landedQuestion?: string | null }) {
+    return <section data-testid="session-view" data-session={session.session} data-landed-request={landedRequest ?? undefined} data-landed-question={landedQuestion ?? undefined} />;
   },
   SessionStatus: () => <span data-testid="session-status">Loading…</span>,
 }));
@@ -37,6 +38,7 @@ const session = (id: string, alias: string, title: string | null = null): DeskSe
   status: null,
   state: null,
   joinedAt: 1,
+  joinedTs: '',
   group: 'working',
   presence: { record: { status: 'busy' }, bridge: true },
   machineOnline: true,
@@ -51,6 +53,7 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   connection.stop();
+  useLanding.getState().clear();
 });
 
 it("carries none of one session's draft or confirmation into another's channel, and retires only the session it was confirmed for", async () => {
@@ -137,6 +140,42 @@ it("draws a direct channel's session view on a phone too while its machine is on
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+describe("a tapped notification's question event, in the session view", () => {
+  const mac = { nonce: 'n', value: 'v' };
+  const asked = { offset: 2, event: { ts: '2026-10-18T08:00:00.000Z', writer: `mini/${A}`, seq: 2, kind: 'question', from: 'maws-45', to: 'host', text: ['Ship it?'], choices: [], src: 'toolu_ask', mac } as LogEvent };
+  const raised = { request: 'request-7', session: A, tool: 'mcp__doperpowers__AskUserQuestion', input: {}, async: true as const, toolUseId: 'toolu_ask', mac };
+  const record = { key: 'k1', request: 'request-7', machine: 'mini', raised, at: 1, pending: true, terminalOnly: false, settled: null };
+  const opened = async () => {
+    useLanding.setState({ landed: { project: PROJECT, session: A, landing: { kind: 'event', writer: `mini/${A}`, seq: 2 } } });
+    const sessions = new Map([[A, session(A, 'maws-45')]]);
+    render(
+      <DeskContext.Provider value={{ connection, member: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', sessions }}>
+        <ChannelView name="MAWS" channel={{ kind: 'session', session: A }} session={sessions.get(A)!} events={[asked]} />
+      </DeskContext.Provider>,
+    );
+    return screen.findByTestId('session-view');
+  };
+
+  it('lands on the card of the request a bridge raised for the same ask, and stays there once it is answered there', async () => {
+    connection.conversation.store.setState({ requests: { k1: record }, checked: true });
+    const view = await opened();
+    expect(view.dataset.landedRequest).toBe('request-7');
+    expect(view.dataset.landedQuestion).toBeUndefined();
+    // Answered on its card, the request settles: the reader is not sent up to the call.
+    act(() => connection.conversation.store.setState({ requests: { k1: { ...record, pending: false } } }));
+    expect(view.dataset.landedRequest).toBe('request-7');
+    expect(view.dataset.landedQuestion).toBeUndefined();
+  });
+
+  it("lands on its call's row when no request waits for it (MAWS's ask), once the pending set is checked", async () => {
+    const view = await opened();
+    expect(view.dataset.landedQuestion).toBeUndefined(); // a request for it may not be checked yet
+    act(() => connection.conversation.store.setState({ checked: true }));
+    expect(view.dataset.landedQuestion).toBe('toolu_ask');
+    expect(view.dataset.landedRequest).toBeUndefined();
+  });
 });
 
 it("draws each item of a session's stream once as it changes (the stream and the composer each keep their own key)", () => {

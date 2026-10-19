@@ -3,9 +3,11 @@
 // writer's, so its latest `joined` / `retired` decides membership, and its latest `titled` its title. The in-charge and
 // status lines can be set from two machines, and the later `ts` wins, as smns §3 has it. Presence (DX4) is live and not
 // in the log: a session's group reads it while its machine is online, and the last `state` event while the machine is
-// offline or its presence is not known yet.
+// offline or its presence is not known yet. A session holding an open async question waits on you as one holding a
+// pending request does (owner, 2026-10-18), though its presence says busy, while its process lives: a session whose
+// presence says no process is stays under ended, its log question uncounted until it runs again.
 import type { LogEvent, SessionPresence } from 'desk-hub/protocol';
-import { writerMachine } from 'desk-hub/protocol';
+import { questionEffect, writerMachine } from 'desk-hub/protocol';
 
 export type SessionGroup = 'waiting' | 'working' | 'idle' | 'ended';
 export const GROUPS: readonly SessionGroup[] = ['waiting', 'working', 'idle', 'ended'];
@@ -31,8 +33,13 @@ export type ProjectedSession = {
   status: string | null;
   /** The last `state` the daemon published: the record for a machine that is offline. */
   state: { word: string; ts: string } | null;
-  /** The offset of the latest `joined`: the sidebar lists the newest member first. */
+  /** The offset of the membership's `joined`: the sidebar lists the newest member first. */
   joinedAt: number;
+  /**
+   * The `ts` of the membership's `joined`: the org view orders sessions of several projects by it, where an offset in
+   * one project's log means nothing.
+   */
+  joinedTs: string;
 };
 
 /**
@@ -69,6 +76,7 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
         status: null,
         state: null,
         joinedAt: offset,
+        joinedTs: event.ts,
         chargeTs: '',
         statusTs: '',
       };
@@ -78,6 +86,13 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
     switch (event.kind) {
       case 'joined': {
         const d = draft();
+        // A relocated `joined` (the engine moved the session within the project: EnterWorktree, a `/cd`) refreshes where
+        // it works and starts no membership: its join time and place stay the membership's first `joined`'s.
+        if (event.relocated === true && d.member) {
+          d.cwd = str(event.cwd);
+          d.worktree = str(event.worktree) || null;
+          break;
+        }
         d.alias = str(event.alias) ?? d.alias;
         d.machine = str(event.machine) ?? d.machine;
         d.cwd = str(event.cwd);
@@ -86,6 +101,7 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
         d.member = true;
         d.ended = null;
         d.joinedAt = offset;
+        d.joinedTs = event.ts;
         break;
       }
       case 'retired': {
@@ -127,10 +143,33 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
   }
   const sessions = new Map<string, ProjectedSession>();
   for (const [id, d] of drafts) {
-    const { session, alias, machine, cwd, worktree, seat, title, member, ended, charge, status, state, joinedAt } = d;
-    sessions.set(id, { session, alias, machine, cwd, worktree, seat, title, member, ended, charge, status, state, joinedAt });
+    const { session, alias, machine, cwd, worktree, seat, title, member, ended, charge, status, state, joinedAt, joinedTs } = d;
+    sessions.set(id, { session, alias, machine, cwd, worktree, seat, title, member, ended, charge, status, state, joinedAt, joinedTs });
   }
   return sessions;
+}
+
+/** An async question the log holds open: the machine whose feed holds it, and its id (the log's `src`). */
+export type OpenQuestion = { machine: string; ask: string };
+
+/**
+ * The async questions the log holds open, by session, read as the hub counts them for its waiting count (desk-hub
+ * `questionEffect`, owner 2026-10-18): a session's `question` opens its ask, an `answered` from it with the same id
+ * closes it, and its `retired` closes every ask it holds, since an ask dies with its process.
+ */
+export function openQuestions(entries: ReadonlyArray<{ event: LogEvent }>): Map<string, OpenQuestion[]> {
+  const open = new Map<string, Map<string, OpenQuestion>>();
+  for (const { event } of entries) {
+    const effect = questionEffect(event);
+    if (effect?.kind === 'retired') open.delete(effect.session);
+    else if (effect?.kind === 'answered') open.get(effect.session)?.delete(effect.ask);
+    else if (effect?.kind === 'question') {
+      const asks = open.get(effect.session) ?? new Map<string, OpenQuestion>();
+      if (!asks.has(effect.ask)) asks.set(effect.ask, { machine: effect.machine, ask: effect.ask });
+      open.set(effect.session, asks);
+    }
+  }
+  return new Map([...open].filter(([, asks]) => asks.size > 0).map(([session, asks]) => [session, [...asks.values()]]));
 }
 
 export type Liveness = {
@@ -140,6 +179,9 @@ export type Liveness = {
   machineOnline?: boolean;
   /** Requests of the session still pending (verified), questions and permission prompts alike. */
   pending: number;
+  /** Async questions of the session its log holds open (`openQuestions`) and the plane has not settled, as this tab
+   * knows it; a bridge's ask is in `pending` too while it is raised. */
+  questions: number;
 };
 
 /** sminos's state words (`STATES` in sminos.py): a live word, or one that says the session is not running. */
@@ -154,8 +196,11 @@ export function groupOf(session: ProjectedSession, live: Liveness): SessionGroup
   if (!session.member) return 'ended';
   if (live.machineOnline === false || live.presence === undefined) return fromState(session.state?.word);
   if (live.pending > 0) return 'waiting';
-  const status = live.presence.record === null ? null : live.presence.record.status;
   if (live.presence.record === null) return 'ended';
+  // An open log question, while its session's process lives (a stopped seat never retires, so its ask stays open in the
+  // log): its session works on, so its presence says busy, and that stays its state word. The hub counts it alike.
+  if (live.questions > 0) return 'waiting';
+  const status = live.presence.record.status;
   if (status === 'waiting') return 'waiting';
   if (status === 'idle') return 'idle';
   return 'working'; // busy, shell, or anything newer: sminos's `peer_state` reads them as busy
