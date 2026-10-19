@@ -28,8 +28,8 @@ type PermissionEvent = Extract<SessionEvent, { kind: 'permission.requested' }>;
 /** The raised request as MAWS's permission pieces read it: the tool's name and input, and nothing MAWS-only. */
 const asPermission = (raised: Raised) => ({ kind: 'permission.requested', toolName: raised.tool, input: raised.input, displayName: null, mcpServer: null, description: null }) as unknown as PermissionEvent;
 
-/** The native AskUserQuestion input as MAWS's question stepper reads it. */
-function questionsOf(raised: Raised): Question[] {
+/** The native AskUserQuestion input as MAWS's question stepper reads it (the chat's receipt reads the headers off it too). */
+export function questionsOf(raised: Raised): Question[] {
   const questions = Array.isArray(raised.input.questions) ? raised.input.questions : [];
   return questions.flatMap((q) => {
     if (typeof q !== 'object' || q === null || Array.isArray(q) || typeof q.question !== 'string') return [];

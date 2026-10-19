@@ -109,7 +109,7 @@ export function GroupComposer({ name }: { name: string }) {
       />
       <div className="mt-1.5 flex items-center gap-3">
         <span className={`text-ui-sm ${error ? 'text-danger' : 'text-fg-faint'}`} role={error ? 'alert' : undefined}>
-          {error ?? 'Untagged is a record; @alias delivers; @all wakes every live member'}
+          {error ?? 'Mention @alias to deliver, @all to wake every live session; untagged is kept here, delivered to no one'}
         </span>
         <button type="button" className={`${PRIMARY} ml-auto`} onClick={post} disabled={!text.trim()}>
           Post

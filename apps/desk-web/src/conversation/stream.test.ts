@@ -50,6 +50,27 @@ describe('the group chat', () => {
     expect(items.find((i) => i.kind === 'system' && i.offset === 10)).toMatchObject({ text: 'maws-45 retired by human' });
   });
 
+  it('carries each line as its subject and its words, a question its list of questions, a request its session', () => {
+    const items = buildStream({ kind: 'group' }, log(), aliases, [placed('toolu_9', S2, 2)]);
+    expect(items.find((i) => i.kind === 'system' && i.offset === 1)).toMatchObject({ session: S1, subject: 'maws-45', rest: 'joined on mini', text: 'maws-45 joined on mini' });
+    expect(items.find((i) => i.kind === 'question')).toMatchObject({ questions: ['Which column?'], text: 'Which column?' });
+    expect(items.find((i) => i.kind === 'request')).toMatchObject({ session: S2 });
+  });
+
+  it('names a rename by the alias the session had before, and says nothing of a rename to the name it already has', () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '' }), // 1
+      ev(`mini/${S1}`, 'renamed', { session: S1, alias: 'maws-45' }), // 2: the same name
+      ev(`mini/${S1}`, 'renamed', { session: S1, alias: 'grid-7c' }), // 3
+      ev(`mini/${S1}`, 'in-charge', { session: S1, text: 'the grid' }), // 4
+    ];
+    const items = buildStream({ kind: 'group' }, entries, new Map([[S1, 'grid-7c']]), []);
+    expect(shape(items)).toEqual(['system:1', 'system:3', 'system:4']);
+    expect(items[1]).toMatchObject({ subject: 'maws-45', rest: 'is now grid-7c', text: 'maws-45 is now grid-7c' });
+    expect(items[2]).toMatchObject({ subject: 'grid-7c', text: 'grid-7c is in charge of: the grid' }); // the sidebar's name for it now
+  });
+
   it('names who retired a session: you, another member of the org by its id, or what sminos recorded', () => {
     const OTHER = '0f1e2d3c4b5a69788796a5b4c3d2e1f0';
     const retired = (by: string) => [...log().slice(0, 1), ev(`mini/${S1}`, 'retired', { session: S1, by, reason: 'retire' })];

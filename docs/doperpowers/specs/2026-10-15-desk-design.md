@@ -495,7 +495,36 @@ unavailable; everything they sent the human is still in the log.
   (decidable in place), lifecycle as system lines, and what humans posted.
   Traffic between agents folds into one row per run, expandable. Posting
   follows `sminos say` (smns §4): untagged is a record that wakes no one,
-  `@alias` delivers, `@all` wakes every live member.
+  `@alias` delivers, `@all` wakes every live member. **Amended 2026-10-19
+  (owner):** it is drawn with the session view's rendering, and works as
+  a group chat on top of it. The rows sit in MAWS's reading column with
+  its typography. A session's message is MAWS's answer prose through its
+  Markdown; a sender's consecutive messages, questions and requests within
+  five minutes stand under one header (the title, the alias beside it only
+  where it differs, the machine, the time of the first). The owner's own
+  message is MAWS's user bubble on the right, each recipient's DX4 outcome
+  in the bubble's foot under a hairline with the tail foot's glyphs, the
+  bubble tinted only when every recipient's machine held it back or
+  failed; a record kept for no one says so in the foot, untinted; another
+  member's or a machine's human's message is a bubble on the left under
+  who they are. A question is the session's request card while a request
+  for it is pending here, and MAWS's question receipt otherwise — one
+  line per question, "header (or the question) → answer", the answers
+  read from the log's `answered` with MAWS's reader of the engine's
+  summary and the headers from the request where this browser saw it —
+  with a foot for what it waits on, or how its request was settled
+  without an answer. Lifecycle is a quiet run: a session's consecutive
+  events on one muted line, its words joined; a run past three lines
+  folds behind "N updates · who"; a rename reads "old is now new" and a
+  rename to the name the session has says nothing; a session's stop and
+  restart stay in the quiet lines, never a line of their own between two
+  messages (only a change between running and not is recorded at all).
+  Traffic between agents is MAWS's lifecycle line for a message between
+  sessions, a run of one drawn whole, more behind their count. A day
+  separator stands where the calendar day changes, as the session view's
+  time rows do. The composer's hint names the grammar in words, not the
+  log's vocabulary ("Mention @alias to deliver, @all to wake every live
+  session; untagged is kept here, delivered to no one").
 - **A direct channel** is one session's exchange with the human — its
   messages, questions, and permission prompts, and what the human sent it —
   with the working record between them folded. **Amended 2026-10-17 (§9):**
@@ -6014,6 +6043,43 @@ a hub that connects into machines (§2).
   depend on the daemon running. Flags DC7 (it discovers bridges by listing
   the directory).
   Date/Author: 2026-10-15, design session (DC2's plan).
+- Decision: The group chat is redrawn on the session view's rendering
+  (owner, 2026-10-19: "we took some care over an individual session's
+  rendering, but the group chat UI looks quite ugly; use the same
+  rendering, but make it work like a group chat"). §4's group-chat clause
+  is amended: MAWS's reading column and typography, a session's message
+  as MAWS's answer prose, the owner's message as MAWS's user bubble with
+  each recipient's delivery as its foot (the tail foot's shape and
+  glyphs, `DeliveryFoot.tsx`), a question as the request card while
+  answerable here and MAWS's question receipt otherwise (the answer read
+  with MAWS's reader of the engine's summary, `ask-mod.ts`, so the
+  engine's "Your questions have been answered: …" text is never drawn),
+  one header per run of a sender's items within five minutes, lifecycle
+  merged per session and folded past three lines, agent traffic as
+  MAWS's peer line, day separators. The screenshot the owner judged
+  (`acceptance-scratch`) showed every alias twice: a session titled with
+  its own alias was named by the title and then the alias; the alias now
+  stands beside the title only where it differs. "X is now X" was a
+  rename drawn with the session's current alias as its subject; a rename
+  names the alias as it stood before, and one to the same name is
+  dropped. The bubble and its fold are one component (`Bubble.tsx`),
+  which the session view's tail bubble now wraps, so the chat's bubble
+  and the tail's cannot drift apart. The group chat's chunk still
+  carries none of MAWS's transcript view: the chat draws with MAWS's
+  classes and its own small pieces, importing only Markdown, the answer
+  reader and an icon from MAWS. Rejected then: a Slack-like avatar
+  column per message (the DC5 mockup's 28 px mark), which the session
+  view does not have and which the sender's header carries without;
+  per-message timestamps within a run (the header carries the run's
+  first; the bubble's shows on hover as in the session view); hiding
+  state flips (stopped, running again) from the chat altogether — they
+  stay, merged into the session's quiet line and folded with it, since
+  a session that stopped between two messages is something the reader
+  should be able to find; and drawing another human's message as prose
+  rather than a bubble (a bubble is a human's words everywhere in the
+  desk; the side says whose). The desktop and phone screenshots the
+  owner saw before merging are under `mockups/desk/10-group-chat/`.
+  Date/Author: 2026-10-19, the chat redraw (branch `desk-chat-render`).
 
 ## Outcomes & Retrospective
 

@@ -81,15 +81,20 @@ test('the group chat draws the log as §4 says: messages, humans, lifecycle line
   await expect(runs.nth(1)).toContainText('thanks');
   await expect(center(page)).toContainText('rebased cleanly'); // a message through MAWS's Markdown: no literal asterisks
   await expect(center(page)).not.toContainText('**cleanly**');
-  await expect(center(page)).toContainText('maws-45 joined on mini');
+  // The sessions' joins and charges, merged per session, fold behind their count until opened (§4, 2026-10-19).
+  const quiet = center(page).getByTestId('quiet-run');
+  await expect(quiet).toContainText('8 updates · doperpowers-1e, cua_repl, maws-fe, maws-45');
+  await expect(center(page)).not.toContainText('maws-45 joined on mini');
+  await quiet.getByRole('button').click();
+  await expect(center(page)).toContainText('maws-45 joined on mini · is in charge of: owner artifacts page');
   await expect(center(page)).toContainText('doperpowers-1e retired by human');
 
   // Status lines as set; liveness only where a session stops or runs again.
   await hub.append(PROJECT, { writer: `mini/${S.rests}`, kind: 'status', session: S.rests, text: 'fixture 8/8' });
   await hub.append(PROJECT, { writer: `mini/${S.rests}`, kind: 'state', session: S.rests, state: 'idle', machine: 'mini' });
   await hub.append(PROJECT, { writer: `mini/${S.rests}`, kind: 'state', session: S.rests, state: 'stopped', machine: 'mini' });
-  await expect(center(page)).toContainText('cua_repl status: fixture 8/8');
-  await expect(center(page)).toContainText('cua_repl stopped on mini');
+  // The session's two lines in a row merge into one quiet line.
+  await expect(center(page)).toContainText('cua_repl status: fixture 8/8 · stopped on mini');
   await expect(center(page)).not.toContainText('cua_repl idle');
 });
 
@@ -121,7 +126,7 @@ test("posting follows sminos say's grammar, sealed by the member, and each recip
   const k = await key();
   for (const [i, event] of humans(hub).entries()) expect(await verify(k, 'log', PROJECT, { ...event, writer: hubWriter(M), seq: i + 1, ts: '2026-10-15T08:00:00.000Z' })).toBe(true);
 
-  await expect(center(page)).toContainText('A record: delivered to no one');
+  await expect(center(page)).toContainText('Recorded · delivered to no one');
   const stored = (text: string) => hub.logOf(PROJECT).find((e) => e.event.text === text)!.event;
   await expect.poll(() => hub.logOf(PROJECT).filter((e) => e.event.kind === 'human').length).toBe(3);
   const taggedEvent = stored('@maws-45 keep user_id');
@@ -556,7 +561,10 @@ test('a card above a reader scrolled back that leaves the stream leaves the read
   await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'question', from: 'maws-45', to: 'host', text: 'Five questions', choices: [], src: 'toolu_gone' });
   await expect(card).toHaveCount(0);
   await page.waitForTimeout(300);
-  expect((await line(38).boundingBox())!.y).toBeCloseTo(reading!.y, 0);
+  // Within a pixel: the question's receipt, which takes the answered line's place below the reader, is MAWS's, whose
+  // lines are 19.5 px tall, and the engine keeps the scroll offset in whole pixels, so the anchoring can be off by a
+  // half pixel of rounding — never by a row.
+  expect(Math.abs((await line(38).boundingBox())!.y - reading!.y)).toBeLessThan(1);
 });
 
 test("content growing inside a long message, above the paragraph a reader is partway through, leaves that paragraph where it was", async ({ page, hub }) => {

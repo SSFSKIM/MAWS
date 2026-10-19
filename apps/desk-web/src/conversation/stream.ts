@@ -24,13 +24,15 @@ export type Entry = { offset: number; event: LogEvent };
 export type StreamItem =
   | { kind: 'message'; key: string; offset: number; event: LogEvent; session: string | null; from: string; text: string }
   | { kind: 'human'; key: string; offset: number; event: LogEvent; text: string; to: '*' | Recipient[]; wake: boolean }
-  /** `request`: the call's id (the event's `src`); `ref`: the key of the request raised for it, if any (`requestKey`). */
-  | { kind: 'question'; key: string; offset: number; event: LogEvent; session: string | null; from: string; text: string; choices: string[]; request: string; ref: string; answered: { text: string; event: LogEvent } | null }
-  | { kind: 'system'; key: string; offset: number; event: LogEvent; text: string }
+  /** `request`: the call's id (the event's `src`); `ref`: the key of the request raised for it, if any (`requestKey`).
+   * `questions`: the questions as sminos recorded them, a list; `text` is the same joined a paragraph each. */
+  | { kind: 'question'; key: string; offset: number; event: LogEvent; session: string | null; from: string; text: string; questions: string[]; choices: string[]; request: string; ref: string; answered: { text: string; event: LogEvent } | null }
+  /** A lifecycle line: `subject` is who it is about (an alias), `rest` its words after the subject, `text` the two. */
+  | { kind: 'system'; key: string; offset: number; event: LogEvent; session: string | null; subject: string; rest: string; text: string }
   | { kind: 'agents'; key: string; says: Entry[] }
   | { kind: 'work'; key: string; offset: number; session: string }
-  /** `request`: the request's id; `ref`: its key in the conversation's `requests`. */
-  | { kind: 'request'; key: string; request: string; ref: string };
+  /** `request`: the request's id; `ref`: its key in the conversation's `requests`; `session`: the session that raised it. */
+  | { kind: 'request'; key: string; request: string; ref: string; session: string };
 
 /**
  * A request as the stream places it: `key` is its key in the conversation's `requests` (machine, session, id); `at`
@@ -45,8 +47,10 @@ export function placedRequest(record: { key: string; request: string; raised: Ra
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-/** A `question` event's text: sminos records the questions an ask put as a list, drawn one paragraph each. */
-const questionText = (v: unknown): string => (Array.isArray(v) ? v.filter((t): t is string => typeof t === 'string').join('\n\n') : str(v));
+/** A `question` event's questions: sminos records the questions an ask put as a list; an older event carries one text. */
+const questionList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((t): t is string => typeof t === 'string') : str(v) ? [str(v)] : []);
+/** The same, drawn one paragraph each. */
+const questionText = (v: unknown): string => questionList(v).join('\n\n');
 const recipients = (to: unknown): Recipient[] =>
   Array.isArray(to) ? to.filter((r): r is Recipient => typeof r === 'object' && r !== null && typeof (r as Recipient).session === 'string') : [];
 const addressedTo = (event: LogEvent, session: string) => recipients(event.to).some((r) => r.session === session);
@@ -89,20 +93,28 @@ export function byWhom(by: string, member: string | null): string {
   return by;
 }
 
-function systemText(event: LogEvent, alias: (id: unknown) => string, member: string | null, projectName: (id: string) => string): string | null {
+/**
+ * A lifecycle event's line: its subject, the session's alias as the sidebar names it now, and its words. A rename is
+ * the one line whose subject is the alias as it stood before (`before`), so it reads "old is now new"; a rename to
+ * the name the session already had says nothing.
+ */
+function systemLine(event: LogEvent, alias: (id: unknown) => string, member: string | null, projectName: (id: string) => string, before: string | null): { subject: string; rest: string } | null {
+  const subject = alias(event.session);
   switch (event.kind) {
     case 'joined':
       // A relocated `joined` refreshes where a member works (the engine moved it within the project): no one joined.
-      return event.relocated === true ? null : `${alias(event.session)} joined on ${str(event.machine)}`;
+      return event.relocated === true ? null : { subject, rest: `joined on ${str(event.machine)}` };
     case 'retired':
-      if (event.reason === 'moved') return `${alias(event.session)} moved${str(event.project) ? ` to ${projectName(str(event.project))}` : ''}`;
-      return `${alias(event.session)} ${event.reason === 'ended' ? 'ended' : 'retired'}${str(event.by) ? ` by ${byWhom(str(event.by), member)}` : ''}`;
-    case 'renamed':
-      return `${alias(event.session)} is now ${str(event.alias)}`;
+      if (event.reason === 'moved') return { subject, rest: `moved${str(event.project) ? ` to ${projectName(str(event.project))}` : ''}` };
+      return { subject, rest: `${event.reason === 'ended' ? 'ended' : 'retired'}${str(event.by) ? ` by ${byWhom(str(event.by), member)}` : ''}` };
+    case 'renamed': {
+      const was = before ?? subject;
+      return was === str(event.alias) ? null : { subject: was, rest: `is now ${str(event.alias)}` };
+    }
     case 'in-charge':
-      return `${alias(event.session)} is in charge of: ${str(event.text)}`;
+      return { subject, rest: `is in charge of: ${str(event.text)}` };
     case 'status':
-      return str(event.text) ? `${alias(event.session)} status: ${str(event.text)}` : `${alias(event.session)} cleared its status`;
+      return { subject, rest: str(event.text) ? `status: ${str(event.text)}` : 'cleared its status' };
     default:
       return null;
   }
@@ -169,6 +181,8 @@ export function buildStream(
     flush();
     items.push(item);
   };
+  const system = (key: string, offset: number, event: LogEvent, session: string | null, line: { subject: string; rest: string }) =>
+    push({ kind: 'system', key, offset, event, session, ...line, text: `${line.subject} ${line.rest}` });
   const workBefore = (key: string, offset: number, session: string | null) => {
     if (channel.kind === 'session' && session === channel.session) push({ kind: 'work', key, offset, session });
   };
@@ -177,12 +191,14 @@ export function buildStream(
       const r = placed[next];
       // A question with no `question` event (a native one) is an exchange item: the working record before it folds.
       if (r.question) workBefore(`work:request:${r.key}`, r.at, r.session);
-      push({ kind: 'request', key: `request:${r.key}`, request: r.request, ref: r.key });
+      push({ kind: 'request', key: `request:${r.key}`, request: r.request, ref: r.key, session: r.session });
       next++;
     }
   };
   /** Whether each session is running, as its `joined` and `state` events say: only a change is drawn. */
   const running = new Map<string, boolean>();
+  /** Each session's alias as the log stood at this point, for a rename's "old is now new". */
+  const named = new Map<string, string>();
 
   for (const entry of shown) {
     const { offset, event } = entry;
@@ -213,6 +229,7 @@ export function buildStream(
           session,
           from: str(event.from),
           text: questionText(event.text),
+          questions: questionList(event.text),
           choices: Array.isArray(event.choices) ? event.choices.filter((c): c is string => typeof c === 'string') : [],
           request: str(event.src),
           ref: questionRef(event),
@@ -221,20 +238,22 @@ export function buildStream(
         break;
       }
       case 'answered':
-        if (!questionRefs.has(questionRef(event))) push({ kind: 'system', key, offset, event, text: `${str(event.from)} was answered: ${str(event.text)}` });
+        if (!questionRefs.has(questionRef(event))) system(key, offset, event, writerSession(event.writer), { subject: str(event.from), rest: `was answered: ${str(event.text)}` });
         break;
       case 'state': {
         const session = str(event.session);
         const now = RUNNING.has(str(event.state));
         const was = running.get(session) ?? true;
         running.set(session, now);
-        if (now !== was) push({ kind: 'system', key, offset, event, text: now ? `${alias(session)} is running again on ${str(event.machine)}` : `${alias(session)} ${str(event.state)} on ${str(event.machine)}` });
+        if (now !== was) system(key, offset, event, session, { subject: alias(session), rest: now ? `is running again on ${str(event.machine)}` : `${str(event.state)} on ${str(event.machine)}` });
         break;
       }
       default: {
+        const session = str(event.session) || null;
         if (event.kind === 'joined') running.set(str(event.session), true);
-        const text = systemText(event, alias, options.member ?? null, options.projectName ?? ((id) => id.slice(0, 8)));
-        if (text !== null) push({ kind: 'system', key, offset, event, text });
+        const line = systemLine(event, alias, options.member ?? null, options.projectName ?? ((id) => id.slice(0, 8)), named.get(str(event.session)) ?? null);
+        if ((event.kind === 'joined' || event.kind === 'renamed') && str(event.alias)) named.set(str(event.session), str(event.alias));
+        if (line !== null) system(key, offset, event, session, line);
       }
     }
   }

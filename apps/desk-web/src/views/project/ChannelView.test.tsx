@@ -191,7 +191,9 @@ it("draws each item of a session's stream once as it changes (the stream and the
   const record = { key: 'k1', request: 'toolu_1', machine: 'mini', raised, at: 1, pending: true, terminalOnly: false, settled: null };
   act(() => connection.conversation.store.setState({ requests: { k1: record } }));
   act(() => connection.conversation.store.setState({ requests: { k1: { ...record, pending: false } } }));
-  expect(screen.getAllByText('maws-45 joined on mini')).toHaveLength(1);
+  const lines = document.querySelectorAll('[data-item="system"]');
+  expect(lines).toHaveLength(1);
+  expect(lines[0].textContent).toContain('maws-45 joined on mini');
   expect(document.querySelectorAll('[data-request="toolu_1"]')).toHaveLength(1);
 });
 

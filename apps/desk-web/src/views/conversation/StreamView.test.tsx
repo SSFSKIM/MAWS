@@ -10,6 +10,7 @@ import { ProjectConnection } from '../../project/connection';
 import { deliveryKey } from '../../project/conversation';
 import type { DeskSession } from '../../shell/sessions';
 import { useGrid } from '../../state/grid';
+import type { StreamItem } from '../../conversation/stream';
 import { DeskContext } from './desk-context';
 import { StreamView } from './StreamView';
 
@@ -61,7 +62,7 @@ it("names a session's message by its title, the alias it went out under muted be
   connection.stop();
 });
 
-it('names who posted each human message: you, another member by id, or a human at a machine', () => {
+it("draws the owner's own message as MAWS's bubble on the right, and another member's or a human's at a machine on the left under who they are", () => {
   const me = '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c';
   const other = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
   const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
@@ -74,9 +75,113 @@ it('names who posted each human message: you, another member by id, or a human a
       <StreamView items={[human(1, `hub/${me}`, me), human(2, `hub/${other}`, other), human(3, 'mini/human')]} outbox={[]} />
     </DeskContext.Provider>,
   );
+  const bubbles = screen.getAllByRole('region').filter((e) => e.classList.contains('desk-chat-send'));
+  expect(bubbles.map((b) => b.getAttribute('data-side'))).toEqual(['you', 'other', 'other']);
+  expect(bubbles[0].getAttribute('aria-label')).toBe('Your message');
+  expect(bubbles[0].querySelector('[data-testid="said-who"]')).toBeNull(); // the side says who
+  expect(bubbles[0].querySelector('.transcript-user-bubble')).not.toBeNull(); // MAWS's bubble, through MAWS's Markdown
   const who = screen.getAllByTestId('said-who');
-  expect(who.map((e) => e.textContent)).toEqual(['You', 'Another member (a1b2c3d4)', 'A human']);
-  expect(who[2].parentElement!.textContent).toContain('@mini');
+  expect(who.map((e) => e.textContent)).toEqual(['Another member (a1b2c3d4)', 'A human']);
+  expect(who[1].parentElement!.textContent).toContain('@mini');
+  // A record, kept for no one, says so in the bubble's foot, untinted.
+  expect(bubbles[0].getAttribute('data-state')).toBe('record');
+  expect(bubbles[0].querySelector('[data-testid="record"]')!.textContent).toBe('Recorded · delivered to no one');
+  connection.stop();
+});
+
+const SESSION = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
+const at = (minutes: number) => `2026-10-15T08:${String(minutes).padStart(2, '0')}:00.000Z`;
+const message = (seq: number, text: string, minutes = 0, session = SESSION, from = 'maws-45'): Extract<StreamItem, { kind: 'message' }> => ({
+  kind: 'message',
+  key: `m${seq}`,
+  offset: seq,
+  event: { ts: at(minutes), writer: `mini/${session}`, seq, kind: 'message', mac: { nonce: `n${seq}`, value: 'v' } } as LogEvent,
+  session,
+  from,
+  text,
+});
+const system = (seq: number, subject: string, rest: string, minutes = 0): Extract<StreamItem, { kind: 'system' }> => ({
+  kind: 'system',
+  key: `s${seq}`,
+  offset: seq,
+  event: { ts: at(minutes), writer: `mini/${SESSION}`, seq, kind: 'joined', mac: { nonce: `n${seq}`, value: 'v' } } as LogEvent,
+  session: SESSION,
+  subject,
+  rest,
+  text: `${subject} ${rest}`,
+});
+const draw = (items: StreamItem[], sessions = new Map<string, DeskSession>()) => {
+  const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
+  render(
+    <DeskContext.Provider value={{ connection, member: 'm', sessions }}>
+      <StreamView items={items} outbox={[]} />
+    </DeskContext.Provider>,
+  );
+  return connection;
+};
+
+it("puts a sender's messages within a few minutes under one header, as MAWS's answer prose, and names a session titled with its own alias once", () => {
+  const sessions = new Map([[SESSION, { title: 'maws-45', alias: 'maws-45', machine: 'mini' }]]) as unknown as Map<string, DeskSession>;
+  const connection = draw([message(1, 'first', 0), message(2, 'second', 2), message(3, 'later', 20)], sessions);
+  const heads = screen.getAllByTestId('said');
+  expect(heads).toHaveLength(2);
+  expect(heads[0].querySelector('[data-testid="said-who"]')!.textContent).toBe('maws-45');
+  expect(heads[0].querySelector('[data-testid="said-alias"]')).toBeNull(); // the title is the alias: said once
+  expect(heads[0].textContent).toContain('@mini');
+  expect(screen.getAllByTestId('run')[0].querySelectorAll('[data-item="message"]')).toHaveLength(2);
+  for (const prose of screen.getAllByTestId('prose')) expect(prose.className).toBe('transcript-answer');
+  expect(screen.getByRole('separator')).toBeTruthy(); // the day's separator, before the first dated row
+  connection.stop();
+});
+
+it('merges a session’s lifecycle lines into one quiet line, and folds a longer run behind its count until opened', () => {
+  const lines = [system(1, 'maws-45', 'joined on mini'), system(2, 'maws-45', 'is in charge of: grid'), system(3, 'maws-fe', 'joined on SK.local'), system(4, 'cua_repl', 'joined on mini'), system(5, 'maws-44', 'ended')];
+  const connection = draw([...lines, message(6, 'hi', 1), system(7, 'maws-45', 'stopped on mini', 2), system(8, 'maws-45', 'is running again on mini', 3)]);
+  const fold = screen.getByTestId('quiet-run');
+  const button = fold.querySelector('button')!;
+  expect(button.textContent).toContain('5 updates · maws-45, maws-fe, cua_repl, maws-44');
+  expect(button.getAttribute('aria-expanded')).toBe('false');
+  expect(fold.querySelector('[data-testid="quiet"]')).toBeNull();
+  fireEvent.click(button);
+  const merged = fold.querySelectorAll('[data-testid="quiet"] li');
+  expect(merged).toHaveLength(4);
+  expect(merged[0].textContent).toContain('maws-45 joined on mini · is in charge of: grid');
+  // Two lines after the message stand as one quiet line, unfolded.
+  const quiet = screen.getAllByTestId('quiet');
+  expect(quiet.at(-1)!.textContent).toContain('maws-45 stopped on mini · is running again on mini');
+  connection.stop();
+});
+
+const question = (seq: number, answered: string | null, questions = ['Which column do we keep?'], ref = 'r'): Extract<StreamItem, { kind: 'question' }> => ({
+  kind: 'question',
+  key: `q${seq}`,
+  offset: seq,
+  event: { ts: at(0), writer: `mini/${SESSION}`, seq, kind: 'question', mac: { nonce: `n${seq}`, value: 'v' } } as LogEvent,
+  session: SESSION,
+  from: 'maws-45',
+  text: questions.join('\n\n'),
+  questions,
+  choices: ['user_id', 'owner_id'],
+  request: 'toolu_q',
+  ref,
+  answered: answered === null ? null : { text: answered, event: { ts: at(1), writer: `mini/${SESSION}`, seq: seq + 1, kind: 'answered', mac: { nonce: 'a', value: 'v' } } as LogEvent },
+});
+
+it("draws an answered question as MAWS's receipt, the answers read from the engine's summary, a plain text as the one question's answer", () => {
+  const summary = 'Your questions have been answered: "Which column do we keep?"="user_id". You can now continue with these answers in mind.';
+  const connection = draw([question(1, summary), question(3, 'owner_id', ['Which column do we keep?'], 'r2'), question(5, null, ['Ship it?'], 'r3')]);
+  const receipts = screen.getAllByTestId('question');
+  expect(receipts).toHaveLength(3);
+  const line = (receipt: Element) => receipt.querySelector('.transcript-question-line')!;
+  expect(line(receipts[0]).textContent).toBe('Which column do we keep?→user_id');
+  expect(receipts[0].querySelector('[data-testid="question-settled"]')).toBeNull(); // nothing to add to the line
+  expect(line(receipts[1]).textContent).toBe('Which column do we keep?→owner_id');
+  // Open, with no request raised to this browser: waiting, and it says so.
+  expect(line(receipts[2]).textContent).toBe('Ship it?→waiting');
+  expect(receipts[2].getAttribute('data-waiting')).toBe('');
+  expect(receipts[2].querySelector('[data-testid="question-waiting"]')!.textContent).toBe('Waiting for an answer');
+  expect(screen.queryByText('Open question')).toBeNull();
+  expect(screen.queryByText(/Your questions have been answered/)).toBeNull();
   connection.stop();
 });
 
