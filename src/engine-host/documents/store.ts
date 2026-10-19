@@ -1112,7 +1112,15 @@ export class ArtifactStore {
     const named = this.storage.db.prepare(
       "SELECT 1 FROM artifacts WHERE linkedPath = ? UNION ALL SELECT 1 FROM artifact_updates WHERE json_extract(content, '$.path') = ? UNION ALL SELECT 1 FROM artifact_versions WHERE json_extract(content, '$.path') = ? LIMIT 1",
     );
-    for (const path of this.files.stagedBefore(now - STAGED_MAX_AGE_MS)) {
+    // P4 (W1, L248): a listing that fails is logged and this sweep skipped, never the rest of the maintenance pass
+    let staged: string[];
+    try {
+      staged = this.files.stagedBefore(now - STAGED_MAX_AGE_MS);
+    } catch (error) {
+      this.log(`the staged files could not be listed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    for (const path of staged) {
       if (named.get(path, path, path)) continue;
       try {
         this.files.discard(path);

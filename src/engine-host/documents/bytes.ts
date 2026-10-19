@@ -6,7 +6,7 @@
 // `stagedBefore`). A `file` artifact's content stays where it is (send_file's rule): only its name, size and hash are
 // recorded.
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, createReadStream, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeSync, type Dirent } from 'node:fs';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 
 export interface ContentRef {
@@ -24,6 +24,17 @@ export function safeName(name: string): string | null {
 }
 
 const sha256Of = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+
+// A directory's entries; none when it is not there or is not a directory (P4 W1, L248).
+function listed(dir: string): Dirent[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return [];
+    throw error;
+  }
+}
 
 export class ArtifactFiles {
   constructor(readonly root: string) {}
@@ -61,15 +72,19 @@ export class ArtifactFiles {
 
   // The files in any artifact directory's `tmp/` last modified before `cutoff` (epoch ms): those a write killed between
   // its `stage` and its `place` or `discard` left, and any other file found there (the store decides which go).
+  // P4 (W1, L248): what an outside actor in the data directory can make of the listing skips only its own part: a `tmp`
+  // that is not a directory (ENOTDIR) its artifact, an entry gone between the listing and its stat (ENOENT) that entry;
+  // any other failure throws.
   stagedBefore(cutoff: number): string[] {
-    if (!existsSync(this.root)) return [];
     const found: string[] = [];
-    for (const artifact of readdirSync(this.root, { withFileTypes: true })) {
+    for (const artifact of listed(this.root)) {
+      if (!artifact.isDirectory()) continue;
       const dir = join(this.root, artifact.name, 'tmp');
-      if (!artifact.isDirectory() || !existsSync(dir)) continue;
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      for (const entry of listed(dir)) {
         const path = join(dir, entry.name);
-        if (entry.isFile() && statSync(path).mtimeMs < cutoff) found.push(path);
+        if (!entry.isFile()) continue;
+        const modified = statSync(path, { throwIfNoEntry: false })?.mtimeMs;
+        if (modified !== undefined && modified < cutoff) found.push(path);
       }
     }
     return found;

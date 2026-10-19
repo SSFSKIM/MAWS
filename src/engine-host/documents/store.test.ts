@@ -16,6 +16,21 @@ import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
 import { ArtifactStore, AUTO_EVERY_MS, AUTO_IDLE_MS, type ArtifactChanged } from './store';
 
+// P4 (W1, L248): one step run just before `statSync` of a given path, where an outside actor could remove the entry
+const fsRace = vi.hoisted(() => ({ beforeStat: null as { path: string; run: () => void } | null }));
+vi.mock('node:fs', async (original) => {
+  const actual = await original<typeof import('node:fs')>();
+  const statSync = ((...args: Parameters<typeof actual.statSync>) => {
+    const hook = fsRace.beforeStat;
+    if (hook !== null && String(args[0]) === hook.path) {
+      fsRace.beforeStat = null;
+      hook.run();
+    }
+    return actual.statSync(...args);
+  }) as typeof actual.statSync;
+  return { ...actual, default: { ...actual, statSync }, statSync };
+});
+
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
@@ -1188,6 +1203,55 @@ describe('ArtifactStore: maintenance and thinning (Decision Log 5, 8)', () => {
     expect(existsSync(fresh)).toBe(true);
     expect(existsSync(inPlace)).toBe(true);
     expect(store.contentRef(file.id).path).toBe(inPlace);
+  });
+
+  // P4 (W1, tracker 2026-10-19 L248): an outside actor in the data directory never ends the pass early: a plain file
+  // where an artifact's tmp/ would be (ENOTDIR) skips that artifact, an entry gone between the listing and its stat
+  // (ENOENT) skips that entry, and the rest of the sweep and the pass (its last run) go on
+  const agedStaged = (artifactId: string) => {
+    const path = join(dir, artifactId, 'tmp', randomUUID());
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, 'bytes');
+    utimesSync(path, (now - DAY) / 1000, (now - DAY) / 1000);
+    return path;
+  };
+  it('collects the other staged files and finishes the pass past a plain file named tmp', async () => {
+    const plain = join(dir, randomUUID(), 'tmp');
+    mkdirSync(dirname(plain), { recursive: true });
+    writeFileSync(plain, 'not a directory');
+    const stale = agedStaged(randomUUID());
+    await expect(store.maintenance.run()).resolves.toMatchObject({ versionsThinned: 0 });
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(plain)).toBe(true);
+    expect(store.maintenance.lastRun()).toBe(now);
+    expect(logs.filter((line) => /staged/.test(line))).toEqual([]);
+  });
+
+  it('collects the other staged files and finishes the pass past an entry removed between the listing and its stat', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const vanishing = agedStaged(doc.id);
+    const stale = agedStaged(randomUUID());
+    fsRace.beforeStat = { path: vanishing, run: () => rmSync(vanishing) };
+    await expect(store.maintenance.run()).resolves.toMatchObject({ versionsThinned: 0 });
+    expect(fsRace.beforeStat).toBeNull(); // the entry was listed, then gone before its stat
+    expect(existsSync(stale)).toBe(false);
+    expect(store.maintenance.lastRun()).toBe(now);
+    expect(logs.filter((line) => /staged/.test(line))).toEqual([]);
+  });
+
+  it('logs a staged listing that fails otherwise and still finishes the pass', async () => {
+    const stale = join(dir, randomUUID(), 'tmp', randomUUID());
+    mkdirSync(dirname(stale), { recursive: true });
+    writeFileSync(stale, 'bytes');
+    fsRace.beforeStat = {
+      path: stale,
+      run: () => {
+        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      },
+    };
+    await expect(store.maintenance.run()).resolves.toMatchObject({ versionsThinned: 0 });
+    expect(store.maintenance.lastRun()).toBe(now);
+    expect(logs).toContainEqual(expect.stringMatching(/staged files could not be listed.*EACCES/));
   });
 });
 
