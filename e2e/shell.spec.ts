@@ -63,16 +63,17 @@ test('shell: sidebar, overview, hover approve, tabs and split, persistence, them
   }
 });
 
-// W12 (I2, I3; §5.2 as amended 2026-10-01): each project has its own tab set, which the strip shows under the project's
-// name; a project click and an open of another project's session switch it; a click replaces the shown session and
-// ⌘-click keeps a tab of its own; ⌘1–9 count in the set; the label reveals the project in the sidebar. W11's tree: a
-// click on a project's row toggles it in place and shows its set, whether it was expanded or not.
-test('tab sets per project: the strip switches with the project, ⌘1 counts in the set, the label names it', async () => {
+// W12 (I2, I3; §5.2 as amended 2026-10-01): each project has its own tab set, which the strip shows; a project click and
+// an open of another project's session switch it; a click replaces the shown session and ⌘-click keeps a tab of its own;
+// ⌘1–9 count in the set. W11's tree: a click on a project's row toggles it in place and shows its set, whether it was
+// expanded or not. P3-F wave S (F17, the owner's obs 8): the set's project is named by the title bar's chip, not in the
+// strip; a click on the chip is the sidebar's "+" (a New chat in that project) and its context menu reveals the project.
+test('tab sets per project: the strip switches with the project, ⌘1 counts in the set, the title bar’s chip names it', async () => {
   const maws = await launchMaws({ env: SHELL_ENV });
   try {
     const { app, page } = maws;
     const main = page.locator('[data-region="main"]');
-    const label = main.locator('[data-strip-project]');
+    const label = page.getByRole('banner').locator('[data-toolbar-project]');
     const clickProject = async (name: string) => {
       await showProjectList(page);
       await projectLine(projectRow(page, name)).click();
@@ -81,14 +82,15 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
 
     await clickProject('MAWS');
     await expect(label).toHaveText('MAWS');
-    await expect(main.getByRole('button', { name: 'Tabs of MAWS' })).toBeVisible();
+    await expect(page.getByRole('banner').getByRole('button', { name: 'New chat in MAWS' })).toBeVisible();
+    await expect(label).toHaveCSS('-webkit-app-region', 'no-drag');
+    await expect(main.locator('[data-strip-project]'), 'the strip names no project').toHaveCount(0);
     await (await sidebarRow(page, FIX)).click();
     await (await sidebarRow(page, SIP)).click({ modifiers: ['Meta'] });
     await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${FIX} · MAWS`, `${SIP} · MAWS`]);
 
     await clickProject('codex_somersault');
     await expect(label).toHaveText('codex_somersault');
-    await expect(main.getByRole('button', { name: 'Tabs of codex_somersault' })).toBeVisible();
     await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'another project, another (empty) set' }).toEqual([]);
     await (await sidebarRow(page, QUOTA)).click();
     await (await sidebarRow(page, 'Trace stream reconnects')).click(); // a click replaces the shown session
@@ -114,11 +116,20 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
     await expect(label).toHaveText('codex_somersault');
     await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(`${QUOTA} · codex_somersault`);
 
-    // the label reveals its project in the sidebar: its row expanded in place, and focused
+    // the chip's context menu reveals its project in the sidebar: its row expanded in place, and focused
     await closeProject(page, 'codex_somersault');
-    await label.click();
+    await label.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Reveal in sidebar' }).click();
     await expect(projectRow(page, 'codex_somersault')).toHaveAttribute('aria-expanded', 'true');
     await expect(projectRow(page, 'codex_somersault')).toBeFocused();
+
+    // a click on the chip is the sidebar's "+": a New chat in that project, a new unstarted tab in front in its set (the
+    // scenario's creator)
+    const before = await tabLabels(page, 'Open tabs');
+    await label.click();
+    await expect.poll(async () => (await tabLabels(page, 'Open tabs')).length, { message: 'one more tab in the set' }).toBe(before.length + 1);
+    expect(before, 'the new tab is in front').not.toContain(await selectedTab(page, 'Open tabs'));
+    await expect(label).toHaveText('codex_somersault');
 
     // Other sessions is the no-project set: no label
     await clickProject('Other sessions');

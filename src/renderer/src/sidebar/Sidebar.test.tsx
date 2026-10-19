@@ -10,7 +10,7 @@ import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { closeDialog, useDialogs } from '../sessions/dialogs';
 import { SessionDialogs } from '../sessions/SessionDialogs';
-import { TabStrip } from '../main/TabStrip';
+import { Toolbar } from '../app/Toolbar';
 import { item, record } from '../../../../test/support/builders';
 import { registerAction } from '../keymap/actions-runtime'; // C11
 import { useAttention } from '../stores/attention';
@@ -103,19 +103,25 @@ describe('sidebar recovery routes', () => {
     expect(useNotices.getState().notices.at(-1)).toMatchObject({ level: 'danger', text: 'Directory no longer exists' });
   });
 
-  it('the hidden project tab label restores it before revealing and focusing its sidebar row', async () => {
+  // P3-F wave S (F17): the title bar's project chip, whose context menu is the reveal the strip's label was
+  it('the title bar chip’s Show in sidebar restores a hidden project before revealing and focusing its sidebar row', async () => {
     const project = nine.projects.find((p) => p.name === 'MAWS')!;
     fillStores({ ...nine, projects: nine.projects.map((p) => ({ ...p, hidden: p.id === project.id })) });
     useLayout.getState().setCurrentProject(project.id);
     useLayout.getState().setSidebar({ collapsed: true });
     const fake = fakeClient();
     window.maws = fake.client;
-    render(<><Sidebar /><TabStrip pane={0} split={false} idPrefix="test" /></>);
-    const button = screen.getByRole('button', { name: 'Tabs of MAWS' });
+    render(<><Sidebar /><Toolbar /></>);
+    const chip = document.querySelector<HTMLElement>('[data-toolbar-project]')!;
+    const menuItem = async () => {
+      fireEvent.contextMenu(chip);
+      return screen.findByRole('menuitem');
+    };
     expect(screen.queryByRole('treeitem', { name: 'MAWS' })).toBeNull();
-    await userEvent.click(button);
+    const show = await menuItem();
+    expect(show.textContent).toBe('Show in sidebar');
+    await userEvent.click(show);
     expect(fake.invoked('session.projects.add')).toEqual([{ directory: project.directory }]);
-    expect(button.title).toBe('Show in sidebar');
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(true);
     await act(() => fake.reply('session.projects.add', { ...project, hidden: false }));
     // Main's project event may arrive after its command response.
@@ -123,8 +129,9 @@ describe('sidebar recovery routes', () => {
     await waitFor(() => expect(document.activeElement).toBe(row('MAWS')));
     expect(row('MAWS').getAttribute('aria-expanded')).toBe('true');
     expect(useLayout.getState().regions.sidebar.collapsed).toBe(false);
-    expect(button.title).toBe('Reveal MAWS in the sidebar');
-    await userEvent.click(button);
+    const reveal = await menuItem();
+    expect(reveal.textContent).toBe('Reveal in sidebar');
+    await userEvent.click(reveal);
     expect(fake.invoked('session.projects.add')).toHaveLength(1);
   });
 });
