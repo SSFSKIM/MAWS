@@ -8,13 +8,33 @@
 export type FaceAliases = ReadonlyMap<string, string>;
 
 const quoted = (name: string) => JSON.stringify(name);
+/** A `var()`: its custom property, and its fallback (what follows the first comma) when it has one. */
+const VAR = /^var\(\s*(--[^\s,)]+)\s*(?:,([\s\S]*))?\)$/i;
 
-/** A CSS font-family list with each authored family the aliases name replaced by its private name (`var()` left). */
+/**
+ * A CSS font-family list with each authored family the aliases name replaced by its private name. A `var()` keeps its
+ * token, and the families of its fallback are aliased the same way, a nested `var()`'s too (L180): an upload a value
+ * names only as an unresolved token's fallback draws as the upload.
+ */
 export function aliasFamilyList(value: string, aliases: FaceAliases): string {
-  if (aliases.size === 0 || value.includes('var(')) return value;
-  const names: string[] = [];
+  if (aliases.size === 0) return value;
+  return listItems(value)
+    .map((item) => {
+      const token = VAR.exec(item);
+      if (token) return token[2] === undefined ? item : `var(${token[1]}, ${aliasFamilyList(token[2], aliases)})`;
+      const bare = /^(["']).*\1$/.test(item) ? item.slice(1, -1) : item.replace(/\s+/g, ' ');
+      const alias = aliases.get(bare.toLowerCase());
+      return alias ? quoted(alias) : item;
+    })
+    .join(', ');
+}
+
+/** A list's items, trimmed: the value split at its commas outside quotes and parentheses. */
+function listItems(value: string): string[] {
+  const items: string[] = [];
   let current = '';
   let quote: string | null = null;
+  let depth = 0;
   for (const ch of value) {
     if (quote) {
       current += ch;
@@ -22,17 +42,15 @@ export function aliasFamilyList(value: string, aliases: FaceAliases): string {
     } else if (ch === '"' || ch === "'") {
       quote = ch;
       current += ch;
-    } else if (ch === ',') {
-      names.push(current.trim());
+    } else if (ch === ',' && depth === 0) {
+      items.push(current.trim());
       current = '';
-    } else current += ch;
+    } else {
+      if (ch === '(') depth++;
+      else if (ch === ')' && depth > 0) depth--;
+      current += ch;
+    }
   }
-  names.push(current.trim());
-  return names
-    .map((name) => {
-      const bare = /^(["']).*\1$/.test(name) ? name.slice(1, -1) : name.replace(/\s+/g, ' ');
-      const alias = aliases.get(bare.toLowerCase());
-      return alias ? quoted(alias) : name;
-    })
-    .join(', ');
+  items.push(current.trim());
+  return items;
 }
