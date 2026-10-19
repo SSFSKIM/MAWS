@@ -312,7 +312,6 @@ test('at the panel’s 280 px minimum a document’s and a dashboard’s toolbar
   test.setTimeout(120_000);
   const page = await start();
   await pinArtifactsTool(page);
-  await resizePanel(page, 280);
   const panel = page.locator('[data-region="panel"]');
   const shots: Buffer[] = [];
   for (const kind of ['document', 'dashboard'] as const) {
@@ -323,6 +322,7 @@ test('at the panel’s 280 px minimum a document’s and a dashboard’s toolbar
     await panel.locator(`[data-artifact-row][data-artifact-id="${artifact.id}"]`).click({ timeout: 15_000 });
     const record = panel.locator(`[data-artifact-record="${artifact.id}"]`);
     await expect(record.locator('.ds-doc .ProseMirror').first()).toBeVisible({ timeout: 15_000 });
+    if (kind === 'document') await resizePanel(page, 280); // opened at the panel's width, as the case above; the dashboard at 280
     const toolbar = record.getByRole('toolbar', { name: 'Formatting' });
     await expect(toolbar).toBeVisible();
     shots.push(await panel.screenshot());
