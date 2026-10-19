@@ -507,7 +507,8 @@ export class Project extends DurableObject<Env> {
     // Once per raise: a daemon that restarted between sending a settlement and recording it sends it again, and the
     // hub takes it without a second broadcast or decision. The ids are in storage, so this holds across an eviction. A
     // request raised again after its settlement (the open ask a resumed session raises under its call's id) is pending
-    // again, and its settlement settles it.
+    // again, and its settlement settles it: sound because the daemon (7.188.2) never sends a settlement after a later
+    // raise of the same request.
     const first = this.plane.markSettled(ctx.machine, message.session, settled.request, Date.now());
     if (!first && !this.plane.pendingOf(ctx.machine, message.session, settled.request)) return;
     const raised = this.plane.settle(ctx.machine, message.session, settled.request);
