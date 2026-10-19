@@ -26,7 +26,7 @@ import { Icon } from '../../app/IconButton';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { askEditorHostClose, clearEditorHost, type EditorHostScope } from '../../panel/editor-host';
-import { panelHost, usePanelHost } from '../../panel/host';
+import { instanceOf, panelHost, usePanelHost } from '../../panel/host';
 import type { PanelTool, PanelToolContext } from '../../panel/tool';
 import { useLayout } from '../../stores/layout';
 import { ARTIFACTS_TOOL_COPY } from './copy';
@@ -61,6 +61,18 @@ export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactI
 export const canShowArtifactInPanel = (appSessionId: AppSessionId | null, pinned: PanelTabRef[] = useLayout.getState().panelPinned, registered = usePanelHost.getState().tools.has(ARTIFACTS_TOOL_ID)): boolean =>
   registered && (appSessionId !== null || pinned.some((t) => t.toolId === ARTIFACTS_TOOL_ID));
 
+// P3-F wave S (F16 review): before an artifact moves in from elsewhere, the Artifacts tab `openArtifactInPanel` would
+// land it in (the scope's one, as the host finds it) lets go of another artifact it shows, through that record's guard,
+// so a guard keeping it refuses the move before its source lets go. True when the tab is free (or there is none yet).
+export function freePanelFor(appSessionId: AppSessionId | null, artifactId: string): Promise<boolean> {
+  const scope = appSessionId === null ? useLayout.getState().panelPinned : useLayout.getState().panelTabsOf(appSessionId);
+  const ref = scope.find((t) => t.toolId === ARTIFACTS_TOOL_ID);
+  const handle = ref && (instanceOf(ref.id)?.state as ArtifactsHandle | undefined);
+  const view = handle?.snapshot().view;
+  if (!handle || view?.kind !== 'record' || view.artifactId === artifactId) return Promise.resolve(true);
+  return handle.backAsked();
+}
+
 export type ArtifactsView = { kind: 'list' } | { kind: 'record'; artifactId: string };
 
 export interface ArtifactsState {
@@ -77,7 +89,7 @@ export class ArtifactsHandle {
   private readonly listeners = new Set<() => void>();
   private disposed = false;
   private closing = false; // the host is closing the tab: record moves are frozen
-  private waiting: { view: ArtifactsView; refused: () => void; asked: Promise<boolean> } | null = null; // the move the shown editor's guard is answering
+  private waiting: { view: ArtifactsView; refused: () => void; landed: () => void; asked: Promise<boolean> } | null = null; // the move the shown editor's guard is answering
   private readonly unwatchClose: () => void;
 
   constructor(
@@ -114,28 +126,29 @@ export class ArtifactsHandle {
   // Moves away from the artifact shown (if any) once its editor's closeGuard allows: at once when there is no guard,
   // else after it answers true, and only if nothing else moved the view meanwhile and the tab is not closing. A move
   // asked while another waits takes its place, answered by the same ask. `refused` runs when the move does not happen,
-  // or another took its place.
-  private leaveThen(view: ArtifactsView, refused: () => void = () => {}): void {
+  // or another took its place; `landed` once it has.
+  private leaveThen(view: ArtifactsView, refused: () => void = () => {}, landed: () => void = () => {}): void {
     if (this.closing) return refused();
     const shown = this.state.view;
-    const go = (to: ArtifactsView) => {
+    const go = (to: ArtifactsView, then: () => void) => {
       this.leave();
       this.update({ view: to });
+      then();
     };
-    if (shown.kind !== 'record') return go(view);
+    if (shown.kind !== 'record') return go(view, landed);
     if (this.waiting) {
       this.waiting.refused();
-      this.waiting = { ...this.waiting, view, refused };
+      this.waiting = { ...this.waiting, view, refused, landed };
       return;
     }
     const asked = askEditorHostClose(this.editorScope);
-    if (asked === null) return go(view);
-    this.waiting = { view, refused, asked };
+    if (asked === null) return go(view, landed);
+    this.waiting = { view, refused, landed, asked };
     void asked.then((allowed) => {
       const move = this.waiting;
       if (move?.asked !== asked) return; // withdrawn
       this.waiting = null;
-      if (allowed && !this.disposed && !this.closing && this.state.view === shown) go(move.view);
+      if (allowed && !this.disposed && !this.closing && this.state.view === shown) go(move.view, move.landed);
       else move.refused();
     });
   }
@@ -163,6 +176,13 @@ export class ArtifactsHandle {
   back = () => {
     if (this.state.view.kind !== 'list') this.leaveThen(LIST);
   };
+
+  // Back, answering whether the list shows once the record's guard has answered (`freePanelFor`).
+  backAsked = (): Promise<boolean> =>
+    new Promise((resolve) => {
+      if (this.state.view.kind === 'list') return resolve(true);
+      this.leaveThen(LIST, () => resolve(false), () => resolve(true));
+    });
 
   setScope = (scope: ArtifactsScope) => {
     if (scope !== this.state.scope) this.update({ scope, scrollTop: 0 });

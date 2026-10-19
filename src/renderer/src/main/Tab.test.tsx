@@ -90,6 +90,58 @@ describe('Show in panel on an artifact tab', () => {
     expect(panelOf(A)).toBeUndefined();
   });
 
+  // P3-F wave S (F16 review): the Artifacts tab the artifact lands in may show another one, whose guard can keep it. That
+  // guard is asked before the tab lets go, once, so a refusal leaves the artifact where it was, never nowhere.
+  describe('when the panel’s Artifacts tab shows another artifact', () => {
+    let asks = 0;
+    let allow = false;
+    let dest = '';
+    beforeEach(() => {
+      asks = 0;
+      useLayout.setState({ main: showing(sessionTab(A), ARTIFACT) });
+      act(() => void (dest = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: 'other-1' }, activate: false })));
+      const closeGuard = async () => {
+        asks += 1;
+        return allow;
+      };
+      act(() => void registerEditorHost({ surface: 'panel', tabId: dest }, { title: 'Other', closeGuard }));
+    });
+
+    it('its guard keeping it leaves the main tab open and that record in place', async () => {
+      allow = false;
+      render(<MainArea />);
+      fireEvent.click(await menuItem());
+      await act(async () => {});
+      expect(artifactTabOpen()).toBe(true);
+      expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: 'other-1' });
+      expect(asks).toBe(1);
+    });
+
+    it('its guard letting go is asked once, and the artifact lands', async () => {
+      allow = true;
+      render(<MainArea />);
+      fireEvent.click(await menuItem());
+      await waitFor(() => expect(artifactTabOpen()).toBe(false));
+      expect(viewOf(dest)).toEqual({ kind: 'record', artifactId: DECK });
+      expect(asks).toBe(1);
+    });
+  });
+
+  it('a panel gone while the tab’s guard answered brings the artifact back in a main tab', async () => {
+    let pinned = '';
+    act(() => void (pinned = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: null, pin: true })));
+    useLayout.setState({ main: showing(ARTIFACT) });
+    let answer!: (allowed: boolean) => void;
+    act(() => void registerEditorHost({ surface: 'main', tabId: ARTIFACT.id }, { title: 'Deck', closeGuard: () => new Promise<boolean>((resolve) => (answer = resolve)) }));
+    render(<MainArea />);
+    fireEvent.click(await menuItem());
+    await waitFor(() => expect(answer).toBeTypeOf('function'));
+    await act(async () => void (await panelHost.closeTab(pinned)));
+    await act(async () => answer(true));
+    await act(async () => {});
+    expect(artifactTabOpen(), 'back in a main tab').toBe(true);
+  });
+
   it('is offered on artifact tabs only', async () => {
     useLayout.setState({ main: showing(sessionTab(A), ARTIFACT) });
     render(<MainArea />);

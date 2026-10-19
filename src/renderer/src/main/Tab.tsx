@@ -28,7 +28,8 @@ import { useArtifactTitle } from '../library/store';
 // P3-L end
 // P3-F wave S (F16) start
 import { usePanelHost } from '../panel/host';
-import { ARTIFACTS_TOOL_ID, canShowArtifactInPanel, openArtifactInPanel } from '../tools/artifacts/ArtifactsTool';
+import { openArtifactTab } from '../library/actions';
+import { ARTIFACTS_TOOL_ID, canShowArtifactInPanel, freePanelFor, openArtifactInPanel } from '../tools/artifacts/ArtifactsTool';
 // P3-F wave S (F16) end
 // E4a start
 import { BROWSER_COPY } from '../tools/browser/copy';
@@ -207,9 +208,11 @@ function TabMenuItem({ children, onSelect, disabled = false, reason }: { childre
 
 // P3-F wave S (F16, the owner's obs 7): an artifact tab moves into the panel, the mirror of the panel record's Open in
 // tab. The panel it lands in is the one shown once the tab is gone: the session the focused pane shows next (the close's
-// own rule, `closeTab`), else the pinned Artifacts tab the no-session panel lists. The tab closes first, through its
-// close guard, and the panel opens only once it has: opened first, the tool would switch main to its session while the
-// tab is still in front, and a guard's refusal would leave the artifact in both places.
+// own rule, `closeTab`), else the pinned Artifacts tab the no-session panel lists. Each side's guard is asked once, and
+// the artifact is never shown nowhere: the Artifacts tab there lets go of another artifact it shows first (its guard
+// keeping it refuses the move), then the tab closes through its own guard, and the panel opens only once it has (opened
+// first, the tool would switch main to its session while the tab is still in front). A panel that changed while the
+// tab's guard answered is checked again, and if it can no longer take the artifact, the artifact goes back to a main tab.
 export const SHOW_IN_PANEL_COPY = { label: 'Show in panel', noPanel: 'No session’s panel to show it in' };
 
 function ShowInPanelItem({ tab }: { tab: Extract<TabRef, { kind: 'artifact' }> }) {
@@ -225,9 +228,12 @@ function ShowInPanelItem({ tab }: { tab: Extract<TabRef, { kind: 'artifact' }> }
 }
 
 async function showInPanel(id: string, artifactId: string, session: AppSessionId | null) {
+  if (!(await freePanelFor(session, artifactId))) return; // the panel's own record kept its place
   await requestCloseTab(id);
   if (allTabs(useLayout.getState().main).some((t) => t.id === id)) return; // its close guard kept it
-  openArtifactInPanel(session, artifactId);
+  const still = sessionOfTab(activeTab(useLayout.getState().main)) === session && canShowArtifactInPanel(session) && (await freePanelFor(session, artifactId));
+  if (still) openArtifactInPanel(session, artifactId);
+  else openArtifactTab(artifactId);
 }
 
 function moveToOtherPane(id: string, pane: 0 | 1) {
