@@ -1,5 +1,5 @@
 // The ask mod's async question in the session view (the composite's §9.1; the owner's 2B): it draws from its transcript
-// row, MAWS's question receipt (S1 classifies `mcp__doperpowers__AskUserQuestion` as a question), and the log's
+// row, MAWS's question receipt (S1 classifies the ask mod's tool, `mcp__sminos__AskUserQuestion` or `mcp__doperpowers__AskUserQuestion`, as a question), and the log's
 // `question` and `answered` events, joined to it by their `src` (the call's tool-use id), overlay that row: while its
 // card waits at the tail the receipt says "Waiting for your answer · below", and once answered it carries the log's
 // answer, which the transcript never writes back into the call (the answer reaches the model later, as a prompt or a

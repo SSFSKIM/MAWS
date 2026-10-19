@@ -1,9 +1,9 @@
-// The rows the doperpowers plugin appends to a session's main loop (`$.session.append`), and how the session view draws
-// a steer among them. The engine keeps every one alike, whatever the plugin asks: a user row, `isMeta`, origin `{kind:
-// "plugin", name: "doperpowers"}` (`isBridgeRow`), one text block; the plugin passes nothing but the text (2.1.300
-// `AGt`, `m6r`). MAWS's backfill reads a meta row as context and draws nothing for it: right for the bridge's records,
-// wrong for a steer, the owner's words read at the loop's next model request, which left the view once its row landed
-// (the tail lets a steer go at the row its result names).
+// The rows the bridge's plugin (doperpowers, or sminos from sminos 1.0.0) appends to a session's main loop
+// (`$.session.append`), and how the session view draws a steer among them. The engine keeps every one alike, whatever
+// the plugin asks: a user row, `isMeta`, origin `{kind: "plugin", name: <the plugin>}` (`isBridgeRow`), one text
+// block; the plugin passes nothing but the text (2.1.300 `AGt`, `m6r`). MAWS's backfill reads a meta row as context
+// and draws nothing for it: right for the bridge's records, wrong for a steer, the owner's words read at the loop's
+// next model request, which left the view once its row landed (the tail lets a steer go at the row its result names).
 //
 // They are a closed set, from DX5 (doperpowers `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md`: the
 // `steer` [steer-line], `deliver` [midturn] and `interrupt` [record] [marker] rows, the DC10 extension's `stop`), and one
@@ -35,7 +35,7 @@
 // (`appended-turn.ts`). The bridge's mirror of a steer or a delivery, a system notice for the terminal, is not drawn.
 import type { JsonObject } from 'desk-hub/protocol';
 import { INTERRUPT_MARKER } from '../../../../../src/engine-host/normalizer-support';
-import { asQueuedPrompt, deliveryFrame, isBridgeRow } from '../../conversation/delivery-frame';
+import { asQueuedPrompt, BRIDGE_PLUGINS, deliveryFrame, isBridgeRow } from '../../conversation/delivery-frame';
 import { BRIDGE_TASK_LINE, bridgeRecordLines, isEngineMarker, singleText } from './interrupt';
 
 export type BridgeRowKind = 'delivery' | 'interrupt-marker' | 'interrupt-note' | 'stop-note' | 'interrupt-record' | 'secret-note' | 'steer';
@@ -76,14 +76,15 @@ export function bridgeRowKind(row: JsonObject): BridgeRowKind | null {
 /**
  * The bridge's mirror of a row it appended for the owner: after a steer's or a delivery's append it logs the words
  * (`$.ui.log`: `steer: <text>`, `delivered: <text>`, a delivery's frame line still in it), which the engine keeps as a
- * system notice under the plugin's name for the terminal to draw. The session view draws the appended row itself, as
- * the owner's prompt, so it draws no mirror: in a turn the mirror repeated the words, frame and all, and after a turn's
- * end it was a notice in a turn of its own that never ended.
+ * system notice under the plugin's name (`<plugin>: steer: …`, either plugin the bridge has run in) for the terminal to
+ * draw. The session view draws the appended row itself, as the owner's prompt, so it draws no mirror: in a turn the
+ * mirror repeated the words, frame and all, and after a turn's end it was a notice in a turn of its own that never
+ * ended.
  */
 export function isMirrorLine(row: JsonObject): boolean {
   return row.type === 'system' && row.subtype === 'informational' && typeof row.content === 'string' && MIRRORS.some((prefix) => (row.content as string).startsWith(prefix));
 }
-const MIRRORS = ['doperpowers: steer: ', 'doperpowers: delivered: '];
+const MIRRORS = BRIDGE_PLUGINS.flatMap((plugin) => [`${plugin}: steer: `, `${plugin}: delivered: `]);
 
 /**
  * A steer's content as its bubble draws it: a marked steer's words without the steer line (kept when the words alone

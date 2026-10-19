@@ -86,8 +86,10 @@ describe('the kind of request', () => {
   it('tells a question from a permission prompt, and an async question (`raised.async`) from a native one', () => {
     expect(isQuestion('AskUserQuestion')).toBe(true);
     expect(isQuestion('mcp__doperpowers__AskUserQuestion')).toBe(true);
+    expect(isQuestion('mcp__sminos__AskUserQuestion')).toBe(true); // the ask once it moved to the sminos plugin
     expect(isQuestion('Bash')).toBe(false);
     expect(isAsyncQuestion({ ...raised, tool: 'mcp__doperpowers__AskUserQuestion', input: { questions: [] }, async: true } as Raised)).toBe(true);
+    expect(isAsyncQuestion({ ...raised, tool: 'mcp__sminos__AskUserQuestion', input: { questions: [] }, async: true } as Raised)).toBe(true);
     expect(isAsyncQuestion({ ...raised, tool: 'AskUserQuestion', input: { questions: [] } })).toBe(false);
   });
 });

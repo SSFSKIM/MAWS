@@ -57,14 +57,14 @@ const other: Recording = {
   steps: [{ at: 0, k: 'raised', draft: { request: 'toolu_other', tool: 'Bash', input: { command: 'rm -rf build' } } }],
 };
 
-async function setUp(options: { memory?: Memory; script?: RpcScript; recordings?: Recording[]; bridge?: boolean; readOnly?: boolean } = {}) {
+async function setUp(options: { memory?: Memory; script?: RpcScript; recordings?: Recording[]; bridge?: boolean; readOnly?: boolean; plugin?: 'doperpowers' | 'sminos' } = {}) {
   const project = newProject();
   const name = `rp-${count}`;
   const credentials = await enroll(hub, ADMIN, name);
   // Miniflare sees a stream's close only when a write to it fails, so a test that crashes the machine beats often.
   await hub.timing(name, { heartbeatMs: 250, leaseMs: 45_000 });
   const memory = options.memory ?? emptyMemory();
-  const make = () => new FakeMachine({ hub: hub.url, machine: name, credentials, orgKey: RAW_KEY, project, recordings: options.recordings ?? [requests], member, memory, script: options.script, bridge: options.bridge, readOnly: options.readOnly });
+  const make = () => new FakeMachine({ hub: hub.url, machine: name, credentials, orgKey: RAW_KEY, project, recordings: options.recordings ?? [requests], member, memory, script: options.script, bridge: options.bridge, readOnly: options.readOnly, plugin: options.plugin });
   const fm = make();
   await fm.connect();
   await fm.play({ speed: 0 });
@@ -335,6 +335,53 @@ describe('stop (DC10)', () => {
     const stop = await call('stop', { session: JOBS, taskId: 'bsleep001' });
     expect((await final(stop)).outcome).toEqual({ state: 'failed', error: { code: 'failed', message: engine } });
     expect(jobsOf(fm).find((j) => j.taskId === 'bsleep001')?.status).toBe('running');
+    b.close();
+    await fm.close();
+  });
+});
+
+// The sminos plugin (doperpowers' sminos plugin design, §11): the bridge and the ask move out of doperpowers into a
+// plugin of their own, so a rolled machine raises the ask as `mcp__sminos__AskUserQuestion` and appends its rows under
+// origin `sminos`. The fake machine plays either: doperpowers by default, as a machine not yet rolled.
+describe('a machine whose bridge runs in the sminos plugin', () => {
+  const ROLLED = '2a3b4c5d-6e7f-4081-9a2b-3c4d5e6f7a8b';
+  const TURN = '9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a';
+  const rolled: Recording = {
+    ...requests,
+    name: 'rolled',
+    session: ROLLED,
+    steps: [
+      { at: 0, k: 'turn-start', turnId: TURN, agentId: null },
+      // Recorded on a machine not yet rolled; a rolled machine raises the same ask under its new name.
+      { at: 1, k: 'raised', draft: { request: 'toolu_plugin_block', tool: 'mcp__doperpowers__AskUserQuestion', input: { questions: [{ question: 'Now?', options: [{ label: 'yes' }, { label: 'no' }] }] } } },
+    ],
+  };
+
+  it('raises the ask under the sminos name, a question that takes an answer and no allow; a machine not yet rolled keeps the old name', async () => {
+    const { fm, b, raised, call, final, digest } = await setUp({ recordings: [rolled], plugin: 'sminos' });
+    const ask = raised('toolu_plugin_block');
+    expect(ask.tool).toBe('mcp__sminos__AskUserQuestion');
+    const allow = await call('decide', { session: ROLLED, decision: 'allow', digest: await digest(ask) });
+    expect((await final(allow)).outcome).toMatchObject({ state: 'failed', error: { code: 'bad-shape' } });
+    const answer = await call('answer', { session: ROLLED, digest: await digest(ask), answers: { 'Now?': 'yes' } });
+    expect((await final(answer)).outcome).toEqual({ state: 'done', result: {} });
+    b.close();
+    await fm.close();
+    const before = await setUp({ recordings: [rolled] });
+    expect(before.raised('toolu_plugin_block').tool).toBe('mcp__doperpowers__AskUserQuestion');
+    before.b.close();
+    await before.fm.close();
+  });
+
+  it('appends a steer and a stop note under the sminos origin', async () => {
+    const { fm, b, call, final } = await setUp({ recordings: [rolled, jobs], plugin: 'sminos' });
+    const steer = await call('steer', { session: ROLLED, text: 'keep it short' });
+    const { row } = ((await final(steer)).outcome as { result: { row: string } }).result;
+    expect(fm.sessions.get(ROLLED)!.rows.get('main')!.find((r) => r.uuid === row)).toMatchObject({ isMeta: true, origin: { kind: 'plugin', name: 'sminos' } });
+    const stop = await call('stop', { session: JOBS, taskId: 'bsleep001' });
+    expect((await final(stop)).outcome).toEqual({ state: 'done', result: { taskId: 'bsleep001' } });
+    const note = fm.sessions.get(JOBS)!.rows.get('main')!.find((r) => JSON.stringify(r).includes(stopNote('bsleep001')));
+    expect(note).toMatchObject({ isMeta: true, origin: { kind: 'plugin', name: 'sminos' } });
     b.close();
     await fm.close();
   });

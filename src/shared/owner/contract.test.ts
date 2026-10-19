@@ -58,7 +58,7 @@ describe('the full contract: contract 5', () => {
     for (const needle of ['`<message>…</message>`', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'a user message naming the askId', 'native AskUserQuestion only where', 'never in code', 'your answers included']) {
       expect(TO_HUMAN_CONTRACT).toContain(needle);
     }
-    for (const retired of ['need-input', 'insight', 'essential', 'to-human>', 'mcp__doperpowers__']) expect(TO_HUMAN_CONTRACT).not.toContain(retired);
+    for (const retired of ['need-input', 'insight', 'essential', 'to-human>', 'mcp__doperpowers__', 'mcp__sminos__']) expect(TO_HUMAN_CONTRACT).not.toContain(retired);
     expect(marksOf(TO_HUMAN_CONTRACT, { messageUuid: 'u' as MessageUuid, blockIndex: 0 })).toEqual([]);
     expect(TO_HUMAN_CONTRACT.length).toBeLessThanOrEqual(16_384); // the launch spec's bound
   });
@@ -96,7 +96,7 @@ describe('the supplement (P2-C2)', () => {
 
   it('names the one mark and the ask tool of a MAWS session, under 120 words, and nothing of the retired marks', () => {
     expect(words.length).toBeLessThan(120);
-    for (const needle of ['`<message>…</message>`', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', '`mcp__doperpowers__AskUserQuestion` is not available here', 'native AskUserQuestion only where', 'never inside code', 'your answers included']) {
+    for (const needle of ['`<message>…</message>`', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'Neither `mcp__sminos__AskUserQuestion` nor `mcp__doperpowers__AskUserQuestion` is available here', 'native AskUserQuestion only where', 'never inside code', 'your answers included']) {
       expect(TO_HUMAN_SUPPLEMENT).toContain(needle);
     }
     for (const retired of ['need-input', 'insight', 'essential', 'to-human>']) expect(TO_HUMAN_SUPPLEMENT).not.toContain(retired);
