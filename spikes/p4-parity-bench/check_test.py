@@ -106,6 +106,19 @@ class Deck(unittest.TestCase):
         self.add_after_sessions('<section id="there"><h2 id="title">Getting there</h2><ul id="l"><li>Bus 14 stops at the gate</li><li>Parking is on Mill Lane</li></ul></section>')
         self.assertFalse(check.check('B7', self.before, self.after)[0], 'two bullets')
 
+    def test_same_deck(self):
+        self.assertTrue(check.same(DECK, self.after)[0], 'a copy')
+        html = ''.join(read(os.path.join(DECK, 'project', 'slides', s + '.html')) for s in json.loads(read(os.path.join(DECK, 'project', 'deck.json')))['order'])
+        one = os.path.join(self.dir, 'one.html')
+        write(one, '<html><body>' + html.replace('<h2', '<h1').replace('</h2>', '</h1>') + '</body></html>')
+        self.assertTrue(check.same(DECK, one)[0], 'one HTML file, other title tags: the same slides and texts')
+        self.edit('sessions', 'Grace Okafor', 'G. Okafor')
+        ok, detail = check.same(DECK, self.after)
+        self.assertFalse(ok)
+        self.assertIn('slide 2', detail)
+        write(one, '<html><body>' + html.rsplit('<section', 1)[0] + '</body></html>')
+        self.assertFalse(check.same(DECK, one)[0], 'a slide missing')
+
     def test_single_file_deck(self):
         html = ''.join(read(os.path.join(DECK, 'project', 'slides', s + '.html')) for s in json.loads(read(os.path.join(DECK, 'project', 'deck.json')))['order'])
         a, b = os.path.join(self.dir, 'a.html'), os.path.join(self.dir, 'b.html')

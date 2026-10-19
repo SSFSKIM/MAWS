@@ -3,7 +3,9 @@
 before and after the turn in each app's native form, and the same rules judge both apps.
 
   python3 -I check.py <task> <before> <after>      prints {"pass": bool, "detail": "..."} and exits 0 or 1
-  python3 -I check.py same <seed.md> <made.md>     the same words in order: a seeded document carries its seed
+  python3 -I check.py same <seed> <made>           a seeded artifact carries its seed: a document the same words in
+                                                   order; a deck (a directory or .html) the same slides with the same
+                                                   texts in order
 
 A document is a markdown file (MAWS's `md` export; Desktop's file). A deck is a directory in the Slides shape
 (`project/deck.json` with `order`, `project/slides/<id>.html`, as MAWS and Claude's Slides type keep it) or one HTML
@@ -152,7 +154,21 @@ def words(path):
     return re.findall(r"[A-Za-z0-9']+", ' '.join(re.sub(r'\[[ xX]\]', ' ', b) for b in blocks(path)))
 
 
+def is_deck(path):
+    return os.path.isdir(path) or path.lower().endswith(('.html', '.htm'))
+
+
 def same(seed, made):
+    if is_deck(seed) or is_deck(made):  # a deck: the same slides with the same texts in order, whatever its form
+        a, b = deck(seed), deck(made)
+        if a == b:
+            return True, 'the same %d slides with the same texts in order' % len(a)
+        i = next((k for k in range(min(len(a), len(b))) if a[k] != b[k]), None)
+        if i is None:
+            return False, 'slide count %d and %d' % (len(a), len(b))
+        j = next((k for k in range(min(len(a[i]), len(b[i]))) if a[i][k] != b[i][k]), min(len(a[i]), len(b[i])))
+        text = lambda s: s[j][1] if j < len(s) else None
+        return False, 'slide %d differs at text %d: seed %r, made %r' % (i + 1, j + 1, text(a[i]), text(b[i]))
     a, b = words(seed), words(made)
     if a == b:
         return True, 'the same %d words in order' % len(a)
