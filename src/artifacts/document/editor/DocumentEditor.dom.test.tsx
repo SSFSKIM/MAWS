@@ -286,10 +286,10 @@ describe('Tab in a table', () => {
   });
 });
 
-// P3-F (F1, the owner's N.3: "링크는 안열리고 cmd+click에도 컴포넌트가 선택됨"): ⌘-click or Ctrl-click on a link opens its href
-// through the host's external opener (main's scheme-checked one in the app) and is consumed there, so the press neither
-// moves the caret nor selects a node (ProseMirror's own modifier-click selected the whole paragraph). A plain click is
-// the page's, the caret placed as anywhere else. In every editor of the document (the read-only one too).
+// P3-F (F1, the owner's N.3: "링크는 안열리고 cmd+click에도 컴포넌트가 선택됨"): ⌘-click (Ctrl-click off a Mac) on a link
+// opens its href through the host's external opener (main's scheme-checked one in the app) and is consumed there, so the
+// press neither moves the caret nor selects a node (ProseMirror's own modifier-click selected the whole paragraph). A
+// plain click is the page's, the caret placed as anywhere else. In every editor of the document (the read-only one too).
 describe('a link', () => {
   const linked = doc({
     type: 'paragraph',
@@ -317,16 +317,38 @@ describe('a link', () => {
     return { press: down.defaultPrevented, click: clicked };
   };
   const anchor = (editor: Editor) => editor.view.dom.querySelector('a[href]')!;
+  // the platform the page reports (happy-dom's reads its user agent): the modifier is ⌘ on a Mac, Ctrl elsewhere
+  const onPlatform = (value: string) => Object.defineProperty(navigator, 'platform', { value, configurable: true });
+  afterEach(() => void delete (navigator as { platform?: string }).platform);
 
-  it('opens through the host on ⌘-click and on Ctrl-click, moving no caret and selecting nothing', async () => {
+  it('opens through the host on ⌘-click on a Mac and on Ctrl-click elsewhere, moving no caret and selecting nothing', async () => {
     const openExternal = vi.fn();
     const { editor } = await mount(linked, { ...owner, openExternal });
     act(() => void editor().commands.setTextSelection(2));
-    for (const modifier of [{ metaKey: true }, { ctrlKey: true }]) {
-      expect(clickWith(anchor(editor()), modifier), JSON.stringify(modifier)).toEqual({ press: true, click: true });
+    for (const [platform, modifier] of [
+      ['MacIntel', { metaKey: true }],
+      ['Win32', { ctrlKey: true }],
+    ] as const) {
+      onPlatform(platform);
+      expect(clickWith(anchor(editor()), modifier), platform).toEqual({ press: true, click: true });
       expect(editor().state.selection.toJSON()).toEqual({ type: 'text', anchor: 2, head: 2 });
     }
     expect(openExternal.mock.calls).toEqual([['https://example.com/brief'], ['https://example.com/brief']]);
+  });
+
+  // the review of F1: on a Mac Ctrl-click is the secondary click (Electron's Chromium sends mousedown, contextmenu and
+  // mouseup, no click), so taking its press only swallowed a context-menu gesture; ⌘ elsewhere is no link gesture either
+  it('takes no Ctrl-click on a Mac and no ⌘-click elsewhere', async () => {
+    const openExternal = vi.fn();
+    const { editor } = await mount(linked, { ...owner, openExternal });
+    for (const [platform, modifier] of [
+      ['MacIntel', { ctrlKey: true }],
+      ['Win32', { metaKey: true }],
+    ] as const) {
+      onPlatform(platform);
+      expect(clickWith(anchor(editor()), modifier), platform).toEqual({ press: false, click: false });
+    }
+    expect(openExternal).not.toHaveBeenCalled();
   });
 
   it('leaves a plain click to the page, opening nothing', async () => {
@@ -350,6 +372,7 @@ describe('a link', () => {
     let current: Editor | null = null;
     render(<DocumentEditor artifactId="doc1" handle={handle} host={{ ...owner, openExternal }} onEditor={(e) => (current = e)} />);
     await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
+    onPlatform('MacIntel');
     expect(clickWith(anchor(current!), { metaKey: true })).toEqual({ press: true, click: true });
     expect(openExternal.mock.calls).toEqual([['https://example.com/brief']]);
   });

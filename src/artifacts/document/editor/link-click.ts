@@ -1,4 +1,4 @@
-// A link opened from the page (P3-F, F1; the owner's sitting, step N.3): ⌘-click or Ctrl-click on a link opens the link
+// A link opened from the page (P3-F, F1; the owner's sitting, step N.3): ⌘-click (Ctrl-click off a Mac) opens the link
 // mark's href through the host's opener (in the app main's one scheme-checked `layout.openExternal`, so a scheme it
 // refuses stays refused) and is consumed at the press: no caret moves, and ProseMirror's own modifier-click, which
 // selects the node clicked (the whole paragraph), never runs. A plain click stays the page's, the caret placed as
@@ -12,9 +12,13 @@ export interface LinkClickOptions {
   open(url: string): void;
 }
 
+// ⌘ on a Mac and Ctrl elsewhere, prosemirror-view's own node-select modifier, the gesture this takes over. On a Mac
+// Ctrl-click is the secondary click (mousedown, contextmenu, mouseup and no click), left to the context menu.
+const linkModifier = (): 'metaKey' | 'ctrlKey' => (/Mac|iPhone|iPad|iPod/.test(navigator.platform) ? 'metaKey' : 'ctrlKey');
+
 // The link under a modifier-click's target (its href, '' for a link without one); null when the press is no such click.
 function linkClicked(view: EditorView, event: MouseEvent): string | null {
-  if (event.button !== 0 || !(event.metaKey || event.ctrlKey)) return null;
+  if (event.button !== 0 || !event[linkModifier()]) return null;
   const anchor = event.target instanceof Element ? event.target.closest('a') : null;
   if (!anchor || !view.dom.contains(anchor)) return null;
   const link = view.state.doc.nodeAt(view.posAtDOM(anchor, 0))?.marks.find((mark) => mark.type.name === 'link');
