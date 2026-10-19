@@ -3,7 +3,9 @@
 // once the host acknowledges it: closing the handle drops what the host has not yet acknowledged. So a showing with no
 // unacknowledged edits ends at once; one whose replica is live waits briefly for the acknowledgement; otherwise
 // (offline, reconnecting, or not acknowledged in time) the owner chooses between keeping the tab open until the edits
-// save and discarding them. Never silently dropped. It reads only the tab's handle (X32's lifetime rule).
+// save and discarding them. Never silently dropped. It reads only the tab's handle and whether the tab's showing ended
+// (X32's lifetime rule): a showing disposed before or while the guard waits closed its replica, its edits gone with it,
+// so nothing is left to ask about.
 import type { DocumentHandle, DocumentState } from '@artifacts/host';
 import { confirm } from '../../sessions/dialogs';
 import { DESIGN_SYSTEM_COPY as C } from './copy';
@@ -33,11 +35,11 @@ function acknowledged(handle: DocumentHandle, ms: number): Promise<boolean> {
   });
 }
 
-/** The closeGuard of a system's showing: true to let it end. */
-export async function allowSystemClose(handle: DocumentHandle, name: string, waitMs = SAVE_WAIT_MS): Promise<boolean> {
+/** The closeGuard of a system's showing: true to let it end. `ended` answers whether the showing was disposed. */
+export async function allowSystemClose(handle: DocumentHandle, name: string, ended: () => boolean = () => false, waitMs = SAVE_WAIT_MS): Promise<boolean> {
   const state = handle.state();
-  if (state.unsaved === 0) return true;
+  if (state.unsaved === 0 || ended()) return true;
   if (state.phase === 'live' && (await acknowledged(handle, waitMs))) return true;
-  if (handle.state().unsaved === 0) return true;
+  if (ended() || handle.state().unsaved === 0) return true;
   return confirm({ title: C.unsavedTitle(name), body: C.unsavedBody, confirmLabel: C.discardChanges, destructive: true });
 }

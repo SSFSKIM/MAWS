@@ -179,7 +179,7 @@ describe('the close guard (F-I1)', () => {
     if (state.status !== 'open') throw new Error('not open');
     const view = render(
       <EditorHostScopeContext.Provider value={SCOPE}>
-        <DesignSystemBody artifactId="ds1" handle={state.handle} host={host} />
+        <DesignSystemBody artifactId="ds1" handle={state.handle} host={host} ended={opened.ended} />
       </EditorHostScopeContext.Provider>,
     );
     act(() => setToken(state.handle.doc, 'color.accent.$root', { $type: 'color', $value: { colorSpace: 'srgb', components: [0.1, 0.2, 0.3] } }));
@@ -203,5 +203,36 @@ describe('the close guard (F-I1)', () => {
     expect(await discarded).toBe(true);
     opened.dispose();
     persisted.destroy();
+  });
+
+  // P3-F (library scalpel-4#1): a showing disposed while its guard waits (the panel's reconciliation, a main tab
+  // unmounting) is gone, its edits with it, so nothing is asked about it; a host lost while the guard waits still asks.
+  it('asks nothing once the showing is disposed while it waits, and still asks when the host is lost instead', async () => {
+    const { handle, set } = fakeHandle();
+    act(() => set({ unsaved: 2 }));
+    const replica: DocumentHandle = { ...handle, close: () => set({ phase: 'off' }) }; // the replica's close: off, its edits carried
+    const opened = new OpenedSystem('ds1', { ...host, open: async () => replica } as unknown as ArtifactHost);
+    await act(async () => {});
+    if (opened.get().status !== 'open') throw new Error('not open');
+    const view = render(
+      <EditorHostScopeContext.Provider value={SCOPE}>
+        <DesignSystemBody artifactId="ds1" handle={replica} host={host} ended={opened.ended} />
+      </EditorHostScopeContext.Provider>,
+    );
+
+    const lost = askEditorHostClose(SCOPE)!;
+    act(() => set({ phase: 'off' })); // the host goes; the showing stays
+    await act(async () => {});
+    expect(useDialogs.getState().open?.kind).toBe('confirm');
+    closeDialog();
+    expect(await lost).toBe(false);
+
+    act(() => set({ phase: 'live' }));
+    const disposed = askEditorHostClose(SCOPE)!;
+    act(() => opened.dispose()); // reconciliation disposes the showing while its guard waits
+    await act(async () => {});
+    expect(useDialogs.getState().open).toBeNull();
+    expect(await disposed).toBe(true);
+    view.unmount();
   });
 });

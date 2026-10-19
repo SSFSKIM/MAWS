@@ -52,6 +52,8 @@ export class OpenedSystem {
 
   readonly get = (): Opening => this.current;
   readonly deleting = (): boolean => this.deleteAsked;
+  /** Whether the showing was disposed (its replica closed): its close guard asks nothing then. */
+  readonly ended = (): boolean => this.disposed;
   requestDelete(): void {
     if (this.disposed || this.deleteAsked) return;
     this.deleteAsked = true;
@@ -134,6 +136,7 @@ function OpenBody(props: { artifactId: string; handle: DocumentHandle; state: Op
         artifactId={artifactId}
         handle={handle}
         host={state.host}
+        ended={state.ended}
         visible={visible}
         onShown={onShown}
         isDefault={isDefault}
