@@ -87,7 +87,7 @@ describe('artifact_create of a document', () => {
     const doc = live(note.artifactId);
     const tops = DocIndex.of(doc).tops(DocIndex.of(doc).tabIds()[0]);
     expect(tops).toHaveLength(3);
-    expect(textOf(doc, tops[0].id)).toBe('This note follows the P3 sitting.');
+    expect(textOf(doc, tops[0].id!)).toBe('This note follows the P3 sitting.'); // a top block always has its id
   });
 
   it('answers a repeated tool-use id with the first result and creates one artifact', async () => {
