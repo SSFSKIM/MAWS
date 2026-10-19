@@ -15,13 +15,16 @@
 //   first, and only the server's refusal leads to the provider's flow. A usable saved sign-in is used without a browser;
 //   an unusable one is `needsReconnect`, never a new consent. Reconnect is the provider's explicit replacement.
 // - Bounds live in the owner operation, not in a window dropping a late answer: a query aborts its resolutions at
-//   OWNER_QUERY_DEADLINE_MS and answers with what it has; an action is acknowledged at once and runs under its own
-//   controller (its deadline, the host's loss and main's stop abort the provider's flow and the host's discoveries).
+//   OWNER_QUERY_DEADLINE_MS (or main's stop) and answers with what it has, each selection raced with that end (P3-F
+//   F-connectors 8); an action is acknowledged at once and runs under its own controller (its deadline, the host's
+//   loss and main's stop abort the provider's flow and the host's discoveries).
 //   Its end, and its start, are `connectors.serversChanged {artifactId}` to the windows that read rows: they read again.
 // - Disconnect takes a saved connection's id alone (no current source, no decryption). A retirement the host has not
 //   confirmed stays visible as its own row, retryable, after the provider has forgotten the record (`disconnecting` is the
-//   provider's, separate from `saved`). Forgetting an unreadable record withdraws, for this main's lifetime, every HTTP
-//   source without its own MAWS sign-in from automatic use (the provider's rule, Decision Log 33); the answer says so.
+//   provider's, separate from `saved`), whether the owner's Disconnect or (P3-F F-connectors 7) a Reconnect's
+//   replacement of the record started it: the provider enumerates its retirements. Forgetting an unreadable record
+//   withdraws, for this main's lifetime, every HTTP source without its own MAWS sign-in from automatic use (the
+//   provider's rule, Decision Log 33); the answer says so.
 // - P3-HD M3c2 correction: a Disconnect synchronously cancels every older owner action it could concern (the exact
 //   HTTP row a listing tied the id to; every HTTP action when no listing did), before anything awaits, so an older
 //   Connect or Reconnect never reaches the provider after a newer Disconnect. A saved record is hidden only behind a
@@ -62,7 +65,7 @@ export interface ConnectorOwnerViewer {
 
 export interface ConnectorOwnerDeps {
   direct: Pick<DirectRoute, 'resolveSource' | 'discover'>;
-  oauth: Pick<ConnectorOAuthProvider, 'state' | 'saved' | 'connect' | 'reconnect' | 'disconnect' | 'disconnecting' | 'onChange' | 'withdrawnUnattributed'> | null; // null: no OAuth of MAWS's own
+  oauth: Pick<ConnectorOAuthProvider, 'state' | 'saved' | 'connect' | 'reconnect' | 'disconnect' | 'disconnecting' | 'retirements' | 'onChange' | 'withdrawnUnattributed'> | null; // null: no OAuth of MAWS's own
   grants(artifactId: string): Promise<ConnectorGrant[]>; // the artifact's durable grants
   log?: (line: string) => void;
 }
@@ -73,6 +76,7 @@ export interface ConnectorOwner {
   reconnect(artifactId: string, sourceHandle: string): ConnectorOwnerAck;
   disconnect(connectionId: string): ConnectorOwnerAck;
   hostLost(): void; // main's attachment to the engine host ended: running actions end, rows are read again
+  hostStreaming(): void; // P3-F F-connectors 9: the engine host's connection streams again: rows are read again
   stop(): void;
 }
 
@@ -161,7 +165,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
   const lastByKey = new Map<string, Last>();
   const lastByConnection = new Map<string, Last>();
   const labels = new Map<string, Origin | 'unreadable'>(); // what a listing last showed for a connection id
-  const retiring = new Map<string, Origin | null>(); // connections the owner disconnected, by id
+  const retiring = new Map<string, Origin | null>(); // connections being retired (the owner's or the provider's), by id
   const disconnects = new Set<string>(); // in flight
   const viewers = new Map<number, { viewer: ConnectorOwnerViewer; artifacts: Set<string> }>();
   const queries = new Set<AbortController>();
@@ -228,7 +232,7 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
       }
       return answer;
     };
-    return async (tool: ConnectorToolRef): Promise<Selection> => {
+    const choose = async (tool: ConnectorToolRef): Promise<Selection> => {
       try {
         const found = await direct.resolveSource(artifactId, tool.server, signal, tool.tool);
         if (found.ok) return { ok: true, source: found.source, known: found.tool !== undefined };
@@ -238,6 +242,9 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
         return { ok: false, why: 'unavailable' };
       }
     };
+    // P3-F F-connectors 8: raced with the query's (or the action's) signal, so a resolution that never hears it (route
+    // D's lookups before its abortable operation) holds no answer past its deadline or main's stop
+    return (tool: ConnectorToolRef): Promise<Selection> => within<Selection>(choose(tool), signal, { ok: false, why: 'unavailable' });
   }
 
   // ── the rows ──
@@ -336,7 +343,13 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
         }
         shown.add(entry.connectionId);
       }
-      // forgotten connections whose withdrawal is still unconfirmed
+      // forgotten connections whose withdrawal is still unconfirmed: the owner's Disconnects and (P3-F F-connectors 7) the
+      // provider's own, a Reconnect's of the record it replaced, labelled by what a listing last showed for the id
+      for (const connectionId of oauth.retirements()) {
+        if (retiring.has(connectionId)) continue;
+        const label = labels.get(connectionId);
+        remember(retiring, connectionId, label === undefined || label === 'unreadable' ? null : label);
+      }
       for (const [connectionId, origin] of [...retiring]) {
         const disconnecting = oauth.disconnecting(connectionId);
         if (disconnecting === null) {
@@ -497,6 +510,10 @@ export function createConnectorOwner(deps: ConnectorOwnerDeps): ConnectorOwner {
     hostLost() {
       for (const action of actions.values()) action.controller.abort();
       changed();
+    },
+    // P3-F F-connectors 9: rows an outage read as unavailable are read again once the host can answer them
+    hostStreaming() {
+      if (!stopped) changed();
     },
     stop() {
       if (stopped) return;

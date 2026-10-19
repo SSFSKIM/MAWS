@@ -20,11 +20,13 @@
 //
 // Re-pin (P2-E1 document, D8): `{ type: 'maws:locate', id, selector }` from the parent (a numeric id, a string
 // selector) is answered with `{ type: 'maws:located', id, selector, rect }`, the id echoed so the app tells two asks of
-// one selector apart, the rect `getBoundingClientRect` of `document.querySelector(selector)`, or null when the selector
-// matches nothing or is invalid (a throwing selector is caught). A zero-size rect is not final: observe the anchor until
-// both dimensions have size, bounded by HtmlFrame's one-second locate budget (null if it never gains size). The observer
-// leaves on either answer. A locate never starts picking or changes the page. The capture window loads the page
-// top-level, where there is no parent to listen to, so the script does nothing there.
+// one selector apart, the rect `getBoundingClientRect` of `document.querySelector(selector)`, or null at once when the
+// selector is invalid (a throwing selector is caught). Neither an anchor the page has not added yet (a script that
+// renders after the load) nor a zero-size rect is final (P3-F L198): watch the page until the anchor exists (a
+// MutationObserver) and then until both its dimensions have size (a ResizeObserver), bounded by HtmlFrame's one-second
+// locate budget (null if it never comes or never gains size). The observers leave on the answer. A locate never starts
+// picking or changes the page. The capture window loads the page top-level, where there is no parent to listen to, so
+// the script does nothing there.
 //
 // P3-H H4: the page's connector runtime (`window.mawsConnectors`, ./page-connectors.ts) runs in the same script, after
 // the picker; its requests go over a port the app's frame hands the page at each load, never to `window.parent` itself.
@@ -143,26 +145,43 @@ const SOURCE = String.raw`(function () {
     if (event.source !== host) return;
     var data = event.data;
     if (!data || typeof data !== 'object' || data.type !== 'maws:locate' || typeof data.id !== 'number' || typeof data.selector !== 'string') return;
-    var rect = null;
-    try {
-      var el = document.querySelector(data.selector);
-      if (el) { var r = el.getBoundingClientRect(); rect = { x: r.left, y: r.top, width: r.width, height: r.height }; }
-    } catch (error) { rect = null; }
-    if (!rect || (rect.width > 0 && rect.height > 0)) {
-      post({ type: 'maws:located', id: data.id, selector: data.selector, rect: rect });
-      return;
-    }
+    function answer(rect) { post({ type: 'maws:located', id: data.id, selector: data.selector, rect: rect }); }
+    function rectOf(node) { var r = node.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; }
+    function sized(rect) { return rect.width > 0 && rect.height > 0; }
+    var el;
+    try { el = document.querySelector(data.selector); } catch (error) { answer(null); return; }
+    var first = el ? rectOf(el) : null;
+    if (first && sized(first)) { answer(first); return; }
+    var done = false;
+    var added = null;
+    var resized = null;
     function finish(rect) {
+      if (done) return;
+      done = true;
       window.clearTimeout(timer);
-      observer.disconnect();
-      post({ type: 'maws:located', id: data.id, selector: data.selector, rect: rect });
+      if (added) added.disconnect();
+      if (resized) resized.disconnect();
+      answer(rect);
     }
-    var observer = new window.ResizeObserver(function () {
-      var r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) finish({ x: r.left, y: r.top, width: r.width, height: r.height });
-    });
+    function measure(node) {
+      var rect = rectOf(node);
+      if (sized(rect)) { finish(rect); return; }
+      resized = new window.ResizeObserver(function () {
+        var r = rectOf(node);
+        if (sized(r)) finish(r);
+      });
+      resized.observe(node);
+    }
     var timer = window.setTimeout(function () { finish(null); }, 1000);
-    observer.observe(el);
+    if (el) { measure(el); return; }
+    added = new window.MutationObserver(function () {
+      var found = document.querySelector(data.selector);
+      if (!found || done) return;
+      added.disconnect();
+      added = null;
+      measure(found);
+    });
+    added.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['id'] });
   });
 
   window.addEventListener('mousemove', function (event) {

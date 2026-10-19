@@ -1,6 +1,7 @@
 // The tabs map and the document's own settings (D1, D2 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; S3's
 // artifact model): tabs are created, renamed, reordered by a fractional `order`, deleted, and each body binds as a doc.
 import { describe, expect, it } from 'vitest';
+import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
 import { applyV1, applyV2, diffV1, newDoc, stateV2, stateVector } from '../yjs';
 import { ynodeToPmnode } from '../yjs/prosemirror';
 import { dsOverrides, setDsOverrides } from './meta';
@@ -99,6 +100,22 @@ describe('the tabs map', () => {
     const only = createDocument(doc, { title: 'Only', generateID });
     expect(() => deleteTab(doc, only)).toThrow(/last tab/);
     expect(() => createDocument(doc, { title: 'Again', generateID })).toThrow(/already/);
+  });
+
+  // P3-F W-DOC-B (tracker L155): the guide's 50-tab limit (DOCUMENT_LIMITS.tabs), refused by name before any write
+  it('refuses a tab past the document’s limit by name and writes nothing, and adds again once a tab is gone', () => {
+    const doc = newDoc();
+    const first = createDocument(doc, { title: 'Tab 1', generateID });
+    for (let n = 2; n <= DOCUMENT_LIMITS.tabs; n++) addTab(doc, { title: `Tab ${n}`, generateID });
+    expect(listTabs(doc)).toHaveLength(50);
+    const before = stateVector(doc);
+    expect(() => addTab(doc, { title: 'One more', generateID })).toThrow('addTab: a document holds at most 50 tabs');
+    expect(() => addTab(doc, { title: 'One more', after: first, generateID })).toThrow('addTab: a document holds at most 50 tabs');
+    expect(stateVector(doc)).toEqual(before);
+    expect(listTabs(doc)).toHaveLength(50);
+    deleteTab(doc, first);
+    addTab(doc, { title: 'Replacement', generateID });
+    expect(listTabs(doc)).toHaveLength(50);
   });
 
   it('writes each change as one transaction under the given origin', () => {

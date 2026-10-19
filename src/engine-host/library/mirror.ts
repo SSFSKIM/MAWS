@@ -15,10 +15,11 @@
 //   rename by case only on a case-insensitive volume keeps it; any other name, an owner's hard link included, is not.
 // - Something at the manifest's path that is not a MAWS manifest (another file, a link, dangling or not) is the
 //   owner's: the directory is refused (logged, as a failing one) and that entry never rewritten or removed.
-// - Two Spaces linked to one directory share its manifest (the desired set is per directory).
+// - Two Spaces linked to one directory share its manifest (the desired set is per directory). A directory is known by
+//   its real path, so two spellings of it (through a link, or by case on a case-insensitive volume) are one.
 // - A directory that fails (gone, unwritable, a link) is logged per Space and tried again at the next change, which
-//   reconciles the whole directory once it loads again; the linked directory itself is never created, and no write or
-//   removal passes through a link inside it.
+//   reconciles the whole directory once it loads again; what the mirror owns there stays owned meanwhile. The linked
+//   directory itself is never created, and no write or removal, the manifest's included, passes through a link inside it.
 // - At start every linked directory is reconciled against its manifest: what changed while the host was down.
 // - P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): a writer
 //   that declares `inputs` (what its output depends on beyond the revision) has them kept in the entry beside the
@@ -73,7 +74,8 @@ export class LibraryMirror {
   private readonly maxWaitMs: number;
   private readonly maxFileBytes: number;
   private readonly timers = new Map<string, { timer: ReturnType<typeof setTimeout>; since: number }>();
-  private readonly manifests = new Map<string, Manifest>(); // by the resolved linked directory, as loaded or written
+  private readonly manifests = new Map<string, Manifest>(); // by the linked directory's key (`keyOf`), as loaded or written
+  private readonly realDirs = new Map<string, string>(); // per resolved linked directory, its real path when last found
   private readonly failing = new Set<string>(); // linked directories whose last load failed
   private readonly unlinked = new Set<string>(); // directories no Space links whose mirror is not yet fully removed
   private readonly saved = new Map<string, string>(); // per directory, the manifest as last written
@@ -171,10 +173,8 @@ export class LibraryMirror {
   private async reconcileAll(): Promise<void> {
     const { store } = this.documents;
     const { spaces, artifacts } = await store.readCommitted(() => ({ spaces: store.listSpaces(), artifacts: store.list() }));
-    const linked = linkedDirs(spaces);
-    for (const dir of new Set([...this.manifests.keys(), ...this.unlinked, ...this.failing])) if (!linked.has(dir)) this.unlinked.add(dir); // a directory that failed its first load included: its manifest may name files
-    for (const dir of linked.keys()) this.unlinked.delete(dir); // linked again: reconciled below as any linked one
-    this.cleanUnlinked();
+    const linked = linkedDirs(spaces, (dir) => this.keyOf(dir));
+    this.track(linked);
     for (const [dir, target] of linked) {
       const members = artifacts.filter((artifact) => artifact.spaceId !== undefined && target.spaceIds.has(artifact.spaceId));
       let manifest: Manifest;
@@ -209,6 +209,52 @@ export class LibraryMirror {
     }
   }
 
+  // The head of every step: each directory this run knows, by its key now (one it knew by another, as one away since the
+  // start is known by its resolved path, carries its manifest and its state over, so one directory never holds two
+  // manifests), those no Space links pending removal (a directory that failed its first load included: its manifest may
+  // name files), and their removals tried.
+  private track(linked: Map<string, unknown>): void {
+    for (const old of new Set([...this.manifests.keys(), ...this.failing, ...this.unlinked])) {
+      const key = this.keyOf(old);
+      if (key === old) continue;
+      const manifest = this.manifests.get(old);
+      const into = this.manifests.get(key);
+      if (manifest && into) {
+        for (const [artifactId, entry] of Object.entries(manifest.artifacts)) {
+          const other = into.artifacts[artifactId];
+          // named by both: every file stays owned, at a revision none matches, so the next write removes what it no longer produces
+          into.artifacts[artifactId] = other ? { ...entry, revision: -1, files: [...new Set([...other.files, ...entry.files])] } : entry;
+        }
+      } else if (manifest) {
+        this.manifests.set(key, manifest);
+        const saved = this.saved.get(old);
+        if (saved !== undefined) this.saved.set(key, saved);
+      }
+      this.manifests.delete(old);
+      this.saved.delete(old);
+      if (this.failing.delete(old)) this.failing.add(key);
+      if (this.unlinked.delete(old)) this.unlinked.add(key);
+    }
+    for (const dir of new Set([...this.manifests.keys(), ...this.unlinked, ...this.failing])) if (!linked.has(dir)) this.unlinked.add(dir);
+    for (const dir of linked.keys()) this.unlinked.delete(dir); // linked again: reconciled as any linked one
+    this.cleanUnlinked();
+  }
+
+  // A linked directory's key: its real path; while the path reaches nothing, the real path it last reached if that is
+  // away too (the directory itself is away), else its resolved path (never found this run, or a link on it removed or
+  // retargeted, so a directory the path no longer reaches is never written).
+  private keyOf(linkedDir: string): string {
+    const resolved = resolve(linkedDir);
+    try {
+      const real = realpathSync.native(resolved); // a link above it followed, the case as the volume spells it
+      this.realDirs.set(resolved, real);
+      return real;
+    } catch {
+      const real = this.realDirs.get(resolved);
+      return real !== undefined && !existsSync(real) ? real : resolved;
+    }
+  }
+
   // The directories no Space links any more: every file their manifests name removed. One stays pending (in memory
   // only, so until the host restarts) until its removals and its manifest's removal have all succeeded, and is tried
   // again at every later step.
@@ -240,14 +286,19 @@ export class LibraryMirror {
   // One artifact: written where its Space is linked, removed from every other directory this run knows it in.
   private async syncArtifact(artifactId: string): Promise<void> {
     const { store } = this.documents;
-    const { artifact, space } = await store.readCommitted(() => {
-      const found = store.get(artifactId);
-      return { artifact: found, space: found?.spaceId === undefined ? undefined : store.listSpaces().find((candidate) => candidate.id === found.spaceId) };
-    });
-    const dir = artifact && space?.linkedDir !== undefined ? resolve(space.linkedDir) : null;
-    this.cleanUnlinked();
+    const { artifact, spaces } = await store.readCommitted(() => ({ artifact: store.get(artifactId), spaces: store.listSpaces() }));
+    const space = artifact?.spaceId === undefined ? undefined : spaces.find((candidate) => candidate.id === artifact.spaceId);
+    this.track(linkedDirs(spaces, (dir) => this.keyOf(dir)));
+    const dir = artifact && space?.linkedDir !== undefined ? this.keyOf(space.linkedDir) : null;
     for (const [known, manifest] of this.manifests) {
       if (known === dir || this.unlinked.has(known) || !manifest.artifacts[artifactId]) continue;
+      try {
+        this.load(known); // a directory away or refused keeps the entry, removed by the reconciliation its next load starts
+      } catch (error) {
+        this.failing.add(known);
+        this.log(`${artifactId} could not be removed from the mirror in ${known}: ${reasonOf(error)}`);
+        continue;
+      }
       try {
         this.remove(known, manifest, artifactId);
       } catch (error) {
@@ -336,7 +387,7 @@ export class LibraryMirror {
         }
         // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 37 (1)): a copy already in place keeps
         // its bytes (they never change under its name); one the mirror lacks is read now
-        if (isMirrorCopy(data) && mine.has(file) && existsSync(target)) {
+        if (isMirrorCopy(data) && mine.has(file) && isFile(target)) {
           written.push(file);
           continue;
         }
@@ -444,6 +495,7 @@ export class LibraryMirror {
   // Writes the manifest when it names a file, removes it (and an emptied `artifacts/`) when it names none.
   private save(dir: string, manifest: Manifest): void {
     const root = join(dir, MIRROR_DIR);
+    if (!realDirsUnder(root, MIRROR_MANIFEST)) throw new Error(`${root} is not a directory of its own (a link, or a file); nothing is written through it`); // relinked since it loaded
     const path = join(root, MIRROR_MANIFEST);
     const present = occupied(path); // a link there too, dangling or not
     if (present && (!lstatSync(path).isFile() || this.saved.get(dir) !== readFileSync(path, 'utf8'))) readManifest(path); // not ours since: left alone
@@ -462,12 +514,12 @@ export class LibraryMirror {
   }
 }
 
-// Per resolved linked directory, the Spaces linked to it.
-function linkedDirs(spaces: Space[]): Map<string, { spaceIds: Set<string>; names: string[] }> {
+// Per linked directory (by its key), the Spaces linked to it.
+function linkedDirs(spaces: Space[], keyOf: (linkedDir: string) => string): Map<string, { spaceIds: Set<string>; names: string[] }> {
   const dirs = new Map<string, { spaceIds: Set<string>; names: string[] }>();
   for (const space of spaces) {
     if (space.linkedDir === undefined) continue;
-    const dir = resolve(space.linkedDir);
+    const dir = keyOf(space.linkedDir);
     const entry = dirs.get(dir) ?? { spaceIds: new Set<string>(), names: [] };
     entry.spaceIds.add(space.id);
     entry.names.push(space.name);
@@ -535,6 +587,15 @@ function occupied(path: string): boolean {
   try {
     lstatSync(path);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+// A regular file is at `path`, never followed: a link in the place of a file the mirror owns is not that file.
+function isFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile();
   } catch {
     return false;
   }

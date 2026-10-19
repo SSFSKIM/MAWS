@@ -39,6 +39,17 @@ describe('parseSpec', () => {
     expect(normalizeSpec(JSON.parse('{"view":{"toString":0}}')).warnings).toEqual(['unknown view object; the view draws as an error']);
   });
 
+  // P3-F dashboard-model wave (sweep#3): a pie's slices are one measure's sizes; a further measure is never dropped in
+  // silence (the figure would omit it while the view's data preview names it), it is the view's error
+  it('refuses a pie of more than one measure, naming the measures it cannot draw; one measure, as a name or a list, reads', () => {
+    expect(parseSpec({ view: 'pie', x: 'region', y: ['sales', 'cost'] })).toEqual({ ok: false, error: 'a pie view draws one measure; y also names "cost"' });
+    expect(parseSpec({ view: 'pie', x: 'region', y: ['sales', 'cost', 'margin'], title: 'Mix' })).toEqual({ ok: false, error: 'a pie view draws one measure; y also names "cost", "margin"', title: 'Mix' });
+    expect(normalizeSpec({ view: 'pie', x: 'region', y: ['sales', 'cost'] })).toEqual({ spec: { view: 'pie', x: 'region', y: ['sales', 'cost'] }, changed: false, warnings: ['a pie view draws one measure; y also names "cost"; the view draws as an error'] });
+    expect(parseSpec({ view: 'pie', x: 'region', y: ['sales'] })).toEqual({ ok: true, spec: { view: 'pie', x: 'region', y: ['sales'] }, warnings: [] });
+    expect(parseSpec({ view: 'pie', x: 'region', y: 'sales' })).toEqual({ ok: true, spec: { view: 'pie', x: 'region', y: 'sales' }, warnings: [] });
+    expect(parseSpec({ view: 'bar', x: 'region', y: ['sales', 'cost'] }).ok).toBe(true); // every other kind draws each measure
+  });
+
   it('takes a column named like an object prototype key as a column', () => {
     const parsed = parseSpec(JSON.parse('{"view":"table","format":{"__proto__":"text","constructor":"number"}}'));
     expect(parsed.ok && parsed.spec.format?.['__proto__']).toBe('text');

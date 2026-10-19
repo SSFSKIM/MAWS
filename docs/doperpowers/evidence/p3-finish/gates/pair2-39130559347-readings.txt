@@ -1,0 +1,88 @@
+### 0_e2edesign-systems.txt
+2026-10-18T13:30:40.0527040Z   ✓  3 e2e/design-systems.spec.ts:262:5 › the real document and deck editors restyle with their system’s live tokens, and their retained versions keep the pinned look (2.5s)
+2026-10-18T13:30:48.0821130Z   8 passed (16.2s)
+### 1_e2epresentations.txt
+2026-10-18T13:32:49.2674470Z [trace filmstrip-reorder] entry {"foreground":false,"at":"2026-10-18T13:32:49.264Z","native":[{"focused":false,"contentsFocused":false,"visible":true,"minimized":false,"opacity":0}],"page":{"hasFocus":true,"visibility":"visible","active":"button Slide 1"}}
+2026-10-18T13:33:00.0855940Z   2 skipped
+2026-10-18T13:33:00.0856150Z   17 passed (1.8m)
+### 2_e2edashboard.txt
+2026-10-18T13:30:02.3407000Z   11 passed (2.8m)
+### 3_unitdarwin.txt
+2026-10-18T13:26:30.4835690Z ##[group]Run .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+2026-10-18T13:26:30.4836540Z .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+2026-10-18T13:26:48.6680470Z  Test Files  14 passed (14)
+2026-10-18T13:26:48.6680920Z       Tests  282 passed (282)
+### 4_e2eartifacts.txt
+2026-10-18T13:26:06.1777400Z   1 skipped
+2026-10-18T13:26:06.1777590Z   4 passed (12.8s)
+### 5_e2edocument.txt
+2026-10-18T13:25:27.0888260Z   9 passed (11.4s)
+### 6_static.txt
+2026-10-18T13:20:29.5757788Z # tests 47
+2026-10-18T13:20:29.5758112Z # pass 47
+2026-10-18T13:20:29.5758277Z # fail 0
+2026-10-18T13:20:29.5758619Z # skipped 0
+### 7_e2eto-human.txt
+2026-10-18T13:24:40.3414010Z [e2e] MAWS_E2E_FOREGROUND: the first window is key
+2026-10-18T13:24:40.9867500Z [trace must-read-focus] entry {"foreground":true,"at":"2026-10-18T13:24:40.984Z","native":[{"focused":true,"contentsFocused":true,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div another session"}}
+2026-10-18T13:24:46.9634320Z [trace must-read-focus] at failure {"at":"2026-10-18T13:24:45.948Z","native":[{"focused":true,"contentsFocused":true,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"button repo · a session that asks · Must read —"}}
+2026-10-18T13:24:46.9637750Z [trace must-read-focus] snapshot {"card":true,"row":"div#transcriptr12-text:msg_01P2cM6Essential:0 tabindex=-1","rowConnected":true,"cardInView":256}
+2026-10-18T13:24:46.9641970Z [trace must-read-focus] after failure {"frameSample":{"from":"2026-10-18T13:24:45.955Z","to":"2026-10-18T13:24:46.958Z","frames":60},"activeAfterSample":"button <button type=\"button\" data-needs-you=\"fe0961c0-6a02-4fbc-ab8a-4ad0cc255df2\" data-menu=\"session:fe0961c0-6a02-4fbc-ab8a-4ad0cc255df2\" aria-label=\"repo · a sessio"}
+2026-10-18T13:24:46.9647100Z [trace must-read-focus] {"t":0,"type":"installed","hasFocus":true,"visibility":"visible","active":"div[role=treeitem,aria-label=another session,tabindex=0]"}
+2026-10-18T13:24:46.9650010Z [trace must-read-focus] {"t":29,"type":"focusout","target":"div[role=treeitem,aria-label=another session,tabindex=0]","related":"button[aria-label=repo · a session that asks · Must read —,tabindex=0]"}
+2026-10-18T13:24:46.9652920Z [trace must-read-focus] {"t":29,"type":"focusin","target":"button[aria-label=repo · a session that asks · Must read —,tabindex=0]","related":"div[role=treeitem,aria-label=another session,tabindex=0]"}
+2026-10-18T13:24:48.3400990Z [e2e] MAWS_E2E_FOREGROUND: the first window is key
+2026-10-18T13:24:49.3093820Z   1 failed
+2026-10-18T13:24:49.3094930Z   1 passed (11.8s)
+### 9_e2ewidgets.txt
+2026-10-18T13:23:19.9626700Z [e2e] MAWS_E2E_FOREGROUND: the first window is key
+2026-10-18T13:24:10.9139870Z   28 passed (53.9s)
+### 10_probes.txt
+2026-10-18T13:14:50.1545736Z # tests 219
+2026-10-18T13:14:50.1547820Z # pass 219
+2026-10-18T13:14:50.1548941Z # fail 0
+2026-10-18T13:14:50.1551000Z # skipped 0
+### 11_e2edefault.txt
+2026-10-18T13:16:29.4212450Z [e2e] MAWS_E2E_FOREGROUND: the first window is key
+2026-10-18T13:21:01.4712760Z [trace overview-focus] entry {"foreground":true,"at":"2026-10-18T13:21:01.469Z","native":[{"focused":false,"contentsFocused":false,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div Workstation north star · MAWS"}}
+2026-10-18T13:22:08.0734640Z   154 skipped
+2026-10-18T13:22:08.0734900Z   82 passed (5.7m)
+### 12_e2edocument-app.txt
+2026-10-18T13:14:09.6526640Z [e2e] MAWS_E2E_FOREGROUND: the first window is key
+2026-10-18T13:14:26.6587610Z [trace commented-paste] entry {"foreground":true,"at":"2026-10-18T13:14:26.656Z","native":[{"focused":true,"contentsFocused":true,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div Document"}}
+2026-10-18T13:14:32.8146860Z [trace commented-paste] at failure {"at":"2026-10-18T13:14:31.669Z","native":[{"focused":false,"contentsFocused":false,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div Document"}}
+2026-10-18T13:14:32.8174600Z [trace commented-paste] snapshot {"editorSelection":[34,34],"editorParagraphs":["The owner reviews the launch plan today.","A second paragraph waits here."],"page":["The owner reviews the launch plan today.","A second paragraph waits here."]}
+2026-10-18T13:14:32.8176600Z [trace commented-paste] after failure {"frameSample":{"from":"2026-10-18T13:14:31.799Z","to":"2026-10-18T13:14:32.802Z","frames":61},"activeAfterSample":"div <div contenteditable=\"true\" aria-label=\"Document\" data-editor=\"live\" translate=\"no\" class=\"tiptap ProseMirror doc-content ProseMirror-focused\" tabindex=\"0\"><p d"}
+2026-10-18T13:14:32.8178200Z [trace commented-paste] {"t":0,"type":"installed","hasFocus":true,"visibility":"visible","active":"body[]"}
+2026-10-18T13:14:32.8181210Z [trace commented-paste] {"t":17,"type":"focusin","target":"div[aria-label=Document,contenteditable=true,tabindex=0]","related":null}
+2026-10-18T13:14:32.8182190Z [trace commented-paste] {"t":17,"type":"selectionchange","text":"launch plan","collapsed":false,"focus":"span[]","offset":11,"active":"div[aria-label=Document,contenteditable=true,tabindex=0]"}
+2026-10-18T13:14:32.8186830Z [trace commented-paste] {"t":21,"type":"copy","target":"span[]","active":"div[aria-label=Document,contenteditable=true,tabindex=0]","types":[],"plain":"","htmlLength":0}
+2026-10-18T13:14:32.8187450Z [trace commented-paste] {"t":22,"type":"copy-after","defaultPrevented":true}
+2026-10-18T13:14:32.8188250Z [trace commented-paste] {"t":146,"type":"keydown","target":"div[aria-label=Document,contenteditable=true,tabindex=0]","active":"div[aria-label=Document,contenteditable=true,tabindex=0]","key":"End"}
+2026-10-18T13:14:32.8190080Z [trace commented-paste] {"t":157,"type":"paste","target":"p[]","active":"div[aria-label=Document,contenteditable=true,tabindex=0]","types":["text/plain","text/html"],"plain":"launch plan","htmlLength":118}
+2026-10-18T13:14:32.8190820Z [trace commented-paste] {"t":159,"type":"transformPasted","by":"uniqueID$","in":13,"out":13}
+2026-10-18T13:14:32.8191320Z [trace commented-paste] {"t":159,"type":"transformPasted","by":"commentPaste$","in":13,"out":13}
+2026-10-18T13:14:32.8191820Z [trace commented-paste] {"t":159,"type":"handlePaste","by":"handlePasteLink$","handled":false}
+2026-10-18T13:14:32.8193940Z [trace commented-paste] {"t":159,"type":"handlePaste","by":"selectingCells$","handled":false}
+2026-10-18T13:14:32.8194470Z [trace commented-paste] {"t":159,"type":"handlePaste","by":"codeBlockVSCodeHandler$","handled":false}
+2026-10-18T13:14:32.8194990Z [trace commented-paste] {"t":159,"type":"handlePaste","by":"plugin$69","handled":false}
+2026-10-18T13:14:32.8195570Z [trace commented-paste] {"t":160,"type":"handlePaste","by":"tiptapPaste$1","handled":false}
+2026-10-18T13:14:32.8196150Z [trace commented-paste] {"t":162,"type":"dispatch","ui":"paste","docChanged":true,"applied":true,"selection":[34,34]}
+2026-10-18T13:14:32.8197040Z [trace commented-paste] {"t":163,"type":"selectionchange","text":"","collapsed":true,"focus":"p[]","offset":33,"active":"div[aria-label=Document,contenteditable=true,tabindex=0]"}
+2026-10-18T13:14:32.8198890Z [trace commented-paste] {"t":163,"type":"keydown-after","defaultPrevented":false}
+2026-10-18T13:14:32.8200090Z [trace commented-paste] {"t":163,"type":"paste-after","defaultPrevented":true}
+2026-10-18T13:14:35.5661190Z [e2e] MAWS_E2E_FOREGROUND: the first window is key
+2026-10-18T13:14:40.1719270Z [trace restore-scene-selection] entry {"foreground":true,"at":"2026-10-18T13:14:40.167Z","native":[{"focused":true,"contentsFocused":true,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div Document"}}
+2026-10-18T13:14:44.8880730Z   1 failed
+2026-10-18T13:14:44.8881890Z   9 passed (38.7s)
+### 13_unit.txt
+2026-10-18T13:16:23.1545733Z .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$cores"
+2026-10-18T13:16:29.8526252Z  ✓  artifacts  src/artifacts/dashboard/snapshots-holds.test.ts (14 tests) 571ms
+2026-10-18T13:18:15.0737816Z  ✓  node  src/engine-host/documents/holds.test.ts (5 tests) 1445ms
+2026-10-18T13:18:17.8895200Z  ✓  node  src/main/dashboard/holds.test.ts (6 tests) 14ms
+2026-10-18T13:18:27.0875936Z  ✓  node  src/engine-host/library/mirror-holds.test.ts (1 test) 209ms
+2026-10-18T13:20:08.5665358Z  ✓  renderer  src/renderer/src/artifacts/host-holds.test.ts (5 tests) 43ms
+2026-10-18T13:22:52.3177288Z ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+2026-10-18T13:22:52.3314040Z  Test Files  1 failed | 1524 passed | 7 skipped (1532)
+2026-10-18T13:22:52.3501071Z       Tests  1 failed | 20309 passed | 73 skipped (20383)
+### 14_plan.txt

@@ -221,4 +221,25 @@ describe('ranges and tabs', () => {
       ['Comments: 4 open (1 orphaned); 2 outside this range', '- c:t3 on ^p2 · "keeps going" · 1 message', '- c:t4 orphaned, near ^p3 · "Third" · 1 message', ''].join('\n'),
     );
   });
+
+  // P3-F document-model scalpel-3#4: a comment spanning into the range is listed with the range that shows its milestones
+  it('lists a comment that starts before the range and runs into it', () => {
+    const doc = newDoc();
+    const tab = createDocument(doc, {
+      title: 'Span',
+      body: schema.nodeFromJSON({
+        type: 'doc',
+        content: [
+          { type: 'paragraph', attrs: { id: 'p1' }, content: [text('Before. '), text('first half', [comment('t9')])] },
+          { type: 'paragraph', attrs: { id: 'p2' }, content: [text('second half', [comment('t9')]), text(' after.')] },
+          { type: 'paragraph', attrs: { id: 'p3' }, content: [text('Unrelated.')] },
+        ],
+      }),
+    });
+    addThread(doc, { threadId: 't9', tabId: tab, blockId: 'p1', quote: 'first halfsecond half', anchor: anchorOfMark(tabBody(doc, tab)!, 't9')!, by: owner, at: now(), body: 'Across two.' });
+    const read = readDocument(doc, { from: 'p2', count: 1 });
+    expect(read.markdown).toContain('<c:t9>second half</c:t9> after. ^p2');
+    expect(read.markdown.split('\n---\n')[1]).toBe(['Comments: 1 open', '- c:t9 on ^p1 · "first halfsecond half" · 1 message', ''].join('\n'));
+    expect(readDocument(doc, { from: 'p3' }).markdown.split('\n---\n')[1]).toBe(['Comments: 1 open; 1 outside this range', ''].join('\n'));
+  });
 });

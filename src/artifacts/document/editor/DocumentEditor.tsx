@@ -25,9 +25,8 @@ import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model'; // P3-E
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { JointHold, TypingPause, type VersionView } from '../collab';
-import { isDarkGround } from '../export/highlight';
 import { isBindingTransaction, type Carry, type Doc } from '../../yjs'; // P3-E: Doc
 import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { coreExtensionOptions } from '../ids';
@@ -42,13 +41,14 @@ import { useOpenThreadCount } from './comments/use-threads';
 import { editorExtensions } from './extensions';
 import { FindBar } from './Find';
 import type { HistoryApi } from './history/api';
-import type { HistoryController, HistorySnapshot, Preview } from './history/controller';
+import type { HistoryController, HistorySnapshot, PinnedScope, Preview } from './history/controller';
 import { HistoryBar } from './history/HistoryBar';
 import { HistoryRail } from './history/HistoryRail';
 import { goToChange, setCarried, setExtra /* P3-E */ } from './history/paint';
 import { ShowEditorsMenu, useShowEditors } from './history/ShowEditors';
 import { useHistoryController, useHistorySnapshot } from './history/use-history';
 import { cssColor, type DocumentHandle, type EditorHost } from './host-types';
+import { usePageGround } from './page-ground';
 import { displayedDocument, type ViewEnvironment } from './nodes/views'; // P3-E: displayedDocument
 import { Tabs } from './Tabs';
 import { useTabs } from './tabs-store';
@@ -83,8 +83,12 @@ export interface DocumentEditorProps {
   onRailChange?(rail: DocumentRail): void;
   /** A new value opens the history rail on its Save version form (the header's Save version); the value at mount is not new. */
   saveVersionRequest?: number;
-  /** What the page is drawn in: the governing design system's scope (D's `<DesignSystemScope>`); the page alone without. */
-  pageScope?: ComponentType<{ children: ReactNode }>;
+  /**
+   * What the page is drawn in: the governing design system's scope (D's `<DesignSystemScope>`); the page alone without.
+   * F (S-RESTYLE): while a version is shown, `pinned` is the system it pinned with its own overrides, to draw it in; the
+   * scope alone draws them (the page declares a version's tokens itself only when it has no scope).
+   */
+  pageScope?: ComponentType<{ children: ReactNode; pinned?: PinnedScope }>;
   /** The page's element as it appears and goes (the shell's Mark-up surface). */
   onPage?(element: HTMLElement | null): void;
   /** Whether a version is shown in place of the live document (the header says read-only meanwhile). */
@@ -186,14 +190,26 @@ export function DocumentEditor(props: DocumentEditorProps) {
   // Escape inside the drawer closes it, and the keyboard goes back to the page; one the rail's own control took is its
   // own, and one in a text field holding text (a reply or a version name being written) is the field's, so the draft is
   // not lost. A checkbox, a radio or a button holds no draft, whatever its value.
+  const focusShownPage = () => {
+    const pages = body.current?.querySelectorAll<HTMLElement>('.doc-page-frame .ProseMirror') ?? [];
+    [...pages].find((page) => page.checkVisibility())?.focus({ preventScroll: true }); // the page shown (the live one, a review's)
+  };
+  // F (L241): History closing ends its preview, and the preview's page with the focus in it; the page shown once the
+  // preview has gone takes the keyboard instead
+  const focusAfterPreview = useRef(false);
+  useEffect(() => {
+    if (preview || !focusAfterPreview.current) return;
+    focusAfterPreview.current = false;
+    focusShownPage();
+  }, [preview]);
   const onBodyKeyDown = (event: KeyboardEvent) => {
     const { target } = event;
     if (!drawer || event.key !== 'Escape' || event.defaultPrevented || !(target instanceof Element) || !target.closest('.doc-rail')) return;
     if (holdsTypedText(target)) return;
     event.preventDefault();
     event.stopPropagation();
-    const pages = body.current?.querySelectorAll<HTMLElement>('.doc-page-frame .ProseMirror') ?? [];
-    [...pages].find((page) => page.checkVisibility())?.focus({ preventScroll: true }); // the page shown (a preview's, a review's)
+    if (rail === 'history' && preview) focusAfterPreview.current = true; // F (L241)
+    else focusShownPage();
     openRail(null);
   };
   return (
@@ -384,11 +400,19 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
   }, [showing, editor, onShown, handle]);
 
   const toggleHistory = () => openRail(rail === 'history' ? null : 'history');
+  // P3-F: Find (Mod-F, the toolbar's) opens the bar, its field taking the keyboard as it mounts; with the bar open, the
+  // field takes it again, the query selected
+  const findField = useRef<HTMLInputElement>(null);
+  const openFind = () => {
+    setFindOpen(true);
+    findField.current?.focus();
+    findField.current?.select();
+  };
   const onKeyDown = (event: KeyboardEvent) => {
     const mod = event.metaKey || event.ctrlKey;
     if (mod && !event.altKey && event.key.toLowerCase() === 'f') {
       event.preventDefault();
-      setFindOpen(true);
+      openFind();
     } else if (mod && event.altKey && event.shiftKey && event.code === 'KeyH' && historyController) {
       event.preventDefault(); // Google Docs' chord for version history
       toggleHistory();
@@ -421,13 +445,13 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           editor={editor}
           artifactId={artifactId}
           host={host}
-          onFind={() => setFindOpen(true)}
+          onFind={openFind}
           comments={{ comment: comments ? () => commentRef.current() : null, railOpen: rail === 'comments', openCount, toggleRail: () => openRail(rail === 'comments' ? null : 'comments') }}
           history={historyController ? { open: rail === 'history', toggle: toggleHistory } : undefined}
           mentions={mentions}
         />
       )}
-      {findOpen && <FindBar editor={shown} onClose={() => setFindOpen(false)} />}
+      {findOpen && <FindBar ref={findField} editor={shown} onClose={() => setFindOpen(false)} />}
       <PageFrame
         editor={shown}
         live={editor}
@@ -520,8 +544,11 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
     };
   }, [editor, handle, author]);
 
-  // a version is drawn with the design-system tokens it pinned (and its own overrides)
+  // a version is drawn with the design-system tokens it pinned (and its own overrides): by the page's scope when there is
+  // one (F, S-RESTYLE: the scope resolves them, a bundled family under its face's private name, which a declaration on
+  // the page would shadow), else declared on the page itself
   const tokens = preview ? (preview.tokens as CSSProperties) : undefined;
+  const declared = Scope ? undefined : tokens;
   const page = useRef<HTMLDivElement>(null);
   const ground = usePageGround(page, tokens);
   useLayoutEffect(() => {
@@ -529,7 +556,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
     return () => onPage?.(null);
   }, [onPage]);
   const sheet = (
-    <div ref={page} className="ds-doc" style={tokens} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments ? moved : undefined}>
+    <div ref={page} className="ds-doc" style={declared} data-ground={ground} data-preview={preview ? '' : undefined} onScroll={comments ? moved : undefined}>
       <div className="ds-doc-page">
         <div className="doc-live" hidden={previewEditor !== null}>
           <EditorContent editor={live} />
@@ -540,7 +567,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
   );
   return (
     <div ref={frame} className="doc-page-frame" onContextMenu={editors.onContextMenu}>
-      <div className="doc-page-scope">{Scope ? <Scope>{sheet}</Scope> : sheet}</div>
+      <div className="doc-page-scope">{Scope ? <Scope pinned={preview?.pinned ?? undefined}>{sheet}</Scope> : sheet}</div>
       {comments?.overlay({ ...reach, layoutKey: `${editor.instanceId}:${layout}` })}
       {pill && (
         <div className="doc-pill" data-markup-occluder>
@@ -560,30 +587,6 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       {editors.open && <ShowEditorsMenu open={editors.open} onShow={editors.show} onClose={editors.close} />}
     </div>
   );
-}
-
-// The page's ground, light or dark, as its computed background reads (the system's `--ds-color-bg`, the app's without
-// a system; Decision Log 22): what the code highlighting keys its colours to. Read again when the app's theme, a
-// stylesheet (a design-system scope's) or the page's own tokens change.
-function usePageGround(page: RefObject<HTMLElement | null>, tokens: CSSProperties | undefined): 'light' | 'dark' {
-  const [ground, setGround] = useState<'light' | 'dark'>('light');
-  useLayoutEffect(() => {
-    const element = page.current;
-    if (!element) return;
-    const read = () => {
-      const background = getComputedStyle(element).backgroundColor;
-      const clear = background === '' || background === 'transparent' || /^rgba\(.*,\s*0\)$/.test(background);
-      setGround(!clear && isDarkGround(background) ? 'dark' : 'light');
-    };
-    read();
-    if (typeof MutationObserver === 'undefined') return;
-    const observer = new MutationObserver(read);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    observer.observe(document.head, { childList: true, subtree: true }); // a stylesheet added, removed or rewritten
-    if (element.parentElement) observer.observe(element.parentElement, { attributes: true });
-    return () => observer.disconnect();
-  }, [page, tokens]);
-  return ground;
 }
 
 const SAFE_ID = /^[\w-]+$/;

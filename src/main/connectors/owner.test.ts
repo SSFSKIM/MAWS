@@ -91,6 +91,7 @@ beforeEach(() => {
     reconnect: vi.fn(async () => ({ ok: true, connectionId: CONN, reused: false })),
     disconnect: vi.fn(async () => ({ local: 'forgotten', host: 'confirmed', revocation: 'revoked' })),
     disconnecting: (connectionId: string) => disconnecting.get(connectionId) ?? null,
+    retirements: () => [...disconnecting.keys()], // P3-F F-connectors 7: every retirement the provider holds
     onChange: vi.fn((listener: () => void) => {
       changeListeners.add(listener);
       return () => void changeListeners.delete(listener);
@@ -219,6 +220,29 @@ describe('the owner’s server rows', () => {
     await vi.advanceTimersByTimeAsync(OWNER_QUERY_DEADLINE_MS);
     expect(seen!.aborted).toBe(true);
     expect((await answer).servers).toEqual([{ kind: 'engineOnly', server: 'notes', why: 'unavailable', tools: ['search'] }]);
+  });
+
+  // P3-F F-connectors 8: the query's deadline, and main's stop, bound a resolution that never hears its signal (route D's
+  // lookups before its abortable operation): the rows answer with what the query has
+  it('answers at the query deadline, and at stop, while a resolution ignores its signal', async () => {
+    selections.set(key('notes', 'search'), () => new Promise(() => {}));
+    const answered = (promise: Promise<unknown>) => {
+      let done = false;
+      void promise.then(() => (done = true));
+      return () => done;
+    };
+    const bounded = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer as never);
+    const boundedDone = answered(bounded);
+    await vi.advanceTimersByTimeAsync(OWNER_QUERY_DEADLINE_MS);
+    await settle();
+    expect(boundedDone()).toBe(true);
+    expect((await bounded).servers).toEqual([{ kind: 'engineOnly', server: 'notes', why: 'unavailable', tools: ['search'] }]);
+    const stopped = owner.servers(ART, [{ server: 'notes', tool: 'search' }], viewer as never);
+    const stoppedDone = answered(stopped);
+    await settle();
+    owner.stop();
+    await settle();
+    expect(stoppedDone()).toBe(true);
   });
 });
 
@@ -399,6 +423,24 @@ describe('the owner’s Disconnect', () => {
     disconnecting.delete(CONN);
     await settle();
     expect((await rows()).servers).toHaveLength(1); // confirmed: the retirement row goes
+  });
+
+  // P3-F F-connectors 7: a Reconnect retires the record it replaced inside the provider; while that close is unconfirmed
+  // the old id stays visible as its own row with Retry, though no Disconnect of the owner's started it
+  it('keeps a Reconnect’s unconfirmed retirement of the replaced connection visible and retryable', async () => {
+    selections.set(key('notes', 'search'), ok(http(SRC_A, '/repo')));
+    states.set('notes', { state: 'needsReconnect', connectionId: CONN_OLD });
+    owner.reconnect(ART, handleOf(await rows(), 'notes'));
+    await settle();
+    expect(provider.reconnect).toHaveBeenCalledTimes(1);
+    states.set('notes', { state: 'connected', connectionId: CONN, refreshable: true });
+    disconnecting.set(CONN_OLD, 'unconfirmed'); // the provider's retirement of the replaced record
+    expect((await rows()).servers).toEqual([
+      expect.objectContaining({ kind: 'source', connection: { state: 'connected', connectionId: CONN } }),
+      { kind: 'retiring', connectionId: CONN_OLD, server: 'notes', scope: 'user', path: '/Users/me/.claude.json', disconnecting: 'unconfirmed' },
+    ]);
+    expect(owner.disconnect(CONN_OLD)).toEqual({ accepted: true }); // Retry
+    expect(provider.disconnect).toHaveBeenCalledWith(CONN_OLD);
   });
 
   it('forgetting an unreadable saved connection needs no source; the withdrawal is the provider’s own flag, never a guess (Decision Log 33)', async () => {

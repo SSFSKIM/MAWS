@@ -58,6 +58,10 @@ export interface ConnectorRouteCallContext {
   // the publication's durable end (the host owns that end once its commit is admitted).
   dataset?: { id: string; baseRevision?: number; requestId?: string };
   publishable?: () => boolean;
+  // P3-F F-connectors 6: main's synchronous admission recheck (the page's native window re-read now, the work not
+  // aborted). A route that awaits anything of its own after main's door (route D's credential preparation) asks it in
+  // the same turn as the write that dispatches the call, and sends nothing when it answers false.
+  admit?: () => boolean;
 }
 
 // `unavailable`: the route no longer has the server (not connected, the engine gone, needs authentication); `failed`:

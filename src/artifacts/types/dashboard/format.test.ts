@@ -82,6 +82,12 @@ describe('the dashboard format reference', () => {
     for (const word of [...VIEW_KINDS, ...AGGREGATES, ...FILTER_OPS, ...VALUE_FORMATS]) expect(grammar).toContain(`\`${word}\``);
   });
 
+  // P3-F: the one-measure pie the grammar enforces (a second measure is the view's error), said where `y` is
+  it('says a pie takes exactly one measure in `y`, as the grammar refuses more', () => {
+    expect(format.split('\n').find((line) => line.startsWith('| `y` |'))).toContain('a pie takes exactly one');
+    expect(parseSpec({ view: 'pie', x: 'region', y: ['total', 'quarter'] }).ok).toBe(false);
+  });
+
   it('states the limits the code enforces and the states as drawn', () => {
     const limits = format.split('## Limits')[1].split('## Examples')[0];
     const number = (value: number) => value.toLocaleString('en-US');

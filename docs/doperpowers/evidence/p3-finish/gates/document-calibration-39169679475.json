@@ -1,0 +1,64 @@
+{
+  "runId": 39169679475,
+  "sourceCommit": "b9bf74237db6de51ed81c3bc56f51a31280a3b80",
+  "wrapperHead": "6fa1502ed09d166bcd2dd22255b610de2c6a26a6",
+  "createdAt": "2026-10-18T21:51:35Z",
+  "statusAtIdentityRead": "in_progress",
+  "conclusion": "success",
+  "groups": [
+    "e2e:document-scale"
+  ],
+  "completionTask": "bx8cm88nc",
+  "quietRelay": {
+    "quietSince": "2026-10-18T21:27:56Z",
+    "loads": [
+      4.72,
+      3.78
+    ],
+    "recheckedApproximately": "21:29Z",
+    "recheckLoads": [
+      3.39,
+      3.69
+    ],
+    "noScenes": true,
+    "launcherHeld": true,
+    "release": "architect notified at completion"
+  },
+  "review": "a18977fda743d3513 correct/no material findings on62f780871..b9bf74237, static only",
+  "calibration": "parentDL109 corrected843275754, exact20/1200/600 rows only; original product targets and three P4 rows retained",
+  "remaining": "one document-only DL59 result needed; no full-set credit",
+  "status": "completed",
+  "attempt": 1,
+  "exit": 0,
+  "job": 117799999480,
+  "startedAt": "2026-10-18T21:51:53Z",
+  "completedAt": "2026-10-18T21:56:40Z",
+  "rawArtifact": "/private/tmp/p3f-doc-final.pHMXML",
+  "rawJsonSha256": "2b1c22083140d858de0a1786d3117ae94b3765ddc370dd306561ffbc4036a848",
+  "measurements": "measurements/document-calibrated-raw.json",
+  "rows": "38 total:33met/5recorded,0failed/marginal",
+  "evidenceStatusAfterGate": "empty",
+  "quietRelease": "completion sent to architect; architect coordinates flag release",
+  "finalFigures": {
+    "typingP95": 16.6,
+    "typingLoad": 2.22,
+    "previewEnters": [
+      925.1,
+      910.5,
+      877.7
+    ],
+    "previewLoads": [
+      2.09,
+      2.09,
+      2.48
+    ],
+    "rendererCollected1": 527.8,
+    "rendererCollected2": 414.7,
+    "memoryLoad": 2.48,
+    "loads": {
+      "launched": 4.22,
+      "steadyStart": 2.76,
+      "steadyEnd": 2.22
+    }
+  }
+}

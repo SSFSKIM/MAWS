@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
 import { actorKey } from '@shared/artifacts/actor';
+import { FILES_ROOT, readFiles } from '../files';
 import type { KindAdapter, ThreadChange } from '../host';
 import {
   applyV1,
@@ -31,11 +32,13 @@ import {
   type Doc,
 } from '../yjs';
 import { pmnodeToDelta } from '../yjs/prosemirror';
-import { documentAdapter, type DocumentAdapter } from './adapter';
+import { documentAdapter, unplacedThreads, type DocumentAdapter } from './adapter';
 import { DocIndex } from './block-index';
 import { applyEdit } from './patch-writer';
+import { readDocument } from './read';
 import { schemaFor } from './schema';
-import { addThread, anchorOfMark, getThread, listThreads, reply, resolve } from './threads';
+import { TABS, addTab, createDocument, deleteTab, listTabs } from './tabs';
+import { addThread, anchorOfMark, getThread, listThreads, locate, reply, resolve } from './threads';
 import { body, coveredIn, dupes, ids, marksOf, nodeOf, now, order, replica, seedDoc, sequence, textOf, TAB } from './writer.fixture';
 
 const human: Actor = { kind: 'human' };
@@ -561,6 +564,81 @@ describe('afterUpdate: provenance, repair, comments and the threads mirror', () 
   });
 });
 
+// P3-F W-DOC-B (tracker L168): a replica that has not seen a move deletes the old copy whole. The move already took the
+// block: that delete is stale and is not forwarded (forwarding it emptied the moved copy); the replica's other edits are.
+describe('a stale whole-block delete of a moved block', () => {
+  it.each(['p3', 'l1'])('is refused for a block the agent moved (%s): the moved copy keeps everything it holds', (id) => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const person = host.peer(); // has not seen the move
+    const before = textOf(host.live, id);
+    const inner = ids(host.live).filter((other) => other !== id && DocIndex.of(host.live).find(other)?.top.id === id);
+    agentBatch(host, adapter, agent, agent1, [{ op: 'move', id, after: 'c1' }]);
+    transact(person, () => body(person).delete(order(person).indexOf(id), 1));
+    host.send(person, human);
+    host.pull(person);
+    host.pull(agent);
+    expect(textOf(host.live, id)).toBe(before);
+    expect(order(host.live).indexOf(id)).toBe(order(host.live).indexOf('c1') + 1);
+    for (const nested of inner) expect(DocIndex.of(host.live).find(nested)?.top.id).toBe(id);
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(textOf(person, id)).toBe(before);
+    expect(textOf(agent, id)).toBe(before);
+  });
+
+  it('is refused for a block a person dragged: another person’s stale delete of the original leaves the dragged copy whole', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const stale = host.peer(); // has not seen the drag
+    const dragger = host.peer();
+    const before = textOf(host.live, 'p3');
+    const p3 = DocIndex.of(dragger).pm(DocIndex.of(dragger).find('p3')!.top);
+    transact(dragger, () => {
+      body(dragger).delete(order(dragger).indexOf('p3'), 1);
+      body(dragger).insert(order(dragger).indexOf('p4') + 1, [pmnodeToDelta(p3)]);
+    });
+    host.send(dragger, human);
+    transact(stale, () => body(stale).delete(order(stale).indexOf('p3'), 1));
+    host.send(stale, human);
+    host.pull(stale);
+    expect(textOf(host.live, 'p3')).toBe(before);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('p4') + 1);
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(textOf(stale, 'p3')).toBe(before);
+  });
+
+  it('refuses only that delete: the same update’s deletion inside another moved block, its typing and its delete of an unmoved block land', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const person = host.peer(); // has not seen either move
+    const p3 = textOf(host.live, 'p3');
+    agentBatch(host, adapter, agent, agent1, [
+      { op: 'move', id: 'p3', after: 'c1' },
+      { op: 'move', id: 'p4', after: 'h1' },
+    ]);
+    const root = body(person);
+    const [p1, p4] = [nodeOf(person, 'p1'), nodeOf(person, 'p4')];
+    const words = textOf(person, 'p4').indexOf(' of this section');
+    const [at2, at3] = [order(person).indexOf('p2'), order(person).indexOf('p3')];
+    transact(person, () => {
+      root.delete(at3, 1); // the moved block, whole: stale
+      root.delete(at2, 1); // a block nobody moved, whole
+      p4.delete(words, ' of this section'.length); // words inside the other moved block
+      p1.insert(0, 'Note: ', {}); // typing in a block nobody moved
+    });
+    host.send(person, human);
+    host.pull(person);
+    expect(textOf(host.live, 'p3')).toBe(p3);
+    expect(textOf(host.live, 'p4')).toBe('Closing paragraph, with enough words to look like prose that a person wrote.');
+    expect(textOf(host.live, 'p1').startsWith('Note: The quick')).toBe(true);
+    expect(order(host.live)).toEqual(['h1', 'p4', 'p1', 'l1', 'tb1', 'c1', 'p3']);
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(textOf(person, 'p4')).toBe(textOf(host.live, 'p4'));
+  });
+});
+
 describe('restore (revertScope, afterRestore)', () => {
   it('reverts text, marks and a thread’s status, and keeps a thread created after the version and a reply posted after it', () => {
     const adapter = adapterOf();
@@ -609,5 +687,293 @@ describe('restore (revertScope, afterRestore)', () => {
   it('takes a reply’s or a resolve’s own line beside the batches’ lines, in call order', () => {
     const adapter = adapterOf();
     expect(adapter.summarizeTurn!([{ results: [{ line: 'replaced ^p1' }] }, { status: 'replied', line: 'replied on c:t1' }, { status: 'resolved', line: 'resolved c:t1' }])).toBe('replaced ^p1\nreplied on c:t1\nresolved c:t1');
+  });
+});
+
+// P3-F document-model scalpel-2#1 (P1): a human drag copies the block as the dragging replica saw it. Text that reached
+// the live block before the drag, which that replica had not seen, is carried into the dragged copy (the carry pairs the
+// units the two hold in common), and an edit still in flight into the original, after either kind of text, follows.
+describe('a human drag of a block that concurrent text reached', () => {
+  const drag = (doc: Doc, id: string, after: string) => {
+    const pm = DocIndex.of(doc).pm(DocIndex.of(doc).find(id)!.top);
+    transact(doc, () => {
+      body(doc).delete(order(doc).indexOf(id), 1);
+      body(doc).insert(order(doc).indexOf(after) + 1, [pmnodeToDelta(pm)]);
+    });
+  };
+
+  it('carries the text that reached the block before the drag into the dragged copy, and later edits into the original follow it', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer(); // types before the drag, and stays stale for it
+    const dragger = host.peer(); // drags without having seen the agent's text
+    const other = host.peer(); // sees neither
+    typeAt(agent, 'p3', 0, 'BEFORE ');
+    host.send(agent, agent1);
+    drag(dragger, 'p3', 'c1');
+    const dragged = host.send(dragger, human);
+    expect(textOf(host.live, 'p3')).toBe('BEFORE A plain paragraph the human types into. Words to keep.');
+    expect(dragged?.provenance?.map((carry) => carry.kind)).toEqual(['move', 'move']); // the drag, and the run carried into it
+    expect(adapter.stats().carries).toBe(1);
+    typeAt(agent, 'p3', 'BEFORE '.length, 'AFTER '); // after its own run, into the original
+    host.send(agent, agent1);
+    typeAt(other, 'p3', 'end', ' END'); // after the seed's text, into the original
+    host.send(other, human);
+    for (const doc of [agent, dragger, other]) host.pull(doc);
+    const text = 'BEFORE AFTER A plain paragraph the human types into. Words to keep. END';
+    expect(textOf(host.live, 'p3')).toBe(text);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('c1') + 1);
+    expect(dupes(ids(host.live))).toEqual([]);
+    for (const doc of [agent, dragger, other]) expect(textOf(doc, 'p3')).toBe(text);
+    expect(new Set(authors(host, 'p3'))).toEqual(new Set(['human', actorKey(agent1)]));
+    expect(marksOf(host.live, 'p3')).toBe('BEFORE AFTER A plain paragraph the human types into. |Words[c:t4]| to keep. END');
+  });
+
+  it('a drag of a block nothing reached registers one carry', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const dragger = host.peer();
+    drag(dragger, 'p3', 'p4');
+    const dragged = host.send(dragger, human);
+    expect(dragged?.provenance?.map((carry) => carry.kind)).toEqual(['move']);
+    expect(adapter.stats().carries).toBe(1);
+  });
+});
+
+// P3-F document-model sweep#1 (P2): a textblock's forward follows the chain of carries as a character's does, so a
+// keystroke into an empty paragraph the agent moved twice lands in the live copy, not the tombstoned first one.
+describe('a textblock moved twice', () => {
+  it('a keystroke into the original of an empty paragraph moved twice lands in the live copy', () => {
+    const adapter = adapterOf();
+    const seed = seedDoc();
+    transact(seed, () => body(seed).insert(order(seed).indexOf('p1') + 1, [pmnodeToDelta(schemaFor().nodes.paragraph.create({ id: 'e1' }))]));
+    const host = new Host(seed, adapter);
+    const agent = host.peer();
+    const person = host.peer(); // sees neither move
+    agentBatch(host, adapter, agent, agent1, [{ op: 'move', id: 'e1', after: 'p2' }]);
+    host.pull(agent);
+    agentBatch(host, adapter, agent, agent1, [{ op: 'move', id: 'e1', after: 'p3' }]);
+    typeAt(person, 'e1', 0, 'Hello');
+    host.send(person, human);
+    host.pull(person);
+    expect(textOf(host.live, 'e1')).toBe('Hello');
+    expect(order(host.live).filter((id) => id === 'e1')).toHaveLength(1);
+    expect(order(host.live).indexOf('e1')).toBe(order(host.live).indexOf('p3') + 1);
+    expect(textOf(person, 'e1')).toBe('Hello');
+  });
+});
+
+// P3-F document-model sweep#2 (P2): a forwarded insertion whose left neighbour's copy was deleted since the move falls
+// back to its right neighbour (then to its textblock) rather than being dropped.
+describe('a forwarded insertion whose anchor was deleted', () => {
+  it('a keystroke after a character the agent deleted from the moved copy lands before the next one', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const agent = host.peer();
+    const person = host.peer(); // has not seen the move
+    agentBatch(host, adapter, agent, agent1, [{ op: 'move', id: 'p3', after: 'c1' }]);
+    host.pull(agent);
+    transact(agent, () => nodeOf(agent, 'p3').delete(0, 1)); // the moved copy's 'A'
+    host.send(agent, agent1);
+    expect(textOf(host.live, 'p3')).toBe(' plain paragraph the human types into. Words to keep.');
+    typeAt(person, 'p3', 1, 'X'); // after the original's 'A'
+    host.send(person, human);
+    host.pull(person);
+    expect(textOf(host.live, 'p3')).toBe('X plain paragraph the human types into. Words to keep.');
+    expect(textOf(person, 'p3')).toBe(textOf(host.live, 'p3'));
+  });
+});
+
+// P3-F document-model scalpel-2#2 (P2): the id repair matches a losing copy's characters to the kept copy's by their
+// common origin, following copies of copies, so a block moved twice and then moved once more by a stale replica holds
+// its text once, with the edit made in the losing copy carried over.
+describe('a stale move of a block moved twice', () => {
+  it('keeps the later copy with the text once and the losing copy’s edit carried into it', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const a1 = host.peer();
+    const a2 = host.peer(); // stale: it moves the original p3 without having seen either of a1's moves
+    const person = host.peer();
+    agentBatch(host, adapter, a1, agent1, [{ op: 'move', id: 'p3', after: 'c1' }]);
+    host.pull(a1);
+    agentBatch(host, adapter, a1, agent1, [{ op: 'move', id: 'p3', after: 'l1' }]);
+    host.pull(person);
+    typeAt(person, 'p3', 0, 'Edited: '); // into a1's second copy
+    host.send(person, human);
+    agentBatch(host, adapter, a2, agent2, [{ op: 'move', id: 'p3', after: 'h1' }]);
+    host.pull(person);
+    expect(order(host.live).filter((id) => id === 'p3')).toHaveLength(1);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('h1') + 1);
+    expect(textOf(host.live, 'p3')).toBe('Edited: A plain paragraph the human types into. Words to keep.');
+    expect(marksOf(host.live, 'p3')).toBe('Edited: A plain paragraph the human types into. |Words[c:t4]| to keep.');
+    expect(dupes(ids(host.live))).toEqual([]);
+    expect(textOf(person, 'p3')).toBe(textOf(host.live, 'p3'));
+  });
+});
+
+// P3-F document-model sweep#5 (P3): two replicas each deleting one of a document's last two tabs both pass the writer's
+// guard; the host's repair gives the merged document one empty tab again, so it stays readable.
+describe('concurrent deletions of the last two tabs', () => {
+  it('leave one readable tab', () => {
+    const adapter = adapterOf({ generateID: sequence('t') });
+    const seed = seedDoc();
+    addTab(seed, { title: 'Second', id: 'tab2' });
+    const host = new Host(seed, adapter);
+    const a = host.peer();
+    const b = host.peer();
+    deleteTab(a, TAB);
+    deleteTab(b, 'tab2');
+    host.send(a, human);
+    host.send(b, human);
+    expect(listTabs(host.live).map((tab) => tab.id)).toEqual([expect.stringMatching(/^t\d+$/)]);
+    expect(readDocument(host.live).shown).toEqual([expect.stringMatching(/^t\d+$/)]);
+    host.pull(a);
+    host.pull(b);
+    expect(listTabs(a)).toEqual(listTabs(host.live));
+    expect(listTabs(b)).toEqual(listTabs(host.live));
+  });
+});
+
+// P3-F document-model scalpel-3#2 (P3): a thread marked in a deleted top-level block and in a surviving one is refreshed
+// by the update that deleted the block, so it locates to its surviving text rather than to the gap the block left.
+describe('a thread marked in a deleted block', () => {
+  it('locates to its surviving text once the block holding its anchor is deleted', () => {
+    const adapter = adapterOf();
+    const seed = seedDoc();
+    const key = 'comment--t9mark00';
+    transact(seed, () => {
+      nodeOf(seed, 'p1').format(0, 3, { [key]: { threadId: 't9' } });
+      nodeOf(seed, 'p2').format(0, 3, { [key]: { threadId: 't9' } });
+    });
+    addThread(seed, { threadId: 't9', tabId: TAB, blockId: 'p1', quote: 'The', anchor: anchorOfMark(body(seed), 't9')!, by: human, at: now(), body: 'Both.' });
+    const host = new Host(seed, adapter);
+    const person = host.peer();
+    transact(person, () => body(person).delete(order(person).indexOf('p1'), 1));
+    host.send(person, human);
+    const thread = getThread(host.live, 't9')!;
+    expect(locate(host.live, thread)).toEqual(expect.objectContaining({ how: 'text', blockId: 'p2', index: 0 }));
+    expect(thread.blockId).toBe('p2');
+  });
+});
+
+// P3-F document-model review (fable, P1): the tab restore keeps a held legacy dashboard held. A restore to the files an
+// older build wrote deletes the tab a later write created; the merged document then has files and no tab, which is the
+// hold's marker (src/artifacts/dashboard/legacy.ts), so no tab is restored there, nor by a resync restating the deletion.
+describe('the tab restore and a held legacy dashboard', () => {
+  const legacy = () => {
+    const seed = newDoc();
+    transact(seed, () => seed.get(FILES_ROOT).setAttr('index.html', '<p>old</p>'));
+    createDocument(seed, { title: 'Board', id: TAB }); // a document of today written over the files, which a restore takes back
+    return seed;
+  };
+  const revert = (doc: Doc) => transact(doc, () => doc.get(TABS).deleteAttr(TAB)); // the restore's revert, not the writer's guarded delete
+
+  it('a deletion of the tab over nonempty files (a restore to them) leaves the document held, with no tab', () => {
+    const adapter = adapterOf();
+    const host = new Host(legacy(), adapter);
+    const restorer = host.peer();
+    revert(restorer);
+    host.send(restorer, human);
+    expect(listTabs(host.live)).toEqual([]);
+    expect(Object.keys(readFiles(host.live))).toEqual(['index.html']);
+  });
+
+  it('a resync restating that deletion restores none either', () => {
+    const adapter = adapterOf();
+    const host = new Host(legacy(), adapter);
+    const restorer = host.peer();
+    revert(restorer);
+    host.send(restorer, human);
+    const peer = host.peer(); // saw the deletion; reconnects with a step 2 that restates it beside its own change
+    transact(peer, () => peer.get(FILES_ROOT).setAttr('notes.txt', 'x'));
+    host.receive(diffV1(peer, stateVector(host.live)), human, { step2: true });
+    expect(listTabs(host.live)).toEqual([]);
+    expect(Object.keys(readFiles(host.live)).sort()).toEqual(['index.html', 'notes.txt']);
+  });
+});
+
+// P3-F document-model review (fable, P3): text replayed into a losing copy (a run that reached the block before a drag)
+// is matched to the kept copy by its origin, so a winner whose base already holds that run does not get it again.
+describe('the id repair and a losing copy’s replayed text', () => {
+  it('does not insert a run the winner was made with again', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const other = host.peer();
+    const dragger = host.peer(); // drags without having seen the run
+    const agent = host.peer(); // sees the run, not the drag
+    typeAt(other, 'p3', 0, 'BEFORE ');
+    host.send(other, human);
+    host.pull(agent);
+    const pm = DocIndex.of(dragger).pm(DocIndex.of(dragger).find('p3')!.top);
+    transact(dragger, () => {
+      body(dragger).delete(order(dragger).indexOf('p3'), 1);
+      body(dragger).insert(order(dragger).indexOf('c1') + 1, [pmnodeToDelta(pm)]);
+    });
+    host.send(dragger, human);
+    expect(textOf(host.live, 'p3')).toBe('BEFORE A plain paragraph the human types into. Words to keep.');
+    const moved = applyEdit(agent, [{ op: 'move', id: 'p3', after: 'h1' }]); // the original, the run in it
+    adapter.registerCarries(ARTIFACT, moved.carries);
+    host.send(agent, agent1);
+    expect(order(host.live).filter((id) => id === 'p3')).toHaveLength(1);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('h1') + 1);
+    expect(textOf(host.live, 'p3')).toBe('BEFORE A plain paragraph the human types into. Words to keep.');
+    expect(dupes(ids(host.live))).toEqual([]);
+  });
+});
+
+// P3-F document-model review (fable, P3): a block thread carries no mark and nothing in the refresh can move it, so one
+// whose block is gone is left out of the refresh scope (in it, every deletion update walked every node of every tab);
+// a text thread whose recorded block is gone is in it, for the mark it may still have elsewhere.
+describe('unplacedThreads', () => {
+  it('names text threads whose recorded block is gone, never block threads', () => {
+    const doc = seedDoc();
+    transact(doc, () => nodeOf(doc, 'p1').format(0, 3, { 'comment--t9mark00': { threadId: 't9' } }));
+    addThread(doc, { threadId: 't9', tabId: TAB, blockId: 'p1', quote: 'The', anchor: anchorOfMark(body(doc), 't9')!, by: human, at: now(), body: 'Text.' });
+    addThread(doc, { threadId: 'tb', tabId: TAB, blockId: 'c1', quote: 'const x = 1', anchor: { kind: 'block' }, by: human, at: now(), body: 'Block.' });
+    expect(unplacedThreads(doc)).toEqual([]);
+    transact(doc, () => {
+      body(doc).delete(order(doc).indexOf('c1'), 1);
+      body(doc).delete(order(doc).indexOf('p1'), 1);
+    });
+    expect(unplacedThreads(doc)).toEqual(['t9']);
+  });
+});
+
+// P3-F document-model recheck (fable, P2): a drag delivered in a sync step 2 (an unacked drag the provider re-sends after
+// a reconnect) keeps its carry on a block with edit history. A step 2 restates the sender's whole delete set, so its
+// tombstones cannot be told from the dragger's own: the view is paired from the live units alone there, as before.
+describe('a human drag delivered in a sync step 2', () => {
+  const drag = (doc: Doc, id: string, after: string) => {
+    const pm = DocIndex.of(doc).pm(DocIndex.of(doc).find(id)!.top);
+    transact(doc, () => {
+      body(doc).delete(order(doc).indexOf(id), 1);
+      body(doc).insert(order(doc).indexOf(after) + 1, [pmnodeToDelta(pm)]);
+    });
+  };
+
+  it('keeps its carry on a block with earlier deletions: concurrent text and a later stale edit land in the dragged copy', () => {
+    const adapter = adapterOf();
+    const host = new Host(seedDoc(), adapter);
+    const editor = host.peer();
+    const at = textOf(editor, 'p3').indexOf(' the human');
+    transact(editor, () => nodeOf(editor, 'p3').delete(at, ' the human'.length)); // edit history: tombstones in the block
+    host.send(editor, human);
+    const dragger = host.peer(); // synced after that deletion; drags while disconnected
+    const typist = host.peer(); // stale for the drag
+    const agent = host.peer();
+    typeAt(agent, 'p3', 0, 'BEFORE '); // reaches the host while the dragger is away
+    host.send(agent, agent1);
+    drag(dragger, 'p3', 'c1');
+    host.receive(diffV1(dragger, stateVector(host.live)), human, { step2: true }); // the reconnect's step 2 carries the drag
+    expect(textOf(host.live, 'p3')).toBe('BEFORE A plain paragraph types into. Words to keep.');
+    expect(adapter.stats().carries).toBe(1);
+    typeAt(typist, 'p3', 'end', ' END');
+    host.send(typist, human);
+    for (const doc of [dragger, typist, agent]) host.pull(doc);
+    const text = 'BEFORE A plain paragraph types into. Words to keep. END';
+    expect(textOf(host.live, 'p3')).toBe(text);
+    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('c1') + 1);
+    expect(dupes(ids(host.live))).toEqual([]);
+    for (const doc of [dragger, typist, agent]) expect(textOf(doc, 'p3')).toBe(text);
   });
 });

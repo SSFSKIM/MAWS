@@ -613,6 +613,9 @@ test('P3-G acceptance 11: Mark up freezes the page to a still under the overlay;
     // Mark up: the still over the page's box, the page held covered beneath it (frozen, never changed)
     await markUp.click();
     await expect(layer).toBeVisible();
+    // P3-F L128: main answers the cover once the page is hidden and the overlay draws only after that answer, so the
+    // live page is already hidden the moment the layer shows (read at once, never polled)
+    expect((await viewOf(s, t))?.visible, 'the page hidden before the overlay showed').toBe(false);
     await expect(layer.locator('img')).toHaveAttribute('src', /^data:image\/(png|jpeg);base64,/);
     const [l, p] = [await box(layer), await box(pane)];
     for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(l[key] - p[key]), `the layer's ${key} on the page's`).toBeLessThanOrEqual(1);

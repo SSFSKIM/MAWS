@@ -153,6 +153,13 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   const slideShown = slide?.id ?? null;
   useEffect(() => history?.setLiveSlide(slideShown), [history, slideShown]);
   useEffect(() => history?.applied(preview?.shown ?? null), [history, preview?.shown]);
+  // P3-F (L233): the session says what the history shows, so the header's Export exports it: the one version previewed,
+  // nothing while two are compared, else the live deck (as the design's workbench tells its view)
+  const previewTarget = preview?.target ?? null;
+  const shownKind = previewTarget?.kind ?? null;
+  const shownId = previewTarget?.kind === 'version' ? previewTarget.versionId : null;
+  useEffect(() => session.showVersion(shownId !== null ? { versionId: shownId } : shownKind === 'compare' ? 'compare' : null), [session, shownKind, shownId]);
+  useEffect(() => () => session.showVersion(null), [session]); // unmounted, the controller drops its preview: the live deck
   const historyOpen = state.rail === 'history';
   const previewing = preview !== null || historySnapshot?.loading === true;
   // final fix wave (B4): an awaited edit (an upload, an asset copy) finishing while a version shows, or once the deck
@@ -174,7 +181,8 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     if (!mod || readOnly || preview) return; // M8: no undo in history (the live deck is not shown)
     const target = event.target as HTMLElement;
     if (event.defaultPrevented || target.isContentEditable) return; // the text box routes its own (M5)
-    if (target.tagName === 'INPUT' || target.tagName === 'SELECT') return; // a field keeps its own undo
+    // a field keeps its own undo (P3-F: a textarea too, a reply's or a version's note), but the notes' typing is the deck's
+    if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || (target.tagName === 'TEXTAREA' && !target.classList.contains('deck-notes-field'))) return;
     if (event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) session.redoStep();

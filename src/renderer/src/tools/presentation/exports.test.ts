@@ -14,7 +14,7 @@ beforeEach(() => useNotices.setState({ notices: [] }));
 describe('the deck’s Export menu', () => {
   it('offers PowerPoint in three font variants, PDF, HTML, For Claude and PNG', () => {
     const picked: string[] = [];
-    const entries = deckExports(A, (entry) => picked.push(entry.id));
+    const entries = deckExports(A, null, (entry) => picked.push(entry.id));
     expect(entries.map((e) => e.label)).toEqual(['PowerPoint (fonts by name)', 'PowerPoint (basic fonts)', 'PowerPoint (slides as pictures)', 'PDF', 'HTML (one page)', 'For Claude (zip)', 'PNG (cover slide)']);
     entries[2]!.onSelect();
     expect(picked).toEqual(['pptx-pictures']);
@@ -33,6 +33,28 @@ describe('the deck’s Export menu', () => {
     expect(toasts()).toEqual([
       ['info', 'Saved to /Users/me/Downloads/Deck.pptx'],
       ['info', 'Saved to /Users/me/Downloads/Deck.pptx'],
+    ]);
+  });
+
+  // P3-F (L233; the design's what-you-see rule, P3-E's Decision Log 31): the header exports what the editor shows
+  it('exports the version the history previews, the live deck otherwise, and offers nothing while two are compared', async () => {
+    const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: '/store/x/exports/4-pdf.pdf', revision: 4 }) : ok({ saved: true, path: '/Users/me/Downloads/Deck.pdf' })));
+    const pdf = DECK_EXPORTS.find((e) => e.id === 'pdf')!;
+    const chosen: string[] = [];
+    for (const shown of [null, { versionId: 3 }] as const) {
+      const entries = deckExports(A, shown);
+      expect(entries.some((e) => e.disabled)).toBe(false);
+    }
+    expect(deckExports(A, 'compare', (entry) => chosen.push(entry.id)).every((e) => e.disabled)).toBe(true);
+    expect(chosen).toEqual([]);
+    await act(() => exportDeck(A, pdf, { versionId: 3 }));
+    await act(() => exportDeck(A, pdf, null));
+    await act(() => exportDeck(A, pdf, 'compare')); // two versions compared: nothing is exported
+    expect(main.calls).toEqual([
+      { name: 'artifacts.export', input: { artifactId: A, format: 'pdf', versionId: 3 } },
+      { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 4, format: 'pdf' } } } },
+      { name: 'artifacts.export', input: { artifactId: A, format: 'pdf' } },
+      { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 4, format: 'pdf' } } } },
     ]);
   });
 

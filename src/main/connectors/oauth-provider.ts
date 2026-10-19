@@ -20,7 +20,9 @@
 //   behind is never joined, so its stalled save cannot hold a replacement), never aborted by a caller (a rotation the
 //   server already made must not be lost): the rotated grant is persisted, then the host confirms the old epoch closed (`closeHost`, the
 //   engine host's `connectors.directClose`) when it was ever delivered, and only then is the new epoch released. An
-//   unsaved rotation or an unconfirmed close holds the release; the next demand retries that step, never the refresh.
+//   unsaved rotation or an unconfirmed close holds the release; the next demand retries that step, never the refresh,
+//   and (P3-F F-connectors 4) retries it before refreshing a replacement that has since come within the margin, so a
+//   transient refresh failure never strands a still-valid replacement behind a close the host would now confirm.
 // - Fences. Every await is followed by checks: the identity's generation (advanced synchronously by Disconnect, a
 //   Reconnect's withdrawal and stop) for saved state; the caller's signal and the host attachment for a delivery; an
 //   owner action's own signal, generation and attachment, captured before its lookup. Store saves use a claim taken
@@ -111,6 +113,9 @@ export interface ConnectorOAuthProvider extends DirectCredentialPreparation {
   // A withdrawn connection's retirement still unanswered (`pending`) or answered without confirmation (`unconfirmed`):
   // until it clears, its identity is delivered nothing.
   disconnecting(connectionId: string): 'pending' | 'unconfirmed' | null;
+  // P3-F F-connectors 7: every connection whose retirement is still pending or unconfirmed, the owner's Disconnects and
+  // a Reconnect's retirement of the record it replaced alike, so the owner can show each (and its Retry).
+  retirements(): string[];
   // P3-HD M3c2 correction (the owner's seam, main-only): `listener` hears, with nothing in the notice, that something an
   // owner's row shows may differ (a flow begun or ended, a source parked, withdrawn or reconnect-bound, a retirement's
   // state, a forgotten record, the unattributed withdrawal). The owner reads the state again; nothing here is authority.
@@ -365,6 +370,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       if (!current() || retirements.has(connectionId)) return;
     }
     if (held.unsaved && !(await persist(slot, held, generation))) return;
+    if (!(await closePending(slot, current))) return; // P3-F F-connectors 4: an earlier rotation's close first
     slot.issued ??= epochOf(slot, held.record);
     const issued = slot.issued;
     if (issued.unusable || expiring(issued)) {
@@ -397,15 +403,21 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       if (issued.deliveredTo && !issued.deliveredTo.aborted) slot.closing.push({ connectionId: issued.connectionId, credentialEpoch: issued.credentialEpoch });
       if (!(await persist(slot, held, generation))) return;
     }
+    await closePending(slot, current);
+  }
+
+  // The slot's replaced epochs closed in the host, oldest first; false when one is unconfirmed or the work went stale.
+  async function closePending(slot: Slot, current: () => boolean): Promise<boolean> {
     while (slot.closing.length > 0) {
       const target = slot.closing[0]!;
       const host = attachment.signal;
       const confirmed = await closeBounded(target);
-      if (!current()) return;
+      if (!current()) return false;
       if (host.aborted) continue; // that attachment ended, and with it the epoch (`hostLost` cleared the list)
-      if (!confirmed) return;
+      if (!confirmed) return false;
       slot.closing = slot.closing.filter((entry) => entry !== target);
     }
+    return true;
   }
 
   function closeBounded(target: { connectionId: string; credentialEpoch?: number }): Promise<boolean> {
@@ -762,6 +774,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     disconnecting(connectionId) {
       return retirements.get(connectionId)?.state ?? null;
     },
+    retirements: () => [...retirements.keys()], // P3-F F-connectors 7
 
     // P3-HD M3c2 correction start: the owner's seam
     onChange(listener) {

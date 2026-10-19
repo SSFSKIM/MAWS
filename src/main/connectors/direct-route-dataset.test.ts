@@ -5,7 +5,7 @@ import type { CommandName } from '@shared/ipc/schema';
 import type { ConnectorDatasetTake, DirectOperationOutcome } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { ConnectorBroker } from './broker';
-import { createDirectRoute, type DirectRoute, type DirectRouteDeps } from './direct-route';
+import { createDirectRoute, DIRECT_RETRY_MS, type DirectRoute, type DirectRouteDeps } from './direct-route';
 import type { ConnectorGrantAuthority, ConnectorRoute, ConnectorRouteTarget } from './route';
 
 const ART = '11111111-1111-4111-8111-111111111111';
@@ -26,6 +26,8 @@ let route: DirectRoute;
 let phases: Map<string, ConnectorDatasetTake>;
 let holdPublication: boolean;
 let cancelled: boolean;
+let cancelUnanswered: boolean; // P3-F F-connectors 5: `connectors.directCancel` fails (the dispatch timed out)
+let takeUnanswered: boolean; // P3-F F-connectors 5 sibling: `connectors.directTake` fails the same way
 const PUBLISHED = { status: 'dataset' as const, artifactId: ART, id: DATASET.id, revision: 5, columns: [{ name: 'day', type: 'string' as const }, { name: 'signups', type: 'number' as const }], rows: 1 };
 
 // The scripted host: a resolution ends at once with READY; a start ends only when the test finishes it.
@@ -36,12 +38,16 @@ const call: DirectRouteDeps['call'] = async (name, input) => {
   let value: unknown;
   if (name === 'library.entry') value = { artifact: { id: ART, kind: 'dashboard', title: 'Live', createdBy: { kind: 'session', appSessionId: 'app-own' }, projectId: 'proj', createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0 }, links: [] };
   else if (name === 'connectors.directTake') {
+    if (takeUnanswered) return { ok: false, error: { code: 'timeout', message: 'no answer' } } as never;
     const dataset = phases.get(operationId);
     value = { outcome: outcomes.get(operationId) ?? null, ...(dataset && { dataset }) };
     if (dataset?.status === 'publishing' && !holdPublication) setTimeout(() => { phases.set(operationId, PUBLISHED); route.operationEnded(operationId); }, 0);
     phases.delete(operationId);
     outcomes.delete(operationId);
-  } else if (name === 'connectors.directCancel') value = { cancelled };
+  } else if (name === 'connectors.directCancel') {
+    if (cancelUnanswered) return { ok: false, error: { code: 'timeout', message: 'no answer' } } as never;
+    value = { cancelled };
+  }
   else {
     value = { operationId };
     if (name === 'connectors.directResolve') finishLater(operationId, READY);
@@ -68,6 +74,8 @@ beforeEach(() => {
   phases = new Map();
   holdPublication = false;
   cancelled = true;
+  cancelUnanswered = false;
+  takeUnanswered = false;
   route = createDirectRoute({ call, sessions: { get: () => ({ projectId: 'proj', directory: '/repo' }) }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] }, realpath: (path) => path, streaming: () => true, log: () => {} });
 });
 afterEach(() => {
@@ -124,6 +132,44 @@ describe('route D’s target and a dataset sink', () => {
     expect(dispatched.filter((entry) => entry.name === 'connectors.directCancel')).toHaveLength(1);
     phases.set(id, PUBLISHED);
     route.operationEnded(id);
+    expect(await settled(answer)).toEqual({ ok: true, result: PUBLISHED });
+  });
+
+  // P3-F F-connectors 5: an unanswered cancel settles nothing; the operation's next end asks the cancel again before any
+  // take, and the host's durable end answers the call
+  it('keeps an operation whose cancel went unanswered and asks the cancel again before taking its end', async () => {
+    const found = await target();
+    holdPublication = true;
+    cancelUnanswered = true;
+    const controller = new AbortController();
+    let ended = false;
+    const answer = found.call({}, { signal: controller.signal, fingerprint: FP, mode: 'read', dataset: DATASET, publishable: () => !controller.signal.aborted }).then((end) => { ended = true; return end; });
+    await vi.advanceTimersByTimeAsync(2);
+    const id = started()[0]!.input.operationId as string;
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ended).toBe(false);
+    cancelUnanswered = false;
+    cancelled = false; // the host had admitted the commit
+    phases.set(id, PUBLISHED);
+    route.operationEnded(id);
+    expect(await settled(answer)).toEqual({ ok: true, result: PUBLISHED });
+    expect(dispatched.filter((entry) => entry.input.operationId === id).map((entry) => entry.name).slice(-3)).toEqual(['connectors.directCancel', 'connectors.directCancel', 'connectors.directTake']);
+  });
+
+  // P3-F F-connectors 5 sibling: an unanswered take may have started the publication: kept, and taken again until the
+  // publication's durable end
+  it('keeps an operation whose take went unanswered and takes again until the publication’s durable end', async () => {
+    const found = await target();
+    takeUnanswered = true;
+    let ended = false;
+    const answer = found.call({}, { signal: new AbortController().signal, fingerprint: FP, mode: 'read', dataset: DATASET, publishable: () => true }).then((end) => { ended = true; return end; });
+    await vi.advanceTimersByTimeAsync(2);
+    const id = started()[0]!.input.operationId as string;
+    expect(dispatched.filter((entry) => entry.name === 'connectors.directTake' && entry.input.operationId === id)).toHaveLength(1);
+    expect(ended).toBe(false);
+    takeUnanswered = false;
+    await vi.advanceTimersByTimeAsync(DIRECT_RETRY_MS); // taken again: the publication runs and ends
     expect(await settled(answer)).toEqual({ ok: true, result: PUBLISHED });
   });
 

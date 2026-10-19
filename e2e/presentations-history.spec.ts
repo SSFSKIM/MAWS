@@ -412,15 +412,21 @@ test('the preview of a 3-month-old version of S7a’s heavy deck draws within 1,
   const page = await ready();
   const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'presentation', title: 'Heavy deck' });
   const id = artifact.id;
+  // P3-F (editor-proof scalpel-1#2): the state applied as an edit fails the case when the host has not acknowledged it
+  // within 30 s; the port is closed only once it has. Closing it with edits unacknowledged dropped them, and the version
+  // saved next snapshotted a truncated deck the preview was then timed on.
   const apply = async (file: string) => {
     const bytes = [...readFileSync(join(HEAVY, file))];
-    await page.evaluate(async ([artifactId, state]) => {
+    const unsaved = await page.evaluate(async ([artifactId, state]) => {
       const docs = (window as unknown as Seam).__maws_documents;
       const handle = await docs.open(artifactId as string);
       docs.applyState(handle, new Uint8Array(state as number[]));
       for (let i = 0; i < 600 && docs.state(handle).unsaved > 0; i++) await new Promise((r) => setTimeout(r, 50));
-      docs.close(handle);
+      const left = docs.state(handle).unsaved;
+      if (left === 0) docs.close(handle);
+      return left;
     }, [id, bytes] as const);
+    expect(unsaved, `the heavy deck's ${file} acknowledged by the host within 30 s, before it is versioned`).toBe(0);
   };
   await apply('prev.bin');
   const old = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'Three months ago' });

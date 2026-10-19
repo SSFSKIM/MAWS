@@ -258,12 +258,21 @@ const rawFenced = (name: string, attrs: Record<string, string | null>, source: s
 
 // ── tables: GFM when GFM can say all of it, else structure blocks ──
 const ALIGNS = new Set(['left', 'center', 'right']);
-/** Text a GFM cell keeps as written: no hard break, no whitespace a cell would trim or collapse. */
-const gfmText = (child: Json): boolean =>
-  child.type === 'hardBreak' ? false : child.type !== 'text' || (!/[^\S ]/.test(child.text ?? '') && !/^ | $| {2}/.test(child.text ?? ''));
+/**
+ * Text a GFM cell keeps as written: no hard break, no whitespace a cell would trim or collapse; with `lineEndings` (a
+ * reader's Markdown, which writes a line ending inside text as `<br>`; P3-F, tracker L166), line endings too, but not in
+ * inline code, where the row's `<br>` would be literal text.
+ */
+const gfmText = (child: Json, lineEndings = false): boolean => {
+  if (child.type === 'hardBreak') return false;
+  if (child.type !== 'text') return true;
+  const text = child.text ?? '';
+  const breaks = lineEndings && !(child.marks ?? []).some((mark) => mark.type === 'code');
+  return !(breaks ? /[^\S \n]/ : /[^\S ]/).test(text) && !/^ | $| {2}/.test(text);
+};
 
 /** True when a pipe table holds every attribute and the content of `table` (header row first, plain cells). */
-export function gfmTable(table: Json): boolean {
+export function gfmTable(table: Json, { lineEndings = false }: { lineEndings?: boolean } = {}): boolean {
   const rows = (table.content ?? []) as Json[];
   if (rows.length === 0) return false;
   const width = rows[0].content?.length ?? 0;
@@ -279,7 +288,7 @@ export function gfmTable(table: Json): boolean {
       if (r === 0) aligns[c] = a.align ?? null;
       else if ((a.align ?? null) !== aligns[c]) return false;
       const blocks = (cell.content ?? []) as Json[];
-      return blocks.length === 1 && blocks[0].type === 'paragraph' && ((blocks[0].content ?? []) as Json[]).every(gfmText);
+      return blocks.length === 1 && blocks[0].type === 'paragraph' && ((blocks[0].content ?? []) as Json[]).every((child) => gfmText(child, lineEndings));
     });
   });
 }
@@ -364,15 +373,16 @@ const parseOptions = (text: string | undefined): string[] => {
 
 /** The serializers and parsers, by extension name, that markdown.ts extends the schema's extensions with. */
 export const MARKDOWN: Record<string, object> = {
-  // The three entities the dialect writes for whitespace Markdown would drop (markdown.ts) read back as that whitespace;
-  // marked leaves character references in text, and Tiptap decodes only the four it writes itself.
+  // The entities the dialect writes for whitespace Markdown would drop or read as structure (markdown.ts; `&#10;`, a line
+  // ending inside text, P3-F tracker L166) read back as that whitespace; marked leaves character references in text,
+  // and Tiptap decodes only the four it writes itself.
   text: {
     markdownTokenizer: {
       name: 'whitespaceEntity',
       level: 'inline',
-      start: (src: string) => src.search(/&#(?:32|9|160);/),
+      start: (src: string) => src.search(/&#(?:32|9|160|10);/),
       tokenize: (src: string) => {
-        const match = /^&#(32|9|160);/.exec(src);
+        const match = /^&#(32|9|160|10);/.exec(src);
         return match ? { type: 'text', raw: match[0], text: String.fromCharCode(Number(match[1])) } : undefined;
       },
     },

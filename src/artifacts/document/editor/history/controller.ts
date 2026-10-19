@@ -31,6 +31,12 @@ export interface Preview {
   carried: ReadonlyMap<string, Carry['kind']>;
   /** The version's pinned design-system tokens and its own overrides (empty for the live document). */
   tokens: TokenOverrides;
+  /**
+   * F (S-RESTYLE): the design system the shown version pinned (X29's `designSystemRef`; the floor for a version written
+   * with none, as C's deck preview draws it) with the version's own overrides, for the page's scope to draw the version
+   * in, faces included. Null for the live document.
+   */
+  pinned: PinnedScope | null;
   /** The version Restore and Make a copy act on; null when comparing. */
   versionId: number | null;
   /** The whole comparison's changes, tab by tab: the bar's "N changes" and ↑ ↓, the same list the pill counts. */
@@ -44,6 +50,12 @@ export interface Preview {
   extras?: readonly ExtraChange[];
 }
 
+/** What a version's page is drawn in: the system it pinned (the revision, or the bundled floor) and its own overrides. */
+export interface PinnedScope {
+  system: NonNullable<ArtifactVersion['designSystemRef']> | { builtin: 'maws' };
+  overrides: TokenOverrides;
+}
+
 export interface Pill {
   since: ArtifactVersion | null;
   /** The changes since, once counted. */
@@ -53,6 +65,8 @@ export interface Pill {
 }
 
 export interface ShownEditor {
+  /** The actor's key (`human`, `session:<id>`), one row each: two untitled sessions are both "Claude" in one minute. */
+  key: string;
   name: string;
   color: string;
   at: number;
@@ -85,6 +99,8 @@ const LIVE = Number.MAX_SAFE_INTEGER;
 
 const EMPTY: HistorySnapshot = { versions: null, selected: [], loading: false, preview: null, pill: null, banner: null, status: null, error: null };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+/** A version's heading over its preview: its name and time, or its time alone. */
+const versionHeading = (version: ArtifactVersion): string => (version.label ? `${version.label} · ${formatWhen(version.at)}` : formatWhen(version.at));
 
 export class HistoryController {
   private snapshot: HistorySnapshot = EMPTY;
@@ -149,10 +165,11 @@ export class HistoryController {
     this.liveTab = tabId;
   }
 
-  /** Reads the list again, and counts the new changes again if counting them failed. */
+  /** Reads the list again (a previewed version's heading with it), and counts the new changes again if counting them failed. */
   async refresh(): Promise<void> {
     try {
-      this.set({ versions: await this.api.versions() });
+      const versions = await this.api.versions();
+      this.set({ versions, ...this.headingFrom(versions) });
     } catch (error) {
       this.set({ error: message(error) });
     }
@@ -288,7 +305,7 @@ export class HistoryController {
     const provenance = decodeMap(await this.api.attributions(0, LIVE));
     return showEditors({ doc, from, to, liveRoot, provenance }).map(({ who, at, kinds }) => {
       const author = authorOf(who, this.api.sessionTitle?.bind(this.api));
-      return { name: author.name, color: author.color, at, when: formatWhen(at), kinds };
+      return { key: who, name: author.name, color: author.color, at, when: formatWhen(at), kinds };
     });
   }
 
@@ -310,7 +327,7 @@ export class HistoryController {
       if (target.kind === 'version') {
         next = byId(target.versionId);
         prev = versions.filter((v) => v.seq < next!.seq || (v.seq === next!.seq && v.id < next!.id)).sort((a, b) => b.seq - a.seq || b.id - a.id)[0] ?? null;
-        title = next.label ? `${next.label} · ${formatWhen(next.at)}` : formatWhen(next.at);
+        title = versionHeading(next);
       } else if (target.kind === 'compare') {
         [prev, next] = target.versionIds.map(byId).sort((a, b) => a.seq - b.seq || a.id - b.id);
         title = `${versionTitle(prev)} → ${versionTitle(next)}`;
@@ -341,6 +358,7 @@ export class HistoryController {
         view: null,
         carried: new Map(),
         tokens: next ? { ...tokens, ...dsOverrides(diff.nextDoc) } : {},
+        pinned: next ? { system: next.designSystemRef ?? { builtin: 'maws' }, overrides: dsOverrides(diff.nextDoc) } : null, // F (S-RESTYLE)
         versionId: target.kind === 'version' ? target.versionId : null,
         changes: documentChanges(diff, extras), // P3-E: extras
         focus: null,
@@ -351,6 +369,17 @@ export class HistoryController {
     } catch (error) {
       if (load === this.load) this.set({ loading: false, error: message(error) });
     }
+  }
+
+  // A previewed version's heading as the list now names it (Name this version here, or a name given elsewhere), so it
+  // reads as the version's row does; nothing when it reads the same.
+  private headingFrom(versions: ArtifactVersion[]): Partial<HistorySnapshot> {
+    const loaded = this.loaded;
+    const target = loaded?.preview.target;
+    const version = target?.kind === 'version' ? versions.find((v) => v.id === target.versionId) : undefined;
+    if (!loaded || !version || versionHeading(version) === loaded.preview.title) return {};
+    loaded.preview = { ...loaded.preview, title: versionHeading(version) };
+    return { preview: loaded.preview };
   }
 
   // Publishes a preview with the view of its tab and Show changes setting (`fresh`: its moved and retyped blocks too).

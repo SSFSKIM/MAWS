@@ -1,0 +1,11 @@
+{
+  "recordedAt": "2026-10-19T07:27:41Z",
+  "S": "de71da97afa48f2b19d3caeccf71406544b03e2c",
+  "run": 39210066820,
+  "attempt": 1,
+  "conclusion": "success",
+  "group": "e2e:dashboard-live-data",
+  "cases": "2 passed, 0 skipped (16.3 min)",
+  "spendUsd": "0",
+  "posture": "start 2560x1440@1x remote=parsec, end @2x remote=none; a functional group, it stands (architect ruling)"
+}

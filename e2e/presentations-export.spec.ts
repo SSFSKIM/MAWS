@@ -588,11 +588,11 @@ test('the PPTX under LibreOffice draws each corpus slide as the app’s own canv
       if (off > 24) failures.push(`${slide.name} ${text.id}: its words' box is ${off.toFixed(1)} px from the canvas's (canvas ${text.ink.map((v) => v.toFixed(0)).join(',')}, LibreOffice ${lo.box.map((v) => v.toFixed(0)).join(',')}, face ${text.face} ${text.weight}, drawn ${text.drawn})`);
     }
   }
-  expect(failures).toEqual([]);
-  expect(compared).toBeGreaterThan(50);
-  expect(rotated).toBeGreaterThan(0);
+  // P3-F (scalpel-4#3): the per-slide report and the summary first, so a failing run keeps them beside its failures
   mkdirSync(test.info().outputDir, { recursive: true });
   writeFileSync(join(test.info().outputDir, 'libreoffice-compare.txt'), `${report.join('\n')}\n`);
   console.log(`[libreoffice compare] ${compared} text boxes (${fourEdges} on four edges, ${rotated} by their centre); mean difference per slide: ${report.join(', ')}`);
   expect(failures).toEqual([]);
+  expect(compared).toBeGreaterThan(50);
+  expect(rotated).toBeGreaterThan(0);
 });

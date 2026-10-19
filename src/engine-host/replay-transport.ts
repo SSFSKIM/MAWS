@@ -19,6 +19,11 @@
 // What the person does to a plugin's drawing (presses, inputs, picks, a pane closed) is still held and matched in order.
 // E10 (Design 12): with `rowDelayMs` the replay waits that long before each `in` row it plays, so a replay streams at a
 // pace (a kept session goes on streaming while the app is away); without it, `in` rows play at once.
+// P3-F L242: `onFirstUser` hears the first `user` write the replay takes, as written: the moment the engine accepts a
+// session's first prompt, which is when it writes the session's transcript (the launcher's seed, ./replay-transcript.ts).
+// When it answers a promise, the replay holds there until it settles: that write settles and the rows after it (the
+// prompt's reply and result) play only then, so whatever reads the transcript once the reply shows finds it. Settled
+// either way (the hook reports its own failure); a kill or an end meanwhile ends the replay at once, rejecting the write.
 import { isDeepStrictEqual } from 'node:util';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
@@ -108,7 +113,12 @@ function isReplayRead(request: { subtype: string; dry_run?: unknown }): boolean 
   return requestClassOf(request.subtype) === 'read' || (request.subtype === 'rewind_files' && request.dry_run === true);
 }
 
-export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[]; onHold?: (row: JournalRow) => void; surfaceReads?: boolean; rowDelayMs?: number }): ReplayTransport {
+const noop = (): void => undefined;
+
+export function replayEngine(
+  journal: JournalRow[],
+  opts: { prelude: JournalRow[]; onHold?: (row: JournalRow) => void; surfaceReads?: boolean; rowDelayMs?: number; onFirstUser?: (written: StdinFrame) => Promise<void> | void },
+): ReplayTransport {
   const rows = journal;
   // R2: the recorded surface reads (their out row's index, key and the engine's answer), and the rows the cursor passes over
   const surfaceReads: { index: number; key: string; response: Frame }[] = [];
@@ -137,6 +147,8 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
   let held: JournalRow | null = null; // the `out` row `onHold` was last told about
   let paced = -1; // E10: the index of the `in` row whose delay has run
   let endPacing: (() => void) | null = null; // E10: ends a row's wait early (a kill), never a write
+  let tookUser = false; // P3-F L242: `onFirstUser` told
+  let seeding: { waiter: Waiter; settled: Promise<void> } | null = null; // P3-F L242: the first prompt, held for the hook
   let resolveExited!: (v: { code: number | null; signal: NodeJS.Signals | null }) => void;
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((r) => (resolveExited = r));
 
@@ -160,6 +172,8 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
       w({ value: undefined, done: true });
     }
     for (const w of waiters.splice(0)) w.reject(new TransportClosed('the replay ended'));
+    seeding?.waiter.reject(new TransportClosed('the replay ended'));
+    seeding = null;
     resolveExited(exit);
     wake?.();
     endPacing?.();
@@ -223,7 +237,16 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
     if (!matches(recorded, written, idMap)) return endAsMismatch(describeOut(row));
     learnIds(recorded, written);
     cursor += 1;
-    waiters.shift()!.resolve();
+    const waiter = waiters.shift()!;
+    if (recorded.type === 'user' && !tookUser) {
+      tookUser = true;
+      const hook = opts.onFirstUser?.(waiter.frame);
+      if (hook) {
+        seeding = { waiter, settled: hook.then(noop, noop) };
+        return null;
+      }
+    }
+    waiter.resolve();
     return null;
   };
 
@@ -240,6 +263,15 @@ export function replayEngine(journal: JournalRow[], opts: { prelude: JournalRow[
             }
             if (injected.length > 0) return { value: injected.shift()!, done: false };
             if (ended) return { value: undefined, done: true };
+            if (seeding) {
+              const held = seeding;
+              await Promise.race([held.settled, exited]); // P3-F L242
+              if (seeding === held) {
+                seeding = null;
+                held.waiter.resolve();
+              }
+              continue;
+            }
             const row = settleCursor();
             if (!row) {
               if (waiters.length > 0) return { value: endAsMismatch('end of journal'), done: false }; // a write the journal never recorded

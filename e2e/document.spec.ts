@@ -15,6 +15,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { withNativeClipboard } from './support/clipboard';
+import { traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 import { join } from 'node:path';
@@ -292,8 +293,36 @@ async function openBesideSession(page: Page, title: string, lines: string[]): Pr
   return { id: artifact.id, record, text };
 }
 
+// The editor element's Tiptap editor, as `durable` reads it: its document, its selection and its edits not yet acknowledged.
+type EditorRoot = HTMLElement & {
+  editor?: {
+    state: { doc: { descendants(f: (node: { type: { name: string }; textContent: string; nodeSize: number }, pos: number) => boolean | void): void; textBetween(from: number, to: number, separator: string): string }; selection: { from: number; to: number } };
+    extensionManager: { extensions: Array<{ name: string; options: { hold?: { base: { state(): { unsaved: number } } } } }> };
+  };
+};
+
 // Selects `quote` inside the editor's paragraph `index` (a DOM selection the editor reads, as a person's drag would set).
+// P3-F (tracker row 277): first the editor's own document holds the paragraph the page shows and the host has
+// acknowledged every edit, so none of the editor's own transactions (the last typed key's flush, the binding's answer to
+// it) lands between the range and the editor's read of it and puts the caret back; then the editor's selection, not
+// only the page's, holds the quote (Comment reads the editor's).
 async function selectIn(text: Locator, index: number, quote: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        text.evaluate((root, at) => {
+          const editor = (root as EditorRoot).editor;
+          if (!editor) return 'no editor on the element';
+          const paragraphs: string[] = [];
+          editor.state.doc.descendants((node) => {
+            if (node.type.name === 'paragraph') paragraphs.push(node.textContent);
+          });
+          const unsaved = editor.extensionManager.extensions.find((extension) => extension.name === 'collaboration')?.options.hold?.base.state().unsaved ?? 0;
+          return paragraphs[at] === root.querySelectorAll('p')[at]?.textContent && unsaved === 0 ? 'settled' : `paragraph "${paragraphs[at]}", ${unsaved} unacknowledged`;
+        }, index),
+      { timeout: 10_000, message: 'the editor holds the paragraph shown and the host has acknowledged every edit' },
+    )
+    .toBe('settled');
   await text.evaluate(
     (root, [at, q]) => {
       const p = root.querySelectorAll('p')[at as number]!;
@@ -321,7 +350,15 @@ async function selectIn(text: Locator, index: number, quote: string): Promise<vo
     },
     [index, quote] as const,
   );
-  await expect.poll(() => text.evaluate(() => getSelection()?.toString() ?? '')).toBe(quote);
+  await expect
+    .poll(() =>
+      text.evaluate((root) => {
+        const editor = (root as EditorRoot).editor!;
+        const { from, to } = editor.state.selection;
+        return { page: getSelection()?.toString() ?? '', editor: editor.state.doc.textBetween(from, to, '\n') };
+      }),
+    )
+    .toEqual({ page: quote, editor: quote });
 }
 
 // The passage `quote` of paragraph `index` on screen: the left edge of its first character, the right edge of its last,
@@ -356,6 +393,8 @@ const passageAt = (text: Locator, index: number, quote: string) =>
 
 // The caret at the end of paragraph `index`. P3-D: the click lands on the paragraph's last line, since `End` ends the
 // visual line and the governing system's type (D's scope, the P3 spec's Decision Log 61) wraps a paragraph in the panel.
+// P3-F (tracker row 199, the paste): the caret is there in the editor's own selection too, which is what a paste
+// replaces; the gate's foreground run pasted over the copy's selection while the page's caret was here.
 async function caretAtEndOf(page: Page, text: Locator, index: number): Promise<void> {
   const paragraph = text.locator('p').nth(index);
   const lastLine = await paragraph.evaluate((p) => {
@@ -369,11 +408,25 @@ async function caretAtEndOf(page: Page, text: Locator, index: number): Promise<v
   await paragraph.click({ position: lastLine }); // P3-D
   await page.keyboard.press('End');
   await expect(text).toBeFocused();
-  await expect.poll(() => text.evaluate((root, at) => {
-    const selection = getSelection()!;
-    const p = root.querySelectorAll('p')[at]!;
-    return selection.isCollapsed && p.contains(selection.focusNode) && selection.focusOffset === (selection.focusNode?.textContent ?? '').length && p.textContent!.endsWith(selection.focusNode?.textContent ?? '');
-  }, index)).toBe(true);
+  await expect
+    .poll(
+      () =>
+        text.evaluate((root, at) => {
+          const selection = getSelection()!;
+          const p = root.querySelectorAll('p')[at]!;
+          const pageAtEnd = selection.isCollapsed && p.contains(selection.focusNode) && selection.focusOffset === (selection.focusNode?.textContent ?? '').length && p.textContent!.endsWith(selection.focusNode?.textContent ?? '');
+          const editor = (root as EditorRoot).editor!;
+          let end = -1;
+          let seen = -1;
+          editor.state.doc.descendants((node, pos) => {
+            if (node.type.name === 'paragraph' && ++seen === at) end = pos + node.nodeSize - 1;
+          });
+          const { from, to } = editor.state.selection;
+          return { page: pageAtEnd, editor: from === to && from === end };
+        }, index),
+      { message: 'the caret at the paragraph’s end, on the page and in the editor' },
+    )
+    .toEqual({ page: true, editor: true });
 }
 
 // The window's Edit command on the OS pasteboard, as ⌘C, ⌘X and ⌘V run it: the app menu's Edit roles (src/main/menu.ts)
@@ -440,6 +493,9 @@ test('commented text through the Mac’s pasteboard: a copy pasted in the same d
   const QUOTE = 'launch plan';
   const threadId = await commentOn(page, record, text, 0, QUOTE);
   const app = launch!.app;
+  // P3-F (tracker row 199, the paste): a dropped paste reports the editor's paste path (its transformPasted and
+  // handlePaste props, the paste's transaction and any filter that refused it) beside the page's focus and selection
+  const trace = await traceForeground(app, page, { editor: '[data-region="panel"] .ds-doc .ProseMirror' });
 
   await withNativeClipboard(app, [QUOTE], async () => {
     // a copy: the pasteboard's HTML carries the thread (the mark's data-thread), the paste is plain text
@@ -451,9 +507,25 @@ test('commented text through the Mac’s pasteboard: a copy pasted in the same d
       return '';
     });
     expect(html, 'the pasteboard’s text/html carries the thread id').toContain(`data-thread="${threadId}"`);
-    await caretAtEndOf(page, text, 1);
-    await edit('paste');
-    await expect(text.locator('p').nth(1)).toHaveText(`A second paragraph waits here.${QUOTE}`);
+    // the caret step's entry reading holds both selections and the marks before the click; the paste step's, after it
+    await trace.step('caret-before-paste', () => caretAtEndOf(page, text, 1));
+    await trace.step(
+      'commented-paste',
+      async () => {
+        await edit('paste');
+        await expect(text.locator('p').nth(1)).toHaveText(`A second paragraph waits here.${QUOTE}`);
+      },
+      () =>
+        text.evaluate((root) => {
+          const editor = (root as EditorRoot).editor!;
+          const { from, to } = editor.state.selection;
+          const paragraphs: string[] = [];
+          editor.state.doc.descendants((node) => {
+            if (node.type.name === 'paragraph') paragraphs.push(node.textContent);
+          });
+          return { editorSelection: [from, to], editorParagraphs: paragraphs, page: Array.from(root.querySelectorAll('p')).map((p) => p.textContent) };
+        }),
+    );
     expect(await markedText(text), 'the copy carries no second comment').toEqual({ [threadId]: QUOTE });
     await expect(text.locator('p').nth(0).locator(`[data-thread="${threadId}"]`)).toHaveText(QUOTE);
 
@@ -463,8 +535,10 @@ test('commented text through the Mac’s pasteboard: a copy pasted in the same d
     await expect(text.locator('p').nth(0)).toHaveText('The owner reviews the  today.');
     await caretAtEndOf(page, text, 1);
     await page.keyboard.type(' Moved: ');
-    await edit('paste');
-    await expect(text.locator('p').nth(1)).toHaveText(`A second paragraph waits here.${QUOTE} Moved: ${QUOTE}`);
+    await trace.step('cut-paste', async () => {
+      await edit('paste');
+      await expect(text.locator('p').nth(1)).toHaveText(`A second paragraph waits here.${QUOTE} Moved: ${QUOTE}`);
+    });
   });
   expect(await markedText(text), 'one comment, on the pasted text').toEqual({ [threadId]: QUOTE });
   await expect(text.locator('p').nth(1).locator(`[data-thread="${threadId}"]`)).toHaveText(QUOTE);
@@ -545,7 +619,9 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   await caretAtEndOf(page, text, 0);
   await page.keyboard.press('Enter');
   await page.keyboard.type('A later sentence for the board.');
-  const newer = await commentOn(page, record, text, 1, 'later sentence');
+  // P3-F (tracker row 277): a selection that does not hold reports the page's selection and the editor's transactions
+  const trace = await traceForeground(launch!.app, page, { editor: '[data-region="panel"] .ds-doc .ProseMirror' });
+  const newer = await trace.step('restore-scene-selection', () => commentOn(page, record, text, 1, 'later sentence'));
   await durable(record);
 
   // A's restore, artifact-wide

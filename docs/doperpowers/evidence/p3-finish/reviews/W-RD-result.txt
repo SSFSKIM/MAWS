@@ -1,0 +1,21 @@
+W-RD — source fixes independently approved; authoritative gate pending
+Execution document: docs/doperpowers/plans/2026-10-18-p3-f-finish.md
+Task base: 73f24d2a0. Exact task commits (W-T and controller records interleave):
+L244 ba8ff17e5 — Unicode-normalized local key with symlink ancestry refusal.
+L245 b7889552e — local-key identity uses key meaning rather than derivation label.
+L269 ed201bdb1 — bounded per-source/credential hint invalidation fences.
+L270 36cc73187 — abort recheck immediately before deferred browser invocation.
+L271 7fcca4305 — literal HTTP loopback exception before URL normalization.
+L256 aa710027e — guard the probe's actual launch configuration origins.
+Review fix a0acd8c76 — refuse unresolved config/argument references while auth fixtures exist; inspect native physical origins and ancestors as well as lexical paths.
+
+Executor proof (reported through its hand-back, not rerun by controller/reviewer):
+Initial union: 12 named unit files, 352/352; changed-file eslint clean.
+Review fix: connector-direct-probe.test.ts + connector-direct-checks.test.ts, 61/61, named eslint clean.
+Command form: /tmp/maws-review/with-slot.sh env pnpm_config_verify_deps_before_run=false pnpm -C <executor worktree> exec vitest run <named files>.
+Failing-first regressions reported for every row. Review-fix counterexamples were split-port interpolation, symlink/.. cwd and physical-ancestor/config-home/file-argument origins. realpathSync.native was necessary; JS realpathSync first erases .. lexically.
+
+Independent task review round 1: five rows accepted; two Important L256 gaps verified by controller against the code: interpolation could assemble a port no scanned string contained, and lexical cwd normalization could inspect a different directory from the spawned engine.
+Round 2 on aa710027e..a0acd8c76: Approved, no Critical/Important/Minor findings. The reviewer checked launch compatibility and the empty-auth-fixture fast path; no engine/app/tests were run by the reviewer.
+
+Remaining verification: remote static/typecheck, full unit/probes and the named Mac connector scenes in the combined W-T/W-RD gate. The six tracker removals are source changes, not a claim of final acceptance before that gate. No paid run or owner-account operation occurred.

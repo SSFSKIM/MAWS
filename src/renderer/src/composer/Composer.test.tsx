@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -759,9 +759,16 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Part
     state.intent = { ...state.intent, ...next };
     state.listeners.forEach((l) => l());
   };
+  // read through useSyncExternalStore, as C10's hook reads its stores: a render that read `state` directly would be
+  // memoized by the React Compiler (vitest's `renderer-compiled`) and never see a later `set`
+  const subscribe = (listener: () => void) => {
+    state.listeners.add(listener);
+    return () => void state.listeners.delete(listener);
+  };
   function useStub(): SetupIntentHook {
-    useStubTick(state.listeners);
-    return { intent: state.intent, options: { models: [], autoModeNote: null, ...options }, phase: state.phase, patch, start };
+    const intent = useSyncExternalStore(subscribe, () => state.intent);
+    const phase = useSyncExternalStore(subscribe, () => state.phase);
+    return { intent, options: { models: [], autoModeNote: null, ...options }, phase, patch, start };
   }
   registerSetupIntentHook((id) => (id === A ? useStub() : null)); // a hook, registered as C10's is
   const setPhase = (phase: string | null) => {
@@ -769,16 +776,6 @@ function stubIntent(over: Partial<SetupIntentHook['intent']> = {}, options: Part
     state.listeners.forEach((l) => l());
   };
   return { patch, start, set, setPhase, answer: (r: HookResult) => act(async () => resolveStart?.(r)) };
-}
-
-function useStubTick(listeners: Set<() => void>): [number, () => void] {
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const l = () => setTick((t) => t + 1);
-    listeners.add(l);
-    return () => void listeners.delete(l);
-  }, [listeners]);
-  return [tick, () => setTick((t) => t + 1)];
 }
 
 describe('unstarted send holds a starting state', () => {

@@ -1,0 +1,19 @@
+{
+  "recordedAt": "2026-10-18T20:43:21Z",
+  "run": 39156492025,
+  "job": 117760724566,
+  "source": "55d012a2e1245a872cf44764842fc155e3276aef",
+  "case": "side.spec.ts931 case12,publication poll962",
+  "counts": "136passed/1failed/184skipped across3packaged invocations; actual L255 proof and smoke passed separately",
+  "observed": "Approval needed/needs-you passed; Allow once43ms,Allow51ms,served null20s; snapshot still Needs approval/waiting/Allow active and viewer v1",
+  "limits": "served null conflates no matching call and missing result; no IPC/pointer trace; no proven replay identity or revision mismatch; not baseline/fixed",
+  "grantedHardening": "child/request identities and public pending/answer states around existing single Allow click; same20s and assertions, no extra click/sleep/timeout/skip/direct answer/product/SDK change",
+  "worker": "aac7ba2e85a9e839c",
+  "acceptance": "quiet combined relaunch is gate; recurrence with evidence becomes product row, pass is one unreproduced observation never fixed",
+  "decisionLog": "none",
+  "diagnosticCommit": "d31423307afbd479adaebaa9fa62e78c02cba81b",
+  "review": "a6c00dc1f0a527021 initial P2 delayed poll verified; applied fixcdf54fbeb recheck correct/no material findings",
+  "diagnosticFix": "cdf54fbeb36c98c9e0c2f10a65b89e09e25b33f6",
+  "gate": "completed green packaged job within otherwise-red quiet set",
+  "quietResult": "39165341280 case931 passed3.3s; one unreproduced packaged observation, never fixed"
+}

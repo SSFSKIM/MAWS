@@ -148,4 +148,25 @@ describe('registerConnectors and the observation cache', () => {
     expect(await surface.statusCache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
     surface.close();
   });
+
+  // P3-F: a resolve begun before main went must not observe into the next attachment, even one whose probe answers
+  it('cancels a resolve still probing when main’s client goes, and lands nothing it reads afterwards', async () => {
+    const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
+    const on = ((name: string, handler: (input: unknown) => Promise<unknown>) => void handlers.set(name, handler)) as unknown as HostOn;
+    const gone: (() => void)[] = [];
+    const launch = context();
+    const session: ConnectorSessionView = { lifecycle: 'ready', control: scriptedClient(), status: () => ({ launchId: 'L1', cwd: project }), connectorLaunchContext: () => launch };
+    const statusCache = new ConnectorStatusCache();
+    let probing!: AbortSignal;
+    let probed!: (support: 'supported') => void;
+    const calls = new ConnectorCalls({ session: (id) => (id === SESSION ? session : undefined), store: () => null, completed: () => {}, statusCache, probe: (_client, signal) => ((probing = signal), new Promise((resolve) => (probed = resolve))) });
+    const surface = registerConnectors(on, (() => true) as unknown as HostEmit, { onClientGone: (listener) => (gone.push(listener), () => {}) }, { sessions: { get: (id) => (id === SESSION ? (session as never) : undefined) }, store: null, calls, statusCache });
+    const resolving = handlers.get('connectors.resolve')!(tool()).catch(() => null);
+    for (const listener of gone) listener();
+    probed('supported'); // a probe answering after all
+    await resolving;
+    expect(await statusCache.resolveSource(project, 'usertoy')).toEqual({ ok: false, why: 'unobserved' });
+    expect(probing.aborted).toBe(true);
+    surface.close();
+  });
 });

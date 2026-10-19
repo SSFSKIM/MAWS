@@ -51,7 +51,7 @@ Chips are inline:
 
 **Tables.** A table is plain GFM when it has a header row, one plain paragraph per cell, no merged cells or widths and one alignment per column. Any other table is written as nested structure blocks, each closed by `:::`: `:::table`, then `:::row <!-- ^id -->` per row, then `:::header` or `:::cell` per cell with the cell's markdown inside and its attributes in braces (`{colspan="2" rowspan="1" colwidth="120,80" align="center"}`). A table is written in one form or the other, never mixed. Read before you rewrite a table: copy its form.
 
-**Escapes.** Text that would read as markup is escaped with a backslash; a space or tab at the edge of formatted text is written `&#32;` or `&#9;`; an empty paragraph holds one no-break space. You only need these when you write such text yourself.
+**Escapes.** Text that would read as markup is escaped with a backslash; a space or tab at the edge of formatted text is written `&#32;` or `&#9;`; a line ending inside a paragraph's text that is not a line break is written `&#10;`; an empty paragraph holds one no-break space. You only need these when you write such text yourself.
 
 ## Limits
 

@@ -4,6 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Artifact } from '@shared/artifacts/entity';
 import { newDoc } from '../yjs';
+import { defaultAssetNames } from '../types/design_system/default-assets';
+import { defaultSystem } from '../types/design_system/defaults';
 import complete from './fixtures/complete.tokens.json';
 import { designSystemMirrorWriter } from './mirror';
 import { readFiles, writeSystem } from './model';
@@ -50,5 +52,48 @@ describe('the design system’s mirror writer', () => {
     const doc = systemDoc();
     expect(Object.keys(designSystemMirrorWriter({ artifact, doc }).files).sort()).toEqual(Object.keys(readFiles(doc)).map((path) => `${FOLDER}/${path}`).sort());
     expect(designSystemMirrorWriter({ artifact, doc: newDoc(), assets: listed, readAsset: (ref) => held[ref]! })).toEqual({ files: {} });
+  });
+});
+
+// scalpel-3#1: canon names an asset as `assets/<name>` from the system's root, and a browser resolves a relative URL from
+// the file that holds it, so a mirrored canon file one directory down reads `../assets/<name>`.
+describe('the mirror’s canon references', () => {
+  const OFFICIAL = defaultSystem('official')!;
+  const officialAssets = defaultAssetNames('official').map((name) => ({ ref: `assets/${name}`, name, mime: 'application/octet-stream', size: 1 }));
+  const mirrorOf = (files: Record<string, string>, assets = officialAssets) => {
+    const doc = newDoc();
+    writeSystem(doc, files, { route: 'derived', at: 0 });
+    return designSystemMirrorWriter({ artifact, doc, assets, readAsset: () => new Uint8Array([1]) }).files;
+  };
+
+  it('the bundled Official’s document.css loads its faces from the mirrored assets', () => {
+    const files = mirrorOf(OFFICIAL.files);
+    const path = `${FOLDER}/components/document.css`;
+    const css = files[path] as string;
+    const urls = [...css.matchAll(/url\(\s*["']?([^"')]+)["']?\s*\)/g)].map((m) => m[1]!);
+    expect(urls).toHaveLength(2);
+    for (const url of urls) {
+      const resolved = decodeURIComponent(new URL(url, `file:///linked/${path}`).pathname).slice('/linked/'.length);
+      expect(Object.keys(files), url).toContain(resolved);
+    }
+    expect(css.replace(/\.\.\/assets\//g, 'assets/')).toBe(OFFICIAL.files['components/document.css']); // only the references move
+  });
+
+  it('moves every asset reference of canon HTML as the in-app frames rewrite them, and nothing else', () => {
+    const card = [
+      `<div style="background: url('assets/paper.png') repeat"><img src=" assets/logo.svg#mark" srcset="assets/logo.svg 1x, assets/logo@2x.png 2x" alt="url(assets/logo.svg)">`,
+      `<svg><use xlink:href="assets/icons.svg#star"/><rect fill="url(#grad)" stroke="url(assets/ink.svg#line)"/></svg>`,
+      `<a href="https://example.com/assets/x" title="a &amp; b">assets/x and url(assets/x)</a><img src='assets/a&amp;b.png'></div>`,
+    ].join('');
+    const mirrored = mirrorOf({ 'DESIGN.md': '# Harbor\n', 'tokens.tokens.json': TOKENS, 'components/card.html': card, 'layouts/cover.html': '<section id="cover" style="background:url(assets/cover.png)"></section>' });
+    expect(mirrored[`${FOLDER}/components/card.html`]).toBe(
+      [
+        `<div style="background: url('../assets/paper.png') repeat"><img src=" ../assets/logo.svg#mark" srcset="../assets/logo.svg 1x, ../assets/logo@2x.png 2x" alt="url(assets/logo.svg)">`,
+        `<svg><use xlink:href="../assets/icons.svg#star"/><rect fill="url(#grad)" stroke="url(../assets/ink.svg#line)"/></svg>`,
+        `<a href="https://example.com/assets/x" title="a &amp; b">assets/x and url(assets/x)</a><img src="../assets/a&amp;b.png"></div>`,
+      ].join(''),
+    );
+    expect(mirrored[`${FOLDER}/layouts/cover.html`]).toBe('<section id="cover" style="background:url(../assets/cover.png)"></section>');
+    expect(mirrored[`${FOLDER}/tokens.tokens.json`]).toBe(TOKENS); // a file at the root is written as it is
   });
 });

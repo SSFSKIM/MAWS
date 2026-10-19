@@ -1,0 +1,108 @@
+{
+  "status": "source frontier accepted; L200/L201 closed; L199must-read1/10, L2772/10, L264full-set and L217following-set monitoring remain",
+  "recordedAt": "2026-10-18T13:40:53Z",
+  "executor": "ab180409652104010",
+  "base": "344d7131c",
+  "commits": {
+    "L199": "8e2a7ac51",
+    "L200": "4143ca059",
+    "L264": "93b9e35bf",
+    "L201": "d26b65149",
+    "L217": "287b45bb1",
+    "L277": "1235d4a77"
+  },
+  "foregroundScripts": [
+    "e2e",
+    "e2e:document-app",
+    "e2e:to-human",
+    "e2e:widgets"
+  ],
+  "checks": {
+    "provenance": "worker reported; independent review was static",
+    "red": "Controlled deferred-frame Overview-focus regression failed old code in renderer and renderer-compiled; ordinary restoration passed",
+    "green": "MainArea86/86; broader named153/153 across9 files; named eslint clean",
+    "notRun": "local typecheck, e2e, app, engine"
+  },
+  "diagnoses": {
+    "L199": "Paste applied an unfiltered transaction, final selection34/34 with unchanged text strongly suggests replacing stale copy selection; pre-paste PM state not sampled. Must-read source candidate: handledFocus recorded before frame, attach rehydration reissues and cancels frame, reissue guard drops never-applied focus. Native ordering unobserved; bounded assessment pending.",
+    "L200": "deferred close-tab focus restore can steal a subsequently opened Overview; deterministic source regression proven, mini ordering pending;39130559347 shell passed but target native entry false, no foreground proof",
+    "L264": "palette now waits actual combobox focus; full-set default green remains",
+    "L201": "await aria-enabled after async selector write (fast-mode write, not model set as old suspicion); native pass pending;39130559347 named widgets case passed",
+    "L217": "one queued page timer orders the single arrow after sensor listener; preserved over/order/replica checks; native root cause unconfirmed;39130559347 scene passed native false, no foreground claim",
+    "L277": "selection follows matching editor/DOM paragraph and zero unacknowledged edits; original failure occurred before restore"
+  },
+  "remainingCounts": {
+    "L199-must-read": "0/10; current scene failed, actual repair pending",
+    "L277": "1/10 case-based consecutive Mac scene passes after1235d4a77:39130559347 native entry true; group fails other scene"
+  },
+  "review": {
+    "reviewer": "aef4b40cb8d4b7d76",
+    "round": 2,
+    "verdict": "approved for diagnostic gate after5f115a09d; full wave acceptance remains open",
+    "finding": "Native state was sampled only after failure and a1s frame count; store timestamped native state immediately before each targeted action, without clipboard/poll/focus side effects. Initial unconditional approval was superseded by this clarified finding.",
+    "fixCommit": "5f115a09d"
+  },
+  "next": "Count on future named/full gates without manufacturing sweeps; fixed L217 recurrence is product, never baseline. Lane-wide foreground choice belongs to CI-opt after landing, not F prerequisite.",
+  "nativeGate": {
+    "runId": 39130559347,
+    "source": "3cc3f0286",
+    "record": "gates/pair2-diagnostic-39130559347.json",
+    "conclusion": "failure"
+  },
+  "assessment": {
+    "agent": "a788b678f28592255",
+    "status": "complete; accepted boundaries in reviews/W-MINI-native-assessment.txt",
+    "scope": "adversarial bounded paste/virtualizer repair recommendation; no code edits"
+  },
+  "mutationScope": "Diagnostics14c3e6fd6 committed; generic paste-selection hook rejected. Model-aware caret readiness and regression-first minimal handledFocus repair plus repeated-target edge authorized; one-time conditional L200 harness activation authorized.",
+  "nativeRepair": {
+    "commits": [
+      "14c3e6fd6",
+      "abdad9d35",
+      "63cbc8db7",
+      "7a23ef400"
+    ],
+    "status": "native clauses pass39133832247; mechanical test TS fix committed",
+    "product": "Invalidate handledFocus on explicit request; record only actual target focus in frame, including repeated same-target request",
+    "paste": "Existing-timeout DOM and model caret readiness plus synchronous paste capture/dispatch; no generic selection hook",
+    "activation": "Conditional one-shot own-window activation before Overview, event wait bounded1s; no poll/retry, original assertions retained",
+    "checks": {
+      "provenance": "worker-reported filtered stdout only; no retained raw logs, no reruns merely for bookkeeping",
+      "red": "Transcript new cases4fail/28skip; renderer-only repeat confirms post-frame assertion failures at200/226",
+      "green": "Transcript32/32 in2projects; named Transcript/anchor/store/Divider95/95 in7files",
+      "lint": "named five changed files exit0 worker reported",
+      "prefix": "pnpm_config_verify_deps_before_run=false /tmp/maws-review/with-slot.sh pnpm -C absolute-W exec",
+      "notRun": "local typecheck/e2e/app/GUI"
+    },
+    "wording": "63cbc8db7 commit message overstates stale replacement as observed; it remains inferred until synchronous next-gate readings. Commit not amended.",
+    "review": {
+      "agent": "afefa3ce1540fa23a",
+      "round": 1,
+      "head": "87613c642702f2d27158709321281da2f4664dff",
+      "verdict": "correct; no material findings"
+    },
+    "tsFix": {
+      "commit": "4b0e1f1e3",
+      "verification": "exact void return correction inspected; controller read named eslint exit0",
+      "next": "typecheck in DOC-A/DECK union; no third MINI gate"
+    }
+  },
+  "rowResults": "waves/W-MINI-row-results.json",
+  "documentaryCommits": {
+    "199": "0b4f2f07d",
+    "200": "5bf2421cc",
+    "201": "37dc9ca91",
+    "217": "1003b9c6b",
+    "264": "b9beae6ed",
+    "277": "0f2d04b9a",
+    "217-correction": "e9a818df2"
+  },
+  "currentNativeCounters": {
+    "recordedAt": "2026-10-18T20:28:07Z",
+    "L277": "5/10",
+    "L199MustRead": "3/10",
+    "L217": "5 post-fix named scene passes; no required streak threshold, future same-signature product recurrence",
+    "fullSetCredit": 0,
+    "proof": "gates/pair45-39156492025.json plus pair4/45 raw default logs for filmstrip"
+  }
+}

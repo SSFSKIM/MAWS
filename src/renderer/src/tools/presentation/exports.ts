@@ -4,8 +4,12 @@
 // `artifact_export` route too) and then saved where the owner chooses, as the library's Export saves (`library.saveAs` of
 // that export, the native dialog at Downloads); the outcome is a toast, a cancelled dialog says nothing. PowerPoint with
 // uploaded faces embedded is not offered yet (the exporter refuses it; the tracker row of H3).
+// P3-F (L233): what it exports is what the editor shows (the design's what-you-see rule, P3-E's Decision Log 31): while
+// the history previews one retained version, that version (main reads its state and its pinned system); while two
+// versions are compared nothing is offered rather than one side silently chosen; otherwise the live deck.
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactExportFonts, ArtifactExportFormat } from '@shared/maws/tools';
+import type { DeckShown } from '@artifacts/slides/editor/session';
 import { ipc } from '../../ipc/client';
 import { toastFailure } from '../../library/dialogs';
 import type { EditorHostExport } from '../../panel/editor-host';
@@ -29,16 +33,18 @@ export const DECK_EXPORTS: readonly DeckExport[] = [
   { id: 'png', label: 'PNG (cover slide)', format: 'png' },
 ];
 
-/** The deck exported as `entry` asks, then saved where the owner chooses. */
-export async function exportDeck(artifactId: string, entry: DeckExport, client: MawsBridge = ipc): Promise<void> {
-  const exported = await client.invoke('artifacts.export', { artifactId, format: entry.format, ...(entry.fonts && { fonts: entry.fonts }) });
+/** The deck as `shown` (L233: the version previewed, else the live deck) exported as `entry` asks, then saved where the owner chooses. */
+export async function exportDeck(artifactId: string, entry: DeckExport, shown: DeckShown = null, client: MawsBridge = ipc): Promise<void> {
+  if (shown === 'compare') return; // two versions compared: nothing is exported
+  const exported = await client.invoke('artifacts.export', { artifactId, format: entry.format, ...(entry.fonts && { fonts: entry.fonts }), ...(shown && { versionId: shown.versionId }) });
   if (!exported.ok) return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
   const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision: exported.value.revision, format: entry.format } } });
   if (!saved.ok) return toastFailure(VIEWERS_COPY.exportFailed(saved.error.message));
   if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path), actions: [], dismissible: true });
 }
 
-/** The header's Export entries for a deck. */
-export function deckExports(artifactId: string, run: (entry: DeckExport) => void = (entry) => void exportDeck(artifactId, entry)): EditorHostExport[] {
-  return DECK_EXPORTS.map((entry) => ({ id: entry.id, label: entry.label, onSelect: () => run(entry) }));
+/** The header's Export entries for a deck as the editor shows it; none is offered while two versions are compared. */
+export function deckExports(artifactId: string, shown: DeckShown, run: (entry: DeckExport) => void = (entry) => void exportDeck(artifactId, entry, shown)): EditorHostExport[] {
+  const disabled = shown === 'compare';
+  return DECK_EXPORTS.map((entry) => ({ id: entry.id, label: entry.label, onSelect: () => run(entry), ...(disabled && { disabled }) }));
 }

@@ -2,12 +2,15 @@
 // C's inspector whenever no element is selected (the board's geometry, as against its content): its name, X, Y, width
 // and height, and a size preset. C's own number field draws each value (the same look, Enter and arrow steps, the
 // refusal shown inline); a frame the model refuses is named there and nothing is written, never adjusted. A held or
-// missing board, or a read-only replica, shows its values without offering a write.
+// missing board, or a read-only replica, shows its values without offering a write, and a draft left in a field when
+// either turned so commits nothing.
 import { useMemo, useState } from 'react';
+import { heldOf } from '../../slides/model';
 import type { DeckSession } from '../../slides/editor/session';
 import { InspectorContext, NumberField, Refusal, Row, Section, type InspectorApi } from '../../slides/editor/inspector/fields';
+import * as Y from '../../yjs/slides';
 import { FRAME_KEYS, type BoardFrame } from '../canvas';
-import { writeBoardEntry } from '../model';
+import { isMissingSource, writeBoardEntry } from '../model';
 import { BoardError, setBoardFrame } from '../writers';
 import { boardLabel, type BoardView } from './boards';
 import { BOARD_PRESETS, DESIGN_COPY as C } from './copy';
@@ -28,7 +31,15 @@ export function BoardInspector({ session, board, readOnly }: BoardInspectorProps
   const api = useMemo<InspectorApi>(() => ({ session, slideId: board.id, picked: [], readOnly: locked, faces: {}, style: () => [], attrs: () => {} }), [session, board.id, locked]);
   const [refused, setRefused] = useState<string | null>(null);
 
+  // a commit lands only while the replica takes writes and the board, as the model holds it now, is drawn from its file:
+  // disabling a focused field fires its blur, which would otherwise commit its draft into the board just locked (the
+  // workbench's rename checks the same)
+  const writable = () => {
+    const doc = session.doc;
+    return !readOnly && session.writable() && Y.hasSlide(doc, board.id) && heldOf(doc, board.id) === null && !isMissingSource(doc, board.id);
+  };
   const write = (frame: Partial<BoardFrame>, typing: string | null): string[] => {
+    if (!writable()) return [];
     try {
       const run = (origin: object) => setBoardFrame(session.doc, board.id, frame, origin);
       if (typing === null) session.edit(run);
@@ -40,6 +51,11 @@ export function BoardInspector({ session, board, readOnly }: BoardInspectorProps
       throw error;
     }
   };
+  const rename = (title: string): boolean => {
+    if (!writable()) return false;
+    session.edit(() => writeBoardEntry(session.doc, board.id, { title: title || undefined })); // inside the edit's transaction, under its origin
+    return true;
+  };
   const preset = board.frame ? (BOARD_PRESETS.find((p) => p.w === board.frame!.w && p.h === board.frame!.h)?.id ?? 'custom') : 'custom';
 
   return (
@@ -48,7 +64,7 @@ export function BoardInspector({ session, board, readOnly }: BoardInspectorProps
         <h2 className="deck-inspector-title">{boardLabel(board)}</h2>
         <Section title={C.board}>
           <Row caption={C.boardName} wide>
-            <NameField key={board.title} title={board.title} disabled={locked} onCommit={(title) => session.edit(() => writeBoardEntry(session.doc, board.id, { title: title || undefined }))} /* inside the edit's transaction, under its origin */ />
+            <NameField key={board.title} title={board.title} disabled={locked} onCommit={rename} />
           </Row>
           {PAIRS.map((pair) => (
             <div key={pair.join('')} className="deck-inspector-pair">
@@ -87,12 +103,15 @@ export function BoardInspector({ session, board, readOnly }: BoardInspectorProps
   );
 }
 
-/** The board's name, written on Enter or on leaving the field (empty: no title; the id names it). */
-function NameField({ title, disabled, onCommit }: { title: string; disabled: boolean; onCommit: (title: string) => void }) {
+/**
+ * The board's name, written on Enter or on leaving the field (empty: no title; the id names it). A commit refused (false)
+ * drops the draft, as C's number field does, so a later blur cannot write it.
+ */
+function NameField({ title, disabled, onCommit }: { title: string; disabled: boolean; onCommit: (title: string) => boolean }) {
   const [draft, setDraft] = useState(title);
   const commit = () => {
     const next = draft.trim();
-    if (next !== title) onCommit(next);
+    if (next !== title && !onCommit(next)) setDraft(title);
   };
   return (
     <span className="deck-inspector-input-wrap">

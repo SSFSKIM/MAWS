@@ -1,0 +1,89 @@
+{
+  "budgetUsd": "2.00",
+  "heldForDiagnosisUsd": "0.10",
+  "rule": "reserve each run's whole cap before it; settle from the receipted cumulative session cost counted once; an unreceipted or unresolved run keeps its whole reservation",
+  "entries": [
+    {
+      "attempt": "library-1",
+      "spec": "library-live.spec.ts",
+      "reservedUsd": "0.10",
+      "reservedAt": "2026-10-19T06:16:36Z",
+      "state": "settled",
+      "chargedUsd": "0",
+      "receipt": "stopped at the MacBook load gate (load1 about 121-160) before admission at the architect's GO on the mini route; no P3F_PAID_ENTERED line, so no engine ran; A-15 before/after read by the trap",
+      "settledAt": "2026-10-19T06:23:19Z"
+    },
+    {
+      "attempt": "mini-library-live",
+      "spec": "library-live.spec.ts",
+      "reservedUsd": "0.10",
+      "reservedAt": "2026-10-19T06:23:40Z",
+      "state": "settled",
+      "chargedUsd": "0.0035",
+      "receipt": "run 39210063850 (carrier fce560e35 on S), mini @2x remote=none; 1 passed; receipt total_cost_usd 0.0035; engine --max-budget-usd 0.1",
+      "settledAt": "2026-10-19T07:10:14Z"
+    },
+    {
+      "attempt": "mini-document-live",
+      "spec": "document-live.spec.ts",
+      "reservedUsd": "0.20",
+      "reservedAt": "2026-10-19T06:23:40Z",
+      "state": "settled",
+      "chargedUsd": "0.0073",
+      "receipt": "run 39210063850 (carrier fce560e35 on S), mini @2x remote=none; 1 passed; receipts [0.004468965,0.005467695,0.00645806,0.00731912], total 0.0073; cap 0.2 as the session maxBudgetUsd (test-results/document-live/live-run.txt)",
+      "settledAt": "2026-10-19T07:10:15Z"
+    },
+    {
+      "attempt": "mini-presentations-live",
+      "spec": "presentations-live.spec.ts",
+      "reservedUsd": "0.15",
+      "reservedAt": "2026-10-19T06:23:40Z",
+      "state": "settled",
+      "chargedUsd": "0.0210",
+      "receipt": "run 39210063850 (carrier fce560e35 on S), mini @2x remote=none; 1 passed; receipts [0.01054647,0.013882684999999999,0.018422275,0.020997685], total 0.0210; engine --max-budget-usd 0.15",
+      "settledAt": "2026-10-19T07:10:17Z"
+    },
+    {
+      "attempt": "mini-design-systems-live",
+      "spec": "design-systems-live.spec.ts",
+      "reservedUsd": "0.15",
+      "reservedAt": "2026-10-19T06:23:40Z",
+      "state": "settled",
+      "chargedUsd": "0.0078",
+      "receipt": "run 39210063850 (carrier fce560e35 on S), mini @2x remote=none; 1 passed; receipt total_cost_usd 0.0078; engine --max-budget-usd 0.15",
+      "settledAt": "2026-10-19T07:10:18Z"
+    },
+    {
+      "attempt": "mini-design-live",
+      "spec": "design-live.spec.ts",
+      "reservedUsd": "1.00",
+      "reservedAt": "2026-10-19T06:23:40Z",
+      "state": "settled",
+      "chargedUsd": "0.0796",
+      "receipt": "run 39210063850 (carrier fce560e35 on S), mini @2x remote=none; 1 passed; receipts [0.025729179999999997,0.032215295,0.048684124999999995,0.07959054999999998], total 0.0796; LaunchSpec.maxBudgetUsd 1",
+      "settledAt": "2026-10-19T07:10:19Z"
+    },
+    {
+      "attempt": "mini-dashboard-live",
+      "spec": "dashboard-live.spec.ts",
+      "reservedUsd": "0.15",
+      "reservedAt": "2026-10-19T06:23:40Z",
+      "state": "settled",
+      "chargedUsd": "0.0109",
+      "receipt": "run 39210063850 (carrier fce560e35 on S), mini @2x remote=none; 1 passed; receipts [0.006033950000000001,0.009239285,0.010852875], total 0.0109; engine --max-budget-usd 0.15",
+      "settledAt": "2026-10-19T07:10:21Z"
+    },
+    {
+      "attempt": "mini-send-to-live",
+      "spec": "send-to-live.spec.ts",
+      "reservedUsd": "0.15",
+      "reservedAt": "2026-10-19T06:23:41Z",
+      "state": "settled",
+      "chargedUsd": "0.0018",
+      "receipt": "run 39210063850 (carrier fce560e35 on S), mini @2x remote=none; 1 passed; receipts [0.0017797450000000001], total 0.0018; session maxBudgetUsd 0.15",
+      "settledAt": "2026-10-19T07:10:22Z"
+    }
+  ],
+  "committedUsd": "0.1319",
+  "availableUsd": "1.8681"
+}

@@ -2,10 +2,11 @@
 // artifact's assets, under `<userData>/artifacts/<artifactId>/`. An `html` write is immutable at
 // `content/<seq>/<name>`; an asset is content-addressed at `assets/<sha256>`. Each file is written to a temp file,
 // fsynced and renamed into place before the row that names it commits, so a committed row never names a missing or
-// partial file (a crash leaves at most an orphan file no row names). A `file` artifact's content stays where it is
-// (send_file's rule): only its name, size and hash are recorded.
+// partial file (a crash leaves at most an orphan file no row names; a staged one is collected by the maintenance pass,
+// `stagedBefore`). A `file` artifact's content stays where it is (send_file's rule): only its name, size and hash are
+// recorded.
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, createReadStream, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 
 export interface ContentRef {
@@ -56,6 +57,22 @@ export class ArtifactFiles {
 
   discard(temp: string): void {
     rmSync(temp, { force: true });
+  }
+
+  // The files in any artifact directory's `tmp/` last modified before `cutoff` (epoch ms): those a write killed between
+  // its `stage` and its `place` or `discard` left, and any other file found there (the store decides which go).
+  stagedBefore(cutoff: number): string[] {
+    if (!existsSync(this.root)) return [];
+    const found: string[] = [];
+    for (const artifact of readdirSync(this.root, { withFileTypes: true })) {
+      const dir = join(this.root, artifact.name, 'tmp');
+      if (!artifact.isDirectory() || !existsSync(dir)) continue;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isFile() && statSync(path).mtimeMs < cutoff) found.push(path);
+      }
+    }
+    return found;
   }
 
   // An `html` write's place: immutable per log row.

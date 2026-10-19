@@ -17,7 +17,7 @@
 //   Alt about the centre; the dragged edges snapped when nothing turns, scales or skews the element.
 // - rotate: the handle's angle, Shift by 15°, composed into the element's transform.
 // - endpoint: a pinned connector's end.
-// - marquee: the slide's children the rectangle touches.
+// - marquee: the slide's children the rectangle touches (with Shift, added at the selection's level).
 import {
   angleFromPointer,
   apply,
@@ -51,7 +51,7 @@ import {
   type Pt,
   type SnapContext,
 } from '../../geometry';
-import { isPinned } from '../../ir';
+import { isPinned, TEXT_TAGS } from '../../ir';
 import { reorderFlow, ROOT } from '../../model';
 import { checkStyle } from '../../css';
 import { siteOf, writeElements, type ElementWrites } from '../../writers-elements';
@@ -59,7 +59,7 @@ import { DECK_COPY as C } from '../copy';
 import type { SlideCanvas } from '../../canvas';
 import type { DeckSession } from '../session';
 import { boxInParent, containerMatrix, flowAxis, measure, measureAll, type Measured } from './measure';
-import { marquee as marqueeOf, slideTree, type SlideTree } from './selection';
+import { addHits, marquee as marqueeOf, slideTree, type SlideTree } from './selection';
 
 export interface GestureContext {
   session: DeckSession;
@@ -282,7 +282,7 @@ export function handlesOf(tree: SlideTree, id: string): readonly Handle[] {
   if (!e || e.tag === 'tr' || e.tag === 'th' || e.tag === 'td') return [];
   if (e.tag === 'x-connector' && e.attrs.x1 !== undefined) return [];
   if (isPinned(e.tag, e.style, e.attrs)) return ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
-  return ['h1', 'h2', 'h3', 'p', 'ul', 'ol'].includes(e.tag) ? ['e'] : ['e', 's', 'se'];
+  return TEXT_TAGS.has(e.tag) ? ['e'] : ['e', 's', 'se'];
 }
 
 export function startResize(ctx: GestureContext, id: string, handle: Handle, p0: Pt): Gesture {
@@ -292,6 +292,8 @@ export function startResize(ctx: GestureContext, id: string, handle: Handle, p0:
   if (!e || !m) return { frame: () => NO_GUIDES, end: () => {} };
   if (unreadable(e.style.transform, m.w, m.h)) return refusal(C.tokenTransform(transformFallback(e.style.transform) !== null));
   const pinned = isPinned(e.tag, e.style, e.attrs);
+  // P3-F: a flow text element takes its width only (handlesOf), so Shift keeps no aspect on it and writes no height
+  const widthOnly = !pinned && TEXT_TAGS.has(e.tag);
   const start = placeOf(e.style, m);
   const conv = pinned ? pinToLeftTop(e.style, start) : {};
   // snapping reads the slide's axes: only for an element nothing turns, scales or skews
@@ -305,9 +307,10 @@ export function startResize(ctx: GestureContext, id: string, handle: Handle, p0:
   return {
     frame(p, mods) {
       const delta = inHost(m.hostMatrix, { x: p.x - p0.x, y: p.y - p0.y });
-      let b = resizePlaced(start, e.style.transform, handle, delta, { keepAspect: mods.shift, fromCentre: mods.alt && pinned, min: MIN_SIZE });
+      const aspect = mods.shift && !widthOnly;
+      let b = resizePlaced(start, e.style.transform, handle, delta, { keepAspect: aspect, fromCentre: mods.alt && pinned, min: MIN_SIZE });
       let guides: readonly Guide[] = [];
-      if (plain && !mods.meta && !mods.shift && !mods.alt) {
+      if (plain && !mods.meta && !aspect && !mods.alt) {
         // the drawn edges snap (the element's own translate, % of its size, moves them off its layout box); the result
         // goes back to layout px at its new size, the held drawn edge where it was (fix wave 2)
         const t = (w: number, h: number) => {
@@ -320,8 +323,8 @@ export function startResize(ctx: GestureContext, id: string, handle: Handle, p0:
         b = { ...snapped.box, x: snapped.box.x - origin.x - after.x, y: snapped.box.y - origin.y - after.y };
         guides = snapped.guides;
       }
-      const wide = mods.shift || handle.includes('e') || handle.includes('w');
-      const tall = mods.shift || handle.includes('n') || handle.includes('s');
+      const wide = aspect || handle.includes('e') || handle.includes('w');
+      const tall = aspect || handle.includes('n') || handle.includes('s');
       const style: Record<string, string | null> = first ? { ...conv } : {};
       if (pinned) {
         style.left = px(b.x);
@@ -426,8 +429,7 @@ export function startMarquee(ctx: GestureContext, p0: Pt, base: readonly string[
   return {
     frame(p) {
       const rect = { x: Math.min(p0.x, p.x), y: Math.min(p0.y, p.y), w: Math.abs(p.x - p0.x), h: Math.abs(p.y - p0.y) };
-      const hit = marqueeOf(tree, bounds, rect);
-      ctx.session.select([...base, ...hit.filter((id) => !base.includes(id))]);
+      ctx.session.select(addHits(tree, base, marqueeOf(tree, bounds, rect)));
       return { guides: [], marquee: rect };
     },
     end() {},

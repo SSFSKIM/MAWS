@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { parseAskSteer } from '@shared/maws/ask';
-import { ArtifactDeliverySchema, ArtifactScreenshotResultSchema, AskResultSchema, TOOL_ERRORS } from '@shared/maws/tools';
+import { ArtifactDeliverySchema, ArtifactScreenshotResultSchema, AskResultSchema } from '@shared/maws/tools';
 import { ArtifactUpdateResultSchema } from '@shared/maws/artifact-update'; // P3-A: the retired update, as recorded
 import { ClaimSessionResponseSchema, GetStatusResponseSchema, GetWorkspaceDiffResponseSchema, InitializeResponseSchema, UiRenderResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
 import { FIXTURE_PASSES, listJournals, loadEngineJournal /* P2-C (2026-10-09) */, loadJournal, type FixturePass } from '../../../test/support/fixtures';
@@ -982,16 +982,22 @@ describe('normaliser: the maws tools recorded live (E1 M2, pass3/p1-maws-*)', ()
     expect(seq(answered)).toBeGreaterThan(steer.seq);
   });
 
-  it('p1-maws-show-pane: one pane shown opened, one with an error, and the unknown pane only as an error tool.result', async () => {
+  // The untouched 2.1.291 recording predates P3-L's deliverable → artifact rename. There is no old-name alias:
+  // today's normalizer emits no maws.pane.shown for deliverable, but retains the recorded call and error result.
+  // These are the historical answers, not what today's tool server would answer if the calls were made again.
+  it('p1-maws-show-pane: terminal opens; retired deliverable and unknown nope retain their recorded error results only', async () => {
     const { events } = await run('pass3', 'p1-maws-show-pane');
+    const calls = ofKind(events, 'tool.use').filter((e) => e.toolName === 'mcp__maws__show_pane');
+    expect(calls.map((e) => e.input)).toEqual([{ pane: 'terminal' }, { pane: 'deliverable', target: 'none' }, { pane: 'nope' }]);
     expect(ofKind(events, 'maws.pane.shown')).toMatchObject([
       { pane: 'terminal', target: null, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:live', title: 'Terminal' }, error: null },
-      { pane: 'artifact', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('artifact') }, // P3-L M6b: the recording's pane renamed with the tool's enum
     ]);
-    const nope = ofKind(events, 'tool.use').find((e) => e.toolName === 'mcp__maws__show_pane' && (e.input as { pane?: string }).pane === 'nope')!;
-    const refused = ofKind(events, 'tool.result').find((e) => e.toolUseId === nope.toolUseId)!;
+    const retired = ofKind(events, 'tool.result').find((e) => e.toolUseId === calls[1]!.toolUseId)!;
+    expect(retired.isError).toBe(true);
+    expect(text(retired.content)).toBe('show_pane: the deliverable pane is not available in this build of MAWS');
+    const refused = ofKind(events, 'tool.result').find((e) => e.toolUseId === calls[2]!.toolUseId)!;
     expect(refused.isError).toBe(true);
-    expect(text(refused.content)).toContain(TOOL_ERRORS.unknownPane('nope'));
+    expect(text(refused.content)).toBe('show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control');
   });
 
   // E11 S1 (E11 execution document, Design §5 S1, Task 6.2): the interrupt while the blocking ask waited, on 2.1.293.

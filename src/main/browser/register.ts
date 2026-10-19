@@ -97,11 +97,14 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
     ),
   }));
   register('browser.profiles.list', () => ({ profiles: avatars.list(profiles()) })); // cua #90: with the names and the avatar
-  // The sender's window places and covers; the cover answers at once, its placeholders follow as browser.view.covered.
+  // The sender's window places and covers; the placeholders go out as browser.view.covered. The cover answers once the
+  // view manager settles it, every shown page's still sent and the page hidden (P3-F L128), so the renderer's
+  // `coverAcknowledged` is a full barrier: Mark up never draws its overlay while the live page can still draw over it.
+  // A failed cover is logged and still answered.
   register('browser.view.place', knownTabs((input, { sender }) => views.place(input, sender)));
-  register('browser.view.cover', ({ covered }, { sender }) => {
-    views.cover(covered, sender).catch((error: unknown) => console.error('[browser] the cover failed:', error));
-  });
+  register('browser.view.cover', ({ covered }, { sender }) =>
+    views.cover(covered, sender).catch((error: unknown) => console.error('[browser] the cover failed:', error)),
+  );
   // P3-G (§D4.1): Mark-up's still of the page, for the window the tab is placed in only (capture.ts)
   register(
     'browser.view.capture',

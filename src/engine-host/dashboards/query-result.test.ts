@@ -61,7 +61,17 @@ describe('a query result’s rows', () => {
     expect(queryRowsOf({ content: '', structuredContent: { rows: [{ t: 1, v: Infinity }] } })).toEqual({ ok: false, problem: QUERY_RESULT_PROBLEMS.nonfinite(1, 'v') });
     expect(queryRowsOf({ content: '', structuredContent: [{ t: 1 }, { t: Number.NaN }] })).toEqual({ ok: false, problem: QUERY_RESULT_PROBLEMS.nonfinite(2, 't') });
     expect(QUERY_RESULT_PROBLEMS.nonfinite(2, 'v')).toBe('record 2 holds a number in "v" too large to read');
-    // a nested value stays the parser's to refuse, once
-    expect(queryRowsOf({ content: '[{"v":[1e400]}]' })).toEqual({ ok: true, rows: [{ v: [Infinity] }] });
+  });
+
+  // P3-F dashboard-model wave (scalpel-4#1): a row is a record and a cell a scalar, refused here otherwise in the parser's
+  // own words before anything serializes the rows, since a cell nested thousands deep overflows the serializer's stack
+  it('refuses a nested cell and a row that is no record, in either arm, before anything serializes the rows', () => {
+    const deep = (n: number) => `${'['.repeat(n)}1${']'.repeat(n)}`;
+    expect(queryRowsOf({ content: '[{"t":1},{"t":2,"v":{"a":1}}]' })).toEqual({ ok: false, problem: 'record 2 holds a nested value in "v"' });
+    expect(queryRowsOf({ content: '[{"v":[1e400]}]' })).toEqual({ ok: false, problem: 'record 1 holds a nested value in "v"' });
+    expect(queryRowsOf({ content: '', structuredContent: { rows: [{ v: [1] }] } })).toEqual({ ok: false, problem: 'record 1 holds a nested value in "v"' });
+    expect(queryRowsOf({ content: '', structuredContent: [{ t: 1 }, 3] })).toEqual({ ok: false, problem: 'record 2 is not an object' });
+    expect(queryRowsOf({ content: `[{"t":1,"v":${deep(10_000)}}]` })).toEqual({ ok: false, problem: 'record 1 holds a nested value in "v"' });
+    expect(queryRowsOf({ content: `[${deep(10_000)}]` })).toEqual({ ok: false, problem: 'record 1 is not an object' });
   });
 });

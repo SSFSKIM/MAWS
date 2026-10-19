@@ -1,0 +1,113 @@
+{
+  "recordedAt": "2026-10-18T16:44:55Z",
+  "executor": "afe4ec31e37c3925e",
+  "commits": [
+    "4b6b3ec69",
+    "7e8b60563",
+    "7d1fcec1a",
+    "9adf50241",
+    "796c9323e",
+    "e63120945"
+  ],
+  "paths": [
+    "src/artifacts/document/adapter.test.ts",
+    "src/artifacts/document/adapter.ts",
+    "src/artifacts/document/carries.ts",
+    "src/artifacts/document/editor/DocumentEditor.dom.test.tsx",
+    "src/artifacts/document/editor/Tabs.tsx",
+    "src/artifacts/document/editor/chrome.css",
+    "src/artifacts/document/export/docx.test.ts",
+    "src/artifacts/document/export/docx.ts",
+    "src/artifacts/document/export/markdown.test.ts",
+    "src/artifacts/document/export/markdown.ts",
+    "src/artifacts/document/markdown-syntax.ts",
+    "src/artifacts/document/markdown.test.ts",
+    "src/artifacts/document/markdown.ts",
+    "src/artifacts/document/tabs.test.ts",
+    "src/artifacts/document/tabs.ts",
+    "src/artifacts/types/document/format.md",
+    "src/engine-host/tool-server/documents.test.ts"
+  ],
+  "review": {
+    "reviewer": "affe8ead56a9bcb86",
+    "result": "incorrect:2 verified P2; fresh fix wave running",
+    "findings": [
+      "reader GFM-cell relaxation accepts multiline code-marked text, raw LF turns into visible <br> inside backticks",
+      "reader terminal LF/hardBreak followed by whitespace-only final node emits literal backslash instead of rendered br"
+    ],
+    "verification": "reviewer reproduced with in-memory read-only probes through slot; controller read gfmText/prepareInline terminal loop, confirms both paths",
+    "fixPaths": [
+      "src/artifacts/document/markdown.ts",
+      "src/artifacts/document/markdown-syntax.ts",
+      "src/artifacts/document/markdown.test.ts",
+      "src/artifacts/document/export/markdown.ts",
+      "src/artifacts/document/export/markdown.test.ts"
+    ],
+    "fixRule": "reader-only corrections with actual marked rendering; no canonical/parser grammar expansion; qualify broad header exactness as required by architect never-claim-remaining-loss-preserved ruling; one recheck"
+  },
+  "rowMap": {
+    "155": "4b6b3ec69",
+    "168": "7e8b60563",
+    "165": "7d1fcec1a",
+    "166": [
+      "9adf50241",
+      "796c9323e",
+      "e63120945"
+    ]
+  },
+  "checksControllerRead": {
+    "br-pass-2.log": "433/2 files, exit0",
+    "br-green.log": "688/19 files, exit0",
+    "br-green2.log": "25/3 files, exit0",
+    "br-lint.log": "exit0"
+  },
+  "otherChecks": "worker-reported; exact logs /tmp/maws-review/doc-b/; reviewer inspecting",
+  "scope": "L155 local50 tab guard, no cross-replica global arbiter; L168 stale whole-node delete forwarding refusal with unrelated edits retained, agent staleTargets already green; L165 marked-whitespace pins already green, no cause claimed; L166 canonical LF entity and existing backslash-br token only",
+  "ruling": "2026-10-18 architect: reader judged by rendered output, standard backslash break/inline br only; canonical edit roundtrip exact for preserved cases; one bounded hardBreak pass and recheck; exact remaining cases one P4 row",
+  "mirror": "searchable read-only export, not artifact_read/edit-quote authority; unchanged reader path",
+  "pendingP4": [],
+  "processDeviation": "DOC-B edited/committed export/markdown.ts,test and export/docx.ts,test before acknowledgment; scope now acknowledged under architect ruling, deviation retained.",
+  "acceptance": "source frontier ready for union gate; local GREEN not obtained (slot wait), remote GREEN pending",
+  "deferredRows": [
+    "| 2026-10-18 | P3-F W-DOC-B (L166 hardBreak boundary; architect ruling 2026-10-18) | After the one existing backslash-break pass e63120945, these hardBreak states remain unpreserved, not claimed lossless: (1) a break ending a paragraph reads back as two trailing spaces, and ending a list-item paragraph as nothing, with the item/paragraph ids re-minted; (2) a break in a heading ends it, subsequent text becoming a paragraph that takes the heading id; (3) a paragraph containing only a break reads back empty with ids and disappears without ids; (4) a break's own marks are lost, though neighbouring text marks survive. Reader output: a table cell containing a hardBreak still requires :::table structure blocks, displayed as text by an ordinary Markdown reader. | src/artifacts/document/markdown.test.ts, \"pins the hardBreaks with no exact form\", ids on/off and explicit id displacement; e63120945. The paragraph/container placements that are preserved have separate exact break* round trips. This is an explicit bounded remainder, not a claim that every case necessarily needs new syntax. | Define lossless representation/mark propagation for these exact remaining states, or obtain an owner ruling accepting a specified loss; replace the loss pins with exact round trips and rendered reader-cell proof. No additional grammar work in P3-F's one bounded pass. Owner: P4. |",
+    "| 2026-10-18 | P3-F W-DOC-B (near L165, standalone list punctuation) | A stored paragraph containing exactly - or + reads back through the canonical Markdown dialect as an empty bullet-list item rather than its literal character. The line-start escape currently requires following whitespace. Not repaired by the marked-whitespace pins or the bounded L166 break work. | Temporary stored-state __probeDash/__probePlus cases, ids on/off loop and named-block variants; retained raw output docs/doperpowers/evidence/p3-finish/codec-L165-probe.txt. Controller inspected the expected text versus received empty bullet-list diffs; no new causal-fix claim. | Escape literal line-start list punctuation even at the paragraph boundary, retaining exact content and ids in canonical read/edit round trips; add permanent regressions. Owner: P4 (document dialect). |",
+    "| 2026-10-18 | P3-F W-DOC-B (near L165, comment-mark boundary escaping) | Inline comment-mark boundaries can split Markdown constructs before escaping: commented 1 followed by . x reads back as a numbered list instead of literal 1. x; x followed by a space and commented ^ab can lose the marker text when the block is unnamed (the named-block variant passes). These exact cases are outside the one bounded L166 break pass. | Temporary __probeCommentSplitNumber/__probeCommentSplitMarker stored-state cases; expected/received diffs retained in docs/doperpowers/evidence/p3-finish/codec-L165-probe.txt. The numbered case fails with named blocks too; no broader comment-loss claim. | Evaluate boundary-sensitive escaping across inline runs while preserving comment milestones and stable ids; permanent exact round-trip regressions for these cases. Owner: P4 (document dialect). |"
+  ],
+  "supplementalDebtOutsideM0": true,
+  "codecProbe": {
+    "original": "/tmp/maws-review/doc-b/l165-probe.log",
+    "retained": "codec-L165-probe.txt",
+    "sha256": "ffb7aff199b35b7023005a26410e132133832393faf64c93790bfaf1c83b479a",
+    "status": "worker temporary probes, controller inspected actual failure diffs; no rerun or new repair"
+  },
+  "fixExecutor": "addfe16856ce9d938",
+  "environmentBlocker": {
+    "observedAt": "2026-10-18T17:18:33Z",
+    "reportedBy": "DOC-B fix worker addfe16856ce9d938, one-time process diagnosis requested after controller uptime read",
+    "status": "queued for shared local slot, tests not started, not source failure",
+    "ownedWrapperPid": 7940,
+    "elapsed": "27:42",
+    "command": "with-slot.sh pnpm --dir W exec vitest run src/artifacts/document/markdown.test.ts src/artifacts/document/export/markdown.test.ts",
+    "plainGreenLog": "/tmp/maws-review/doc-b-fix/green.log,0bytes at diagnosis",
+    "child": "only wrapper sleep10, no pnpm/vitest child",
+    "red": "worker retained3failed/433passed exit1 before fixes",
+    "hostLoadControllerRead": [
+      93.69,
+      106.22,
+      106.44
+    ],
+    "coordination": "architect identified other-session slot holders (remote-only CI waiter and long board-api sweep), requested release and will escalate if no movement in15min; DOC-B wrapper stays queued unchanged",
+    "prohibitionsObserved": "no slot override, live-lock deletion, other-process kill, bypass or completion polling"
+  },
+  "localSlotPolicy": "Architect ruling2026-10-18: local named check queued for a slot over10min is stopped, not waited for; preserve existing RED and commit source, reviewer reads diff against RED, union gate supplies GREEN. Record per row: local GREEN not obtained (slot wait); gate <run id> green only after verified result. Never fabricate unavailable checks. Lint/typecheck remote. Gate-only failure gets one bounded worker fix and DL59 relaunch. No slot bypass, lock deletion or other-process stop.",
+  "fix": {
+    "executor": "addfe16856ce9d938",
+    "commit": "264697a788a3f99ef73ba7f0ebb602109e7feed6",
+    "controllerRead": "five-path diff75insert/9delete and RED3fail/433pass exit1",
+    "localGreen": "not obtained; stopped slot-wait taskbc4vgnsji/pid7940, green.log empty",
+    "recheck": "implementation fixes accepted; sole rendered-entity assertion defect corrected d62e1aece, exact one-line diff controller-verified against retained RED line71; no third review",
+    "gateGreen": "pending; no pass claimed",
+    "assertionFix": "d62e1aece5238ae3e04d8d77992ba83ebc9d8e4b"
+  },
+  "localGreenOmissionResolution": "local GREEN not obtained (slot wait); unit group39156492025 green, overall run red elsewhere. Original pair4 native groups green; static corrective retry pending."
+}

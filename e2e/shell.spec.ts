@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { ACTIONS, type ActionId } from '../src/shared/keymap/actions';
 import { formatChord } from '../src/shared/keymap/chord';
+import { activateForScene, traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
@@ -107,7 +108,7 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
     await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(`${FIX} · MAWS`);
 
     // an open from elsewhere (the palette) of another project's session switches the strip to its set
-    await menu(app, 'palette.open');
+    await openPalette(app, page);
     await page.keyboard.type('quota');
     await page.keyboard.press('Enter');
     await expect(label).toHaveText('codex_somersault');
@@ -586,9 +587,15 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
 
     // ⌘0 floats the Overview over the session, which stays mounted behind it; Esc closes it and gives focus back.
     const shown = main.getByRole('tabpanel');
-    await menu(app, 'tab.overview');
-    await expect(overview).toBeVisible();
-    await expect(overview).toBeFocused();
+    // P3-F (tracker rows 200 and 264): a focus loss here reports the page's focus timeline and the window's state; in a
+    // foreground run the app takes the front once first and says whether it got it (no credit when it did not)
+    await activateForScene(app, 'overview-focus');
+    const trace = await traceForeground(app, page);
+    await trace.step('overview-focus', async () => {
+      await menu(app, 'tab.overview');
+      await expect(overview).toBeVisible();
+      await expect(overview).toBeFocused();
+    });
     await expect(shown.locator('.transcript')).toHaveCount(1);
     await page.keyboard.press('Escape');
     await expect(overview).toHaveCount(0);
@@ -625,7 +632,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
   });
 
   await test.step('Item 8: the ⌘K palette', async () => {
-    await menu(app, 'palette.open');
+    await openPalette(app, page);
     await expect(palette).toBeVisible();
     const actions = palette.getByRole('group', { name: 'Actions' }).getByRole('option');
     const ids = Object.keys(ACTIONS) as ActionId[];
@@ -650,14 +657,14 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     await expect(palette).toHaveCount(0);
     await expect.poll(() => selectedTab(page, 'Open tabs'), { message: '⏎ opens it' }).toBe(three[2]);
 
-    await menu(app, 'palette.open');
+    await openPalette(app, page);
     await page.keyboard.type('dark');
     await expect(palette.getByRole('group', { name: 'Actions' }).getByRole('option')).toHaveText([/^Appearance: Dark/]);
     await expect(palette.getByRole('group', { name: 'Sessions' })).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(palette).toHaveCount(0);
 
-    await menu(app, 'palette.open');
+    await openPalette(app, page);
     await page.keyboard.type('north');
     await expect(palette.getByRole('group', { name: 'Sessions' }).getByRole('option')).toHaveCount(1);
     await page.keyboard.press('Meta+Enter');
@@ -679,7 +686,7 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     // palette brings MAWS's set and its split back while the sidebar stays on the project.
     await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the clicked project’s empty set' }).toEqual([]);
     await expect(main.getByRole('button', { name: `Tabs of ${USAGE_PROJECT}` })).toBeVisible();
-    await menu(app, 'palette.open');
+    await openPalette(app, page);
     await page.keyboard.type('charter');
     await page.keyboard.press('Enter');
     await expect.poll(() => tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research · MAWS']);
@@ -747,6 +754,14 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
     return true;
   }, id);
   expect(clicked, `menu item ${id} exists and is enabled`).toBe(true);
+}
+
+// The ⌘K palette opened from its menu item, its input holding focus before anything is typed: Radix moves focus into the
+// dialog after it mounts, and a key sent before that is lost, so the query misses its first letters (P3-F, tracker row
+// 264: `dark` was read as `ark`, listing `Appearance: Dark` and `Mark up`).
+async function openPalette(app: ElectronApplication, page: Page): Promise<void> {
+  await menu(app, 'palette.open');
+  await expect(page.getByRole('dialog', { name: 'Command palette' }).getByRole('combobox')).toBeFocused();
 }
 
 // Plays the scenario's timeline up to `ms` (the manual clock, MAWS_SCENARIO_CLOCK=manual).

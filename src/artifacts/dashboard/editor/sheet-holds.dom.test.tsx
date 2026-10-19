@@ -179,3 +179,34 @@ describe('the source sheet’s lost capture stays lost (E3)', () => {
     expect(m.sheet.snapshot().hold).toBe('held');
   });
 });
+
+// P3-F dashboard-model wave (scalpel-2#1): the hold gates the rows as it gates the read. A lost hold withholds the rows
+// read under it, the table and Copy rows alike, while its recapture is pending, and a failed recapture leaves the
+// unavailable alert with nothing to show or copy; the source's rows and a view's alike.
+describe('the source sheet’s rows under a lost hold (P3-F)', () => {
+  for (const view of [undefined, { spec: { view: 'table' }, caption: 'All of it' }]) {
+    it(`withholds them while the recapture is pending and after it fails (${view ? 'a view’s rows' : 'the source’s rows'})`, async () => {
+      const m = mount();
+      const first = lease();
+      let answer!: (fresh: null) => void;
+      act(() => m.sheet.open([{ id: 'live', descriptor: fetched('assets/q1.json'), ...(view && { view }) }], 'live', first, () => new Promise<null>((resolve) => (answer = resolve))));
+      first.resolve();
+      await settle();
+      const dialog = screen.getByRole('dialog');
+      const copy = () => within(dialog).getByRole('button', { name: 'Copy rows' });
+      expect(within(dialog).queryAllByRole('row')).toHaveLength(2);
+      expect(copy().hasAttribute('disabled')).toBe(false);
+      first.lose();
+      await settle();
+      expect(m.sheet.snapshot().hold).toBe('pending');
+      expect(within(dialog).queryAllByRole('row')).toHaveLength(0);
+      expect(within(dialog).getByText('Reading the rows…')).toBeTruthy();
+      expect(copy().hasAttribute('disabled')).toBe(true);
+      answer(null);
+      await settle();
+      expect(within(dialog).getByRole('alert').textContent).toBe('This snapshot is no longer available; open the source again to see the current one.');
+      expect(within(dialog).queryAllByRole('row')).toHaveLength(0);
+      expect(copy().hasAttribute('disabled')).toBe(true);
+    });
+  }
+});

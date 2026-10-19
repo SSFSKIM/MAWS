@@ -3,7 +3,7 @@
 // body's bottom left. Over a Browser tab in the panel the page is a native view drawn over the DOM, so a pill there would
 // be under the page: the browser's chrome draws it at the right end of its tab row instead (`ChromePill`, the
 // coordinator's ruling on M2), and the layer draws none while a chrome hosts it.
-import { useLayoutEffect } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { displayTitle } from '../sessions/title';
 import { useLayout } from '../stores/layout';
@@ -13,13 +13,21 @@ import { CARD_MARGIN, cardSession, openCard, useFloatingCard } from './floating'
 export const useSessionTitle = (appSessionId: AppSessionId) => useSessions((s) => displayTitle(s.records.get(appSessionId)));
 
 // `floating`: at the panel body's bottom left, over the tool; `inline`: in a row of controls (the browser's tab row), at
-// the row's chip height.
+// the row's chip height. The first pill to mount after the card's Close takes the keyboard (P3-F): in one commit the
+// chrome's comes before the layer's, which goes once the chrome hosts the pill.
 export function Pill({ appSessionId, placement }: { appSessionId: AppSessionId; placement: 'floating' | 'inline' }) {
   const title = useSessionTitle(appSessionId);
   const unread = useSessions((s) => s.records.get(appSessionId)?.unread === true);
+  const self = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    if (!useFloatingCard.getState().pillTakesFocus) return;
+    useFloatingCard.setState({ pillTakesFocus: false });
+    self.current?.focus();
+  }, []);
   const place = placement === 'floating' ? 'pointer-events-auto absolute h-7 shadow-float' : 'h-6 shrink-0';
   return (
     <button
+      ref={self}
       type="button"
       aria-label="Show session card"
       title={unread ? `${title} · Unread` : title}

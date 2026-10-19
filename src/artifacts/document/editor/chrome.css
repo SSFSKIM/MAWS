@@ -117,14 +117,15 @@
   border-radius: var(--radius-sm);
 }
 .doc-tool:hover:not(:disabled),
-.doc-icon-button:hover {
+.doc-icon-button:hover:not(:disabled) {
   background: var(--bg-hover);
 }
 .doc-tool[data-active] {
   background: var(--bg-active);
   color: var(--accent);
 }
-.doc-tool:disabled {
+.doc-tool:disabled,
+.doc-icon-button:disabled {
   color: var(--fg-faint);
 }
 .doc-toolbar-select {

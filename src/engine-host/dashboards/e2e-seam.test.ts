@@ -3,10 +3,12 @@
 // directory as cwd: the agent's create from markdown, its bind of a file it wrote there, its read, a replay of one
 // tool-use id, a path outside the directory refused, and B's thread tools on the dashboard; each answer carries its wall
 // time and the host loop around it; commands also arrive over the file channel.
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readDataset } from '@artifacts/dashboard/datasets';
 import { registerDocumentKind, type DocumentKind } from '../documents/kinds/document';
 import { DocumentService } from '../documents/service';
 import { SqliteDocumentStorage } from '../documents/storage';
@@ -27,6 +29,7 @@ beforeEach(() => {
   seam = new DashboardE2eSeam(store, join(data, 'cwd'));
 });
 afterEach(() => {
+  vi.restoreAllMocks(); // P3-F L247: the stepped Date.now
   seam.close();
   world.dashboards.close();
   world.kind.close();
@@ -172,6 +175,61 @@ describe('the measurement corrections (E2 M6 review; parent Decision Log 42)', (
     expect(answered(await seam.run({ cmd: 'call', session: 'B', tool: 'artifact_read', args: { artifact: other } })).announcedAt).toBeUndefined();
     const calls = 6; // two creates, the bind, the refusal, the replay and the read
     expect(subscribed.off, 'every call ends its subscription').toBe(calls);
+  });
+
+  it('matches each write’s announcement to the call’s own revision, the one carrying its marker, beside another session’s interleaved write (P3-F L247)', async () => {
+    // Every `updated` the seam's listener takes is logged with the clock value it read (Date.now, stepped by one per
+    // read, so a stamp names one delivery), the delivering subscription, and the bound descriptors' content SHA at that
+    // revision; `announcedAt` is then traced back to the one delivery it came from.
+    let clock = 1_700_000_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => ++clock);
+    const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+    const descriptorSha = (artifactId: string, dataset: string) => (readDataset(world.store.service.live(artifactId), dataset)?.source as { sha256?: string } | undefined)?.sha256;
+    const deliveries: { subscription: number; stamp: number; artifactId: string; revision: number; sales?: string; costs?: string }[] = [];
+    let subscriptions = 0;
+    const onChange = world.store.onChange.bind(world.store);
+    world.store.onChange = (listener) => {
+      const subscription = ++subscriptions;
+      return onChange((change) => {
+        listener(change);
+        if (change.change === 'updated') deliveries.push({ subscription, stamp: clock, artifactId: change.artifactId, revision: change.revision, sales: descriptorSha(change.artifactId, 'sales'), costs: descriptorSha(change.artifactId, 'costs') });
+      });
+    };
+    const traced = (answer: DashboardCallAnswer) => deliveries.find((d) => d.stamp === answer.announcedAt);
+
+    const id = await created('A');
+    await seam.run({ cmd: 'call', session: 'B', tool: 'artifact_read', args: { artifact: id } });
+    // a unique marker per call, in the bytes each session binds
+    const markerA = `region,sales\nSeoul,${clock % 100_000}\n`;
+    const markerB = `region,costs\nBusan,${(clock % 100_000) + 1}\n`;
+    await write('A', markerA);
+    writeFileSync(join(((await seam.run({ cmd: 'cwd', session: 'B' })) as { cwd: string }).cwd, 'costs.csv'), markerB);
+    // the two sessions' writes to the one dashboard, in flight together
+    const before = subscriptions;
+    const [a, b] = (
+      await Promise.all([
+        bind('A', id),
+        seam.run({ cmd: 'call', session: 'B', tool: 'artifact_dataset', args: { artifact: id, id: 'costs', path: 'costs.csv', baseRevision: 'last' } }),
+      ])
+    ).map(answered);
+    expect([a!.isError, b!.isError], `${a!.text} ${b!.text}`).toEqual([false, false]);
+    const calls = [
+      { answer: a!, revision: (a!.result as { revision: number }).revision, own: { sales: sha(markerA) } },
+      { answer: b!, revision: (b!.result as { revision: number }).revision, own: { costs: sha(markerB) } },
+    ];
+    expect(calls[0]!.revision).not.toBe(calls[1]!.revision);
+    const during = deliveries.filter((d) => d.subscription > before);
+    // an announcement taken is its own call's: the delivery it came from is at the call's revision, whose descriptor
+    // carries the call's own marker, never the other session's revision
+    const announced = calls.filter((c) => c.answer.announcedAt !== undefined);
+    expect(announced.length, 'the later write is always announced').toBeGreaterThan(0);
+    for (const c of announced) expect(traced(c.answer)).toMatchObject({ artifactId: id, revision: c.revision, ...c.own });
+    // when one batch committed both writes, the store announces only the batch's revision: the earlier call's own
+    // revision is never announced, so it takes none (absent, which fails the scale row by name), not the other's
+    for (const c of calls.filter((c) => c.answer.announcedAt === undefined)) expect(during.filter((d) => d.revision === c.revision)).toEqual([]);
+    // the interleaving happened: a call's subscription delivered a revision that is not its call's, and did not take it
+    const tookAt = new Map(announced.map((c) => [traced(c.answer)!.subscription, c.revision]));
+    expect(during.some((d) => !tookAt.has(d.subscription) || d.revision !== tookAt.get(d.subscription)), 'one write was announced inside the other call').toBe(true);
   });
 
   it('mints fresh tool-use ids across a release and a recreated seam; a given id still replays its first answer', async () => {

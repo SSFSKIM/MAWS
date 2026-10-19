@@ -694,3 +694,249 @@ describe('a writer’s inputs and the mirror’s refresh (P3-C)', () => {
   });
 });
 // P3-C end
+
+// P3-F (the library panel's F-library wave): a directory away or relinked keeps what the mirror owns there and is never
+// written through; one directory spelled two ways is one directory; a link in a copy's place is not the copy.
+describe('the mirror over a directory that goes away, is relinked or is spelled two ways (P3-F)', () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const page = (title: string, spaceId: string) => store().create({ kind: 'html', title, spaceId, content: html(title) }, agent);
+  const file = (artifact: { id: string; title: string }) => `${mirrorSlug(artifact)}.html`;
+
+  it('keeps the entry of an artifact deleted while its directory is away, and removes its file once the directory is back (library sweep#1)', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    const gone = await page('Gone', space.id);
+    const kept = await page('Kept', space.id);
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, file(gone), file(kept)].sort());
+    const away = `${project}-away`;
+
+    renameSync(project, away);
+    try {
+      await store().delete(gone.id);
+      await mirror!.flush();
+    } finally {
+      renameSync(away, project);
+    }
+    await store().writeContent(kept.id, html('Kept 2'), agent); // a later change in the Space
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, file(kept)]);
+    expect(Object.keys(manifest().artifacts)).toEqual([kept.id]);
+
+    renameSync(project, away); // the last entry too
+    try {
+      await store().delete(kept.id);
+      await mirror!.flush();
+    } finally {
+      renameSync(away, project);
+    }
+    await store().updateSpace(space.id, { name: 'Launch 2' }); // a later change of the Space
+    await mirror!.flush();
+    expect(listed()).toEqual([]);
+  });
+
+  it('never writes the manifest through an `artifacts` relinked while the host runs, keeping another project’s manifest there as it was (library scalpel-2#1)', async () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
+    try {
+      await startMirror();
+      const space = await linkedSpace();
+      const a = await page('A', space.id);
+      await page('B', space.id);
+      await mirror!.flush();
+      const theirs = `${JSON.stringify({ version: 1, artifacts: { other: { revision: 3, slug: 'other', files: ['other.html'] } } }, null, 2)}\n`;
+      writeFileSync(join(elsewhere, MIRROR_MANIFEST), theirs); // another project's mirror
+      renameSync(out(), join(project, 'artifacts-moved'));
+      symlinkSync(elsewhere, out()); // the owner relinks `artifacts/`
+
+      await store().delete(a.id);
+      await mirror!.flush();
+      expect(readdirSync(elsewhere)).toEqual([MIRROR_MANIFEST]);
+      expect(readFileSync(join(elsewhere, MIRROR_MANIFEST), 'utf8')).toBe(theirs);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it('never writes the manifest through an `artifacts` relinked during a pass (library scalpel-2#1)', async () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
+    try {
+      let relink = false;
+      offs.push(
+        registerMirrorWriter('document', ({ artifact, doc }) => {
+          if (relink) {
+            relink = false;
+            renameSync(out(), join(project, 'artifacts-moved'));
+            symlinkSync(elsewhere, out()); // the owner relinks `artifacts/` while the mirror writes
+          }
+          return { files: { [`${mirrorSlug(artifact)}.md`]: doc!.get('root').toString() } };
+        }),
+      );
+      await startMirror();
+      const space = await linkedSpace();
+      await page('Page', space.id); // the manifest keeps naming this one
+      const doc = await store().create({ kind: 'document', title: 'Doc', spaceId: space.id }, human);
+      await store().testWrite(doc.id, 'w1', [{ op: 'insertText', index: 0, text: 'v1' }], human);
+      await mirror!.flush();
+      expect(listed()).toHaveLength(3);
+
+      relink = true;
+      await store().testWrite(doc.id, 'w2', [{ op: 'insertText', index: 0, text: 'v2 ' }], human);
+      await sleep(CHANGE_COALESCE_MS + 50);
+      await mirror!.flush();
+      expect(relink).toBe(false);
+      expect(readdirSync(elsewhere)).toEqual([]);
+      expect(logs.some((line) => line.includes('could not be written'))).toBe(true);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps two Spaces linked to one directory by two spellings in one manifest (library scalpel-2#2)', async () => {
+    const links = mkdtempSync(join(tmpdir(), 'maws-mirror-links-'));
+    try {
+      const alias = join(links, 'alias');
+      symlinkSync(project, alias); // the same directory, spelled through a link
+      const one = await linkedSpace('One');
+      const two = await linkedSpace('Two', alias);
+      const a = await page('A', one.id);
+      const b = await page('B', two.id);
+      await startMirror();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(a), file(b)].sort());
+      expect(Object.keys(manifest().artifacts).sort()).toEqual([a.id, b.id].sort());
+
+      await store().updateSpace(one.id, { name: 'One again' }); // a later reconciliation
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(a), file(b)].sort());
+      await store().updateSpace(two.id, { linkedDir: null });
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(a)]);
+      expect(logs).toEqual([]);
+    } finally {
+      rmSync(links, { recursive: true, force: true });
+    }
+  });
+
+  it('knows a directory away since the start under its real path once it is back: what it missed is mirrored, nothing else rewritten (library scalpel-2#2)', async () => {
+    const links = mkdtempSync(join(tmpdir(), 'maws-mirror-links-'));
+    const away = `${project}-away`;
+    try {
+      const alias = join(links, 'alias');
+      symlinkSync(project, alias);
+      const space = await linkedSpace('Launch', alias);
+      const still = await page('Still', space.id);
+      const gone = await page('Gone', space.id);
+      const kept = await page('Kept', space.id);
+      await startMirror();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(still), file(gone), file(kept)].sort());
+      const inode = lstatSync(out(file(still))).ino;
+      mirror!.close();
+
+      renameSync(project, away);
+      let added: { id: string; title: string } | undefined;
+      try {
+        await startMirror(); // its first load fails: known by the spelling it is linked by
+        await store().delete(gone.id);
+        added = await page('Added', space.id);
+        await mirror!.flush();
+      } finally {
+        renameSync(away, project);
+      }
+      await store().writeContent(kept.id, html('Kept 2'), agent); // a later change in the Space
+      await mirror!.flush();
+      await store().updateSpace(space.id, { name: 'Launch 2' });
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(still), file(kept), file(added!)].sort());
+      expect(read(file(kept))).toBe('<p>Kept 2</p>');
+      expect(lstatSync(out(file(still))).ino).toBe(inode); // never removed and written again
+    } finally {
+      rmSync(links, { recursive: true, force: true });
+      rmSync(away, { recursive: true, force: true });
+    }
+  });
+
+  it('writes a copy over a link the owner put in its place, leaving what the link points at alone (library scalpel-2#3)', async () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
+    try {
+      const copy = { read: () => new Uint8Array([5, 6]) };
+      offs.push(registerMirrorWriter('document', ({ doc }): MirrorOutput => ({ files: { 'd/text.txt': doc!.get('root').toString(), 'd/assets/a.bin': copy } })));
+      await startMirror();
+      const space = await linkedSpace();
+      const doc = await store().create({ kind: 'document', title: 'Doc', spaceId: space.id }, human);
+      await store().testWrite(doc.id, 'w1', [{ op: 'insertText', index: 0, text: 'v1' }], human);
+      await mirror!.flush();
+      expect([...readFileSync(out('d', 'assets', 'a.bin'))]).toEqual([5, 6]);
+      writeFileSync(join(elsewhere, 'theirs.bin'), 'the owner’s file');
+      rmSync(out('d', 'assets', 'a.bin'));
+      symlinkSync(join(elsewhere, 'theirs.bin'), out('d', 'assets', 'a.bin'));
+
+      await store().testWrite(doc.id, 'w2', [{ op: 'insertText', index: 0, text: 'v2 ' }], human);
+      await sleep(CHANGE_COALESCE_MS + 50);
+      await mirror!.flush();
+      expect(lstatSync(out('d', 'assets', 'a.bin')).isFile()).toBe(true);
+      expect([...readFileSync(out('d', 'assets', 'a.bin'))]).toEqual([5, 6]);
+      expect(mode('d', 'assets', 'a.bin')).toBe(0o444);
+      expect(readFileSync(join(elsewhere, 'theirs.bin'), 'utf8')).toBe('the owner’s file');
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it('stops writing into a directory the Space’s link no longer reaches, and mirrors where it points once that is there (library review keyOf)', async () => {
+    const links = mkdtempSync(join(tmpdir(), 'maws-mirror-links-'));
+    try {
+      const link = join(links, 'project');
+      symlinkSync(project, link); // the Space's path, a link to the project
+      await startMirror();
+      const space = await linkedSpace('Launch', link);
+      const first = await page('First', space.id);
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, file(first)]);
+
+      const later = join(links, 'later');
+      rmSync(link);
+      symlinkSync(later, link); // retargeted to a directory not there yet; the project stays on disk
+      const second = await page('Second', space.id);
+      await mirror!.flush();
+      expect(listed()).toEqual([]); // nothing written there, and its mirror removed as any directory no Space links
+      expect(logs.some((line) => line.includes('Launch') && line.includes(link))).toBe(true);
+
+      mkdirSync(later);
+      await store().writeContent(second.id, html('Second 2'), agent);
+      await mirror!.flush();
+      expect(readdirSync(join(later, 'artifacts')).sort()).toEqual([MIRROR_MANIFEST, file(first), file(second)].sort());
+    } finally {
+      rmSync(links, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps every file either manifest named when two directories it knew become one (library review merge)', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'maws-mirror-links-'));
+    try {
+      const [a, b] = [join(root, 'a'), join(root, 'b')];
+      mkdirSync(a);
+      mkdirSync(b);
+      const mirrored = (dir: string) => (existsSync(join(dir, 'artifacts')) ? readdirSync(join(dir, 'artifacts')).sort() : []);
+      const one = await linkedSpace('One', a);
+      const two = await linkedSpace('Two', b);
+      const moved = await page('Old', one.id);
+      await startMirror();
+      expect(mirrored(a)).toEqual([MIRROR_MANIFEST, file(moved)].sort());
+
+      renameSync(a, `${a}-away`); // away while the artifact moves to b under a new name: a's entry stays owned
+      await store().update(moved.id, { spaceId: two.id, title: 'New' });
+      await mirror!.flush();
+      const renamed = file({ id: moved.id, title: 'New' });
+      expect(mirrored(b)).toEqual([MIRROR_MANIFEST, renamed].sort());
+
+      rmSync(b, { recursive: true, force: true }); // the owner puts a's folder in b's place, a link left at a's name
+      renameSync(`${a}-away`, b);
+      symlinkSync(b, a);
+      await store().updateSpace(one.id, { name: 'One again' });
+      await mirror!.flush();
+      expect(mirrored(b)).toEqual([MIRROR_MANIFEST, renamed].sort()); // a's file under the old name removed, never left unowned
+      expect(Object.keys((JSON.parse(readFileSync(join(b, 'artifacts', MIRROR_MANIFEST), 'utf8')) as { artifacts: object }).artifacts)).toEqual([moved.id]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

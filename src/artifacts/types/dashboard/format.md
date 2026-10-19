@@ -30,7 +30,7 @@ A live dataset's source is a query: a read-only MCP tool (`server · tool` in it
 |---|---|
 | `view` | `bar`, `line`, `area`, `scatter`, `pie` or `table` |
 | `x` | the column along the x axis, or a pie's slices |
-| `y` | a column, or a list of up to 8, drawn as numbers; a pie's sizes |
+| `y` | a column, or a list of up to 8, drawn as numbers; a pie takes exactly one, its sizes |
 | `series` | a column whose values split the rows into series |
 | `agg` | `sum`, `mean`, `count`, `min` or `max`: groups the rows by `x` (and `series`) and aggregates each `y`; `count` counts rows and needs no `y` |
 | `filter` | a list of `{"column", "op", "value"}`, every one kept: `op` is `eq`, `ne`, `lt`, `gt`, or `in` with a list of up to 256 values; the number `1` and the text `"1"` are different values |

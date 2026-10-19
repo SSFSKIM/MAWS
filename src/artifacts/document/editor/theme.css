@@ -143,8 +143,10 @@
   outline-offset: -2px;
 }
 
-/* the callout's tone (data-callout-tone, the ledger's canon name): note, tip, warn, danger */
-.ds-doc .doc-callout {
+/* the callout's tone (data-callout-tone, the ledger's canon name): note, tip, warn, danger. Styled by the attribute, which
+   the node view's callout and the inert attributed one (a version's, the suggestion review's) both carry, at the
+   specificity of a design system's own callout rules (D's components/document.css), which still come after */
+.ds-doc [data-callout-tone] {
   display: flex;
   flex-direction: column;
   gap: var(--ds-space-1, var(--space));
@@ -154,13 +156,13 @@
   border-radius: var(--ds-radius-md, var(--radius));
   padding: var(--ds-space-3, calc(var(--space) * 3)) var(--ds-space-4, calc(var(--space) * 4));
 }
-.ds-doc .doc-callout[data-callout-tone="tip"] {
+.ds-doc [data-callout-tone="tip"] {
   border-left-color: var(--ds-color-status-ok, var(--success));
 }
-.ds-doc .doc-callout[data-callout-tone="warn"] {
+.ds-doc [data-callout-tone="warn"] {
   border-left-color: var(--ds-color-status-warn, var(--warning));
 }
-.ds-doc .doc-callout[data-callout-tone="danger"] {
+.ds-doc [data-callout-tone="danger"] {
   border-left-color: var(--ds-color-status-error, var(--danger));
 }
 .ds-doc .doc-callout-tone {

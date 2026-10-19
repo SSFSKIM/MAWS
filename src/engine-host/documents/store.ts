@@ -9,6 +9,7 @@
 // announced before the commit (Decision Log 26).
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, bindingVersion, decodeMap, encodeMap, mergeMaps, newDoc, type Doc } from '@artifacts/yjs';
@@ -34,6 +35,7 @@ import { actorFromKey, VersionStore, type DesignSystemRef, type VersionKind } fr
 export const AUTO_IDLE_MS = 2 * 60_000; // an auto version 2 minutes after the last human update (§4.7)
 export const AUTO_EVERY_MS = 10 * 60_000; // and every 10 minutes of continuous activity, by anyone
 export const CHANGE_COALESCE_MS = 250; // a Y doc's commits reach the change feed at most this often per artifact
+export const STAGED_MAX_AGE_MS = 3_600_000; // a staged temp file this old is a killed write's (collectStaged)
 
 export type ArtifactChange = 'created' | 'updated' | 'deleted' | 'linked';
 export interface ArtifactChanged {
@@ -59,6 +61,9 @@ export interface ListFilter {
 // A byte kind's content: `html` takes bytes (and a file name, `index.html` by default), `file` a path in place, with its
 // `digest` when the caller hashed it beforehand (`files.describeStreamed`, off the commit path), else hashed at the write.
 export type ByteContent = { bytes: Uint8Array; name?: string } | { path: string; digest?: { sha256: string; size: number } };
+
+// A version row as the store reads it.
+type VersionRow = NonNullable<ReturnType<VersionStore['get']>>;
 
 export interface CreateInput {
   kind: ArtifactKind;
@@ -299,9 +304,11 @@ export class ArtifactStore {
   }
 
   // An artifact named by its UUID or by a handle its asking session's lineage created (itself first, then its
-  // ancestors nearest first; Decision Log 3). Null when nothing live matches.
+  // ancestors nearest first; Decision Log 3). Null when nothing live matches. P3-F (artifact-protocol finding 7): a
+  // handle may be shaped like a UUID (E2's ids were names an agent chose), so a UUID that names no live artifact is
+  // looked up as a handle: it resolves, and collides at a create, as any handle does.
   resolve(ref: string, lineage: readonly string[] = []): string | null {
-    if (UUID.test(ref)) return this.get(ref) ? ref : null;
+    if (UUID.test(ref) && this.get(ref)) return ref;
     const find = this.storage.db.prepare(
       "SELECT a.id FROM artifacts a JOIN artifact_sessions s ON s.artifactId = a.id AND s.role = 'created' WHERE s.appSessionId = ? AND a.handle = ? AND a.deletedAt IS NULL ORDER BY a.createdAt DESC LIMIT 1",
     );
@@ -316,8 +323,21 @@ export class ArtifactStore {
   // write it as an `import` version; Y kinds start with `initial` written in the entity's savepoint, else with their
   // kind adapter's seed (`KindAdapter.initial`, Decision Log 44c), else empty. One `created` announces it: the first
   // content's commit is not also announced as an update.
+  //
+  // F (L139): a file given by its path alone is hashed by a streamed read once the create is checked, before its batch;
+  // the checks run again where it writes (a Space or a system may have gone meanwhile), their refusal released after the
+  // batch they read (`writeCommitted`).
   async create(input: CreateInput, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     this.checkCreate(input, actor);
+    if (input.kind !== 'file' || !input.content || !('path' in input.content) || input.content.digest) return this.createChecked(input, actor, inFrame); // a path of another kind is refused by its write, unread
+    const content = await this.withDigest(input.content);
+    return this.writeCommitted(async () => {
+      this.checkCreate(input, actor);
+      return this.createChecked({ ...input, content }, actor, inFrame);
+    });
+  }
+
+  private async createChecked(input: CreateInput, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     const id = randomUUID();
     const at = this.now();
     const adapter = isDocKind(input.kind) ? this.service.adapterFor(input.kind) : undefined;
@@ -444,12 +464,26 @@ export class ArtifactStore {
   // The copy is one savepoint (Decision Log 37c): the entity row, its link and its assets, then a Y kind's state through
   // the duplicator's host replica (the doc takes its kind's adapter from the entity row written first) with its
   // `import` version, or a byte kind's content write. A copy whose state fails to land leaves nothing, rows or files.
+  //
+  // F (L139): a file's content is hashed by a streamed read before the copy's batch. The source and its version are read
+  // again where the copy is written, so a source or a version gone meanwhile is refused, and the copy takes the source's
+  // placement as it is then (never a system or a Space since deleted); its content stays the one hashed.
   async duplicate(artifactId: string, options: { versionId?: number; title?: string }, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     const source = this.requireLive(artifactId);
     const version = options.versionId === undefined ? undefined : this.requireVersion(artifactId, options.versionId);
+    const content = isDocKind(source.kind) ? null : this.byteContentOf(source, version ? (JSON.parse(version.content!) as ContentRef) : this.contentRef(artifactId).ref);
+    if (!content || !('path' in content)) return this.copyOf(source, version, content, options, actor, inFrame);
+    const hashed = await this.withDigest(content);
+    return this.writeCommitted(async () =>
+      this.copyOf(this.requireLive(artifactId), options.versionId === undefined ? undefined : this.requireVersion(artifactId, options.versionId), hashed, options, actor, inFrame),
+    );
+  }
+
+  // The copy itself, synchronous up to its batch: `content` a byte kind's, null for a Y kind.
+  private async copyOf(source: EntityRow, version: VersionRow | undefined, content: ByteContent | null, options: { title?: string }, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
+    const artifactId = source.id;
     const id = randomUUID();
     const at = this.now();
-    const content = isDocKind(source.kind) ? null : this.byteContentOf(source, version ? (JSON.parse(version.content!) as ContentRef) : this.contentRef(artifactId).ref);
     const state = !isDocKind(source.kind) ? null : version ? this.versions.state(artifactId, version.id) : this.service.readState(artifactId).state;
     const pinned = version ? (JSON.parse(version.assetRefs) as string[]) : this.assetIds(artifactId);
     const assets = state ? this.retention.copiedAssets(artifactId, pinned, state) : pinned; // E3: never a snapshot its state cannot name
@@ -565,6 +599,16 @@ export class ArtifactStore {
     this.emit(artifactId, 'linked');
   }
 
+  // A session's link written in the frame of a write its caller holds open (a `writeAs`'s or a store write's `inFrame`),
+  // so it commits with that write or not at all (P3-F, artifact-protocol finding 3: a publish links `edited` only with
+  // what it wrote, never on a refusal), and announced after that commit as `link`'s is. Outside a write's savepoint it
+  // throws, as the op ledger's `record` does: the link would commit on its own.
+  linkInWrite(artifactId: string, appSessionId: AppSessionId, role: ArtifactSessionLink['role']): void {
+    if (!this.storage.frameOpen) throw new Error(`the ${role} link of ${artifactId} was written outside a write's savepoint: write it inside the savepoint of the write it commits with`);
+    this.linkInFrame(artifactId, appSessionId, role, this.now());
+    this.emit(artifactId, 'linked');
+  }
+
   links(artifactId: string): ArtifactSessionLink[] {
     return this.storage.db.prepare('SELECT artifactId, appSessionId, role, lastAt FROM artifact_sessions WHERE artifactId = ? ORDER BY lastAt, appSessionId, role').all(artifactId) as unknown as ArtifactSessionLink[];
   }
@@ -646,6 +690,18 @@ export class ArtifactStore {
 
   private byteContentOf(row: EntityRow, ref: ContentRef): ByteContent {
     return row.kind === 'html' ? { bytes: this.files.read(row.id, ref), name: ref.name } : { path: ref.path };
+  }
+
+  // A file's content with its digest, hashed now by a streamed read (`files.describeStreamed`), so the write's batch only
+  // records it and a large file never holds the event loop inside the transaction (the owner's create, copy and restore,
+  // as the agent's `send_file` and `artifact_create` hash first). Bytes, a given digest, or a path that is not a regular
+  // file or cannot be read are answered unchanged: the write's own checks refuse what it cannot use. Only a regular file
+  // is opened (a FIFO or a device could block the read).
+  async withDigest(content: ByteContent): Promise<ByteContent> {
+    if (!('path' in content) || content.digest || !isAbsolute(content.path)) return content;
+    if (!(await stat(content.path).catch(() => null))?.isFile()) return content;
+    const described = await this.files.describeStreamed(content.path).catch(() => null);
+    return described ? { path: content.path, digest: { sha256: described.sha256, size: described.size } } : content;
   }
 
   // Inside a savepoint: one byte-kind write (its log row, its file in place, its version, pinned to the governing design
@@ -953,7 +1009,7 @@ export class ArtifactStore {
     const at = this.now();
     const { revision, state } = this.service.readState(row.id);
     const actor = typeof meta.actor === 'string' ? meta.actor : actorKey(meta.actor);
-    const id = this.versions.writeState(row.id, revision, state, { ...meta, actor, at, designSystemRef: this.pinInFrame(row), assetRefs: this.assetIds(row.id) }, options);
+    const id = this.versions.writeState(row.id, revision, state, this.withPin(row, { ...meta, actor, at, assetRefs: this.assetIds(row.id) }), options);
     // The state kept for the next delta lives as long as the doc stays loaded (the service's unload forgets it); a doc
     // read from the store without loading (a scheduled auto version after the idle unload, a design system's pin)
     // keeps none.
@@ -974,6 +1030,15 @@ export class ArtifactStore {
     const revision = this.service.revision(system.id);
     if (this.versions.latest(system.id)?.seq !== revision) this.versionInFrame(system, { kind: 'auto', actor: this.lastWriter(system.id) }, { pinTarget: true });
     return { id: system.id, versionSeq: this.versions.latest(system.id)!.seq };
+  }
+
+  // `meta` with its design-system pin read only where the version store writes a row with it (P3-F store-versions
+  // sweep#1): a version that writes nothing (an `auto` at a revision already captured, a turn's checkpoint with no `auto`
+  // to upgrade) leaves the governing system's history and `updatedAt` alone, since Decision Log 22b writes the system's
+  // `auto` only for a version written. Read at most once.
+  private withPin<T extends object>(row: EntityRow, meta: T): T & { readonly designSystemRef: DesignSystemRef | null } {
+    let pin: { ref: DesignSystemRef | null } | null = null;
+    return Object.defineProperty(meta, 'designSystemRef', { enumerable: true, get: () => (pin ??= { ref: this.pinInFrame(row) }).ref }) as T & { readonly designSystemRef: DesignSystemRef | null };
   }
 
   // The live design system governing `target` as the registered chain names it (Decision Log 42), or null when the
@@ -1029,6 +1094,23 @@ export class ArtifactStore {
       const live = this.storage.db.prepare('SELECT 1 FROM artifact_updates WHERE artifactId = ? AND content = ? AND seq = (SELECT MAX(seq) FROM artifact_updates WHERE artifactId = ? AND content IS NOT NULL)').get(artifactId, JSON.stringify(ref), artifactId);
       const kept = this.storage.db.prepare('SELECT 1 FROM artifact_versions WHERE artifactId = ? AND content = ?').get(artifactId, JSON.stringify(ref));
       if (!live && !kept) this.files.removeContent(artifactId, ref);
+    }
+  }
+
+  // The maintenance pass's (P3-F store-versions scalpel-1#2): the temp files a write killed between its stage and its
+  // place or discard left in an artifact's `tmp/`, once older than STAGED_MAX_AGE_MS (no write in flight holds its file
+  // that long), go; a fresh one stays, and so does any file a row names in place (a `file` artifact's).
+  collectStaged(now: number): void {
+    const named = this.storage.db.prepare(
+      "SELECT 1 FROM artifacts WHERE linkedPath = ? UNION ALL SELECT 1 FROM artifact_updates WHERE json_extract(content, '$.path') = ? UNION ALL SELECT 1 FROM artifact_versions WHERE json_extract(content, '$.path') = ? LIMIT 1",
+    );
+    for (const path of this.files.stagedBefore(now - STAGED_MAX_AGE_MS)) {
+      if (named.get(path, path, path)) continue;
+      try {
+        this.files.discard(path);
+      } catch (error) {
+        this.log(`a staged file was not collected (${path}): ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 
@@ -1127,7 +1209,7 @@ export class ArtifactStore {
       const id = await this.service.inBatch(() =>
         isDocKind(row.kind)
           ? this.versionInFrame(row, meta)
-          : this.versions.checkpoint(row.id, this.contentRef(row.id).revision, { ...meta, actor: actorKey(actor), at: this.now(), designSystemRef: this.pinInFrame(row), assetRefs: this.assetIds(row.id) }),
+          : this.versions.checkpoint(row.id, this.contentRef(row.id).revision, this.withPin(row, { ...meta, actor: actorKey(actor), at: this.now(), assetRefs: this.assetIds(row.id) })),
       );
       if (id !== null) this.emit(artifactId, 'updated');
     }
@@ -1425,7 +1507,8 @@ export class ArtifactStore {
     return (this.storage.db.prepare('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq DESC LIMIT 1').get(artifactId) as { actor: string } | undefined)?.actor ?? 'human';
   }
 
-  // An `auto` version now, when the doc moved since its last version (the scheduler; before a restore).
+  // An `auto` version now, when the doc moved since its last version (the scheduler; a restore writes its own in its
+  // frame, restore.ts).
   async autoVersion(artifactId: string): Promise<void> {
     const row = this.entity(artifactId);
     if (!row || row.deletedAt !== null || !isDocKind(row.kind) || this.closed) return;
@@ -1446,13 +1529,13 @@ export class ArtifactStore {
     return this.byteContentOf(row, ref);
   }
 
-  private requireLive(artifactId: string): EntityRow {
+  requireLive(artifactId: string): EntityRow {
     const row = this.entity(artifactId);
     if (!row || row.deletedAt !== null) throw new ArtifactStoreError('notFound', `no artifact ${artifactId}`, { artifactId });
     return row;
   }
 
-  private requireVersion(artifactId: string, versionId: number) {
+  requireVersion(artifactId: string, versionId: number): VersionRow {
     const version = this.versions.get(artifactId, versionId);
     if (!version) throw new ArtifactStoreError('notFound', `no version ${versionId} of ${artifactId}`, { artifactId, versionId });
     return version;

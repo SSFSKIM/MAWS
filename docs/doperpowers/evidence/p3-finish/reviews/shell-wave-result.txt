@@ -1,0 +1,53 @@
+Recorded 2026-10-19T04:54:33Z. Shell wave medium review (reviewer-medium on opus), f8745adf7, dad412ce4, ad29e501c, aa9c9796f, 801a3f5bc, 8c4e796f7 (claim extended to ToastHost.tsx, floating.ts, FloatingPill.tsx with the executor's approval). Verdict correct; its P3 (the covered surface is not inert) is P4 row S-MARKUP-INERT.
+
+Reviewer report, verbatim:
+## Findings
+- [P3] Make the covered surface inert; the Tab trap only catches keys pressed inside the overlay — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/renderer/src/markup/MarkupLayer.tsx:194-202
+  The new `onKeyDown` only acts on a Tab whose target is inside the overlay root. Nothing marks the surface under the still, or the card's layer, `inert`. So focus that leaves the overlay any other way is one Tab away from hidden live content. The PanelRegion tab order is header, then body (the surface), then the card layer. A concrete path: click More actions in the panel header and press Escape. Since ad29e501c that closes the menu and keeps the session, and Radix returns focus to the trigger. Tab then walks the header into the panel body, where a document editor takes keystrokes the user can't see. F8 (Radix's toast-viewport hotkey) and then Tab reach the same place without a mouse. Once focus is there, the new Escape split also lets the hidden editor, or the card's composer under the still, answer Escape first instead of the discard. The composer's Escape interrupts a running turn. This needs focus to leave the overlay first, so it is P3, and the routing did offer the trap as an option. The worker turned down `inert` because the card's layer is not part of the surface. Marking both inert for the session (the surface element and the `[data-markup-occluder]` card layer) answers that and closes every path. The trap can stay as well.
+
+## Verdict
+correct — All six fixes do what their findings ask. Each commit reads as self-contained, and no later commit touches these files. The one finding is a gap left by the trap the routing allowed, not a regression, and it does not block.
+
+Answers to the brief's questions:
+
+1. **z-30 lift.**
+   - **It works.** Neither PanelRegion's `<section>` nor the Shell root sets a z-index or isolation. So the chrome and the card layer share the document's root stacking context, not "the region's" as the test comment says; the paint order comes out the same either way.
+   - **Order changes while the list shows.** At z-30 the chrome stays under:
+     - MarkupLayer (fixed z-30), which is later in the DOM;
+     - OverviewLayer (z-30), which comes after MainArea and is clipped to main by its `overflow-hidden`;
+     - toasts (z-40) and portaled dialogs and popovers (z-40/z-50).
+   - It now rises above:
+     - the card layer, as intended;
+     - the browser pane's comment-card host (Pane.tsx:163, z-10). That host used to win on DOM order; now the list draws over docked comment cards, which is better.
+     - DropEdge (z-20) for a chrome in a main pane, which only shows during a tab drag.
+   - The panel's Resizer was already under the chrome by DOM order. Nothing material changes.
+   - **The structural test is meaningful as a guard.** It mimics `:has()` for this one selector, so it fails if the attribute, the variant, or a z-indexed wrapper changes. It cannot see stacking contexts made by transform, opacity or isolation, an inline z-index, or whether Tailwind actually compiles the variant (the worker checked that once by hand). Proof of the real paint would be a Mac e2e click in the browser.spec.ts column case.
+2. **Escape split.**
+   - **Mechanics are sound.** Radix's DismissableLayer calls `preventDefault` before `onDismiss`. A window-capture `stopPropagation` also skips the window bubble listener, so `endMarkup` never runs twice.
+   - **The toast side effect is acceptable, not a regression against the routing's intent:**
+     - It only happens when focus is outside the overlay and not on body. With focus on the overlay, which is how a session opens and where every canvas click returns it, the capture listener discards first and the toast is left alone, as before.
+     - Before the fix, that same Escape discarded the session anyway, so no marks are lost that weren't lost before. The only new effect is that the toast also closes, which is what Escape does to a toast anywhere.
+     - Radix's toast deliberately does not call `preventDefault`. A passive toast blocking the discard would be worse: the retry's own 6-second "Couldn't capture" toast would swallow the first Escape.
+   - **Narrow leftover:** a toast that mounts after a menu opened becomes Radix's top layer. Escape then closes the toast, leaves the menu open, and discards the session. That comes from Radix's layer order and is not worth fixing now.
+   - **The split goes beyond menus.** Escape in a visible composer outside the overlay now goes to the composer (interrupting a running turn), and on a focused request card to request.decline, instead of discarding. That matches the commit's stated rule that the focused control gets its key, so I did not flag it.
+3. **Focus trap.**
+   - **Inside the overlay it is sound.** Radix's RovingFocusGroup root has `tabIndex=0` and contains its items, so `first.contains(target)` treats any radio as the first stop. Radix's own Shift+Tab state (`isTabbingBackOut`) is set before the root handler runs and resets on blur, so nothing gets stuck. Disabled Undo, Clear and Add are skipped, Cancel is always a stop, and Escape and Cancel still leave.
+   - **Focus comes back.** A discard, a queued Add (now) or a failed composite restores the element focused before; a taken picture hands focus to the composer.
+   - The keyboard can still get out of the trap by the routes in the finding.
+4. **Toast occluder and the pill mark.**
+   - **The toast occluder is correct.** The attribute lands on the Radix `<ol>` that the toasts portal into. The browser cover watch only watches child lists, so the visibility toggle doesn't disturb it, and focus held in a toast is restored.
+   - **No stale mark.** `closeCard` is only called from the open card's Close button (FloatingCard.tsx:192). The layer renders the Pill in the same commit under the conditions the card already met, and `pillHost` is null while the card is open. When the chrome hosts the pill, its Pill comes first in tree order and takes the mark. Every other production write of `closed` clears it (`setClosed`, the `floating` subscription). StrictMode's double effect run is harmless.
+   - **No persisted key.** `useFloatingCard` is a plain zustand `create` with no persist, and the range touches no layout schema.
+5. **Intermediate commits.** Read one by one, none is plainly broken. In each commit the imports, helpers and expected values match the files as they are at that commit:
+   - dad412ce4's narrowing to `'taken' | 'queued' | null` compiles;
+   - 801a3f5bc's three-occluder counts match its own ToastHost change;
+   - the `ChromePill` import arrives with 8c4e796f7.
+
+Logs agree with the report: RED is 9 failed and 55 passed, each for the intended reason; GREEN is 38 files and 592 tests, covering all three regression files under both projects.
+
+## Not verified
+- No vitest, typecheck, lint or e2e run, as the brief asked.
+- That Tailwind 4.3 compiles `has-[[data-address-suggestions]]:z-30` and that it beats `z-10`; I relied on the worker's check.
+- Real paint, or a click on a list row through the column card in Electron.
+- The worker's cmp claim that the committed files match the GREEN-tested tree. I confirmed that nothing after 8c4e796f7 changes these files, but not what was in the working tree when GREEN ran.
+- Radix behaviour in real Chromium. Event-phase order is set by the DOM spec, and I read the Radix layer and toast logic from node_modules/@radix-ui (react-dismissable-layer, react-toast, react-roving-focus) rather than running it.

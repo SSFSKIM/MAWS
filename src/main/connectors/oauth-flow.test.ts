@@ -4,7 +4,7 @@
 // listener and browser stand in for the 127.0.0.1 socket and the system browser. Nothing is sent or bound.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LoopbackReply, LoopbackRequest } from './oauth-callback';
-import { CONNECT_CALLBACK_TIMEOUT_MS, createConnectorOAuthFlow, type ConnectorOAuthFlowDeps } from './oauth-flow';
+import { CONNECT_CALLBACK_TIMEOUT_MS, createConnectorOAuthFlow, untilEnded, type ConnectorOAuthFlowDeps } from './oauth-flow';
 import type { ConnectorOAuthGrant } from './oauth-types';
 
 const MCP = 'https://mcp.example.com';
@@ -551,6 +551,21 @@ describe('refresh', () => {
     expect(tokens).toEqual({ accessToken: 'at-1', refreshToken: 'rt-1', tokenType: 'Bearer', grantedScope: 'metrics:read', expiresAt: NOW + 60_000, obtainedAt: NOW });
   });
 
+  // P3-F F-connectors 3 sibling: the SDK's token requests (Connect's code exchange and the refresh) carry the same
+  // form-encoded Basic authentication as the revocation, never the SDK's own unencoded one
+  it('form-encodes Basic authentication on the code exchange and on the refresh', async () => {
+    const basic = `Basic ${btoa('client+1:se%2Bc%2Fr%3Dt%25')}`;
+    const h = new Harness();
+    h.script.metadata = { ...METADATA, token_endpoint_auth_methods_supported: ['client_secret_basic'] };
+    h.script.register = { client_id: 'client 1', client_secret: 'se+c/r=t%', client_id_issued_at: 1, redirect_uris: ['http://127.0.0.1:53100/callback'], token_endpoint_auth_method: 'client_secret_basic', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], client_name: 'MAWS' };
+    const pending = connect(h);
+    await h.browserOpened();
+    h.deliver('/callback?code=code-1&state=state-abc');
+    const grant = await pending;
+    await h.flow.refresh(grant, new AbortController().signal);
+    expect(h.posts('/token').map((post) => post.headers.get('authorization'))).toEqual([basic, basic]);
+  });
+
   it('keeps the old refresh token when the server does not rotate it', async () => {
     const h = new Harness();
     const noRotation = { ...TOKENS, refresh_token: undefined };
@@ -613,6 +628,14 @@ describe('revoke', () => {
     expect(h.form(first)).toEqual({ token: 'rt-0', token_type_hint: 'refresh_token' });
   });
 
+  // P3-F F-connectors 3: RFC 6749 §2.3.1: each Basic component is form-encoded before Base64, so a secret's '+', '/', '='
+  // or '%' reaches a conforming endpoint as itself
+  it('form-encodes the client id and secret before Basic authentication', async () => {
+    const h = new Harness();
+    await h.flow.revoke(savedGrant({ client: { client_id: 'client 1', client_secret: 'se+c/r=t%', redirect_uris: [], token_endpoint_auth_method: 'client_secret_basic' }, authorizationServer: { ...METADATA, revocation_endpoint: `${AS}/revoke`, token_endpoint_auth_methods_supported: ['client_secret_basic'] } }), new AbortController().signal);
+    expect(h.posts('/revoke').map((post) => post.headers.get('authorization'))).toEqual([`Basic ${btoa('client+1:se%2Bc%2Fr%3Dt%25')}`, `Basic ${btoa('client+1:se%2Bc%2Fr%3Dt%25')}`]);
+  });
+
   it('is unsupported without an advertised endpoint, and a failing endpoint is reported, never thrown', async () => {
     const none = new Harness();
     expect(await none.flow.revoke(savedGrant({ authorizationServer: METADATA }), new AbortController().signal)).toBe('unsupported');
@@ -633,5 +656,24 @@ describe('revoke', () => {
     owner.abort();
     expect(await h.flow.revoke(savedGrant(), owner.signal)).toBe('failed');
     expect(h.fetch).not.toHaveBeenCalled();
+  });
+});
+
+// P3-F L270: the browser opener (and the binding) is called a microtask after the flow decided to call it; an abort
+// queued into that gap must still keep the call from being made.
+describe('untilEnded', () => {
+  it('an abort landing after the decision and before the deferred call never makes the call', async () => {
+    const owner = new AbortController();
+    const opener = vi.fn(async () => {});
+    const pending = untilEnded(opener, owner.signal);
+    owner.abort(); // queued before the deferred call's microtask runs
+    expect(await failureOf(pending)).toMatchObject({ code: 'cancelled' });
+    expect(opener).not.toHaveBeenCalled();
+  });
+
+  it('without an abort the deferred call is made once and answers', async () => {
+    const opener = vi.fn(async () => 'opened');
+    expect(await untilEnded(opener, new AbortController().signal)).toBe('opened');
+    expect(opener).toHaveBeenCalledTimes(1);
   });
 });

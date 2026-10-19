@@ -1,0 +1,63 @@
+{
+  "recordedAt": "2026-10-19T05:07:24Z",
+  "meaning": "interim class-1a proofs on branch commits during the fix waves (pool; --gates static,unit,probes,unit:darwin); not the hand-back; they supply remote GREEN for findings committed under the Decision Log 29 slot rule",
+  "runs": {
+    "p3f-waves1": {
+      "run": 39175062663,
+      "sha": "bc837f2360573702b3149e481997ff064f51b0da",
+      "conclusion": "failure",
+      "jobs": {
+        "static": "failure (one typecheck error, src/main/ipc/router.test.ts:141, fixed by 008c7d000)",
+        "unit": "success",
+        "unit:darwin": "success",
+        "probes": "success"
+      }
+    },
+    "p3f-waves2": {
+      "run": 39178022722,
+      "sha": "848693ed37a84a5018e37edeb63444015117c283",
+      "conclusion": "success",
+      "jobs": {
+        "static": "success",
+        "unit": "success",
+        "unit:darwin": "success",
+        "probes": "success"
+      }
+    },
+    "p3f-waves3": {
+      "run": 39185735129,
+      "sha": "6101c2ace",
+      "wrapper": "e97000c506bcdc2bcfc55a3878404d68d8206b9e",
+      "conclusion": "failure",
+      "jobs": {
+        "static": "success",
+        "unit": "failure (2 of 20,699: retention.test.ts:454, fixed by 829860908; legacy-writes.test.ts:143, the document-model P1 fixed by cdab1711a)",
+        "unit:darwin": "success",
+        "probes": "success"
+      }
+    },
+    "p3f-waves4": {
+      "run": 39199097568,
+      "sha": "a6038fe40667f77de347bae130f2c9b9b7a46a8e",
+      "conclusion": "success",
+      "jobs": {
+        "static": "success",
+        "unit": "success",
+        "unit:darwin": "success",
+        "probes": "success"
+      }
+    },
+    "p3f-prefreeze": {
+      "run": 39201844046,
+      "sha": "de71da97afa48f2b19d3caeccf71406544b03e2c",
+      "conclusion": "success",
+      "jobs": {
+        "static": "success",
+        "unit": "success",
+        "unit:darwin": "success",
+        "probes": "success"
+      },
+      "note": "the final interim gate on S itself, before the hand-back gate"
+    }
+  }
+}

@@ -1,0 +1,1448 @@
+{
+  "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
+  "phase": "hand-back: S, gates, bundle, live reruns, measurement and live-data complete; owner sitting sheet finalisation (M2) and the architect's landing remain",
+  "W-T": {
+    "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
+    "base": "1c007d713",
+    "executor": "a57f5bfb86c7f98b3",
+    "rowCommits": [
+      "b177fe204",
+      "aa98bcbdd",
+      "3dff5766f",
+      "a58b39e86",
+      "c889aadae"
+    ],
+    "fixCommit": "412fe9a1f",
+    "reviewers": {
+      "bundle": "a3d3b1ae84bcc3caf",
+      "cleanup": "a507344cd689e05ff",
+      "otherRows": "a3e84a98079cfd6a4"
+    },
+    "countRemainder": "L265 five full sets, currently 0",
+    "gateFixCommit": "312a3e83d",
+    "gateFixReviewer": "ac9a488552c09c721"
+  },
+  "W-RD": {
+    "status": "accepted at2c45e150f by39119260018",
+    "base": "73f24d2a0",
+    "executor": "a53212fbc596ac2a9",
+    "reviewer": "a84a924b3c8fb8e36",
+    "rowCommits": [
+      "ba8ff17e5",
+      "b7889552e",
+      "ed201bdb1",
+      "36cc73187",
+      "7fcca4305",
+      "aa710027e"
+    ],
+    "fixCommit": "a0acd8c76",
+    "reviewRounds": 2
+  },
+  "dependencyInstall": "completed exit 0 under with-slot",
+  "dragDiscriminator": "complete four jobs; alleged regression closed as confound by architect, no bisect; final absolute/preview/heavy half and parent-bound decision remain",
+  "commitLock": "/private/tmp/maws-p3f-commit.lock",
+  "helper": "/private/tmp/p3f-commit-row.py",
+  "paidSpendUsd": "0.1319",
+  "preflight": {
+    "runId": 39115417793,
+    "attempt": 1,
+    "conclusion": "cancelled",
+    "bundleInspection": "passed; not extracted; not final-source evidence",
+    "repairCommit": "312a3e83d"
+  },
+  "preflightRerun": {
+    "runId": 39119260018,
+    "source": "2c45e150fe9bc87c867f76feccaab1548933697f",
+    "waiter": "bq1uoj3jk",
+    "queueThresholdTask": "be6eddzs1",
+    "recoveryVerifiedAt": "2026-10-18T10:57:52Z",
+    "waiterPid": 73297,
+    "queueThresholdResult": "terminal117651335932,unit:darwin117651335971,connectors117651336007 queued over30min; architect notified",
+    "status": "completed",
+    "attempt": 1,
+    "conclusion": "success"
+  },
+  "M1-record": {
+    "executor": "a37d3b91c053340cd",
+    "status": "independently approved;149 row commits complete;L230 reserved for W-DOC-A",
+    "reviewer": "aa9e606e95ce0d337",
+    "recordCommits": [
+      "7d9c8de2b",
+      "c3d5aa56a"
+    ],
+    "counts": {
+      "preclosedRemoved": 16,
+      "closedRemoved": 9,
+      "reDeferred": 124
+    }
+  },
+  "M2-preparation": {
+    "executor": "adeb9c47ffd6b1bc0",
+    "status": "draft source-grounded through exact Settings > Artifacts labels and design-system Duplicate; final-source recheck and owner execution pending",
+    "commit": "b9551cab8",
+    "reviewer": "adcc38ef2eb777453",
+    "fixCommit": "0a64bcb47",
+    "reviewRounds": 2,
+    "comparisonEditor": "adeb9c47ffd6b1bc0",
+    "comparisonSource": "25b29e64f; independent panel/main history controllers confirmed read-only",
+    "comparisonCommit": "b34c32786",
+    "exactLabelsCommits": [
+      "6d18c529a",
+      "c73e78e8c"
+    ],
+    "notesSceneCommit": "e98580866",
+    "notesScene": "source-derived5.1b,4000byte/0newline sample verified, select-all before paste corrected; owner unrun",
+    "notesSceneFixCommit": "f02852e10"
+  },
+  "W-MINI": {
+    "status": "both type corrections proved by green static39145946170; native source accepted, original count clauses remain",
+    "foreground": "package-script activation permitted; lane hold lifted; child DL13",
+    "executor": "ab180409652104010",
+    "claims": "pair2-claims.json",
+    "rowCommits": [
+      "8e2a7ac51",
+      "4143ca059",
+      "93b9e35bf",
+      "d26b65149",
+      "287b45bb1",
+      "1235d4a77"
+    ],
+    "reviewer": "aef4b40cb8d4b7d76",
+    "reviewRounds": 2,
+    "checkpoint": "waves/W-MINI-checkpoint.json",
+    "reviewFixCommit": "5f115a09d",
+    "nativeReadings": "gates/pair2-diagnostic-39130559347.json",
+    "L277SceneStreak": {
+      "passed": 5,
+      "required": 10,
+      "runs": [
+        39130559347,
+        39133832247,
+        39140360292,
+        39149994319,
+        39156492025
+      ],
+      "latestProof": "native=true19:03:32.799Z and restore passed; tracker updated5/10"
+    },
+    "repairAssessment": "a788b678f28592255",
+    "diagnosticSupplement": "14c3e6fd6",
+    "remainingUnionGateBudget": 0,
+    "nativeRepairCommits": [
+      "abdad9d35",
+      "63cbc8db7",
+      "7a23ef400"
+    ],
+    "nativeRepairReviewer": "afefa3ce1540fa23a",
+    "L199MustReadSceneStreak": {
+      "passed": 3,
+      "required": 10,
+      "runs": [
+        39133832247,
+        39149994319,
+        39156492025
+      ],
+      "latestProof": "native=true19:14:41.147Z and must-read passed; tracker updated3/10"
+    },
+    "tsFixLint": {
+      "task": "bgmopgt3v",
+      "status": "completed",
+      "exit": 0,
+      "verification": "controller read Bash output eslint exit0; exact callback diff inspected",
+      "redundantWaiters": "worker reports bph5r69s0 and brq926ccm stopped; no repeated check"
+    },
+    "tsFixCommit": "4b0e1f1e3",
+    "documentaryCommits": {
+      "199": "0b4f2f07d",
+      "200": "5bf2421cc",
+      "201": "37dc9ca91",
+      "217": "1003b9c6b",
+      "264": "b9beae6ed",
+      "277": "0f2d04b9a",
+      "217-correction": "e9a818df2"
+    },
+    "traceTypeFix": "dc0247612",
+    "L217PostFixPasses": {
+      "passed": 5,
+      "runs": [
+        39130559347,
+        39133832247,
+        39140360292,
+        39149994319,
+        39156492025
+      ],
+      "futureFailure": "product recurrence, never baseline",
+      "latestProof": "Controller read actual filmstrip-reorder native=true entries17:40:06.694Z(pair4) and19:21:23.512Z(pair45), followed by presentations.spec.ts168 case passes; pair4 overall default red on unrelated fork. Future same-signature failure remains product recurrence."
+    }
+  },
+  "W-STORE": {
+    "status": "full unit and actual restyle e2e pass39133832247; unrelated MINI test TS correction proved next normal static gate",
+    "executor": "a53b2ea8e3417bc02",
+    "claims": "pair2-claims.json",
+    "rowCommits": [
+      "af74add9b",
+      "46bb88734",
+      "46dac3eb4",
+      "c1eb9bd74"
+    ],
+    "supplementCommits": [
+      "33ecf47c0",
+      "f71d7e046"
+    ],
+    "reviewer": "a64e6ed27a8f39b3f",
+    "reviewRounds": 2,
+    "fixExecutor": "a9b6e9e5eb14418ce",
+    "checkpoint": "waves/W-STORE-checkpoint.json",
+    "fixCommits": [
+      "10c238a01",
+      "25b29e64f",
+      "15863818e"
+    ],
+    "finalGuardCommit": "5b5017f9d",
+    "tokenGuardFixCommit": "05d1f824b"
+  },
+  "baselineFold": {
+    "merge": "25eb0e6a8",
+    "master": "7c4ebaac7",
+    "commits": [
+      "dfa75d831",
+      "344d7131c"
+    ],
+    "currentRows": "docs/doperpowers/evidence/p3-finish/tracker-current.json",
+    "reviewer": "a1e3175e07d93770d",
+    "status": "independent medium review approved; exact original/current guards retained"
+  },
+  "dragIdleWindowReminder": {
+    "task": "bdvfnkxaf",
+    "at": "2026-10-18T12:00:00Z",
+    "rule": "one notification; consider discriminator only with no wave gate pending",
+    "status": "completed; no discriminator started because pair2 diagnostic gate pending"
+  },
+  "pair2GatePrepared": {
+    "launcher": "/tmp/maws-review/p3f-mini-store-diagnosis-launch.sh",
+    "label": "p3f-mini-store",
+    "status": "launched and completed",
+    "extraGroupReason": "dashboard shares document editor/history surface"
+  },
+  "pair2Gate": {
+    "runId": 39130559347,
+    "source": "3cc3f0286b0f84c1a66aa73e750de14ee366b7db",
+    "wrapper": "03591260da475a44f3762c884b84ec97f9492c44",
+    "attempt": 1,
+    "conclusion": "failure",
+    "completionTask": "b7408uqe9",
+    "queueThresholdTask": "bet8xg7l6",
+    "record": "gates/pair2-diagnostic-39130559347.json"
+  },
+  "pair2RepairPrepared": {
+    "launcher": "/tmp/maws-review/p3f-mini-store-repair-launch.sh",
+    "status": "launched",
+    "groups": "prior13 plus e2e:transcript for shared jump repair",
+    "reviewBase": "c237ddc5a9a8aff74dc1a5495c4fccbe222573cb",
+    "reviewedHead": "87613c642702f2d27158709321281da2f4664dff",
+    "latestMaster": "782bbf83c",
+    "merge": "87613c642"
+  },
+  "pair2RepairGate": {
+    "runId": 39133832247,
+    "sourceCommit": "6adae7e4e9d1678068a9bf3e328f17746f592836",
+    "wrapperHead": "478957549398935bb02364b573fea68329bda53e",
+    "completionTask": "bru1fzgmn",
+    "queueThresholdTask": "b1xey6vm4",
+    "log": "/tmp/maws-review/gates/p3f-mini-store-repair-ci.log",
+    "status": "completed",
+    "conclusion": "failure",
+    "failure": "static TS2322 test callback only; all13 other groups success"
+  },
+  "W-DOC-A": {
+    "executor": "af7fe2d9bf548028a",
+    "status": "source/recheck correct; design14 passed at fixed pin; pair3 selected-group union accepted",
+    "claims": "pair3-claims.json",
+    "reviewer": "a69c0ca8f5888e14f",
+    "checkpoint": "waves/W-DOC-A-checkpoint.json",
+    "P4RemainderCommit": "a5b5610d3",
+    "gateFixCommit": "fba70d44e"
+  },
+  "W-DECK": {
+    "executor": "a00549767dfb02089",
+    "status": "source/recheck correct; pair3 selected-group union accepted; L211 exact partial carry retained",
+    "claims": "pair3-claims.json",
+    "reviewer": "a042b15ec9aa10fab",
+    "checkpoint": "waves/W-DECK-checkpoint.json",
+    "fixExecutor": "a2097c2f1e042d41a",
+    "L211CarryCommit": "3eca1ffff"
+  },
+  "pair3GatePrepared": {
+    "launcher": "/tmp/maws-review/p3f-doc-a-deck-launch.sh",
+    "status": "launched",
+    "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:design,e2e:side,e2e:presentations,e2e:tools,e2e:artifacts,e2e:design-systems,e2e:dashboard"
+  },
+  "laneSchedule": {
+    "recordedAt": "2026-10-18T16:44:55Z",
+    "hold": {
+      "owner": "maws-3f/cua via CI-opt",
+      "startedAt": "2026-10-18T15:40:09Z",
+      "releasedBy": "explicit architect message: mini online/idle16:35Z, launch retry now; pair4 once reviewed",
+      "status": "released"
+    },
+    "furtherHold": "none scheduled tonight; no inference from elapsed time was used"
+  },
+  "pair3Gate": {
+    "runId": 39140360292,
+    "sourceCommit": "6d9a8242085a2b4214b5678951e91124f6309833",
+    "wrapperHead": "8e6c8f48b9f5a3b3bdd0f2648caa66f5cb81040d",
+    "completionTask": "bt15x2m1r",
+    "queueThresholdTask": "bcrpvzt6a",
+    "log": "/tmp/maws-review/gates/p3f-doc-a-deck-ci.log",
+    "status": "completed",
+    "attempt": 1,
+    "conclusion": "failure",
+    "completedAt": "2026-10-18T15:40:09Z",
+    "failure": "static TS2345 trace log never[]; design obsolete wide-main Comment count expectation",
+    "exit": 1
+  },
+  "W-DOC-B": {
+    "executor": "afe4ec31e37c3925e",
+    "status": "unit/native source frontier green39156492025 plus static39162779550; local GREEN omission recorded",
+    "claims": "pair4-claims.json",
+    "rowCommits": [
+      "4b6b3ec69",
+      "7e8b60563",
+      "7d1fcec1a",
+      "9adf50241",
+      "796c9323e",
+      "e63120945"
+    ],
+    "checkpoint": "waves/W-DOC-B-checkpoint.json",
+    "reviewer": "affe8ead56a9bcb86",
+    "fixExecutor": "addfe16856ce9d938",
+    "fixCommit": "264697a788a3f99ef73ba7f0ebb602109e7feed6",
+    "assertionFix": "d62e1aece5238ae3e04d8d77992ba83ebc9d8e4b"
+  },
+  "W-SHELL": {
+    "executor": "a87de8fe2228592d9",
+    "status": "original pair4 native source frontier accepted by39156492025 plus static39162779550; MainArea supplement final unit proof remains",
+    "claims": "pair4-claims.json",
+    "rowCommits": [
+      "80757a5c6",
+      "d5f5c5b9e",
+      "be55152f4",
+      "957948cd9",
+      "3c068c7b3",
+      "232035f80",
+      "3bbe7134d",
+      "1cc84bf04"
+    ],
+    "checkpoint": "waves/W-SHELL-checkpoint.json",
+    "reviewer": "af5a8d2e5227da2f7",
+    "fixExecutor": "a669c1af09b6dc634",
+    "fixCommit": "e0bb59c878e1525e133af0a8867ad88f1cda8a98"
+  },
+  "effectiveBins": {
+    "fix": 52,
+    "sitting": 10,
+    "close": 9,
+    "defer": 125,
+    "theirs": 42
+  },
+  "checkpointAt": "2026-10-18T18:30:12Z",
+  "checkpointHead": "e631209455f1439cf29a22ec4292b20dc9d71c27",
+  "pair3Retry": {
+    "runId": 39145946170,
+    "attempt": 1,
+    "sourceCommit": "fba70d44e3e309d0e12ca9c8064b2837cb1f4251",
+    "wrapperHead": "39f3596e90398dfed92f0623360bfb8c67f20e39",
+    "createdAt": "2026-10-18T16:38:48Z",
+    "status": "completed",
+    "groups": [
+      "static",
+      "e2e:design"
+    ],
+    "completionTask": "bhjcsmdu8",
+    "log": "/tmp/maws-review/gates/p3f-doc-a-deck-retry-ci.log",
+    "launcher": "/tmp/maws-review/p3f-doc-a-deck-retry-launch.sh",
+    "originalRun": 39140360292,
+    "originalAttempt": 1,
+    "DL59": "original completed: refused0, green11, red static+design; failure-specific fixed-source relaunch only; no full-set credit",
+    "review": "focused two-file recheck a69c0ca8f5888e14f correct/no material findings",
+    "fullSetCounterAdvance": false,
+    "notFinalSource": true,
+    "recordedAt": "2026-10-18T16:49:22Z",
+    "conclusion": "success",
+    "completedAt": "2026-10-18T16:45:21Z",
+    "exit": 0,
+    "rawLogs": "/private/tmp/p3f-pair3-retry-logs.ZaVoiF/logs.zip",
+    "rawLogsSha256": "d68bdf49b23047519298906b31e15f45d4afacf75e435fddd5bc5d2a54dd2d77",
+    "results": {
+      "static": "success: typecheck all projects, lint and gate-script tests",
+      "e2e:design": "14 passed,55.6s"
+    },
+    "afterGateEvidenceStatus": "empty",
+    "union": "all13 original selected groups green across39140360292 and this fix-only corrective retry; no full-set credit"
+  },
+  "W-E": {
+    "executor": "a40d9b1903ee4f68d",
+    "status": "all5rows/3supplements committed; high measurement and medium scale/bar reviews correct, remote measured/native proof pending",
+    "claims": "pair5-claims.json",
+    "assessment": "reviews/W-E-preflight-assessment.txt",
+    "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+    "reviewers": {
+      "measurement": "a93edc63de6472590",
+      "scaleAndBars": "afc2bee7c0ba99d11"
+    },
+    "checkpoint": "waves/W-E-checkpoint.json"
+  },
+  "W-PKG": {
+    "executor": "af1eb156dd5f3f542",
+    "status": "L255 closed e935dbe62 on actual packaged transition/resolution plus smoke; overall packaged approval red independent",
+    "claims": "pair5-claims.json",
+    "releaseBase": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+    "rowCommit": "f58b9736b7512a097c86a7dbf48cbcd8913d1c9d",
+    "reviewer": "a28c0a091cef6f3c5",
+    "checkpoint": "waves/W-PKG-checkpoint.json",
+    "fixExecutor": "aa596e346b79e8587",
+    "fixCommit": "24c606c906ab55dfd4ea2b41b80e7f6282abc213",
+    "fixSupplement": "4463dcac6d06e8802af0f42347ef215cd4d7599b",
+    "mechanicalQuoteFix": "0ba7596c73c891dd90c2860d4be72ef24653687e"
+  },
+  "pair4GatePrepared": {
+    "launcher": "/tmp/maws-review/p3f-doc-b-shell-launch.sh",
+    "status": "launched at fixed source fa23cabbb; later pair5 changes excluded",
+    "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:panel,e2e:side,e2e:to-human,e2e:transcript,e2e:default,e2e:browser,e2e:browser-comment,e2e:deliverables,e2e:library,e2e:available,e2e:terminal,e2e:agents",
+    "reason": "document editor/export/mirror; shell and agent graph; actual C10 replay consumers including sessions via default; c12 empty fixtures does not seed",
+    "upstreamFetched": "3efa6cba7; merge waits clean fix workers; incoming desk app/docs only"
+  },
+  "localSlotBlocker": {
+    "observedAt": "2026-10-18T17:18:33Z",
+    "reportedBy": "DOC-B fix worker addfe16856ce9d938, one-time process diagnosis requested after controller uptime read",
+    "status": "queued for shared local slot, tests not started, not source failure",
+    "ownedWrapperPid": 7940,
+    "elapsed": "27:42",
+    "command": "with-slot.sh pnpm --dir W exec vitest run src/artifacts/document/markdown.test.ts src/artifacts/document/export/markdown.test.ts",
+    "plainGreenLog": "/tmp/maws-review/doc-b-fix/green.log,0bytes at diagnosis",
+    "child": "only wrapper sleep10, no pnpm/vitest child",
+    "red": "worker retained3failed/433passed exit1 before fixes",
+    "hostLoadControllerRead": [
+      93.69,
+      106.22,
+      106.44
+    ],
+    "coordination": "architect identified other-session slot holders (remote-only CI waiter and long board-api sweep), requested release and will escalate if no movement in15min; DOC-B wrapper stays queued unchanged",
+    "prohibitionsObserved": "no slot override, live-lock deletion, other-process kill, bypass or completion polling",
+    "architectResolution": "Worker stopped own waiting taskbc4vgnsji/pid7940 without ever holding a slot, no other process/lock touched. Source264697a78 committed; retained RED3fail/433pass exit1, local GREEN absent, reviewer recheck running and union gate will supply GREEN."
+  },
+  "localSlotPolicy": "Architect ruling2026-10-18: local named check queued for a slot over10min is stopped, not waited for; preserve existing RED and commit source, reviewer reads diff against RED, union gate supplies GREEN. Record per row: local GREEN not obtained (slot wait); gate <run id> green only after verified result. Never fabricate unavailable checks. Lint/typecheck remote. Gate-only failure gets one bounded worker fix and DL59 relaunch. No slot bypass, lock deletion or other-process stop.",
+  "countDispositionAtM4": {
+    "L246": "5/5 under ruled throwaway-merge criterion: both parents ancestors and watched spec identical",
+    "L253": "10/10 stall-event, alternate5/10; observation pin ancestor; no root cause/repair claim",
+    "L90": "4/20, load readings absent",
+    "L264": "0 qualifying post-fix full sets",
+    "L265": "0/5 qualifying post-fix full sets"
+  },
+  "pair4Gate": {
+    "runId": 39149994319,
+    "sourceCommit": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+    "wrapperHead": "b9b499efaa70f3b1a68f1e157f8c9d4564e36494",
+    "createdAt": "2026-10-18T17:31:39Z",
+    "recordedAt": "2026-10-18T18:30:12Z",
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "failure",
+    "groups": [
+      "static",
+      "unit",
+      "probes",
+      "unit:darwin",
+      "e2e:document-app",
+      "e2e:document",
+      "e2e:panel",
+      "e2e:side",
+      "e2e:to-human",
+      "e2e:transcript",
+      "e2e:default",
+      "e2e:browser",
+      "e2e:browser-comment",
+      "e2e:deliverables",
+      "e2e:library",
+      "e2e:available",
+      "e2e:terminal",
+      "e2e:agents"
+    ],
+    "label": "p3f-doc-b-shell",
+    "completionTask": "bi4c75849",
+    "completionMethod": "actual wrapper background Bash, automatic completion notification; no completion poll",
+    "queueThresholdTask": "bxfvwr64z",
+    "queueThreshold": "one independent queue check at run+30min, not a completion waiter",
+    "log": "/tmp/maws-review/gates/p3f-doc-b-shell-ci.log",
+    "integration": {
+      "master": "3efa6cba74e3e14d0977e9a042183a63716fe5ea",
+      "merge": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+      "result": "clean ort merge, incoming desk app/docs preserved, tracker unchanged"
+    },
+    "review": {
+      "W-SHELL": "af5a8d2e5227da2f7 recheck correct at e0bb59c87, both original issues closed within owned scratch model",
+      "W-DOC-B": "affe8ead56a9bcb86 recheck accepted implementation at264697a78; single entity assertion corrected d62e1aece, controller exact-diff verification against retained RED line71; no third review"
+    },
+    "localCheckOmission": "DOC-B local GREEN not obtained (slot wait >10min); retained RED3failed/433passed exit1. Stopped own waiting taskbc4vgnsji/pid7940, never held a lock. No post-fix local lint/typecheck. This union must supply GREEN per architect ruling, no pass yet.",
+    "consumerScope": "C10 nonempty fixture users covered by side,to-human,browser-comment,available,library and sessions through default; shared HTML frame/Document CardHost, browser cover, panel/transcript and agent graph included. c12 has empty fixture list and does not seed.",
+    "notFinalSource": true,
+    "fullSetCounterAdvance": false,
+    "paidSpendUsd": 0,
+    "viewerConfound": {
+      "record": "viewer-confound.json",
+      "note": "Screen Sharing attached during this run or its known17:45Z interval; not a cause inferred, native focus snapshots and existing diagnoses stand. remote=none is unreliable (ci-kit#50).",
+      "knownInputOverlap": "no input overlap established for this specific reading"
+    },
+    "completedAt": "2026-10-18T18:05:19Z",
+    "exit": 1,
+    "rawLogs": "/private/tmp/p3f-pair4-logs.uKa0I8/logs.zip",
+    "rawLogsSha256": "b33b2ef4e696bf37e8bcd40a7abcdcab3c7abd48b07a23ffebc200342925d5d0",
+    "results": {
+      "static": "TS2322 bridge-script.test.ts199 plain fakeDOMRect; lint and47gate-script tests passed",
+      "unit": "20535passed,3intended L260 name snapshots failed,73skipped;1528files passed,1failed,7skipped",
+      "probes": "219passed",
+      "unit:darwin": "282passed,14files",
+      "e2e:document-app": "9passed,1new standalone-selection failure (document-standalone.spec.ts51/115), not :436/:519 signature",
+      "e2e:document": "9passed",
+      "e2e:panel": "26passed",
+      "e2e:side": "12passed",
+      "e2e:to-human": "2passed, must-read entry native=true",
+      "e2e:transcript": "35passed",
+      "e2e:default": "102passed,1fork-without-child failure sessions.spec.ts300,185skipped",
+      "e2e:browser": "11passed",
+      "e2e:browser-comment": "13passed,3Side-thread cards stay composing at552/657/727; attribution pending",
+      "e2e:deliverables": "11passed,1reply-order assertion id4/id3 reversed after intentional L198 missing-anchor wait",
+      "e2e:library": "5passed",
+      "e2e:available": "2passed",
+      "e2e:terminal": "15passed",
+      "e2e:agents": "23passed"
+    },
+    "queueThresholdResult": {
+      "at": "2026-10-18T18:01:39Z",
+      "queued": [
+        {
+          "group": "e2e:side",
+          "job": 117741524819
+        },
+        {
+          "group": "e2e:document-app",
+          "job": 117741524842
+        }
+      ],
+      "reportedToArchitect": true,
+      "oneShotExit": 0
+    },
+    "evidenceStatusAfterGate": "only untracked p3-finish/scale-review/tooling-preparation.json; nothing outside p3-finish",
+    "counterEffects": {
+      "L277": "4/10; restore native=true18:03:55.542Z and scene passed",
+      "L199": "must-read2/10; native=true18:00:33.375Z and case passed; paste intended caret73/73/native=true and copy/cut pass",
+      "fullSet": false
+    },
+    "nextGate": "Architect ruled one current-source26-group combined pair4+pair5 union after bounded fixes/diagnoses, not artificial fix-only pin; its own reds use DL59 afterward",
+    "localGreenOmissionReading": "L166 named unit suites427+9 passed in this run, despite overall unit job red on unrelated snapshots; local GREEN omission remains explicit and no overall gate GREEN claimed"
+  },
+  "nativeViewerContext": "viewer-confound.json: confirmed attached12:49:09Z-19:33:02Z; old remote=none wrong inside window, detector fixed19:56Z; union four scale groups afterward viewer-free; no causal relabeling",
+  "pair4RepairFrontier": {
+    "mechanical": "f4f6a0b69f21da20e32be2ce7367f911b662358d, five exact test/snapshot paths; medium a3683858e23dbb112 correct/no material findings",
+    "L242": "3c475c9ed41a96d38c766c007f0eb6168679dd36 test-only fixture correction; production unchanged; closure attribution in waves/W-SHELL-checkpoint.json rowResults242",
+    "standalone": "fdfe73c312347e957e4019da0bfb4fc99a49e451; cause undetermined, neither branch defect nor baseline; observational readiness then one unchanged range write and model+DOM checks; no timeout increase",
+    "recurrence": "Same signature after readiness met is a DL59 red of its own; same-foreground master reproduction owed before further repair.",
+    "focusedReview": "ad7e512b27334234f correct/no material findings, f4f6a0b69..fdfe73c31 exactly three specs, static only",
+    "decisionLog": "no new entry for either attribution/readiness ruling"
+  },
+  "nextCombinedGate": {
+    "groups": "static,unit,probes,unit:darwin,e2e:document-app,e2e:document,e2e:panel,e2e:side,e2e:to-human,e2e:transcript,e2e:default,e2e:browser,e2e:browser-comment,e2e:deliverables,e2e:library,e2e:available,e2e:terminal,e2e:agents,e2e:document-scale,e2e:design,e2e:dashboard-scale,e2e:dashboard,e2e:presentations-scale,e2e:artifacts-perf,packaged,e2e:connectors-direct",
+    "status": "held for pair4 fixes/attribution; all reviewed current source, latest-master integration; no old-green credit on a changed tree"
+  },
+  "pair45Gate": {
+    "recordedAt": "2026-10-18T18:59:40Z",
+    "runId": 39156492025,
+    "attempt": 1,
+    "sourceCommit": "55d012a2e1245a872cf44764842fc155e3276aef",
+    "wrapperHead": "b1c6c53c2d0740a7a4eba1965da38ad68c52b4b4",
+    "createdAt": "2026-10-18T18:56:55Z",
+    "statusAtIdentityRead": "queued",
+    "conclusion": "failure",
+    "groups": [
+      "static",
+      "unit",
+      "probes",
+      "unit:darwin",
+      "e2e:document-app",
+      "e2e:document",
+      "e2e:panel",
+      "e2e:side",
+      "e2e:to-human",
+      "e2e:transcript",
+      "e2e:default",
+      "e2e:browser",
+      "e2e:browser-comment",
+      "e2e:deliverables",
+      "e2e:library",
+      "e2e:available",
+      "e2e:terminal",
+      "e2e:agents",
+      "e2e:document-scale",
+      "e2e:design",
+      "e2e:dashboard-scale",
+      "e2e:dashboard",
+      "e2e:presentations-scale",
+      "e2e:artifacts-perf",
+      "packaged",
+      "e2e:connectors-direct"
+    ],
+    "label": "p3f-pair45",
+    "completionTask": "byakt5a4b",
+    "completionMethod": "actual wrapper background Bash, automatic completion; no completion polling",
+    "wrapper": "/private/tmp/p3f-pair45-gate.sh",
+    "integration": {
+      "master": "b1110be77b024e3b8758353671e93552992184b5",
+      "merge": "55d012a2e1245a872cf44764842fc155e3276aef",
+      "trackerConflict": "append-only; resolved to exact ours plus exact three-line upstream suffix; incoming rows unchanged, no row discarded"
+    },
+    "reviewedRepairs": [
+      "f4f6a0b69 mechanical test/snapshots, a3683858e23dbb112 correct",
+      "3c475c9ed L242 fixtures plus fdfe73c31 standalone observational readiness, ad7e512b27334234f correct"
+    ],
+    "acceptance": "current-source shared pair4+pair5 union, not an artificial fix-only retry or whole set; own reds use DL59 afterward",
+    "nativeGreen": "original pair4 native groups all green here; static retry needed for its selected-group union; pair5 packaged/measure fronts still red",
+    "fullSetCounterAdvance": false,
+    "paidSpendUsd": 0,
+    "viewerContext": {
+      "record": "viewer-confound.json",
+      "provenance": "CI-opt custody correction relayed by architect",
+      "attachedWindow": "2026-10-18T12:49:09Z through19:33:02Z",
+      "during": "union Mac groups before disconnect inside attached window, old remote=none wrong",
+      "after": "document-scale, presentations-scale, dashboard-scale, artifacts-perf running after disconnect are viewer-free",
+      "detector": "fixed19:56Z,ci-kit#53/26d1033; screensharingd up to15s lag, ps failure unknown",
+      "causality": "no causal relabeling or bound waiver"
+    },
+    "newMasterUnitReading": "Only all tests passing with hover-card Timeout._onTimeout after MainArea.test.tsx teardown and ReferenceError window is not defined reads against b1110be77 master row, one DL59 relaunch, no new row.",
+    "queueThresholdTask": "bb4lghff2",
+    "queueThreshold": "one queue-age check at19:26:55Z (created+30min), not a completion waiter",
+    "earlyStaticFailure": {
+      "job": 117760724418,
+      "log": "/private/tmp/p3f-pair45-static.Tf1O2o/static.log",
+      "verifiedDiagnostics": [
+        "TS6307 deck-history.ts missing from tsconfig.node.json include",
+        "TS6307 packaged-resolution.ts missing from tsconfig.node.json include",
+        "deck-history.test.ts:42 unused _soak/_workload/_filesView"
+      ],
+      "fixWorker": "ad88e48c3c4f5badf",
+      "authorizedPaths": [
+        "tsconfig.node.json",
+        "test/support/deck-history.test.ts"
+      ],
+      "relaunch": "static only, after this run completes, DL59; no early relaunch, no product source changes",
+      "conclusion": "failure",
+      "startedAt": "2026-10-18T18:58:04Z",
+      "completedAt": "2026-10-18T19:01:35Z",
+      "logSha256": "80997bc671bddedbb17a783c7c581e2800976d8a218747c92eeaa272adc8ae28",
+      "fixCommit": "29bb6d09260cfbef7be2f9c84e9a83a458fae389",
+      "fixScope": "exact two paths,3insert/1delete; explicit two includes and true omission via entry filter; no product change",
+      "focusedReview": "a212cf83b5473e7de correct/no material findings; exact37858708b..29bb6d092, static only, no checks"
+    },
+    "queueThresholdResult": {
+      "at": "2026-10-18T19:26:55Z",
+      "exit": 0,
+      "status": "queued",
+      "queued": [
+        {
+          "id": 117760724566,
+          "name": "packaged"
+        },
+        {
+          "id": 117760724825,
+          "name": "e2e:document-scale"
+        },
+        {
+          "id": 117760724855,
+          "name": "e2e:design"
+        },
+        {
+          "id": 117760724874,
+          "name": "e2e:presentations-scale"
+        },
+        {
+          "id": 117760724885,
+          "name": "e2e:dashboard-scale"
+        },
+        {
+          "id": 117760724896,
+          "name": "e2e:connectors-direct"
+        },
+        {
+          "id": 117760724946,
+          "name": "e2e:artifacts-perf"
+        }
+      ],
+      "reportedToArchitect": true,
+      "method": "single queue-age check, not completion polling"
+    },
+    "recordedCompletedAt": "2026-10-18T20:24:34Z",
+    "status": "completed",
+    "completedAt": "2026-10-18T20:17:45Z",
+    "exit": 1,
+    "jobs": [
+      {
+        "name": "unit",
+        "databaseId": 117760724387,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T18:58:02Z",
+        "completedAt": "2026-10-18T19:06:10Z"
+      },
+      {
+        "name": "static",
+        "databaseId": 117760724418,
+        "status": "completed",
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T18:58:04Z",
+        "completedAt": "2026-10-18T19:01:35Z"
+      },
+      {
+        "name": "probes",
+        "databaseId": 117760724452,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T18:57:56Z",
+        "completedAt": "2026-10-18T18:58:48Z"
+      },
+      {
+        "name": "unit:darwin",
+        "databaseId": 117760724463,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:03:47Z",
+        "completedAt": "2026-10-18T19:04:27Z"
+      },
+      {
+        "name": "packaged",
+        "databaseId": 117760724566,
+        "status": "completed",
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T19:29:12Z",
+        "completedAt": "2026-10-18T19:45:03Z"
+      },
+      {
+        "name": "e2e:panel",
+        "databaseId": 117760724646,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T18:57:10Z",
+        "completedAt": "2026-10-18T18:59:10Z"
+      },
+      {
+        "name": "e2e:document-app",
+        "databaseId": 117760724650,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:02:02Z",
+        "completedAt": "2026-10-18T19:03:44Z"
+      },
+      {
+        "name": "e2e:deliverables",
+        "databaseId": 117760724656,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T18:59:12Z",
+        "completedAt": "2026-10-18T19:00:42Z"
+      },
+      {
+        "name": "e2e:browser-comment",
+        "databaseId": 117760724661,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:00:44Z",
+        "completedAt": "2026-10-18T19:02:00Z"
+      },
+      {
+        "name": "e2e:library",
+        "databaseId": 117760724673,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:06:58Z",
+        "completedAt": "2026-10-18T19:07:49Z"
+      },
+      {
+        "name": "e2e:document",
+        "databaseId": 117760724677,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:06:19Z",
+        "completedAt": "2026-10-18T19:06:57Z"
+      },
+      {
+        "name": "e2e:side",
+        "databaseId": 117760724688,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:04:28Z",
+        "completedAt": "2026-10-18T19:05:41Z"
+      },
+      {
+        "name": "e2e:to-human",
+        "databaseId": 117760724714,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:14:17Z",
+        "completedAt": "2026-10-18T19:14:51Z"
+      },
+      {
+        "name": "e2e:default",
+        "databaseId": 117760724716,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:18:01Z",
+        "completedAt": "2026-10-18T19:24:37Z"
+      },
+      {
+        "name": "e2e:browser",
+        "databaseId": 117760724741,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:16:52Z",
+        "completedAt": "2026-10-18T19:17:59Z"
+      },
+      {
+        "name": "e2e:transcript",
+        "databaseId": 117760724749,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:24:39Z",
+        "completedAt": "2026-10-18T19:29:10Z"
+      },
+      {
+        "name": "e2e:available",
+        "databaseId": 117760724767,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:05:43Z",
+        "completedAt": "2026-10-18T19:06:17Z"
+      },
+      {
+        "name": "e2e:agents",
+        "databaseId": 117760724818,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:14:53Z",
+        "completedAt": "2026-10-18T19:16:50Z"
+      },
+      {
+        "name": "e2e:document-scale",
+        "databaseId": 117760724825,
+        "status": "completed",
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T20:13:29Z",
+        "completedAt": "2026-10-18T20:17:45Z"
+      },
+      {
+        "name": "e2e:dashboard",
+        "databaseId": 117760724826,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:10:11Z",
+        "completedAt": "2026-10-18T19:14:16Z"
+      },
+      {
+        "name": "e2e:terminal",
+        "databaseId": 117760724840,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:07:52Z",
+        "completedAt": "2026-10-18T19:10:09Z"
+      },
+      {
+        "name": "e2e:design",
+        "databaseId": 117760724855,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T20:03:52Z",
+        "completedAt": "2026-10-18T20:05:27Z"
+      },
+      {
+        "name": "e2e:presentations-scale",
+        "databaseId": 117760724874,
+        "status": "completed",
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T20:05:29Z",
+        "completedAt": "2026-10-18T20:11:10Z"
+      },
+      {
+        "name": "e2e:dashboard-scale",
+        "databaseId": 117760724885,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:45:05Z",
+        "completedAt": "2026-10-18T19:53:20Z"
+      },
+      {
+        "name": "e2e:connectors-direct",
+        "databaseId": 117760724896,
+        "status": "completed",
+        "conclusion": "success",
+        "startedAt": "2026-10-18T19:53:22Z",
+        "completedAt": "2026-10-18T20:03:50Z"
+      },
+      {
+        "name": "e2e:artifacts-perf",
+        "databaseId": 117760724946,
+        "status": "completed",
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T20:11:13Z",
+        "completedAt": "2026-10-18T20:13:27Z"
+      }
+    ],
+    "rawLogs": "/private/tmp/p3f-pair45-complete.h0El4i/logs.zip",
+    "rawLogsSha256": "1bdc6a588e328aceb43214fcb59e2c5289f2d19644875b618056080972f02d8d",
+    "reports": "/tmp/maws-review/gates/ci-55d012a2/",
+    "evidenceStatusAfterGate": "empty; no dirty evidence paths anywhere",
+    "greenGroupCounts": {
+      "unit": "20563passed/73skipped,1532files passed/7skipped",
+      "probes": "219passed",
+      "unit:darwin": "282passed/14files",
+      "e2e:document-app": "10passed, both standalone cases and restore scene passed",
+      "e2e:document": "9passed",
+      "e2e:panel": "26passed",
+      "e2e:side": "12passed",
+      "e2e:to-human": "2passed",
+      "e2e:transcript": "35passed",
+      "e2e:default": "74passed/165skipped; fork-in-place sessions.spec.ts300 passed",
+      "e2e:browser": "11passed",
+      "e2e:browser-comment": "16passed",
+      "e2e:deliverables": "12passed",
+      "e2e:library": "5passed",
+      "e2e:available": "2passed",
+      "e2e:terminal": "15passed",
+      "e2e:agents": "23passed",
+      "e2e:dashboard": "11passed",
+      "e2e:dashboard-scale": "1passed, all bounded rows met with admitted trials; loaded attempts retained",
+      "e2e:design": "14passed",
+      "e2e:connectors-direct": "15passed; not packaged proof"
+    },
+    "redGroups": [
+      "static",
+      "packaged",
+      "e2e:document-scale",
+      "e2e:presentations-scale",
+      "e2e:artifacts-perf"
+    ],
+    "remainingAttribution": {
+      "packaged": "a209e629db229083f read-only",
+      "document/presentations-scale": "a9e90f35808356d51 read-only, includes heavy generation proof",
+      "artifacts-perf": "a07742cd27dea4251 read-only, announcement and actual metrics"
+    },
+    "nativeSceneProof": {
+      "restore": "native focused/contentsFocused true at19:03:32.799Z; case and group passed; L2775/10",
+      "mustRead": "native focused/contentsFocused true at19:14:41.147Z; case passed; L1993/10",
+      "copyCut": "copy-paste editor73/73 at19:03:27.613Z; cut-paste81/81 at19:03:27.804Z; native true and assertions passed",
+      "standalone": "both cases passed, source fdfe73c31 readiness; cause remains undetermined, not product-fix/baseline",
+      "L242": "default fork case passed, browser-comment16/16; fixture corrections supplied native GREEN, product contract unchanged"
+    },
+    "measurementReadingFrame": {
+      "judgingFloor": 20,
+      "rule": "P3 DL54, gate-offload3.5;15.68/17.3 are observations, no waiver; child below10 quiet requirement is separate",
+      "perRowRequired": [
+        "value",
+        "unchanged bound",
+        "sample load",
+        "time since build step ended",
+        "mini idle load or explicit unknown"
+      ],
+      "separateCauses": [
+        "external mini load: CI-opt investigates19:33-20:17 and#157 overlap; if established, unchanged groups rerun once quiet",
+        "build tail: bounded shared test-side settle before first measured trial only after extraction/ruling; record wait/start load, still run trials and record load if budget expires",
+        "quiet-mini host mismatch: architect owns rebase-versus-repair acceptance entry, no bound edit by F"
+      ],
+      "heavy": "distinguish6-minute generation budget failure from export/validation failure, with load",
+      "mechanics": "one DL59 combined relaunch of four Mac reds after approved corrections, union with21greens plus static retry; no measurement fix committed before per-row extraction",
+      "packaged": "L255 attribution independent"
+    }
+  },
+  "postPartitionIncomingRows": {
+    "source": "b1110be77b024e3b8758353671e93552992184b5",
+    "denominator": "all three outside immutable F M0",
+    "disclosure": "P3-owned, development StrictMode only; no F fix, carry with fix clause into next phase and section13 draft",
+    "DC9": "desk-owned, no action",
+    "MainArea": "test-only e3f5ce79a committed after union launch; residual-timer RED and final10 named test instances verified; applied-source review correct; hand-back unit and CI-opt repeated-run clause remain",
+    "decisionLog": "none"
+  },
+  "pair45StaticRetry": {
+    "runId": 39162779550,
+    "sourceCommit": "29bb6d09260cfbef7be2f9c84e9a83a458fae389",
+    "wrapperHead": "742e8d0540bf35a272d981fc0eff0604caadfa97",
+    "createdAt": "2026-10-18T20:19:28Z",
+    "groups": [
+      "static"
+    ],
+    "statusAtIdentityRead": "in_progress",
+    "conclusion": "success",
+    "completionTask": "bcvvpuacd",
+    "afterOriginalCompletion": true,
+    "rule": "DL59 static-only corrective union; source correction tests/config only, no product change; MainArea later test supplement still needs final hand-back unit proof",
+    "status": "completed",
+    "attempt": 1,
+    "exit": 0,
+    "job": 117779435067,
+    "startedAt": "2026-10-18T20:21:06Z",
+    "completedAt": "2026-10-18T20:26:24Z",
+    "evidenceStatusAfterGate": "empty; no dirty evidence paths outside p3-finish or inside it"
+  },
+  "pair45NativeCounts": {
+    "L277": 5,
+    "L199MustRead": 3,
+    "fullSets": 0
+  },
+  "measurementAttribution": {
+    "recordedAt": "2026-10-18T20:33:47Z",
+    "run": 39156492025,
+    "source": "55d012a2e1245a872cf44764842fc155e3276aef",
+    "provenance": "architect relayed CI-opt custody record; not independently observed process telemetry by F",
+    "externalSource": "manim-master lane,8- and9-way replays on approximately10-core mini",
+    "windows": [
+      {
+        "name": "probe_all",
+        "start": "19:46:16Z",
+        "end": "19:56:28Z"
+      },
+      {
+        "name": "replay-r1",
+        "start": "19:56:45Z",
+        "end": "20:08:12Z"
+      },
+      {
+        "name": "replay-r2",
+        "start": "20:10:24Z",
+        "end": "20:21:49Z"
+      },
+      {
+        "name": "replay-master",
+        "start": "20:21:49Z",
+        "end": null
+      }
+    ],
+    "singleRunStarts": [
+      "19:44:54Z",
+      "19:55:57Z",
+      "20:09:22Z"
+    ],
+    "singleRunEndTimes": "not supplied; do not invent exact concurrency duration",
+    "ruling": "cause(a): three measured reds are load-confounded observations, not verdicts, even where sampled load1 is low; retain values/bounds/loads and overlap, quiet relaunch supplies verdict",
+    "coverage": "artifacts-perf and document-scale entirely within replay-r2; presentations-scale spans r1,20:09:22 single run and r2; packaged had no overlap",
+    "loadRule": "judging floor20 unchanged; external-work confound is not a numeric high-load waiver; below10 quiet clause remains separate",
+    "protocol": "No settle-wait spec change tonight. One deferred P3 tracker row; promote only if quiet relaunch first samples exceed10 without external source.",
+    "nextRun": "one DL59 relaunch of packaged/document-scale/presentations-scale/artifacts-perf on same tree plus accepted packaged correction and parent DL108 drag calibration, only after architect relays CI-opt quiet hold and mini below5; no further run after quiet failure without architect rebase-versus-repair ruling"
+  },
+  "quietRelaunch": {
+    "recordedAt": "2026-10-18T20:57:54Z",
+    "runId": 39165341280,
+    "attempt": 1,
+    "sourceCommit": "cdf54fbeb36c98c9e0c2f10a65b89e09e25b33f6",
+    "wrapperHead": "c82767cdbbc1bb3c19fdb7df21f286f62f392dfc",
+    "createdAt": "2026-10-18T20:53:07Z",
+    "statusAtIdentityRead": "queued",
+    "conclusion": "failure",
+    "groups": [
+      "static",
+      "packaged",
+      "e2e:presentations-scale",
+      "e2e:artifacts-perf",
+      "e2e:document-scale"
+    ],
+    "class1a": "pool",
+    "runner": "macos",
+    "completionTask": "b6w1r4060",
+    "completionMethod": "actual wrapper background command, automatic notification, no completion poll",
+    "label": "p3f-pair45-mac",
+    "rule": "one DL59 relaunch, union with39156492025 greens and39162779550 static, current-tree static included; no unit job",
+    "integration": "corrected parentDL108 a963cf446 merged d81b68a67",
+    "review": {
+      "initial": "a6c00dc1f0a527021 accepted calibration, found P2 delayed20s poll due awaited post-click evidence",
+      "fix": "cdf54fbeb byace7bcff092c64bac, post-click diagnostic concurrent with original20s poll, immediate rejection handler",
+      "recheck": "same registered medium reviewer, exactcc9381f06..cdf54fbeb plus originald81b68a67 comparison; correct/no material findings, static only"
+    },
+    "quietRelay": {
+      "by": "architect relaying CI-opt",
+      "at": "20:51Z",
+      "loadSamples": [
+        {
+          "at": "2026-10-18T20:50:41Z",
+          "load1": 2.0
+        },
+        {
+          "at": "2026-10-18T20:51:11Z",
+          "load1": 2.27
+        }
+      ],
+      "noManimScenes": true,
+      "launcherHeldByQuietFlag": true,
+      "background": "one-core diagnostic loop and sminos daemon; record actual per-row loads",
+      "release": "architect releases CI-opt hold only after completed result relayed"
+    },
+    "boundaries": {
+      "drag": "DL10824ms calibration only; below16 product repair retained P4, old raw16ms readings unchanged",
+      "approval": "cause undetermined; one click/20s retained; pass unreproduced observation, recurrence product row with new evidence",
+      "announcement": "unchanged case; recurrence own DL59 red and gap fixed before hand-back",
+      "settleProtocol": "no implementation, deferred conditional row only",
+      "MainArea": "88/88 named proof; full-unit obligation remains final hand-back",
+      "fullSetCredit": false,
+      "paidSpendUsd": 0
+    },
+    "queueThresholdTask": "b21w80pyy",
+    "queueThreshold": "own pending taskb21w80pyy stopped after completion before30min threshold, no check/poll performed",
+    "recordedCompletedAt": "2026-10-18T21:28:37Z",
+    "status": "completed",
+    "exit": 1,
+    "completedAt": "2026-10-18T21:21:19Z",
+    "rawLogs": "/private/tmp/p3f-quiet-complete.bZ8EnY/logs.zip",
+    "rawLogsSha256": "2e7851c2127c043c7e3edfd80fe76122b738020d6e5a8a892a68aef28c292051",
+    "reports": "/tmp/maws-review/gates/ci-cdf54fbe",
+    "evidenceStatusAfterGate": "empty; no dirty evidence paths",
+    "quietRelease": "completed result sent to architect; only architect coordinates flag release",
+    "jobs": [
+      {
+        "name": "packaged",
+        "databaseId": 117787051754,
+        "conclusion": "success",
+        "startedAt": "2026-10-18T20:56:09Z",
+        "completedAt": "2026-10-18T21:11:43Z"
+      },
+      {
+        "name": "e2e:artifacts-perf",
+        "databaseId": 117787051783,
+        "conclusion": "success",
+        "startedAt": "2026-10-18T20:53:25Z",
+        "completedAt": "2026-10-18T20:56:07Z"
+      },
+      {
+        "name": "e2e:presentations-scale",
+        "databaseId": 117787051814,
+        "conclusion": "success",
+        "startedAt": "2026-10-18T21:15:56Z",
+        "completedAt": "2026-10-18T21:21:19Z"
+      },
+      {
+        "name": "e2e:document-scale",
+        "databaseId": 117787051832,
+        "conclusion": "failure",
+        "startedAt": "2026-10-18T21:11:45Z",
+        "completedAt": "2026-10-18T21:15:54Z"
+      },
+      {
+        "name": "static",
+        "databaseId": 117787051957,
+        "conclusion": "success",
+        "startedAt": "2026-10-18T20:54:52Z",
+        "completedAt": "2026-10-18T21:00:09Z"
+      }
+    ],
+    "results": {
+      "static": "green",
+      "packaged": "135passed/184skipped plus supervisor1 and voice1;137passed total, no failures",
+      "e2e:artifacts-perf": "5passed, announcement case76 passed unchanged and all3metrics passed",
+      "e2e:presentations-scale": "1passed, all8rows met24ms drag calibration; separate logical fixture non-repeatability discovered",
+      "e2e:document-scale": "1failed/1passed; typing17.2/16ms,preview-enter2 1016.9/1000ms,collected renderer1 519.7/500MB; parentDL109 calibration to be applied and singly relaunched after quiet relay"
+    },
+    "observationDisposition": {
+      "approval": "side.spec.ts931 passed3.3s at21:11:13.723Z; one unreproduced packaged observation, never fixed",
+      "announcement": "artifacts-store.spec.ts76 passed4.7s at20:54:29.912Z and again in packaged2.6s; P4 source-gap row retained, no causal-fix claim",
+      "settleTrigger": "no source settle implementation; actual first loads recorded, evaluate condition with completed extraction",
+      "fullSetCredit": false
+    }
+  },
+  "heavyRepeatability": "P4 carry row committed with both shapes; parent accepts preview validity by descriptor, no probe/optimization",
+  "documentCalibration": {
+    "parent": "843275754ae6e2058963f8c41c531c76cad6bf64",
+    "merge": "a8ff60d21c5ddea153ad1c079fe0663d4f2eb35e",
+    "status": "reviewed and green39169679475; source/wave acceptance complete, final frozen-source gates remain",
+    "quietRelay": {
+      "quietSince": "2026-10-18T21:27:56Z",
+      "reportedLoads": [
+        4.72,
+        3.78
+      ],
+      "recheckApprox": "21:29Z",
+      "recheckLoads": [
+        3.39,
+        3.69
+      ],
+      "noScenes": true,
+      "noRunnerJobAtRelay": true,
+      "launcherHeld": true,
+      "launchCondition": "single document-scale only after calibration review; architect notified run start/end"
+    },
+    "commit": "b9bf74237db6de51ed81c3bc56f51a31280a3b80"
+  },
+  "documentCalibrationGate": {
+    "runId": 39169679475,
+    "sourceCommit": "b9bf74237db6de51ed81c3bc56f51a31280a3b80",
+    "wrapperHead": "6fa1502ed09d166bcd2dd22255b610de2c6a26a6",
+    "createdAt": "2026-10-18T21:51:35Z",
+    "statusAtIdentityRead": "in_progress",
+    "conclusion": "success",
+    "groups": [
+      "e2e:document-scale"
+    ],
+    "completionTask": "bx8cm88nc",
+    "quietRelay": {
+      "quietSince": "2026-10-18T21:27:56Z",
+      "loads": [
+        4.72,
+        3.78
+      ],
+      "recheckedApproximately": "21:29Z",
+      "recheckLoads": [
+        3.39,
+        3.69
+      ],
+      "noScenes": true,
+      "launcherHeld": true,
+      "release": "architect notified at completion"
+    },
+    "review": "a18977fda743d3513 correct/no material findings on62f780871..b9bf74237, static only",
+    "calibration": "parentDL109 corrected843275754, exact20/1200/600 rows only; original product targets and three P4 rows retained",
+    "remaining": "one document-only DL59 result needed; no full-set credit",
+    "status": "completed",
+    "attempt": 1,
+    "exit": 0,
+    "job": 117799999480,
+    "startedAt": "2026-10-18T21:51:53Z",
+    "completedAt": "2026-10-18T21:56:40Z",
+    "rawArtifact": "/private/tmp/p3f-doc-final.pHMXML",
+    "rawJsonSha256": "2b1c22083140d858de0a1786d3117ae94b3765ddc370dd306561ffbc4036a848",
+    "measurements": "measurements/document-calibrated-raw.json",
+    "rows": "38 total:33met/5recorded,0failed/marginal",
+    "evidenceStatusAfterGate": "empty",
+    "quietRelease": "completion sent to architect; architect coordinates flag release",
+    "finalFigures": {
+      "typingP95": 16.6,
+      "typingLoad": 2.22,
+      "previewEnters": [
+        925.1,
+        910.5,
+        877.7
+      ],
+      "previewLoads": [
+        2.09,
+        2.09,
+        2.48
+      ],
+      "rendererCollected1": 527.8,
+      "rendererCollected2": 414.7,
+      "memoryLoad": 2.48,
+      "loads": {
+        "launched": 4.22,
+        "steadyStart": 2.76,
+        "steadyEnd": 2.22
+      }
+    }
+  },
+  "pairedWaveAcceptance": {
+    "runs": [
+      39156492025,
+      39162779550,
+      39165341280,
+      39169679475
+    ],
+    "status": "all26selected groups accepted as ruled corrective union, not whole-set or frozen-S hand-back",
+    "calibration": "parentDL108/109, product targets carriedP4",
+    "heavy": "descriptor-valid preview proof, separate logical repeatability P4 carry",
+    "laterObligation": "MainArea final full-unit proof, native count clauses, source-scale review, final hand-back,paid7,owner sitting"
+  },
+  "scaleReviewHandup": {
+    "recordedAt": "2026-10-18T22:03:37Z",
+    "status": "complete post-debt20-pair hand-up ready; not final source freeze or panel completion",
+    "source": "070e23f49875006484683d280cb61b52aa17f2dc",
+    "sourceTree": "91a23c42d464fff7892ee25998c5063e70f174cc",
+    "rangeBase": "5ad08789cc0f4e564091cdb2f5224026304fb889",
+    "coverage": {
+      "changedFiles": 2935,
+      "assignedFiles": 1608,
+      "excludedFiles": 1327,
+      "unassigned": 0,
+      "overlaps": 0,
+      "obsolete": 0,
+      "assignedLines": 236293,
+      "excludedLines": 210924,
+      "totalLines": 447217
+    },
+    "tiers": {
+      "max": 14,
+      "xhigh": 6
+    },
+    "largest": 14948,
+    "proof": "all20stat/numstat/base-content/head-tree/parents/on-review-head checks true,0statuslines; no omitted/overlapping/obsolete path",
+    "helper": {
+      "path": "/private/tmp/p3f-final-pairs.py",
+      "sha256": "b6019ca8e191dfe9460ef0b23d2df2408c17611c974be187cda9f663917b4abc",
+      "review": "P1 ownership guard corrected and independent recheck clean; real build now completed"
+    },
+    "preflightLog": "/private/tmp/p3f-final-preflight-070e23f49.log",
+    "buildLog": "/private/tmp/p3f-final-build-070e23f49.log",
+    "preflightSha256": "f75fb8b5f20d36ceeeae21626f56e603a7865d0d71c3567198fe8dbabd675fdc",
+    "buildSha256": "5026e763c63ec68680df09e7cbc67be704420eebd569bf20134b840b6815d59c",
+    "pairManifestSha256": "8720dbf0fd774c413624d49315779ebd2641febbf7f8617a26329dda9c3f1058",
+    "gateBasis": [
+      39156492025,
+      39162779550,
+      39165341280,
+      39169679475
+    ],
+    "reviewContext": [
+      "parentDL108/109 authorize named host calibrations; product targets retainedP4",
+      "heavy generator logical repeatability carried; preview valid by descriptor, both shapes retained",
+      "reader Markdown rendering and canonical dialect exactness are distinct; explicit remaining loss cases carriedP4",
+      "C10 replay seed uses fresh owned scratch model; ordinary symlinks rejected, malicious same-UID concurrent replacement not atomically prevented",
+      "native count clauses, MainArea final-unit proof, final frozen-S gate/bundle/paid7 and owner sitting remain"
+    ],
+    "cloneCustody": "20area clones now handed to architect; do not rebuild while reviews run; drag-a/drag-b untouched"
+  },
+  "ownDiffReview": {
+    "recordedAt": "2026-10-18T22:35:01Z",
+    "range": "1c007d713587b482a0329a8d3cce8fd5162054ed..070e23f49875006484683d280cb61b52aa17f2dc",
+    "paths": 180,
+    "rung": "reviewer-high (astra, high)",
+    "verdict": "correct, no material findings, static only",
+    "record": "reviews/own-diff-high-result.txt",
+    "fixWaves": "each fix wave after 070e23f49 gets its own review of its range"
+  },
+  "mainareaUnitProof": {
+    "run": 39171525104,
+    "conclusion": "success",
+    "record": "gates/mainarea-unit-39171525104.json",
+    "status": "additional evidence; unit:darwin skipped; p3f-final unit job authoritative"
+  },
+  "rungSubstitution": {
+    "from": "2026-10-18T22:27Z",
+    "cause": "astra and sol accounts at usage limit until 2026-10-24 13:40 PDT; fresh dispatches fail at their first request",
+    "rule": "architect: reviewer-high on fable (high); reviewer-medium/low and sol-xhigh on opus; astra workers on fable or opus",
+    "affected": "composition medium review died on the sol quota without a verdict; re-dispatched once on opus"
+  },
+  "scaleReviewFixes": {
+    "record": "scale-review/report.txt",
+    "routedAreas": 20,
+    "remainingAreas": 0,
+    "findings": 46,
+    "trackerRows": [
+      "S-SHOWPANE-RECAPTURE",
+      "S-DOC-CARRY-LABELS",
+      "S-PPTX-SKEW",
+      "S-DESIGN-NOTES-STOPS",
+      "S-DESIGN-FRAME-SLICES",
+      "S-STORE-SUGGESTION-ATTRS",
+      "S-AP-PATH-TOCTOU",
+      "S-AP-PRESENCE-CROSS",
+      "S-DS-VERSION-ASSETS",
+      "S-DASH-REFRESH-LOG",
+      "S-DOC-WRITER-REORDER",
+      "S-STORE-STAGED-LISTING",
+      "S-MIRROR-RESIDUALS",
+      "S-PPTX-TABLE-OUTLINE",
+      "S-DESIGN-ORDER-SETTLE",
+      "S-DESIGN-SCALE-100HZ",
+      "S-SLIDE-STAGE-KEYBOARD-EXIT",
+      "S-MIRROR-RELINK-RECONCILE",
+      "S-COMPILER-BAILOUT-DECK",
+      "S-PRES-HOLD-SEAM",
+      "S-MARKUP-INERT",
+      "S-DOC-DRAG-CARRY-DELETION",
+      "S-DOC-TAB-DRAG-SOURCE",
+      "S-PRESENT-EMBED-FOCUS"
+    ],
+    "compositionFix": "91d4874fa2f799261fffe8208c8fc3b3d88f773d",
+    "compositionFollowUp": [
+      "068f25725",
+      "bc837f236"
+    ],
+    "connectorsCommits": {
+      "host": [
+        "90d43609e",
+        "cc8270eaa",
+        "2bed35b08",
+        "2d08cc287"
+      ],
+      "main": [
+        "e366f527e",
+        "eb97b441b",
+        "4be8d3b9b",
+        "681c37f18",
+        "bb3aea301",
+        "1bbed2d6f",
+        "525f9b0c9",
+        "6660f4515",
+        "fc95f2e8f"
+      ],
+      "siblings": {
+        "F5": "93258657f (a take unanswered after a false cancel keeps the operation)",
+        "F3": "4393f3bb1 (form-encoded Basic on the SDK exchange and refresh via addClientAuthentication)"
+      },
+      "note": "siblings complete routed classes F5 and F3 in claimed files; architect confirmed they stay in, recorded under those findings"
+    },
+    "dashboardModelCommits": [
+      "2d6357818",
+      "f2380b48e",
+      "42f327f55",
+      "62d9feabb",
+      "2f0e99a4c"
+    ],
+    "interimGates": "gates/interim-class1a.json",
+    "closedAt": "2026-10-19T04:54:33Z"
+  },
+  "finalGatePreparation": "final-gate-preparation.json",
+  "agentCeiling": {
+    "from": "2026-10-19T00:59:15Z",
+    "rule": "architect reading of A-13: up to four workers plus up to two read-only reviewers, six agents at most; reviewers run nothing heavy; vitest slots, commit lock, e2e lock and load rule unchanged; parent DL110 at landing"
+  },
+  "freezeEstimate": {
+    "sentAt": "2026-10-19T03:53Z",
+    "lastReviewLanding": "~2026-10-19T07:15Z (06:30-08:00)",
+    "S": "~08:00Z (07:15-09:00)",
+    "previous": {
+      "sentAt": "2026-10-18T23:31Z",
+      "S": "~06:30Z"
+    }
+  },
+  "frozenSource": {
+    "S": "de71da97afa48f2b19d3caeccf71406544b03e2c",
+    "frozenAt": "2026-10-19T05:05Z",
+    "masterMerge": "none needed: master had not moved (git log HEAD..master empty at the freeze)",
+    "prefreezeGate": 39201844046,
+    "ownDiffReview": "Decision Log 32: own-diff high review of 1c007d713..070e23f49 correct; each later fix wave reviewed its own range (E/reviews)",
+    "quietSignal": "CI-opt flag up 04:54:23Z, mini quiet 04:55:05Z, relayed by the architect before launch"
+  },
+  "finalGate": {
+    "label": "p3f-final",
+    "ref": "ci/p3f-final-de71da97",
+    "run": 39202806940,
+    "startedAt": "2026-10-19T05:06:06Z",
+    "status": "success",
+    "log": "/tmp/maws-review/gates/p3f-final-de71da97a-ci.log",
+    "record": "gates/p3f-final.json"
+  },
+  "postMerge": {
+    "merge": "073d10446a5f43f0ae8f818b2f0d650c710cc66c",
+    "record": "gates/post-merge.json"
+  },
+  "handBack": {
+    "S": "de71da97afa48f2b19d3caeccf71406544b03e2c",
+    "merge": "073d10446a5f43f0ae8f818b2f0d650c710cc66c",
+    "carrier": "fce560e3591474cabf4cb0030de054d4b7be4c2b",
+    "finalGate": 39202806940,
+    "measure": {
+      "valid": 39210430697,
+      "void": 39208915867
+    },
+    "livedata": 39210066820,
+    "live": 39210063850,
+    "postMerge": {
+      "pool": 39203174607,
+      "connectors": 39210067429
+    },
+    "bundleSha256": "f085148fb51b3a8476e7e78030c1e73cfb19df9c794ffe8c630f98732dce19a3",
+    "closures": [
+      "L216",
+      "L246",
+      "L253"
+    ],
+    "recordedAt": "2026-10-19T07:27:41Z"
+  }
+}

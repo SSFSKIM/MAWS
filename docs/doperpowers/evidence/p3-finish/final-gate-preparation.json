@@ -1,0 +1,25 @@
+{
+  "recordedAt": "2026-10-18T23:08:13Z",
+  "status": "prepared, not run on S (S not frozen)",
+  "scripts": {
+    "p3f-final-gate.sh": "8421d20929961f0044235ae69b6e6a7fabaea9b0669d1e1c11f8f1954b3531a4",
+    "p3f-measure-gate.sh": "b8946420a2e98b1a4c60057e7f49f89dfce8f1285f24e8397588051b24971036",
+    "p3f-livedata-gate.sh": "06066c4a2939f5fe5e0c9b49ff95d3d346b296e4ef2cdc9c57c73b5d1f49d2c0",
+    "p3f-fetch-bundle.sh": "e621b348d0cfd73f6ddcd2250fcbfcebc8d8f7cc8818f75774df73ad4ef3e1ce",
+    "p3f-inspect-bundle.py": "6a247f07516a79f3583bdda27fb71f272f382214adc6b567b771b259f59d64e1",
+    "p3f-extract-out.py": "6a76a9426ddd3a15680cb811f2a7289d53d429d9b65c2def0e3f25e5b9a19470",
+    "p3f-verify-out.py": "1e73d0a84a270a560bdf5ba7d90aa5a818eb32f5802f5d1f043a249c966d4712",
+    "p3f-a15.py": "ace93187efbf3a71269751f075260e48aad5051d97e2e5dc986a2c13489646db",
+    "p3f-paid-run.sh": "6653d809f453b5a2926998ddc979bd18ff5fb285436723febfc2679659ed9f2e",
+    "p3f-class1a-gate.sh": "e004c4e9f80d14d0e7ccd2f8ab942570a4ac3bf3e07eeeea1878377029c8a436"
+  },
+  "order": [
+    "p3f-final-gate.sh <S> (background; read the run id once)",
+    "p3f-fetch-bundle.sh <run> <S> (green run only; fresh mktemp dir; inspection only)",
+    "p3f-extract-out.py <manifest> <S> (refuses an existing W/out; out/ only; per-file sha256 after write)",
+    "per paid spec: reserve the cap in E/live ledger, then p3f-paid-run.sh <attempt> <spec> <manifest> <S> <flags> (verifies W/out, A-15 before and after, load1 < 20, macbook-e2e lock plus slot, direct Playwright one worker zero retries)",
+    "p3f-measure-gate.sh <S>, then p3f-livedata-gate.sh <S>"
+  ],
+  "rehearsal": "p3f-extract-out.py on the preflight bundle (commit 82af0196b) into a scratch root: 853 files, 56,198,913 bytes, all digests verified; scratch removed. gh run view, artifact listing and wrapper-commit API reads checked on run 39017820302 (gh api takes no -R; the API still serves a deleted ci ref commit).",
+  "refs": "ci-gate.sh names the ref ci/<label>-<first 8 of the sha>; the bundle is in the e2e-dashboard artifact under test-results/bundle/"
+}

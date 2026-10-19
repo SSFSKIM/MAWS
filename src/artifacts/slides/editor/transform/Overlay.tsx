@@ -194,20 +194,31 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       setShown(g.frame(slidePoint({ x: e.clientX, y: e.clientY }), mods(e)));
     };
 
+    // the gesture ends written, its step closed, and the layout passes it saw caught up
+    const finish = (g: Gesture) => {
+      g.end(true);
+      setShown(null);
+      catchUpLayout();
+    };
+
     const onUp = (e: PointerEvent) => {
       const g = gesture.current;
       gesture.current = null;
       const pend = pending.current;
       pending.current = null;
       if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
-      if (g) {
-        g.end(true);
-        setShown(null);
-        catchUpLayout();
-        return;
-      }
+      if (g) return finish(g);
       // a press without a drag inside a multi-selection narrows it to what was pressed
       if (pend && pend.target !== null && !pend.toggle && session.snapshot().selection.length > 1) session.select([pend.target]);
+    };
+
+    // P3-F (L218): the capture lost with no release (the surface hidden, the system taking the pointer) ends the gesture
+    // as a release does; a press not yet a drag is dropped. After a release nothing is left to end.
+    const onLost = () => {
+      const g = gesture.current;
+      gesture.current = null;
+      pending.current = null;
+      if (g) finish(g);
     };
 
     // a double-click goes into the selected container, or edits the selected text element (a pointer press carries no
@@ -241,6 +252,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
     el.addEventListener('pointercancel', onCancel);
+    el.addEventListener('lostpointercapture', onLost);
     el.addEventListener('dblclick', onDouble);
     return () => {
       el.removeEventListener('dblclick', onDouble);
@@ -248,6 +260,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       el.removeEventListener('pointermove', onMove);
       el.removeEventListener('pointerup', onUp);
       el.removeEventListener('pointercancel', onCancel);
+      el.removeEventListener('lostpointercapture', onLost);
     };
   }, [surface, ctx, slidePoint, session, slideId, scale, readOnly, editing, catchUpLayout]);
 
@@ -277,8 +290,12 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
           done();
         }
       } else if (key === 'Tab' && !mod) {
-        session.select(tabNext(tree, sel, e.shiftKey));
-        done();
+        // P3-F: past the last element (before the first with Shift) the key is the browser's: focus leaves the stage
+        const next = tabNext(tree, sel, e.shiftKey);
+        if (next) {
+          session.select(next);
+          done();
+        }
       } else if (key === 'Enter' && sel.length === 1 && !readOnly) {
         const kids = tree.childrenOf(sel[0]!);
         if (isText(tree.element(sel[0]!)?.tag)) session.editText(sel[0]!);

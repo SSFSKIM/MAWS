@@ -13,7 +13,10 @@
 //   the end. The operation is registered here before its command is sent, so an end announced before the command's
 //   acknowledgment is not lost; events reach main only once its connection streams (X13), so an operation starts only
 //   then and a streaming connection reconciles every pending one by `take`; each has a deadline past the host's own,
-//   at which main takes or withdraws it.
+//   at which main takes or withdraws it. P3-F F-connectors 5: a dataset operation's cancel the host never answered
+//   proves neither outcome, so it settles nothing and nothing is taken; the cancel is asked again on the operation's
+//   next end or reconciliation, or after DIRECT_RETRY_MS, until the host answers it. Its sibling: a dataset take the
+//   host never answered may have started the publication, so it settles nothing either and is asked again the same way.
 // - A call is bound to the target main selected: one `directStart` per call, never retried or moved to another route,
 //   even when an eligible engine appears meanwhile (the next resolution picks route E). Only fixed words reach the broker
 //   and the log: the host's answers are closed enums, and no SDK, server, file or token text exists to leak.
@@ -23,6 +26,8 @@
 //   check) or the owner's discovery, within the operation's registered and bounded lifetime: its cancellation, its
 //   deadline, the host's loss, a close and stop each settle it at once and abort the preparation, and a late answer
 //   sends nothing. Resolution never prepares one. An `unauthorized` answer is reported with exactly the credential sent.
+//   P3-F F-connectors 6: the broker's door preceded the preparation's awaits, so the call asks main's admission again
+//   (`admit`, the native window re-read) in the same turn as its start.
 import { randomUUID } from 'node:crypto';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import type { DirectCallOutcome, DirectCredential, DirectDiscoverAnswer, DirectOperationOutcome, DirectResolveAnswer, DirectSource, DirectToolMetadata } from '@shared/ipc/schema/connectors';
@@ -85,6 +90,8 @@ export const DIRECT_RESOLVE_DEADLINE_MS = 8_000;
 export const DIRECT_OPERATION_DEADLINE_MS = 180_000;
 // The operations main keeps pending at once (E keeps no bound; the host's own is 256).
 export const DIRECT_PENDING_LIMIT = 64;
+// P3-F F-connectors 5: how long after an unanswered dataset cancel or take main asks it again, when no end came first.
+export const DIRECT_RETRY_MS = 1_000;
 
 type Kind = DirectOperationOutcome['kind'];
 type OutcomeOf<K extends Kind> = Extract<DirectOperationOutcome, { kind: K }>;
@@ -99,6 +106,8 @@ interface Pending {
   readonly kind: Kind;
   publishable?: () => boolean; // E3c: native visibility/request recheck before every publication take
   stopping?: boolean;
+  unconfirmed?: Lost; // P3-F F-connectors 5: its cancel went unanswered: asked again before anything is taken
+  retry?: ReturnType<typeof setTimeout>; // P3-F F-connectors 5: an unanswered cancel's or take's next ask, should no end come first
   settle(result: DirectOperationOutcome | Lost): void;
   sent: boolean; // P3-HD M3b: its command was sent (until then, preparing its credential: the host knows nothing of it)
   taking: boolean; // a `directTake` is in flight
@@ -142,17 +151,30 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
       if (whenNone !== null) withdraw(operationId, whenNone); // P3-HD M3b: nothing in the host to take
       return;
     }
+    if (operation.unconfirmed) return stopDataset(operationId, operation.unconfirmed); // P3-F F-connectors 5: no take before the cancel's answer
     if (operation.taking) {
       operation.again = { whenNone: whenNone ?? operation.again?.whenNone ?? null }; // an in-flight take may have answered before this end
       return;
     }
     if (operation.publishable && !operation.stopping && !operation.publishable()) return stopDataset(operationId, lost('the work may no longer publish'));
     operation.taking = true;
+    clearTimeout(operation.retry); // a take asked now is the one a failed take's retry would ask
+    // P3-F F-connectors 5 sibling: unanswered, a dataset take may have started the publication: the operation stays, and
+    // the take is asked again; any other operation is withdrawn, as the host may still run it
+    const unanswered = (word: string) => {
+      operation.taking = false;
+      if (pending.get(operationId) !== operation) return;
+      if (!operation.publishable) return withdraw(operationId, lost(word));
+      const next = operation.again;
+      operation.again = undefined;
+      clearTimeout(operation.retry);
+      operation.retry = setTimeout(() => fetch(operationId, next?.whenNone ?? whenNone), DIRECT_RETRY_MS);
+    };
     void deps.call('connectors.directTake', { operationId }).then(
       (taken) => {
         operation.taking = false;
         if (!pending.has(operationId)) return;
-        if (!taken.ok) return withdraw(operationId, lost(`directTake failed: ${taken.error.code}`)); // the host may still run it
+        if (!taken.ok) return unanswered(`directTake failed: ${taken.error.code}`);
         const { outcome, dataset } = taken.value;
         if (dataset && operation.publishable) {
           if (dataset.status !== 'publishing') return operation.settle({ kind: 'call', outcome: dataset.status === 'failed' && dataset.reason === 'revoked' ? { ok: false, failure: 'refused', refusal: 'revoked', reason: 'grant' } : { ok: true, result: dataset } });
@@ -167,10 +189,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
         if (next) return fetch(operationId, next.whenNone ?? whenNone);
         if (whenNone !== null) withdraw(operationId, whenNone);
       },
-      () => {
-        operation.taking = false;
-        withdraw(operationId, lost('directTake failed'));
-      },
+      () => unanswered('directTake failed'),
     );
   }
 
@@ -180,12 +199,22 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
     if (!operation || operation.stopping) return;
     if (!operation.sent) return withdraw(operationId, result);
     operation.stopping = true;
+    operation.unconfirmed = undefined;
+    clearTimeout(operation.retry);
+    // P3-F F-connectors 5: unanswered, the cancel may or may not have won: the operation stays, to be asked again
+    const unanswered = () => {
+      if (pending.get(operationId) !== operation) return;
+      operation.stopping = false;
+      operation.unconfirmed = result;
+      operation.retry = setTimeout(() => stopDataset(operationId, result), DIRECT_RETRY_MS);
+    };
     void deps.call('connectors.directCancel', { operationId }).then((answer) => {
       if (pending.get(operationId) !== operation) return;
-      if (answer.ok && !answer.value.cancelled) return fetch(operationId, lost('the host kept no outcome for the operation', 'failed'));
-      if (answer.ok) void deps.call('connectors.directTake', { operationId }).catch(() => {});
+      if (!answer.ok) return unanswered();
+      if (!answer.value.cancelled) return fetch(operationId, lost('the host kept no outcome for the operation', 'failed'));
+      void deps.call('connectors.directTake', { operationId }).catch(() => {});
       operation.settle(result);
-    }, () => operation.settle(result));
+    }, unanswered);
   }
 
   // Answers the operation now and withdraws it from the host (which may still run it, or never have heard of it).
@@ -230,6 +259,7 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
         settle: (result) => {
           if (!pending.delete(operationId)) return;
           clearTimeout(deadline);
+          clearTimeout(operation.retry); // P3-F F-connectors 5
           signal.removeEventListener('abort', cancel);
           preparation.abort(); // P3-HD M3b: a preparation still running is told; its answer is dropped
           resolve({ result: result as OutcomeOf<K> | Lost, credential });
@@ -250,6 +280,9 @@ export function createDirectRoute(deps: DirectRouteDeps): DirectRoute {
           if (!deps.streaming()) return withdraw(operationId, lost('the engine host is not streaming its events yet'));
           credential = prepared.credential;
         }
+        // P3-F F-connectors 6: main's admission again, in the same turn as the send (a window that hid unannounced while
+        // the credential was prepared aborts the call here, before anything, an Allow once included, is used)
+        if (context?.admit && !context.admit()) return withdraw(operationId, lost('cancelled'));
         operation.sent = true;
         let started;
         try {

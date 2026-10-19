@@ -511,6 +511,39 @@ describe('a dashboard tab’s live datasets: the owner’s gestures (E3 M3)', ()
     await starting;
     expect(w.surface.refreshWatch).not.toHaveBeenCalled();
   });
+
+  // P3-F dashboard-live-ui wave (scalpel-3#1): a Start that settles while the dashboard is hidden calls nothing then; at
+  // the next showing each manual query it left paused for want of a session refreshes once, so the no-session note and
+  // Start go, and later showings call nothing more unasked
+  it('a Start settling while hidden refreshes its paused manual queries once at the next showing, never while hidden', async () => {
+    const w = world();
+    setDataset(w.doc, 'manual', query({ tool: 'manual' }));
+    w.live.follow(w.doc);
+    w.live.setShown(true);
+    await settle();
+    w.surface.callTool.mockResolvedValueOnce(NO_ROUTE);
+    await w.live.refresh('manual');
+    expect(w.live.snapshot().needsStart).toBe(true);
+    const end = deferred<ArtifactSessionEnd>();
+    w.startSession.mockResolvedValueOnce({ status: 'starting', appSessionId: SESSION, settled: end.promise, cancel: vi.fn() });
+    const starting = w.live.start();
+    await settle();
+    w.live.setShown(false); // the owner switches tabs while the session starts
+    end.resolve({ status: 'ready', appSessionId: SESSION });
+    await starting;
+    await settle();
+    expect(w.live.snapshot().start).toEqual({ phase: 'ready', appSessionId: SESSION });
+    expect(w.surface.callTool).toHaveBeenCalledTimes(1); // nothing called while hidden
+    w.live.setShown(true);
+    await settle();
+    expect(w.surface.callTool).toHaveBeenCalledTimes(2);
+    expect(w.live.snapshot().queries.get('manual')?.pause).toBeNull();
+    expect(w.live.snapshot().needsStart).toBe(false);
+    w.live.setShown(false);
+    w.live.setShown(true);
+    await settle();
+    expect(w.surface.callTool).toHaveBeenCalledTimes(2); // one call for the one Start
+  });
 });
 
 describe('a dashboard tab’s live datasets: the stale label’s clock (E3 M3)', () => {

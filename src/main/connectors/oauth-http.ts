@@ -26,6 +26,11 @@ export class OAuthTransportError extends Error {
   }
 }
 
+// P3-F L271: the plain-HTTP exception is matched on the address as written, since WHATWG parsing turns other spellings
+// of the loopback (2130706433, 127.1, 0x7f.0.0.1, a trailing dot, percent-escapes) into 127.0.0.1. A URL object keeps no
+// spelling, so its canonical href is what is checked; each one MAWS passes is built from a string checked here.
+const LITERAL_LOOPBACK = /^http:\/\/127\.0\.0\.1(?::\d*)?(?:[/?#]|$)/i;
+
 export function isPermittedOAuthUrl(value: string | URL): boolean {
   let url: URL;
   try {
@@ -34,7 +39,8 @@ export function isPermittedOAuthUrl(value: string | URL): boolean {
     return false;
   }
   if (url.username !== '' || url.password !== '') return false;
-  return url.protocol === 'https:' || (url.protocol === 'http:' && url.hostname === '127.0.0.1');
+  if (url.protocol === 'https:') return true;
+  return url.protocol === 'http:' && url.hostname === '127.0.0.1' && LITERAL_LOOPBACK.test(typeof value === 'string' ? value : value.href);
 }
 
 const NULL_BODY = new Set([204, 205, 304]);

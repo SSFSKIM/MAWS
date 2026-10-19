@@ -7,10 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { charSlots } from '@artifacts/document/structs';
 import { insertedBy, carriedBy } from '@artifacts/yjs';
 import { DocIndex } from '@artifacts/document/block-index';
+import { carriedBlocks } from '@artifacts/document/history';
 import { fingerprint } from '@artifacts/document/fingerprint';
 import { schemaFor } from '@artifacts/document/schema';
 import { getThread, locate, liveThreadIds } from '@artifacts/document/threads';
-import { body, nodeOf, pmOf, seedDoc, TAB, textOf } from '@artifacts/document/writer.fixture';
+import { body, nodeOf, order, pmOf, seedDoc, TAB, textOf } from '@artifacts/document/writer.fixture';
 import { createAbsolutePositionFromRelativePosition, createRelativePositionFromJSON, createRelativePositionFromTypeIndex, relativePositionToJSON } from '@artifacts/yjs/document';
 import { pmnodeToDelta } from '@artifacts/yjs/prosemirror';
 import { applyV1, diffV1, stateV2, transact } from '@artifacts/yjs';
@@ -85,6 +86,19 @@ describe('artifact_create of a document', () => {
     const b = json(await call(create, { kind: 'document', title: 'Once', content: 'Text.' }, { toolUseId }));
     expect(b.artifactId).toBe(a.artifactId);
     expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Once')).toHaveLength(1);
+  });
+
+  // P3-F (artifact-protocol finding 2): the artifact and its first content commit together or not at all
+  it('takes back the whole create when writing its content fails: no empty artifact is left, and its handle stays free', async () => {
+    const create = documentCreateTool(deps());
+    const args = { kind: 'document', title: 'Atomic', handle: 'atomic', content: 'Text.' };
+    vi.spyOn(world.kind.adapter, 'afterUpdate').mockImplementationOnce(() => {
+      throw new Error('the hook broke');
+    });
+    const failed = await call(create, args).then(textOfResult, (error: unknown) => String(error));
+    expect(failed).toContain('the hook broke');
+    expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Atomic')).toEqual([]);
+    expect(json(await call(create, args))).toMatchObject({ status: 'created', handle: 'atomic' });
   });
 
   it('hands every other kind to the tool it wraps', async () => {
@@ -234,6 +248,30 @@ describe('artifact_edit', () => {
     expect(refusal.reason).toBe('staleTargets');
   });
 
+  // P3-F W-DOC-B (tracker L168): the agent's own stale delete of a moved block, through the tool (a regression pin: the
+  // agent writes on a host replica current with the live doc, so the move is seen and the delete refused as stale)
+  it('a delete whose block a person moved since the read is refused naming it where it is now; an unmoved block’s delete at that base lands', async () => {
+    const { id, revision } = await readSeed();
+    const person = world.connect(id, HUMAN);
+    person.edit((doc) =>
+      transact(doc, () => {
+        const p3 = DocIndex.of(doc).pm(DocIndex.of(doc).find('p3')!.top);
+        body(doc).delete(order(doc).indexOf('p3'), 1);
+        body(doc).insert(order(doc).indexOf('p4') + 1, [pmnodeToDelta(p3)]);
+      }),
+    );
+    await world.service.whenCommitted();
+    expect(order(live(id)).slice(-1)).toEqual(['p3']);
+    const before = stateV2(live(id));
+    const refusal = refusalOf(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'delete', id: 'p3' }] }));
+    expect(refusal.reason).toBe('staleTargets');
+    expect(JSON.stringify(refusal.blocks)).toContain('A plain paragraph the human types into.');
+    expect(stateV2(live(id))).toEqual(before);
+    json(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'delete', id: 'p2' }] }));
+    expect(order(live(id))).not.toContain('p2');
+    expect(textOf(live(id), 'p3')).toBe('A plain paragraph the human types into. Words to keep.');
+  });
+
   it('answers a repeated tool-use id with the first result and applies the batch once', async () => {
     const { id, revision } = await readSeed();
     const toolUseId = 'toolu_edit_once' as ToolUseId;
@@ -378,6 +416,8 @@ describe('suggestions (D14)', () => {
     const [client, clock] = charSlots(nodeOf(live(id), 'proposal'))[0].slot;
     expect(insertedBy(world.service.provenance(id), { client, clock })?.actor).toBe(`session:${SELF}`);
     expect(carriedBy(world.service.provenance(id), { client, clock })).toBe('accept');
+    // F's L160: the history preview labels the accepted copy (Accepted), not as the suggester's plain insertion
+    expect(carriedBlocks(body(live(id)), world.service.provenance(id)).get('proposal')).toBe('accept');
     expect(world.store.storage.clientActor(id, client)).toEqual({ kind: 'session', appSessionId: SELF });
   });
   it('clears direct and suggestion presence independently when a session switches write modes', async () => {

@@ -1,0 +1,108 @@
+{
+  "recordedAt": "2026-10-18T16:44:55Z",
+  "executor": "a87de8fe2228592d9",
+  "commits": [
+    "80757a5c6",
+    "d5f5c5b9e",
+    "be55152f4",
+    "957948cd9",
+    "3c068c7b3",
+    "232035f80",
+    "3bbe7134d",
+    "1cc84bf04"
+  ],
+  "paths": [
+    "e2e/browser.spec.ts",
+    "src/engine-host/index.ts",
+    "src/engine-host/ipc.ts",
+    "src/engine-host/launcher.ts",
+    "src/engine-host/replay-transcript.test.ts",
+    "src/engine-host/replay-transcript.ts",
+    "src/engine-host/replay-transport.test.ts",
+    "src/engine-host/replay-transport.ts",
+    "src/main/artifacts/bridge-script.dom.test.tsx",
+    "src/main/artifacts/bridge-script.test.ts",
+    "src/main/artifacts/bridge-script.ts",
+    "src/main/browser/register.test.ts",
+    "src/main/browser/register.ts",
+    "src/main/sessions/rollback.test.ts",
+    "src/main/sessions/service-register.test.ts",
+    "src/main/sessions/service.ts",
+    "src/main/sessions/side-thread.test.ts",
+    "src/main/sessions/start-guards.ts",
+    "src/renderer/src/panel/PanelHeader.tsx",
+    "src/renderer/src/shell/FloatingCard.test.tsx",
+    "src/renderer/src/shell/FloatingCard.tsx",
+    "src/renderer/src/side/card/CardHost.test.tsx",
+    "src/renderer/src/side/card/CardHost.tsx",
+    "src/renderer/src/statusline/format.test.ts",
+    "src/renderer/src/statusline/format.ts",
+    "src/renderer/src/tools/agents/model/task-graph.test.ts",
+    "src/renderer/src/tools/agents/model/task-graph.ts",
+    "src/renderer/src/transcript/model/derive.test.ts",
+    "src/renderer/src/transcript/model/derive.ts",
+    "src/renderer/src/transcript/model/fixtures.test.ts"
+  ],
+  "review": {
+    "reviewer": "af5a8d2e5227da2f7",
+    "result": "incorrect:2 verified P2; fresh fix wave running",
+    "findings": [
+      "replay transcript projects/slug symlinks can redirect writes outside canonical scratch config; wx does not constrain parent directories",
+      "discarded seed promise lets replay reply/result/idle precede transcript file; false no_engine_session on immediate Side/Fork"
+    ],
+    "verification": "controller read canonical guard/mkdir/write and void hook/transport resolve source; no owner-store write observed; reviewer code tracing, no executed reproduction",
+    "fixPaths": [
+      "src/engine-host/replay-transcript.ts",
+      "src/engine-host/replay-transcript.test.ts",
+      "src/engine-host/replay-transport.ts",
+      "src/engine-host/replay-transport.test.ts",
+      "src/engine-host/launcher.ts"
+    ],
+    "fixRule": "scratch-only failing regressions; actual containment before any escaping filesystem mutation; await seed before replay progress, coherent failure/kill semantics; no new knob/key; one recheck"
+  },
+  "rowMap": {
+    "125": "80757a5c6",
+    "129": "d5f5c5b9e",
+    "132": "be55152f4",
+    "260": "957948cd9",
+    "258": "3c068c7b3",
+    "128": "232035f80",
+    "198": "3bbe7134d",
+    "242": "1cc84bf04"
+  },
+  "checksControllerRead": {
+    "final-named.log": "528/22 files, exit0"
+  },
+  "otherChecks": "worker-reported red/green named logs /tmp/maws-review/w-shell/; reviewer inspecting",
+  "narrowedRows": {
+    "260": "known agent name only; unloaded host lookup P4 next transcript-model change",
+    "258": "generic tool-use-id task mapping, actual Bash linkage only; Monitor wire remains unrecorded/P4 capture recipe"
+  },
+  "processDeviation": "SHELL added rollback.test.ts, service-register.test.ts, index.ts and replay-transcript.ts/test before acknowledgment; ipc.ts absent from prior claim, disclosed at handback. Included in exact independent review, not retrospectively compliant.",
+  "replayBoundary": "C10 only; canonical owned scratch home with checked ordinary parent directories and wx, awaited first-user seed; concurrent malicious same-UID directory substitution is outside the owned scratch model",
+  "acceptance": "source and test-only fixture reviews correct; retained native RED pending combined26",
+  "fix": {
+    "executor": "a669c1af09b6dc634",
+    "commit": "e0bb59c878e1525e133af0a8867ad88f1cda8a98",
+    "controllerRead": "48/48 across2 named files exit0; five-path eslint exit0; actual three source diffs inspected",
+    "red": "worker-reported9 failures/39passes; retained red.log",
+    "logs": "/tmp/maws-review/w-shell-fix/",
+    "recheck": "af5a8d2e5227da2f7 correct, no material findings; immutable five-path range only",
+    "remainingModelBoundary": "non-atomic malicious/same-uid concurrent directory substitution not prevented; fresh owned scratch store, ordinary pre-existing symlink redirection is checked; not claimed an observed owner-store write"
+  },
+  "rowResults242": {
+    "source": "1cc84bf04 and e0bb59c87 product unchanged",
+    "status": "fixture correction3c475c9ed independently reviewed and native GREEN in39156492025 default/browser-comment; product unchanged",
+    "observed": "empty default source produced no fork intent/child record; browser cards remained composing with an alert/refused form phase; alert words and host log absent",
+    "inferred": "no_engine_session refusal reason, and random-pin seed followed by record rebinding to PARENT; neither is an artifact-observed refusal code",
+    "fixtureMismatches": [
+      "default fork starts without the recorded first prompt",
+      "browser2b/2c never send parent prompt",
+      "all three browser direct launches unpinned while journal reports PARENT"
+    ],
+    "correction": "faithful first parent turn and settled result/idle; matching sessionId pin; no forged transcript or product change",
+    "processDeviation": "worker committed under legacy /tmp/maws-review/p2f-wt.lock, not /private/tmp/maws-p3f-commit.lock; controller release said shared lock without identifier. Exact commit is only the approved two specs, no absorbed files; empty index worker-reported. No amendment; required lock restated explicitly.",
+    "decisionLog": "none; bounded replay seam unchanged"
+  },
+  "nativeUnion": "39156492025 original native groups green, static corrective retry pending; MainArea supplement recorded separately"
+}

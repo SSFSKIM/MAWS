@@ -6,6 +6,7 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName, HostState } from '@shared/ipc/schema';
+import { eventChannel } from '@shared/ipc/schema';
 import type { DirectOperationOutcome } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import type { MainContext } from '../ipc/router';
@@ -133,8 +134,9 @@ function fullStatus(session: ReturnType<typeof liveSession>) {
 }
 
 class FakeSender extends EventEmitter {
+  readonly sent: [string, unknown][] = [];
   isDestroyed = () => false;
-  send = () => {};
+  send = (channel: string, payload: unknown) => void this.sent.push([channel, payload]);
   constructor(readonly id: number) {
     super();
   }
@@ -265,5 +267,15 @@ describe('route D composed after route E', () => {
     expect(await answering).toMatchObject({ ok: false });
     expect(fake.dispatched.filter((entry) => entry.name === 'connectors.directCancel').map((entry) => entry.input)).toContainEqual({ operationId: started });
     expect(fake.count('connectors.directStart')).toBe(1);
+  });
+
+  // P3-F F-connectors 9: rows read during an outage (sources unavailable) are read again once the host streams again
+  it('invalidates the owner’s rows when the connection streams again after the host’s loss', async () => {
+    await invoke('connectors.servers', { artifactId: ART, tools: [ROWS] });
+    for (const listener of fake.stateListeners) listener({ state: 'restarting', pid: null, restarts: 1, revision: 2 });
+    expect(me.sent).toContainEqual([eventChannel('connectors.serversChanged'), { artifactId: ART }]);
+    me.sent.length = 0;
+    fake.startStreaming();
+    expect(me.sent).toEqual([[eventChannel('connectors.serversChanged'), { artifactId: ART }]]);
   });
 });

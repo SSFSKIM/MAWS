@@ -6,23 +6,28 @@ import type { Editor, JSONContent } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
 import { ynodeToPmnode } from '../../yjs/prosemirror';
 import { schemaFor } from '../schema';
-import { createDocument, listTabs, tabBody } from '../tabs';
+import { addTab, createDocument, listTabs, tabBody } from '../tabs';
 import { DocumentEditor } from './DocumentEditor';
 import type { DocumentHandle, EditorHost } from './host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import type { MentionSource, MentionTarget } from './MentionPicker';
 import type { CommentOverlayProps, DocumentComments } from './comments/surface';
 import { getThread, liveThreadIds } from '../threads';
+import { MemoryHistory } from './history/memory-history';
 import { TAB, World, doc, endOf, para, readOnlySwitch, until } from './test-world';
 
 let world: World | null = null;
 let handles: DocumentHandle[] = [];
+let history: MemoryHistory | null = null;
 afterEach(() => {
   cleanup();
   for (const handle of handles) handle.close();
   handles = [];
+  history?.destroy();
+  history = null;
   world?.destroy();
   world = null;
 });
@@ -192,6 +197,34 @@ describe('the toolbar', () => {
     expect(two.marks).toEqual([{ type: 'code' }]);
     expect(three.marks).toEqual([{ type: 'link', attrs: { href: 'https://example.com/a', title: null } }]);
   });
+
+  // P3-F panel scalpel-3#4: the Insert menu closes on Escape (the keyboard back on Insert when it was in the menu) and on
+  // a press outside it, not only on an item or on Insert again
+  it('closes the Insert menu on Escape and on a press outside it, inserting nothing', async () => {
+    const { editor } = await mount(doc(para('p1', 'Start')));
+    const before = JSON.stringify(editor().getJSON());
+    const menu = () => screen.queryByRole('menu');
+    const insertButton = () => within(toolbar()).getByRole('button', { name: 'Insert' });
+    // opened by a click, the caret stays in the page (the toolbar keeps the selection): Escape there closes it
+    press('Insert');
+    expect(menu()).not.toBeNull();
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'Escape' }));
+    expect(menu(), 'the menu after Escape in the page').toBeNull();
+    // the keyboard inside the menu: Escape closes it and puts the keyboard back on Insert
+    press('Insert');
+    const item = screen.getByRole('menuitem', { name: 'Table' });
+    act(() => item.focus());
+    act(() => void fireEvent.keyDown(item, { key: 'Escape' }));
+    expect(menu(), 'the menu after Escape in the menu').toBeNull();
+    expect(document.activeElement).toBe(insertButton());
+    // a press on Insert itself leaves the toggle to its click; a press in the page closes the menu
+    press('Insert');
+    act(() => void fireEvent.pointerDown(insertButton()));
+    expect(menu()).not.toBeNull();
+    act(() => void fireEvent.pointerDown(editor().view.dom));
+    expect(menu(), 'the menu after a press in the page').toBeNull();
+    expect(JSON.stringify(editor().getJSON())).toBe(before);
+  });
 });
 
 describe('tabs', () => {
@@ -218,6 +251,54 @@ describe('tabs', () => {
     await until(() => editor().getText() === 'First tab text', 'the first tab’s body');
     expect(endOf(editor(), 'p1')).toBeGreaterThan(0);
   });
+
+  // P3-F W-DOC-B (tracker L155): the guide's 50-tab limit is refused in the editor too, the reason named on the control
+  it('refuses Add tab at the document’s limit with the limit named, adds nothing on a click, and adds again below it', async () => {
+    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    act(() => {
+      for (let n = 2; n <= DOCUMENT_LIMITS.tabs; n++) addTab(handle.doc, { title: `Tab ${n}` });
+    });
+    await until(() => screen.getAllByRole('tab').length === 50, 'fifty tabs');
+    const add = screen.getByRole('button', { name: 'Add tab' });
+    expect(add).toHaveProperty('disabled', true);
+    expect(add.getAttribute('title')).toBe('A document holds at most 50 tabs');
+    act(() => fireEvent.click(add));
+    expect(listTabs(handle.doc)).toHaveLength(50);
+
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Tab options' })));
+    act(() => fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' })));
+    await until(() => screen.getAllByRole('tab').length === 49, 'a tab deleted');
+    expect(screen.getByRole('button', { name: 'Add tab' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Add tab' }).getAttribute('title')).toBeNull();
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Add tab' })));
+    await until(() => listTabs(handle.doc).length === 50, 'the tab added below the limit');
+  });
+
+  // P3-F panel scalpel-2#2: a tab dragged from another document's strip (or deleted mid-drag) is no tab of this one; its
+  // drop is not accepted and throws nothing, and a drop of one of this document's tabs still moves it
+  it('ignore a dropped tab that is not one of this document’s, and move one that is', async () => {
+    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    act(() => void addTab(handle.doc, { title: 'Second', id: 'tab00002' }));
+    await until(() => screen.getAllByRole('tab').length === 2, 'two tabs');
+    const carrying = (id: string) => ({ dataTransfer: { getData: (type: string) => (type === 'application/x-maws-document-tab' ? id : '') } });
+    const errors: unknown[] = [];
+    const onError = (event: ErrorEvent) => {
+      event.preventDefault();
+      errors.push(event.error);
+    };
+    window.addEventListener('error', onError);
+    try {
+      let accepted = false;
+      act(() => void (accepted = !fireEvent.drop(screen.getByRole('tab', { name: 'Main' }), carrying('elsewhere'))));
+      expect(accepted, 'a foreign tab’s drop accepted').toBe(false);
+      expect(errors).toEqual([]);
+      expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Main', 'Second']);
+      act(() => void fireEvent.drop(screen.getByRole('tab', { name: 'Main' }), carrying('tab00002')));
+      expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Second', 'Main']);
+    } finally {
+      window.removeEventListener('error', onError);
+    }
+  });
 });
 
 describe('find', () => {
@@ -235,6 +316,72 @@ describe('find', () => {
     act(() => fireEvent.keyDown(input, { key: 'Escape' }));
     expect(screen.queryByRole('searchbox')).toBeNull();
     expect(editor().view.dom.querySelectorAll('.find-match')).toHaveLength(0);
+  });
+
+  const findCount = () => within(screen.getByRole('search')).getByRole('status').textContent;
+
+  // P3-F panel scalpel-1#2 (X26): the keys of an IME composition are the IME's; its commit Enter does not step and its
+  // Escape (a cancelled composition) does not close the bar
+  it('neither steps nor closes on a key of an IME composition', async () => {
+    const { editor } = await mount(doc(para('p1', '알파 베타'), para('p2', '베타 감마')));
+    act(() => void editor().commands.setTextSelection(1));
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'f', metaKey: true }));
+    const input = screen.getByRole('searchbox', { name: 'Find in document' });
+    act(() => fireEvent.change(input, { target: { value: '베' } }));
+    act(() => fireEvent.change(input, { target: { value: '베타' } }));
+    expect(findCount()).toBe('1 of 2');
+    act(() => void fireEvent.keyDown(input, { key: 'Enter', isComposing: true }));
+    expect(findCount(), 'after the composition’s commit Enter').toBe('1 of 2');
+    act(() => void fireEvent.keyDown(input, { key: 'Escape', isComposing: true }));
+    expect(screen.queryByRole('searchbox'), 'the bar after the composition’s Escape').not.toBeNull();
+    act(() => void fireEvent.keyDown(input, { key: 'Enter' }));
+    expect(findCount()).toBe('2 of 2');
+  });
+
+  // P3-F panel scalpel-2#1: Mod-F with the bar already open puts the keyboard back in its field, the query selected
+  it('takes the keyboard back to the open field on a second Mod-F, the query selected', async () => {
+    const { editor } = await mount(doc(para('p1', 'alpha beta'), para('p2', 'beta gamma')));
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'f', metaKey: true }));
+    const input = screen.getByRole('searchbox', { name: 'Find in document' }) as HTMLInputElement;
+    act(() => fireEvent.change(input, { target: { value: 'beta' } }));
+    act(() => input.blur()); // the keyboard went back to the page
+    expect(document.activeElement).not.toBe(input);
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'f', metaKey: true }));
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([0, 4]);
+  });
+
+  // P3-F panel sweep#1: the bar's query goes with it to the editor shown, a version opened from History and the live
+  // document again, matched there at once (the preview has its own editor, M9)
+  it('keeps finding its query in the editor shown: a version from History, then the live document', async () => {
+    world = new World(doc(para('p1', 'alpha beta'), para('p2', 'beta gamma')));
+    history = new MemoryHistory(world.host);
+    history.version('named', { kind: 'human' }, { label: 'Before' });
+    const handle = openMemoryHandle(world.host, { log: () => {} });
+    handles.push(handle);
+    await whenSynced(handle);
+    let current: Editor | null = null;
+    render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} history={history} onEditor={(e) => (current = e)} />);
+    await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
+    const live = current!;
+    act(() => void live.commands.setTextSelection(1));
+    act(() => void fireEvent.keyDown(live.view.dom, { key: 'f', metaKey: true }));
+    act(() => fireEvent.change(screen.getByRole('searchbox', { name: 'Find in document' }), { target: { value: 'beta' } }));
+    expect(findCount()).toBe('1 of 2');
+
+    act(() => void fireEvent.click(within(toolbar()).getByRole('button', { name: 'Version history' })));
+    const rail = () => screen.getByRole('complementary', { name: 'Version history' });
+    await until(() => screen.queryByRole('complementary', { name: 'Version history' }) !== null && within(rail()).queryAllByRole('button', { name: /^Version Before/ }).length > 0, 'the version list');
+    act(() => void fireEvent.click(within(rail()).getByRole('button', { name: /^Version Before/ })));
+    const preview = () => (document.querySelector('.ProseMirror[data-editor="preview"]') as unknown as { editor?: Editor } | null)?.editor ?? null;
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) !== null && preview() !== null && preview()!.getText().includes('gamma'), 'the version shown');
+    expect(findCount(), 'the count in the version').toBe('1 of 2');
+    expect(preview()!.view.dom.querySelectorAll('.find-match')).toHaveLength(2);
+
+    act(() => void fireEvent.click(within(screen.getByRole('toolbar', { name: 'Version preview' })).getByRole('button', { name: 'Back to document' })));
+    await until(() => screen.queryByRole('toolbar', { name: 'Formatting' }) !== null && preview() === null, 'the live document');
+    expect(findCount(), 'the count in the live document again').toBe('1 of 2');
+    expect(live.view.dom.querySelectorAll('.find-match')).toHaveLength(2);
   });
 });
 
@@ -321,6 +468,41 @@ describe('the mention picker', () => {
     await until(() => results().queryAllByRole('option').length === 3, 'the results again');
     act(() => void fireEvent.click(results().getByRole('option', { name: /Fix the build/ })));
     expect(mentionAttrs(editor())).toMatchObject({ kind: 'session', ref: 'app-1', label: 'Fix the build' });
+  });
+
+  // P3-F panel scalpel-1#1 (X26): the Hangul IME's commit Enter is the composition's, and an Enter picks only from the
+  // results of the query in the field: composed on to 김민수 while 김민's results still show, nothing is inserted until
+  // 김민수's arrive
+  it('inserts nothing on a composing Enter, nor from results of an older query', async () => {
+    const people: MentionTarget[] = [
+      { kind: 'person', ref: 'p-minji', label: '김민지' },
+      { kind: 'person', ref: 'p-minsu', label: '김민수' },
+    ];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const editor = await mountWith({
+      search: async (query) => {
+        if (query === '김민수') await held;
+        return people.filter((p) => p.label.includes(query));
+      },
+    });
+    insert('Mention');
+    const field = screen.getByRole('combobox', { name: 'Mention' });
+    act(() => void fireEvent.change(field, { target: { value: '김민' } }));
+    await until(() => results().queryAllByRole('option').length === 2, 'the results for 김민');
+    act(() => void fireEvent.change(field, { target: { value: '김민수' } })); // the composition goes on; its search is out
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150)); // past the search's quiet window
+    });
+    act(() => void fireEvent.keyDown(field, { key: 'Enter', isComposing: true })); // the IME's commit Enter
+    expect(mentionAttrs(editor()), 'a mention on the composing Enter').toBeNull();
+    act(() => void fireEvent.keyDown(field, { key: 'Enter' })); // the Enter after it, 김민's results still shown
+    expect(mentionAttrs(editor()), 'a mention from the older query’s results').toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Mention' })).not.toBeNull();
+    await act(async () => release());
+    await until(() => results().queryAllByRole('option').length === 1, 'the results for 김민수');
+    act(() => void fireEvent.keyDown(field, { key: 'Enter' }));
+    expect(mentionAttrs(editor())).toMatchObject({ kind: 'person', ref: 'p-minsu', label: '김민수' });
   });
 });
 

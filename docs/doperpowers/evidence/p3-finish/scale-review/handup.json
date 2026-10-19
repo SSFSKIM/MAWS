@@ -1,0 +1,48 @@
+{
+  "recordedAt": "2026-10-18T22:03:37Z",
+  "status": "complete post-debt20-pair hand-up ready; not final source freeze or panel completion",
+  "source": "070e23f49875006484683d280cb61b52aa17f2dc",
+  "sourceTree": "91a23c42d464fff7892ee25998c5063e70f174cc",
+  "rangeBase": "5ad08789cc0f4e564091cdb2f5224026304fb889",
+  "coverage": {
+    "changedFiles": 2935,
+    "assignedFiles": 1608,
+    "excludedFiles": 1327,
+    "unassigned": 0,
+    "overlaps": 0,
+    "obsolete": 0,
+    "assignedLines": 236293,
+    "excludedLines": 210924,
+    "totalLines": 447217
+  },
+  "tiers": {
+    "max": 14,
+    "xhigh": 6
+  },
+  "largest": 14948,
+  "proof": "all20stat/numstat/base-content/head-tree/parents/on-review-head checks true,0statuslines; no omitted/overlapping/obsolete path",
+  "helper": {
+    "path": "/private/tmp/p3f-final-pairs.py",
+    "sha256": "b6019ca8e191dfe9460ef0b23d2df2408c17611c974be187cda9f663917b4abc",
+    "review": "P1 ownership guard corrected and independent recheck clean; real build now completed"
+  },
+  "preflightLog": "/private/tmp/p3f-final-preflight-070e23f49.log",
+  "buildLog": "/private/tmp/p3f-final-build-070e23f49.log",
+  "preflightSha256": "f75fb8b5f20d36ceeeae21626f56e603a7865d0d71c3567198fe8dbabd675fdc",
+  "buildSha256": "5026e763c63ec68680df09e7cbc67be704420eebd569bf20134b840b6815d59c",
+  "pairManifestSha256": "8720dbf0fd774c413624d49315779ebd2641febbf7f8617a26329dda9c3f1058",
+  "gateBasis": [
+    39156492025,
+    39162779550,
+    39165341280,
+    39169679475
+  ],
+  "reviewContext": [
+    "parentDL108/109 authorize named host calibrations; product targets retainedP4",
+    "heavy generator logical repeatability carried; preview valid by descriptor, both shapes retained",
+    "reader Markdown rendering and canonical dialect exactness are distinct; explicit remaining loss cases carriedP4",
+    "C10 replay seed uses fresh owned scratch model; ordinary symlinks rejected, malicious same-UID concurrent replacement not atomically prevented",
+    "native count clauses, MainArea final-unit proof, final frozen-S gate/bundle/paid7 and owner sitting remain"
+  ],
+  "cloneCustody": "20area clones now handed to architect; do not rebuild while reviews run; drag-a/drag-b untouched"
+}

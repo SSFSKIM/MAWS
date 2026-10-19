@@ -30,8 +30,41 @@ async function openAsTab(s: Scene, title: string, artifactId: string): Promise<L
   return tab;
 }
 
+// The editor element's Tiptap editor (as document.spec.ts's `selectIn` reads it): its document, its selection and its
+// edits not yet acknowledged.
+type EditorRoot = HTMLElement & {
+  editor?: {
+    state: { doc: { descendants(f: (node: { type: { name: string }; textContent: string }) => boolean | void): void; textBetween(from: number, to: number, separator: string): string }; selection: { from: number; to: number } };
+    extensionManager: { extensions: Array<{ name: string; options: { hold?: { base: { state(): { unsaved: number } } } } }> };
+  };
+};
+
 // Selects `quote` in the editor's first paragraph containing it (a DOM selection the editor reads, as a drag would set).
+// P3-F (run 39149994319, cause undetermined): there the range was written right after typing and the page's selection
+// read empty about 5 ms later; nothing recorded what changed it. The range is written once, as before, but only after
+// the readiness document.spec.ts's `selectIn` waits on (L277): the editor's own document holds the paragraph the page
+// shows and the host has acknowledged every edit. Then the editor's selection, not only the page's, must hold the quote
+// (Comment reads the editor's).
 async function select(text: Locator, quote: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        text.evaluate((root, q) => {
+          const editor = (root as EditorRoot).editor;
+          if (!editor) return 'no editor on the element';
+          const shown = Array.from(root.querySelectorAll('p')).map((el) => el.textContent ?? '');
+          const at = shown.findIndex((t) => t.includes(q));
+          if (at < 0) return `no paragraph shows "${q}"`;
+          const paragraphs: string[] = [];
+          editor.state.doc.descendants((node) => {
+            if (node.type.name === 'paragraph') paragraphs.push(node.textContent);
+          });
+          const unsaved = editor.extensionManager.extensions.find((extension) => extension.name === 'collaboration')?.options.hold?.base.state().unsaved ?? 0;
+          return paragraphs[at] === shown[at] && unsaved === 0 ? 'settled' : `paragraph "${paragraphs[at]}", ${unsaved} unacknowledged`;
+        }, quote),
+      { message: 'the editor holds the paragraph shown and the host has acknowledged every edit' },
+    )
+    .toBe('settled');
   await text.evaluate((root, q) => {
     const p = Array.from(root.querySelectorAll('p')).find((el) => (el.textContent ?? '').includes(q))!;
     const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
@@ -48,7 +81,15 @@ async function select(text: Locator, quote: string): Promise<void> {
     }
     throw new Error(`no text node holds "${q}"`);
   }, quote);
-  await expect.poll(() => text.evaluate(() => getSelection()?.toString() ?? '')).toBe(quote);
+  await expect
+    .poll(() =>
+      text.evaluate((root) => {
+        const editor = (root as EditorRoot).editor!;
+        const { from, to } = editor.state.selection;
+        return { page: getSelection()?.toString() ?? '', editor: editor.state.doc.textBetween(from, to, '\n') };
+      }),
+    )
+    .toEqual({ page: quote, editor: quote });
 }
 
 const comment = (tab: Locator) => tab.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();

@@ -31,6 +31,38 @@ describe('mergeBoardOrder', () => {
     expect(mergeBoardOrder(base, ['n', 'a', 'b', 'c', 'd'], ['b', 'a', 'c', 'd'], ['n'], false).desired).toEqual(['n', 'b', 'a', 'c', 'd']);
     expect(mergeBoardOrder(base, ['b', 'a', 'd'], base, [], false)).toEqual({ desired: ['b', 'a', 'c', 'd'], clashes: [] });
   });
+
+  it('forced, settles a pair the agent re-ordered by its sent order, where placing its moved board after its predecessor would not (design-workbench sweep#1)', () => {
+    // the agent moved a last; the owner put c first: a, after its sent predecessor c, would land before b
+    const [read, sent, live] = [['a', 'b', 'c'], ['b', 'c', 'a'], ['c', 'b', 'a']];
+    expect(mergeBoardOrder(read, sent, live, [], false).clashes).toEqual(['a', 'b']);
+    // a after both, as the agent sent it; the owner's c before b, which the agent did not re-order, kept
+    expect(mergeBoardOrder(read, sent, live, [], true)).toEqual({ desired: ['c', 'b', 'a'], clashes: [] });
+  });
+
+  it('forced, keeps every pair the agent re-ordered and every pair all three orders agree on, whatever the owner did (every order of four and of five boards on each side; design-workbench review)', () => {
+    const orders = (ids: string[]): string[][] => (ids.length <= 1 ? [ids] : ids.flatMap((id) => orders(ids.filter((x) => x !== id)).map((rest) => [id, ...rest])));
+    // the agent swapped b and c; the owner swapped a with b and c with d: a before c, as all three have it, stays
+    const agreed = mergeBoardOrder(base, ['a', 'c', 'b', 'd'], ['b', 'a', 'd', 'c'], [], true).desired;
+    expect(agreed.indexOf('a')).toBeLessThan(agreed.indexOf('c'));
+    expect(agreed.indexOf('c')).toBeLessThan(agreed.indexOf('b'));
+    for (const read of [base, ['a', 'b', 'c', 'd', 'e']]) {
+      const all = orders(read);
+      const broken: string[] = [];
+      for (const sent of all)
+        for (const live of all) {
+          const { desired } = mergeBoardOrder(read, sent, live, [], true);
+          if ([...desired].sort().join() !== [...read].sort().join()) broken.push(`${sent} / ${live}: ${desired}`);
+          for (const [i, x] of read.entries())
+            for (const y of read.slice(i + 1)) {
+              const [s, b, l, d] = [sent, read, live, desired].map((seq) => seq.indexOf(x) < seq.indexOf(y));
+              if (s !== b && d !== s) broken.push(`${sent} / ${live} -> ${desired}: the agent's ${x} ${s ? 'before' : 'after'} ${y} lost`);
+              if (s === b && l === b && d !== b) broken.push(`${sent} / ${live} -> ${desired}: ${x} ${b ? 'before' : 'after'} ${y}, as all three have it, inverted`);
+            }
+        }
+      expect(broken.slice(0, 5), `${read.length} boards: ${broken.length} broken`).toEqual([]);
+    }
+  });
 });
 
 describe('movableIn', () => {

@@ -159,6 +159,37 @@ describe('held slides: a structural failure holds the slide with its reason, nev
     expect(load(fine).slide.children[0]!.attrs).toEqual({ 'aria-label': 'A chart', width: '10', height: '10' });
   });
 
+  it('holds an svg whose <desc> or <title> holds an element (parse5 reads HTML there, as the browser does); a <style> there stays checked as any svg style (P3-F slide-model scalpel-4#1)', () => {
+    const svg = (inner: string) => `<section id="a"><svg width="10" height="10">${inner}<path d="M0 0"/></svg></section>`;
+    // the panel's vectors: HTML elements whose reference attributes svgProblem never screened, and markup that is not a reference at all
+    const payloads: Record<string, string> = {
+      'an iframe with srcdoc': '<iframe srcdoc="&lt;script&gt;top.alert(1)&lt;/script&gt;"></iframe>',
+      'an img with srcset': '<img srcset="https://x.test/a.png 1x">',
+      'a video with a poster': '<video poster="https://x.test/p.png"></video>',
+      'an object with data': '<object data="https://x.test/o.svg"></object>',
+      'a meta refresh': '<meta http-equiv="refresh" content="0;url=https://x.test/">',
+      'a form with autofocus': '<form><input autofocus></form>',
+      'inline markup': '<b>bold</b>',
+    };
+    for (const [name, payload] of Object.entries(payloads)) {
+      const tag = /^<([a-z]+)/.exec(payload)![1]!;
+      expect(reasons(svg(`<desc>${payload}</desc>`)), `${name} under desc`).toBe(`an <svg> <desc> holding <${tag}> (a desc or title holds text)`);
+      expect(reasons(svg(`<title>${payload}</title>`)), `${name} under title`).toBe(`an <svg> <title> holding <${tag}> (a desc or title holds text)`);
+      expect(reasons(svg(`<g><g><desc>${payload}</desc></g></g>`)), `${name} under a nested desc`).toBe(`an <svg> <desc> holding <${tag}> (a desc or title holds text)`);
+    }
+    // the panel's section: every vector at once, held on the first; the loader's answer carries nothing of it
+    const all = loadSlide(svg(`<desc>${Object.values(payloads).join('')}</desc><title><img srcset="https://x.test/a.png 1x"></title>`));
+    expect(all).toMatchObject({ ok: false, held: { reasons: ['an <svg> <desc> holding <iframe> (a desc or title holds text)'] } });
+    // text alone is what a desc or title is for
+    expect(reasons(svg('<title>Chart</title><desc>A bar chart, 2026 <!-- a comment --></desc>'))).toBeNull();
+    // an HTML <style> there is admitted (B1 and A16: the canvas and the export scope it), read by the svg's own CSS rules, so the carve-out is no route for a reference
+    expect(reasons(svg('<desc><style>.a{fill:#000}</style></desc>'))).toBeNull();
+    expect(reasons(svg('<desc><style>.a{fill:url(https://x.test/a)}</style></desc>'))).toMatch(/referencing url\(https:\/\/x\.test\/a\)/);
+    expect(reasons(svg('<title><style>@import "x.css";</style></title>'))).toMatch(/@import/);
+    expect(reasons(svg('<desc><style>.a{fill:image-set("x.png" 1x)}</style></desc>'))).toMatch(/with image-set\(\)/);
+    expect(reasons(svg('<desc><style>.a{fill:#000}</style><img srcset="https://x.test/a.png 1x"></desc>'))).toBe('an <svg> <desc> holding <img> (a desc or title holds text)');
+  });
+
   it('holds an x-shape kind or x-icon name it does not know, or none (Claude’s build errors); a cosmetic enum is dropped (fix wave 1)', () => {
     expect(reasons('<section id="a"><x-shape kind="star"></x-shape></section>')).toBe('kind="star" on <x-shape> is not one of rect, rounded, ellipse, diamond, arrow-right, arrow-left, arrow-up, arrow-down, line');
     expect(reasons('<section id="a"><x-shape></x-shape></section>')).toMatch(/an <x-shape> without a kind/);

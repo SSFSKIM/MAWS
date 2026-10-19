@@ -1,0 +1,21 @@
+Review at e631209455f1439cf29a22ec4292b20dc9d71c27, base fba70d44e3e309d0e12ca9c8064b2837cb1f4251, exact wave paths only.
+{
+  "reviewer": "af5a8d2e5227da2f7",
+  "result": "incorrect:2 verified P2; fresh fix wave running",
+  "findings": [
+    "replay transcript projects/slug symlinks can redirect writes outside canonical scratch config; wx does not constrain parent directories",
+    "discarded seed promise lets replay reply/result/idle precede transcript file; false no_engine_session on immediate Side/Fork"
+  ],
+  "verification": "controller read canonical guard/mkdir/write and void hook/transport resolve source; no owner-store write observed; reviewer code tracing, no executed reproduction",
+  "fixPaths": [
+    "src/engine-host/replay-transcript.ts",
+    "src/engine-host/replay-transcript.test.ts",
+    "src/engine-host/replay-transport.ts",
+    "src/engine-host/replay-transport.test.ts",
+    "src/engine-host/launcher.ts"
+  ],
+  "fixRule": "scratch-only failing regressions; actual containment before any escaping filesystem mutation; await seed before replay progress, coherent failure/kill semantics; no new knob/key; one recheck"
+}
+No separate gate proof yet.
+
+Bounded final recheck af5a8d2e5227da2f7: e631209455f1439cf29a22ec4292b20dc9d71c27 -> e0bb59c878e1525e133af0a8867ad88f1cda8a98, exactly replay-transcript.ts/test, replay-transport.ts/test and launcher.ts. Verdict correct, no material findings. Ordinary pre-existing symlink redirection refused before mutation outside the checked scratch store; first write/replies wait for seed settlement; failures logged, kill releases reader and rejects held write. No atomic same-UID concurrent filesystem replacement claim. Reviewer inspected nine red/exit1,48 green/exit0 and lint/exit0 retained logs, no rerun. Native gate proof pending.

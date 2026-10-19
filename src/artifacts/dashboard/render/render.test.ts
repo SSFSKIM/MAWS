@@ -274,6 +274,19 @@ describe('renderView', () => {
     expect(repeatOf(renderView({ view: 'scatter', x: 'w', y: 'v' }, { columns: t.columns, rows: [['A', 1, 1, 's1'], ['A', 2, 1, 's1']] }, theme, 't').warnings)).toEqual([]);
   });
 
+  it('exempts bars of opposite sign at one category, which stand on either side of zero, from the overlap warning (P3-F L251)', () => {
+    const repeatOf = (warnings: string[]) => warnings.filter((w) => w.includes('bars overlap'));
+    const columns: ViewTable['columns'] = [{ name: 'k', type: 'string' }, { name: 'v', type: 'number' }];
+    const bar = (rows: [string, number][]) => repeatOf(renderView({ view: 'bar', x: 'k', y: 'v' }, { columns, rows }, theme, 't').warnings);
+    expect(bar([['A', 4], ['A', -3], ['B', 1]])).toEqual([]);
+    // a second bar on either side of zero still overlaps its own side's
+    expect(bar([['A', 4], ['A', -3], ['A', 2]])).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
+    expect(bar([['A', -1], ['A', -2]])).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
+    // a zero bar stands on the zero line with the positive bars, so it overlaps them and not a negative one
+    expect(bar([['A', 0], ['A', 5]])).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
+    expect(bar([['A', 0], ['A', -5]])).toEqual([]);
+  });
+
   it('keeps series identity from the unfiltered snapshot: a filter never changes a surviving series\' form', () => {
     const spec = { view: 'scatter', x: 'flipper_length_mm', y: 'body_mass_g', series: 'species_ko' };
     const three = renderView(spec, penguins, theme, 'penguins').svg!;
@@ -715,5 +728,57 @@ describe('aggregate overflow and renamed measures', () => {
     expect(tips(bar)).toEqual(['10% · mean of rate: 10%', '20% · mean of rate: 20%']);
     const own = renderView({ view: 'table', x: 'rate', y: 'rate', agg: 'mean', columns: ['mean of rate'], format: { 'mean of rate': 'percent' } }, t, theme, 't').html!;
     expect(own).toContain('<td class="dash-num">10%</td>');
+  });
+});
+
+// P3-F dashboard-model wave: what valid data the figure must still say, whatever its words or its size.
+describe('labels and values at their edges (P3-F dashboard-model wave)', () => {
+  /** The legend's labels, in its order. */
+  const legendLabels = (svg: string) => [.../<g>(.*?)<\/g>/.exec(svg)![1].matchAll(/<text [^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
+
+  // sweep#1: a whitespace-only text is a valid cell, a category or a series with no words to wrap
+  const blank: ViewTable = { columns: [{ name: 'k', type: 'string' }, { name: 's', type: 'string' }, { name: 'v', type: 'number' }], rows: [[' ', ' ', 1], ['b', 'B', 2]] };
+  it('draws a blank pie category as an empty label in the list, its tip whole, never throwing', () => {
+    const pie = renderView({ view: 'pie', x: 'k', y: 'v' }, blank, theme, 't');
+    expect(tips(pie.svg!)).toEqual([' : 1 (33.3%)', 'b: 2 (66.7%)']);
+    expect(grade(pie.svg!).problems).toEqual([]);
+    expect(pie.svg).not.toMatch(/undefined|NaN/);
+  });
+
+  it('draws a blank series as an empty label in the legend, never throwing', () => {
+    for (const view of ['bar', 'line']) {
+      const { svg = '' } = renderView({ view, x: 'k', y: 'v', series: 's' }, blank, theme, 't');
+      expect(legendLabels(svg), view).toEqual(['', 'B']);
+      expect(grade(svg).problems, view).toEqual([]);
+      expect(svg, view).not.toMatch(/undefined|NaN/);
+    }
+  });
+
+  // sweep#2: a measure too small for two decimals keeps its significant figures and its sign wherever its value is said
+  const small: ViewTable = { columns: [{ name: 'k', type: 'string' }, { name: 'v', type: 'number' }], rows: [['a', 0.001], ['b', -0.001], ['c', 1e-5]] };
+  it('says a small nonzero measure with its magnitude and sign: a table cell, a tip and the export preview', () => {
+    const said = ['0.001', '−0.001', '0.00001'];
+    const html = renderView({ view: 'table' }, small, theme, 't').html!;
+    expect([...html.matchAll(/<td class="dash-num">([^<]*)<\/td>/g)].map((m) => m[1])).toEqual(said);
+    expect(tips(renderView({ view: 'bar', x: 'k', y: 'v' }, small, theme, 't').svg!)).toEqual(said.map((v, i) => `${'abc'[i]} · v: ${v}`));
+    expect(layer(renderView({ view: 'line', x: 'k', y: 'v' }, small, theme, 't').svg!).map((point) => point.tip)).toEqual(said.map((v, i) => `${'abc'[i]} · v: ${v}`));
+    const preview = viewPreview({ view: 'bar', x: 'k', y: 'v' }, small, 't');
+    expect(preview.ok && preview.table.rows).toEqual(said.map((v, i) => ['abc'[i], v]));
+    // in percent too: 0.001% is not 0%
+    const percent = renderView({ view: 'table', format: { v: 'percent' } }, small, theme, 't').html!;
+    expect([...percent.matchAll(/<td class="dash-num">([^<]*)<\/td>/g)].map((m) => m[1])).toEqual(['0.1%', '−0.1%', '0.001%']);
+  });
+
+  // sweep#3: a pie of two measures is the view's error in place, never the first measure drawn and the second dropped
+  it('draws a pie of more than one measure as the error naming the rest; a pie of one measure as before', () => {
+    const t: ViewTable = { columns: [{ name: 'region', type: 'string' }, { name: 'sales', type: 'number' }, { name: 'cost', type: 'number' }], rows: [['N', 3, 1], ['S', 1, 2]] };
+    const two = renderView({ view: 'pie', x: 'region', y: ['sales', 'cost'], title: 'Mix' }, t, theme, 't');
+    expect(two.warnings).toEqual(['a pie view draws one measure; y also names "cost"']);
+    expect(two.svg).toContain('<title>Mix</title>');
+    expect(tips(two.svg!)).toEqual([]);
+    expect(viewPreview({ view: 'pie', x: 'region', y: ['sales', 'cost'] }, t, 't')).toEqual({ ok: false, error: 'a pie view draws one measure; y also names "cost"' });
+    const one = renderView({ view: 'pie', x: 'region', y: ['sales'] }, t, theme, 't');
+    expect(tips(one.svg!)).toEqual(['N: 3 (75%)', 'S: 1 (25%)']);
+    expect(one).toEqual(renderView({ view: 'pie', x: 'region', y: 'sales' }, t, theme, 't'));
   });
 });

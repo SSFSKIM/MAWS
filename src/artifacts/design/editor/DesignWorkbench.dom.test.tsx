@@ -613,3 +613,31 @@ describe('what a frame of a gesture costs (DL39’s bounded wave: work proportio
     size.mockRestore();
   });
 });
+
+describe('the board inspector beside other writers (design-workbench fix wave)', () => {
+  it('(scalpel-2#1) a frame or name draft pending when the replica turns read-only, the board held or missing, or writes held, commits nothing on blur', () => {
+    for (const turn of ['readOnly', 'held', 'missing', 'holdWrites'] as const)
+      for (const field of ['Board width', 'Board name'] as const) {
+        const { container, doc, session, turnReadOnly } = mount();
+        const { remote, toLocal } = remoteOf(doc);
+        fireEvent.click(title(container, 'b1'));
+        fireEvent.change(screen.getByRole('textbox', { name: field }), { target: { value: field === 'Board width' ? '834' : 'Phone, tall' } });
+        if (turn === 'readOnly') turnReadOnly();
+        else if (turn === 'holdWrites') act(() => session.holdWrites(true));
+        else {
+          transact(remote, () => {
+            if (turn === 'held') Y.setSlideKey(remote, 'b1', 'held', { source: '<section id="b1"><blink>x</blink></section>', reasons: ['an unknown tag <blink>'] });
+            else Y.setSlideKey(remote, 'b1', MISSING_SOURCE_KEY, true);
+          });
+          toLocal();
+        }
+        fireEvent.blur(screen.getByRole('textbox', { name: field })); // as disabling the focused field fires it
+        expect(boardFrame(doc, 'b1')!.w, `${turn}, ${field}`).toBe(390);
+        expect(Y.slideScalars(doc, 'b1').title, `${turn}, ${field}`).toBe('Phone');
+        expect(session.undo.canUndo(), `${turn}, ${field}: nothing on the undo stack`).toBe(false);
+        // the refused draft is dropped, not kept for a later blur to commit: the field shows the board's value again
+        expect(screen.getByRole<HTMLInputElement>('textbox', { name: field }).value, `${turn}, ${field}: the field`).toBe(field === 'Board width' ? '390' : 'Phone');
+        cleanup();
+      }
+  });
+});

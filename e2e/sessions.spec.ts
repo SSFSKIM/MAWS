@@ -301,8 +301,14 @@ test.describe('sessions', () => {
     const { page, maws, trustedRepos } = await begin({ fixtures: [FORK_START, FORK_FORK] });
     const project = await addProject(page, trustedRepos[0]!.root);
     const source = await plus(page, project.name);
-    await startDirect(page, source);
+    // P3-F L242: a fork copies the source's engine conversation, which a no-message start does not have yet; the source
+    // starts with its recording's own first prompt (the probe forked once that turn had written the start transcript),
+    // and Fork waits for the turn to end
+    await collectTurns(page);
+    const prompt = fixtureIdentity(FORK_START).firstPrompt!;
+    await startDirect(page, source, {}, { content: prompt.content as string, display: prompt.display });
     await untilPhase(page, source, 'ready');
+    await turnEnded(page, source);
     await expect(row(page, source)).toBeVisible();
 
     await menu(page, source, 'Fork');

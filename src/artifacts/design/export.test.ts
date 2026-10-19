@@ -128,6 +128,31 @@ describe('a PNG’s board and size', () => {
     expect(refusal(planDesignExport(tall, { format: 'png', width: 983, height: 8200 }))).toMatchObject({ reason: 'invalid', data: { board: 'p', width: 983, height: 8200 } });
   });
 
+  it('a width and a height together take any scale inside both sides’ rounding and the scale range: the range’s endpoints included (P3-F L227)', () => {
+    const png = (plan: DesignExportPlan) => (plan.ok && plan.format === 'png' ? { width: plan.width, height: plan.height } : refusal(plan));
+    // 161×161 → 16×16: each side's own ratio (16/161) is under the range, yet 0.1 itself rounds both sides to 16
+    const small = source(design([{ id: 's', at: { x: 0, y: 0, w: 161, h: 161 } }]));
+    const paired = planDesignExport(small, { format: 'png', width: 16, height: 16 });
+    expect(paired).toMatchObject({ ok: true, width: 16, height: 16 });
+    expect(png(paired)).toEqual(png(planDesignExport(small, { format: 'png', scale: 0.1 })));
+    const s = paired.ok ? paired.scale : NaN;
+    expect(s).toBeGreaterThanOrEqual(DESIGN_EXPORT_LIMITS.scaleMin);
+    // two sides of different lengths whose admissible scales meet only from the range's lower endpoint
+    const pair = source(design([{ id: 'r', at: { x: 0, y: 0, w: 161, h: 322 } }]));
+    expect(png(planDesignExport(pair, { format: 'png', width: 16, height: 32 }))).toEqual(png(planDesignExport(pair, { format: 'png', scale: 0.1 })));
+    // every scale both sides' rounding admits is under the range: refused for the range, as a single side is
+    const under = source(design([{ id: 'u', at: { x: 0, y: 0, w: 166, h: 166 } }]));
+    expect(refusal(planDesignExport(under, { format: 'png', width: 16, height: 16 }))).toMatchObject({ reason: 'invalid', data: { board: 'u', scale: expect.any(Number) } });
+    expect(refusal(planDesignExport(under, { format: 'png', width: 16 }))).toMatchObject({ reason: 'invalid', data: { board: 'u', scale: expect.any(Number) } });
+    // the upper endpoint: a side ratio over 4 whose rounding still admits 4 is drawn at 4, never above
+    const tiny = source(design([{ id: 't', at: { x: 0, y: 0, w: 2.9, h: 2.9 } }]));
+    const top = planDesignExport(tiny, { format: 'png', width: 12, height: 12 });
+    expect(png(top)).toEqual(png(planDesignExport(tiny, { format: 'png', scale: 4 })));
+    expect(top.ok ? top.scale : NaN).toBeLessThanOrEqual(DESIGN_EXPORT_LIMITS.scaleMax);
+    // the open end of a side's rounding is never taken: 16 px at 16.5/161 would round to 17
+    expect(refusal(planDesignExport(small, { format: 'png', width: 17, height: 16 }))).toMatchObject({ reason: 'invalid', data: { board: 's', width: 17, height: 16 } });
+  });
+
   it('refuses by name an unknown board, boards meant for a PDF, a paper size, an empty design, and a board that cannot be drawn', () => {
     expect(refusal(planDesignExport(source(), { format: 'png', board: 'nope' }))).toMatchObject({ reason: 'notFound', data: { board: 'nope' } });
     expect(refusal(planDesignExport(source(), { format: 'png', boards: ['b1'] }))).toMatchObject({ reason: 'invalid', data: { boards: ['b1'] } });

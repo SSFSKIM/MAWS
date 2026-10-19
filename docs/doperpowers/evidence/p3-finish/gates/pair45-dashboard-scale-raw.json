@@ -1,0 +1,617 @@
+{
+  "run": "2026-10-18T19:45:30.633Z",
+  "runId": "39156492025",
+  "commit": "b1c6c53c2d0740a7a4eba1965da38ad68c52b4b4",
+  "environment": {
+    "platform": "darwin",
+    "release": "27.0.0",
+    "cpus": 10,
+    "cpu": "Apple M2 Pro",
+    "memoryGB": 16,
+    "node": "v22.23.3",
+    "electron": "44.4.5",
+    "runner": "ci-kit-mac-mini"
+  },
+  "bench": "benchCsv(50000) and BENCH_VIEWS (12 views, the scatter 10000 points): src/artifacts/dashboard/fixtures/bench.ts",
+  "settle": {
+    "start": [
+      {
+        "at": "2026-10-18T19:45:28.477Z",
+        "load": 6.7
+      }
+    ],
+    "afterBuild": [
+      {
+        "at": "2026-10-18T19:45:30.635Z",
+        "load": 6.73
+      }
+    ],
+    "settled": true
+  },
+  "memory": {
+    "samples": [
+      {
+        "startedAt": 0,
+        "completedAt": 6,
+        "load": 4.81,
+        "mb": 508
+      },
+      {
+        "startedAt": 10001,
+        "completedAt": 10025,
+        "load": 4.66,
+        "mb": 180.3
+      },
+      {
+        "startedAt": 20002,
+        "completedAt": 20010,
+        "load": 5.44,
+        "mb": 176.4
+      },
+      {
+        "startedAt": 30001,
+        "completedAt": 30008,
+        "load": 4.99,
+        "mb": 176.4
+      },
+      {
+        "startedAt": 40002,
+        "completedAt": 40008,
+        "load": 4.54,
+        "mb": 171.9
+      },
+      {
+        "startedAt": 50000,
+        "completedAt": 50009,
+        "load": 4.53,
+        "mb": 171.9
+      },
+      {
+        "startedAt": 60001,
+        "completedAt": 60007,
+        "load": 4.46,
+        "mb": 171.9
+      }
+    ],
+    "judged": {
+      "verdict": "met",
+      "value": 171.9,
+      "reason": "settled within 5 % at the samples started 30.0 s and 40.0 s",
+      "excluded": []
+    },
+    "afterForcedCollection": {
+      "privateMB": 161.3,
+      "workingSetMB": 320.6,
+      "jsHeapMB": 53.8
+    }
+  },
+  "settleSpentMs": 130006,
+  "end": {
+    "load": 4.19
+  },
+  "failed": [],
+  "hardwareBlockedOrUnsettled": [],
+  "judging": "parent Decision Log 42: every trial after a bounded settle toward a 1-minute load below 10; a timing row needs 3 admitted trials (started below 10) each within its bound, at most 5 attempts, fewer admitted hardware-blocked; the scroll row the p95 of every admitted event pooled, a long task over 50 ms failing it; the renderer's private memory (process.getProcessMemoryInfo, samples on the 10 s marks 0 through 60, every one below load 10: the first pair from 30 s within 5 %, else the 60 s sample); median and best descriptive",
+  "rows": [
+    {
+      "row": "1 bind",
+      "measure": "artifact_dataset on the host: read the 50000-row CSV under the session's directory, parse and validate it, register its asset, write its descriptor in one commit (the call's wall time)",
+      "bound": "every admitted trial ≤ 2,000 ms",
+      "limit": 2000,
+      "unit": "ms",
+      "value": 94.15,
+      "median": 82.79,
+      "best": 78.14,
+      "verdict": "met",
+      "admitted": 3,
+      "trials": [
+        {
+          "value": 94.15,
+          "load": 6.73,
+          "loadAfter": 6.73,
+          "settle": [
+            {
+              "at": "2026-10-18T19:45:30.907Z",
+              "load": 6.73
+            }
+          ],
+          "note": "host loop busy 91.5 ms, its longest stretch 92.5 ms"
+        },
+        {
+          "value": 82.79,
+          "load": 6.73,
+          "loadAfter": 6.73,
+          "settle": [
+            {
+              "at": "2026-10-18T19:45:31.170Z",
+              "load": 6.73
+            }
+          ],
+          "note": "host loop busy 80.8 ms, its longest stretch 81.8 ms"
+        },
+        {
+          "value": 78.14,
+          "load": 6.73,
+          "loadAfter": 6.73,
+          "settle": [
+            {
+              "at": "2026-10-18T19:45:31.419Z",
+              "load": 6.73
+            }
+          ],
+          "note": "host loop busy 76.3 ms, its longest stretch 77.3 ms"
+        }
+      ]
+    },
+    {
+      "row": "1b bind at the row limit",
+      "measure": "artifact_dataset of a 200,000-row CSV (the parser’s row limit candidate), bound to no view",
+      "bound": "recorded",
+      "limit": null,
+      "unit": "ms",
+      "value": 368.29,
+      "median": 368.29,
+      "best": 368.29,
+      "verdict": "recorded",
+      "admitted": 1,
+      "trials": [
+        {
+          "value": 368.29,
+          "load": 6.73,
+          "loadAfter": 6.73,
+          "settle": [
+            {
+              "at": "2026-10-18T19:45:31.670Z",
+              "load": 6.73
+            }
+          ],
+          "note": "host loop busy 366.8 ms, longest stretch 366.6 ms"
+        }
+      ]
+    },
+    {
+      "row": "2 open cold",
+      "measure": "cold open: the click on the library row to the frame after the last of 12 views is in the page; first the tab closed, a snapshot the host has never read bound, the agent's holder released and the host's copy proved unloaded (the seam's loaded, ≤ 90 s)",
+      "bound": "every admitted trial ≤ 1,000 ms",
+      "limit": 1000,
+      "unit": "ms",
+      "value": 769.5,
+      "median": 686.2,
+      "best": 569.1,
+      "verdict": "met",
+      "admitted": 3,
+      "trials": [
+        {
+          "value": 769.5,
+          "load": 5.93,
+          "loadAfter": 5.93,
+          "settle": [
+            {
+              "at": "2026-10-18T19:46:32.781Z",
+              "load": 5.93
+            }
+          ],
+          "note": "unloaded 60.2 s after the release; 12 views drawn; slowest 43.4 ms"
+        },
+        {
+          "value": 686.2,
+          "load": 30.69,
+          "loadAfter": 30.69,
+          "settle": [
+            {
+              "at": "2026-10-18T19:47:34.343Z",
+              "load": 31.43
+            },
+            {
+              "at": "2026-10-18T19:47:44.344Z",
+              "load": 38.12
+            },
+            {
+              "at": "2026-10-18T19:47:54.345Z",
+              "load": 41.91
+            },
+            {
+              "at": "2026-10-18T19:48:04.347Z",
+              "load": 44.41
+            },
+            {
+              "at": "2026-10-18T19:48:14.347Z",
+              "load": 44.49
+            },
+            {
+              "at": "2026-10-18T19:48:24.348Z",
+              "load": 46.65
+            },
+            {
+              "at": "2026-10-18T19:48:34.350Z",
+              "load": 45.11
+            },
+            {
+              "at": "2026-10-18T19:48:44.352Z",
+              "load": 39.95
+            },
+            {
+              "at": "2026-10-18T19:48:54.353Z",
+              "load": 35.17
+            },
+            {
+              "at": "2026-10-18T19:49:04.345Z",
+              "load": 30.69
+            }
+          ],
+          "note": "unloaded 60.0 s after the release; 12 views drawn; slowest 52.2 ms"
+        },
+        {
+          "value": 625.6,
+          "load": 9.55,
+          "loadAfter": 9.27,
+          "settle": [
+            {
+              "at": "2026-10-18T19:50:05.997Z",
+              "load": 14.95
+            },
+            {
+              "at": "2026-10-18T19:50:15.997Z",
+              "load": 13.19
+            },
+            {
+              "at": "2026-10-18T19:50:25.998Z",
+              "load": 11.78
+            },
+            {
+              "at": "2026-10-18T19:50:36.000Z",
+              "load": 10.65
+            },
+            {
+              "at": "2026-10-18T19:50:46.001Z",
+              "load": 9.55
+            }
+          ],
+          "note": "unloaded 60.2 s after the release; 12 views drawn; slowest 50.6 ms"
+        },
+        {
+          "value": 569.1,
+          "load": 4.74,
+          "loadAfter": 4.74,
+          "settle": [
+            {
+              "at": "2026-10-18T19:51:47.595Z",
+              "load": 4.74
+            }
+          ],
+          "note": "unloaded 60.3 s after the release; 12 views drawn; slowest 42.0 ms"
+        }
+      ]
+    },
+    {
+      "row": "3 render 10,000 points",
+      "measure": "one view of 10000 points (the scatter): the chart view's dash:view entry, the renderer's view and its insertion into the page, from the rows in hand, in each cold open (the largest of an open's entries)",
+      "bound": "every admitted trial ≤ 200 ms",
+      "limit": 200,
+      "unit": "ms",
+      "value": 30.6,
+      "median": 30.6,
+      "best": 28.7,
+      "verdict": "met",
+      "admitted": 3,
+      "trials": [
+        {
+          "value": 30.6,
+          "load": 5.93,
+          "loadAfter": 5.93,
+          "settle": [
+            {
+              "at": "2026-10-18T19:46:32.781Z",
+              "load": 5.93
+            }
+          ],
+          "note": "the scatter's dash:view entries 30.6 ms"
+        },
+        {
+          "value": 31,
+          "load": 30.69,
+          "loadAfter": 30.69,
+          "settle": [
+            {
+              "at": "2026-10-18T19:47:34.343Z",
+              "load": 31.43
+            },
+            {
+              "at": "2026-10-18T19:47:44.344Z",
+              "load": 38.12
+            },
+            {
+              "at": "2026-10-18T19:47:54.345Z",
+              "load": 41.91
+            },
+            {
+              "at": "2026-10-18T19:48:04.347Z",
+              "load": 44.41
+            },
+            {
+              "at": "2026-10-18T19:48:14.347Z",
+              "load": 44.49
+            },
+            {
+              "at": "2026-10-18T19:48:24.348Z",
+              "load": 46.65
+            },
+            {
+              "at": "2026-10-18T19:48:34.350Z",
+              "load": 45.11
+            },
+            {
+              "at": "2026-10-18T19:48:44.352Z",
+              "load": 39.95
+            },
+            {
+              "at": "2026-10-18T19:48:54.353Z",
+              "load": 35.17
+            },
+            {
+              "at": "2026-10-18T19:49:04.345Z",
+              "load": 30.69
+            }
+          ],
+          "note": "the scatter's dash:view entries 31.0 ms"
+        },
+        {
+          "value": 30.4,
+          "load": 9.55,
+          "loadAfter": 9.27,
+          "settle": [
+            {
+              "at": "2026-10-18T19:50:05.997Z",
+              "load": 14.95
+            },
+            {
+              "at": "2026-10-18T19:50:15.997Z",
+              "load": 13.19
+            },
+            {
+              "at": "2026-10-18T19:50:25.998Z",
+              "load": 11.78
+            },
+            {
+              "at": "2026-10-18T19:50:36.000Z",
+              "load": 10.65
+            },
+            {
+              "at": "2026-10-18T19:50:46.001Z",
+              "load": 9.55
+            }
+          ],
+          "note": "the scatter's dash:view entries 30.4 ms"
+        },
+        {
+          "value": 28.7,
+          "load": 4.74,
+          "loadAfter": 4.74,
+          "settle": [
+            {
+              "at": "2026-10-18T19:51:47.595Z",
+              "load": 4.74
+            }
+          ],
+          "note": "the scatter's dash:view entries 28.7 ms"
+        }
+      ]
+    },
+    {
+      "row": "2b open warm",
+      "measure": "warm reopen: the same, the host’s copy and parse cache loaded",
+      "bound": "recorded",
+      "limit": null,
+      "unit": "ms",
+      "value": 412.1,
+      "median": 412.1,
+      "best": 412.1,
+      "verdict": "recorded",
+      "admitted": 1,
+      "trials": [
+        {
+          "value": 412.1,
+          "load": 4.74,
+          "loadAfter": 4.74,
+          "settle": [
+            {
+              "at": "2026-10-18T19:51:48.626Z",
+              "load": 4.74
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "row": "4 replace to all views",
+      "measure": "a replacement by the agent (artifact_dataset, new bytes): from its first observed post-write revision announcement (the seam's announcedAt, the public ArtifactStore.onChange updated at the answer's revision; not the durable commit) to the frame after the last of 12 views is drawn again in the open tab (host and page on one clock)",
+      "bound": "every admitted trial ≤ 500 ms",
+      "limit": 500,
+      "unit": "ms",
+      "value": 454,
+      "median": 442,
+      "best": 426,
+      "verdict": "met",
+      "admitted": 3,
+      "trials": [
+        {
+          "value": 454,
+          "load": 4.74,
+          "loadAfter": 4.74,
+          "settle": [
+            {
+              "at": "2026-10-18T19:51:49.768Z",
+              "load": 4.74
+            }
+          ],
+          "note": "the call's start to the paint 562 ms (the bind 109 ms); announced 108 ms after the call's start"
+        },
+        {
+          "value": 426,
+          "load": 4.74,
+          "loadAfter": 4.92,
+          "settle": [
+            {
+              "at": "2026-10-18T19:51:51.020Z",
+              "load": 4.74
+            }
+          ],
+          "note": "the call's start to the paint 499 ms (the bind 73 ms); announced 73 ms after the call's start"
+        },
+        {
+          "value": 442,
+          "load": 4.92,
+          "loadAfter": 4.92,
+          "settle": [
+            {
+              "at": "2026-10-18T19:51:51.698Z",
+              "load": 4.92
+            }
+          ],
+          "note": "the call's start to the paint 515 ms (the bind 74 ms); announced 73 ms after the call's start"
+        }
+      ]
+    },
+    {
+      "row": "5b sheet reads every raw row",
+      "measure": "the sheet's bounded pages of the 50000-row snapshot read and shown (the click to its row count; the tab's reader may hold them from the raw table view)",
+      "bound": "recorded",
+      "limit": null,
+      "unit": "ms",
+      "value": 45,
+      "median": 45,
+      "best": 45,
+      "verdict": "recorded",
+      "admitted": 1,
+      "trials": [
+        {
+          "value": 45,
+          "load": 4.92,
+          "loadAfter": 4.92,
+          "settle": [
+            {
+              "at": "2026-10-18T19:51:52.920Z",
+              "load": 4.92
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "row": "5 source scroll",
+      "measure": "the source sheet scrolling 50000 raw rows (150 wheel steps of 120 px, then 20 jumps across the snapshot): per scroll event, the main thread's time from the event to the virtual rows' DOM commit (Performance marks), p95 over every admitted trial's events pooled",
+      "bound": "pooled p95 ≤ 16 ms; any long task over 50 ms fails it",
+      "limit": 16,
+      "unit": "ms",
+      "value": 9.6,
+      "median": 9.7,
+      "best": 8.9,
+      "verdict": "met",
+      "admitted": 3,
+      "trials": [
+        {
+          "value": 8.9,
+          "load": 4.92,
+          "loadAfter": 4.77,
+          "settle": [
+            {
+              "at": "2026-10-18T19:51:52.972Z",
+              "load": 4.92
+            }
+          ],
+          "note": "this trial's own p95 (information); 170 scroll events, 170 committed (0 without a commit after them); work p50 0.90, max 14.70 ms; rAF interval p50 16.70 (cadence 59.9 Hz), p95 18.20, max 18.70 ms; long tasks 0 (longest 0.0 ms)"
+        },
+        {
+          "value": 9.7,
+          "load": 4.77,
+          "loadAfter": 4.95,
+          "settle": [
+            {
+              "at": "2026-10-18T19:51:59.109Z",
+              "load": 4.77
+            }
+          ],
+          "note": "this trial's own p95 (information); 171 scroll events, 171 committed (0 without a commit after them); work p50 1.00, max 12.20 ms; rAF interval p50 16.70 (cadence 59.9 Hz), p95 18.20, max 18.70 ms; long tasks 0 (longest 0.0 ms)"
+        },
+        {
+          "value": 9.8,
+          "load": 4.95,
+          "loadAfter": 4.79,
+          "settle": [
+            {
+              "at": "2026-10-18T19:52:05.104Z",
+              "load": 4.95
+            }
+          ],
+          "note": "this trial's own p95 (information); 171 scroll events, 171 committed (0 without a commit after them); work p50 1.20, max 17.20 ms; rAF interval p50 16.70 (cadence 59.9 Hz), p95 18.20, max 18.60 ms; long tasks 0 (longest 0.0 ms)"
+        }
+      ],
+      "note": "512 admitted events pooled; per-trial p95 8.90, 9.70, 9.80 ms and the frame cadence are information, never the bound"
+    },
+    {
+      "row": "6 renderer",
+      "measure": "the renderer process's own private memory (process.getProcessMemoryInfo().private, Electron's documented renderer API) with the 12-view dashboard open after the scrolls and replacements, no input, sampled on the 10 s marks 0 through 60 s: the later sample of the first consecutive pair both started at or after 30 s and within 5 % (a sample started more than 1 s after its mark kept and named, in no pair), else the sample of the 60 s mark; every sample started below load 10",
+      "bound": "≤ 500 MB, idle from 30 s",
+      "limit": 500,
+      "unit": "MB",
+      "value": 171.9,
+      "median": null,
+      "best": null,
+      "verdict": "met",
+      "admitted": 7,
+      "trials": [
+        {
+          "value": 508,
+          "load": 4.81,
+          "loadAfter": 4.81,
+          "settle": [],
+          "note": "the 0 s mark: started 0.0 s, completed 0.0 s (overhead 6 ms)"
+        },
+        {
+          "value": 180.3,
+          "load": 4.66,
+          "loadAfter": 4.66,
+          "settle": [],
+          "note": "the 10 s mark: started 10.0 s, completed 10.0 s (overhead 24 ms)"
+        },
+        {
+          "value": 176.4,
+          "load": 5.44,
+          "loadAfter": 5.44,
+          "settle": [],
+          "note": "the 20 s mark: started 20.0 s, completed 20.0 s (overhead 8 ms)"
+        },
+        {
+          "value": 176.4,
+          "load": 4.99,
+          "loadAfter": 4.99,
+          "settle": [],
+          "note": "the 30 s mark: started 30.0 s, completed 30.0 s (overhead 7 ms)"
+        },
+        {
+          "value": 171.9,
+          "load": 4.54,
+          "loadAfter": 4.54,
+          "settle": [],
+          "note": "the 40 s mark: started 40.0 s, completed 40.0 s (overhead 6 ms)"
+        },
+        {
+          "value": 171.9,
+          "load": 4.53,
+          "loadAfter": 4.53,
+          "settle": [],
+          "note": "the 50 s mark: started 50.0 s, completed 50.0 s (overhead 9 ms)"
+        },
+        {
+          "value": 171.9,
+          "load": 4.46,
+          "loadAfter": 4.46,
+          "settle": [],
+          "note": "the 60 s mark: started 60.0 s, completed 60.0 s (overhead 6 ms)"
+        }
+      ],
+      "reason": "settled within 5 % at the samples started 30.0 s and 40.0 s",
+      "note": "after a forced collection (diagnostic only): private 161.3 MB, working set 320.6 MB, JS heap 53.8 MB"
+    }
+  ]
+}

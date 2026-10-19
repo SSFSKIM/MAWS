@@ -3,7 +3,7 @@
 // sheet's hold was taken (never relabelling the old descriptors as latest), holds it afresh and reopens the sheet on
 // that one capture; if the document does not sync again within the bound, the sheet says the snapshot is unavailable.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
+import { removeDataset, setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { newDoc } from '@artifacts/yjs';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -126,5 +126,85 @@ describe('the dashboard tab’s source sheet across a host restart (E3)', () => 
     await settle();
     expect(w.tab.sheet.snapshot().hold).toBe('unavailable');
     expect(w.holds).toHaveLength(1);
+  });
+});
+
+// P3-F dashboard-live-ui wave (scalpel-1#1): the recapture reads the document the sheet was opened on, never whatever the
+// editor displays by the restart, and the sheet keeps its own preview flag: the live document's latest for a sheet opened
+// on it behind a history preview, and the version's own descriptors for one opened on the version
+describe('the dashboard tab’s source sheet recaptures from the document it was opened on (P3-F)', () => {
+  const versionOf = () => {
+    const version = newDoc(); // a retained version's own document
+    setDataset(version, 'live', live('assets/q0.json', 'Version'));
+    return version;
+  };
+  const restart = async (w: Awaited<ReturnType<typeof opened>>, hold: number) => {
+    w.setState({ phase: 'off', synced: false }); // the host went: the replica's port closed and the sheet's hold with it
+    w.holds[hold]!.lose();
+    await settle();
+    setDataset(w.doc, 'live', live('assets/q2.json', 'Live, later')); // what the restarted host's sync brings
+    w.setState({ phase: 'live', synced: true });
+    await settle();
+  };
+
+  it('opened on the live document, a history preview displayed meanwhile: the live latest, never the version, still no preview', async () => {
+    const w = await opened();
+    expect(w.tab.sheet.snapshot().preview).toBe(false);
+    w.tab.document.setPreviewing(true); // the owner opens a version in history
+    w.tab.displayed(versionOf());
+    await settle();
+    await restart(w, 0);
+    const snapshot = w.tab.sheet.snapshot();
+    expect(snapshot.datasets.map(({ descriptor }) => descriptor.title)).toEqual(['Live, later']);
+    expect(snapshot.preview).toBe(false);
+    expect(w.holds.at(-1)!.refs).toEqual(['assets/q2.json']);
+    expect(snapshot.hold).toBe('held');
+  });
+
+  it('opened on a version, the live document displayed again since: the version’s own, still a preview', async () => {
+    const w = world();
+    tabs.push(w.tab);
+    await vi.waitFor(() => expect(w.tab.document.snapshot().ready).toBe(true));
+    w.tab.document.setPreviewing(true);
+    w.tab.displayed(versionOf());
+    await settle();
+    w.tab.toggleDatasets(); // the header's Datasets on the version
+    await settle();
+    const sheetHold = w.holds.length - 1; // the sheet's own, beside the preview's
+    expect(w.holds.map((hold) => hold.refs)).toEqual([['assets/q0.json'], ['assets/q0.json']]);
+    expect(w.tab.sheet.snapshot().preview).toBe(true);
+    w.tab.document.setPreviewing(false); // the preview ends
+    w.tab.displayed(w.doc);
+    await settle();
+    await restart(w, sheetHold);
+    const snapshot = w.tab.sheet.snapshot();
+    expect(snapshot.datasets.map(({ descriptor }) => descriptor.title)).toEqual(['Version']);
+    expect(snapshot.preview).toBe(true);
+    expect(w.holds.at(-1)!.refs).toEqual(['assets/q0.json']);
+  });
+});
+
+// P3-F dashboard-live-ui wave (scalpel-1#2): Show current reopens the sheet on the current capture of its datasets; a
+// dataset removed since leaves the shown document's others, never the false "No data is bound" sheet while some remain
+describe('the dashboard tab’s Show current on a removed dataset (P3-F)', () => {
+  it('reopens on the remaining datasets; with none left, on none', async () => {
+    const w = world();
+    tabs.push(w.tab);
+    await vi.waitFor(() => expect(w.tab.document.snapshot().ready).toBe(true));
+    setDataset(w.doc, 'other', live('assets/o1.json', 'Other'));
+    w.tab.displayed(w.doc);
+    w.tab.reopenSheet('live'); // as its source label opens it: that dataset alone
+    await settle();
+    expect(w.tab.sheet.snapshot().datasets.map(({ id }) => id)).toEqual(['live']);
+    removeDataset(w.doc, 'live');
+    w.tab.reopenSheet('live'); // its live block's Show current
+    await settle();
+    const snapshot = w.tab.sheet.snapshot();
+    expect(snapshot.open).toBe(true);
+    expect(snapshot.datasets.map(({ id }) => id)).toEqual(['other']);
+    expect(snapshot.selected).toBe('other');
+    removeDataset(w.doc, 'other');
+    w.tab.reopenSheet('other');
+    expect(w.tab.sheet.snapshot().datasets).toEqual([]); // nothing bound now: the sheet says so truly
   });
 });

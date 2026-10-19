@@ -6,7 +6,7 @@
 // first two 10 s-spaced samples within 5 % completed within 60 s of the first one's start, every sample admitted below
 // load 10, never a forced collection's figure.
 import { describe, expect, it } from 'vitest';
-import { LOAD_BELOW, MEMORY_FLOOR_MS, MEMORY_LAST_MARK_MS, MEMORY_SPACING_MS, memoryVerdict, percentile, privateMB, replacementInterval, scrollVerdict, timingVerdict } from '../../e2e/support/dashboard-scale';
+import { LOAD_BELOW, MEMORY_FLOOR_MS, MEMORY_LAST_MARK_MS, MEMORY_LATE_MS, MEMORY_SPACING_MS, memoryVerdict, percentile, privateMB, replacementInterval, scrollVerdict, timingVerdict } from '../../e2e/support/dashboard-scale';
 
 const at = (load: number) => (value: number) => ({ value, load });
 
@@ -111,6 +111,26 @@ describe('the renderer’s memory (parent Decision Log 42(5), amended)', () => {
     expect(memoryVerdict(marks(flat, 40, [3, 3, 3, 3, 3, 3, 12]), 500)).toMatchObject({ verdict: 'hardware-blocked', reason: expect.stringMatching(/12/) });
     // an over-limit figure under load is blocked, not a product failure
     expect(memoryVerdict(marks([600, 600, 600, 600, 600, 600, 600], 40, [3, 3, 3, 3, 3, 15]), 500)).toMatchObject({ verdict: 'hardware-blocked' });
+  });
+
+  it('keeps a sample started more than 1 s after its mark out of the deciding pair only, every sample kept and the excluded named (P3-F L249)', () => {
+    expect(MEMORY_LATE_MS).toBe(1_000);
+    // a slow read delays the 40 s sample 1.2 s past its mark: 30/40 s (within 5 %) cannot decide, nor 40/50 s; 50/60 s does
+    const late = [...marks([600, 560, 520, 480]), sample(41_200, 41_250, 482), ...[490, 492].map((mb, k) => sample((5 + k) * MEMORY_SPACING_MS, (5 + k) * MEMORY_SPACING_MS + 40, mb))];
+    const verdict = memoryVerdict(late, 500);
+    expect(verdict).toMatchObject({ verdict: 'met', value: 492, excluded: [{ mark: 40_000, startedAt: 41_200, mb: 482 }] });
+    expect(verdict.reason).toMatch(/40 s mark.*41\.2 s.*482\.0 MB/);
+    expect(late).toHaveLength(7); // the input is never trimmed
+    // exactly 1 s late is not late
+    expect(memoryVerdict([...marks([600, 560, 520, 480]), sample(41_000, 41_050, 482), ...[300, 200].map((mb, k) => sample((5 + k) * MEMORY_SPACING_MS, (5 + k) * MEMORY_SPACING_MS + 40, mb))], 500)).toMatchObject({ verdict: 'met', value: 482, excluded: [] });
+    // the catch-up burst after a slow read: the 50 s sample starts at 61.5 s, right after the slow 40 s one; neither
+    // decides a pair, and the 60 s figure is the sample on the 60 s mark, never the late 50 s one that started after 60 s
+    const burst = [...marks([600, 560, 520, 400]), sample(40_000, 61_400, 512), sample(61_500, 61_540, 300), sample(61_600, 61_640, 700)];
+    expect(memoryVerdict(burst, 500)).toMatchObject({ verdict: 'failed', value: 700, excluded: [{ mark: 50_000, startedAt: 61_500, mb: 300 }, { mark: 60_000, startedAt: 61_600, mb: 700 }] });
+    // an excluded sample vetoes nothing: a later qualifying pair still decides
+    expect(memoryVerdict([...marks([600, 560, 520, 470]), sample(42_000, 42_040, 900), sample(50_000, 50_040, 471), sample(60_000, 60_040, 472)], 500)).toMatchObject({ verdict: 'met', value: 472 });
+    // load still blocks on every sample, the excluded ones included
+    expect(memoryVerdict([...marks([600, 560, 520, 470]), sample(42_000, 42_040, 471, 12), sample(50_000, 50_040, 471), sample(60_000, 60_040, 472)], 500)).toMatchObject({ verdict: 'hardware-blocked' });
   });
 
   it('takes the renderer’s private kilobytes as MB, refusing what is not a finite non-negative number', () => {

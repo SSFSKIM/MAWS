@@ -112,15 +112,18 @@ export function applyRepair(doc: Doc, plan: RepairPlan, registry: CarryRegistry,
 /**
  * Before a losing copy is tombstoned: every character in it that is not one it was created with (an edit made in it
  * after the move) is inserted into the winner after the winner's counterpart of its left neighbour, and creation
- * characters deleted in the loser are deleted from the winner. Each inserted run is added to `copied` as a carry of the
- * loser's characters. Returns the number of runs carried.
+ * characters deleted in the loser are deleted from the winner. Counterparts are matched by their common origin, each
+ * copy's base followed through the copies it was made from (one copy may descend from the other's source through a
+ * move in between), so the text the two share is never taken for new. Each inserted run is added to `copied` as a carry
+ * of the loser's characters. Returns the number of runs carried.
  */
 function carryCopyEdits(doc: Doc, registry: CarryRegistry, loser: Node, winner: Node, copied: AttributionCarry[]): number {
   const recL = registry.copy(itemOf(loser));
   const recW = registry.copy(itemOf(winner));
   if (!recL || !recW) return 0;
+  const originKey = (source: Slot): string => slotKey(registry.origin(source));
   const sourceToWinner = new Map<string, Slot>();
-  for (const [won, source] of recW.base) sourceToWinner.set(slotKey(source), parseSlot(won));
+  for (const [won, source] of recW.base) sourceToWinner.set(originKey(source), parseSlot(won));
   const visible = new Set(deepSlotIds(loser).map(slotKey));
   const loserBlocks = textblocksY(loser);
   const winnerBlocks = textblocksY(winner);
@@ -144,8 +147,8 @@ function carryCopyEdits(doc: Doc, registry: CarryRegistry, loser: Node, winner: 
       pendingSlots = [];
     };
     for (const { slot, ch } of charSlots(block)) {
-      const source = recL.base.get(slotKey(slot));
-      const won = source && sourceToWinner.get(slotKey(source));
+      const source = recL.base.get(slotKey(slot)) ?? slot; // a run replayed into the loser is in the origins, not its base
+      const won = sourceToWinner.get(originKey(source));
       if (won) {
         flush();
         const at = locateSlot(doc, won);
@@ -160,7 +163,7 @@ function carryCopyEdits(doc: Doc, registry: CarryRegistry, loser: Node, winner: 
   });
   for (const [lost, source] of recL.base) {
     if (visible.has(lost)) continue;
-    const won = sourceToWinner.get(slotKey(source));
+    const won = sourceToWinner.get(originKey(source));
     const at = won && locateSlot(doc, won);
     if (at) {
       at.node.delete(at.index, 1);

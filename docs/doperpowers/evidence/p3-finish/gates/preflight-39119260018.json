@@ -1,0 +1,152 @@
+{
+  "kind": "preflight (not final-source evidence)",
+  "label": "p3f-final",
+  "gates": [
+    "static",
+    "unit",
+    "probes",
+    "unit:darwin",
+    "e2e:design",
+    "e2e:dashboard",
+    "e2e:connectors",
+    "e2e:terminal",
+    "e2e:connectors-direct",
+    "e2e:connectors-oauth"
+  ],
+  "bundlePolicy": "inspect only; no extraction or paid reruns",
+  "runId": 39119260018,
+  "sourceCommit": "2c45e150fe9bc87c867f76feccaab1548933697f",
+  "wrapperHead": "9f20ae45051fea888c4fe3fd2cfda679bb89a73c",
+  "createdAt": "2026-10-18T10:26:29Z",
+  "previousRun": 39115417793,
+  "attempt": 1,
+  "conclusion": "success",
+  "manifestCommit": "2c45e150fe9bc87c867f76feccaab1548933697f",
+  "log": "/tmp/maws-review/gates/p3f-union-preflight-retry1-ci.log",
+  "bundleInspection": {
+    "status": "verified preflight; inspection only, not final-source evidence",
+    "manifestCommit": "2c45e150fe9bc87c867f76feccaab1548933697f",
+    "buildCommit": "9f20ae45051fea888c4fe3fd2cfda679bb89a73c",
+    "variant": "plain",
+    "archiveSha256": "5310ef779134196e64391661e321a34624aef8d506e8d2e7fe5dc706926039ec",
+    "archiveBytes": 15520401,
+    "files": 853,
+    "uncompressedBytes": 56198913,
+    "extracted": false
+  },
+  "unitTiming": {
+    "conclusion": "success",
+    "jobId": 117651335816,
+    "jobSeconds": 590,
+    "baselineJobSeconds": 405,
+    "deltaJobSeconds": 185,
+    "testStepSeconds": 445,
+    "baselineTestStepSeconds": 281,
+    "deltaTestStepSeconds": 164,
+    "interpretation": "Successful whole named union; observed delta not pure compiler attribution; below25min"
+  },
+  "status": "completed",
+  "verifiedAt": "2026-10-18T11:11:51Z",
+  "terminalLines": [
+    "ci-gate: run 39119260018 attempt 1",
+    "ci-gate: run 39119260018 success",
+    "p3f-gate-exit: 0"
+  ],
+  "interpretation": "W-T/W-RD named union accepted; reporter preflight only, not final-source evidence; no full-set counter advances",
+  "jobs": [
+    {
+      "name": "static",
+      "id": 117651335887,
+      "conclusion": "success",
+      "passed": 46,
+      "failed": 0,
+      "skipped": 0,
+      "detail": "All node/web/e2e typechecks and lint passed; count46 is the gate-script tests"
+    },
+    {
+      "name": "unit",
+      "id": 117651335816,
+      "conclusion": "success",
+      "passed": 20287,
+      "failed": 0,
+      "skipped": 73,
+      "files": {
+        "passed": 1525,
+        "skipped": 7,
+        "failed": 0
+      }
+    },
+    {
+      "name": "probes",
+      "id": 117651335865,
+      "conclusion": "success",
+      "passed": 219,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "unit:darwin",
+      "id": 117651335971,
+      "conclusion": "success",
+      "passed": 282,
+      "failed": 0,
+      "skipped": 0,
+      "files": {
+        "passed": 14,
+        "skipped": 0,
+        "failed": 0
+      }
+    },
+    {
+      "name": "e2e:design",
+      "id": 117651335889,
+      "conclusion": "success",
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "e2e:dashboard",
+      "id": 117651335852,
+      "conclusion": "success",
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "e2e:connectors",
+      "id": 117651336007,
+      "conclusion": "success",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "e2e:connectors-direct",
+      "id": 117651335878,
+      "conclusion": "success",
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "e2e:connectors-oauth",
+      "id": 117651335911,
+      "conclusion": "success",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "e2e:terminal",
+      "id": 117651335932,
+      "conclusion": "success",
+      "passed": 15,
+      "failed": 0,
+      "skipped": 0
+    }
+  ],
+  "unselected": "packaged job skipped because not requested; not part of this named acceptance",
+  "logsArchive": "/private/tmp/p3f-preflight-completed-logs-39119260018/logs.zip",
+  "evidenceContainment": "git status --porcelain docs/doperpowers/evidence empty immediately after gate"
+}

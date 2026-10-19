@@ -58,6 +58,26 @@ describe('captureLocalKey', () => {
     expect(await captureLocalKey(join(dir, 'absent'))).toEqual({ kind: 'unidentified', why: 'unreadable' });
   });
 
+  // P3-F L244: APFS answers a realpath in the spelling it stored, so a launch cwd composed (NFC) can come back
+  // decomposed (NFD) for the very same directory. The fake realpath answers as APFS would; the filesystem is real.
+  const storedNfd: LocalKeyFiles = { ...nodeLocalKeyFiles, realpath: async (path) => (await nodeLocalKeyFiles.realpath(path)).normalize('NFD') };
+
+  it('a cwd the filesystem answers in another Unicode normalization is the same directory, keyed in NFC', async () => {
+    const cwd = join(dir, 'caf\u00e9', '\ud55c\uae00');
+    mkdirSync(cwd, { recursive: true });
+    expect(await captureLocalKey(cwd, { files: storedNfd })).toEqual({ kind: 'directory', key: cwd });
+    mkdirSync(join(dir, 'caf\u00e9', '.git'));
+    expect(await captureLocalKey(cwd, { files: storedNfd })).toEqual({ kind: 'repository', key: join(dir, 'caf\u00e9') });
+  });
+
+  it('a symlink along the cwd stays refused even when its target differs from the cwd only by normalization', async () => {
+    mkdirSync(join(dir, 'target', 'inner'), { recursive: true });
+    symlinkSync(join(dir, 'target'), join(dir, 'caf\u00e9'));
+    // a normalization-sensitive filesystem can hold the decomposed twin as another directory a link points at
+    const twin: LocalKeyFiles = { ...nodeLocalKeyFiles, realpath: async (path) => path.normalize('NFD') };
+    expect(await captureLocalKey(join(dir, 'caf\u00e9', 'inner'), { files: twin })).toEqual({ kind: 'unidentified', why: 'symlinkedCwd' });
+  });
+
   it('a failed probe of any ancestor never reads as “no repository”', async () => {
     const cwd = join(dir, 'a', 'b');
     mkdirSync(cwd, { recursive: true });

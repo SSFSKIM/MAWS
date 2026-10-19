@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import { _electron, test as base, type ElectronApplication, type Page } from '@playwright/test';
 import { writeReplayEngine } from '../../test/support/replay-engine';
 import { writeScratchShellHome } from '../../test/support/shell-home';
+import { shellsUnder, untilExited } from './processes';
 import { launchEnvironment } from './scratch-env';
 
 export const REPO_ROOT = resolve(__dirname, '../..');
@@ -108,10 +109,16 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   let app: ElectronApplication | null = null;
   let closed = false;
   const cleanup = async () => {
+    // P3-F (the terminal e2e's ENOTEMPTY, tracker 2026-10-17): a shell the app started saves its history into the shell
+    // home as it exits on its terminal's hang-up, which can come after the app has closed, so the removal waits for the
+    // shells it found before the close (never signalling one) and retries a directory that filled meanwhile.
+    const shells = app && !closed ? shellsUnder(app.process().pid!) : [];
     try {
       if (app && !closed) await closeOrKill(app);
     } finally {
-      if (ownsUserData) rmSync(userData, { recursive: true, force: true }); // C5: a given profile is the caller's
+      const left = await untilExited(shells, SHELL_EXIT_MS);
+      if (left.length > 0) console.error(`[e2e] shells still running ${SHELL_EXIT_MS} ms after the app closed: ${left.map((p) => p.pid).join(', ')}`);
+      if (ownsUserData) rmSync(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); // C5: a given profile is the caller's
     }
   };
 
@@ -196,6 +203,10 @@ export async function collectConsoleErrors(page: Page): Promise<() => string[]> 
   livePage.splice(0);
   return () => [...seededConsole, ...liveConsole, ...seededPage, ...livePage];
 }
+
+// How long a launch's cleanup waits for the app's shells to exit after the app closed: a hung-up shell saves its history
+// and exits within milliseconds; one still running then is named and the removal goes ahead.
+const SHELL_EXIT_MS = 5_000;
 
 // `close()` waits for the app to exit; if it fails, the process is killed so no Electron outlives the test, and the
 // failure is still thrown, since an app that will not close is itself a defect.

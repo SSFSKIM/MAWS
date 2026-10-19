@@ -93,13 +93,16 @@ export function escapeUp(tree: SlideTree, selection: readonly string[]): string[
   return scope === ROOT ? [] : [scope];
 }
 
-/** Tab (and Shift-Tab): the next element among the selection's siblings in paint order, around. */
-export function tabNext(tree: SlideTree, selection: readonly string[], back: boolean): string[] {
+/**
+ * Tab (and Shift-Tab): the next element among the selection's siblings in paint order. Past the last (before the
+ * first), and on a level with none, there is no next (null): the key then leaves the stage, so the stage is no keyboard
+ * trap (P3-F; WCAG 2.1.2).
+ */
+export function tabNext(tree: SlideTree, selection: readonly string[], back: boolean): string[] | null {
   const list = tree.childrenOf(scopeOf(tree, selection));
-  if (!list.length) return [];
   const at = selection.length ? list.indexOf(selection[selection.length - 1]!) : -1;
-  const next = at < 0 ? (back ? list.length - 1 : 0) : (at + (back ? -1 : 1) + list.length) % list.length;
-  return [list[next]!];
+  const next = at < 0 ? (back ? list.length - 1 : 0) : at + (back ? -1 : 1);
+  return next >= 0 && next < list.length ? [list[next]!] : null;
 }
 
 /** ⌘A: every element at the selection's level. */
@@ -111,6 +114,17 @@ export function marquee(tree: SlideTree, bounds: ReadonlyMap<string, Box>, rect:
     const b = bounds.get(id);
     return b !== undefined && intersects(b, rect);
   });
+}
+
+/**
+ * A Shift-marquee: its hits added to the selection at the selection's level, as a Shift-click adds (`pick`); hits at
+ * another level replace it, so a group's child and the group are never selected together (P3-F: one move then moved
+ * the child twice). Touching nothing keeps the selection.
+ */
+export function addHits(tree: SlideTree, selection: readonly string[], hits: readonly string[]): string[] {
+  if (!hits.length) return [...selection];
+  if (selection.length && tree.parentOf(selection[0]!) !== tree.parentOf(hits[0]!)) return [...hits];
+  return [...selection, ...hits.filter((id) => !selection.includes(id))];
 }
 
 /** Whether every element of the selection is pinned (the transform layer moves pinned elements by left/top). */

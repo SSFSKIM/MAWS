@@ -22,6 +22,8 @@ import { BROWSER_COPY } from '../copy';
 import { coverPane, resetCovering } from '../covering';
 import { registerChromeExtra, type ChromeExtraProps } from '../extras';
 import { panelHost } from '../../../panel/host';
+import { PanelRegion } from '../../../panel/PanelRegion'; // P3-F (F-shell)
+import { registerSlot, resetSlots } from '../../../app/slots'; // P3-F (F-shell)
 import { browser, connectBrowser, onShowRequest, raiseNotice, resetBrowser } from '../store';
 import { Chrome, type ChromeProps } from './Chrome';
 
@@ -337,6 +339,47 @@ describe('the address field', () => {
     expect(document.activeElement).not.toBe(field());
     act(() => main.emit('browser.chrome.command', { tabId: T1, command: 'focusAddress' }));
     expect(document.activeElement).toBe(field());
+  });
+
+  // P3-F (F-shell, scalpel-1#1): in the X30 column layout the card lies on the pane's left under the chrome, so the list
+  // dropping below the nav row must paint above the card's layer, or its left part is under the card and cannot be
+  // clicked. happy-dom paints nothing and loads no stylesheet: the paint order is read off the classes, as the built
+  // Tailwind applies them (an element's z-index is its `z-N`, or a `has-[…]:z-N` whose selector matches what it holds).
+  it('the open list paints above the floating card’s layer; the closed chrome stays under it', async () => {
+    const user = userEvent.setup();
+    onTestFinished(resetSlots);
+    const zIndex = (el: Element): number | null => {
+      let z: number | null = null;
+      for (const name of el.classList) {
+        const held = /^has-\[(.+)\]:z-(\d+)$/.exec(name);
+        if (held && el.querySelector(held[1]!) !== null) return Number(held[2]);
+        const plain = /^z-(\d+)$/.exec(name);
+        if (plain) z = Number(plain[1]);
+      }
+      return z;
+    };
+    // the element whose stacking context `el` paints in: its nearest ancestor with a z-index, else `top`
+    const context = (el: Element, top: Element): Element => {
+      for (let at = el.parentElement; at !== null && at !== top; at = at.parentElement) if (zIndex(at) !== null) return at;
+      return top;
+    };
+    registerSlot('panelHost', () => <Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[tab()]} owns />);
+    useLayout.getState().setPanel({ floating: true });
+    render(<PanelRegion />);
+    const region = document.querySelector('[data-region="panel"]')!;
+    const layer = document.querySelector('[data-floating-layer]')!;
+    const chrome = document.querySelector('[data-browser-chrome]')!;
+    // the chrome and the card's layer stack in one context, the region's: nothing between either and it has a z-index
+    expect([context(chrome, region), context(layer, region)]).toEqual([region, region]);
+    expect(zIndex(chrome)!, 'closed, the chrome stays under the layer').toBeLessThan(zIndex(layer)!);
+    await user.click(field());
+    await user.keyboard('wiki');
+    const list = await screen.findByRole('listbox', { name: BROWSER_COPY.addressSuggestions });
+    expect(context(list, region), 'the list stacks inside the chrome').toBe(chrome);
+    expect(zIndex(chrome)!, 'open, the chrome and its list paint above the layer').toBeGreaterThan(zIndex(layer)!);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(zIndex(chrome)!).toBeLessThan(zIndex(layer)!);
   });
 });
 

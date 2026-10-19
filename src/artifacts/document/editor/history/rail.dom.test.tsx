@@ -5,15 +5,21 @@
 // and the banner; Make a copy; Compare by shift-click; the "See N new changes" pill; Show editors on a selection.
 import type { Editor } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { StrictMode, type ReactNode } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { StrictMode, type ComponentProps, type ReactNode } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { applyEdit } from '../../patch-writer';
 import { schemaFor } from '../../schema';
 import { addTab, createDocument, deleteTab, renameTab, tabBody } from '../../tabs';
-import { isBindingTransaction } from '../../../yjs';
+import { isBindingTransaction, newDoc, stateV2 } from '../../../yjs';
 import { ynodeToPmnode } from '../../../yjs/prosemirror';
+import { DesignSystemHostContext, DesignSystemScope } from '../../../design-system/apply';
+import complete from '../../../design-system/fixtures/complete.tokens.json';
+import { writeSystem } from '../../../design-system/model';
+import { parseTokens, serializeTokens } from '../../../design-system/tokens';
+import type { ArtifactHost } from '../../../host';
+import { setDsOverrides } from '../../meta';
 import { DocumentEditor } from '../DocumentEditor';
 import type { DocumentHandle } from '../host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '../memory-host';
@@ -52,6 +58,7 @@ async function setup(
   prepare?: (world: Pick<Mounted, 'host' | 'history' | 'agentWrites'>) => Promise<void> | void,
   options: ConstructorParameters<typeof MemoryHistory>[1] = {},
   wrap: (node: ReactNode) => ReactNode = (node) => node,
+  pageScope?: ComponentProps<typeof DocumentEditor>['pageScope'],
 ): Promise<Mounted> {
   host = new MemoryDocumentHost();
   history = new MemoryHistory(host, { sessionTitles: { [SESSION]: 'Fix the build' }, ...options });
@@ -84,7 +91,7 @@ async function setup(
   await prepare?.({ host, history, agentWrites });
   const handle = await open(HUMAN);
   let editor: Editor | null = null;
-  render(wrap(<DocumentEditor artifactId="doc1" handle={handle} host={memoryEditorHost({ actor: HUMAN, name: 'Owner', color: '--author-2' })} history={history} onEditor={(e) => (editor = e)} />));
+  render(wrap(<DocumentEditor artifactId="doc1" handle={handle} host={memoryEditorHost({ actor: HUMAN, name: 'Owner', color: '--author-2' })} history={history} onEditor={(e) => (editor = e)} pageScope={pageScope} />));
   await until(() => editor !== null && editor.getText().length > 0, 'the editor to bind');
   return { host, history, agent, editor: () => editor!, agentWrites };
 }
@@ -311,6 +318,98 @@ describe('the preview', () => {
     await until(() => page().style.getPropertyValue('--ds-color-text') === '', 'the live tokens');
   });
 
+  // F's S-RESTYLE: the page's scope draws a version in the system it pinned (the floor for one written with none), with
+  // the version's own overrides, as C's deck preview does; the live document again in the governing one
+  it('hands the page’s scope the system each version pinned, and nothing for the live document', async () => {
+    const system = '00000000-0000-4000-8000-0000000000d5';
+    const Scope = ({ children, pinned }: { children: ReactNode; pinned?: { system: { id: string; versionSeq: number } | { builtin: 'maws' }; overrides: Record<string, string> } }) => {
+      const key = !pinned ? 'live' : 'builtin' in pinned.system ? `floor ${JSON.stringify(pinned.overrides)}` : `${pinned.system.id}@${pinned.system.versionSeq} ${JSON.stringify(pinned.overrides)}`;
+      return <div data-scope-key={key}>{children}</div>;
+    };
+    await setup(
+      async ({ history: h, agentWrites }) => {
+        h.version('named', HUMAN, { label: 'Unpinned' });
+        await agentWrites(agentAppends(' More.'));
+        h.version('named', HUMAN, { label: 'Old look', designSystemRef: { id: system, versionSeq: 1 } });
+      },
+      {},
+      undefined,
+      Scope,
+    );
+    const scopeKey = () => document.querySelector<HTMLElement>('[data-scope-key]')!.dataset.scopeKey;
+    const liveEditor = document.querySelector('.ProseMirror:not([data-editor="preview"])');
+    expect(scopeKey()).toBe('live');
+    await openHistory();
+    click(row('Old look'));
+    await previewing();
+    await until(() => scopeKey() === `${system}@1 {}`, 'the pinned system');
+    click(row('Unpinned'));
+    await until(() => scopeKey() === 'floor {}', 'the floor for a version with no pin');
+    click(within(bar()).getByRole('button', { name: 'Back to document' }));
+    await until(() => scopeKey() === 'live', 'the live system');
+    // only the scope changed: the live editor is the one mounted before the preview
+    expect(document.querySelector('.ProseMirror:not([data-editor="preview"])')).toBe(liveEditor);
+  });
+
+  // F's S-RESTYLE review: with D's own scope around the page, the scope alone draws a version in the system it pinned, so
+  // a version override naming the system's bundled family reaches the page under the face's private name, its face
+  // loaded from the pinned revision's asset; the page itself declares none of the version's tokens (an inline one would
+  // shadow the scope's aliased value with the bare family name, which no face declares).
+  it('lets D’s scope draw a version’s bundled-family override, with its pinned face, declaring nothing on the page', async () => {
+    const system = '00000000-0000-4000-8000-0000000000d6';
+    const pinnedSeq = 7;
+    const systemDoc = newDoc();
+    writeSystem(
+      systemDoc,
+      {
+        'tokens.tokens.json': serializeTokens(parseTokens(complete).tokens!),
+        'components/document.css': '@font-face { font-family: "Iowan Old Style"; font-weight: 400; src: url("assets/iowan.woff2") format("woff2"); }\n',
+      },
+      { route: 'derived', at: Date.UTC(2026, 9, 13) },
+      { name: 'Harbor' },
+    );
+    const pinnedState = stateV2(systemDoc);
+    systemDoc.destroy();
+    const systems = {
+      versionState: async (id: string, at: number | { seq: number }) => {
+        if (id !== system || typeof at === 'number' || at.seq !== pinnedSeq) throw new Error(`no state of ${id}`);
+        return pinnedState;
+      },
+      assetUrl: (id: string, ref: string, revision?: number) => `https://assets.example/${id}/${revision ?? 'live'}/${ref}`,
+    } as unknown as ArtifactHost;
+    const SystemScope = ({ children, pinned }: { children: ReactNode; pinned?: { system: { id: string; versionSeq: number } | { builtin: 'maws' }; overrides: Record<`--ds-${string}`, string> } }) => (
+      <DesignSystemScope system={pinned?.system ?? { builtin: 'maws' }} medium="document" overrides={pinned?.overrides} className="doc-page-system">
+        {children}
+      </DesignSystemScope>
+    );
+    const BODY = '"Iowan Old Style", serif';
+    await setup(
+      async ({ history: h, agentWrites }) => {
+        await agentWrites((agent) => setDsOverrides(agent.doc, { '--ds-font-body': BODY }));
+        h.version('named', HUMAN, { label: 'Old look', designSystemRef: { id: system, versionSeq: pinnedSeq } });
+      },
+      {},
+      (node) => <DesignSystemHostContext.Provider value={systems}>{node}</DesignSystemHostContext.Provider>,
+      SystemScope,
+    );
+    const page = () => document.querySelector<HTMLElement>('.ds-doc')!;
+    const scopeCss = () => {
+      const scope = page().closest<HTMLElement>('[data-ds-scope]')?.dataset.dsScope;
+      return (scope && document.head.querySelector(`style[data-ds-scope-style="${scope}"]`)?.textContent) || '';
+    };
+    await openHistory();
+    click(row('Old look'));
+    await previewing();
+    await until(() => /assets\.example\/[\w-]+\/7\/assets\/iowan\.woff2/.test(scopeCss()), 'the pinned system’s face in the scope');
+    const css = scopeCss();
+    expect(css).toContain(`assets.example/${system}/7/assets/iowan.woff2`);
+    const alias = /font-family: (ds-face-[a-z0-9]+);/.exec(css)?.[1];
+    expect(alias).toBeDefined();
+    expect(css).toContain(`--ds-font-body: ${alias}, "Iowan Old Style", serif;`);
+    expect(page().hasAttribute('data-preview')).toBe(true);
+    expect(page().getAttribute('style') ?? '').toBe('');
+  });
+
   it('compares two versions picked by shift-click', async () => {
     await setup(async ({ history: h, agentWrites }) => {
       await agentWrites(agentAppends(' Before the first.'));
@@ -455,6 +554,69 @@ describe('the owner’s actions', () => {
     expect(rows.some((text) => text?.startsWith('You'))).toBe(true);
     expect(rows.some((text) => text?.startsWith('Fix the build'))).toBe(true);
     for (const text of rows) expect(text).toMatch(/\d{1,2}:\d{2}\s?[AP]M/);
+  });
+
+  // The history-anchors review (scalpel-4#3): two sessions with no title are both "Claude", and edits in one minute read
+  // the same time; each session is its own row all the same.
+  it('lists two untitled sessions that edited in the same minute as a row each', async () => {
+    const other: Actor = { kind: 'session', appSessionId: '00000000-0000-4000-8000-0000000000a2' as AppSessionId };
+    const at = Date.UTC(2026, 9, 18, 9, 41);
+    const { editor } = await setup(
+      async ({ host: h, agentWrites }) => {
+        await agentWrites(agentAppends(' One.'));
+        h.write((doc) => (tabBody(doc, TAB)!.get(1) as { insert(i: number, s: string): void }).insert(0, 'Two. '), other);
+      },
+      { sessionTitles: {}, now: () => at },
+    );
+    const errors = vi.spyOn(console, 'error');
+    try {
+      act(() => void editor().commands.setTextSelection({ from: 1, to: endOf(editor(), 'p2') }));
+      act(() => void fireEvent.contextMenu(editor().view.dom));
+      click(screen.getByRole('menuitem', { name: 'Show editors' }));
+      await until(() => screen.queryByRole('dialog', { name: 'Editors' })?.querySelectorAll('li').length === 3, 'the editors');
+      const rows = [...screen.getByRole('dialog', { name: 'Editors' }).querySelectorAll('li')].map((li) => li.textContent);
+      expect(rows.filter((text) => text?.startsWith('Claude · ')), 'one row per session').toHaveLength(2);
+      expect(new Set(rows).size, 'the two read alike').toBe(2);
+      expect(errors.mock.calls.filter((call) => /same key/.test(String(call[0]))), 'no two rows share a key').toEqual([]);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  // The history-anchors review (scalpel-5#2): the control clicked takes the keyboard and then goes (the menu's item as
+  // the list replaces it, × as the list closes), so closing gives it back to the page; an Escape a comment card already
+  // took is the card's, and the list stays.
+  it('gives the keyboard back to the page when the editors list closes by Escape or ×, and leaves an Escape a card took', async () => {
+    const { editor } = await setup(async ({ agentWrites }) => {
+      await agentWrites(agentAppends(' The agent adds this.'));
+    });
+    const page = editor().view.dom;
+    const dialog = () => screen.queryByRole('dialog', { name: 'Editors' });
+    const showEditors = async () => {
+      act(() => void editor().commands.setTextSelection({ from: 1, to: endOf(editor(), 'p2') }));
+      act(() => page.focus());
+      expect(document.activeElement, 'the page holds the keyboard').toBe(page);
+      act(() => void fireEvent.contextMenu(page));
+      const item = screen.getByRole('menuitem', { name: 'Show editors' });
+      act(() => item.focus()); // a click focuses what it lands on
+      click(item);
+      await until(() => (dialog()?.querySelectorAll('li').length ?? 0) > 0, 'the editors');
+    };
+    await showEditors();
+    const card = document.body.appendChild(document.createElement('div'));
+    card.addEventListener('keydown', (event) => event.preventDefault()); // a card's Escape, its own
+    act(() => void fireEvent.keyDown(card, { key: 'Escape' }));
+    card.remove();
+    expect(dialog(), 'an Escape a card took leaves the list').not.toBeNull();
+    act(() => void fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' }));
+    expect(dialog()).toBeNull();
+    expect(document.activeElement, 'Escape: the page has the keyboard again').toBe(page);
+    await showEditors();
+    const close = screen.getByRole('button', { name: 'Close editors' });
+    act(() => close.focus());
+    click(close);
+    expect(dialog()).toBeNull();
+    expect(document.activeElement, '×: the page has the keyboard again').toBe(page);
   });
 });
 

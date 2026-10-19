@@ -127,7 +127,7 @@
     "from": null,
     "id": "agentmsg:agents-relay:journal:333:1",
     "kind": "agent_message",
-    "text": "Sent message to ad286defbc77bc090: Say PING in your next inbox line",
+    "text": "Sent message to Read and report one.txt content: Say PING in your next inbox line",
     "to": {
       "agentId": "ad286defbc77bc090",
       "glyph": 3,

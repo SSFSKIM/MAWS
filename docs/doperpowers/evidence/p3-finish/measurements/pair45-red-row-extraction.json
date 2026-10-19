@@ -1,0 +1,193 @@
+{
+  "recordedAt": "2026-10-18T20:33:47Z",
+  "classification": "cause(a): three measured reds are load-confounded observations, not verdicts, even where sampled load1 is low; retain values/bounds/loads and overlap, quiet relaunch supplies verdict",
+  "rawRecords": [
+    "pair45-document-raw.json",
+    "pair45-presentations-raw.json",
+    "pair45-artifacts-raw.json"
+  ],
+  "rows": [
+    {
+      "row": "artifact first sync",
+      "value": 219.1,
+      "bound": "<150ms, worst of3",
+      "trials": [
+        {
+          "value": 219.1,
+          "load": [
+            15.68,
+            12.85,
+            12.38
+          ],
+          "evaluateAt": "20:12:04.879Z",
+          "secondsFromTestStepStart": 31.75,
+          "secondsFromRestoreMarker": 30.386
+        },
+        {
+          "value": 145,
+          "load": [
+            15.68,
+            12.85,
+            12.38
+          ],
+          "evaluateAt": "20:12:07.303Z",
+          "secondsFromTestStepStart": 34.174,
+          "secondsFromRestoreMarker": 32.81
+        },
+        {
+          "value": 170.7,
+          "load": [
+            17.3,
+            13.24,
+            12.52
+          ],
+          "evaluateAt": "20:12:09.658Z",
+          "secondsFromTestStepStart": 36.529,
+          "secondsFromRestoreMarker": 35.165
+        }
+      ],
+      "externalWindow": "replay-r2 20:10:24-20:21:49Z",
+      "idleLoad": "unknown, no independent idle sample"
+    },
+    {
+      "row": "document typing p95",
+      "value": 16.8,
+      "bound": "<=16ms",
+      "loadAtRow": 9.77,
+      "intervalLoads": [
+        12.01,
+        9.77
+      ],
+      "measurementInterval": [
+        "20:15:10.466Z",
+        "20:15:53.960Z"
+      ],
+      "rowTimeBracket": [
+        "20:15:53.937Z",
+        "20:15:53.954Z"
+      ],
+      "secondsFromRestoreMarkerBracket": [
+        121.236954,
+        121.253954
+      ],
+      "externalWindow": "replay-r2 20:10:24-20:21:49Z",
+      "testStepDelta": {
+        "testStepStart": "20:13:51.270474Z",
+        "typingIntervalSeconds": [
+          79.238526,
+          119.813526
+        ],
+        "rowWriteBracketSeconds": [
+          122.666526,
+          122.683526
+        ]
+      },
+      "idleLoad": "unknown"
+    },
+    {
+      "row": "presentation drag p95",
+      "value": 19.6,
+      "bound": "<=16ms, best of3",
+      "rowLoad": 4.54,
+      "trials": [
+        {
+          "value": 20.3,
+          "load": 4.54,
+          "probeInterval": [
+            "20:09:23.068Z",
+            "20:09:29.806Z"
+          ]
+        },
+        {
+          "value": 19.9,
+          "load": 4.45,
+          "probeInterval": [
+            "20:09:30.820Z",
+            "20:09:37.562Z"
+          ]
+        },
+        {
+          "value": 19.6,
+          "load": 4.46,
+          "probeInterval": [
+            "20:09:38.575Z",
+            "20:09:45.378Z"
+          ]
+        }
+      ],
+      "secondsFromRestoreMarkerBestInterval": [
+        227.534758,
+        234.337758
+      ],
+      "externalWindow": "single manim run started20:09:22Z, end not supplied; presentation job also intersects r1/r2. Architect rules confounded, not quiet verdict.",
+      "testStepDelta": {
+        "testStepStart": "20:05:49.849368Z",
+        "trialProbeIntervalsSeconds": [
+          [
+            213.218632,
+            219.956632
+          ],
+          [
+            220.970632,
+            227.712632
+          ],
+          [
+            228.725632,
+            235.528632
+          ]
+        ],
+        "rowStdoutSeconds": 236.534394,
+        "rowStdoutIsSampleTimestamp": false
+      },
+      "idleLoad": "unknown"
+    },
+    {
+      "row": "document first-after-read1 marginal",
+      "value": 50.73,
+      "bound": "<=50ms",
+      "load": 12.01,
+      "externalWindow": "replay-r2 covers entire document job",
+      "sampleTime": {
+        "rowWriteBracket": [
+          "20:15:09.938Z",
+          "20:15:10.297Z"
+        ],
+        "afterTestStepSeconds": [
+          78.667526,
+          79.026526
+        ],
+        "afterRestoreSeconds": [
+          77.237954,
+          77.596954
+        ],
+        "precision": "recording bracket, not call start"
+      }
+    },
+    {
+      "row": "document history-enter2 marginal",
+      "value": 1126.8,
+      "bound": "<=1000ms",
+      "load": 12.24,
+      "externalWindow": "replay-r2 covers entire document job",
+      "sampleTime": {
+        "clickResultEnvelope": [
+          "20:16:08.416Z",
+          "20:16:09.564Z"
+        ],
+        "afterTestStepSeconds": [
+          137.145526,
+          138.293526
+        ],
+        "rowWriteBracket": [
+          "20:16:09.758Z",
+          "20:16:09.759Z"
+        ],
+        "precision": "exact event/sample instant absent"
+      }
+    }
+  ],
+  "otherArtifactMetrics": "p95durableAck8.2ms<10 recorded,500edits, before/after loads17.3/11.08; acknowledgedLost0 of209acknowledged across3kills, loads11/11/10.44. Both raw metrics persisted but later assertions did not execute after first-sync assertion failed.",
+  "buildAge": "These jobs restored the same cache, not freshly compiled. Restore markers are last successful output, not exact script-exit timestamps. Artifact test-step starts20:11:33.128576Z; restore marker20:11:34.493080Z. Prior presentations final line20:11:06.790700Z, artifact cold starts58.088/60.512/62.867s later.",
+  "heavy": "one generation71,222ms of360,000ms budget,exit0,load4.43->12.25,export ok;84live slides/120versions,descriptorseed11,filesView872a715838d5/52384da44462. Snapshot counters differ from final stdout because export precedes final day events. No empirical repeat-determinism claim; hashes integrity only; no binaries retained. Heavy previews124.8/113.5/117.9ms at12.25,all<1000,confounded early observations.",
+  "laterDragRuling": "Parent DL108 corrected bya963cf446 uses twelve earlier trials plus final three with single-scene context to calibrate24ms; raw original16ms verdicts are preserved, not recomputed."
+}

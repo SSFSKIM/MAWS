@@ -1103,7 +1103,12 @@ export class DocumentService {
     conn.closed = true;
     const hostDoc = this.docs.get(conn.artifactId);
     if (!hostDoc || !hostDoc.conns.delete(conn)) return;
-    if (conn.awarenessClients.size > 0) awarenessProtocol.removeAwarenessStates(hostDoc.awareness, [...conn.awarenessClients], null);
+    if (conn.awarenessClients.size > 0) {
+      awarenessProtocol.removeAwarenessStates(hostDoc.awareness, [...conn.awarenessClients], null);
+      // P3-F (artifact-protocol finding 5): their clocks too (after the removal is relayed, which encodes them), so a
+      // replica that reconnects with its presence unchanged, at the clock the host already knew, is taken back
+      for (const id of conn.awarenessClients) hostDoc.awareness.meta.delete(id);
+    }
     if (hostDoc.conns.size === 0) this.scheduleFlush(); // the flush starts the grace period of a doc nobody holds
   }
 }

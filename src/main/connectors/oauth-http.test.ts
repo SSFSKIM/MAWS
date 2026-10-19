@@ -16,6 +16,16 @@ describe('isPermittedOAuthUrl', () => {
       'https://user:pw@auth.example.com/', 'http://a@127.0.0.1/', 'file:///etc/passwd', 'javascript:alert(1)', 'data:text/plain,x', 'not a url'])
       expect(isPermittedOAuthUrl(refused), refused).toBe(false);
   });
+
+  // P3-F L271: WHATWG URL parsing rewrites every one of these to 127.0.0.1; the exception is for the literal spelling.
+  it('refuses another spelling of the IPv4 loopback that URL normalization would turn into 127.0.0.1', () => {
+    for (const spelling of ['2130706433', '0x7f000001', '127.1', '127.0.1', '0x7f.0.0.1', '0177.0.0.1', '127.000.000.001', '127.0.0.1.', '%31%32%37.0.0.1'])
+      expect(isPermittedOAuthUrl(`http://${spelling}:4100/token`), spelling).toBe(false);
+    for (const refused of ['http:/127.0.0.1/token', 'http:\\\\127.0.0.1/token', ' http://127.0.0.1/token', 'http://127.0.0.\t1/token'])
+      expect(isPermittedOAuthUrl(refused), JSON.stringify(refused)).toBe(false);
+    for (const admitted of ['http://127.0.0.1', 'http://127.0.0.1:4100', 'http://127.0.0.1?q=1', 'http://127.0.0.1#f', 'HTTP://127.0.0.1:4100/token'])
+      expect(isPermittedOAuthUrl(admitted), admitted).toBe(true);
+  });
 });
 
 describe('boundedOAuthFetch', () => {
@@ -23,6 +33,7 @@ describe('boundedOAuthFetch', () => {
     const base = vi.fn(async () => ok());
     const f = boundedOAuthFetch(base, new AbortController().signal);
     await expect(f('http://auth.example.com/token')).rejects.toMatchObject({ code: 'insecure' });
+    await expect(f('http://2130706433:4100/token')).rejects.toMatchObject({ code: 'insecure' }); // P3-F L271
     expect(base).not.toHaveBeenCalled();
   });
 

@@ -107,6 +107,7 @@ export class LiveDatasetsController implements LiveDatasets {
   private start_: LiveStart = { phase: 'idle' };
   private started: AppSessionId | null = null; // the session the last Start named
   private waiting: (() => void) | null = null; // stops listening for a Start's setup
+  private readonly afterStart = new Set<string>(); // P3-F: manual queries a Start's readiness found paused while hidden
   private staleTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
 
@@ -396,8 +397,15 @@ export class LiveDatasetsController implements LiveDatasets {
 
   // Shown again: each watch's handle asked once it is due, and a query paused at the cap tries its watch again. A watch
   // cannot yield while shown, so one answer per showing suffices; a start still in flight is asked when it answers.
+  // P3-F: a manual query a Start's readiness found paused for want of a session while hidden refreshes once, now.
   private recover(): void {
     const now = this.now();
+    const afterStart = [...this.afterStart];
+    this.afterStart.clear();
+    for (const id of afterStart) {
+      const query = this.queries.get(id);
+      if (query && query.pause === 'noRoute' && query.source.schedule === undefined) void this.refresh(id);
+    }
     for (const query of this.queries.values()) {
       const schedule = query.source.schedule;
       if (schedule === undefined) continue;
@@ -488,7 +496,12 @@ export class LiveDatasetsController implements LiveDatasets {
   private settle(end: ArtifactSessionEnd): void {
     if (end.status !== 'ready') return this.setStart({ phase: end.status, appSessionId: end.appSessionId, words: end.words });
     this.setStart({ phase: 'ready', appSessionId: end.appSessionId });
-    for (const query of [...this.queries.values()]) if (query.pause === 'noRoute') void this.refresh(query.id);
+    for (const query of [...this.queries.values()]) {
+      if (query.pause !== 'noRoute') continue;
+      // P3-F: nothing is called while hidden; a manual query waits for the next showing's recovery (a watch has its own)
+      if (!this.shown && query.source.schedule === undefined) this.afterStart.add(query.id);
+      void this.refresh(query.id);
+    }
   }
 
   private setStart(start: LiveStart): void {

@@ -24,6 +24,8 @@ export const DECK_COPY = {
   notes: 'Speaker notes',
   notesPlaceholder: 'Speaker notes',
   notesTooLong: (length: number, max: number) => `Speaker notes hold at most ${max.toLocaleString('en-US')} characters; these have ${length.toLocaleString('en-US')}. Shorten them to save.`,
+  notesNotSaved: 'These speaker notes are not saved yet: they were too long until the notes changed elsewhere.', // P3-F (L203)
+  saveNotes: 'Save notes',
   deckFull: (max: number) => `A deck holds at most ${max} slides: delete one to add another.`,
   emptyDeck: 'This deck has no slides yet.',
   toolbar: 'Deck',

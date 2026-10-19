@@ -64,6 +64,7 @@ describe('main answers the session service commands through the router', () => {
     h.trustDirectory(h.work);
     h.host.script = () => ({});
     const parent = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0x3e3), directory: h.work })).record.appId;
+    h.writeTranscript(h.work, sessionIdFor(0x3e3)); // its conversation, which the thread forks (P3-F L242)
     const anchor = { kind: 'file-line', locator: '/r/x.ts#L1', label: 'x.ts:1', path: '/r/x.ts', line: 1 };
     expect(await invoke('side.thread.open', { appSessionId: parent, from: { kind: 'comment', anchor, text: 'why?', screenshot: null } })).toMatchObject({ ok: true, value: { status: 'starting' } });
     const shot = { path: join(h.root, 'nowhere.png'), width: 1, height: 1 };

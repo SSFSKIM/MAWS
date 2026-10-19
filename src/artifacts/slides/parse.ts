@@ -220,7 +220,7 @@ class Loader {
     if (asides.length === 1) {
       const last = [...kids].reverse().find((n) => !(n.kind === 'text' && !n.value.trim()));
       if (last !== asides[0]) this.hold('<aside> (the notes) is not the section’s last child');
-      slide.notes = textContent(asides[0]!).trim();
+      slide.notes = normalizeNotes(textContent(asides[0]!));
       if (slide.notes.length > SLIDE_LIMITS.notes) this.hold(`${slide.notes.length} characters of speaker notes (over ${SLIDE_LIMITS.notes})`);
     }
     slide.children = this.children(kids.filter((n) => !asides.includes(n)), { tag: 'section', style: slide.style, el: null }, 0);
@@ -411,14 +411,13 @@ class Loader {
 
   /** Inline content to normalized runs: HTML whitespace collapsing, adjacent equal runs merged. */
   private block(type: 'p' | 'li', nodes: RawNode[], subject: Subject): TextBlock {
-    type Ch = { ch: string; marks: Marks } | { br: true };
     const chars: Ch[] = [];
     const where = subject.el ? `<${subject.el.tag}>` : 'the text';
     const walk = (ns: RawNode[], marks: Marks) => {
       for (const n of ns) {
         if (n.kind === 'comment') continue;
         if (n.kind === 'text') {
-          for (const ch of n.value.replace(/[\t\n\r\f]/g, ' ')) chars.push({ ch, marks });
+          toChars(n.value, marks, chars);
           continue;
         }
         let next: Marks | null = null;
@@ -469,30 +468,7 @@ class Loader {
       }
     };
     walk(nodes, {});
-    // collapse: runs of spaces to one (the first keeps its marks), none at the block's ends or beside a <br>
-    const out: Ch[] = [];
-    for (const c of chars) {
-      if ('ch' in c && c.ch === ' ') {
-        const prev = out[out.length - 1];
-        if (!prev || 'br' in prev || prev.ch === ' ') continue;
-      }
-      if ('br' in c) {
-        const prev = out[out.length - 1];
-        if (prev && 'ch' in prev && prev.ch === ' ') out.pop();
-      }
-      out.push(c);
-    }
-    while (out.length && 'ch' in out[out.length - 1]! && (out[out.length - 1] as { ch: string }).ch === ' ') out.pop();
-    const inline: Inline[] = [];
-    for (const c of out) {
-      if ('br' in c) {
-        inline.push({ br: true });
-        continue;
-      }
-      const last = inline[inline.length - 1];
-      if (last && 'text' in last && sameMarks(last.marks, c.marks)) last.text += c.ch;
-      else inline.push({ text: c.ch, marks: canonMarks(c.marks) });
-    }
+    const inline = collapseInline(chars);
     const cost = textCost([{ type, inline }]);
     this.textChars += cost.chars;
     this.markCount += cost.marks;
@@ -571,13 +547,21 @@ function cssRefProblem(css: string): string | null {
 /**
  * Claude's svg rules (format.md, "Graphics"): one opaque graphic whose root and every descendant hold no `<script>` or
  * `<foreignObject>`, no `on*` handler, no script URL, and no reference (an `href`, a `src`, a CSS `url()` in an attribute,
- * a `style` or a `<style>`, read with CSS escapes decoded; an animated `href`'s values) but a local `#id`. The reason, or
- * null when it passes.
+ * a `style` or a `<style>`, read with CSS escapes decoded; an animated `href`'s values) but a local `#id`. A `<desc>` or
+ * `<title>` holds text: parse5 and the browser read HTML inside them (integration points, as inside `<foreignObject>`),
+ * so an element there is an HTML element the dialect never screened (an `iframe srcdoc`, an `img srcset`, a `video
+ * poster`, an `object data`, a `meta refresh`, a form), held as `<foreignObject>` is; a `<style>` alone is admitted,
+ * read here as any svg stylesheet, and the canvas and the export scope it (P3-F slide-model scalpel-4#1; B1, A16). The
+ * reason, or null when it passes.
  */
 export function svgProblem(root: RawElement): string | null {
   const walk = (n: RawElement): string | null => {
     const tag = n.tag.toLowerCase();
     if (tag === 'script' || tag === 'foreignobject') return `an <svg> holding <${n.tag}>`;
+    if (tag === 'desc' || tag === 'title') {
+      const held = n.children.find((c): c is RawElement => c.kind === 'element' && c.tag.toLowerCase() !== 'style');
+      if (held) return `an <svg> <${n.tag}> holding <${held.tag}> (a desc or title holds text)`;
+    }
     for (const [name, value] of n.attrs) {
       const attr = name.toLowerCase();
       if (attr.startsWith('on')) return `an <svg> with an event handler (${name})`;
@@ -610,6 +594,60 @@ export function svgProblem(root: RawElement): string | null {
 
 function describe(parent: ParentSite): string {
   return parent.el?.id ? `<${parent.tag} id="${parent.el.id}">` : `<${parent.tag}>`;
+}
+
+// ---------------------------------------------------------------- the loader's text normalization, shared with the model's writers
+
+type Ch = { ch: string; marks: Marks } | { br: true };
+/** HTML whitespace: a tab, a line feed, a carriage return or a form feed reads as a space before the collapse. */
+function toChars(text: string, marks: Marks, chars: Ch[]): void {
+  for (const ch of text.replace(/[\t\n\r\f]/g, ' ')) chars.push({ ch, marks });
+}
+/** A block's characters to runs: runs of spaces to one (the first keeps its marks), none at the block's ends or beside a <br>; adjacent equal runs merged, marks canonical. */
+function collapseInline(chars: Ch[]): Inline[] {
+  const out: Ch[] = [];
+  for (const c of chars) {
+    if ('ch' in c && c.ch === ' ') {
+      const prev = out[out.length - 1];
+      if (!prev || 'br' in prev || prev.ch === ' ') continue;
+    }
+    if ('br' in c) {
+      const prev = out[out.length - 1];
+      if (prev && 'ch' in prev && prev.ch === ' ') out.pop();
+    }
+    out.push(c);
+  }
+  while (out.length && 'ch' in out[out.length - 1]! && (out[out.length - 1] as { ch: string }).ch === ' ') out.pop();
+  const inline: Inline[] = [];
+  for (const c of out) {
+    if ('br' in c) {
+      inline.push({ br: true });
+      continue;
+    }
+    const last = inline[inline.length - 1];
+    if (last && 'text' in last && sameMarks(last.marks, c.marks)) last.text += c.ch;
+    else inline.push({ text: c.ch, marks: canonMarks(c.marks) });
+  }
+  return inline;
+}
+/**
+ * A text's blocks as the loader reads them back from the file the serializer writes them to (each block's inline content
+ * through `block`'s collapse), so what a writer stores is a parse/serialize fixed point and the publish compares the
+ * live text as it compares the agent's (P3-F slide-model scalpel-3#2).
+ */
+export function normalizeText(blocks: TextBlock[]): TextBlock[] {
+  return blocks.map((b) => {
+    const chars: Ch[] = [];
+    for (const r of b.inline) {
+      if ('br' in r) chars.push({ br: true });
+      else toChars(r.text, r.marks, chars);
+    }
+    return { type: b.type, inline: collapseInline(chars) };
+  });
+}
+/** The speaker notes as the loader reads them back: line ends as HTML text carries them, trimmed (likewise). */
+export function normalizeNotes(notes: string): string {
+  return notes.replace(/\r\n?/g, '\n').trim();
 }
 
 function byteLength(s: string): number {

@@ -1,0 +1,74 @@
+{
+  "recordedAt": "2026-10-18T21:28:37Z",
+  "runs": [
+    39156492025,
+    39165341280
+  ],
+  "descriptor": {
+    "kind": "deck",
+    "profile": "heavy",
+    "encoding": "delta",
+    "months": 3,
+    "month": 3,
+    "seed": 11
+  },
+  "sameInputCounts": {
+    "turns": 1950,
+    "sessions": 195,
+    "comments": 130,
+    "named": 39,
+    "restores": 6
+  },
+  "first": {
+    "generationMs": 71222,
+    "generationLoads": [
+      4.43,
+      12.25
+    ],
+    "workload": {
+      "counts": {
+        "turns": 1950,
+        "sessions": 195,
+        "comments": 130,
+        "named": 39,
+        "restores": 6
+      },
+      "updates": 78290,
+      "slides": 84,
+      "versions": 120
+    },
+    "filesView": {
+      "prev": "872a715838d5",
+      "next": "52384da44462"
+    }
+  },
+  "quiet": {
+    "generationMs": 56553,
+    "generationLoads": [
+      2.21,
+      2.91
+    ],
+    "workload": {
+      "counts": {
+        "turns": 1950,
+        "sessions": 195,
+        "comments": 130,
+        "named": 39,
+        "restores": 6
+      },
+      "updates": 78842,
+      "slides": 86,
+      "versions": 122
+    },
+    "filesView": {
+      "prev": "872a715838d5",
+      "next": "35a2e8338883"
+    }
+  },
+  "finding": "logical outputs differ: updates,live slide count,version count,next filesView; not merely non-repeatable random binary hashes. Both validators ok and within time budget; no cross-run logical-equality assertion in validator.",
+  "interpretation": "non-deterministic-generator carry criterion triggered; parent notified. No optimization or probe, parent confirms carry with both shapes retained and no probe; preview validity depends on descriptor, not repeatability. Raw preview numbers remain actual observations of these distinct fixtures, not repeatability acceptance.",
+  "retainedM8": "120.1ms at loads17.7-31.7 retained per original fallback rule; no new bound waiver",
+  "cause": "not diagnosed; no product/generator fix claimed",
+  "disposition": "carried to P4 S7a presentation-history fixture; parent accepts descriptor-based validity of measured previews independently",
+  "trackerRow": "| 2026-10-18 | P4 S7a presentation-history fixture (logical repeatability) | Two mandatory gate generations with the same deck/heavy/delta/months3/month3/seed11 descriptor and input counts1950turns/195sessions/130comments/39named/6restores produced different logical outputs: updates78290/78842,live slides84/86,versions120/122,next filesView52384da44462/35a2e8338883; previous filesView872a715838d5 and previous-state hash matched. This is not merely random binary-client-id hashing. | Runs39156492025 and39165341280; P3-F measurements/heavy-repeatability-observation.json retains both shapes,loads and hashes; generation71.222/56.553s and export validators both ok. | Explain and stabilize the fixed-descriptor logical output for reproducible comparisons, with appropriate semantic checks rather than byte-hash equality. Owner: P4 S7a presentation-history fixture. Carried now, no P3-F generator probe or optimization. By parent ruling, existing heavy-preview readings remain valid for the descriptor; preview validity does not require byte or logical repeatability. |"
+}

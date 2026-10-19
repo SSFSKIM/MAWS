@@ -213,7 +213,7 @@
     "from": null,
     "id": "agentmsg:replay:journal:196:1",
     "kind": "agent_message",
-    "text": "Sent message to a7aea42f9bed9b3ea: Say PING in your next inbox line",
+    "text": "Sent message to Loop rounds until stop.txt: Say PING in your next inbox line",
     "to": {
       "agentId": "a7aea42f9bed9b3ea",
       "glyph": 3,
@@ -356,7 +356,7 @@
     "from": null,
     "id": "agentmsg:replay:journal:315:1",
     "kind": "agent_message",
-    "text": "Sent message to a7aea42f9bed9b3ea: Say PONG in your next inbox line",
+    "text": "Sent message to Loop rounds until stop.txt: Say PONG in your next inbox line",
     "to": {
       "agentId": "a7aea42f9bed9b3ea",
       "glyph": 3,
@@ -480,7 +480,7 @@
     "from": null,
     "id": "agentmsg:replay:journal:543:1",
     "kind": "agent_message",
-    "text": "Sent message to accea5ba03e220b64: Say PANG in your next inbox line",
+    "text": "Sent message to Read file after sleep: Say PANG in your next inbox line",
     "to": {
       "agentId": "accea5ba03e220b64",
       "glyph": 5,

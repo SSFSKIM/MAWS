@@ -18,7 +18,7 @@ import { useSessions } from '../../../stores/sessions';
 import type { AskRowData } from '../../../transcript';
 import { mawsTranscriptActionsOver } from '../actions';
 import { connectAsks } from './connect';
-import { EMPTY_DRAFT, pickOption, setOther, setText } from './draft';
+import { EMPTY_DRAFT, pickOption, setDesignSystem, setOther, setText } from './draft';
 import { applyAskEvents, askSheet, editDraft, ensureLoaded, resetAskSheets, selectAsk, shownAsk, submitAsk } from './store';
 
 const QUESTIONS: AskQuestion[] = [
@@ -268,6 +268,50 @@ describe('Submit', () => {
     await done;
     expect(state().asks.has('a1')).toBe(false);
     expect(state().notice).toBe('Already answered elsewhere');
+  });
+});
+
+// F's L176 (D's M6, the ledger's X28 host row): a design system deleted between the owner's pick and Submit is not sent
+// by its id for the chain to skip silently; Submit reads each picked system first, and a gone one is unpicked and named.
+describe('Submit re-validates a design_system pick', () => {
+  const ACME = '0d9e8f7a-6b5c-4d3e-8f2a-1b0c9d8e7f6a';
+  const PICKS: AskQuestion[] = [{ id: 's1', question: 'Which design system?', modality: 'design_system' }];
+  const picked = () => {
+    applyAskEvents(A, [opened('d1', { questions: PICKS })]);
+    editDraft(A, 'd1', 's1', (draft) => setDesignSystem(draft, { id: ACME, name: 'Acme web' }));
+  };
+
+  it('sends a pick still live, after reading it', async () => {
+    picked();
+    const fake = fakeClient({ 'artifacts.get': { artifact: { id: ACME, kind: 'design_system', title: 'Acme web' } } });
+    const done = submitAsk(A, 'd1', fake.client, []);
+    await vi.waitFor(() => expect(fake.pending('maws.ask.answer')).toBe(1));
+    expect(fake.invoked('artifacts.get')).toEqual([{ artifactId: ACME, prepare: false }]);
+    expect(fake.invoked('maws.ask.answer')).toEqual([{ appSessionId: A, askId: 'd1', answers: [{ id: 's1', question: 'Which design system?', status: 'answered', designSystemId: ACME, name: 'Acme web' }] }]);
+    await fake.reply('maws.ask.answer', { outcome: 'delivered' });
+    await done;
+    expect(state().asks.has('d1')).toBe(false);
+  });
+
+  it('sends nothing for a system deleted since the pick: the pick is cleared and the notice names it', async () => {
+    picked();
+    const fake = fakeClient({ 'artifacts.get': { artifact: null } });
+    await submitAsk(A, 'd1', fake.client, []);
+    expect(fake.invoked('maws.ask.answer')).toEqual([]);
+    expect(state()).toMatchObject({ submitting: null, failed: null, notice: 'Acme web was deleted. Choose another design system.' });
+    expect(state().drafts.get('d1')?.get('s1')?.designSystem).toBeNull();
+    expect(state().asks.get('d1')?.state).toBe('pending');
+  });
+
+  it('a check that cannot be read fails the Submit with its message, the pick kept for Retry', async () => {
+    picked();
+    const fake = fakeClient();
+    const done = submitAsk(A, 'd1', fake.client, []);
+    await fake.fail('artifacts.get', 'engine host unavailable');
+    await done;
+    expect(fake.invoked('maws.ask.answer')).toEqual([]);
+    expect(state()).toMatchObject({ submitting: null, failed: { askId: 'd1', detail: 'engine host unavailable' } });
+    expect(state().drafts.get('d1')?.get('s1')?.designSystem).toEqual({ id: ACME, name: 'Acme web' });
   });
 });
 

@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, mergeUpdates, newDoc, newSuggestionDoc, onUpdate, planAccept, planReject, stateV2, transact, type Doc, type SuggestionRange } from '../../yjs';
 import { applyEdit } from '../patch-writer';
+import { schemaFor } from '../schema';
+import { addTab } from '../tabs';
 import { nodeOf, pmOf } from '../writer.fixture';
 import { DocumentEditor } from './DocumentEditor';
 import type { DocumentHandle } from './host-types';
@@ -144,6 +146,60 @@ describe('document suggestion review', () => {
     const { mounted, close } = await mount();
     mounted.unmount();
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  // P3-F panel scalpel-3#1: the review's page reads its ground as the live page does (usePageGround), so code on a dark
+  // ground takes shiki's dark colours there too
+  it('gives the review’s page its ground: dark on a dark page, light again on a light one', async () => {
+    const ground = document.head.appendChild(document.createElement('style'));
+    ground.textContent = '.ds-doc { background-color: rgb(31, 30, 27); }';
+    try {
+      await mount();
+      const page = screen.getByLabelText('Suggested document').closest<HTMLElement>('.ds-doc')!;
+      expect(page.dataset.ground).toBe('dark');
+      ground.remove();
+      await until(() => page.dataset.ground === 'light', 'the light ground');
+    } finally {
+      ground.remove();
+    }
+  });
+
+  // P3-F panel scalpel-4#1: the suggestion replica is the artifact's, not the tab's: a document-tab switch keeps its port
+  // and the review state, so a review on screen shows the new tab's proposal on its first read (no settle window anew)
+  it('keeps its replica and its review state across a document-tab switch', async () => {
+    world = new World(doc(para('base', 'Original.')));
+    world.host.write((d) => void addTab(d, { title: 'Second', id: 't2', body: schemaFor().nodeFromJSON(doc(para('b2', 'Second.'))) }));
+    const handle = await world.bare();
+    proposal = newSuggestionDoc();
+    applyV2(proposal, stateV2(handle.doc));
+    const updates: Uint8Array[] = [];
+    proposal.on('update', (bytes: Uint8Array) => void updates.push(bytes));
+    applyEdit(proposal, [{ op: 'insert', after: 'base', markdown: 'Proposed first. ^one' }]);
+    applyEdit(proposal, [{ op: 'insert', after: 'b2', markdown: 'Proposed second. ^two' }]);
+    const map = encodeMap(attributionMap(contentIdsOf(mergeUpdates(updates)), { insertActor: 'session:agent', deleteActor: 'session:agent', at: Date.now() }));
+    const close = vi.fn();
+    const host: SuggestionHost = {
+      open: vi.fn(async () => ({ ...handle, doc: proposal!, close })),
+      attributions: vi.fn(async () => map),
+      acceptSuggestion: vi.fn(async () => ({ revision: 2 })),
+      rejectSuggestion: vi.fn(async () => ({ revision: 2 })),
+    };
+    const onPending = vi.fn(); // one callback, as DocumentEditor's state setter is
+    const shown = (tabId: string) => <Suggestions artifactId="doc1" tabId={tabId} base={handle} host={host} editorHost={owner} onPending={onPending} />;
+    const reviewed = () => screen.queryByLabelText('Suggested document')?.textContent ?? '';
+    const { rerender } = render(shown('t1'));
+    await until(() => reviewed().includes('Proposed first.'), 't1’s review');
+    const reads = vi.mocked(host.attributions).mock.calls.length;
+    rerender(shown('t2'));
+    await until(() => reviewed().includes('Proposed second.'), 't2’s review');
+    expect(host.open, 'replicas opened').toHaveBeenCalledOnce();
+    expect(close, 'the replica closed').not.toHaveBeenCalled();
+    expect(vi.mocked(host.attributions).mock.calls.length - reads, 'reads before t2’s review').toBe(1);
+    expect(reviewed()).not.toContain('Proposed first.');
+    rerender(shown('t1'));
+    await until(() => reviewed().includes('Proposed first.'), 't1’s review again');
+    expect(host.open).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
   });
 });
 

@@ -4,7 +4,7 @@
 import { basename } from 'node:path';
 import { mimeOf } from '@shared/files/mime';
 import { parseToolArguments, type ArtifactListAssetsResult, type ArtifactUploadAssetResult } from '@shared/maws/tools';
-import { actorOf, answering, lineageOf, opIdOf, pathUnderCwd, readSourceFile, resolveArtifact, storeOf, type ArtifactToolDeps } from './artifact-context';
+import { actorOf, answering, lineageOf, opIdOf, readSourceFile, resolveArtifact, sourceUnderCwd, storeOf, type ArtifactToolDeps } from './artifact-context';
 import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './server';
 
 export function artifactUploadAssetTool(deps: ArtifactToolDeps): McpToolDefinition {
@@ -17,7 +17,7 @@ export function artifactUploadAssetTool(deps: ArtifactToolDeps): McpToolDefiniti
       // a repeated call answers what the first one did, before its source file or the artifact is looked at again
       const replayed = await store.replayOf(opIdOf(ctx));
       if (replayed.found) return toolText(replayed.result);
-      const source = pathUnderCwd('artifact_upload_asset', ctx.cwd, input.path);
+      const source = await sourceUnderCwd('artifact_upload_asset', ctx.cwd, input.path); // P3-F: where it leads, too
       const bytes = await readSourceFile('artifact_upload_asset', source);
       const name = input.name ?? basename(source);
       const artifactId = await resolveArtifact('artifact_upload_asset', store, input.artifact, lineageOf(ctx, deps));
@@ -29,10 +29,12 @@ export function artifactUploadAssetTool(deps: ArtifactToolDeps): McpToolDefiniti
           artifactId,
           async (op) => {
             const answer = (asset: { assetId: string; ref: string }): ArtifactUploadAssetResult => ({ status: 'uploaded', artifactId, ...asset, name: asset.ref.slice('assets/'.length), size: bytes.length });
-            const linked = store.link(artifactId, ctx.appSessionId, 'edited');
-            linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
-            const uploaded = await store.uploadAsset(artifactId, bytes, { name, mime: mimeOf(name) }, actor, (asset) => op.record(answer(asset)));
-            await linked;
+            // P3-F (artifact-protocol finding 3's completion): the `edited` link in the upload's own frame, beside its op, so
+            // it commits with the asset or not at all (a refused upload links nothing)
+            const uploaded = await store.uploadAsset(artifactId, bytes, { name, mime: mimeOf(name) }, actor, (asset) => {
+              store.linkInWrite(artifactId, ctx.appSessionId, 'edited');
+              op.record(answer(asset));
+            });
             return answer(uploaded);
           },
           { actor },

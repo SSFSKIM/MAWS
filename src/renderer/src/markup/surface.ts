@@ -51,8 +51,8 @@ export function onMarkupSurfaceRemoved(listener: (surface: MarkupSurface) => voi
   return () => void removed.delete(listener);
 }
 
-// The Shell's layers drawn over panel content (the floating card's layer, the comment card's host) carry this attribute:
-// the DOM route's still is the surface alone, so they are hidden while main takes it.
+// The Shell's layers drawn over panel content (the floating card's layer, the comment card's host, the toasts' viewport)
+// carry this attribute: the DOM route's still is the surface alone, so they are hidden while main takes it.
 const MARKUP_OCCLUDER = 'data-markup-occluder';
 
 // The DOM route's still: the window's own page at the rect, taken by main. Null when main could not take it. The

@@ -220,6 +220,35 @@ describe('task graph', () => {
     });
   });
 
+  // P3-F L258: a task is tied to the call that started it by its tool-use id (pass3/p2-to-human-steer-cancel-disk,
+  // engine 2.1.295: the Bash call toolu_01RiHi… at seq 45, its `task_started` local_bash naming it at seq 57). A command
+  // Monitor runs as a `local_bash` task (the engine's source; no recorded Monitor frame yet), so the start named by a
+  // `Monitor` call is a monitor whichever arrives first, and a Bash call's stays a shell.
+  describe('the task a call started (P3-F L258)', () => {
+    const monitorCall = (seq: number) => event('tool.use', { toolName: 'Monitor', toolUseId: 'toolu_mon', input: { command: 'tail -F /tmp/run.log', description: 'failures' } }, { seq });
+    const started = (seq: number) => event('task.started', { taskId: 'bmon1', toolUseId: 'toolu_mon', taskType: 'local_bash', description: 'failures' }, { seq });
+
+    it('a recorded background Bash call’s task is tied to it by its tool-use id and stays a shell', () => {
+      const graph = graphOf(replayed('pass3', 'p2-to-human-steer-cancel-disk'));
+      expect(node(graph, 'b1pqwn23b')).toMatchObject({ kind: 'shell', taskType: 'local_bash', toolUseId: 'toolu_01RiHiYtzKixk5JhjmGyLr87' });
+      expect(graph.byToolUse.get('toolu_01RiHiYtzKixk5JhjmGyLr87' as ToolUseId)).toBe('b1pqwn23b');
+    });
+
+    it('a local_bash task started by a Monitor call is a monitor, under Monitors and not Shells', () => {
+      const graph = graphOf([monitorCall(1), started(2)]);
+      expect(node(graph, 'bmon1')).toMatchObject({ kind: 'monitor', taskType: 'local_bash', toolUseId: 'toolu_mon' });
+      expect(monitors(graph).map((n) => n.taskId)).toEqual(['bmon1']);
+      expect(shells(graph)).toEqual([]);
+      expect(counts(graph)).toMatchObject({ shells: 0, monitors: 1 });
+    });
+
+    it('a Monitor call that arrives after its task’s start turns the shell into a monitor', () => {
+      const shell = graphOf([started(1)]);
+      expect(node(shell, 'bmon1').kind).toBe('shell');
+      expect(node(applyTaskEvents(shell, [monitorCall(2)]), 'bmon1').kind).toBe('monitor');
+    });
+  });
+
   it('process.exited (the parent’s) marks the running nodes exited and leaves the ended ones', () => {
     const events = replayed('pass1', 'subagent');
     const graph = graphOf(upTo(events, 340)); // one agent completed, the other running

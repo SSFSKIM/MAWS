@@ -20,7 +20,7 @@ import { parseSpec, type ValueFormat, type ViewSpec } from '../spec';
 import { DATASET_STATES, VIEW_STATES } from '../states';
 import * as geo from './geometry';
 import { SHAPES, type Point, type Ticks } from './geometry';
-import { decimalsFor, esc, formatClock, formatInstant, formatNumber, px, unitOf, type Theme } from './svg';
+import { decimalsFor, esc, formatClock, formatInstant, formatNumber, formatValue, px, unitOf, type Theme } from './svg';
 import { textWidth, wrap } from './text';
 import { columnFormat, instantOf, overflowKey, shownColumns, transform, typedKey, type ViewColumn, type ViewData, type ViewTable } from './transform';
 
@@ -182,9 +182,9 @@ function notice(theme: Theme, message: string, caption: string, warnings: string
 function formatCell(value: Cell, column: ViewColumn | undefined, format?: ValueFormat): string {
   if (value === null) return '—';
   if (typeof value === 'number') {
-    if (format === 'percent') return `${formatNumber(value * 100, 1)}%`;
+    if (format === 'percent') return `${formatValue(value * 100, 1)}%`;
     if (format === 'text') return String(value);
-    return formatNumber(value, 2);
+    return formatValue(value, 2);
   }
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (column?.type === 'date' && format !== 'text') {
@@ -607,9 +607,11 @@ function cartesian(v: View): Rendered {
 }
 
 /**
- * An unaggregated bar view draws every row, so two drawable rows of one series and measure at one category stand on one
- * another: the warning names those categories (the first three as the axis names them, in its order, then how many
- * more) and points at `agg` (E2 panel). The same category in two series or two measures sits side by side, no overlap.
+ * An unaggregated bar view draws every row, so two drawable rows of one series and measure at one category on the same
+ * side of zero stand on one another: the warning names those categories (the first three as the axis names them, in
+ * its order, then how many more) and points at `agg` (E2 panel). The same category in two series or two measures sits
+ * side by side, no overlap; nor do a negative bar and a positive or zero one at one category, which stand on either
+ * side of the zero line (P3-F L251).
  */
 function repeatedBars(all: Series[], xCol: ViewColumn, xFormat: ValueFormat | undefined, warnings: string[]): void {
   const repeated = new Set<string>();
@@ -618,8 +620,9 @@ function repeatedBars(all: Series[], xCol: ViewColumn, xFormat: ValueFormat | un
     for (const m of s.marks) {
       if (m.y === null) continue;
       const key = typedKey(m.x);
-      if (seen.has(key)) repeated.add(key);
-      else seen.add(key);
+      const side = `${m.y < 0 ? '-' : '+'}${key}`;
+      if (seen.has(side)) repeated.add(key);
+      else seen.add(side);
     }
   }
   if (repeated.size === 0) return;

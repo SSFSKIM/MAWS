@@ -29,6 +29,7 @@ import {
   type VersionSummary,
 } from '@shared/maws/tools';
 import type { Doc } from '@artifacts/yjs';
+import type { Base } from '../documents/replica';
 import type { ArtifactStore, ByteContent } from '../documents/store';
 import {
   actorOf,
@@ -251,7 +252,13 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
           ...read.head, ...(Object.keys(named).length > 0 || input.paths ? { files: named } : {}), ...(missing.length > 0 && { missing }), ...(Object.keys(json).length > 0 && !input.paths && { json }),
           ...(warnings && warnings.length > 0 && { warnings }), ...(held && held.length > 0 && { held }), // P3-C
         };
-        if (read.base) store.service.replica(ctx.appSessionId, artifactId).base = read.base;
+        if (read.base) {
+          // P3-F (artifact-protocol finding 1): a read of some files rebases the session on those files alone; one it was
+          // not shown keeps the text the session last knew of it (or stays unknown), so a change it never saw still
+          // conflicts with its publish
+          const replica = store.service.replica(ctx.appSessionId, artifactId);
+          replica.base = input.paths ? { ...read.base, files: knownAfterRead(store, read.head.kind, replica.base, named, missing) } : read.base;
+        }
       } else if (read.bytes !== null) {
         result = { ...read.head, files: { 'index.html': read.bytes.toString('utf8') } };
         if (read.live) deps.session.byteBases.set(artifactId, { revision: read.head.revision, sha256: read.ref.sha256 });
@@ -264,6 +271,14 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
       return toolText(result);
     }),
   );
+}
+
+// The files a session knows after a read of some of them: what it knew before, with the files the read returned and
+// without those it found missing.
+function knownAfterRead(store: ArtifactStore, kind: ArtifactKind, before: Base | null, returned: Record<string, string>, missing: readonly string[]): Record<string, string> {
+  const known = before ? { ...(before.files ?? withDoc(before.state, (doc) => filesOf(store, kind, doc))) } : {};
+  for (const path of missing) delete known[path];
+  return { ...known, ...returned };
 }
 
 function summaryOf(version: ArtifactVersion, self: AppSessionId): VersionSummary {

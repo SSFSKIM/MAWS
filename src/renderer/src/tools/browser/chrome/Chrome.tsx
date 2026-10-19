@@ -11,6 +11,10 @@
 //
 // P3-G (M2, the coordinator's ruling): in the panel, while the pane holds the page, the tab row's right end hosts the
 // floating card's pill when the card is closed (the page is a native view: a pill over it could not be seen).
+//
+// P3-F (F-shell): while the address field's list shows, the chrome stacks at z-30, over the floating card's layer
+// (z-20): in the X30 column the card lies on the pane's left under the chrome, and the list drops over it. Closed, the
+// chrome keeps z-10.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { DEFAULT_PARTITION, type BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -88,7 +92,7 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false }: Chrom
   };
 
   return (
-    <div data-browser-chrome="" onKeyDown={onKeyDown} className="relative z-10 flex shrink-0 flex-col border-b border-border bg-bg-raised">
+    <div data-browser-chrome="" onKeyDown={onKeyDown} className="relative z-10 flex shrink-0 flex-col border-b border-border bg-bg-raised has-[[data-address-suggestions]]:z-30">
       <TabStrip appSessionId={appSessionId} surface={surface} tabs={tabs} shownId={tabId} trailing={surface === 'panel' && owns ? <ChromePill /> : null} />
       <NavRow appSessionId={appSessionId} surface={surface} tab={tab} addressRef={addressRef} owns={owns} onFind={openFind} />
       {tab?.control === 'human' && <ControlSlot tab={tab} />}

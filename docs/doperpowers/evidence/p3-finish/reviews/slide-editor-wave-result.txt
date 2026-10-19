@@ -1,0 +1,58 @@
+Recorded 2026-10-19T04:54:33Z. Slide-editor wave medium review (reviewer-medium on opus) over worker A (dd34d3f9f, 7fae549e3, 01b8290dd, 557d77a8c) and worker B (c771b857d, d4aa27c15, 8c849fa19, 4d6667d58, b916bb78e, f4c717371, ef536408b). Verdict correct; its P3 (the presenter bar's mousedown guard kept stale button focus) was fixed in cc8a315a8; a bounded low recheck (opus), appended below, found it correct; its embed-focus note is P4 row S-PRESENT-EMBED-FOCUS. Worker A's residual is P4 row S-SLIDE-STAGE-KEYBOARD-EXIT; worker B's compiler observation is P4 row S-COMPILER-BAILOUT-DECK.
+
+Reviewer report, verbatim:
+## Findings
+- [P3] Clear stale button focus when the presenter bar is clicked — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/artifacts/slides/editor/present/Presentation.tsx:197
+  Worker B added the `onMouseDown={(event) => event.preventDefault()}` guard beyond the routing. It means a mouse click never moves focus. It also never clears focus that a bar button already holds, so focus that is stale persists through any number of clicks. Take a presenter who has pressed Tab once (on purpose or not). Focus is now on the first bar button, "←" (Back), because the timer and the count are spans. The presenter then clicks "→" with the mouse and presses Space or Enter to go on. Since b916bb78e, line 167 leaves Enter and Space to the focused button, so the key activates "←" and the show goes back. If "End show" was the focused button, the show ends and its windows close. Without the guard, the click would have moved focus to "→" and the key would have advanced. This only happens once a bar button already has keyboard focus, which is rare in a running show, so the severity is low. The fix is small: in the same handler, also blur `document.activeElement` when it is inside the bar. That keeps the mouse-only case the worker wanted and drops the stale focus. Tab order and screen-reader activation are not affected: an accessibility press sends a simulated click, and cancelling mousedown does not stop that click.
+
+## Verdict
+correct — All eleven fixes match their findings and the architect's routing. I checked each against the code at its commit, the callers it affects and the RED/GREEN logs. The one finding is a non-blocking P3 edge case in Worker B's extra mousedown guard. I found no break in existing code or tests that I could trace.
+
+## Answers to the brief's questions
+1. **Item 1, `addHits`.** The behaviour is right in the design workbench too. World.tsx:461 mounts the same Overlay over the active board, with `slideId` set to the board's id. The board's tree is a slide tree, so the level rule and `pick`'s Shift-click rule (replace when the hit is at another level, selection.ts:67-68) apply there unchanged. One nuance follows the routing: `marquee` reads only ROOT's children. So a Shift-marquee started from inside a group replaces the selection with the group, whereas a Shift-click on a sibling inside the same group adds that sibling.
+2. **Item 4, Tab.** There is no remaining trap. `tabNext` returns null past either end at any level, including inside a container, and on a level with no elements. In that case the Overlay (Overlay.tsx:293-298) neither cancels nor stops the key. There is also no path where Tab does nothing:
+   - Every non-null answer names an element other than the last selected one.
+   - When there is no canvas yet, the early `ctx()` return leaves Tab to the browser.
+   - Nothing else handles plain Tab: the shell's `tab.next` is Ctrl+Tab (terminal/keys.ts:18), and World's capture listener ignores Tab.
+   - In the workbench, a Tab past the last element goes to the board title buttons, which sit inside the world region.
+
+   The one residual is the one Worker A already noted: re-entering the stage forward while the last element is still selected leaves it straight away. That is intended and is not a trap.
+3. **Item 5, ⌘Z.** Yes, the notes field is the only textarea it still takes. Under `.deck-editor` there are only three textareas: Notes.tsx:80, CommentsRail.tsx:162 (the reply field) and HistoryRail.tsx:129 ("What changed"). Only Notes.tsx:82 carries the class `deck-notes-field`.
+4. **Item 3, `seen`.**
+   - The neighbour rule holds after reorders and after an undo. `seen` takes the live order on every render while `show.pos` is in the deck, and it is frozen only once the slide is removed. The neighbour is then the first slide after the removed one in `seen` that is still in the live show, so the slide on screen stays put through later reorders. An undo that brings the slide back returns the show to it, because `show.pos` still names it.
+   - No caller depends on the old never-seen answer. `next`, `back`, `moveOf` and `following` are only given positions that are settled or come from `firstPosition`, so they are always in the show. The only way to reach the never-seen case is a position sent over the channel that this window's replica does not hold yet. Both the old answer (the last slide) and the new one (the first) are momentary there.
+   - The new hidden-slide branch is equivalent to the old `findIndex`.
+5. **Items 2 and 8.**
+   - Item 2 is right. Remounting at build N draws `hiddenAt(N-1)` and plays group N. That path is reachable only by a remount or by a slide written anew where the show stands, because a normal forward move onto a new slide is always at build 0.
+   - Item 8 cannot mark shown twice: `markShown`'s `wasShown` guard (tab-state.ts:179-184) allows it once per tab.
+   - It cannot mark a non-empty deck either. `empty` needs a session, and `host.open` resolves only once the replica has synced (host.ts:197), so a deck with slides never reads as empty.
+6. **Item 9.** Leaving Enter and Space to a focused button is right. The extra guard does not change Tab order, does not stop screen-reader activation, and no click handler in the bar depends on focus. Its one effect is the stale-focus case in the finding above.
+7. **Items 10 and 11.**
+   - `color.bg.raised` is in ROLES (roles.ts:15), "the token paths every system defines" under X28. The `#ffffff` fallback is the house value, and the value is built with the same `tokenValue` pattern as ACCENT, so it is acceptable under tokens-only.
+   - `--text-ui` is defined in tokens.css:29 and is already used by `.present-root`. Using calc() on it follows the precedent in transcript.css:364.
+8. **Item 7, `useDeckCount`.** It does unsubscribe: `onUpdate` returns `doc.off` (yjs/doc.ts:45-48), and useSyncExternalStore calls that when the session changes or the body unmounts. It counts hidden slides as not showable, because `showSlides` filters out `attr:hidden`.
+
+## What I could not verify
+- I ran no tests, following the brief.
+- No run covers both workers' commits together. Worker A's batch ran before Worker B finished, and Worker B's final batch did not include the transform/ or design/editor suites. The files are disjoint, but the combined state is unproven.
+- Worker A did not run the typecheck. `tabNext`'s return type changed; its only caller, Overlay.tsx, handles null.
+- Nothing ran in real Electron or Chromium: a button's Enter and Space activation, focus on click on macOS, and VoiceOver activation are reasoned about, not exercised.
+- The cost of `useDeckCount` on each replica update during the deck scale gate's drag row was not measured. It is three scalar reads per slide on each update, which looks small for the gate's 100-slide deck.
+
+Bounded low recheck (reviewer-low on opus) of the follow-up cc8a315a8, verbatim:
+## Findings
+No material findings.
+
+## Verdict
+correct. `dropBarFocus` ([Presentation.tsx:261-265](/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/artifacts/slides/editor/present/Presentation.tsx#L261)) still cancels mousedown, so a click never moves focus. It blurs only an element that is inside the header it is attached to, which fixes the stale-focus P3 without changing keyboard use. The regression goes red on the reported failure and green with the fix.
+
+## Answers to the four checks
+1. **Space or Enter after a click on the bar.** Yes, whenever the focus is in the document. If a bar button held focus, the blur leaves `document.activeElement` on body. The next keydown then has body as its target, and the early return at line 167 (`event.target.closest('button')`) does not fire, so the show keys run. One case is outside this fix, and it is not new. Embeds in the current pane are sandboxed iframes ([elements.ts:115-120](/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/artifacts/slides/canvas/elements.ts#L115)). If the presenter clicks into one, focus moves into the iframe. A later click on the bar is cancelled and the iframe is not inside the bar, so the iframe keeps focus and Space goes to the embed instead of the window listener. The mousedown guard from b916bb78e already behaved this way, and cc8a315a8 does not change it. I am not filing it against this commit. It may be worth a backlog line if embeds in the show are meant to be interactive.
+2. **Keyboard use.** Unchanged. A Tab onto a button and then Enter or Space never sends a mousedown. The keydown returns early at line 167, and the button's native activation runs its `onClick`. The tests already in the file still pass in the green log: Space on Black, Enter on End show, and ArrowRight on a focused button.
+3. **Blur taking focus from outside the bar.** It cannot. The guard is `focused instanceof HTMLElement && event.currentTarget.contains(focused)`, and `currentTarget` is the `<header className="present-bar">`, which holds only spans and buttons. The bar has no portals and no shadow roots. Each window is its own renderer route (`PresentRoute.tsx`), so `instanceof HTMLElement` is checked in the right realm.
+4. **Fidelity of the regression.** It is faithful for Chromium/Electron. `clickOn` focuses the target only when `fireEvent.mouseDown` returns true (not cancelled), then fires mouseup and click. That matches Chromium focusing a button on a mousedown that is not cancelled. Using `Previous.focus()` to stand in for a Tab is a fair setup. The red log shows the reported bug exactly: `expected 'one/0' to be 'two/1'`. The click advanced to two/0, then Space on the still-focused ← went back. The green log shows 28 of 28. After the fix, `pressOn(document.activeElement)` fires on body, the event bubbles to the window listener, and nothing is clicked synthetically because body is not a button.
+
+## What I could not verify
+- I ran no tests (as instructed) and relied on the RED and GREEN logs.
+- Real Chromium focus behaviour on a cancelled mousedown followed by `blur()`, including where the next Tab starts from, was not checked in Electron. jsdom only models it.
+- I did not check whether an embed in the presenter's current pane actually receives pointer events, which the iframe case in item 1 depends on.

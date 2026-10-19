@@ -85,6 +85,7 @@ export class Maintenance {
     const plan = artifacts.map((id) => ({ id, drop: store.versions.thinnable(id, now, pinned) })).filter((p) => p.drop.length > 0);
     const files = plan.length === 0 ? [] : await service.inBatch(() => plan.flatMap(({ id, drop }) => store.versions.drop(id, drop).map((ref) => ({ artifactId: id, ref }))));
     store.removeUnreferenced(files);
+    store.collectStaged(now); // P3-F (store-versions scalpel-1#2): what a killed write staged
     service.commitNow();
     store.collectRetiredAssets(); // E3: the query snapshots only the thinned versions pinned (retention.ts)
     storage.incrementalVacuum();

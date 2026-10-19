@@ -1,0 +1,30 @@
+Recorded 2026-10-19T04:21:41Z. One medium review (reviewer-medium on opus) over the history-anchors wave (bb2fdde79, 610cd5e13, 1364039af, dc914a7b6) and the library-viewers-cutover wave (1586d7eeb, d4d7c58e5, 380dfbf26, 284a6907d). Verdict: history-anchors correct; library-viewers-cutover correct but for one P3 (a followed-latest Export during a versions re-read exports the live revision), fixed in 8e2138907 by the library follow-up worker and covered by the library recheck.
+
+Reviewer report, verbatim:
+## Findings
+- [P3] Keep Export on the shown version while the versions re-read — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/renderer/src/tools/artifacts/viewers/ByteViewer.tsx:235-239
+  Wave B, item 1 (1586d7eeb). The comment above `selection` still says an export is possible "only once the shown version and its file are resolved (null during a read …), so a historical selection is never exported as the live revision". The versions re-read now keeps `ordered` and `content`, so that is no longer true. Scenario: a followed latest shows v3 (revision 9) and a publish moves `row.revision` to 20. Until `artifacts.versions` answers, the frame still shows revision 9, but Export calls `exportArtifact(id, format, undefined)`, which exports the live revision 20. Reveal, Open externally and Save a copy still use `content.revision` (9), so only Export disagrees with the frame. The worker named this trade-off, and the window is one IPC round trip, about as long as the lag that already exists before the row moves, so the practical impact is close to nil. The stated reason does not hold, though: Export's `versionId` is separate from the `revision` that Reveal reads. Passing `shown.version.id` when `row?.revision !== content.revision` keeps Export on the shown version without disabling anything. At minimum the comment should stop promising "null during a read".
+
+## Verdict
+Wave A (F-history-anchors, bb2fdde79, 610cd5e13, 1364039af, dc914a7b6): correct. Each fix closes its finding.
+- **Keys:** the actor key (`who`) is unique per list in both `showEditors` and `elementEditors`.
+- **Notice:** `pending.serial` comes from one counter for the whole window and only goes up, and each host shows at most one notice, so two notices never share a key. A notice that changes from starting to refused keeps its serial and does not remount.
+- **Focus restore:** focus goes back to the opener only when focus is on body, on a detached element, or inside the menu. So an Escape (or a blur) from a field the owner moved to never takes focus away. A field that unmounts on Escape drops focus to body, and the page then gets it, which is better than before. The document editor binds no Escape key, so Escape from the page still closes the list.
+- **Deck Escape:** the stage's Overlay calls stopPropagation on Escape whenever something is selected, so the window never saw that Escape, before or after the change. The only change is that an Escape a text box takes (its keymap returns true, which calls preventDefault) now ends the text edit and leaves the menu open. That is consistent with the routing.
+- **Heading:** `headingFrom` reads the current preview after the await. It cannot bring back a closed preview, because `loaded` and the snapshot are cleared together. It keeps `view` and `carried` unchanged, so nothing re-binds.
+
+Wave B (F-library-viewers-cutover, 1586d7eeb, d4d7c58e5, 380dfbf26, 284a6907d): correct apart from the P3 above.
+- **Stale window:** during the re-read, the frame, Reveal, Open externally and Save a copy all act on the same revision. Only a followed-latest Export can differ (the P3).
+- **Reload:** it still re-keys the read, so it reads from nothing and shows loading.
+- **Superseded moves:** the `refused` callbacks only call `cancelVersionRequest`, which is a no-op once a later open has superseded the request. Back's callback is a no-op. No UI is left stuck.
+- **Guard asks:** a move that supersedes another reuses the pending ask. Every waiting move is either landed or refused (when replaced, withdrawn, when the guard answers false, after dispose or while closing).
+- **Guard asked twice:** this only happens after a withdraw: a new move made while the first ask is still pending asks again, and the first answer is ignored. That is fewer concurrent asks than before the change, where every move asked.
+- **Ported pick cases:** they match the deleted `comment/pick.test.ts` case for case. The title-fallback case was dropped, and the reason given is sound.
+- **Outside the routing:** neither wave changed behaviour beyond the departures the workers reported. One trivial note: comment-session.tsx now has `type Notice` and a component `function Notice` in the same file. That is legal, and lint's `no-redeclare` is off.
+
+Not verified:
+- Typecheck and lint were not run.
+- I did not run the React Compiler on ShowEditors.tsx or DeckEditor. Their tests run in the uncompiled artifacts-dom project. comment-session, ByteViewer and ArtifactsTool passed under renderer-compiled, according to the GREEN logs.
+- I did not check real Chromium focus behaviour. I assumed a right-click focuses the contenteditable, so the opener is the page.
+- The focus assertions in item 3's regression were never seen red: RED stopped at the earlier defaultPrevented assertion.
+- No e2e runs. The intermediate commit states were not tested.

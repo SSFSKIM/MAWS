@@ -1,0 +1,57 @@
+{
+  "executor": "af1eb156dd5f3f542",
+  "sourceCommit": "f58b9736b7512a097c86a7dbf48cbcd8913d1c9d",
+  "base": "fa23cabbb029983ad3236d1ab2ad51a5c1d7b35a",
+  "row": 255,
+  "rowStatus": "narrowed, not closed; actual packaged transition/host/resolution/smoke proof pending",
+  "paths": [
+    "e2e/connectors-direct.spec.ts",
+    "e2e/support/packaged-resolution.ts",
+    "test/support/packaged-resolution.test.ts"
+  ],
+  "diff": "315 insertions,4 deletions including tracker",
+  "localChecks": {
+    "red": "module absent, no tests executed; /tmp/wpkg/red-kept.log",
+    "green": "5/5 named node-project tests,381ms, retained /tmp/wpkg/green.log inspected by controller",
+    "entryRed": "2026-10-18T17:35:30Z",
+    "entryGreen": "2026-10-18T17:36:32Z",
+    "exit": "runner script execs pnpm directly, preserving actual exit; retained stdout does not print numeric exit",
+    "notRun": "packaged scene, lint, typecheck; remote gate required"
+  },
+  "reviewer": "a28c0a091cef6f3c5",
+  "review": "one verified P2: inherited NODE_OPTIONS differs from actual packaged supervisor scrub",
+  "gate": "combined pair5 must include packaged and connectors-direct plus shared static/unit/probes/Darwin and W-E named/measured groups",
+  "claim": "actual packaged supervisor route D plus packaged-binary RunAsNode dependency resolution inside Resources; no model turn,OAuth or native custody claim",
+  "paidSpendUsd": 0,
+  "fixExecutor": "aa596e346b79e8587",
+  "fixPaths": [
+    "e2e/support/packaged-resolution.ts",
+    "test/support/packaged-resolution.test.ts"
+  ],
+  "reviewRecord": "reviews/W-PKG-result.txt",
+  "fix": {
+    "executor": "aa596e346b79e8587",
+    "commits": [
+      "24c606c906ab55dfd4ea2b41b80e7f6282abc213",
+      "4463dcac6d06e8802af0f42347ef215cd4d7599b"
+    ],
+    "controllerVerified": "final two-file supplement diff; red2.exit1,green3.exit0;6/6 green3.log",
+    "logs": "/tmp/maws-review/wpkg-fix/",
+    "recheck": "original environment/capture issues closed; sole test-path quoting finding mechanically corrected0ba7596c and controller-verified",
+    "testBoundaryDeviation": "24c606c90 regression temporarily wrote full child environment to owned scratch file. Controller caught it before recheck and notified architect. Actual sensitive-value presence unknown; neither controller nor worker opened that capture afterward. afterEach removes scratch root and GREEN completed.4463dcac6 records only six controlled fields/presence; no complete environment dump. No claim earlier capture safe.",
+    "mechanicalQuoteFix": "0ba7596c73c891dd90c2860d4be72ef24653687e",
+    "quoteProof": "green4.log6/6,green4.exit0,apostrophe scratch path; no observed quote RED"
+  },
+  "rowResult255": {
+    "status": "closing condition achieved in packaged job117760724566 of39156492025; parent accepted closure despite unrelated Side red",
+    "source": "55d012a2e1245a872cf44764842fc155e3276aef",
+    "controllerVerified": "decoded transition-packaged3868bytes/SHA9b9b0c189e5f3069f8dd5e451c4efca7b01e528a3f8cf3d514d6b5b4e8f8ba79 and transition4859bytes/SHA98db04c7839871c1e291e7d01fc17bd876286decf9593580cfcd786d9ba7289b; transition case685 passed and smoke23 passed",
+    "proof": "connected bundled supervisor72496 owns direct server74225 (parent match true); host imports/closure withinResources; SDK1.32.1 pin,zod4.6.5,92closure identities,missing[],truncatedfalse,problems[]",
+    "raw": [
+      "gates/pair45-transition-packaged.json",
+      "gates/pair45-transition.json"
+    ],
+    "boundary": "overall packaged136passed/1Sideapprovalfailed/184skipped; standalone connectors-direct15/15 not used as packaged proof; no claim whole job green"
+  },
+  "acceptance": "L255 proof achieved, parent closure accepted; overall packaged job remains red on cause-undetermined Side approval path"
+}

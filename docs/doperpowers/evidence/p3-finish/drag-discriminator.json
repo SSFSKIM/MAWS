@@ -1,0 +1,216 @@
+{
+  "status": "A/B/A/B complete; alleged regression closed as measurement confound, absolute/final-source half remains",
+  "order": [
+    "drag-a",
+    "drag-b",
+    "drag-a",
+    "drag-b"
+  ],
+  "window": "mini idle half 12–24Z; no wave gate pending, wave gates have priority",
+  "budgetUsd": 0,
+  "gateScript": "/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/scripts/ci-gate.sh",
+  "gates": "e2e:presentations-scale",
+  "probes": [
+    {
+      "name": "drag-a",
+      "originalPin": "e50c8c924a1de4c612c3fe4eff9f19f81f6e2271",
+      "probeCommit": "6120130ec712fb3d664df9aac3c008f1b77385a2",
+      "clone": "/private/tmp/maws-p3f-review/drag-a",
+      "changes": [
+        "e2e/presentations-scale.spec.ts",
+        "package.json"
+      ],
+      "flag": "MAWS_PRESENTATIONS_SCALE=1",
+      "heavyHistory": "unset / absent",
+      "trialsPerRun": 3
+    },
+    {
+      "name": "drag-b",
+      "originalPin": "f686e72b31ad15be30f79710a868d4499a81a1e0",
+      "probeCommit": "e2b81e967bfb6c98f24fcf97915a3e2d1c0f5fac",
+      "clone": "/private/tmp/maws-p3f-review/drag-b",
+      "changes": [
+        "e2e/presentations-scale.spec.ts",
+        "package.json"
+      ],
+      "flag": "MAWS_PRESENTATIONS_SCALE=1",
+      "heavyHistory": "unset / absent",
+      "trialsPerRun": 3
+    }
+  ],
+  "readings": "Extract JSON between P3F_DRAG_RESULT_BEGIN and P3F_DRAG_RESULT_END from each completed job log; retain raw job logs and start/end/trial loads.",
+  "rule": "No product gap closes the regression half as a measurement confound; final absolute/preview bounds remain. Product gap triggers at most six additional bisect jobs then P4 carry.",
+  "runs": [
+    {
+      "order": 1,
+      "name": "drag-a",
+      "runId": 39136242401,
+      "source": "6120130ec712fb3d664df9aac3c008f1b77385a2",
+      "wrapper": "94a93a85bc404fc23f5cdb1fcf486dba83a02c51",
+      "createdAt": "2026-10-18T14:29:48Z",
+      "task": "bffxxll3y",
+      "log": "/tmp/maws-review/gates/p3f-drag-a1-ci.log",
+      "status": "completed",
+      "trialCountPlanned": 3,
+      "heavyHistory": "verified skipped",
+      "conclusion": "failure",
+      "attempt": 1,
+      "wrapperExit": 1,
+      "jobId": 117701252546,
+      "rawJobLog": "/private/tmp/p3f-drag-a1-logs.bgvpaw/job.txt",
+      "rawJobSha256": "23b4dc9ab8a0a23bfc87404ecc82f9d1e81405c3aefa6645775bf6bb701880c0",
+      "result": "drag-a1-39136242401.json",
+      "dragTrialsMs": [
+        18.2,
+        18.8,
+        19.1
+      ],
+      "dragLoads": [
+        4.34,
+        4.31,
+        4.41
+      ],
+      "startLoad": 3.18,
+      "endLoad": 4.78,
+      "reading": "absolute16ms bound failed at below10 load; no A/B conclusion before all four jobs"
+    },
+    {
+      "order": 2,
+      "name": "drag-b",
+      "runId": 39136925852,
+      "source": "e2b81e967bfb6c98f24fcf97915a3e2d1c0f5fac",
+      "wrapper": "3f47d6d1c3525d69b132febfb28b07963db8ac20",
+      "createdAt": "2026-10-18T14:38:47Z",
+      "task": "b03za34sw",
+      "log": "/tmp/maws-review/gates/p3f-drag-b1-ci.log",
+      "jobId": 117703238112,
+      "status": "completed",
+      "conclusion": "failure",
+      "attempt": 1,
+      "wrapperExit": 1,
+      "rawJobLog": "/private/tmp/p3f-drag-b1-logs.FlNHGC/job.txt",
+      "rawJobSha256": "cefddd733c26627254178286d0d9ebc6d9ac3053ed5780d6f65eec7ebaaaf837",
+      "result": "drag-b1-39136925852.json",
+      "dragTrialsMs": [
+        19.3,
+        19.0,
+        19.5
+      ],
+      "dragLoads": [
+        2.54,
+        2.5,
+        3.02
+      ],
+      "startLoad": 3.21,
+      "endLoad": 2.94,
+      "heavyHistory": "verified skipped",
+      "reading": "absolute16ms bound failed below10 load; comparison waits for A2/B2"
+    },
+    {
+      "order": 3,
+      "name": "drag-a",
+      "runId": 39137361846,
+      "source": "6120130ec712fb3d664df9aac3c008f1b77385a2",
+      "wrapper": "ba21e41a6ca10e8ce770a915fa8fc401908493a6",
+      "createdAt": "2026-10-18T14:44:44Z",
+      "task": "bqr3snsr4",
+      "log": "/tmp/maws-review/gates/p3f-drag-a2-ci.log",
+      "jobId": 117704533159,
+      "status": "completed",
+      "conclusion": "failure",
+      "attempt": 1,
+      "wrapperExit": 1,
+      "rawJobLog": "/private/tmp/p3f-drag-a2-logs.B41cRb/job.txt",
+      "rawJobSha256": "70c4e2841e9abe105d3ae88454cc35640ecc94e1b38fb49bfca02dfc13fe97eb",
+      "result": "drag-a2-39137361846.json",
+      "dragTrialsMs": [
+        19.1,
+        19.9,
+        20.5
+      ],
+      "dragLoads": [
+        2.75,
+        4.26,
+        4.26
+      ],
+      "startLoad": 2.48,
+      "endLoad": 4.14,
+      "heavyHistory": "verified skipped",
+      "reading": "absolute16ms bound failed below10 load; final comparison awaits B2"
+    },
+    {
+      "order": 4,
+      "name": "drag-b",
+      "runId": 39137918574,
+      "source": "e2b81e967bfb6c98f24fcf97915a3e2d1c0f5fac",
+      "wrapper": "318e8bd835894a9d1b57a20fbbdfdb2448c37a10",
+      "createdAt": "2026-10-18T14:52:09Z",
+      "task": "b1yttnr8i",
+      "log": "/tmp/maws-review/gates/p3f-drag-b2-ci.log",
+      "jobId": 117706153551,
+      "status": "completed",
+      "conclusion": "failure",
+      "attempt": 1,
+      "wrapperExit": 1,
+      "rawJobLog": "/private/tmp/p3f-drag-b2-logs.4PFJSx/job.txt",
+      "rawJobSha256": "038a1abbe285cc280b43d546a8855c993fea44849c55fbf99857bf54a796362e",
+      "result": "drag-b2-39137918574.json",
+      "dragTrialsMs": [
+        18.5,
+        20.1,
+        19.0
+      ],
+      "dragLoads": [
+        3.79,
+        3.52,
+        3.23
+      ],
+      "startLoad": 6.39,
+      "endLoad": 3.04,
+      "heavyHistory": "verified skipped"
+    }
+  ],
+  "comparison": {
+    "pooled": {
+      "A": {
+        "medianMs": 19.1,
+        "meanMs": 19.266666666666666,
+        "rangeMs": [
+          18.2,
+          20.5
+        ]
+      },
+      "B": {
+        "medianMs": 19.15,
+        "meanMs": 19.233333333333334,
+        "rangeMs": [
+          18.5,
+          20.1
+        ]
+      }
+    },
+    "trialLoadRange": [
+      2.5,
+      4.41
+    ],
+    "runMediansMs": [
+      18.8,
+      19.3,
+      19.9,
+      19.0
+    ],
+    "reading": "No discernible product gap with same host-faithful measurement at comparable low loads; direction reverses between pairs. Architect accepts regression half as confound, no bisection jobs.",
+    "absolute": "All12 trials miss16ms at below10 load; no waiver. Pooled medians descriptive only, original best-of-three verdicts unchanged.",
+    "remaining": "Final-source absolute, preview and heavy-preview measures remain. If final host-faithful absolute misses without product gap, parent-impact with stand-in15.4ms/load4.9 and host-faithful figures side by side; architect decides parent acceptance/bound rebase versus repair via P3 Decision Log. F neither waives nor assumes repair owed.",
+    "S-DRAG-FIDELITY": "remains deferred with measured divergence; promotion waits same parent bound decision, not in current DECK fix"
+  },
+  "seamRowUpdate": {
+    "before": "| 2026-10-18 | The presentation test seam (P3-C; next seam change/P4) | The class-1 drag case’s stand-in agent calls `publishDeck` on the renderer thread (`src/renderer/src/tools/presentation/e2e-seam.ts`, `agentRepublishing`), while product agent publishes run through the host’s `artifact_publish` path; a measured bound on the stand-in path includes renderer loader work, not just the product drag path. | P3-F M0 read and L216 discriminator preparation; the host-faithful comparison is `e2e/presentations-scale.spec.ts` row 2, with probe identities in `docs/doperpowers/evidence/p3-finish/drag-discriminator.json`. | Closes when the class-1 drag case republishes through the host-faithful artifact_publish path with its fidelity regression and raw measurement evidence. Owner: the presentation seam’s next change (P4). P3-F promotes this to a bounded W-DECK fix only if the approved L216 discriminator shows the two paths diverge materially; until then deliberately deferred. |",
+    "after": "| 2026-10-18 | The presentation test seam (P3-C; next seam change/P4) | The class-1 drag case’s stand-in agent calls `publishDeck` on the renderer thread (`src/renderer/src/tools/presentation/e2e-seam.ts`, `agentRepublishing`), while product agent publishes run through the host’s `artifact_publish` path; a measured bound on the stand-in path includes renderer loader work, not just the product drag path. | P3-F M0 read and L216 discriminator preparation; the host-faithful comparison is `e2e/presentations-scale.spec.ts` row 2, with probe identities in `docs/doperpowers/evidence/p3-finish/drag-discriminator.json`. Measured divergence, P3-F A/B/A/B runs39136242401,39136925852,39137361846,39137918574: the host-faithful path has pooled medians19.10/19.15ms, trials18.2–20.5ms at loads2.50–4.41, beside the prior stand-in15.4ms at load4.9; no discernible product gap between the source pins. Raw numbers/log hashes are in the discriminator record. | Closes when the class-1 drag case republishes through the host-faithful artifact_publish path with fidelity regression and raw measurement evidence, after the architect decides the parent acceptance/bound calibration. Owner: the presentation seam next change (P4). Remains deferred (architect ruling2026-10-18): promoting now would make class-1 red under a16ms bound calibrated on the stand-in; promotion waits on the same parent decision as L216 final-source host-faithful measures. No bound waiver or repair obligation is assumed. |",
+    "ruling": "architect2026-10-18; remains defer until same parent bound decision"
+  },
+  "viewerContext": {
+    "record": "viewer-confound.json",
+    "note": "All four jobs inside confirmed attached interval12:49:09Z-19:33:02Z; shared A/B context, old remote=none wrong. Accepted no-discernible-gap reading retained; no extra bisect, causal claim or bound waiver."
+  }
+}

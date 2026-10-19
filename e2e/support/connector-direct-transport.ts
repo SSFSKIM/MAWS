@@ -7,6 +7,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { StdioLaunch } from '../../src/engine-host/connectors/direct-stdio';
 import { DIRECT_SERVER, type ProbeLayout } from './connector-direct-probe';
+import { shellQuoted } from './connector-direct-checks'; // P3-F (sweep#1)
 
 export const DIRECT_HOST = join(__dirname, 'connector-direct-host.mjs');
 
@@ -18,7 +19,7 @@ export interface WrapperPids {
 export function writeWrapper(layout: ProbeLayout): { path: string; log: string } {
   const path = join(layout.bin, 'npx-standin');
   const log = join(layout.scratch, 'wrapper.log');
-  writeFileSync(path, `#!/bin/sh\nprintf 'wrapper %s\\n' "$$" >> "$MAWS_PROBE_WRAPPER_LOG"\n/bin/sleep 600 </dev/null >/dev/null 2>&1 &\nprintf 'sleeper %s\\n' "$!" >> "$MAWS_PROBE_WRAPPER_LOG"\n${JSON.stringify(process.execPath)} "$@"\n`);
+  writeFileSync(path, `#!/bin/sh\nprintf 'wrapper %s\\n' "$$" >> "$MAWS_PROBE_WRAPPER_LOG"\n/bin/sleep 600 </dev/null >/dev/null 2>&1 &\nprintf 'sleeper %s\\n' "$!" >> "$MAWS_PROBE_WRAPPER_LOG"\n${shellQuoted(process.execPath)} "$@"\n`); // P3-F (sweep#1): the interpreter one literal word, never expanded
   chmodSync(path, 0o755);
   return { path, log };
 }

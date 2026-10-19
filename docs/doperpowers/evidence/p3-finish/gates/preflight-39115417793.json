@@ -1,0 +1,130 @@
+{
+  "kind": "preflight (not final-source evidence)",
+  "runId": 39115417793,
+  "sourceCommit": "82af0196b6d2e0d0042c3bd2ab00dd1e458400df",
+  "wrapperHead": "8c72499764dad7ff7e8cf90ea72c7fad9edd5714",
+  "createdAt": "2026-10-18T09:27:41Z",
+  "label": "p3f-final",
+  "attempt": 1,
+  "conclusion": "cancelled",
+  "gates": [
+    "static",
+    "unit",
+    "probes",
+    "unit:darwin",
+    "e2e:design",
+    "e2e:dashboard",
+    "e2e:connectors",
+    "e2e:terminal",
+    "e2e:connectors-direct",
+    "e2e:connectors-oauth"
+  ],
+  "log": "/tmp/maws-review/gates/p3f-union-preflight-ci.log",
+  "bundlePolicy": "inspect only; no extraction or paid reruns",
+  "manifestCommit": "82af0196b6d2e0d0042c3bd2ab00dd1e458400df",
+  "status": "completed",
+  "verifiedAt": "2026-10-18T10:25:27Z",
+  "conclusionSource": "GitHub runs/jobs API; wrapper terminated after cancellation: p3f-gate-exit: 130; no normal attempt/conclusion pair",
+  "jobs": [
+    {
+      "name": "static",
+      "id": 117640153671,
+      "conclusion": "failure",
+      "detail": "TS6307 missing node project file; TS2345 readonly counts parameter. Lint and46 gate-script tests passed; web/e2e typecheck not reached."
+    },
+    {
+      "name": "unit",
+      "id": 117640153751,
+      "conclusion": "failure",
+      "passed": 20276,
+      "failed": 1,
+      "skipped": 73,
+      "detail": "renderer-compiled File viewer files.read assertion before watch readiness; not the earlier code/viewer timeout"
+    },
+    {
+      "name": "probes",
+      "id": 117640153816,
+      "conclusion": "success",
+      "passed": 219,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "e2e:connectors",
+      "id": 117640153707,
+      "conclusion": "success",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "e2e:design",
+      "id": 117640153708,
+      "conclusion": "success",
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "e2e:dashboard",
+      "id": 117640153720,
+      "conclusion": "success",
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "e2e:connectors-direct",
+      "id": 117640153725,
+      "conclusion": "failure",
+      "interpretation": "desktop-check refused before tests: UserNotificationCenter held focus; lane episode, not product baseline"
+    },
+    {
+      "name": "e2e:connectors-oauth",
+      "id": 117640153736,
+      "conclusion": "cancelled",
+      "interpretation": "runner drain orphaned assignment, per gate-offload DL72; no test verdict"
+    },
+    {
+      "name": "unit:darwin",
+      "id": 117640153718,
+      "conclusion": "cancelled",
+      "interpretation": "cancelled while queued; no test verdict"
+    },
+    {
+      "name": "e2e:terminal",
+      "id": 117640154190,
+      "conclusion": "cancelled",
+      "interpretation": "cancelled while queued; no test verdict"
+    }
+  ],
+  "bundleInspection": {
+    "result": "passed",
+    "manifestCommit": "82af0196b6d2e0d0042c3bd2ab00dd1e458400df",
+    "buildCommit": "8c72499764dad7ff7e8cf90ea72c7fad9edd5714",
+    "variant": "plain",
+    "sha256": "667f2a7d19713efce737e67ee04c32ebf4ac19d2382f75a4392965df81f40e0f",
+    "files": 853,
+    "uncompressedBytes": 56198913,
+    "archiveBytes": 15520417,
+    "extracted": false,
+    "path": "/private/tmp/p3f-preflight-bundle.umdDlG",
+    "verifier": "/private/tmp/p3f-inspect-bundle.py",
+    "checks": "manifest/source/build identity, archive digest, safe regular out/ members, ordered inventory, every size and file hash"
+  },
+  "unitTiming": {
+    "jobSeconds": 509,
+    "baselineJobSeconds": 405,
+    "deltaJobSeconds": 104,
+    "testStepSeconds": 384,
+    "baselineTestStepSeconds": 281,
+    "deltaTestStepSeconds": 103,
+    "vitestSeconds": 382.15,
+    "interpretation": "failed run; below25min, observed delta not causal attribution"
+  },
+  "logsArchive": "/private/tmp/p3f-preflight-completed-logs-39115417793/logs.zip",
+  "repairCommit": "312a3e83d",
+  "repairReview": "medium: correct, no material findings; static review only",
+  "next": "Whole original named set under p3f-final after latest-master merge; no source acceptance from cancelled run",
+  "dialogClearance": "Owner answered manually about10:04Z; alert15 closed and runner released10:07Z, per architect/gate-offload DL72. Executor clicked no dialog."
+}

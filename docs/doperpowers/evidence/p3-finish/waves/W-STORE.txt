@@ -1,0 +1,19 @@
+W-STORE — approved debt wave; dispatch/base supplied by controller
+Read the whole execution document docs/doperpowers/plans/2026-10-18-p3-f-finish.md; parent §5 P3-F and DL104–106 govern. Work only in the controller-specified W. One commit per row, its removal or narrowing included; source beyond the quoted clause needs controller agreement. No new contract/persisted key/version, no engine patch, owner data/credentials/config access, GUI/live/e2e runs, gate-lane files, parent/ledger/charter/sibling documents or new .md. Named-file local vitest/eslint only through /tmp/maws-review/with-slot.sh, export pnpm_config_verify_deps_before_run=false, pnpm -C absolute W. Whole-project typecheck and CI belong to controller. UI work consumes the designer skill, chart work dataviz; retain the approved design/tokens, not a new taste pass.
+Before editing, report the exact product/test paths you claim for the pair. Tracker and staging are serial: /private/tmp/p3f-commit-row.py under lockf /private/tmp/maws-p3f-commit.lock, using a per-row JSON {line,paths,message,replacement}; no tracker write or git add outside that atomic step. A nonempty index or nonmatching original row stops for reconciliation. Do not absorb the other wave’s paths. Commit messages have no attribution lines.
+Return status, exact per-row commits, named test red/green results, changed paths, decisions and remaining clauses via SubagentHandback; no report Markdown. Controller schedules the independent reviewer and named union gate.
+
+Pair with W-MINI. Own file ingestion/digest, document carry attribution, stale design-system ask validation and document font export seams. Supplemental S-RESTYLE: integrate actual document and deck live-token restyle (not merely system selection/fixture restyle) into e2e/design-systems.spec.ts and related dedicated helpers. Stay out of MINI’s five spec files and its signal helpers. Reuse X31’s existing faces/assets seams and X28 names; no new field/contract. Verify retained versions preserve old appearance. If another file claim overlaps MINI, ask before editing.
+
+Verbatim frozen rows and closing clauses:
+L139
+| 2026-10-14 | P3-A (landing) | The owner's file duplicate, file create and file restore hash their file synchronously inside the transaction; the agent's paths stream the hash before the write. | `src/artifacts/store.ts:425, 446-448`; `src/main/artifacts/register.ts:109-113`; A's fixer's concern at the whole-branch fix wave. | The three owner paths hash by the same streamed read before the batch, with a test on a large file. Owner: P3-F. |
+
+L160
+| 2026-10-14 | P3-B (landing) | An accepted copy shows as the suggester's insertion, unlabelled by `carriedBlocks` (only moves and retypes are labelled). | B's M9 addendum. | Label copies as carries. Owner: P3-F. |
+
+L176
+| 2026-10-14 | P3-D (landing) | In the ask sheet, a design system deleted between the owner's pick and Submit is still sent by id and the chain skips it silently. | D's M6 (the ledger's X28 host row). | The sheet re-validates the pick at Submit, or the answer names the skipped system. Owner: P3-F. |
+
+L182
+| 2026-10-14 | P3-D (landing) | HTML and PDF document exports carry the governing system's tokens but not its bundled faces (no `@font-face` declarations or font bytes), so `official`'s Noto Serif KR falls back where it is not installed. | D's part-2 task review (Important, deferred as a `[parent-impact]` row). | B's exporter seam and X31's `fonts?` policy (Decision Log 53(4)) accept sanitized face declarations with self-contained assets, D supplying the faces from `view.css()`'s face filter. Owner: P3-F. |

@@ -1,0 +1,34 @@
+Recorded 2026-10-19T04:54:33Z. Bounded recheck (reviewer-medium on opus) of the library follow-up (8c8116859 keyOf, a672b0cfa merge) and the library-viewers-cutover follow-up (8e2138907 Export during a re-read). Verdict correct; its P3 (no reconcile when a link reaches a directory again) and the HeaderInput comment nit are P4 row S-MIRROR-RELINK-RECONCILE.
+
+Reviewer report, verbatim:
+## Findings
+- [P3] Reconcile a directory that a Space's link reaches again after a detach — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/engine-host/library/mirror.ts:253-254
+  After 8c8116859, a link `S → A` that stops reaching `A` (removed, or pointed at a path that does not exist yet) gets keyed `S`. At the next mirror step anywhere in the library, `track` marks `A` unlinked and `cleanUnlinked` empties it. When the owner points `S` back at `A`, the mirror rewrites everything only if `S` was recorded in `failing` while it was detached. That needs a Space change (`reconcileAll` loads `S` and fails, line 185) or a step for one of that Space's own artifacts (line 315). In that case `track` moves `failing` from `S` to `A` (line 235), and `load(A)` queues `reconcile` (line 481). If the only steps in the window were for artifacts in other Spaces, `S` is never in `failing`, but `track` still cleans `A`. Then after the restore, `A` has no manifest in memory and is not in `failing`, so `load(A)` queues nothing. `A/artifacts/` then holds only the artifacts that change afterwards, until the next Space change or host start, and an agent's grep misses the rest. I traced this by reading; I did not run it. No owner file is removed or overwritten, and no mirror file goes unowned. The missing reconcile is older than this change: a retarget to a directory that already exists has it, and so does the test's `later` directory if no step for that Space's artifacts ran while it was missing. What is new is that a detach-then-restore, a no-op before, now ends up here. The window is a link swap with activity in another Space, so the severity is low. Remedy: queue a reconciliation when a Space's path resolves to a different key than at the previous step. Don't key it on "no manifest held": an away directory never gets one, so that would reconcile on every step. The same remedy also covers the older retarget case.
+
+## Verdict
+correct — All three commits close their findings, and I found no regression in existing behaviour. The P3 above is a narrow gap in refilling the mirror; its mechanism is older than the change, and this change adds one new way to reach it.
+
+1. **keyOf.**
+   - **Truly away directory: keeps its key.** With an unmounted volume, or a dangling link whose target is also away, `realDirs` holds the last real path and `existsSync` is false, so the key stays the same. The directory stays linked and is never put in `unlinked`, so the mirror keeps owning its files.
+   - **Removed or retargeted link while the old target stays on disk: falls back to `S`.** The key becomes `resolve(S)`, and `load(S)` fails as it did before the wave. In `track`, `keyOf(A)` returns `A`, which is not linked, so `cleanUnlinked` runs `remove()` over exactly the files `A`'s manifest names, each under a `realDirsUnder` guard. The manifest file is removed only when it is still the one the mirror wrote.
+   - **Pointing back: no owner file is lost or orphaned.** The rewrite refuses any occupied name the mirror does not own. If the cleanup failed part-way, `A` stays pending with the entry at revision -1; relinking takes it off the pending list with the cached manifest, so those files stay owned. Whether every artifact is rewritten depends on the condition in the P3.
+2. **Merge.**
+   - **Union and revision -1: every file stays owned.** The merged entry holds the files of both entries at revision -1, which `readNow` never treats as current.
+   - **Leftovers go only through `write()`'s existing path.** `write()`'s leftover loop (mirror.ts:406-418) removes the names the artifact no longer produces. A case-only variant of a written name is kept by `aliases`. An artifact that is no longer a member goes through `remove()`, which removes the whole union.
+   - **No cross-artifact claims.** Mirror slugs end in the artifact id, so a union cannot claim another artifact's names.
+   - **Restart before the next save.** The merged manifest lives only in memory until the directory's next save. A restart drops it, but the manifest on disk still describes the directory, so nothing becomes unowned.
+3. **Viewer.**
+   - **Export now always matches the screen.** `content` is read at `shown.version.seq`, and `contentRef` returns exactly that seq. So an Export by version id exports the same revision that the frame, Reveal, Open externally and Save a copy use. Export goes live only when `row.revision === content.revision`.
+   - **The "row above the latest version's seq" state doesn't occur in real data for byte kinds.** At rest, the live revision equals the newest version's seq: `storage.revision` is the maximum seq, every byte write inserts a version, and thinning and "Delete versions older than…" both keep the newest. That state comes from the test fixtures; where it does occur, Export follows the frame.
+   - **No steady state where the owner sees the live revision but Export picks an older version.** The one divergence left is the older row lag: a publish not yet reflected in the row makes a followed latest export live.
+   - **Nit, not blocking:** the HeaderInput comment at ByteViewer.tsx:394-395 still says the version id is set "when it is not the latest".
+
+## Not verified
+- I did not run vitest, typecheck or lint, as the brief said. Read from the logs:
+  - `/tmp/maws-review/p3f-lib-red2.log`: 2 failed, 36 passed; the failures are the two new mirror cases.
+  - `/tmp/maws-review/p3f-lib-green2.log`: 7 files, 77 passed.
+  - `/tmp/maws-review/p3f-lib-red3.log`: 2 failed, 64 passed; the new viewer case, in renderer and renderer-compiled.
+  - `/tmp/maws-review/p3f-lib-green3.log`: 17 file runs, 213 passed, exit 0.
+- Each GREEN run started before its commit: green2 at 20:58:15, before 8c8116859 (20:59:45) and a672b0cfa (21:00:01); green3 at 21:10:49, before 8e2138907 (21:11:32). No later commit touches the four files, but I cannot compare the tested working tree to the committed bytes.
+- The P3 trace and the answers to checks 1–3 come from reading the code, not from running it.
+- I did not probe how `realpathSync.native` and `existsSync` behave on autofs or SMB volumes, or on a mount point left empty after an unmount.

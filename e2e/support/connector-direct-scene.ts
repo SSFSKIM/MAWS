@@ -17,7 +17,7 @@ import type { CommandResult } from '@shared/ipc/schema';
 import { FIXTURE_SERVER } from './connector-engine';
 import { invoke, pageState, TOOL, value, type ConnectorScene } from './connector-scene';
 import { wrapperPids, type WrapperPids } from './connector-direct-transport';
-import { blankResumeStartupRejection, boundedMetaRows, forbiddenFrames, journalFilesOf, journalTurns, readJournalRows, type JournalTurns } from './connector-direct-checks';
+import { blankResumeStartupRejection, boundedMetaRows, forbiddenFrames, journalFilesOf, journalTurns, readJournalRows, shellQuoted, type JournalTurns } from './connector-direct-checks'; // P3-F (sweep#1): shellQuoted
 
 // The fixture server answers no tools/call while this file exists (support/connector-mcp-server.mjs `--hold`), and
 // answers the held ones once it is removed (P3-HD M4b).
@@ -36,7 +36,7 @@ export function wrappedServer(scene: ConnectorScene): Record<string, unknown> {
   const path = join(bin, 'npx-standin');
   writeFileSync(
     path,
-    `#!/bin/sh\nprintf 'wrapper %s\\n' "$$" >> "$MAWS_PROBE_WRAPPER_LOG"\n/bin/sh -c 'while :; do /bin/sleep 1; done' "$MAWS_PROBE_SCENE_ROOT" </dev/null >/dev/null 2>&1 &\nprintf 'sleeper %s\\n' "$!" >> "$MAWS_PROBE_WRAPPER_LOG"\n${JSON.stringify(process.execPath)} "$@"\n`,
+    `#!/bin/sh\nprintf 'wrapper %s\\n' "$$" >> "$MAWS_PROBE_WRAPPER_LOG"\n/bin/sh -c 'while :; do /bin/sleep 1; done' "$MAWS_PROBE_SCENE_ROOT" </dev/null >/dev/null 2>&1 &\nprintf 'sleeper %s\\n' "$!" >> "$MAWS_PROBE_WRAPPER_LOG"\n${shellQuoted(process.execPath)} "$@"\n`, // P3-F (sweep#1): the interpreter one literal word, never expanded
   );
   chmodSync(path, 0o755);
   return {

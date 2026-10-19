@@ -185,14 +185,17 @@ export class DeckTabState {
 
   /**
    * X32's close guard: nothing is lost once the host has every edit and no awaited edit (B4: an upload, an asset copy)
-   * is still to write; those in flight are waited for, then asked about.
+   * is still to write; those in flight are waited for, then asked about. P3-F (L203): speaker notes the session keeps
+   * unwritten (refused for their length, or within it only since a change made elsewhere) go with the tab, read-only or
+   * not: only the owner writes them, so waiting cannot save them; once what is in flight settled, they are asked about.
    */
   closeGuard = async (): Promise<boolean> => {
     const handle = this.current.handle;
     if (!handle) return true;
     const session = this.current.session;
     const settled = () => handle.state().readOnly || (handle.state().unsaved === 0 && (session?.snapshot().pending ?? 0) === 0);
-    if (settled()) return true;
+    const unwritten = () => session?.hasUnwrittenNotes() ?? false; // L203
+    if (settled()) return !unwritten() || this.deps.confirmDiscard(this.title);
     const saved = await new Promise<boolean>((resolve) => {
       const stops: (() => void)[] = [];
       const finish = (ok: boolean) => {
@@ -205,7 +208,7 @@ export class DeckTabState {
       stops.push(handle.subscribe(check));
       if (session) stops.push(session.subscribe(check));
     });
-    return saved || settled() || this.deps.confirmDiscard(this.title);
+    return ((saved || settled()) && !unwritten()) || this.deps.confirmDiscard(this.title);
   };
 
   /**

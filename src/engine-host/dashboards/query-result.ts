@@ -9,10 +9,12 @@
 // - without it, exactly one text: the wire's string `content`, or a `content` of one `text` block, whose JSON is one of
 //   those two forms. Images, resources and several blocks are refused.
 //
-// The array alone is the snapshot (its JSON, never the envelope's); whether its records are flat is the parser's to
-// say. A record's number no JSON can carry (JSON.parse reads 1e400 as Infinity) is refused here, in the parser's own
-// words, in either arm: serializing the rows for the parser would turn it into a valid null cell (E3 M2 fix). The
-// problems are this module's own closed words, never the server's text.
+// The array alone is the snapshot (its JSON, never the envelope's), an array of flat records. What the rows must be
+// before anything serializes them for the parser is refused here, in the parser's own words, in either arm: a row that
+// is no record, a nested cell (P3-F: one nested thousands deep would overflow the serializer's stack before the parser
+// could refuse it), and a number no JSON can carry (JSON.parse reads 1e400 as Infinity; serialized, it would become a
+// valid null cell, E3 M2 fix). The rest of the dataset's rules are the parser's. The problems are this module's own
+// closed words, never the server's text.
 export type QueryRows = { ok: true; rows: unknown[] } | { ok: false; problem: string };
 
 export const QUERY_RESULT_PROBLEMS = {
@@ -24,16 +26,19 @@ export const QUERY_RESULT_PROBLEMS = {
   shape: 'its JSON is neither an array of rows nor an object with a rows array',
   // the parser's wording for the same value in a JSON file (src/artifacts/dashboard/parse.ts), without its line
   nonfinite: (record: number, key: string) => `record ${record} holds a number in ${JSON.stringify(key)} too large to read`,
+  notARecord: (record: number) => `record ${record} is not an object`, // P3-F
+  nested: (record: number, key: string) => `record ${record} holds a nested value in ${JSON.stringify(key)}`, // P3-F
 } as const;
 
 const refused = (problem: string): QueryRows => ({ ok: false, problem });
 
-// The rows, unless a record's own value is a number no JSON can carry.
-function finite(rows: unknown[]): QueryRows {
+// The rows, when each is a record whose own values are scalars JSON can carry: so serialized, they are at most two deep.
+function flat(rows: unknown[]): QueryRows {
   for (const [r, record] of rows.entries()) {
-    if (!isRecord(record)) continue; // the parser refuses it
+    if (!isRecord(record)) return refused(QUERY_RESULT_PROBLEMS.notARecord(r + 1));
     for (const key of Object.keys(record)) {
       const cell = record[key];
+      if (cell !== null && typeof cell === 'object') return refused(QUERY_RESULT_PROBLEMS.nested(r + 1, key));
       if (typeof cell === 'number' && !Number.isFinite(cell)) return refused(QUERY_RESULT_PROBLEMS.nonfinite(r + 1, key));
     }
   }
@@ -61,7 +66,7 @@ export function queryRowsOf(envelope: unknown): QueryRows {
   if (envelope.isError === true) return refused(QUERY_RESULT_PROBLEMS.toolError);
   if (Object.hasOwn(envelope, 'structuredContent') && envelope.structuredContent !== undefined) {
     const rows = rowsIn(envelope.structuredContent);
-    return rows ? finite(rows) : refused(QUERY_RESULT_PROBLEMS.structured);
+    return rows ? flat(rows) : refused(QUERY_RESULT_PROBLEMS.structured);
   }
   const text = textOf(envelope.content);
   if (text === null) return refused(QUERY_RESULT_PROBLEMS.content);
@@ -72,5 +77,5 @@ export function queryRowsOf(envelope: unknown): QueryRows {
     return refused(QUERY_RESULT_PROBLEMS.notJson);
   }
   const rows = rowsIn(parsed);
-  return rows ? finite(rows) : refused(QUERY_RESULT_PROBLEMS.shape);
+  return rows ? flat(rows) : refused(QUERY_RESULT_PROBLEMS.shape);
 }

@@ -27,7 +27,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   discoverAuthorizationServerMetadata, discoverOAuthProtectedResourceMetadata, exchangeAuthorization, refreshAuthorization, registerClient,
-  selectClientAuthMethod, startAuthorization,
+  selectClientAuthMethod, startAuthorization, type AddClientAuthentication,
 } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { AuthorizationServerMetadata, OAuthClientInformationFull, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { checkResourceAllowed, resourceUrlFromServerUrl } from '@modelcontextprotocol/sdk/shared/auth-utils.js';
@@ -98,10 +98,15 @@ async function step<T>(signal: AbortSignal, code: ConnectorOAuthFailure, run: ()
   return value;
 }
 
-// A wait that is not a request (binding, the browser opener): it ends with the signal even if it never answers.
-function untilEnded<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
+// A wait that is not a request (binding, the browser opener): it ends with the signal even if it never answers. The
+// call itself is deferred a microtask, so it checks the signal once more right before it is made (P3-F L270): an abort
+// queued into that gap never opens a browser. Exported for that regression.
+export function untilEnded<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(ended(signal));
-  const pending = Promise.resolve().then(work);
+  const pending = Promise.resolve().then(() => {
+    if (signal.aborted) throw ended(signal);
+    return work();
+  });
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(ended(signal));
     signal.addEventListener('abort', onAbort, { once: true });
@@ -189,13 +194,24 @@ function callbackWaiter(issuer: string, issRequired: boolean) {
   };
 }
 
+// P3-F F-connectors 3: RFC 6749 §2.3.1: the client id and secret are each application/x-www-form-urlencoded before
+// they are joined and Base64-encoded, so a conforming endpoint decodes a '+', '/', '=' or '%' in either as itself.
+const formEncoded = (value: string): string => new URLSearchParams([['', value]]).toString().slice(1);
+
 function applyClientAuthentication(method: string, client: OAuthClientInformationFull, headers: Headers, params: URLSearchParams): void {
   if (method === 'client_secret_basic' && client.client_secret !== undefined) {
-    headers.set('Authorization', `Basic ${btoa(`${client.client_id}:${client.client_secret}`)}`);
+    headers.set('Authorization', `Basic ${btoa(`${formEncoded(client.client_id)}:${formEncoded(client.client_secret)}`)}`);
     return;
   }
   params.set('client_id', client.client_id);
   if (method === 'client_secret_post' && client.client_secret !== undefined) params.set('client_secret', client.client_secret);
+}
+
+// P3-F F-connectors 3 sibling: the SDK's token requests (Connect's code exchange and the refresh) authenticate the
+// client here, the method chosen as the SDK chooses it, so a Basic credential is form-encoded there too (the SDK's own
+// is not); passed through the SDK's public `addClientAuthentication`.
+function tokenClientAuthentication(client: OAuthClientInformationFull, metadata: Pick<AuthorizationServerMetadata, 'token_endpoint_auth_methods_supported'> | undefined): AddClientAuthentication {
+  return (headers, params) => applyClientAuthentication(selectClientAuthMethod(client, metadata?.token_endpoint_auth_methods_supported ?? []), client, headers, params);
 }
 
 // RFC 7009's fields as RFC 8414 metadata declares them; OpenID discovery metadata carries them only as extra members.
@@ -317,7 +333,7 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
           callback.arm(state);
           await step(flow, 'browser', () => untilEnded(() => deps.openBrowser(authorizationUrl.href), flow));
           const code = await callback.wait(flow);
-          const raw = await step(flow, 'exchange', () => exchangeAuthorization(server, { metadata, clientInformation: client, authorizationCode: code, codeVerifier, redirectUri, resource, fetchFn: flowFetch }));
+          const raw = await step(flow, 'exchange', () => exchangeAuthorization(server, { metadata, clientInformation: client, authorizationCode: code, codeVerifier, redirectUri, resource, addClientAuthentication: tokenClientAuthentication(client, metadata), fetchFn: flowFetch }));
           return { issuer: metadata.issuer, resource, redirectUri, authorizationServer: metadata, client, tokens: acceptTokens(raw, now()) };
         } finally {
           await listener.close().catch(() => {});
@@ -335,7 +351,7 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
       const fetchFn = boundedOAuthFetch(deps.fetch, signal);
       let raw: OAuthTokens;
       try {
-        raw = await refreshAuthorization(grant.issuer, { metadata: grant.authorizationServer, clientInformation: grant.client, refreshToken, resource: grant.resource, fetchFn });
+        raw = await refreshAuthorization(grant.issuer, { metadata: grant.authorizationServer, clientInformation: grant.client, refreshToken, resource: grant.resource, addClientAuthentication: tokenClientAuthentication(grant.client, grant.authorizationServer), fetchFn });
       } catch (error) {
         if (signal.aborted) throw fail('cancelled');
         if (error instanceof OAuthTransportError) throw fail(error.code === 'timeout' ? 'timeout' : error.code === 'insecure' ? 'rejected' : 'transient');

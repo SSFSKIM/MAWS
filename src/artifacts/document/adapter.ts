@@ -23,6 +23,7 @@
 // lands as that actor's update. Every hook reads the carry registry of the doc's own artifact, which A's service names
 // on every call (`info.artifactId`: the artifact's id, or its suggestion doc's key; D8, Decision Log 21).
 import type { Actor } from '@shared/artifacts/actor';
+import { readFiles } from '../files';
 import type { KindAdapter, RevertScope, ThreadChange, ThreadRow } from '../host';
 import { contentIdsOf, type Carry as AttributionCarry, type ContentIds, type Doc, type Node } from '../yjs';
 import { ContentString, ContentType, Item, YNode, createContentIds, createIdSet, decodeUpdate, findIndexSS } from '../yjs/document';
@@ -31,9 +32,9 @@ import { CarryRegistry } from './carries';
 import type { Carry, Slot } from './edit-ops';
 import { allBlocks, applyRepair, planRepair, repairNeeded } from './repair';
 import { nanoid8 } from './schema';
-import { createDocument, listTabs } from './tabs';
+import { TABS, createDocument, ensureTab, listTabs } from './tabs';
 import { deepSlotIds, formatAt, itemAt, itemOf, locateSlot, nodeAt, slotKey, textblocksY, charSlots } from './structs';
-import { THREADS, blockThreads /* P3-E */, getThread, isCommentKey, listThreads, refreshAnchors, stripMarklessComments, type Thread } from './threads';
+import { THREADS, blockThreads /* P3-E */, getThread, isBlockAnchor, isCommentKey, listThreads, refreshAnchors, stripMarklessComments, type Thread } from './threads';
 
 export interface DocumentAdapter extends KindAdapter {
   /** The carries of a batch the tool handler just applied on the agent's replica (S4's `registerCarry`). */
@@ -58,12 +59,32 @@ interface DecodedItem {
   length: number;
 }
 
-/** A move a human made (a block's node deleted and re-inserted under its id in one update), seen before the apply. */
+/** A visible slot of a node with its character (null for a node or an embed), the unit two copies are matched by. */
+interface Unit {
+  slot: Slot;
+  ch: string | null;
+}
+
+/** A run of characters to replay: after the carried character before it, or before the one after it, or into its textblock. */
+interface Run {
+  text: string;
+  slots: Slot[];
+  after: Slot | null;
+  before: Slot | null;
+  block: Slot;
+}
+
+/**
+ * A move a human made (a block's node deleted and re-inserted under its id in one update), seen before the apply. The
+ * copy is the source as the dragging replica saw it: the units its update deletes (`shared`, what the copy holds unit
+ * for unit), and not the text that reached the source after that replica's state (`late`, carried into the copy).
+ */
 interface Drag {
   blockId: string;
   source: Slot;
-  sourceSlots: Slot[];
-  sourceBlocks: Slot[]; // the source's textblocks, paired in order with the copy's for the block forwards
+  shared: Unit[];
+  sourceBlocks: Slot[]; // the source's textblocks the copy holds, paired in order with the copy's for the block forwards
+  late: Run[];
   node: Slot;
   name: string; // the source node's type: a re-insert as another type is a retype
 }
@@ -71,7 +92,7 @@ interface Drag {
 /** Edits that reached a carried block's old copy before the update performing the carry (seen before the apply). */
 interface Late {
   carry: Carry;
-  inserts: Array<{ text: string; slots: Slot[]; after: Slot | null; before: Slot | null; block: Slot }>;
+  inserts: Run[];
   deletes: Slot[];
 }
 
@@ -105,6 +126,22 @@ const threadRow = (thread: Thread): ThreadRow => ({
   ...(thread.createdBy.kind === 'session' ? { appSessionId: (thread.createdBy as Extract<Actor, { kind: 'session' }>).appSessionId } : {}),
 });
 
+/**
+ * The threads whose recorded block is no longer in the document (deleted, with the text their anchor named): a mark they
+ * still have in another block re-anchors them, which the refresh scope of the changed blocks alone never reaches. Block
+ * threads are left out: they carry no mark and nothing re-anchors them, and placing one walks every node of every tab.
+ */
+export function unplacedThreads(doc: Doc): string[] {
+  const index = DocIndex.of(doc);
+  const out: string[] = [];
+  for (const [id, node] of doc.get(THREADS).attrEntries()) {
+    if (!(node instanceof YNode) || isBlockAnchor(node.getAttr('anchor'))) continue;
+    const blockId: unknown = node.getAttr('blockId');
+    if (typeof blockId === 'string' && !index.find(blockId)) out.push(String(id));
+  }
+  return out;
+}
+
 export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions = {}): DocumentAdapter {
   const registries = new Map<string, CarryRegistry>();
   const registryFor = (artifactId: string): CarryRegistry => {
@@ -115,18 +152,24 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
   // What a forwarding edit learnt for the `afterUpdate` that follows it on the same replica (A calls both in one frame).
   const stash = new WeakMap<Doc, AttributionCarry[]>();
 
-  /** The blocks an update touched, the nodes it inserted, and the threads it changed. */
-  function scan(doc: Doc, ids: ContentIds): { tops: Set<TopBlock>; inserted: Set<Node>; threads: Set<string> } {
+  /** The blocks an update touched, the nodes it inserted, the threads it changed, and whether it deleted a tab. */
+  function scan(doc: Doc, ids: ContentIds): { tops: Set<TopBlock>; inserted: Set<Node>; threads: Set<string>; tabDeleted: boolean } {
     const index = DocIndex.of(doc);
     const threadsRoot = doc.get(THREADS);
+    const tabsRoot = doc.get(TABS);
     const tops = new Set<TopBlock>();
     const inserted = new Set<Node>();
     const threads = new Set<string>();
+    let tabDeleted = false;
     const visit = (isInsert: boolean) => (item: Item) => {
       if (isInsert && item.content instanceof ContentType) inserted.add(item.content.type as Node);
       const parent = item.parent;
       if (!(parent instanceof YNode)) return;
       if (isInsert && item.parentSub === 'id') inserted.add(parent);
+      if (parent === tabsRoot) {
+        if (!isInsert) tabDeleted = true;
+        return;
+      }
       if (parent === threadsRoot) {
         if (item.parentSub) threads.add(item.parentSub);
         return;
@@ -140,13 +183,13 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     };
     itemsIn(doc, ids.inserts, visit(true));
     itemsIn(doc, ids.deletes, visit(false));
-    return { tops, inserted, threads };
+    return { tops, inserted, threads, tabDeleted };
   }
 
-  /** The thread scope of a set of changed blocks: their threads, and per tab the blocks carrying any of them. */
-  function threadScope(doc: Doc, changed: Set<TopBlock>) {
+  /** The thread scope of a set of changed blocks (and of `more` threads): their threads, and per tab the blocks carrying any of them. */
+  function threadScope(doc: Doc, changed: Set<TopBlock>, more: Iterable<string> = []) {
     const index = DocIndex.of(doc);
-    const threads = new Set<string>();
+    const threads = new Set<string>(more);
     for (const top of changed) for (const id of index.threads(top)) threads.add(id);
     return {
       threads,
@@ -178,18 +221,83 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     return out;
   }
 
-  /** Blocks of `live` the incoming update deletes and re-inserts under the same id (seen before the apply). */
+  /** Every visible slot under `node` in document order, as `deepSlotIds` lists them, with its character. */
+  function deepUnits(node: Node, out: Unit[] = []): Unit[] {
+    for (let item = node._start; item !== null; item = item.right) {
+      if (item.deleted || !item.countable) continue;
+      const content = item.content;
+      if (content instanceof ContentString) for (let k = 0; k < content.str.length; k++) out.push({ slot: [item.id.client, item.id.clock + k], ch: content.str[k] });
+      else if (content instanceof ContentType) {
+        out.push({ slot: [item.id.client, item.id.clock], ch: null });
+        deepUnits(content.type as Node, out);
+      } else for (let k = 0; k < item.length; k++) out.push({ slot: [item.id.client, item.id.clock + k], ch: null });
+    }
+    return out;
+  }
+
+  /**
+   * Blocks of `live` the incoming update deletes and re-inserts under the same id (seen before the apply). A nested block
+   * of a dragged block is a drag of its own (its carry and forwards), but the text that reached the subtree is carried
+   * once, by the outermost.
+   */
   function drags(live: Doc, inserted: Map<string, Slot>, deletes: ContentIds['deletes'], carried: Set<string>): Drag[] {
     if (inserted.size === 0) return [];
-    const out: Drag[] = [];
+    const out: Array<Drag & { sourceNode: Node }> = [];
+    const seen = (slot: Slot) => deletes.has(slot[0], slot[1]);
     itemsIn(live, deletes, (item) => {
       if (item.deleted || !(item.content instanceof ContentType)) return;
       const node = item.content.type as Node;
       const id: unknown = node.getAttr('id');
       const now = typeof id === 'string' ? inserted.get(id) : undefined;
-      if (now && !carried.has(slotKey(now))) out.push({ blockId: id as string, source: itemOf(node), sourceSlots: deepSlotIds(node), sourceBlocks: textblocksY(node).map(itemOf), node: now, name: node.name });
+      if (!now || carried.has(slotKey(now))) return;
+      out.push({
+        blockId: id as string,
+        source: itemOf(node),
+        shared: deepUnits(node).filter((unit) => seen(unit.slot)),
+        sourceBlocks: textblocksY(node).filter((block) => seen(itemOf(block))).map(itemOf),
+        late: lateRuns(node, seen, () => false),
+        node: now,
+        name: node.name,
+        sourceNode: node,
+      });
     });
-    return out;
+    const sources = new Set(out.map((drag) => drag.sourceNode));
+    const nested = (node: Node): boolean => {
+      for (let at = node.parent as Node | null; at; at = at.parent as Node | null) if (sources.has(at)) return true;
+      return false;
+    };
+    return out.map(({ sourceNode, ...drag }) => (nested(sourceNode) ? { ...drag, late: [] } : drag));
+  }
+
+  /**
+   * The runs of `source`'s visible characters its copy lacks (not `seen`: they reached the source after the copying
+   * replica's state), each placed after the seen character before it, or before the next one when it follows words
+   * the copying update deletes (`skip`: the agent's own replaced words, not late).
+   */
+  function lateRuns(source: Node, seen: (slot: Slot) => boolean, skip: (slot: Slot) => boolean): Run[] {
+    const inserts: Run[] = [];
+    for (const block of textblocksY(source)) {
+      let previous: Slot | null = null;
+      let run: Run | null = null;
+      const open: Run[] = [];
+      for (const { slot, ch } of charSlots(block)) {
+        if (seen(slot)) {
+          for (const waiting of open.splice(0)) waiting.before = slot;
+          previous = slot;
+          run = null;
+        } else if (skip(slot)) {
+          previous = null;
+          run = null;
+        } else if (run) {
+          run.text += ch;
+          run.slots.push(slot);
+        } else {
+          inserts.push((run = { text: ch, slots: [slot], after: previous, before: null, block: itemOf(block) }));
+          open.push(run);
+        }
+      }
+    }
+    return inserts;
   }
 
   /**
@@ -201,46 +309,38 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     const source = carry.source && nodeAt(live, carry.source);
     if (!source) return null;
     const from = new Set(carry.from.map(slotKey));
-    const late: Late = { carry, inserts: [], deletes: carry.from.filter((slot) => !itemAt(live, slot) || itemAt(live, slot)!.deleted) };
-    for (const block of textblocksY(source)) {
-      // a run of late characters sits right after the carried character it follows; one that follows words the agent
-      // replaced sits before the next carried character, after the agent's new words
-      let previous: Slot | null = null;
-      let run: Late['inserts'][number] | null = null;
-      const open: Array<Late['inserts'][number]> = [];
-      for (const { slot, ch } of charSlots(block)) {
-        if (from.has(slotKey(slot))) {
-          for (const waiting of open.splice(0)) waiting.before = slot;
-          previous = slot;
-          run = null;
-        } else if (deletes.has(slot[0], slot[1])) {
-          previous = null;
-          run = null;
-        }
-        else if (run) {
-          run.text += ch;
-          run.slots.push(slot);
-        } else {
-          late.inserts.push((run = { text: ch, slots: [slot], after: previous, before: null, block: itemOf(block) }));
-          open.push(run);
-        }
-      }
-    }
+    const late: Late = {
+      carry,
+      inserts: lateRuns(
+        source,
+        (slot) => from.has(slotKey(slot)),
+        (slot) => deletes.has(slot[0], slot[1]),
+      ),
+      deletes: carry.from.filter((slot) => !itemAt(live, slot) || itemAt(live, slot)!.deleted),
+    };
     return late.inserts.length || late.deletes.length ? late : null;
   }
 
   /**
-   * Inserts `text` where the forwards say its left (or right) neighbour, or its textblock, lives now; answers the slots
-   * it wrote (null when it found no place), which the caller reports as a carry of `slots` so the copied characters
-   * keep their author.
+   * Inserts `text` where the forwards say its left neighbour lives now, else (never carried, or deleted from the copy
+   * since) its right neighbour, else at the start of its textblock; answers the slots it wrote (null when it found no
+   * place), which the caller reports as a carry of `slots` so the copied characters keep their author.
    */
   function replay(registry: CarryRegistry, doc: Doc, text: string, slots: Slot[], left: Slot | null, right: Slot | null, block: Slot | null): Slot[] | null {
     const after = left && registry.resolve(left);
-    const before = !after && right ? registry.resolve(right) : null;
-    const into = !after && !before && block ? registry.resolveBlock(block) : null;
-    const at = after ? locateSlot(doc, after) : before ? locateSlot(doc, before) : into ? { node: nodeAt(doc, into)!, index: -1 } : null;
-    if (!at || !at.node) return null;
-    const index = after ? at.index + 1 : before ? at.index : 0;
+    let at = after ? locateSlot(doc, after) : null;
+    let index = at ? at.index + 1 : 0;
+    if (!at) {
+      const before = right && registry.resolve(right);
+      at = before ? locateSlot(doc, before) : null;
+      index = at ? at.index : 0;
+    }
+    if (!at) {
+      const into = block && registry.resolveBlock(block);
+      const node = into && nodeAt(doc, into);
+      at = node ? { node, index: 0 } : null;
+    }
+    if (!at) return null;
     at.node.insert(index, text, formatAt(at.node, index, isCommentKey));
     const now = deepSlotIds(at.node).slice(index, index + text.length);
     slots.forEach((slot, k) => registry.noteForward(slot, now[k]));
@@ -259,8 +359,14 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     const late = performing.map((carry) => lateEdits(live, carry, ds)).filter((entry): entry is Late => entry !== null);
     if (performing.length === 0 && moved.length === 0 && !registry.hasActive) return null;
     // Deletions that are part of a move are not edits: the moves this update performs (registered or a drag), and any
-    // re-insert of a block an earlier carry moved (a stale replica moving the old copy again).
-    const own = new Set([...performing.flatMap((carry) => carry.from.map(slotKey)), ...moved.flatMap((drag) => drag.sourceSlots.map(slotKey)), ...registry.carriedOf(new Set(inserted.keys()))]);
+    // re-insert of a block an earlier carry moved (a stale replica moving the old copy again). Nor is a stale replica's
+    // delete of an old copy whole: the move overtook it, and forwarding it would empty the moved copy (P3-F, L168).
+    const own = new Set([
+      ...performing.flatMap((carry) => carry.from.map(slotKey)),
+      ...moved.flatMap((drag) => drag.shared.map((unit) => slotKey(unit.slot))),
+      ...registry.carriedOf(new Set(inserted.keys())),
+      ...registry.carriedOfDeletedSources(ds),
+    ]);
     return (doc) => {
       // what this edit writes through the actor's replica that someone else typed: reported as carries, so the
       // attribution keeps each run's author and time rather than crediting the actor (D8b; parent Decision Log 34)
@@ -296,19 +402,19 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
         });
       }
       // a drag or retype is a carry of its own from here on: its copy is recorded and the old copy's characters and
-      // textblocks forward into it, so an edit still in flight into the old copy lands in the new one
-      const carries: AttributionCarry[] = [...copied];
+      // textblocks forward into it, so an edit still in flight into the old copy lands in the new one; the text that
+      // reached the old copy before the drag, which the dragging replica had not seen, is carried in after them
       for (const drag of moved) {
         const node = nodeAt(doc, drag.node);
         if (!node) continue;
-        const now = deepSlotIds(node);
-        if (now.length !== drag.sourceSlots.length) continue;
+        const now = deepUnits(node);
+        if (now.length !== drag.shared.length || now.some((unit, k) => unit.ch !== drag.shared[k].ch)) continue; // not the copy of what the replica saw: no carry, as for any other re-insert
         const blocks = textblocksY(node).map(itemOf);
         const carry: Carry = {
           kind: node.name === drag.name ? 'move' : 'retype',
           blockId: drag.blockId,
-          from: drag.sourceSlots,
-          to: now,
+          from: drag.shared.map((unit) => unit.slot),
+          to: now.map((unit) => unit.slot),
           source: drag.source,
           node: drag.node,
           blocks: drag.sourceBlocks.slice(0, blocks.length).map((old, k): [Slot, Slot] => [old, blocks[k]]),
@@ -316,9 +422,10 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
         registry.register([carry]);
         registry.activate(carry);
         registry.reported(carry);
-        carries.push(carry);
+        copied.push(carry);
+        for (const run of drag.late) copy('move', run.slots, replay(registry, doc, run.text, run.slots, run.after, run.before, run.block));
       }
-      if (carries.length) stash.set(doc, carries);
+      if (copied.length) stash.set(doc, copied);
     };
   }
 
@@ -331,16 +438,19 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     }
     const provenance: AttributionCarry[] = [...performed, ...(stash.get(doc) ?? [])];
     stash.delete(doc);
-    const { tops, inserted, threads } = scan(doc, ids);
+    const { tops, inserted, threads, tabDeleted } = scan(doc, ids);
+    // two replicas each deleting one of the last two tabs both passed the writer's guard: the merged document gets one
+    // empty tab again (P3-F document-model sweep#5). Not when its files root is nonempty: files and no tab is a held
+    // legacy dashboard (dashboard/legacy.ts), which a restore to its files produces through the same deletion
+    if (tabDeleted && Object.keys(readFiles(doc)).length === 0) ensureTab(doc, generateID);
     const plan = planRepair(doc, inserted, registry, (node) => !!node._item && ids.inserts.has(node._item.id.client, node._item.id.clock));
     if (repairNeeded(plan)) provenance.push(...applyRepair(doc, plan, registry, generateID).carries);
-    if (tops.size > 0) {
-      const live = [...tops].filter((top) => DocIndex.of(doc).position(top) >= 0);
-      const byTab = (tabId: string) => live.filter((top) => top.tabId === tabId).map((top) => top.node);
-      stripMarklessComments(doc, undefined, byTab);
-      const scope = threadScope(doc, new Set(live));
-      if (scope.threads.size > 0) refreshAnchors(doc, undefined, scope);
-    }
+    const live = [...tops].filter((top) => DocIndex.of(doc).position(top) >= 0);
+    if (live.length > 0) stripMarklessComments(doc, undefined, (tabId) => live.filter((top) => top.tabId === tabId).map((top) => top.node));
+    // the threads of the changed blocks, and, on a deletion, those whose recorded block it took (P3-F document-model
+    // scalpel-3#2): a surviving mark elsewhere re-anchors such a thread, else it stays where it was
+    const scope = threadScope(doc, new Set(live), ids.deletes.isEmpty() ? [] : unplacedThreads(doc));
+    if (scope.threads.size > 0) refreshAnchors(doc, undefined, scope);
     // P3-E (E2 M4): a block thread carries no mark, so the scope above never names it; a block (re)inserted under its id
     // (a move, between tabs too) refreshes the threads on it. A document without block threads reads its map and stops.
     const insertedIds = new Set([...inserted].map((node) => node.getAttr('id')).filter((id): id is string => typeof id === 'string'));

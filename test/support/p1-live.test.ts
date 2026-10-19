@@ -107,6 +107,18 @@ describe('a paid call’s charge', () => {
     expect(chargeOf([prompt(1), row(2, 'in', { type: 'result', parent_tool_use_id: 'toolu_1', total_cost_usd: 0.01 })], 0.05).usd).toBe(0.05);
   });
 
+  it('reads a main result without its cost figure as unknown, never as zero', () => {
+    const unpriced = (seq: number, frame: Record<string, unknown> = {}) => row(seq, 'in', { type: 'result', subtype: 'success', parent_tool_use_id: null, num_turns: 1, ...frame });
+    expect(chargeOf([prompt(1), unpriced(2)], 0.05)).toEqual({ usd: 0.05, receipted: 0, settled: false });
+    expect(chargeOf([prompt(1), unpriced(2, { total_cost_usd: null })], 0.05)).toEqual({ usd: 0.05, receipted: 0, settled: false });
+    // an earlier turn's figure does not settle a later turn whose result carries none
+    expect(chargeOf([prompt(1), result(2, 0.02), prompt(3), unpriced(4)], 0.08)).toEqual({ usd: 0.08, receipted: 0.02, settled: false });
+    // nor does a later figure cover an earlier unpriced result: the cumulative figure restarts after `/clear`
+    expect(chargeOf([prompt(1), unpriced(2), prompt(3), result(4, 0.01)], 0.08).settled).toBe(false);
+    // with no prompt either, an unpriced result is still exposure the run cannot see
+    expect(chargeOf([unpriced(1)], 0.05)).toEqual({ usd: 0.05, receipted: 0, settled: false });
+  });
+
   it('gives each S1 attempt what is left divided by the attempts still to run, so three fit the cap', () => {
     expect(attemptBudget(0.15, 0, 3)).toBe(0.05);
     expect(attemptBudget(0.15, 0.02, 2)).toBe(0.065);

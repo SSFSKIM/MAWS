@@ -40,6 +40,19 @@ describe('the text matcher', () => {
     expect(wordsAlong(along(['South', 'North'], -12), box, 'North South', -12)).toBeNull();
   });
 
+  // P3-F (L210): the exception is the symbol classes alone; punctuation is read in its place with the letters and digits,
+  // so a box whose comma, colon or stop LibreOffice moved or lost is not read as whole
+  it('reads punctuation in its place, and lets only a symbol sit elsewhere in its run', () => {
+    expect(wordsOfBox([word('North', 100), word('South', 200), word(',', 300)], INK, 'North, South')).toBeNull();
+    expect(wordsOfBox([word('Done', 100), word('yes:', 200)], INK, 'Done: yes')).toBeNull();
+    expect(wordsOfBox([word('Done:', 100), word('yes', 200)], INK, 'Done: yes')).toMatchObject({ joined: 'Done:yes' });
+    expect(wordsOfBox([word('Q3', 100), word('Q4', 150), word('→', 200)], INK, 'Q3 → Q4')).not.toBeNull();
+    expect(wordsOfBox([word('2.38', 100), word('g', 200), word('÷', 250), word('28.97', 300)], INK, '2.38 g ÷ 28.97')).not.toBeNull();
+    const turned = (pieces: string[]) => pieces.map((text, i) => word(text, 300 + 60 * i, 300)).reverse();
+    expect(wordsAlong(turned(['North', 'South', ',']), [280, 200, 600, 360], 'North, South', 0)).toBeNull();
+    expect(wordsAlong(turned(['North,', 'South']), [280, 200, 600, 360], 'North, South', 0)).toMatchObject({ joined: 'North,South' });
+  });
+
   it('of several runs that read the text, takes the one nearest the app’s text', () => {
     const found = wordsOfBox([word('Total', 900, 500), word('Total', 110)], INK, 'Total');
     expect(found!.box[0]).toBe(110);

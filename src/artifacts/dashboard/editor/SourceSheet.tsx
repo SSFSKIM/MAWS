@@ -117,9 +117,13 @@ function DatasetDetail({ artifactId, id, descriptor, view, hold, reader, host, a
       current = false;
     };
   }, [reader, snapshot, hold]);
+  // P3-F: the hold gates what was read as it gates the reading. A hold lost while open (pending its recapture, or
+  // unavailable) withholds the rows read under it, and its read's failure, from the table and Copy rows alike.
+  const held = hold === 'held';
+  const rows = held ? source : null;
   // the view's rows: the interpretation the view itself draws (renderView's transform), never a second one
-  const viewed = useMemo(() => (view && source ? viewRows(view.spec, source, id) : null), [view, source, id]);
-  const table = shown === 'view' ? (viewed?.ok ? viewed.table : null) : source;
+  const viewed = useMemo(() => (view && rows ? viewRows(view.spec, rows, id) : null), [view, rows, id]);
+  const table = shown === 'view' ? (viewed?.ok ? viewed.table : null) : rows;
   const order = useMemo(() => {
     if (!table) return [];
     const indexes = table.rows.map((_, i) => i);
@@ -207,7 +211,7 @@ function DatasetDetail({ artifactId, id, descriptor, view, hold, reader, host, a
         <p className="dash-sheet-note">This query has not been fetched yet; there are no rows to show.</p>
       ) : hold === 'unavailable' ? (
         <p className="dash-sheet-note" role="alert">This snapshot is no longer available; open the source again to see the current one.</p>
-      ) : failed !== null ? (
+      ) : held && failed !== null ? (
         <p className="dash-sheet-note" role="alert">{`The rows could not be read: ${failed}`}</p>
       ) : shown === 'view' && viewed && !viewed.ok ? (
         <p className="dash-sheet-note" role="alert">{`This view cannot be drawn: ${viewed.error}`}</p>

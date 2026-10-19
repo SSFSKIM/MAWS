@@ -93,17 +93,18 @@ export class ShowStage {
       layer.build = pos.build;
       return;
     }
-    // a new slide: forward (or the first entry) with motion, its entry builds after the transition; any other move shows
-    // it as built
+    // a new slide: forward (or the first entry) with motion, after the transition its position's group plays over what the
+    // clicks before it built (P3-F: a layer made mid-slide, a remount or a slide written anew where the show stands, enters
+    // at its build, not at the slide's entry); any other move shows it as built
     const entering = animate && (move === 'forward' || move === 'enter');
-    const next = this.makeLayer(pos.slideId, pos.build, hiddenAt(steps, entering ? -1 : pos.build));
+    const next = this.makeLayer(pos.slideId, pos.build, hiddenAt(steps, entering ? pos.build - 1 : pos.build));
     this.layer = next;
     const delay = layer && animate && transition ? TRANSITION_MS : 0;
     if (layer) {
       if (animate && transition) this.transit(layer, next, transition, move === 'back');
       else this.removeLayer(layer);
     }
-    if (entering) this.playGroup(next, steps, 0, delay);
+    if (entering) this.playGroup(next, steps, pos.build, delay);
   }
 
   /** The elements of the slide shown, hidden or not, as drawn now (the e2e reads them). */

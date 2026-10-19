@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import { ArtifactPublishResultSchema, artifactRefusalOf, TOOL_ERRORS } from '@shared/maws/tools';
@@ -192,6 +192,22 @@ describe('artifact_publish of a file kind (the generic file model)', () => {
     expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A', 'b.css': 'B' });
   });
 
+  // P3-F (artifact-protocol finding 3): a refused publish leaves nothing durable, the session's edited link included
+  it('a refused publish links nothing: no edited link for a session that never edited, and an existing one keeps its time', async () => {
+    const created = await design();
+    const edited = () => w.store.links(created.artifactId).filter((link) => link.appSessionId === SELF && link.role === 'edited');
+    await human(created.artifactId, (f) => f.setAttr('a.html', 'A by the user'));
+    expect(artifactRefusalOf(textOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { 'a.html': 'A2' } })))).toMatchObject({ reason: 'conflict' });
+    expect(artifactRefusalOf(textOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { '../escape.css': 'x' } })))).toMatchObject({ reason: 'invalid' });
+    expect(edited()).toEqual([]);
+    const published = jsonOf<{ revision: number }>(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { 'b.css': 'B2' } }));
+    expect(edited()).toHaveLength(1);
+    const at = edited()[0]!.lastAt;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(artifactRefusalOf(textOf(await publish({ artifact: created.artifactId, baseRevision: published.revision, files: { 'a.html': 'A3' } })))).toMatchObject({ reason: 'conflict' });
+    expect(edited()).toEqual([expect.objectContaining({ lastAt: at })]);
+  });
+
   it('after a publish the base is what the session knows: a file the user changed that it never read still conflicts', async () => {
     const created = await design();
     await human(created.artifactId, (f) => f.setAttr('b.css', 'B by the user'));
@@ -201,6 +217,30 @@ describe('artifact_publish of a file kind (the generic file model)', () => {
     expect(artifactRefusalOf(textOf(blind))).toMatchObject({ reason: 'conflict', paths: ['b.css'] });
     const fresh = await read(created.artifactId);
     expect(jsonOf(await publish({ artifact: created.artifactId, baseRevision: fresh.revision, files: { 'b.css': 'B mine' } }))).toMatchObject({ changed: ['b.css'] });
+  });
+
+  // P3-F (artifact-protocol panel, finding 1): a read of some files rebases the session on those files alone
+  it('a read of some files rebases only those: a file the user changed that the read did not return still conflicts, after a publish too', async () => {
+    const created = await design();
+    await read(created.artifactId);
+    await human(created.artifactId, (f) => f.setAttr('a.html', 'A by the user'));
+    const readSome = (session = SELF, deps: Parameters<World['deps']>[0] = {}) => artifactReadTool(w.deps(deps)).call({ artifact: created.artifactId, paths: ['b.css', 'gone.txt'] }, w.ctx({ appSessionId: session }));
+    const partial = jsonOf<{ revision: number; files: Record<string, string>; missing: string[] }>(await readSome());
+    expect(partial).toMatchObject({ files: { 'b.css': 'B' }, missing: ['gone.txt'] });
+    const blind = await publish({ artifact: created.artifactId, baseRevision: partial.revision, files: { 'a.html': 'A mine' } });
+    expect(artifactRefusalOf(textOf(blind))).toMatchObject({ reason: 'conflict', conflicts: [{ path: 'a.html', detail: 'changed since your read' }] });
+    // a file it was shown publishes, and the new base still holds a.html as the session last read it
+    const shown = jsonOf<{ revision: number }>(await publish({ artifact: created.artifactId, baseRevision: partial.revision, files: { 'b.css': 'B mine', 'gone.txt': 'G' } }));
+    expect(shown).toMatchObject({ changed: ['b.css', 'gone.txt'] });
+    expect(artifactRefusalOf(textOf(await publish({ artifact: created.artifactId, baseRevision: shown.revision, files: { 'a.html': 'A mine' } })))).toMatchObject({ reason: 'conflict', paths: ['a.html'] });
+    expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A by the user', 'b.css': 'B mine', 'gone.txt': 'G' });
+    // a session that never read a.html at all knows nothing of it after reading only b.css
+    const OTHER = 'app-other' as AppSessionId;
+    const other = { session: new ArtifactSession() };
+    const theirs = jsonOf<{ revision: number }>(await readSome(OTHER, other));
+    const unseen = await publish({ artifact: created.artifactId, baseRevision: theirs.revision, files: { 'a.html': 'A theirs' } }, { appSessionId: OTHER }, other);
+    expect(artifactRefusalOf(textOf(unseen))).toMatchObject({ reason: 'conflict', conflicts: [{ path: 'a.html', detail: 'created since your read' }] });
+    expect(liveFiles(created.artifactId)['a.html']).toBe('A by the user');
   });
 
   it('names a file a restore removed since the read as "removed by restore"', async () => {
@@ -306,6 +346,30 @@ describe('artifact_publish as a suggestion (M8; parent Decision Log 27)', () => 
     const first = jsonOf(await publish(args, { toolUseId: 'toolu_suggest' as ToolUseId }));
     expect(jsonOf(await publish(args, { toolUseId: 'toolu_suggest' as ToolUseId }))).toEqual(first);
     expect(rowsOf(`${created.artifactId}:suggest`)).toHaveLength(1);
+  });
+
+  // P3-F (artifact-protocol finding 8): the owner's setting is read where the publish writes, not before it waited
+  it('obeys the owner’s setting turned on while the publish waited to write: a suggestion, or the refusal of a kind that takes none', async () => {
+    const migrate = w.store.ensureMigrated.bind(w.store);
+    const turnedOnWhileWaiting = (id: string) => vi.spyOn(w.store, 'ensureMigrated').mockImplementationOnce(async (artifactId, actor) => {
+      await w.store.update(id, { agentEditsAsSuggestions: true });
+      return migrate(artifactId, actor);
+    });
+    const created = await design();
+    turnedOnWhileWaiting(created.artifactId);
+    expect(jsonOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { 'a.html': 'A2' } }))).toMatchObject({ status: 'suggested', changed: ['a.html'] });
+    expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A', 'b.css': 'B' });
+    expect(suggested(created.artifactId)).toEqual({ 'a.html': 'A2', 'b.css': 'B' });
+    const page = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    turnedOnWhileWaiting(page.artifactId);
+    const html = await publish({ artifact: 'dash', baseRevision: page.revision, files: { 'index.html': '<p>v2</p>' } });
+    expect(artifactRefusalOf(textOf(html))).toEqual({ reason: 'invalid', kind: 'html', mode: 'suggest', setting: true });
+    expect(w.store.revision(page.artifactId)).toBe(page.revision);
+    const board = await create({ kind: 'design', title: 'Board', files: { 'a.html': 'A' } });
+    turnedOnWhileWaiting(board.artifactId);
+    const refused = await publish({ artifact: board.artifactId, baseRevision: board.revision, files: { 'a.html': 'A2' } });
+    expect(artifactRefusalOf(textOf(refused))).toEqual({ reason: 'invalid', kind: 'design', mode: 'suggest', setting: true });
+    expect(liveFiles(board.artifactId)).toEqual({ 'a.html': 'A' });
   });
 
   it('refuses a suggestion to an html page, asked for or set by the owner, writing nothing', async () => {

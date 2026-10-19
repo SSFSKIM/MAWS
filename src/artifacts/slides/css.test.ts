@@ -46,6 +46,9 @@ describe('values: each property’s line, with its ranges', () => {
     // colours
     ['color', 'RGB(255, 0, 0)', '#ff0000'],
     ['color', 'rgb(255 0 0 / 50%)', 'rgba(255, 0, 0, 0.5)'],
+    ['color', 'rgb(100%, 0%, 0%)', '#ff0000'], // P3-F slide-model sweep#1: a percentage channel is an 8-bit channel, rounded
+    ['color', 'rgb(50%, 50%, 50%)', '#808080'],
+    ['color', 'rgb(33.3% 0% 0% / 50%)', 'rgba(85, 0, 0, 0.5)'],
     ['color', 'Tomato', 'tomato'],
     ['color', 'currentColor', null],
     ['color', 'bogus', null],

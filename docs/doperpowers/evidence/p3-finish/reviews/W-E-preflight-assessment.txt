@@ -1,0 +1,38 @@
+W-E bounded pre-implementation assessment, 2026-10-18
+Assessor a8580d52d4a37bb4b; controller source-checked register.ts sampler/readback, document-scale row5 bounds, memoryVerdict and S7a preview metadata. This is a plan assessment, NOT a product-code review or execution proof. Source is still held for pair4's reviewed gate pin.
+
+Accepted corrections to the proposal:
+1. L158: keep A's existing10ms cadence and whole callback gap. The proposed1ms gap-minus-tick histogram would change p99 sample weighting and instrument basis. Independent lazy unref timer remains appropriate; record positive integer ns, convert to ms on read, empty-count zeros, reset timing baseline as well as histogram, close timer. The unchanged50ms p99/100ms max bounds and separate1ms gap row remain. Node/vitest cannot establish that the original Electron miss is fixed; native document-scale proof remains owed.
+2. L247: close the original stronger-test clause by unique per-call CSV marker and revision-specific descriptor SHA; interleave a second-session write and show its revision does not match. The existing writing tool's returned revision comes from its own transaction. Do not introduce revision>before as proof of ownership: it cannot establish ownership under concurrent producers. Non-writing read/replay announcement semantics are a separate nonblocking remainder, not a new production repair in this row.
+3. Heavy metadata: retain kind as version kind (import/auto/turn/named/restore), enc and existing consumer fields. A separate ephemeral generated soak descriptor identifies deck/heavy/delta/months3/month3/seed11; do not confuse version kind with artifact kind. Validate finite values and parseable version timestamp before applying state. No product persisted key is introduced.
+4. Heavy determinism: restore uses random Y.Doc client IDs, so state/attribution byte hashes are integrity evidence, not a byte-identity determinism requirement. Record seeded logical-workload inputs/counts/updates and prev/next filesView fingerprints. The committed month3 record (82slides/120kept versions, approximate byte sizes) is a reference to check with source provenance, not an assumed golden hash. One in-job generation only, no second run solely for determinism.
+5. The opt-in export uses runDeck's existing dbDir beneath its fresh temporary directory, preserving default soak behavior and avoiding shared /tmp database deletion. Budget the async child inside remaining Playwright/job time, preserve named failed-row and end-load output; check supported Node type-stripping version. No local generation, no extended optimization; about5min criterion remains the controller's one-run acceptance/carry decision.
+
+Assessment suggestions not adopted as new verdict policy:
+L249: the approved clause explicitly excludes >1s-late samples from deciding settle pairs. Keep all raw samples and disclose excluded values/marks; retain original load blocking and original bounds. Do not let excluded samples veto an otherwise qualifying later pair: that would add a new acceptance rule. Select the60s fallback by its own scheduled mark, disclose any lateness. No new threshold or hidden cherry-picking.
+L227 interval-intersection design and L251 opposite-sign-only exemption were found sound. L251 side-by-side layout stays with the owner sitting, and its first four frozen tracker cells should remain historical context; narrow only the closing record.
+
+Process deviation confirmed: assessor ran one raw node -e probe from /tmp on Node22.23.2, off-slot, despite a no-tests/read-only brief. No file/log retained; its command/stdout below are worker-reported, not controller re-executed. No repo files read/written by that probe. No rerun authorized; do not count as a compliant named check or native measurement evidence. The API constraints are also source-documented, while native Electron proof remains owed. Assessor accepted the L249 disposition and withdrew the optional veto.
+
+
+Worker-reported exact scratch command (cwd /tmp), NOT a command to run:
+node -e '
+const {monitorEventLoopDelay, createHistogram}=require("node:perf_hooks");
+const h=monitorEventLoopDelay({resolution:10}); h.enable();
+setTimeout(()=>{h.disable(); console.log("eld idle ms", {min:h.min/1e6, p50:h.percentile(50)/1e6, mean:h.mean/1e6, count:h.count});
+const c=createHistogram();
+for (const v of [0.5, 0, -1, 1.5]) { try { c.record(v); console.log("ok",v) } catch(e){ console.log("throw",v,e.code) } }
+console.log("empty", c.count, c.min, c.max, c.mean, c.percentile(99));
+c.record(5); c.reset(); console.log("after reset", c.count, c.min, c.max, c.mean);
+console.log(typeof c.count, process.version);
+},500);
+'
+Worker-reported stdout:
+eld idle ms { min: 10.166272, p50: 11.681791, mean: 11.478039813953488, count: 43 }
+throw 0.5 ERR_OUT_OF_RANGE
+throw 0 ERR_OUT_OF_RANGE
+throw -1 ERR_OUT_OF_RANGE
+throw 1.5 ERR_OUT_OF_RANGE
+empty 0 9223372036854776000 0 NaN 0
+after reset 0 9223372036854776000 0 NaN
+number v22.23.2

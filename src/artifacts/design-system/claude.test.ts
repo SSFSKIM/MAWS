@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { HOUSE_KEY, defaultSystem } from '../types/design_system/defaults';
 import { ClaudeShapeError, fromClaude, isClaudeShape, toClaude } from './claude';
 import { validateClaudeTokens } from './claude-grammar';
 import { colorToCss } from './color';
@@ -357,5 +358,51 @@ describe('whole-branch review: a role found by identity (C1)', () => {
     expect(styles.find((s) => s.name === 'deck-title')).toMatchObject({ fontSize: '96px' });
     expect(styles.map((s) => s.name)).not.toContain('title-2');
     expect(validateClaudeTokens(exported)).toEqual([]);
+  });
+});
+
+describe('P3-F design-systems wave', () => {
+  const house = JSON.parse(defaultSystem(HOUSE_KEY)!.files['tokens.tokens.json']!) as { font: Record<string, { $value: unknown }> };
+  type Exported = { type: { families: Record<string, string>; groups: { styles: { name: string; family: string }[] }[] } };
+
+  // sweep#1: a style's family is found by the font token's identity, so `{font.body}` finds `font.body.$root`.
+  it('exports one family per font token when the fonts are written in their $root form', () => {
+    const rooted = (value: unknown) => ({ $root: { $value: value } });
+    const file = edited(
+      house,
+      ...(['display', 'body', 'mono'] as const).map((role) => [`font/${role}`, rooted(house.font[role]!.$value)] as const),
+      ['font/brand', rooted(['Brand Sans', 'sans-serif'])],
+      ['font/note', rooted(['Note Serif', 'serif'])],
+    );
+    const tokens = parseTokens(file).tokens!;
+    expect(tokens.tokens.has('font.body.$root')).toBe(true);
+    const exported = JSON.parse(toClaude({ name: 'Rooted', law: LAW, tokens })['tokens.json']!) as Exported;
+    expect(Object.keys(exported.type.families).sort()).toEqual(['body', 'brand', 'display', 'mono', 'note']);
+    const familyOf = Object.fromEntries(exported.type.groups[0]!.styles.map((s) => [s.name, s.family]));
+    expect(familyOf).toMatchObject({ title: 'display', h1: 'display', body: 'body', caption: 'body' });
+    expect(validateClaudeTokens(exported)).toEqual([]);
+  });
+
+  // scalpel-4#1: a further family's dimension is judged by its parsed unit; `1rem` is not an em.
+  it('imports a rem dimension in a further family and round-trips it, while an em one stays in the sources', () => {
+    const imported = fromClaude({ 'tokens.json': JSON.stringify({ layout: { tokens: [{ name: 'gutter', value: '1rem' }, { name: 'indent', value: '2em' }] } }) });
+    expect(imported.tokens.tokens.get('layout.gutter')!.$value).toEqual({ value: 1, unit: 'rem' });
+    expect(imported.warnings.filter((w) => w.startsWith('layout '))).toEqual(['layout "indent": "2em" has no DTCG type MAWS writes; it stays in sources/claude/tokens.json']);
+    const back = fromClaude(toClaude({ name: 'Layout', law: LAW, tokens: imported.tokens }));
+    expect(back.tokens.tokens.get('layout.gutter')!.$value).toEqual({ value: 1, unit: 'rem' });
+    expect(back.warnings.filter((w) => w.startsWith('layout '))).toEqual([]);
+  });
+
+  // sweep#2: a deck style's line height takes every form Claude's grammar reads, as a ratio, as a text style's does.
+  it('imports a deck style’s length line height as a ratio of its size', () => {
+    const style = (name: string, fontSize: string, lineHeight: string) => ({ name, family: 'sans', fontSize, lineHeight });
+    const groups = [
+      { name: 'Text', styles: [style('title', '40px', '1.15'), style('body', '16px', '1.5')] },
+      { name: 'Deck', styles: [style('deck-title', '96px', '120%'), style('deck-body', '40px', '80px')] },
+    ];
+    const imported = fromClaude({ 'tokens.json': JSON.stringify({ type: { fonts: [], families: { sans: 'Inter' }, groups } }) });
+    const deck = (role: string) => imported.tokens.tokens.get(`type.${role}`)!.$extensions?.['dev.maws.deck'];
+    expect(deck('body')).toEqual({ fontSize: { value: 40, unit: 'px' }, lineHeight: 2 });
+    expect(deck('title')).toEqual({ fontSize: { value: 96, unit: 'px' }, lineHeight: 1.2 });
   });
 });

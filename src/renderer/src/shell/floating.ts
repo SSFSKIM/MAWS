@@ -25,6 +25,8 @@ export interface ColumnDrag {
 
 export interface FloatingCardState {
   closed: boolean; // the card closed to its pill
+  // Close unmounted the focused Close button with the card: the pill that mounts next takes the keyboard, once (P3-F)
+  pillTakesFocus: boolean;
   column: ColumnReservation | null;
   // The column's width while the card's right edge is dragged (the pane's spacer follows it, so the page moves with the
   // drag); null otherwise. `regions` is written once, on release.
@@ -41,10 +43,11 @@ export const useFloatingCard = create<FloatingCardState>()((set, get) => {
   let drag: object | null = null; // the current column drag's token
   return {
     closed: false,
+    pillTakesFocus: false,
     column: null,
     columnDrag: null,
     pillHost: null,
-    setClosed: (closed) => set({ closed }),
+    setClosed: (closed) => set({ closed, pillTakesFocus: false }),
     reserveColumn(element) {
       const reservation: ColumnReservation = { element };
       set({ column: reservation });
@@ -77,7 +80,7 @@ export const useFloatingCard = create<FloatingCardState>()((set, get) => {
 });
 
 useLayout.subscribe((state, before) => {
-  if (state.regions.panel.floating !== before.regions.panel.floating && useFloatingCard.getState().closed) useFloatingCard.setState({ closed: false });
+  if (state.regions.panel.floating !== before.regions.panel.floating && useFloatingCard.getState().closed) useFloatingCard.setState({ closed: false, pillTakesFocus: false });
 });
 
 type Layout = Pick<LayoutState, 'main' | 'regions'>;
@@ -150,8 +153,9 @@ export function dockPanel(): void {
   layout().setPanel({ floating: false });
 }
 
+// The card's Close: its pill (the layer's, or a browser chrome's row's) takes the keyboard the Close button held.
 export function closeCard(): void {
-  useFloatingCard.getState().setClosed(true);
+  useFloatingCard.setState({ closed: true, pillTakesFocus: true });
 }
 
 export function openCard(): void {

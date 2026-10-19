@@ -157,11 +157,25 @@ describe('the design_system question', () => {
     expect(within(section('s1')).getByRole('button', { name: 'Skip' })).toBeTruthy();
   });
 
-  it('answers the chosen system by its id and name', async () => {
+  it('answers the chosen system by its id and name, once Submit has read it live', async () => {
     await mountWith([PICK]);
     fireEvent.click(within(section('s1')).getByRole('radio', { name: 'MAWS' }));
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(fake.invoked('artifacts.get')).toEqual([{ artifactId: HOUSE, prepare: false }]);
+    await act(() => fake.reply('artifacts.get', { artifact: { id: HOUSE, kind: 'design_system', title: 'MAWS' } }));
     expect(fake.invoked('maws.ask.answer')).toEqual([{ appSessionId: A, askId: 'toolu_d', answers: [{ id: 's1', question: PICK.question, status: 'answered', designSystemId: HOUSE, name: 'MAWS' }] }]);
+  });
+
+  // F's L176: the system was deleted between the pick and Submit (its row still on screen until the library's re-read)
+  it('sends nothing for a pick deleted since, unpicks it and names it in the sheet’s notice', async () => {
+    await mountWith([PICK]);
+    fireEvent.click(within(section('s1')).getByRole('radio', { name: 'Acme web' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    await act(() => fake.reply('artifacts.get', { artifact: null }));
+    expect(fake.invoked('maws.ask.answer')).toEqual([]);
+    expect(screen.getAllByRole('status').map((status) => status.textContent)).toContain('Acme web was deleted. Choose another design system.');
+    expect(within(section('s1')).getByRole('radio', { name: 'Acme web' }).getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByRole('button', { name: 'Submit · 1 skipped' })).toBeTruthy();
   });
 
   it('answers create for "Build one with me", and has no such row when the question does not allow it', async () => {

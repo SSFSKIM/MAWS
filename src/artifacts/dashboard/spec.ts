@@ -2,7 +2,8 @@
 // declarative grammar a chart or table block names its dataset's view with. No expression, URL or callback can be
 // written in it; every value is checked against the grammar, never trusted by its shape. An unknown key, or a value the
 // grammar refuses, is dropped with a warning (the agent's `viewWarnings`, and the note under the view); an unknown view
-// kind, or a spec that is not an object, cannot be drawn and is the shared in-place error. Promoted from M1's spike.
+// kind, a spec that is not an object, or a pie of more than one measure (P3-F) cannot be drawn and is the shared
+// in-place error. Promoted from M1's spike.
 import type { Cell } from './datasets';
 
 export const VIEW_KINDS = ['bar', 'line', 'area', 'scatter', 'pie', 'table'] as const;
@@ -69,6 +70,8 @@ export function parseSpec(input: unknown): ParsedSpec {
     else if (Array.isArray(raw.y) && raw.y.length > 0 && raw.y.length <= SPEC_LIMITS.ys && raw.y.every(isName)) spec.y = [...(raw.y as string[])];
     else bad('y');
   }
+  // P3-F: a pie's slices are one measure's sizes; a further measure is the view's error, never dropped in silence
+  if (spec.view === 'pie' && Array.isArray(spec.y) && spec.y.length > 1) return { ok: false, error: `a pie view draws one measure; y also names ${spec.y.slice(1).map((name) => `"${clip(name)}"`).join(', ')}`, ...(title !== undefined && { title }) };
   if (raw.series !== undefined) {
     if (isName(raw.series)) spec.series = raw.series;
     else bad('series');

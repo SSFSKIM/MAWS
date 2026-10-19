@@ -25,7 +25,10 @@
 //   refresh's outcome waits to be published stops that one too. The artifact's deletion stops every tool's work for
 //   it, whether or not a grant row was left to announce (P3 Decision Log 91). The owner's revoke aborts before it
 //   awaits the store, and refuses new calls of the tool until the store has answered; an Allow once being consumed is
-//   the call it admitted going ahead, not a revoke.
+//   the call it admitted going ahead, not a revoke. P3-F F-connectors 1: the owner's grant gesture is fenced the same
+//   way: its route resolution is work of the tool (a revoke, the deletion and main's stop abort it), and its write
+//   follows a synchronous recheck that no revoke began since the gesture did, so an older gesture never restores a
+//   grant, an Allow once included, that the owner's newer decision withdrew.
 // - Watches: 30 s to 24 h, at most 64 across the whole app, one refresh at a time, the next an interval after the last
 //   ended; hidden, none run, and shown, a due one catches up once. A watch with no route reads paused and asks again at
 //   its interval; one with no grant waits, timerless, for a grant (a denial computed before a grant that arrived while
@@ -40,7 +43,8 @@
 //   serves it, never another session's, under the same read grant; the owner's revoke, the store's revoke or delete and
 //   main's stop end it as they end a page's work. E3 M2 fix: a dataset work, a page's or an agent's, runs on one
 //   budget (CONNECTOR_OPERATION_DEADLINE_MS) from its admission here through the route, the grant, the call and the
-//   host's publication; at its end the work is aborted (`paused: unavailable`) and may no longer publish. E3 M2
+//   host's publication; at its end the work is aborted (`paused: unavailable`) and may no longer publish (P3-F
+//   F-connectors 2: a watch's refresh so ended is a refresh that ran: published, the next due an interval later). E3 M2
 //   residual (the architect's terminal-ownership ruling): an aborted dataset call is not answered "nothing published"
 //   while its commit may land. Once dispatched, its route settles it through the host's cancel: the abort's refusal
 //   when the cancel won, else the publication's durable end, which stands as the outcome (`settledBy`). E3 M3 fix (the
@@ -120,6 +124,7 @@ interface Lease {
 interface Work {
   readonly key: string; // the artifact and the tool
   readonly controller: AbortController;
+  expired?: boolean; // P3-F F-connectors 2: aborted by its dataset budget's end, not by a hide, close, unwatch or revoke
 }
 
 interface Watch {
@@ -191,6 +196,7 @@ export class ConnectorBroker {
   private readonly grantGenerations = new Map<string, number>(); // per key, the grants announced so far
   private readonly revocations = new Map<string, number>(); // P3-H H3b: per key, the revokes heard so far
   private readonly agentWork = new Map<Work, string>(); // E3: agents' refreshes in flight, by their artifact
+  private readonly gestures = new Map<Work, string>(); // P3-F F-connectors 1: grant gestures resolving their target, by artifact
   private readonly sessionRoute: ConnectorBrokerOptions['sessionRoute']; // E3
   private stopped = false;
 
@@ -342,6 +348,7 @@ export class ConnectorBroker {
     this.stopped = true;
     for (const lease of [...this.leases.values()]) this.dispose(lease);
     this.abort(this.agentWork.keys(), refusal('paused', 'closed')); // E3
+    this.abort(this.gestures.keys(), refusal('paused', 'closed')); // P3-F F-connectors 1
     this.windowShown.clear();
   }
 
@@ -378,11 +385,24 @@ export class ConnectorBroker {
   async grantTool(artifactId: string, gesture: unknown): Promise<ConnectorGrantOutcome> {
     const { server, tool, mode } = ConnectorGrantGestureSchema.parse(gesture);
     const ref = { server, tool };
-    const found = await this.target(artifactId, ref, new AbortController().signal);
+    if (this.stopped) return refusal('paused', 'closed');
+    // P3-F F-connectors 1: the revokes heard before the gesture began are older than it; any heard since are newer
+    const work: Work = { key: workKey(artifactId, ref), controller: new AbortController() };
+    const revocations = this.revocations.get(work.key) ?? 0;
+    this.gestures.set(work, artifactId);
+    let found;
+    try {
+      found = await this.target(artifactId, ref, work.controller.signal);
+    } finally {
+      this.gestures.delete(work);
+    }
     if ('ok' in found) return found;
     // P3-HD M3b (Decision Log 18): no grant of either mode from grant-backed metadata alone; the owner's discovery first
     if (found.target.grantBacked) return refusal('paused', 'noRoute');
     if (mode === 'read' && !found.target.readOnly) return invalid('notReadOnly');
+    // P3-F F-connectors 1: in the same turn as the write, a newer revoke (begun, or still unanswered by the store) wins
+    if (this.stopped) return refusal('paused', 'closed');
+    if (this.revoking.has(work.key) || (this.revocations.get(work.key) ?? 0) !== revocations) return refusal('revoked', 'revoked');
     const grant = await this.authority.grant(artifactId, { server, tool, fingerprint: found.target.fingerprint, mode });
     this.granted(artifactId, ref);
     return { ok: true, grant };
@@ -432,6 +452,7 @@ export class ConnectorBroker {
     for (const lease of this.leases.values()) if (lease.artifactId === artifactId) for (const [key, tool] of lease.declared) tools.set(key, tool);
     for (const tool of tools.values()) this.revoked(artifactId, tool);
     this.abort([...this.agentWork].filter(([, of]) => of === artifactId).map(([work]) => work), refusal('revoked', 'revoked')); // E3
+    this.abort([...this.gestures].filter(([, of]) => of === artifactId).map(([work]) => work), refusal('revoked', 'revoked')); // P3-F F-connectors 1
   }
 
   // ── the work ──
@@ -504,12 +525,16 @@ export class ConnectorBroker {
     let answer;
     try {
       // The backend's door (P3-H H4): the window re-read in the same turn as the call, so a hide no event announced while
-      // the route or the grant answered aborts the work here and nothing is dispatched.
+      // the route or the grant answered aborts the work here and nothing is dispatched. P3-F F-connectors 6: the same
+      // recheck goes to the route (`admit`), for its own door after awaits of its own (route D's credential preparation).
       const admitted = authorization;
-      const dispatched = Promise.resolve().then<ConnectorRouteAnswer | typeof ABORTED>(() => {
+      const admit = () => {
         if (owner !== null) this.recheckWindow(owner);
-        return signal.aborted ? ABORTED : target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode, ...(dataset && { dataset: dataset.sink, publishable: dataset.publishable, ...(dataset.appSessionId && { appSessionId: dataset.appSessionId }) }) /* E3 */ });
-      });
+        return !signal.aborted;
+      };
+      const dispatched = Promise.resolve().then<ConnectorRouteAnswer | typeof ABORTED>(() =>
+        admit() ? target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode, admit, ...(dataset && { dataset: dataset.sink, publishable: dataset.publishable, ...(dataset.appSessionId && { appSessionId: dataset.appSessionId }) }) /* E3 */ }) : ABORTED,
+      );
       // E3 M2 residual: a dataset call, once dispatched, is settled by its route even when aborted (never raced)
       answer = await (dataset ? dispatched : unlessAborted(dispatched, signal));
     } catch (error) {
@@ -561,6 +586,7 @@ export class ConnectorBroker {
     this.revocations.set(key, (this.revocations.get(key) ?? 0) + 1); // P3-H H3b
     const stop = refusal('revoked', 'revoked');
     this.abort([...this.agentWork.keys()].filter((work) => work.key === key), stop); // E3: an agent's refresh of it
+    this.abort([...this.gestures.keys()].filter((work) => work.key === key), stop); // P3-F F-connectors 1: a grant gesture of it
     for (const lease of this.leases.values()) {
       if (lease.artifactId !== artifactId) continue;
       this.abort([...lease.work].filter((work) => work.key === key), stop);
@@ -654,7 +680,9 @@ export class ConnectorBroker {
     this.recheckWindow(lease.owner); // P3-H H4: at publication, a hide no event announced aborts it still
     // The publication fence, checked now rather than when the run ended: a hide, close, unwatch or revoke since then
     // (another watch's listener, say) has aborted the work, which is still registered, or changed what it would check.
-    if (work.controller.signal.aborted || !this.watches.has(watch.id) || !this.visible(lease) || watch.waitingForGrant) {
+    // P3-F F-connectors 2: the budget's end alone is no such abort: the refresh ended, and its outcome is published.
+    const cancelled = work.controller.signal.aborted && !work.expired;
+    if (cancelled || !this.watches.has(watch.id) || !this.visible(lease) || watch.waitingForGrant) {
       lease.work.delete(work);
       this.schedule(watch); // a hide's watch is due again once shown; a revoke's waits; a closed one is gone
       return;
@@ -751,7 +779,11 @@ function settledBy(work: Work, outcome: ConnectorCallOutcome, sink: ConnectorDat
 // E3 M2 fix: a dataset work's one budget, from now: at its end the work is aborted (and so no longer publishable).
 // Answers what lets the timer go.
 function bounded(work: Work): () => void {
-  const timer = setTimeout(() => work.controller.abort(refusal('paused', 'unavailable')), CONNECTOR_OPERATION_DEADLINE_MS);
+  const timer = setTimeout(() => {
+    if (work.controller.signal.aborted) return; // stopped otherwise first: that abort stands
+    work.expired = true; // P3-F F-connectors 2
+    work.controller.abort(refusal('paused', 'unavailable'));
+  }, CONNECTOR_OPERATION_DEADLINE_MS);
   return () => clearTimeout(timer);
 }
 

@@ -49,6 +49,8 @@ export interface DesignSystemBodyProps {
   /** The system's replica, opened by the tab (L's `createState` in M6) and closed with it. */
   handle: DocumentHandle;
   host: Pick<ArtifactHost, 'assetUrl' | 'export'>;
+  /** Whether the tab's showing was disposed (L's `dispose`), which its close guard reads; never, when absent. */
+  ended?: () => boolean;
   /** "Set as my default": makes this system the owner's default (settings 14). Absent, the action is disabled. */
   onSetDefault?: () => void;
   /** This system is the owner's default already: "Set as my default" is disabled. */
@@ -67,7 +69,7 @@ export interface DesignSystemBodyProps {
 }
 
 export function DesignSystemBody(props: DesignSystemBodyProps) {
-  const { artifactId, handle, host, onSetDefault, isDefault = false, onDelete, askAdopt, visible = true, onShown, title } = props;
+  const { artifactId, handle, host, ended, onSetDefault, isDefault = false, onDelete, askAdopt, visible = true, onShown, title } = props;
   const scope = useEditorHostScope();
   const key = keyOf(scope, artifactId);
   const reveal = useCheckRequests((s) => s.serials[key] ?? 0);
@@ -87,7 +89,7 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
       ...(onDelete ? [{ id: 'design-system.delete', label: DESIGN_SYSTEM_COPY.deleteAction, onSelect: () => onDelete() }] : []),
     ],
     exports: [{ id: 'design-system.export-claude', label: DESIGN_SYSTEM_COPY.exportClaude, onSelect: () => exportForClaude(host, artifactId) }],
-    closeGuard: () => allowSystemClose(handle, shownTitle), // the tab's handle (L's createState), never this body's state
+    closeGuard: () => allowSystemClose(handle, shownTitle, ended), // the tab's handle and showing (L's createState), never this body's state
   });
 
   const surface = useRef<HTMLDivElement>(null);

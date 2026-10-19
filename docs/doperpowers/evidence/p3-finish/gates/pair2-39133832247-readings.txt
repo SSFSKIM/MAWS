@@ -1,0 +1,62 @@
+### 0_e2edesign-systems.txt
+2026-10-18T14:21:02.7764360Z   ✓  3 e2e/design-systems.spec.ts:262:5 › the real document and deck editors restyle with their system’s live tokens, and their retained versions keep the pinned look (2.5s)
+2026-10-18T14:21:10.6216820Z   8 passed (15.6s)
+### 1_e2edocument.txt
+2026-10-18T14:20:30.1880530Z   9 passed (11.1s)
+### 2_e2eartifacts.txt
+2026-10-18T14:19:52.5391970Z   1 skipped
+2026-10-18T14:19:52.5392200Z   4 passed (12.1s)
+### 3_unitdarwin.txt
+2026-10-18T14:19:00.3711200Z ##[group]Run .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+2026-10-18T14:19:00.3712020Z .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+2026-10-18T14:19:16.7605010Z  Test Files  14 passed (14)
+2026-10-18T14:19:16.7606090Z       Tests  282 passed (282)
+### 4_e2etranscript.txt
+2026-10-18T14:18:35.5352590Z   35 passed (4.1m)
+### 5_e2edashboard.txt
+2026-10-18T14:14:03.2024510Z   11 passed (2.9m)
+### 6_e2epresentations.txt
+2026-10-18T14:10:34.5603740Z [trace filmstrip-reorder] entry {"foreground":false,"at":"2026-10-18T14:10:34.557Z","native":[{"focused":false,"contentsFocused":false,"visible":true,"minimized":false,"opacity":0}],"page":{"hasFocus":true,"visibility":"visible","active":"button Slide 1"},"editor":null}
+2026-10-18T14:10:45.3072760Z   2 skipped
+2026-10-18T14:10:45.3072930Z   17 passed (1.7m)
+### 7_e2edocument-app.txt
+2026-10-18T14:08:28.4465110Z [trace caret-before-paste] entry {"foreground":true,"at":"2026-10-18T14:08:28.443Z","native":[{"focused":true,"contentsFocused":true,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div Document"},"editor":{"page":{"anchor":"p[]","anchorOffset":22,"focus":"span[]","focusOffset":11,"collapsed":false},"editor":[23,34],"marks":{"drawn":{"vvzz4qrl":"launch plan"},"held":{"vvzz4qrl":"launch plan"}}}}
+2026-10-18T14:08:28.5763330Z [trace commented-paste] entry {"foreground":true,"at":"2026-10-18T14:08:28.572Z","native":[{"focused":true,"contentsFocused":true,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div Document"},"editor":{"page":{"anchor":"p[]","anchorOffset":30,"focus":"p[]","focusOffset":30,"collapsed":true},"editor":[73,73],"marks":{"drawn":{"vvzz4qrl":"launch plan"},"held":{"vvzz4qrl":"launch plan"}}}}
+2026-10-18T14:08:28.7904870Z [trace cut-paste] entry {"foreground":true,"at":"2026-10-18T14:08:28.783Z","native":[{"focused":true,"contentsFocused":true,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div Document"},"editor":{"page":{"anchor":"p[]","anchorOffset":49,"focus":"p[]","focusOffset":49,"collapsed":true},"editor":[81,81],"marks":{"drawn":{},"held":{}}}}
+2026-10-18T14:08:33.8108710Z [trace restore-scene-selection] entry {"foreground":true,"at":"2026-10-18T14:08:33.805Z","native":[{"focused":true,"contentsFocused":true,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div Document"},"editor":{"page":{"anchor":"p[]","anchorOffset":31,"focus":"p[]","focusOffset":31,"collapsed":true},"editor":[65,65],"marks":{"drawn":{"6if2fsd4":"budget review"},"held":{"6if2fsd4":"budget review"}}}}
+2026-10-18T14:08:38.4560110Z   10 passed (29.6s)
+### 8_probes.txt
+2026-10-18T13:59:41.1192332Z # tests 219
+2026-10-18T13:59:41.1194084Z # pass 219
+2026-10-18T13:59:41.1194719Z # fail 0
+2026-10-18T13:59:41.1196071Z # skipped 0
+### 9_unit.txt
+2026-10-18T14:01:14.6802312Z .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$cores"
+2026-10-18T14:01:21.7606314Z  ✓  artifacts  src/artifacts/dashboard/snapshots-holds.test.ts (14 tests) 569ms
+2026-10-18T14:03:08.3852841Z  ✓  node  src/engine-host/documents/holds.test.ts (5 tests) 1305ms
+2026-10-18T14:03:11.6771201Z  ✓  node  src/main/dashboard/holds.test.ts (6 tests) 14ms
+2026-10-18T14:03:21.2950783Z  ✓  node  src/engine-host/library/mirror-holds.test.ts (1 test) 246ms
+2026-10-18T14:05:11.7984422Z  ✓  renderer  src/renderer/src/artifacts/host-holds.test.ts (5 tests) 42ms
+2026-10-18T14:08:02.3728393Z  Test Files  1527 passed | 7 skipped (1534)
+2026-10-18T14:08:02.3914542Z       Tests  20345 passed | 73 skipped (20418)
+### 10_e2edefault.txt
+2026-10-18T14:05:56.6841640Z [trace overview-focus] activation {"at":"2026-10-18T14:05:56.683Z","obtained":true,"native":{"window":true,"focused":true,"contentsFocused":true,"visible":true,"opacity":1}}
+2026-10-18T14:05:56.6886910Z [trace overview-focus] entry {"foreground":true,"at":"2026-10-18T14:05:56.686Z","native":[{"focused":true,"contentsFocused":true,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div Workstation north star · MAWS"},"editor":null}
+2026-10-18T14:07:03.4553130Z   154 skipped
+2026-10-18T14:07:03.4553530Z   82 passed (5.5m)
+### 11_e2eto-human.txt
+2026-10-18T14:00:14.9582190Z [trace must-read-focus] entry {"foreground":true,"at":"2026-10-18T14:00:14.955Z","native":[{"focused":true,"contentsFocused":true,"visible":true,"minimized":false,"opacity":1}],"page":{"hasFocus":true,"visibility":"visible","active":"div another session"},"editor":null}
+2026-10-18T14:00:17.4361040Z   2 passed (6.0s)
+### 12_static.txt
+2026-10-18T13:59:26.6730719Z ##[group]Run .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm typecheck
+2026-10-18T13:59:26.6731533Z .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm typecheck
+2026-10-18T14:01:20.7871968Z ##[error]src/renderer/src/transcript/view/Transcript.test.tsx(169,28): error TS2322: Type 'VitestUtils' is not assignable to type 'Awaitable<void>'.
+2026-10-18T14:01:21.1114845Z ##[group]Run .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm lint
+2026-10-18T14:01:21.1115659Z .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm lint
+2026-10-18T14:03:32.6210998Z # tests 47
+2026-10-18T14:03:32.6211389Z # pass 47
+2026-10-18T14:03:32.6211568Z # fail 0
+2026-10-18T14:03:32.6211917Z # skipped 0
+### 13_e2ewidgets.txt
+2026-10-18T13:59:43.5316250Z   28 passed (54.1s)
+### 15_plan.txt

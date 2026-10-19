@@ -171,24 +171,35 @@ describe('the bridge script (E2 Design §10)', () => {
   });
 
   // P2-E1 (M3): re-pin (P2-E1 document, D8): the parent asks where an element is now, by its selector
-  it('answers maws:locate with its id and the element’s rect, null for an absent or invalid selector; it never starts picking', () => {
+  it('answers maws:locate with its id and the element’s rect, null at once for an invalid selector; it never starts picking', () => {
     page('<h1 id="hero">Title</h1><p>x</p>');
     const hero = $('#hero') as unknown as { getBoundingClientRect(): unknown };
     hero.getBoundingClientRect = () => ({ left: 4, top: 6, width: 300, height: 90, right: 304, bottom: 96, x: 4, y: 6 });
     fromParent({ type: 'maws:locate', id: 1, selector: '#hero' });
-    fromParent({ type: 'maws:locate', id: 2, selector: '#gone' });
     fromParent({ type: 'maws:locate', id: 3, selector: 'h1[' }); // querySelector throws
     fromParent({ type: 'maws:locate', id: 4, selector: '#hero' }); // the same selector again: its own answer
     expect(posted).toEqual([
       { type: 'maws:located', id: 1, selector: '#hero', rect: { x: 4, y: 6, width: 300, height: 90 }, origin: '*' },
-      { type: 'maws:located', id: 2, selector: '#gone', rect: null, origin: '*' },
       { type: 'maws:located', id: 3, selector: 'h1[', rect: null, origin: '*' },
       { type: 'maws:located', id: 4, selector: '#hero', rect: { x: 4, y: 6, width: 300, height: 90 }, origin: '*' },
     ]);
     hover($('p'));
     click($('p'));
     expect(overlay()).toBeNull();
-    expect(posted).toHaveLength(4);
+    expect(posted).toHaveLength(3);
+  });
+
+  // P3-F L198: a page whose script adds the anchor after the load answers it once it is there, not null at once
+  it('waits for an anchor the page does not have yet and answers it once the page adds it', async () => {
+    page('<p>x</p>');
+    fromParent({ type: 'maws:locate', id: 1, selector: '#late' });
+    expect(posted).toEqual([]);
+    const late = win.document.createElement('h1');
+    late.id = 'late';
+    late.getBoundingClientRect = () => new win.DOMRect(4, 6, 300, 90); // happy-dom's own DOMRect: left 4, top 6, right 304, bottom 96
+    win.document.body.appendChild(late);
+    await new Promise((resolve) => setTimeout(resolve, 0)); // the mutation's delivery
+    expect(posted).toEqual([{ type: 'maws:located', id: 1, selector: '#late', rect: { x: 4, y: 6, width: 300, height: 90 }, origin: '*' }]);
   });
 
   it('answers a locate from the parent alone, with a numeric id and a string selector only', () => {

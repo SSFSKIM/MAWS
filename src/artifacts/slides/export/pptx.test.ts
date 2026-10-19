@@ -119,10 +119,12 @@ describe('the PPTX mapping', () => {
     if (out.kind !== 'text') throw new Error('a text box');
     // 32 px × √(2 × 1.5) ≈ 55.4 px seen → 27.7 pt; letter spacing × 2 (across); line height × 1.5 (down)
     expect(out.text[0]!.options).toMatchObject({ fontSize: points(32 * Math.sqrt(3)), charSpacing: points(2), lineSpacing: points(60) });
-    // insets: left and right × 2, top and bottom × 1.5 (pptxgenjs's order l, r, b, t); the line and corner at the seen size
-    expect(out.options.margin).toEqual([points(40), points(40), points(15), points(15)]);
+    // insets: left and right × 2, top and bottom × 1.5 (pptxgenjs's order l, r, b, t), after the border (the path half
+    // the border inside the box: exports-capture scalpel-5#5); the line and corner at the seen size, the corner the path's
+    const half = Math.sqrt(3);
+    expect(out.options.margin).toEqual([points(40 + half), points(40 + half), points(15 + half), points(15 + half)]);
     expect(out.options.line).toMatchObject({ width: points(2 * Math.sqrt(3)) });
-    expect(out.options.rectRadius).toBeCloseTo(inches(8 * Math.sqrt(3)), 6);
+    expect(out.options.rectRadius).toBeCloseTo(inches(8 * Math.sqrt(3) - half), 6);
   });
 
   // fix wave 1 (finding 3): a region stretched into a box of another aspect scales each axis on its own
@@ -237,4 +239,126 @@ describe('the PPTX mapping: the final review', () => {
     const sequence = [...paragraph.matchAll(/<a:br\/>|<a:t>([^<]*)<\/a:t>/g)].map((m) => (m[0] === '<a:br/>' ? '|' : m[1])).filter((t) => t !== '').join('');
     expect(sequence).toBe('|LeadA||B|');
   });
+});
+
+// The exports-capture panel's findings (P3-F), each a regression drawn against where the canvas draws.
+describe('the PPTX mapping: the exports-capture panel', () => {
+  const cover = MEASURED.slides[0]!;
+  const body = MEASURED.slides[1]!;
+  const on = (slide: typeof cover) => (el: MeasuredElement, pictures = new Map<string, string>()) => pptxSlides(deck(), { slides: [{ ...slide, elements: [el] }] }, { variant: 'named', pictures, asset })[0]!.objects;
+  const onBody = on(body);
+  const NO_PAINT: MeasuredElement['paint'] = { fill: null, image: false, borders: [null, null, null, null], radius: 0, shadow: null, opacity: 1 };
+  /** Slide px from pptxgenjs's inches and points. */
+  const px = (inch: number) => inch * 144;
+  const pxOfPt = (pt: number) => pt * 2;
+  /** Within a point (2 px) of where the canvas draws it. */
+  const nearCanvas = (exported: number, canvas: number) => expect(Math.abs(exported - canvas), `${exported} px against the canvas's ${canvas} px`).toBeLessThanOrEqual(2);
+
+  // scalpel-5#5: PowerPoint centres an outline on its shape's path; the canvas draws a border inside the box (as the
+  // uneven bars are drawn) and sets the text after the border and the padding
+  it('scalpel-5#5: draws a 16 px border inside the box and sets a quote’s text after its 6 px left border', () => {
+    const black = { width: 16, style: 'solid', color: 'rgb(0, 0, 0)' };
+    const card: MeasuredElement = { ...body.elements[0]!, id: 'card', tag: 'div', box: { x: 100, y: 100, w: 400, h: 200 }, paint: { ...NO_PAINT, fill: 'rgb(255, 255, 255)', borders: [black, black, black, black], radius: 24 } };
+    const shape = named(onBody(card), 'card');
+    if (shape.kind !== 'shape') throw new Error('a shape');
+    const o = shape.options as { x: number; y: number; w: number; h: number; line: { width: number }; rectRadius: number };
+    const stroke = pxOfPt(o.line.width);
+    expect(stroke).toBe(16);
+    // the stroke's outer edge on the box's edge, its inner edge 16 px inside
+    nearCanvas(px(o.x) - stroke / 2, 100);
+    nearCanvas(px(o.y) - stroke / 2, 100);
+    nearCanvas(px(o.x) + px(o.w) + stroke / 2, 500);
+    nearCanvas(px(o.y) + px(o.h) + stroke / 2, 300);
+    nearCanvas(px(o.x) + stroke / 2, 116);
+    // the corner's outer curve keeps the box's 24 px radius
+    nearCanvas(px(o.rectRadius) + stroke / 2, 24);
+
+    const title = cover.elements[0]!;
+    const teal = { width: 6, style: 'solid', color: 'rgb(43, 122, 120)' };
+    const quote: MeasuredElement = { ...title, id: 'quote', tag: 'p', box: { x: 200, y: 400, w: 800, h: 120 }, paint: { ...NO_PAINT, borders: [null, null, null, teal] }, text: { ...title.text!, padding: [24, 32, 24, 32] } };
+    const objects = on(cover)(quote);
+    const text = named(objects, 'quote');
+    if (text.kind !== 'text') throw new Error('a text box');
+    const [left, right, bottom, top] = text.options.margin as [number, number, number, number];
+    // the text starts after the border and the padding: 200 + 6 + 32 on the left, 400 + 24 at the top
+    nearCanvas(px(text.options.x as number) + pxOfPt(left), 238);
+    nearCanvas(px(text.options.y as number) + pxOfPt(top), 424);
+    nearCanvas(px(text.options.x as number) + px(text.options.w as number) - pxOfPt(right), 968);
+    nearCanvas(px(text.options.y as number) + px(text.options.h as number) - pxOfPt(bottom), 496);
+    // the border its own bar, inside the box
+    expect(named(objects, 'quote:border-left').options).toMatchObject({ x: inches(200), w: inches(6) });
+  });
+  // scalpel-5#2: a table's own background, border and shadow, which the canvas draws (its border collapsed over its
+  // cells' fills)
+  it('scalpel-5#2: draws a dark table’s fill under the native table and its outline over it; a gradient table’s picture under it', () => {
+    const grid = body.elements.find((e) => e.id === 'grid')!;
+    const edge = { width: 2, style: 'solid', color: 'rgb(204, 204, 204)' };
+    const whiteText = grid.rows!.map((row) => ({ ...row, fill: null, cells: row.cells.map((cell) => ({ ...cell, text: { ...cell.text, paragraphs: cell.text.paragraphs.map((p) => ({ ...p, runs: p.runs.map((r) => ({ ...r, color: 'rgb(255, 255, 255)' })) })) } })) }));
+    const dark: MeasuredElement = { ...grid, paint: { ...NO_PAINT, fill: 'rgb(31, 41, 55)', borders: [edge, edge, edge, edge], shadow: { x: 0, y: 4, blur: 12, color: 'rgba(0, 0, 0, 0.25)' } }, rows: whiteText };
+    const out = onBody(dark);
+    expect(out.map((o) => [o.kind, o.name])).toEqual([['shape', 'grid:fill'], ['table', 'grid'], ['shape', 'grid:border']]);
+    // the fill and the shadow under the table, over its whole box
+    expect(out[0]).toMatchObject({ shape: 'rect', options: { objectName: 'grid:fill', x: inches(128), y: inches(229), w: inches(400), h: inches(120), fill: { color: '1F2937', transparency: 0 }, shadow: { type: 'outer', color: '000000' } } });
+    expect(out[0]!.options).not.toHaveProperty('line');
+    // the cells' white text on it
+    const table = out[1]!;
+    if (table.kind !== 'table') throw new Error('a table');
+    expect(table.rows.flat().map((cell) => (cell.text as { options?: { color?: string } }[])[0]!.options?.color)).toEqual(['FFFFFF', 'FFFFFF', 'FFFFFF', 'FFFFFF']);
+    // the outline over it, unfilled, unshadowed, its stroke inside the box
+    expect(out[2]).toMatchObject({ options: { objectName: 'grid:border', fill: { type: 'none' }, line: { color: 'CCCCCC', width: 1 }, x: inches(129), y: inches(230), w: inches(398), h: inches(118) } });
+    expect(out[2]!.options).not.toHaveProperty('shadow');
+
+    // a gradient: the window's picture of the table's own paint (its cells hidden) under the native table
+    const gradient: MeasuredElement = { ...grid, paint: { ...NO_PAINT, image: true } };
+    expect(pictureJobs({ slides: [{ ...body, elements: [gradient] }] }, 'named').map((j) => [j.key, j.mode])).toEqual([['body/grid', 'self']]);
+    const pictured = onBody(gradient, new Map([[pictureKey('body', 'grid'), PNG]]));
+    expect(pictured.map((o) => [o.kind, o.name])).toEqual([['image', 'grid:fill'], ['table', 'grid']]);
+    expect(pictured[0]).toMatchObject({ options: { data: PNG, objectName: 'grid:fill', x: inches(128), y: inches(229), w: inches(400), h: inches(120) } });
+    // an unpainted table: the native table alone, as before
+    expect(onBody(grid).map((o) => o.name)).toEqual(['grid']);
+  });
+  // scalpel-5#3: an image's own paint (the presentation guide's `border-radius:16px`, a border, a background) is no
+  // native picture's: the window's picture of it, which draws them; a shadow PowerPoint casts itself
+  it('scalpel-5#3: takes a rounded or framed image as the window draws it, and casts an image’s shadow natively', () => {
+    const logo = cover.elements.find((e) => e.id === 'logo')!;
+    const onCover = on(cover);
+    const jobsOf = (el: MeasuredElement) => pictureJobs({ slides: [{ ...cover, elements: [el] }] }, 'named').map((j) => [j.key, j.mode]);
+    const picture = new Map([[pictureKey('cover', 'logo'), PNG]]);
+    const rounded: MeasuredElement = { ...logo, paint: { ...NO_PAINT, radius: 16 } };
+    expect(jobsOf(rounded)).toEqual([['cover/logo', 'self']]);
+    expect(onCover(rounded, picture)).toEqual([{ kind: 'image', name: 'logo', options: { data: PNG, objectName: 'logo', altText: 'Logo', x: inches(1600), y: inches(64), w: inches(200), h: inches(100) } }]);
+    const framed: MeasuredElement = { ...logo, paint: { ...NO_PAINT, borders: Array(4).fill({ width: 4, style: 'solid', color: 'rgb(0, 0, 0)' }) as MeasuredElement['paint']['borders'] } };
+    expect(jobsOf(framed)).toEqual([['cover/logo', 'self']]);
+    expect(onCover(framed, picture)).toMatchObject([{ kind: 'image', options: { data: PNG } }]);
+    // no picture taken (the window failed): the native picture, as before
+    expect(onCover(rounded)).toMatchObject([{ kind: 'image', options: { data: LOGO } }]);
+    // a shadow alone: the native picture keeps its resolution, PowerPoint casting the shadow; a rounded one's picture casts it too
+    const shadow = { x: 0, y: 8, blur: 24, color: 'rgba(0, 0, 0, 0.25)' };
+    const cast = { type: 'outer', blur: 12, offset: 4, angle: 90, color: '000000', opacity: 0.25 };
+    const shadowed: MeasuredElement = { ...logo, paint: { ...NO_PAINT, shadow } };
+    expect(jobsOf(shadowed)).toEqual([]);
+    expect(onCover(shadowed)).toMatchObject([{ kind: 'image', options: { data: LOGO, shadow: cast } }]);
+    expect(onCover({ ...rounded, paint: { ...rounded.paint, shadow } }, picture)).toMatchObject([{ kind: 'image', options: { data: PNG, shadow: cast } }]);
+    // a placeholder keeps its flat stand-in, whatever its paint
+    expect(jobsOf({ ...rounded, image: { ...rounded.image!, placeholder: true } })).toEqual([]);
+  });
+  // scalpel-5#4: CSS turns the whole img about the element's centre; PowerPoint turns a picture about its own frame's
+  it('scalpel-5#4: turns a contained, cropped, off-centre picture about the element’s centre, where the canvas draws it', () => {
+    const logo = cover.elements.find((e) => e.id === 'logo')!;
+    // a 400 × 200 box, a square crop region (zoom 2 of a 400 × 400 picture), its focus at 25 %, a quarter turn
+    const turned: MeasuredElement = { ...logo, box: { x: 0, y: 0, w: 400, h: 200 }, rotate: 90, attrs: { ...logo.attrs, 'data-crop': '2 25% 50%' }, image: { ...logo.image!, natural: { w: 400, h: 400 }, fit: 'contain', position: [0.25, 0.5] } };
+    const out = named(on(cover)(turned), 'logo');
+    if (out.kind !== 'image') throw new Error('a picture');
+    const o = out.options as { x: number; y: number; rotate: number; sizing: { w: number; h: number } };
+    // unturned the region is drawn 200 × 200 at (50, 0), centred at (150, 100); the quarter turn about the element's
+    // centre (200, 100) takes that centre to (200, 50)
+    expect([px(o.sizing.w), px(o.sizing.h), o.rotate]).toEqual([200, 200, 90]);
+    nearCanvas(px(o.x) + 100, 200);
+    nearCanvas(px(o.y) + 100, 50);
+    // uncropped and contained the same: a 400 × 400 picture drawn 200 × 200 at (50, 0)
+    const whole = named(on(cover)({ ...turned, attrs: { alt: 'Logo' } }), 'logo');
+    nearCanvas(px((whole.options as { x: number }).x) + 100, 200);
+    nearCanvas(px((whole.options as { y: number }).y) + 100, 50);
+  });
+  // (the exports-capture regressions end)
 });

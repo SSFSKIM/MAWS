@@ -9,6 +9,14 @@
 // (`SLIDE_LIMITS.notes`; the loader would hold the slide) are not written: the owner's text stays in the field, the
 // refusal says why, and the field writes again once it is short enough. While the field holds text the model refused,
 // remote changes are carried onto it as onto a composition.
+//
+// P3-F (L203): that refused text is the tab's (`DeckSession.notesDraft`), not this body's, so the field mounting again
+// (another slide and back, a version shown and left, a tab switch) shows it again with its refusal, carried onto the
+// notes as they are now.
+//
+// Fix wave: carried onto a change made elsewhere, kept text may come within the limit; it is still not written (no
+// write is the field's own doing, mounted or not), so it shows as not saved, with Save, until the owner saves or edits
+// it. Over the limit it reads as refused, counted as it is now.
 import { useEffect, useRef, useState } from 'react';
 import * as Y from '../../yjs/slides';
 import { mapCaret, rebaseText } from '../caret';
@@ -21,16 +29,20 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
   const field = useRef<HTMLTextAreaElement>(null);
   const composingFrom = useRef<string | null>(null); // the model's notes when a composition began
   const shownFrom = useRef(''); // the model's notes the field's text derives from
-  const [refused, setRefused] = useState<number | null>(null); // the length of text refused, while the field holds it
+  // the length of the text the field holds unwritten, refused or kept since (L203: the session's kept text, at mount)
+  const [unwritten, setUnwritten] = useState<number | null>(() => session.unwrittenNotes(slideId)?.length ?? null);
   const doc = session.doc;
+
+  // L203: the field's unwritten text is the tab's (its session), typed over the notes the field shows it from
+  const keep = (text: string | null) => {
+    session.keepNotesDraft(slideId, text === null ? null : { text, from: shownFrom.current });
+    setUnwritten(text === null ? null : text.length);
+  };
 
   const write = (value: string) => {
     if (readOnly) return;
-    if (value.length > SLIDE_LIMITS.notes) {
-      setRefused(value.length);
-      return;
-    }
-    setRefused(null);
+    if (value.length > SLIDE_LIMITS.notes) return keep(value);
+    keep(null);
     session.typing(`notes:${slideId}`, (origin) => setNotes(doc, slideId, value, origin));
     shownFrom.current = value;
   };
@@ -38,8 +50,11 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
   // the field follows the model: at mount, and at each change of the notes made elsewhere
   useEffect(() => {
     const el = field.current!;
-    el.value = Y.readNotes(doc, slideId);
-    shownFrom.current = el.value;
+    const notes = Y.readNotes(doc, slideId);
+    const kept = session.unwrittenNotes(slideId); // L203
+    el.value = kept ?? notes;
+    shownFrom.current = notes;
+    setUnwritten(kept === null ? null : kept.length);
     composingFrom.current = null;
     const stop = Y.observeSlide(doc, slideId, (changes, origin) => {
       if (composingFrom.current !== null || origin === session.origin) return;
@@ -49,6 +64,7 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
       // text the model refused stays the owner's, carried onto the change
       const shown = before === shownFrom.current ? next : rebaseText(shownFrom.current, before, next);
       shownFrom.current = next;
+      if (session.notesDraft(slideId)) keep(shown); // L203: kept as carried, and counted again
       if (shown === before) return;
       const focused = el.ownerDocument.activeElement === el;
       const [start, end] = [el.selectionStart, el.selectionEnd];
@@ -58,13 +74,14 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
     return stop;
   }, [doc, slideId, token, session]);
 
+  const refused = unwritten !== null && unwritten > SLIDE_LIMITS.notes;
   return (
     <div className="deck-notes">
       <textarea
         ref={field}
         className="deck-notes-field"
         aria-label={C.notes}
-        aria-invalid={refused !== null || undefined}
+        aria-invalid={refused || undefined}
         placeholder={C.notesPlaceholder}
         readOnly={readOnly}
         spellCheck
@@ -87,9 +104,17 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
           write(merged);
         }}
       />
-      {refused !== null && (
+      {unwritten !== null && (
         <p role="alert" className="deck-notes-refused">
-          {C.notesTooLong(refused, SLIDE_LIMITS.notes)}
+          {refused ? C.notesTooLong(unwritten, SLIDE_LIMITS.notes) : C.notesNotSaved}
+          {!refused && !readOnly && (
+            <>
+              {' '}
+              <button type="button" className="deck-button" onClick={() => write(field.current!.value)}>
+                {C.saveNotes}
+              </button>
+            </>
+          )}
         </p>
       )}
     </div>

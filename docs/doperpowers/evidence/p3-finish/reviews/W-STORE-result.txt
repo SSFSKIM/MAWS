@@ -1,0 +1,13 @@
+W-STORE round1: needs fixes before authoritative gate. Reviewer a64e6ed27a8f39b3f.
+Exact source:af74add9b,46bb88734,46dac3eb4,c1eb9bd74,33ecf47c0,f71d7e046; MINI excluded.
+Four Important findings, verified by controller and all within intended bounded scope:
+1 Validate create kind/domain and regular-file path before streaming; current register/withDigest can open a refused FIFO/device before existing refusal.
+2 Revalidate source/references after digest await before write; duplicate captures designSystemId S, source can move off S and S can be deleted while digest waits, then stale S is inserted. Audit create/byte-restore await boundaries too.
+3 Raw preview.tokens inline on .ds-doc shadows pinned Scope private font aliases. Real scoped consumers must let Scope own overrides; preserve unscoped fallback. Test pinned bundled-family override and asset URL.
+4 Empty document plus synthetic i accent probe is not rendered-content restyle proof. Seed real token-painted links/marks and check actual visible content before/after/in retained preview; keep deck headline proof.
+Fresh fix executor a9b6e9e5eb14418ce owns the fix wave. No code patched by controller.
+Folder-filter local checks violated named-file rule and are retained with exact scope in waves/W-STORE-checkpoint.json. holds5s timeout is unresolved, not an accepted baseline. No local checks were run by reviewer; counts/lint worker-reported, native/export/e2e proof pending.
+
+Round2 on10c238a01/25b29e64f/15863818e: reference revalidation, scoped font alias ownership and actual rendered-link proof are coherent. Raw logs independently substantiate82/157/58 GREEN totals; no checks rerun. One Important residue remains in create: invalid HTML+path still streams. Reviewer specified restricting digest preparation to file kind and adding that case to the no-stream regression; controller verified and returned this mechanical correction to the worker. No third broad review loop. Native/typecheck/union remain pending. Expected SQLite and Vitest transform-cache messages are retained as informational, not claimed absent and not a new product defect.
+
+Mechanical residue correction5b5017f9d adds input.kind !== file to the bypass guard and the HTML+path no-stream regression. Controller verified the entire exact diff and retained RED1fail/30skip then GREEN82pass log summaries. It is exactly the bounded correction prescribed by round2, not a new design or third broad review. No material review finding remains unaddressed; remote typecheck/unit/e2e still required.

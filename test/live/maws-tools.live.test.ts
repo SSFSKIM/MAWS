@@ -184,7 +184,7 @@ describe('the maws tool server, live (E1 M2)', () => {
     expect(transcript?.text).toContain('[MAWS ask ');
   }, CASE_MS);
 
-  // P3-L M6b: the `artifact` pane (E2's `deliverable` until the cutover); the recording this re-records was renamed so
+  // P3-L M6b: the `artifact` pane (E2's `deliverable` until the cutover); pass3/p1-maws-show-pane is the pre-rename recording, and e2e replays a derived copy with the pane renamed (e2e/fixtures/derived/p1-maws-show-pane-artifact.jsonl)
   it('4 show_pane: terminal opened, artifact not in this build, an unknown pane refused', async (ctx) => {
     const g = liveCase(gate, ctx);
     await withSession(g, 'p1-maws-show-pane', async (s) => {

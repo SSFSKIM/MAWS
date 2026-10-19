@@ -100,4 +100,46 @@ describe('DirectToolHints: lifetimes', () => {
     expect(hints.publish(sources[0]!, ROWS_READ, { admittedAt: pending })).toBe(false);
     expect(hints.readOnly(sources[0]!, 'rows')).toBeNull();
   });
+
+  // P3-F L269: an invalidation reaches only the identity it concerns, so an unrelated first listing is never late.
+  it('a withdrawal never suppresses an unrelated source’s pending first listing; the withdrawn credential’s pending ones stay out', () => {
+    const hints = new DirectToolHints();
+    const open = { ...SOURCE, sourceId: 'source-open' };
+    const elsewhere = { ...SOURCE, sourceId: 'source-c2' };
+    const underWithdrawn = { ...SOURCE, sourceId: 'source-c1' };
+    hints.publish(SOURCE, ROWS_READ, { admittedAt: hints.admit(), credential: { connectionId: C1, credentialEpoch: 1 } });
+    const pendingOpen = hints.admit(); // first listings of other sources, in flight across the withdrawal
+    const pendingC2 = hints.admit();
+    const pendingC1 = hints.admit();
+    hints.withdraw(C1, 1);
+    expect(hints.publish(open, ROWS_READ, { admittedAt: pendingOpen })).toBe(true);
+    expect(hints.publish(elsewhere, ROWS_READ, { admittedAt: pendingC2, credential: { connectionId: C2, credentialEpoch: 1 } })).toBe(true);
+    expect(hints.publish(underWithdrawn, ROWS_READ, { admittedAt: pendingC1, credential: { connectionId: C1, credentialEpoch: 1 } })).toBe(false);
+    expect(hints.readOnly(open, 'rows')).toBe(true);
+    expect(hints.readOnly(elsewhere, 'rows')).toBe(true);
+    expect(hints.readOnly(underWithdrawn, 'rows')).toBeNull();
+  });
+
+  it('an eviction never suppresses an unrelated source’s pending first listing', () => {
+    const hints = new DirectToolHints({ sources: 2, toolsPerSource: 8 });
+    const [a, b, c, d] = ['a', 'b', 'c', 'd'].map((id) => ({ ...SOURCE, sourceId: id }));
+    hints.publish(a!, ROWS_READ, { admittedAt: hints.admit() });
+    const pending = hints.admit();
+    hints.publish(b!, ROWS_READ, { admittedAt: hints.admit() });
+    hints.publish(c!, ROWS_READ, { admittedAt: hints.admit() }); // evicts a
+    expect(hints.publish(d!, ROWS_READ, { admittedAt: pending })).toBe(true);
+    expect(hints.readOnly(d!, 'rows')).toBe(true);
+    expect(hints.publish(a!, ROWS_READ, { admittedAt: pending })).toBe(false); // a's own pending listing stays out
+  });
+
+  it('remembers invalidations within its bound; past it, a publisher admitted before a forgotten one is refused everywhere', () => {
+    const hints = new DirectToolHints({ sources: 2, toolsPerSource: 8 });
+    const ancient = hints.admit();
+    for (let index = 0; index < 6; index++) hints.publish({ ...SOURCE, sourceId: `s${index}` }, ROWS_READ, { admittedAt: hints.admit() }); // four evictions
+    const recent = hints.admit();
+    hints.publish({ ...SOURCE, sourceId: 's6' }, ROWS_READ, { admittedAt: hints.admit() }); // a fifth
+    expect((hints as unknown as { sourceFences: Map<string, unknown> }).sourceFences.size).toBeLessThanOrEqual(2);
+    expect(hints.publish({ ...SOURCE, sourceId: 'fresh' }, ROWS_READ, { admittedAt: ancient })).toBe(false); // fails closed
+    expect(hints.publish({ ...SOURCE, sourceId: 'fresh' }, ROWS_READ, { admittedAt: recent })).toBe(true);
+  });
 });

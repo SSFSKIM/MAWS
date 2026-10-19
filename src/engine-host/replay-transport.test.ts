@@ -90,6 +90,91 @@ describe('replay transport plays a fixture and advances on the adapter\'s writes
     expect(frameOf(items[2]!)).toMatchObject({ user_message_uuids: ['MINT-U'], user_message_uuid: 'MINT-U' });
   });
 
+  // P3-F L242: the moment the engine takes the first prompt, when it writes the session's transcript
+  it('tells onFirstUser the first user write it takes, once, as written', async () => {
+    const journal = [
+      row(1, 'out', { type: 'user', uuid: 'rec-u', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null }),
+      row(2, 'in', { type: 'result', user_message_uuids: ['rec-u'] }),
+      row(3, 'out', { type: 'user', uuid: 'rec-v', message: { role: 'user', content: 'again' }, parent_tool_use_id: null }),
+      row(4, 'in', { type: 'result', user_message_uuids: ['rec-v'] }),
+      row(5, 'meta', { event: 'exit', code: 0, signal: null }),
+    ];
+    const firstUser = vi.fn();
+    const transport = replayEngine(journal, { prelude, onFirstUser: firstUser });
+    const first: StdinFrame = { type: 'user', uuid: 'MINT-U', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null };
+    void transport.write(first);
+    await take(transport.frames, 1);
+    expect(firstUser).toHaveBeenCalledTimes(1);
+    expect(firstUser).toHaveBeenCalledWith(first);
+    void transport.write({ type: 'user', uuid: 'MINT-V', message: { role: 'user', content: 'again' }, parent_tool_use_id: null });
+    await take(transport.frames, 1);
+    expect(firstUser).toHaveBeenCalledTimes(1);
+  });
+
+  // P3-F L242 (review): the transcript the hook writes is what makes the conversation exist (a side thread, a fork), so
+  // nothing the replay plays after the first prompt, its reply or result, reaches the consumer before the hook settles
+  describe('holds the replay at the first prompt until onFirstUser settles', () => {
+    const journal = [
+      row(1, 'out', { type: 'user', uuid: 'rec-u', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null }),
+      row(2, 'in', { type: 'assistant', message: { content: [{ type: 'text', text: 'hello' }] } }),
+      row(3, 'in', { type: 'result', user_message_uuids: ['rec-u'] }),
+      row(4, 'meta', { event: 'exit', code: 0, signal: null }),
+    ];
+    const first: StdinFrame = { type: 'user', uuid: 'MINT-U', message: { role: 'user', content: 'hi' }, parent_tool_use_id: null };
+    const held = () => {
+      let settle!: () => void;
+      let fail!: (error: Error) => void;
+      const hook = vi.fn(() => new Promise<void>((resolve, reject) => ((settle = resolve), (fail = reject))));
+      return { hook, settle: () => settle(), fail: (error: Error) => fail(error) };
+    };
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+    it('plays no reply or result, and settles no write, until the hook settles; then plays on as recorded', async () => {
+      const seed = held();
+      const transport = replayEngine(journal, { prelude, onFirstUser: seed.hook });
+      let written = false;
+      void transport.write(first).then(() => (written = true));
+      const it = transport.frames[Symbol.asyncIterator]();
+      let delivered: TransportItem | null = null;
+      const next = it.next().then((r) => (delivered = r.value as TransportItem));
+      await tick();
+      expect(seed.hook).toHaveBeenCalledWith(first);
+      expect(delivered).toBeNull();
+      expect(written).toBe(false);
+      seed.settle();
+      await next;
+      expect(written).toBe(true);
+      expect(frameOf(delivered!)).toMatchObject({ type: 'assistant' });
+      expect(frameOf((await it.next()).value as TransportItem)).toMatchObject({ type: 'result', user_message_uuids: ['MINT-U'] });
+      expect((await it.next()).done).toBe(true);
+    });
+
+    it('plays on when the hook fails (the hook reports its own failure)', async () => {
+      const seed = held();
+      const transport = replayEngine(journal, { prelude, onFirstUser: seed.hook });
+      const write = transport.write(first);
+      const next = transport.frames[Symbol.asyncIterator]().next();
+      await tick();
+      seed.fail(new Error('disk full'));
+      await expect(write).resolves.toBeUndefined();
+      expect(frameOf((await next).value as TransportItem)).toMatchObject({ type: 'assistant' });
+    });
+
+    it('ends at once on a kill while the hook is pending: the reader finishes, the write rejects, nothing hangs', async () => {
+      const seed = held();
+      const transport = replayEngine(journal, { prelude, onFirstUser: seed.hook });
+      const write = transport.write(first);
+      const next = transport.frames[Symbol.asyncIterator]().next();
+      await tick();
+      transport.kill('SIGTERM');
+      await expect(next).resolves.toEqual({ value: undefined, done: true });
+      await expect(write).rejects.toThrow('the replay ended');
+      await expect(transport.exited).resolves.toEqual({ code: null, signal: 'SIGTERM' });
+      seed.settle(); // late: changes nothing
+      await tick();
+    });
+  });
+
   it('matches a recorded control_cancel_request for a host-minted request by the id this run minted for it, and still refuses a cancel of another id', async () => {
     // a journal the host wrote under launch AAAAAAAA, replayed under launch BBBBBBBB
     const journal = [

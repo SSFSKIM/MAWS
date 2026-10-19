@@ -701,7 +701,7 @@ export function normColor(raw: string): string | null {
     const ch = parts.slice(0, 3).map((p) => {
       const pm = NUM_RE.exec(p);
       if (!pm) return NaN;
-      return pm[2] === '%' ? Number(pm[1]) * 2.55 : Number(pm[1]);
+      return pm[2] === '%' ? Math.round((Number(pm[1]) * 255) / 100) : Number(pm[1]); // a percentage names an 8-bit channel, rounded as the browser stores it (P3-F slide-model sweep#1)
     });
     if (ch.some((c) => Number.isNaN(c))) return null;
     const exact = ch.every((c) => Number.isInteger(c) && c >= 0 && c <= 255);

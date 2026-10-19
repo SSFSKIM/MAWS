@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
@@ -8,6 +9,7 @@ import { applyV1, applyV2, canonicalV2, contentIdsOf, decodeMap, diffV1, idAt, i
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ArtifactStoreError } from './errors';
+import { restoreArtifact } from './restore';
 import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
 import { ArtifactStore, AUTO_EVERY_MS, AUTO_IDLE_MS, type ArtifactChanged } from './store';
@@ -191,6 +193,15 @@ describe('ArtifactStore: entities, spaces and links', () => {
     await store.delete(doc.id);
     await store.delete(system.id);
     expect(store.get(system.id)).toBeNull();
+  });
+
+  // P3-F (artifact-protocol review, linkInWrite): a link that commits with a write is written inside that write's frame
+  it('refuses linkInWrite outside a write’s savepoint, as the op ledger’s record does, and writes it inside one', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Notes' }, human);
+    expect(() => store.linkInWrite(doc.id, sid('app-1'), 'edited')).toThrow(/outside a write's savepoint/);
+    expect(store.links(doc.id)).toEqual([]);
+    await service.inBatch(() => store.linkInWrite(doc.id, sid('app-1'), 'edited'));
+    expect(store.links(doc.id)).toEqual([{ artifactId: doc.id, appSessionId: 'app-1', role: 'edited', lastAt: now }]);
   });
 });
 
@@ -659,6 +670,45 @@ describe('ArtifactStore: versions (Decision Log 8)', () => {
     expect(upgraded).toMatchObject({ kind: 'named', label: 'Current', assetRefs: [asset.assetId] });
     expect(upgraded.designSystemRef).toBeUndefined();
   });
+
+  // P3-F (store-versions sweep#1): the pin is read only where a version row of the artifact is written (Decision Log 22b)
+  it('leaves the governing system’s history alone when markViewed finds the doc unmoved', async () => {
+    const system = await store.create({ kind: 'design_system', title: 'House style' }, human);
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# v1'));
+    const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: system.id }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'text'));
+    await store.markViewed(doc.id); // the doc moved: its auto version pins the system, writing the system's first
+    expect(store.listVersions(system.id)).toHaveLength(1);
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# v2')); // the system moves
+    const systemAt = store.get(system.id)!.updatedAt;
+    now += MIN;
+    await store.markViewed(doc.id); // the doc did not: no version of it, so nothing to pin
+    expect(store.listVersions(doc.id)).toHaveLength(1);
+    expect(store.listVersions(system.id)).toHaveLength(1);
+    expect(store.get(system.id)!.updatedAt).toBe(systemAt);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'more '));
+    await store.markViewed(doc.id); // a version written pins the system as it is now
+    expect(store.listVersions(system.id)).toHaveLength(2);
+    expect(store.listVersions(doc.id).at(-1)!.designSystemRef).toEqual({ id: system.id, versionSeq: store.revision(system.id) });
+  });
+
+  it('leaves the governing system’s history alone when a byte kind’s turn finds no auto version to upgrade', async () => {
+    const system = await store.create({ kind: 'design_system', title: 'House style' }, human);
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# v1'));
+    const page = await store.create({ kind: 'html', title: 'Page', designSystemId: system.id, content: { bytes: html('one') } }, agent); // an import version, pinning the system
+    expect(store.listVersions(system.id)).toHaveLength(1);
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# v2')); // the system moves
+    const systemAt = store.get(system.id)!.updatedAt;
+    now += MIN;
+    await store.endTurn(sid('app-1')); // the agent's write has an import version: no auto to upgrade, no version written
+    expect(store.listVersions(page.id).map((v) => v.kind)).toEqual(['import']);
+    expect(store.listVersions(system.id)).toHaveLength(1);
+    expect(store.get(system.id)!.updatedAt).toBe(systemAt);
+    await store.writeContent(page.id, { bytes: html('two') }, agent);
+    await store.endTurn(sid('app-1')); // its auto version becomes the turn's, pinning the system as it is now
+    expect(store.listVersions(page.id).map((v) => v.kind)).toEqual(['import', 'turn']);
+    expect(store.listVersions(page.id).at(-1)!.designSystemRef).toEqual({ id: system.id, versionSeq: store.revision(system.id) });
+  });
 });
 
 describe('ArtifactStore: restore (Decision Log 16)', () => {
@@ -773,6 +823,54 @@ describe('ArtifactStore: restore (Decision Log 16)', () => {
     expect(live.get('threads').getAttr('t1')).toBe('a posted message');
     expect(live.get('meta').getAttr('restoredFrom')).toBe(at);
     expect(committed('SELECT threadId FROM artifact_threads WHERE artifactId = ?', doc.id)).toEqual([{ threadId: 't1' }]);
+  });
+
+  // P3-F (store-versions scalpel-3#1): the restore reads the artifact and the version again where it writes, as a byte
+  // kind's does
+  it('never writes a restore on an artifact deleted before its write: one asked with a delete lands first or not at all', async () => {
+    const doc = await schemaAgnostic();
+    const at = (await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    await write(doc.id, agent, (d) => d.get('root').setAttr('title', 'Agent title'));
+    let wroteOnDeleted: boolean | null = null;
+    const restoring = store.restore(doc.id, at, human, () => (wroteOnDeleted = store.get(doc.id) === null));
+    const [restored, deleted] = await Promise.allSettled([restoring, store.delete(doc.id)]);
+    expect(deleted.status).toBe('fulfilled');
+    if (restored.status === 'rejected') expect(restored.reason).toMatchObject({ code: 'notFound' });
+    expect(wroteOnDeleted).not.toBe(true); // its write saw the artifact live, or never ran
+
+    // a caller holding the rows it read before an await: refused where it writes, with nothing written
+    const later = await schemaAgnostic();
+    const v1 = (await store.createVersion(later.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    await write(later.id, agent, (d) => d.get('root').setAttr('title', 'Agent title'));
+    const row = store.entity(later.id)!;
+    const version = store.requireVersion(later.id, v1);
+    await store.delete(later.id);
+    const rows = () => [committed('SELECT COUNT(*) AS n FROM artifact_updates WHERE artifactId = ?', later.id), committed('SELECT COUNT(*) AS n FROM artifact_versions WHERE artifactId = ?', later.id)];
+    const before = rows();
+    await expect(restoreArtifact(store, row, version, human)).rejects.toMatchObject({ code: 'notFound' });
+    expect(rows()).toEqual(before);
+    expect(service.loaded(later.id)).not.toBeNull(); // refused before anything was written: the doc was not reset
+  });
+
+  // P3-F (store-versions scalpel-3#2): the bracketing auto and the revert are of one state, in one frame (Decision Log 16)
+  it('brackets the restore with an auto of the very state it reverts, so an edit landing as it is asked is kept or versioned', async () => {
+    const doc = await schemaAgnostic();
+    const at = (await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    await write(doc.id, agent, (d) => d.get('root').setAttr('title', 'Agent title'));
+    const restoring = store.restore(doc.id, at, human);
+    const typed = write(doc.id, other, (d) => d.get('notes').insert(0, 'typed meanwhile')); // a replica's update reaching the host now
+    const [result] = await Promise.all([restoring, typed]);
+    const versions = store.listVersions(doc.id);
+    const restore = versions.findIndex((v) => v.id === result.versionId);
+    const bracket = versions[restore - 1];
+    expect(bracket).toMatchObject({ kind: 'auto' });
+    expect(versions[restore].seq).toBe(bracket.seq + 1); // nothing landed unversioned between the bracket and the revert
+    const notes = (state: Uint8Array) => {
+      const d = newDoc();
+      applyV2(d, state);
+      return d.get('notes').toString();
+    };
+    expect([notes(service.readState(doc.id).state), notes(store.versionState(doc.id, bracket.id))]).toContain('typed meanwhile');
   });
 });
 
@@ -1045,6 +1143,30 @@ describe('ArtifactStore: maintenance and thinning (Decision Log 5, 8)', () => {
     expect(existsSync(store.contentRef(page.id).path)).toBe(true);
     const latest = store.listVersions(doc.id)[0];
     expect(canonicalV2(store.versionState(doc.id, latest.id))).toEqual(canonicalV2(service.readState(doc.id).state));
+  });
+
+  // P3-F (store-versions scalpel-1#2): a file staged for a write a kill interrupted is collected once past the age any
+  // write in flight could hold it for; a fresh one, and a file a row names in place, stay
+  it('collects staged temp files a kill left once an hour old, keeping a fresh one and a file artifact’s file in place', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const staged = (artifactId: string, name: string, age: number) => {
+      const path = join(dir, artifactId, 'tmp', name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, 'bytes');
+      utimesSync(path, (now - age) / 1000, (now - age) / 1000);
+      return path;
+    };
+    const stale = staged(doc.id, randomUUID(), 2 * HOUR);
+    const orphaned = staged(randomUUID(), randomUUID(), DAY); // under the directory of a create the kill took back
+    const fresh = staged(doc.id, randomUUID(), MIN);
+    const inPlace = staged(doc.id, 'report.pdf', DAY);
+    const file = await store.create({ kind: 'file', title: 'report.pdf', content: { path: inPlace } }, agent);
+    await store.maintenance.run();
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(orphaned)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    expect(existsSync(inPlace)).toBe(true);
+    expect(store.contentRef(file.id).path).toBe(inPlace);
   });
 });
 

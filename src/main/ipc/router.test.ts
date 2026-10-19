@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
+import type { HostDispatch } from './router';
 
 // Electron is faked: `ipcMain.handle` records one handler per channel, and each fake window is the one whose
 // webContents the fake event names as its sender.
@@ -132,6 +133,16 @@ describe('main ipc router', () => {
     expect(dispatch).not.toHaveBeenCalled();
     const { isBridgedCommandName } = await import('@shared/ipc/names');
     expect(isBridgedCommandName('engine.configure')).toBe(false);
+  });
+
+  // P3-F (artifact-protocol finding 6): the answer to the host's export request is main's export service's alone, so a
+  // window that saw the request cannot settle it first
+  it('refuses a window’s maws.artifact.exported before host dispatch', async () => {
+    const dispatch = vi.fn<HostDispatch>(async () => ({ ok: true, value: { outcome: 'delivered' } }));
+    await load(DEV_URL, dispatch);
+    const fabricated = { appSessionId: 'app-1', requestId: 'mcp-export', answer: { ok: false, error: 'fabricated' } };
+    await expect(invoke(appWindow(), 'maws.artifact.exported', fabricated)).resolves.toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('hands a host dispatcher the owner, the name and the validated input', async () => {

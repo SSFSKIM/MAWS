@@ -144,7 +144,11 @@ export const Find = Extension.create({
               return n === 0 ? value : build(state.doc, value.query, (value.current + meta.step + n) % n, value.matches);
             }
             if (!tr.docChanged || !value.query) return value;
-            return build(state.doc, value.query, value.current);
+            // P3-F: the current match is the text it was on, mapped through the change (an occurrence written before it,
+            // here or by another replica, moves its index, not it); gone, the next match after where it was
+            const was = value.matches[value.current];
+            const matches = matchesIn(state.doc, value.query);
+            return build(state.doc, value.query, was ? firstAtOrAfter(matches, tr.mapping.map(was.from)) : value.current, matches);
           },
         },
         props: { decorations: (state) => findKey.getState(state)?.decorations ?? DecorationSet.empty },

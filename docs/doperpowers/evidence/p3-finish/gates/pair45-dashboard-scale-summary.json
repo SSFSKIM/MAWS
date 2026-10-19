@@ -1,0 +1,91 @@
+{
+  "source": "55d012a2e1245a872cf44764842fc155e3276aef",
+  "wrapper": "b1c6c53c2d0740a7a4eba1965da38ad68c52b4b4",
+  "run": 39156492025,
+  "earlyNotFinal": true,
+  "raw": "pair45-dashboard-scale-raw.json",
+  "rows": [
+    {
+      "row": "1 bind",
+      "value": 94.15,
+      "bound": "every admitted trial ≤ 2,000 ms",
+      "verdict": "met",
+      "admitted": 3
+    },
+    {
+      "row": "1b bind at the row limit",
+      "value": 368.29,
+      "bound": "recorded",
+      "verdict": "recorded",
+      "admitted": 1
+    },
+    {
+      "row": "2 open cold",
+      "value": 769.5,
+      "bound": "every admitted trial ≤ 1,000 ms",
+      "verdict": "met",
+      "admitted": 3
+    },
+    {
+      "row": "3 render 10,000 points",
+      "value": 30.6,
+      "bound": "every admitted trial ≤ 200 ms",
+      "verdict": "met",
+      "admitted": 3
+    },
+    {
+      "row": "2b open warm",
+      "value": 412.1,
+      "bound": "recorded",
+      "verdict": "recorded",
+      "admitted": 1
+    },
+    {
+      "row": "4 replace to all views",
+      "value": 454,
+      "bound": "every admitted trial ≤ 500 ms",
+      "verdict": "met",
+      "admitted": 3
+    },
+    {
+      "row": "5b sheet reads every raw row",
+      "value": 45,
+      "bound": "recorded",
+      "verdict": "recorded",
+      "admitted": 1
+    },
+    {
+      "row": "5 source scroll",
+      "value": 9.6,
+      "bound": "pooled p95 ≤ 16 ms; any long task over 50 ms fails it",
+      "verdict": "met",
+      "admitted": 3
+    },
+    {
+      "row": "6 renderer",
+      "value": 171.9,
+      "bound": "≤ 500 MB, idle from 30 s",
+      "verdict": "met",
+      "admitted": 7
+    }
+  ],
+  "memory": {
+    "value": 171.9,
+    "pairSeconds": [
+      30,
+      40
+    ],
+    "excluded": [],
+    "loads": [
+      4.81,
+      4.66,
+      5.44,
+      4.99,
+      4.54,
+      4.53,
+      4.46
+    ]
+  },
+  "loadContext": "start6.7,end4.19; cold-open attempt at30.69 (settle peak46.65) retained but not among three admitted below10 trials",
+  "viewer": "after19:33:02Z disconnect; viewer-free per CI-opt custody record"
+}

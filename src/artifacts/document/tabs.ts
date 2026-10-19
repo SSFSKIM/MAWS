@@ -3,6 +3,7 @@
 // binds and the writer edits. Tabs sort by a fractional `order` key, so a reorder writes one attribute and two
 // replicas reordering concurrently converge without renumbering.
 import type { Node as PMNode } from '@tiptap/pm/model';
+import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
 import { transact, type Doc, type Node } from '../yjs';
 import { YNode } from '../yjs/document';
 import { pmnodeToDelta } from '../yjs/prosemirror';
@@ -69,9 +70,13 @@ export function createDocument(doc: Doc, { title, body, id, generateID = nanoid8
   return tabId;
 }
 
-/** Adds a tab after `after` (default: last). Returns its id. */
+/** The document's tab limit as the guide states it, which the editor shows on its refused Add tab (P3-F, tracker L155). */
+export const TAB_LIMIT_REFUSAL = `A document holds at most ${DOCUMENT_LIMITS.tabs} tabs`;
+
+/** Adds a tab after `after` (default: last), refused before any write at `DOCUMENT_LIMITS.tabs`. Returns its id. */
 export function addTab(doc: Doc, { title, body, id, generateID = nanoid8, after }: NewTab & { after?: string }, origin?: unknown): string {
   const tabs = listTabs(doc);
+  if (tabs.length >= DOCUMENT_LIMITS.tabs) throw new Error(`addTab: a document holds at most ${DOCUMENT_LIMITS.tabs} tabs`);
   const at = after == null ? tabs.length - 1 : tabs.findIndex((tab) => tab.id === after);
   if (after != null && at < 0) throw new Error(`addTab: no tab ${after}`);
   const tabId = id ?? generateID();
@@ -137,11 +142,23 @@ function rekey(doc: Doc, rekeyed: Array<{ id: string; order: string }>): void {
   for (const { id, order } of rekeyed) tabNode(doc, id)?.setAttr('order', order);
 }
 
-/** Deletes a tab and its body. A document keeps at least one tab. */
+/** Deletes a tab and its body. A document keeps at least one tab (`ensureTab` restores one the guard could not keep). */
 export function deleteTab(doc: Doc, tabId: string, origin?: unknown): void {
   if (!tabNode(doc, tabId)) throw new Error(`deleteTab: no tab ${tabId}`);
   if (listTabs(doc).length === 1) throw new Error('deleteTab: a document keeps its last tab');
   transact(doc, () => tabsRoot(doc).deleteAttr(tabId), origin);
+}
+
+/**
+ * Gives a document that has no tab one empty tab again: two replicas each deleting one of its last two tabs both pass
+ * `deleteTab`'s guard, and the merged document has none (P3-F, document-model sweep#5); the host's repair calls this
+ * after an update that deleted a tab of a document with no files (files and no tab is a held legacy dashboard, which
+ * keeps its hold). Its title is empty (the editor shows an untitled tab). Answers whether it wrote.
+ */
+export function ensureTab(doc: Doc, generateID: () => string = nanoid8, origin?: unknown): boolean {
+  if (listTabs(doc).length > 0) return false;
+  createDocument(doc, { title: '', generateID }, origin);
+  return true;
 }
 
 // ── fractional order keys ──

@@ -4,7 +4,6 @@
 // going inactive, its window's document hiding and a history preview hide the surface, never ending the watch; the tab's
 // end closes it. The view's label says the live pause; the source sheet's Start runs H's context and start policy (an
 // artifact with no context refuses in H's words), and nothing starts a session from a mount or ten minutes of timers.
-import '../../../../../test/support/artifacts-dom-setup'; // first: the editor loads KaTeX, which warns under happy-dom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setDataset, type DatasetDescriptor } from '@artifacts/dashboard/datasets';

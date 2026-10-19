@@ -100,8 +100,10 @@ const nextReload = () => ++reloadSerial;
 
 type Read<T> = { status: 'reading' } | { status: 'ready'; value: T } | { status: 'error'; error: string };
 
-// One read per key (none while the key is null); an answer for a key no longer asked is dropped.
-function useRead<T>(key: string | null, read: () => Promise<{ ok: true; value: T } | { ok: false; error: { message: string } }>): Read<T> {
+// One read per key (none while the key is null); an answer for a key no longer asked is dropped. A change of `again`
+// reads the same key afresh while its last answer stands (review scalpel-1#1: a re-read moves nothing on screen until
+// its own answer lands).
+function useRead<T>(key: string | null, read: () => Promise<{ ok: true; value: T } | { ok: false; error: { message: string } }>, again?: unknown): Read<T> {
   const [answer, setAnswer] = useState<{ key: string; read: Read<T> } | null>(null);
   const latest = useRef(read);
   useEffect(() => {
@@ -116,7 +118,7 @@ function useRead<T>(key: string | null, read: () => Promise<{ ok: true; value: T
     return () => {
       live = false;
     };
-  }, [key]);
+  }, [key, again]);
   return answer?.key === key ? answer.read : { status: 'reading' };
 }
 
@@ -137,7 +139,9 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   const { selected, reloads } = useStore(state.view);
   const row = useLibraryRow(artifactId).value;
   const title = row?.title ?? VIEWERS_COPY.fallbackTitle;
-  const versionsRead = useRead(`${artifactId}@${row?.revision ?? '?'}#${reloads}`, () => ipc.invoke('artifacts.versions', { artifactId }));
+  // read again as the row moves on (a publish), the versions read before standing meanwhile, so the version shown keeps
+  // its frame and an Open asked meanwhile is placed; a Reload reads from nothing
+  const versionsRead = useRead(`${artifactId}#${reloads}`, () => ipc.invoke('artifacts.versions', { artifactId }), row?.revision);
   const ordered = useMemo(() => (versionsRead.status === 'ready' ? versionsInOrder(versionsRead.value.versions) : null), [versionsRead]);
   const shown = ordered ? shownVersion(ordered, placeOfOpenAt(ordered, selected)) : null;
   const revision = shown?.version.seq;
@@ -229,10 +233,12 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   };
 
   // Fix wave 1: what an export or a copy takes, only once the shown version and its file are resolved (null during a
-  // read, a Reload or a remount), so a historical selection is never exported as the live revision. Whole-branch
-  // review: a revision asked for keeps its version id even while it is the latest, so a publish since the read is not
-  // what it exports; only the latest followed exports live.
-  const selection = ordered !== null && content !== null ? { revision: content.revision, versionId: shown && selected !== 'latest' ? shown.version.id : undefined } : null;
+  // read from nothing: the first, a Reload or a remount), so a historical selection is never exported as the live
+  // revision. Whole-branch review: a revision asked for keeps its version id even while it is the latest, so a publish
+  // since the read is not what it exports. Review of 1586d7eeb: a publish's re-read keeps the shown frame, so the latest
+  // followed exports live only while it shows the row's revision, else the version shown, as the actions' revision is.
+  const selection =
+    ordered !== null && content !== null ? { revision: content.revision, versionId: shown && (selected !== 'latest' || row?.revision !== content.revision) ? shown.version.id : undefined } : null;
   useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload: reload, connectors });
   useRegionMarkupSurface(bodyBox, title, body !== null); // P3-G (§D4.1): Mark-up over the drawn body
 

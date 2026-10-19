@@ -3,7 +3,7 @@
 // the artifact target, drawn by the editor's host pinned where the editor locates the passage; Side thread and Send to
 // main carry the anchor, whose tag round-trips; the card resolves and reopens its thread; a sent comment is recorded in
 // the thread and an unsent one withdrawn.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addThread, discardThread, getThread, reply, resolve as resolveThread, threadStatus } from '@artifacts/document/threads';
@@ -14,6 +14,7 @@ import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import type { sendHumanPrompt } from '../../composer/submit/send-human-prompt'; // P3-F (L154)
 import { sendComment } from '../../side/actions';
 import { useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
@@ -22,6 +23,11 @@ import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer } from '../code/anchor/anchor';
 import { artifactCommentAnchor, useDocumentComments } from './comments';
+
+// P3-F (L154): the card thread's Reply goes through the human send seam (one spy for every run of the factory, as
+// CardThread.test.tsx explains)
+const seam = vi.hoisted(() => vi.fn<typeof sendHumanPrompt>());
+vi.mock('../../composer/submit/send-human-prompt', async (original) => ({ ...(await original<typeof import('../../composer/submit/send-human-prompt')>()), sendHumanPrompt: seam }));
 
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const ARTIFACT = 'art-0001';
@@ -265,6 +271,34 @@ describe('a comment on its way outlives its card', () => {
     await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: CHILD, reason: 'no_engine_session', message: 'Not yet' }));
     expect(getThread(doc, passage.threadId)).toBeNull();
     expect(useNotices.getState().notices).toHaveLength(1);
+  });
+
+  // P3-F (L154; B's Decision Log 26 residue): a message typed later in the Side thread's own reply box, the card's
+  // Reply, reaches the document's thread as the comment did, once it went
+  it('records a later reply typed in the card’s thread as the thread’s next message; a refused one is not recorded', async () => {
+    const { doc, reach, comment } = mountLive();
+    let n = 0;
+    vi.mocked(reach.record).mockImplementation((threadId: string, body: string) => {
+      if (getThread(doc, threadId)) reply(doc, threadId, { id: `${threadId}:r${++n}`, by: { kind: 'human' }, at: 2 + n, body });
+    });
+    comment();
+    await act(async () => {});
+    await sendSideThread('Please explain');
+    act(() => useSessions.setState({ records: new Map(useSessions.getState().records).set(CHILD as AppSessionId, record(CHILD as AppSessionId)) }));
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD }));
+    expect(card()!.dataset.cardPhase).toBe('thread');
+    const replyField = () => screen.getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
+    expect(replyField().disabled).toBe(false);
+
+    seam.mockResolvedValueOnce({ disposition: 'sent', started: false });
+    await userEvent.type(replyField(), 'Also the subtitle{Enter}');
+    await waitFor(() => expect(bodies(doc, passage.threadId)).toEqual(['Please explain', 'Also the subtitle']));
+    expect(seam.mock.calls.map(([id, content]) => [id, content])).toEqual([[CHILD, 'Also the subtitle']]);
+
+    seam.mockResolvedValueOnce({ disposition: 'refused', started: false, reason: 'The session is starting' });
+    await userEvent.type(replyField(), 'Not this one{Enter}');
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('The session is starting'));
+    expect(bodies(doc, passage.threadId)).toEqual(['Please explain', 'Also the subtitle']);
   });
 
   it('a send refused while its card shows leaves a draft: Close then withdraws it', async () => {

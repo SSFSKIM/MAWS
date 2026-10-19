@@ -6,7 +6,7 @@
 // on a node the diff inserts are not attribute changes. No DOM; the editor draws what this computes (editor/history).
 import type { Node as PMNode, Schema } from '@tiptap/pm/model';
 import { applyV2, type Carry, type ContentMap, type Doc, type Node as YType } from '../yjs';
-import { ContentType, YNode, createDiffRenderer, newDocGcOff, type DiffRenderer } from '../yjs/document';
+import { ContentType, YNode, createDiffRenderer, newDocGcOff, type DiffRenderer, type Item } from '../yjs/document';
 import { ynodeToPmnode } from '../yjs/prosemirror';
 import { attributedNodes, schemaFor } from './schema';
 import { TABS, listTabs, tabBody, type TabInfo } from './tabs';
@@ -38,7 +38,9 @@ export function openDiff({ prevState, nextState, attributions }: { prevState: Ui
   const renderer = createDiffRenderer(prevDoc, nextDoc, { attributions });
   // A deleted tab's body is gone from `nextDoc` (the host collects deleted content), and drawn from `prevDoc` it reads
   // as alive: the renderer takes a piece's status from its own item. Both states in one gc-off doc keep the body with
-  // its items deleted, which the renderer draws as deletions. Built on first use.
+  // its items deleted, which the renderer draws as deletions. Built on first use. F (L187): the tab drawn is the one the
+  // earlier state held, by its item: a restore that brought the tab back and a later deletion of it again leave the
+  // key's last item the restore's, inserted and deleted inside the window, where the earlier tab is the one before it.
   let both: Doc | null = null;
   const removedBody = (tabId: string): YType | undefined => {
     if (!prevState || tabBody(nextDoc, tabId) || !tabBody(prevDoc, tabId)) return undefined;
@@ -47,7 +49,10 @@ export function openDiff({ prevState, nextState, attributions }: { prevState: Ui
       applyV2(both, prevState);
       applyV2(both, nextState);
     }
-    const tab = both.get(TABS)._map.get(tabId)?.content;
+    const earlier = prevDoc.get(TABS)._map.get(tabId)!.id;
+    let item = both.get(TABS)._map.get(tabId) ?? null;
+    while (item !== null && (item.id.client !== earlier.client || item.id.clock !== earlier.clock)) item = item.left;
+    const tab = item?.content;
     const body = tab instanceof ContentType ? (tab.type as YType)._map.get('body')?.content : undefined;
     return body instanceof ContentType ? (body.type as YType) : undefined;
   };
@@ -316,6 +321,23 @@ const authorOf = (ranges: Ranges, who: 'insert' | 'delete'): Array<{ who: string
 };
 
 /**
+ * Where the text a live format marker (at text index `start`) formats ends: at the next live marker of its key, else at
+ * the block's end. A marker clearing its key (the end of a run) formats nothing after it: `start`.
+ */
+function formattedUntil(marker: Item, start: number): number {
+  const format = marker.content;
+  if (!('key' in format) || !('value' in format) || format.value == null) return start;
+  let end = start;
+  for (let item = marker.right; item !== null; item = item.right) {
+    const content = item.content;
+    if (item.deleted) continue;
+    if (item.countable) end += item.length;
+    else if ('key' in content && content.key === format.key) break;
+  }
+  return end;
+}
+
+/**
  * "Show editors" for the selection [from, to) of the live editor's document: who inserted the visible content in the
  * range, who formatted it, who deleted content inside it, who last set the attributes of its blocks, of the containers
  * holding them (a task's checked state, a callout's tone) and of its inline nodes, each with their latest
@@ -352,7 +374,10 @@ export function showEditors({ doc, from, to, liveRoot, provenance }: { doc: PMNo
       if (item.deleted) {
         if (start > a && start < b) add(provenance.deletes.slice(client, clock, item.length), 'delete', 'del');
       } else if (!item.countable) {
-        if (start >= a && start <= b) add(provenance.inserts.slice(client, clock, item.length), 'insert', 'fmt');
+        // a format marker inside the selection, or one whose formatted text reaches into it from before; a comment's
+        // marker is not formatting (parent Decision Log 29, as `counted` reads it)
+        const comment = 'key' in item.content && typeof item.content.key === 'string' && isCommentKey(item.content.key);
+        if (!comment && start <= b && (start >= a || formattedUntil(item, start) > a)) add(provenance.inserts.slice(client, clock, item.length), 'insert', 'fmt');
       } else if (end > a && start < b) {
         const s = Math.max(a, start) - start;
         const e = Math.min(b, end) - start;
@@ -376,10 +401,12 @@ export function showEditors({ doc, from, to, liveRoot, provenance }: { doc: PMNo
 }
 
 /**
- * The blocks under `root` that a move or a type change re-inserted (parent Decision Log 34; D8b), by block id: a block
- * whose own content carries a `carry` kind in provenance (A's `carryAttribution` marks every carried character and
- * child element of the re-inserted copy). The diff draws that copy as inserted by the original author and the old one
- * as deleted; these are what the preview labels Moved or Retyped. A carried block's children are not listed again.
+ * The blocks under `root` that a carry re-inserted (parent Decision Log 34; D8b), by block id: a block whose own content
+ * carries a `carry` kind in provenance (A's `carryAttribution` marks every carried character and child element of the
+ * re-inserted copy). A move or a type change, and the host's suggestion copies alike (Decision Log 45: an accepted
+ * proposal's copy, a rejected deletion's restored one; F's L160). The diff draws that copy as inserted by the original
+ * author and the old one as deleted; these are what the preview labels Moved, Retyped, Accepted or Restored. A carried
+ * block's children are not listed again.
  */
 export function carriedBlocks(root: YType, attributions: ContentMap): Map<string, Carry['kind']> {
   const carried = new Map<string, Carry['kind']>();
@@ -388,7 +415,7 @@ export function carriedBlocks(root: YType, attributions: ContentMap): Map<string
       if (item.deleted || !item.countable) continue;
       for (const range of attributions.inserts.slice(item.id.client, item.id.clock, item.length)) {
         const kind = range.attrs?.find((attr) => attr.name === 'carry')?.val;
-        if (kind === 'move' || kind === 'retype') return kind;
+        if (kind === 'move' || kind === 'retype' || kind === 'accept' || kind === 'reject') return kind;
       }
     }
     return null;

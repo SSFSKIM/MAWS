@@ -1,14 +1,17 @@
 // P3-C M4 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8): the deck editor over a replica, under happy-dom:
 // the filmstrip's thumbnails, sections, hidden and held slides; the slide gestures as one undo step each; the notes
 // bound by character diff in both directions. Drag reorder, zoom by fit and paint are the e2e's.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyV1, diffV1, newDoc, stateVector, transact, type Doc } from '../../yjs';
+import type { ArtifactVersion } from '@shared/artifacts/version';
+import type { HistoryApi } from '../../document/editor/history/api';
+import { applyV1, diffV1, encodeMap, mergeMaps, newDoc, stateV2, stateVector, transact, type Doc } from '../../yjs';
 import * as Y from '../../yjs/slides';
 import { flushLayout } from '../canvas';
 import { importSlide, readSlide, setNotes, slideOrder, writeDeckKeys } from '../model';
 import { DECK_LIMITS } from '../deck';
 import { loadSlide } from '../parse';
+import { addThread } from '../threads';
 import { DeckEditor } from './DeckEditor';
 import { DeckSession } from './session';
 
@@ -134,6 +137,102 @@ describe('the notes under a composition and the dialect’s limits (findings 1 a
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  // P3-F (L203): the refused text is the tab's (its session), not the field's: another slide and back, or the body
+  // unmounting on a tab switch, shows it again with its refusal, carried onto what changed meanwhile
+  it('notes refused for their length outlive the field: shown again, still refused, on the same slide and after a remount', () => {
+    const { doc, session, unmount } = mount();
+    const over = 'y'.repeat(4_000);
+    notesField().value = `Notes a${over}`;
+    fireEvent.input(notesField());
+    fireEvent.click(thumbs()[1]!);
+    expect(notesField().value).toBe('Notes b');
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(thumbs()[0]!);
+    expect(notesField().value).toBe(`Notes a${over}`);
+    expect(screen.getByRole('alert').textContent).toMatch(/4,007/);
+    unmount();
+    act(() => setNotes(doc, 'a', 'Opening: Notes a', 'remote'));
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    expect(notesField().value).toBe(`Opening: Notes a${over}`);
+    expect(screen.getByRole('alert').textContent).toMatch(/4,016/);
+    expect(readSlide(doc, 'a').notes).toBe('Opening: Notes a');
+    notesField().value = 'Opening: Notes a, shorter';
+    fireEvent.input(notesField());
+    expect(readSlide(doc, 'a').notes).toBe('Opening: Notes a, shorter');
+    expect(screen.queryByRole('alert')).toBeNull();
+    cleanup();
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    expect(notesField().value).toBe('Opening: Notes a, shorter');
+  });
+
+  // P3-F (L203, fix wave): kept text that fits only because the notes changed elsewhere meanwhile is still unwritten:
+  // shown as not saved until the owner saves or edits it, never written by the field mounting, never shown as saved
+  const keptOverModel = (doc: Doc) => {
+    const model = 'm'.repeat(4_000);
+    act(() => setNotes(doc, 'a', model, 'remote'));
+    notesField().value = `${model}ZZ`;
+    fireEvent.input(notesField());
+    expect(screen.getByRole('alert').textContent).toMatch(/4,002/);
+  };
+  const editor = (session: DeckSession, readOnly = false) => render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={readOnly} />);
+
+  it('kept notes that fit after a change made while the field was away mount as not saved, and only the owner’s Save writes them', () => {
+    const { doc, session, unmount } = mount();
+    keptOverModel(doc);
+    unmount();
+    act(() => setNotes(doc, 'a', '', 'remote')); // the other writer removes the 4,000 characters the owner added to
+    editor(session);
+    expect(notesField().value).toBe('ZZ');
+    expect(screen.getByRole('alert').textContent).toMatch(/not saved yet/);
+    expect(notesField().getAttribute('aria-invalid')).toBeNull(); // within the limit: unsaved, not refused
+    expect(readSlide(doc, 'a').notes).toBe('');
+    cleanup();
+    editor(session);
+    expect(readSlide(doc, 'a').notes).toBe(''); // mounting again writes nothing either
+    expect(screen.getByRole('alert').textContent).toMatch(/not saved yet/);
+    fireEvent.click(screen.getByRole('button', { name: 'Save notes' }));
+    expect(readSlide(doc, 'a').notes).toBe('ZZ');
+    expect(screen.queryByRole('alert')).toBeNull();
+    cleanup();
+    editor(session);
+    expect(notesField().value).toBe('ZZ');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('with the field shown, a remote change re-counts refused notes and, once they fit, says they are not saved until the owner edits', () => {
+    const { doc } = mount();
+    keptOverModel(doc);
+    act(() => setNotes(doc, 'a', 'm'.repeat(3_999), 'remote'));
+    expect(notesField().value).toBe(`${'m'.repeat(3_999)}ZZ`);
+    expect(screen.getByRole('alert').textContent).toMatch(/4,001/);
+    act(() => setNotes(doc, 'a', '', 'remote'));
+    expect(notesField().value).toBe('ZZ');
+    expect(screen.getByRole('alert').textContent).toMatch(/not saved yet/);
+    expect(notesField().getAttribute('aria-invalid')).toBeNull();
+    expect(readSlide(doc, 'a').notes).toBe('');
+    notesField().value = 'ZZ!';
+    fireEvent.input(notesField());
+    expect(readSlide(doc, 'a').notes).toBe('ZZ!');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('read-only, kept notes that fit are shown as not saved with no Save, neither written nor dropped', () => {
+    const { doc, session, unmount } = mount();
+    keptOverModel(doc);
+    unmount();
+    act(() => setNotes(doc, 'a', '', 'remote'));
+    editor(session, true);
+    expect(notesField().readOnly).toBe(true);
+    expect(notesField().value).toBe('ZZ');
+    expect(screen.getByRole('alert').textContent).toMatch(/not saved yet/);
+    expect(screen.queryByRole('button', { name: 'Save notes' })).toBeNull();
+    expect(readSlide(doc, 'a').notes).toBe('');
+    cleanup();
+    editor(session);
+    fireEvent.click(screen.getByRole('button', { name: 'Save notes' }));
+    expect(readSlide(doc, 'a').notes).toBe('ZZ');
+  });
+
   it('a composition whose rebased text passes the limit is refused too', () => {
     const { doc } = mount();
     const field = notesField();
@@ -220,5 +319,55 @@ describe('final fix wave B4: an awaited edit writes only while the deck takes wr
     session.holdWrites(false);
     await expect(session.later(Promise.resolve('y'), write)).resolves.toBe(true);
     expect(write).toHaveBeenCalledWith('y');
+  });
+});
+
+// ---- P3-F (L233) ---------------------------------------------------------------------------------------------------
+
+describe('what the editor shows, for the header’s Export (L233)', () => {
+  it('tells its session the one version its history previews, two compared, and the live deck once the rail closes', async () => {
+    const doc = deck();
+    const states = [stateV2(doc)];
+    setNotes(doc, 'a', 'Notes a, revised');
+    states.push(stateV2(doc));
+    const versions: ArtifactVersion[] = states.map((_, i) => ({ id: i + 1, seq: i + 1, at: Date.UTC(2026, 9, 18, 9, i), actor: { kind: 'human' as const }, kind: 'named' as const, label: `Draft ${i + 1}`, assetRefs: [] }));
+    const api: HistoryApi = {
+      versions: async () => versions,
+      lastViewedAt: async () => null,
+      versionState: async (id) => states[id - 1]!,
+      attributions: async () => encodeMap(mergeMaps([])),
+      saveVersion: async () => ({ versionId: 3 }),
+      restore: async () => ({ revision: 3, versionId: 3 }),
+      duplicate: async () => ({ artifactId: 'copy' }),
+      markViewed: async () => {},
+    };
+    const session = new DeckSession(doc);
+    render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} history={{ api, handle: { doc, onRestored: () => () => {} } }} />);
+    act(() => session.toggleRail('history'));
+    const row = (label: string) => screen.findByRole('button', { name: new RegExp(`^Version ${label} by`) });
+    fireEvent.click(await row('Draft 2'));
+    await waitFor(() => expect(session.snapshot().shown).toEqual({ versionId: 2 }));
+    fireEvent.click(await row('Draft 1'), { shiftKey: true });
+    await waitFor(() => expect(session.snapshot().shown).toBe('compare'));
+    act(() => session.toggleRail('history'));
+    await waitFor(() => expect(session.snapshot().shown).toBeNull());
+  });
+});
+
+// ---- P3-F (the slide-editor panel) ---------------------------------------------------------------------------------
+
+describe('the editor-wide ⌘Z (scalpel-4#2)', () => {
+  it('⌘Z in a comment’s reply field leaves the deck as it is and the field its own undo; in the notes it is still the deck’s', async () => {
+    const { doc, session } = mount();
+    notesField().value = 'Notes a, then more';
+    fireEvent.input(notesField()); // a deck edit to take back: one undo step
+    act(() => addThread(doc, { threadId: 't1', slideId: 'a', elementId: 't', quote: 'Slide a', by: { kind: 'human' }, at: 1 }));
+    act(() => session.toggleRail('comments'));
+    const reply = await screen.findByRole('textbox', { name: 'Reply' });
+    fireEvent.change(reply, { target: { value: 'Cut it' } });
+    expect(fireEvent.keyDown(reply, { key: 'z', metaKey: true })).toBe(true); // not cancelled: the field undoes its own typing
+    expect(readSlide(doc, 'a').notes).toBe('Notes a, then more');
+    expect(fireEvent.keyDown(notesField(), { key: 'z', metaKey: true })).toBe(false);
+    expect(readSlide(doc, 'a').notes).toBe('Notes a');
   });
 });

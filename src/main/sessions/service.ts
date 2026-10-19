@@ -891,7 +891,7 @@ export class SessionService {
     const allocated = await this.serial(appSessionId, async (): Promise<StartOutcome | AppSessionId> => {
       const s = await this.ready();
       const source = s.sessions.get(appSessionId);
-      const refusal = sideThreadRefusal(s, appSessionId);
+      const refusal = await sideThreadRefusal(s, appSessionId);
       if (source === null || refusal !== null) return { status: 'refused', appSessionId, ...(refusal ?? { reason: 'unknown_session', message: `no session ${appSessionId}` }) };
       const content: ContentBlock[] =
         from.kind === 'comment'

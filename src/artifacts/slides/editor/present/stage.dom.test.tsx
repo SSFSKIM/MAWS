@@ -62,6 +62,7 @@ function deck(): Doc {
     s2: `<section id="s2" data-transition="push"><h1 id="t" style="font-size:96px">Two</h1></section>`,
     s3: `<section id="s3"><h1 id="t" style="font-size:96px">Three</h1></section>`,
     s4: `<section id="s4">${pin('auto1', 'data-build-in="fade auto"')}</section>`,
+    s5: `<section id="s5">${pin('c1', 'data-build-in="fade 1"')}${pin('c2', 'data-build-in="fade 2"')}${pin('c3', 'data-build-in="fade 3"')}</section>`,
   };
   const doc = newDoc();
   transact(doc, () => {
@@ -143,6 +144,28 @@ describe('a first entry', () => {
     played.length = 0;
     stageOf(doc).go('s4', 'jump');
     expect(played).toEqual([]);
+  });
+});
+
+// P3-F slide-editor scalpel-3#1: a stage made anew mid-slide (the audience view remounted after P twice, or a slide written
+// anew where the show stands) enters at the position's build, not at the slide's entry
+describe('a stage that enters mid-slide', () => {
+  it('shows the clicks played before it, plays only the current one, and the next click plays only its own', () => {
+    const doc = deck();
+    const steps = slideSteps(doc, 's5');
+    const first = stageOf(doc).stage;
+    first.show({ slideId: 's5', build: 0 }, steps, 'enter');
+    first.show({ slideId: 's5', build: 1 }, steps, 'forward');
+    first.show({ slideId: 's5', build: 2 }, steps, 'forward');
+    first.dispose();
+    played.length = 0;
+    const { stage } = stageOf(doc);
+    stage.show({ slideId: 's5', build: 2 }, steps, 'forward'); // the remount: the show's last move, at build 2
+    const eids = () => played.map((a) => (a.target as HTMLElement).dataset.eid);
+    expect([[...stage.hiddenNow()], eids()]).toEqual([['c3'], ['c2']]);
+    played.length = 0;
+    stage.show({ slideId: 's5', build: 3 }, steps, 'forward');
+    expect([[...stage.hiddenNow()], eids()]).toEqual([[], ['c3']]);
   });
 });
 

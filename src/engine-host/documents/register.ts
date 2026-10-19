@@ -11,7 +11,6 @@
 // names is a `HostCommandError` whose `issues` is an `ArtifactRefusal` (schema/artifacts.ts); a store that failed to
 // open answers `unavailable`; a refusal waits for the batch its validation read the same way (`writeCommitted`).
 import { join } from 'node:path';
-import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { HostCommandError, type HostClientHooks, type HostEmit, type HostOn } from '@shared/host/runtime';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -24,6 +23,7 @@ import type { DeadlineShape } from '../ipc';
 import { ArtifactFiles } from './bytes';
 import { ArtifactStoreError, StoreTooNewError } from './errors';
 import { SuggestionError } from '@artifacts/yjs';
+import { LoopDelaySampler } from './loop-delay'; // P3-F L158
 import { fromMessagePortMain } from './ports';
 import { suggestionKey, type DocumentService } from './service';
 import type { Documents } from '.';
@@ -69,8 +69,7 @@ function typed(error: unknown): unknown {
 // E3: `onClientGone` releases the holds main's connection took (its absence: a test's surface, holds released at close)
 export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'onDocPort'> & Partial<Pick<HostClientHooks, 'onClientGone'>>, { documents, env, datasetRefresh }: ArtifactsSurfaceDeps): { close(): void } {
   const e2e = env.MAWS_E2E === '1';
-  const loopDelay: ReturnType<typeof monitorEventLoopDelay> | null = e2e ? monitorEventLoopDelay({ resolution: 10 }) : null;
-  loopDelay?.enable();
+  const loopDelay = e2e ? new LoopDelaySampler() : null; // P3-F L158: its own timer, started at the first read
 
   const storeOf = (): ArtifactStore => {
     if (!documents) throw refused('unavailable', 'the artifact store could not be opened this run', {}, 'internal');
@@ -127,7 +126,7 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   });
   serve('artifacts.create', async ({ content, ...input }) => {
     const store = storeOf();
-    const byteContent: ByteContent | undefined = content && ('bytes' in content ? { bytes: content.bytes, name: content.name } : { path: content.path });
+    const byteContent: ByteContent | undefined = content && ('bytes' in content ? { bytes: content.bytes, name: content.name } : { path: content.path }); // F (L139): the store hashes a file once the create is checked
     const artifact = await store.create({ ...input, content: byteContent }, HUMAN);
     return written(store, artifact.id);
   });
@@ -214,12 +213,7 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   });
   serve('artifacts.testLoopDelay', ({ reset }) => {
     e2eOnly('artifacts.testLoopDelay');
-    const histogram = loopDelay!;
-    const ms = (ns: number) => ns / 1e6;
-    const empty = histogram.count === 0;
-    const answer = empty ? { p50: 0, p99: 0, max: 0, mean: 0 } : { p50: ms(histogram.percentile(50)), p99: ms(histogram.percentile(99)), max: ms(histogram.max), mean: ms(histogram.mean) };
-    if (reset) histogram.reset();
-    return answer;
+    return loopDelay!.read({ reset });
   });
   serve('artifacts.setDefaults', ({ owner, spaces }) => storeOf().setDefaults({ owner, spaces }));
   // A retained version pinned to a since-deleted design system still renders with that system's faces and images
@@ -335,7 +329,7 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   return {
     close: () => {
       for (const off of offs.splice(0)) off();
-      loopDelay?.disable();
+      loopDelay?.close();
       stopGone?.(); // E3
       holds.releaseAll(); // E3
     },

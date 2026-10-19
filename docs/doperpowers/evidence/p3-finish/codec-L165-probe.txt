@@ -1,0 +1,721 @@
+
+ RUN  v5.0.2 /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015
+
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the dialect > marks one-line blocks at the line’s end and longer top-level blocks on a line after them 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the dialect > gives each table row a trailing comment, cells positional, the columns aligned 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the dialect > writes chips, math and the ::: blocks 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the dialect > writes overlapping comments as milestones that name their thread, with no nesting (S5) 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the dialect > writes milestones inside code too (D2 allows the mark there), and only the threads asked for 4ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the dialect > writes a literal milestone in code with one more backslash, so it never reads as one 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the dialect > writes what GFM cannot say in the dialect’s own forms (Decision Log 15) 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the dialect > writes no ids for an export 2ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > a parse > returns every block kind with the ids the markdown names and fresh ones elsewhere 36ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > a parse > gives back every stored state of the fixture exactly, comments and unshown ids aside (Decision Log 15) 15ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > a parse > reads a code block’s comment milestones away and its literal ones back, the code as it was 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > a parse > mints 8-character ids when no generator is given, and parses an empty string to nothing 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > a parse > ignores comment milestones in the agent’s markdown (S5’s Q4) 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > a parse > takes a marker line only after a block, never inside code 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > a parse > stores a link’s address and title without control characters, and the stored link reads back exactly (Decision Log 18) 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > a parse > keeps an empty paragraph and its id 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > multiParaCell 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > noHeader 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > emptyCell 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hardBreakCell 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > imgAsset 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > imgAltEmpty 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > imgSrcSpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hlColor 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hlEq 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hlAdj 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > linkAdj 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > linkTitleQuote 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldTrailSpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > leadSpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > doubleSpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > nbspOnly 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeNoLang 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeFence 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeEmpty 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > diagramColon 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > diagramEmpty 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > chartObj 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > chartNull 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > mathDollar 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > mathInlineNl 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > mathEmpty 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > mentionNullRef 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > dropdownNull 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > emptyCallout 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > calloutList 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > headingEmpty 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > taskNested 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > listItemTwoParas 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > orderedType 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > quoteCode 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeTicks 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeEdge 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeLead 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeLiteralMs 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeBlockLiteralMs 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeTrailingNl 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeLtAmp 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > linkTitleEmpty 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > linkSpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldPunct 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldPunctOpen 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > italicSpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldItalic 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > strikeSpace 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > underlineSpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hlSpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hlNested 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > linkSpaceEdge 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > imgKorean 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > imgNullSrc 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableSpans 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableAlignMix 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableRich 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableEmptyCellNoBlocks 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableNoRows 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableSpaceCell 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tablePipe 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > calloutNested 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > calloutCode 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > textColonLine 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > textEntity 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > textSep 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > textMarkTag 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > pendingQuote 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEndPunct 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEndBang 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > italicEndPunct 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > strikeEndPunct 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEndSpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEdgeSpaces 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldDashes 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldStars 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > headingBoldPunct 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > itemBoldPunct 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > quoteBoldPunct 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > rowBoldPunct 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > plainTrail 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > textDashes 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > itemDashes 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > breakDashes 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E000 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E001 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E002 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E003 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E004 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E005 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E006 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E007 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E008 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E009 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00A 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00B 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00C 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00D 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00E 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00F 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEmojiClose 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEmojiOpen 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldPrivateUseClose 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceAlone 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceFirst 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceLast 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaces 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlyTab 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceBetweenPunct 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceInItalic 2ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceKorean 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > italicOnlySpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > strikeOnlySpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > underlineOnlySpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > highlightOnlySpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > headingBoldOnlySpace 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > itemBoldOnlySpace 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > rowBoldOnlySpace 1ms
+ × |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeDash 7ms
+   → expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+ × |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probePlus 1ms
+   → expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+ × |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeCommentSplitNumber 1ms
+   → expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+ × |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeCommentSplitMarker 1ms
+   → expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literalInCode 2ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literalInInlineCode 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literalInAttributes 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literalInIntent 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literalInSpecKeys 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > multiParaCell, its blocks named 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > noHeader, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > emptyCell, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hardBreakCell, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > imgAsset, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > imgAltEmpty, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > imgSrcSpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hlColor, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hlEq, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hlAdj, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > linkAdj, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > linkTitleQuote, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldTrailSpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > leadSpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > doubleSpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > nbspOnly, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeNoLang, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeFence, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeEmpty, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > diagramColon, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > diagramEmpty, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > chartObj, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > chartNull, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > mathDollar, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > mathInlineNl, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > mathEmpty, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > mentionNullRef, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > dropdownNull, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > emptyCallout, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > calloutList, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > headingEmpty, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > taskNested, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > listItemTwoParas, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > orderedType, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > quoteCode, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeTicks, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeEdge, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeLead, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeLiteralMs, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeBlockLiteralMs, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeTrailingNl, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > codeLtAmp, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > linkTitleEmpty, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > linkSpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldPunct, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldPunctOpen, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > italicSpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldItalic, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > strikeSpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > underlineSpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hlSpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > hlNested, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > linkSpaceEdge, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > imgKorean, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > imgNullSrc, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableSpans, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableAlignMix, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableRich, its blocks named 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableEmptyCellNoBlocks, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableNoRows, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tableSpaceCell, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > tablePipe, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > calloutNested, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > calloutCode, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > textColonLine, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > textEntity, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > textSep, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > textMarkTag, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > pendingQuote, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEndPunct, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEndBang, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > italicEndPunct, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > strikeEndPunct, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEndSpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEdgeSpaces, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldDashes, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldStars, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > headingBoldPunct, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > itemBoldPunct, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > quoteBoldPunct, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > rowBoldPunct, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > plainTrail, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > textDashes, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > itemDashes, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > breakDashes, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E000, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E001, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E002, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E003, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E004, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E005, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E006, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E007, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E008, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E009, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00A, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00B, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00C, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00D, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00E, its blocks named 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literal U+E00F, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEmojiClose, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldEmojiOpen, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldPrivateUseClose, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceAlone, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceFirst, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceLast, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaces, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlyTab, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceBetweenPunct, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceInItalic, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > boldOnlySpaceKorean, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > italicOnlySpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > strikeOnlySpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > underlineOnlySpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > highlightOnlySpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > headingBoldOnlySpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > itemBoldOnlySpace, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > rowBoldOnlySpace, its blocks named 0ms
+ × |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeDash, its blocks named 1ms
+   → expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+ × |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probePlus, its blocks named 1ms
+   → expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+ × |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeCommentSplitNumber, its blocks named 1ms
+   → expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeCommentSplitMarker, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literalInCode, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literalInInlineCode, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literalInAttributes, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literalInIntent, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > literalInSpecKeys, its blocks named 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeInQuote 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeInItem 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeInQuoteInQuote 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeInOrderedItems 2ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeInLetteredItems 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeInNumberedUnderLettered 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeWithNumberedLines 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeWithItemLinesInLettered 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeInTaskItem 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeInQuoteInItem 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeInItemInQuote 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > codeInNestedItem 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > rawInQuote 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > reads quoted code as written (the review’s case) 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > reads comment milestones away inside quoted and listed code, the code as it was 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > raw content inside containers > keeps a structure-block table row’s id inside a quote 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the agent’s `Dr. Smith said so.` as a paragraph 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the agent’s `A. Lincoln wrote it.` as a paragraph 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the agent’s `I. Introduction` as a paragraph 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the agent’s `iv) the fourth` as a paragraph 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the agent’s `No. 5 is next.
+St. Louis too.` as a paragraph 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads a marker followed by two spaces as an item 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > writes two spaces after a letter or roman marker and one after a number 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > keeps whitespace-only lines of code in an item of a `a` list exactly 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > keeps whitespace-only lines of code in an item of a `i` list exactly 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > keeps whitespace-only lines of code in an item of a `I` list exactly 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > known gap: a one-item list lettered from i (the ninth letter) reads back as the other style 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > known gap: a one-item list roman from v (five) reads back as the other style 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s alpha back as the same list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s alphaUpperFromC back as the same list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s alphaFromI back as the same list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s alphaFromV back as the same list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s alphaPastZ back as the same list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s roman back as the same list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s romanUpperFromIV back as the same list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s romanAlone back as the same list 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s nested back as the same list 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s numberedInLettered back as the same list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s letteredInNumbered back as the same list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > lettered and roman lists > reads the serializer’s multiParagraph back as the same list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: 2*3*4 and _under_ but snake_case 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: [not a link](x) and `not code` and ~~not struck~~ 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: # not a heading 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: - not a list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: 1. not a list either 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: > not a quote 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: :::callout not a callout 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: cost $$5 and <chip kind="date"/> and <b>tags</b> 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: ==not highlighted== and ++not underlined++ 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: an entity &amp; a backslash \ here 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: ends like a marker ^ab12 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: Dr. Smith signed it 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: A. Lincoln and iv) the fourth 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: I. Introduction 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: A.  Lincoln, two spaces after 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: iv)  spaced 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives a round trip: 회의는 분기마다 열리고 **디자인 리뷰**를 포함한다 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > text that reads as markup > survives in a table cell, a pipe included 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on the fixture 5ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: An inserted **intro** paragraph.
+
+- with a list 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: A new paragraph with **bold** and a [link](https://example.com). 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: ### Closing paragraph of this section, with enough words to look like prose that a person wrote. 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: ```
+A plain paragraph the human types into. Words to keep.
+``` 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: The review is scheduled for Monday and the owner signs off before it. 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: Inserted. 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: gamma 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: 42 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: ## Before closing 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: **42** 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: ## The quick brown fox jumps over the lazy [dog](https://example.com). 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: - The review is scheduled for Friday. 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: ### Section 1 plan 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: Rewritten. 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: Closing words. 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: ## not an item 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: | Name | Value |
+| --- | --- |
+| zero | 0 |
+| alpha | 1 |
+| beta | 2 | 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: 100 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: The quick brown fox leaps over the **lazy** [dog](https://example.com) twice. It has two sentences. 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: The quick red fox leaps over the lazy dog twice. 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: ### The quick red fox leaps over the lazy dog twice. 0ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s corpus: ## Section 1 plan ^h1
+
+The quick brown fox jumps over the **lazy** [dog](https://example.com). It has two sentences. ^p1
+
+The review is scheduled for Friday and the owner signs off after it. ^p2
+
+- first item ^li1
+- second item with **bold** ^li2
+^l1
+
+| Name | Value | <!-- ^tr0 -->
+| --- | --- |
+| alpha | 1 | <!-- ^tr1 -->
+| beta | 2 | <!-- ^tr2 -->
+^tb1
+
+```ts
+const x = 1
+```
+^c1 1ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > holds on S4’s seed document read with its comments, and the parse gives the seed back 2ms
+ ✓ |artifacts| src/artifacts/document/markdown.test.ts > the fixed point (serialize → parse) > keeps every id S4’s seed read names 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeDash
+AssertionError: expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+
+- Expected
++ Received
+
+@@ -4,14 +4,24 @@
+        "attrs": {
+          "id": null,
+        },
+        "content": [
+          {
+-           "text": "-",
+-           "type": "text",
++           "attrs": {
++             "id": null,
+            },
+-       ],
++           "content": [
++             {
++               "attrs": {
++                 "id": null,
++               },
+                "type": "paragraph",
++             },
++           ],
++           "type": "listItem",
++         },
++       ],
++       "type": "bulletList",
+      },
+    ],
+    "type": "doc",
+  }
+
+ ❯ src/artifacts/document/markdown.test.ts:341:98
+    339|   it.each(Object.entries(states))('%s', (_name, json) => {
+    340|     const doc = docOf([schema.nodeFromJSON(json)]);
+    341|     for (const ids of [true, false]) expect(stored(docOf(md.parse(md.s…
+       |                                                                                                  ^
+    342|   });
+    343|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probePlus
+AssertionError: expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+
+- Expected
++ Received
+
+@@ -4,14 +4,24 @@
+        "attrs": {
+          "id": null,
+        },
+        "content": [
+          {
+-           "text": "+",
+-           "type": "text",
++           "attrs": {
++             "id": null,
+            },
+-       ],
++           "content": [
++             {
++               "attrs": {
++                 "id": null,
++               },
+                "type": "paragraph",
++             },
++           ],
++           "type": "listItem",
++         },
++       ],
++       "type": "bulletList",
+      },
+    ],
+    "type": "doc",
+  }
+
+ ❯ src/artifacts/document/markdown.test.ts:341:98
+    339|   it.each(Object.entries(states))('%s', (_name, json) => {
+    340|     const doc = docOf([schema.nodeFromJSON(json)]);
+    341|     for (const ids of [true, false]) expect(stored(docOf(md.parse(md.s…
+       |                                                                                                  ^
+    342|   });
+    343|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeCommentSplitNumber
+AssertionError: expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+
+- Expected
++ Received
+
+  {
+    "content": [
+      {
+        "attrs": {
+          "id": null,
++         "start": 1,
++         "type": null,
+        },
+        "content": [
+          {
+-           "text": "1. x",
++           "attrs": {
++             "id": null,
++           },
++           "content": [
++             {
++               "attrs": {
++                 "id": null,
++               },
++               "content": [
++                 {
++                   "text": "x",
+                    "type": "text",
+                  },
+                ],
+                "type": "paragraph",
++             },
++           ],
++           "type": "listItem",
++         },
++       ],
++       "type": "orderedList",
+      },
+    ],
+    "type": "doc",
+  }
+
+ ❯ src/artifacts/document/markdown.test.ts:341:98
+    339|   it.each(Object.entries(states))('%s', (_name, json) => {
+    340|     const doc = docOf([schema.nodeFromJSON(json)]);
+    341|     for (const ids of [true, false]) expect(stored(docOf(md.parse(md.s…
+       |                                                                                                  ^
+    342|   });
+    343|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeCommentSplitMarker
+AssertionError: expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+
+- Expected
++ Received
+
+@@ -4,11 +4,11 @@
+        "attrs": {
+          "id": null,
+        },
+        "content": [
+          {
+-           "text": "x ^ab",
++           "text": "x",
+            "type": "text",
+          },
+        ],
+        "type": "paragraph",
+      },
+
+ ❯ src/artifacts/document/markdown.test.ts:341:98
+    339|   it.each(Object.entries(states))('%s', (_name, json) => {
+    340|     const doc = docOf([schema.nodeFromJSON(json)]);
+    341|     for (const ids of [true, false]) expect(stored(docOf(md.parse(md.s…
+       |                                                                                                  ^
+    342|   });
+    343|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeDash, its blocks named
+AssertionError: expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+
+- Expected
++ Received
+
+@@ -4,14 +4,24 @@
+        "attrs": {
+          "id": null,
+        },
+        "content": [
+          {
+-           "text": "-",
+-           "type": "text",
++           "attrs": {
++             "id": null,
+            },
+-       ],
++           "content": [
++             {
++               "attrs": {
++                 "id": null,
++               },
+                "type": "paragraph",
++             },
++           ],
++           "type": "listItem",
++         },
++       ],
++       "type": "bulletList",
+      },
+    ],
+    "type": "doc",
+  }
+
+ ❯ src/artifacts/document/markdown.test.ts:354:56
+    352|   it.each(Object.entries(states))('%s, its blocks named', (_name, json…
+    353|     const doc = docOf([schema.nodeFromJSON(named(json))]);
+    354|     expect(stored(docOf(md.parse(md.serialize(doc))))).toEqual(stored(…
+       |                                                        ^
+    355|   });
+    356| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probePlus, its blocks named
+AssertionError: expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+
+- Expected
++ Received
+
+@@ -4,14 +4,24 @@
+        "attrs": {
+          "id": null,
+        },
+        "content": [
+          {
+-           "text": "+",
+-           "type": "text",
++           "attrs": {
++             "id": null,
+            },
+-       ],
++           "content": [
++             {
++               "attrs": {
++                 "id": null,
++               },
+                "type": "paragraph",
++             },
++           ],
++           "type": "listItem",
++         },
++       ],
++       "type": "bulletList",
+      },
+    ],
+    "type": "doc",
+  }
+
+ ❯ src/artifacts/document/markdown.test.ts:354:56
+    352|   it.each(Object.entries(states))('%s, its blocks named', (_name, json…
+    353|     const doc = docOf([schema.nodeFromJSON(named(json))]);
+    354|     expect(stored(docOf(md.parse(md.serialize(doc))))).toEqual(stored(…
+       |                                                        ^
+    355|   });
+    356| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  |artifacts| src/artifacts/document/markdown.test.ts > every stored state, one at a time > __probeCommentSplitNumber, its blocks named
+AssertionError: expected { type: 'doc', content: [ { …(3) } ] } to deeply equal { type: 'doc', content: [ { …(3) } ] }
+
+- Expected
++ Received
+
+  {
+    "content": [
+      {
+        "attrs": {
+          "id": null,
++         "start": 1,
++         "type": null,
+        },
+        "content": [
+          {
+-           "text": "1. x",
++           "attrs": {
++             "id": null,
++           },
++           "content": [
++             {
++               "attrs": {
++                 "id": null,
++               },
++               "content": [
++                 {
++                   "text": "x",
+                    "type": "text",
+                  },
+                ],
+                "type": "paragraph",
++             },
++           ],
++           "type": "listItem",
++         },
++       ],
++       "type": "orderedList",
+      },
+    ],
+    "type": "doc",
+  }
+
+ ❯ src/artifacts/document/markdown.test.ts:354:56
+    352|   it.each(Object.entries(states))('%s, its blocks named', (_name, json…
+    353|     const doc = docOf([schema.nodeFromJSON(named(json))]);
+    354|     expect(stored(docOf(md.parse(md.serialize(doc))))).toEqual(stored(…
+       |                                                        ^
+    355|   });
+    356| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 350 passed (357)
+   Start at  09:00:12
+   Duration  642ms (transform 36%, tests 34%, import 30%)
+
+exit: 1

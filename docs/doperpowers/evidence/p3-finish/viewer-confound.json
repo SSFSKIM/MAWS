@@ -1,0 +1,35 @@
+{
+  "recordedAt": "2026-10-18T18:02:16Z",
+  "provenance": "architect relayed CI-opt observations on2026-10-18; not an F GUI action",
+  "attachedSince": "2026-10-18T12:49:09Z",
+  "knownAttachedThrough": "2026-10-18T19:33:02Z (disconnect)",
+  "viewer": "one tailnet Screen Sharing connection from owner MacBook to mini",
+  "knownInput": [
+    {
+      "at": "2026-10-18T15:31:49Z",
+      "action": "Chrome window closed through viewer",
+      "actor": "maws-3f cua work"
+    },
+    {
+      "at": "2026-10-18T15:31:52Z",
+      "action": "Chrome window closed through viewer",
+      "actor": "maws-3f cua work"
+    }
+  ],
+  "knownOverlap": "pair3 e2e:dashboard15:28:37–15:32:10Z, green; no focus-loss signature at known click times",
+  "interpretation": "Attached viewer is a confound, not a failure cause. Frontmost app does not change merely because viewer is attached. Design red had viewer but no known input; retry success stands. Preserve paste/must-read diagnoses on their own traces and source regressions. Do not infer no input where none is known.",
+  "unreliableField": "Until19:56Z the job hook netstat omitted Internet sockets and mistook an empty table for no viewer. Every remote=none line during attached window12:49:09Z-19:33:02Z is wrong; do not infer custody from that old detector.",
+  "coverage": "pair2 diagnostic/repair, pair3 original/retry, pair4, all L216 drag probes and shared union39156492025 Mac jobs before19:33:02Z fall inside12:49:09Z-19:33:02Z; union document-scale/presentations-scale/dashboard-scale/artifacts-perf after disconnect are viewer-free per CI-opt custody report",
+  "measurement": "L216 A/B common viewer context retained; no reopening accepted no-discernible-product-gap interpretation or extra bisect. Absolute bounds not waived. Final-source measurements must record actual custody, not remote=none.",
+  "updatedAt": "2026-10-18T19:58:36Z",
+  "disconnectedAt": "2026-10-18T19:33:02Z",
+  "detectorCorrection": {
+    "reportedBy": "architect relaying CI-opt, not F direct GUI/network observation",
+    "fixedAt": "2026-10-18T19:56:00Z (reported minute)",
+    "issue": "ci-kit#50",
+    "fix": "ci-kit#53,26d1033",
+    "method": "screensharingd presence; launchd starts it on connect, exits about15s after last viewer leaves",
+    "reading": "from19:56Z remote=screensharing is a real presence reading with up to15s lag; ps failure is remote=unknown",
+    "action": "record only; no causal relabeling, new gate or Decision Log entry"
+  }
+}

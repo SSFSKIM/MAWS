@@ -9,9 +9,18 @@
 // tab's too (`later`): counted while it runs, so the tab's close guard waits for it (B's rule), and written only if the
 // session still takes writes when the work is done; a closed tab, a read-only replica or a version shown in place of
 // the live deck drops it.
+//
+// P3-F (L203): speaker notes the dialect refused (over its limit) are the tab's too, kept here per slide until written or
+// replaced, so the notes field shows them again when it mounts again; they are never written to the doc. Fix wave: carried
+// onto a change made meanwhile they may fit, yet stay unwritten until the owner writes them, and the tab's close guard
+// asks before they are lost.
+// P3-F (L233): what the editor shows in place of the live deck (`shown`), so the header's Export, which outlives the body,
+// exports what is on screen (the design's what-you-see rule, P3-E's Decision Log 31).
 import type { Awareness } from '@y/protocols/awareness';
 import { transact, type Doc } from '../../yjs';
+import { hasSlide, readNotes } from '../../yjs/slides';
 import { createDeckUndo, type DeckUndo } from '../../yjs/slides-undo';
+import { rebaseText } from '../caret';
 import { slideOrder } from '../model';
 import { keepingRemovedQuotes } from '../threads'; // M7 fix wave 1
 
@@ -33,6 +42,8 @@ export interface DeckSessionState {
   rail: DeckRail | null;
   /** Final fix wave (B4): edits waiting on their work (an upload, an asset copy) before their write. */
   pending: number;
+  /** P3-F (L233): what the editor shows in place of the live deck, if anything. */
+  shown: DeckShown;
 }
 
 export interface DeckSessionOptions {
@@ -56,6 +67,18 @@ export interface DeckPresence {
 
 const NONE: readonly string[] = Object.freeze([]);
 
+/**
+ * P3-F (L233): what the editor shows: one retained version its history previews, two versions compared, or (null) the
+ * live deck, its changes since the last view included.
+ */
+export type DeckShown = { versionId: number } | 'compare' | null;
+
+/** P3-F (L203): notes the dialect refused on a slide: the owner's text, and the slide's notes it was typed over. */
+export interface NotesDraft {
+  text: string;
+  from: string;
+}
+
 /** Times of one showing, read through the e2e seam (Acceptance 7's open-to-interactive). */
 export interface DeckTimings {
   openedAt: number;
@@ -77,6 +100,7 @@ export class DeckSession {
   readonly timings: DeckTimings;
   private disposed = false; // B4
   private writesHeld = false; // B4: the editor shows a version in place of the live deck
+  private readonly notesDrafts = new Map<string, NotesDraft>(); // L203
 
   constructor(
     readonly doc: Doc,
@@ -84,7 +108,7 @@ export class DeckSession {
     private readonly options: DeckSessionOptions = {},
   ) {
     this.undo = createDeckUndo(doc, { editor: 'deck' });
-    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null, pending: 0 };
+    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null, pending: 0, shown: null };
     this.timings = { openedAt };
     this.stopUndo = this.undo.subscribe(() => this.set({ canUndo: this.undo.canUndo(), canRedo: this.undo.canRedo() }));
     this.publish();
@@ -191,6 +215,30 @@ export class DeckSession {
     return this.undo.track(origin);
   }
 
+  /** L203: the notes the dialect refused on a slide, kept until written or replaced; null without any. */
+  notesDraft(slideId: string): NotesDraft | null {
+    return this.notesDrafts.get(slideId) ?? null;
+  }
+  /** L203: keeps the refused notes of a slide, or with null forgets them (written, or short enough again). */
+  keepNotesDraft(slideId: string, draft: NotesDraft | null): void {
+    if (draft) this.notesDrafts.set(slideId, draft);
+    else this.notesDrafts.delete(slideId);
+  }
+  /**
+   * L203 fix wave: the notes kept unwritten for a slide, carried onto its notes as they are now; null without any, or
+   * once the slide is gone. Within the limit after a change made elsewhere, they are still unwritten: the owner writes them.
+   */
+  unwrittenNotes(slideId: string): string | null {
+    const draft = this.notesDrafts.get(slideId);
+    if (!draft || !hasSlide(this.doc, slideId)) return null;
+    const now = readNotes(this.doc, slideId);
+    return draft.from === now ? draft.text : rebaseText(draft.from, draft.text, now);
+  }
+  /** L203 fix wave: whether any slide's notes are kept unwritten (lost with the tab: its close guard asks). */
+  hasUnwrittenNotes(): boolean {
+    return [...this.notesDrafts.keys()].some((id) => this.unwrittenNotes(id) !== null);
+  }
+
   /** The composition hold: remote updates wait while an IME composes in the text box (no-op without a replica). */
   holdRemote(on: boolean): void {
     this.options.holdRemote?.(on);
@@ -240,6 +288,12 @@ export class DeckSession {
   }
   setZoom(zoom: Zoom): void {
     this.set({ zoom });
+  }
+  /** L233: the editor shows a retained version, two compared, or (null) the live deck. */
+  showVersion(shown: DeckShown): void {
+    const now = this.state.shown;
+    const same = shown === null || shown === 'compare' ? now === shown : now !== null && now !== 'compare' && now.versionId === shown.versionId;
+    if (!same) this.set({ shown });
   }
   /** M6: opens a panel beside the stage, or closes it when it is the one open. */
   toggleRail(rail: DeckRail): void {

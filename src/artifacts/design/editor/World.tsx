@@ -63,6 +63,8 @@ export interface WorldProps {
   importAsset?: ImportAsset;
   /** The world's focusable surface: it takes the pointer, the keys and the clipboard (C's overlay reads it too). */
   surface: RefObject<HTMLDivElement | null>;
+  /** Told the surface as React attaches and detaches it (the owner's Mark-up surface follows each mount of the world). */
+  onSurface?: (element: HTMLDivElement | null) => void;
   /** Fits the selection (the toolbar's and Shift+2's), fits every board (Shift+1). */
   fitSelection: () => void;
   fitAll: () => void;
@@ -93,11 +95,20 @@ const keysFrom = (frame: BoardFrame, keys: readonly FrameKey[]): Partial<BoardFr
 const writable = (b: BoardView | undefined, readOnly: boolean): b is BoardView & { frame: BoardFrame } => !readOnly && b !== undefined && b.frame !== null && b.held === null && !b.missing;
 
 export function World(props: WorldProps) {
-  const { session, view, boards, active, canvases, onCanvas, assetUrl, faces, scope, readOnly, onNotice, artifactId, importAsset, surface } = props;
+  const { session, view, boards, active, canvases, onCanvas, assetUrl, faces, scope, readOnly, onNotice, artifactId, importAsset, surface, onSurface } = props;
   // M6 (the scale gate's pan and zoom frame work): the world renders on a change of zoom or of the selected frame alone;
   // the pan is two transforms written straight from the view (below), so a pan re-renders nothing and re-lays nothing
   const zoom = useViewZoom(view);
   const selectedFrame = useViewFrame(view);
+  // the surface as React attaches and detaches it: the ref object everything here and C's overlay read, and the owner told
+  const attachSurface = useCallback(
+    (element: HTMLDivElement | null) => {
+      const surfaceRef = surface; // a ref by its name, so the React Compiler takes this write for a ref's, not a prop's
+      surfaceRef.current = element;
+      onSurface?.(element);
+    },
+    [surface, onSurface],
+  );
   const layer = useRef<HTMLDivElement | null>(null);
   const pan = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
@@ -412,7 +423,7 @@ export function World(props: WorldProps) {
 
   return (
     <div
-      ref={surface}
+      ref={attachSurface}
       className="design-world"
       role="region"
       aria-label={C.world}

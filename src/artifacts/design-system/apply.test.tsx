@@ -21,10 +21,11 @@ import {
   type DesignSystemView,
   type HouseDesignSystem,
 } from './apply';
+import { authoredFontStack } from './assets';
 import complete from './fixtures/complete.tokens.json';
 import { setToken, writeSystem } from './model';
 import { holdScopeStyle, scopeIdOf } from './scope-style';
-import { liveView } from './view';
+import { liveView, snapshotCss, type SystemSnapshot } from './view';
 import { parseTokens, serializeTokens, type Token } from './tokens';
 
 const AT = Date.UTC(2026, 9, 13);
@@ -451,6 +452,74 @@ describe('resolveDsVars (the export helper)', () => {
     expect(resolveDsVars('p { color: var(--ds-x); }', withInherited, 'document', { '--ds-x': 'var(--ds-adopted-link)' })).toBe('p { color: #c9663f; }');
     const chain = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`--ds-c${i}`, i === 199 ? 'var(--ds-color-text)' : `var(--ds-c${i + 1})`]));
     expect(resolveDsVars('p { color: var(--ds-c0); }', tokens, 'document', chain)).toBe('p { color: #1f1e1b; }');
+  });
+});
+
+// P3-F design-systems wave: a scope and an export take a consumer's overrides through one filter, so what the scope
+// draws is what the export writes.
+describe('a scope’s overrides and the export’s', () => {
+  const tokens = parseTokens(complete).tokens!;
+  const snapshot: SystemSnapshot = { tokens, law: '', name: 'T', files: {}, origin: null };
+  const scope = (overrides?: Record<string, string>) => snapshotCss(snapshot, null, '.s', 'document', overrides);
+  /** The value the scope's stylesheet sets last for `name`. */
+  const declared = (css: string, name: string) => [...css.matchAll(new RegExp(`${name}: ([^;]*);`, 'g'))].at(-1)?.[1];
+
+  // scalpel-1#2: a priority is not a value; inside a property it makes the declaration invalid
+  it('drops an override that carries a priority, in the scope and in the export', () => {
+    const css = 'p { padding: var(--ds-space-1) var(--ds-space-2); }';
+    for (const value of ['8px !important', '8px!important', '8px ! important']) {
+      const overrides = { '--ds-space-1': value };
+      expect(resolveDsVars(css, tokens, 'document', overrides)).toBe(resolveDsVars(css, tokens, 'document'));
+      expect(scope(overrides)).toBe(scope());
+      expect(declared(scope(overrides), '--ds-space-1')).toBe(resolveDsVars('var(--ds-space-1)', tokens, 'document', overrides));
+    }
+  });
+
+  // scalpel-2#1: the scope sets the overrides the export takes, each as the literal the export resolves
+  it('sets in the scope each override the export takes, as the value the export resolves', () => {
+    const cases: Record<string, string>[] = [
+      { '--ds-color-accent': 'var(--ds-missing)' }, // resolves to nothing: dropped, the system's value kept
+      { '--ds-color-accent': 'var(--ds-color-border)', '--ds-color-border': 'var(--ds-color-accent)' }, // a cycle: dropped
+      { '--ds-color-accent': 'var(--accent, #123456)' }, // not a system name: its fallback, whatever the page sets
+      { '--ds-color-accent': 'var(--ds-color-text)', '--ds-color-text': '#010203' }, // a chain through another override
+    ];
+    for (const overrides of cases) {
+      const css = scope(overrides);
+      for (const name of ['--ds-color-accent', '--ds-color-border', '--ds-color-text']) {
+        expect.soft(declared(css, name), `${JSON.stringify(overrides)} ${name}`).toBe(resolveDsVars(`var(${name})`, tokens, 'document', overrides));
+      }
+    }
+  });
+
+  it('draws in a scope the accent the export writes, whatever the page around it sets', () => {
+    document.documentElement.style.setProperty('--accent', '#00ff00'); // the app's own accent (the renderer's tokens.css)
+    const style = document.head.appendChild(document.createElement('style'));
+    const host = document.body.appendChild(document.createElement('div'));
+    onTestFinished(() => {
+      style.remove();
+      host.remove();
+      document.documentElement.style.removeProperty('--accent');
+    });
+    host.className = 's';
+    host.innerHTML = '<p style="color: var(--ds-color-accent)">text</p>';
+    for (const value of ['var(--ds-missing)', 'var(--accent, #123456)']) {
+      const overrides = { '--ds-color-accent': value };
+      style.textContent = scope(overrides);
+      expect.soft(getComputedStyle(host.firstElementChild!).color, value).toBe(resolveDsVars('var(--ds-color-accent)', tokens, 'document', overrides));
+    }
+  });
+
+  // the wave's review: a literal under a name the system does not set still names the face by its private name
+  // (the bundled Official's own case, `var(--ds-font-body)` and its Noto Serif KR, needs its document.css, which this
+  // project reads as empty; the fixture's face stands in for it)
+  it('draws the bundled face for an override-only name that refers to a system font stack, as the export does', () => {
+    const faced: SystemSnapshot = { ...snapshot, files: { 'components/document.css': FACE } };
+    const overrides = { '--ds-font-note': 'var(--ds-font-display)' };
+    const css = snapshotCss(faced, (ref) => `maws-artifact://sys/3/${ref}`, '.s', 'document', overrides);
+    const note = declared(css, '--ds-font-note')!;
+    expect(note).toMatch(/^ds-face-[0-9a-z]+, "Iowan Old Style", Georgia, serif$/);
+    expect(note).toBe(declared(css, '--ds-font-display'));
+    expect(authoredFontStack(note)).toBe(resolveDsVars('var(--ds-font-note)', tokens, 'document', overrides)); // the export's stack, by its authored names
   });
 });
 

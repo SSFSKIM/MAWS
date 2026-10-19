@@ -1,0 +1,8 @@
+{
+  "recordedAt": "2026-10-18T20:28:07Z",
+  "originalLine": 199,
+  "gate": 39156492025,
+  "source": "55d012a2e1245a872cf44764842fc155e3276aef",
+  "proof": "must-read case passed, native/contentsFocused true19:14:41.147Z;3/10",
+  "scope": "native scene only; overall union failed elsewhere, no whole-set credit"
+}

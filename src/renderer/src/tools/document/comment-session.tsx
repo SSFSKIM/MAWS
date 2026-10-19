@@ -176,8 +176,22 @@ function positionOf(style: CardStyle): CSSProperties {
   }
 }
 
-/** The pending comment's notice, where its card would be: over the editor's page, pinned under the passage. */
-export function PendingCommentNotice({ pending, locate, layoutKey, onClose }: { pending: Pending; locate(threadId: string): PassageRect | null; layoutKey: string; onClose(): void }) {
+interface NoticeProps {
+  pending: Pending;
+  locate(threadId: string): PassageRect | null;
+  layoutKey: string;
+  onClose(): void;
+}
+
+/**
+ * The pending comment's notice, where its card would be: over the editor's page, pinned under the passage. Each comment's
+ * notice is its own (keyed by its serial), so one replacing another on the same host mounts afresh and takes the keyboard.
+ */
+export function PendingCommentNotice(props: NoticeProps) {
+  return <Notice key={props.pending.serial} {...props} />;
+}
+
+function Notice({ pending, locate, layoutKey, onClose }: NoticeProps) {
   const host = useRef<HTMLDivElement>(null);
   const box = useHostBox(host);
   const rect = useLocated(pending.threadId, locate, layoutKey, box);

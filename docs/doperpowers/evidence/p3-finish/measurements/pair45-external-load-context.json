@@ -1,0 +1,41 @@
+{
+  "recordedAt": "2026-10-18T20:33:47Z",
+  "run": 39156492025,
+  "source": "55d012a2e1245a872cf44764842fc155e3276aef",
+  "provenance": "architect relayed CI-opt custody record; not independently observed process telemetry by F",
+  "externalSource": "manim-master lane,8- and9-way replays on approximately10-core mini",
+  "windows": [
+    {
+      "name": "probe_all",
+      "start": "19:46:16Z",
+      "end": "19:56:28Z"
+    },
+    {
+      "name": "replay-r1",
+      "start": "19:56:45Z",
+      "end": "20:08:12Z"
+    },
+    {
+      "name": "replay-r2",
+      "start": "20:10:24Z",
+      "end": "20:21:49Z"
+    },
+    {
+      "name": "replay-master",
+      "start": "20:21:49Z",
+      "end": null
+    }
+  ],
+  "singleRunStarts": [
+    "19:44:54Z",
+    "19:55:57Z",
+    "20:09:22Z"
+  ],
+  "singleRunEndTimes": "not supplied; do not invent exact concurrency duration",
+  "ruling": "cause(a): three measured reds are load-confounded observations, not verdicts, even where sampled load1 is low; retain values/bounds/loads and overlap, quiet relaunch supplies verdict",
+  "coverage": "artifacts-perf and document-scale entirely within replay-r2; presentations-scale spans r1,20:09:22 single run and r2; packaged had no overlap",
+  "loadRule": "judging floor20 unchanged; external-work confound is not a numeric high-load waiver; below10 quiet clause remains separate",
+  "protocol": "No settle-wait spec change tonight. One deferred P3 tracker row; promote only if quiet relaunch first samples exceed10 without external source.",
+  "nextRun": "one DL59 relaunch of packaged/document-scale/presentations-scale/artifacts-perf on same tree plus accepted packaged correction and parent DL108 drag calibration, only after architect relays CI-opt quiet hold and mini below5; no further run after quiet failure without architect rebase-versus-repair ruling",
+  "laterCalibration": "Parent DL108 corrected bya963cf446 retains single scene starting20:09:22 before final drag trials, calls it immaterial against twelve earlier trials;24ms calibration authorized, raw custody unchanged."
+}

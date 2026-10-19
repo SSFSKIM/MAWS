@@ -99,18 +99,23 @@ function undrawable(board: DesignExportBoard): DesignExportPlan | null {
 const deckOf = (source: DesignExportSource, boards: readonly DesignExportBoard[]): ExportDeck => ({ ...source.deck, slides: boards.map((b) => source.deck.slides.find((s) => s.id === b.id)!) });
 
 /**
- * A scale at which the board's sides round to exactly `width` and `height` (`px`'s rounding), or null when none does:
- * the side's own ratio when it serves both, else the start of the scales both sides' rounding admits.
+ * A scale at which the board's sides round to exactly `width` and `height` (`px`'s rounding), or null when none does.
+ * Each side admits the scales of its rounding, from (side − 0.5)/length (included) to (side + 0.5)/length (excluded);
+ * the scale is taken from both sides' interval intersected with the scale range (both ends included, P3-F L227): a
+ * side's own ratio when it serves both and is in range, else the intersection's middle, else its ends. Only when no
+ * scale in range serves both is a scale outside the range answered (so the caller refuses it for the range, as it does
+ * a single side), and null when no scale at all serves both.
  */
 function commonScale(board: Pick<DesignExportBoard, 'w' | 'h'>, width: number, height: number): number | null {
   const fits = (s: number) => px(board.w * s) === width && px(board.h * s) === height;
-  if (fits(width / board.w)) return width / board.w;
-  if (fits(height / board.h)) return height / board.h;
   const lo = Math.max((width - 0.5) / board.w, (height - 0.5) / board.h);
   const hi = Math.min((width + 0.5) / board.w, (height + 0.5) / board.h);
-  if (lo >= hi) return null;
-  const mid = (lo + hi) / 2;
-  return fits(mid) ? mid : null;
+  const own = [width / board.w, height / board.h];
+  const from = Math.max(lo, DESIGN_EXPORT_LIMITS.scaleMin);
+  const to = Math.min(hi, DESIGN_EXPORT_LIMITS.scaleMax);
+  const inside = [...own, (from + to) / 2, from, to].find((s) => inRange(s) && fits(s));
+  if (inside !== undefined) return inside;
+  return [...own, (lo + hi) / 2].find(fits) ?? null;
 }
 
 function planPng(source: DesignExportSource, request: DesignExportRequest): DesignExportPlan {

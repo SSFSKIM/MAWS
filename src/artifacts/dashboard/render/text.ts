@@ -26,7 +26,8 @@ export function textWidth(text: string, size: number, mono = false): number {
 /**
  * Lines of `text` no wider than `max`, at most `lines` of them: breaks between words (Hangul keeps its words whole, the
  * law's `keep-all`), a word wider than a line broken by character. When it cannot fit, the last line ends in `…` and
- * `shortened` is set; the caller keeps the full text reachable (the mark's tip and the source table).
+ * `shortened` is set; the caller keeps the full text reachable (the mark's tip and the source table). Always at least
+ * one line: a text with no words (a whitespace-only cell is valid data) is one empty line (P3-F).
  */
 export function wrap(text: string, size: number, max: number, lines: number): { lines: string[]; shortened: boolean } {
   const out: string[] = [];
@@ -42,6 +43,7 @@ export function wrap(text: string, size: number, max: number, lines: number): { 
     }
   }
   if (line !== '') out.push(line);
+  if (out.length === 0) out.push('');
   if (out.length <= lines) return { lines: out, shortened: false };
   const kept = out.slice(0, lines);
   let last = kept[lines - 1];

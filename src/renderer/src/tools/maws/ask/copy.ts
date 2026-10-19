@@ -58,6 +58,8 @@ export const SHEET = {
   noSystems: 'You have no design systems yet.',
   readingSystems: 'Reading your design systems…',
   systemsUnread: "Couldn't read your design systems.",
+  // F (L176): Submit found a picked system deleted since the pick, and sent nothing
+  systemDeleted: (names: readonly string[]) => `${names.join(', ')} ${names.length === 1 ? 'was' : 'were'} deleted. Choose another design system.`,
   systemOrigin: (origin: { route: string; from?: string } | null | undefined): string | null => {
     if (!origin) return null;
     const from = origin.from ? ` from ${origin.from}` : '';

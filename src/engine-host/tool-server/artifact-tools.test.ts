@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -49,6 +50,17 @@ describe('artifact_create', () => {
     expect(Buffer.from(w.store.files.read(id, w.store.contentRef(id).ref)).toString('utf8')).toBe(PAGE);
     expect(w.store.contentRef(id).ref.name).toBe('dashboard.html');
     expect(existsSync(join(w.userData, 'deliverables'))).toBe(false);
+  });
+
+  // P3-F (artifact-protocol finding 7): a handle shaped like a UUID names the artifact it was given to, as E2's id did
+  it('resolves a UUID-shaped handle as the handle it is, and refuses it to a second create', async () => {
+    const handle = '11111111-1111-4111-8111-111111111111';
+    const created = jsonOf<{ artifactId: string }>(await create({ handle, content: '<p>one</p>', title: 'One' }));
+    expect(created).toMatchObject({ handle, id: handle });
+    expect(created.artifactId).not.toBe(handle);
+    expect(jsonOf(await read({ artifact: handle }))).toMatchObject({ artifactId: created.artifactId, handle });
+    expect(textOf(await create({ handle, content: '<p>two</p>', title: 'Two' }))).toBe(TOOL_ERRORS.artifactExists(handle));
+    expect(jsonOf(await read({ artifact: created.artifactId }))).toMatchObject({ artifactId: created.artifactId }); // its id still names it
   });
 
   it('attaches the kind’s guide once per session, and an inline page needs no file', async () => {
@@ -385,6 +397,44 @@ describe('artifact_upload_asset and artifact_list_assets', () => {
     expect(artifactRefusalOf(textOf(await artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path: '/etc/hosts' }, w.ctx())))).toMatchObject({ reason: 'invalid' });
     expect(textOf(await artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path: 'gone.png' }, w.ctx()))).toBe(TOOL_ERRORS.artifactNotAFile('artifact_upload_asset', join(w.cwd, 'gone.png')));
   });
+
+  // P3-F (artifact-protocol finding 4): the working directory bounds where a path leads, not only its words
+  it('refuses a source a link under the working directory leads out of it, and follows one that stays inside', async () => {
+    const design = jsonOf(await create({ kind: 'design', title: 'Site' }));
+    const outside = mkdtempSync(join(tmpdir(), 'maws-tools-outside-'));
+    try {
+      writeFileSync(join(outside, 'private.txt'), 'secret');
+      symlinkSync(outside, join(w.cwd, 'out'));
+      symlinkSync(join(outside, 'private.txt'), join(w.cwd, 'private.png'));
+      for (const path of ['out/private.txt', 'private.png']) {
+        const refused = await artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path }, w.ctx());
+        expect(artifactRefusalOf(textOf(refused))).toMatchObject({ reason: 'invalid', path: join(w.cwd, path) });
+      }
+      expect(w.store.listAssets(design.artifactId as string)).toEqual([]);
+      mkdirSync(join(w.cwd, 'img'));
+      writeFileSync(join(w.cwd, 'img', 'logo.png'), 'png');
+      symlinkSync(join(w.cwd, 'img'), join(w.cwd, 'pictures'));
+      expect(jsonOf(await artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path: 'pictures/logo.png' }, w.ctx()))).toMatchObject({ status: 'uploaded', name: 'logo.png' });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  // P3-F (artifact-protocol #3 completion): the `edited` link commits with the upload's rows or not at all
+  it('links the session edited only with an upload that landed: a refused one leaves no link, nor moves an existing one', async () => {
+    const design = jsonOf<{ artifactId: string }>(await create({ kind: 'design', title: 'Site' }));
+    writeFileSync(join(w.cwd, 'logo.png'), 'png');
+    const upload = (name?: string) => artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path: 'logo.png', ...(name === undefined ? {} : { name }) }, w.ctx());
+    const edited = () => w.store.links(design.artifactId).filter((link) => link.role === 'edited');
+    const refused = ['query-11111111-1111-4111-8111-111111111111.json', '..']; // the query snapshots' namespace; no usable name
+    for (const name of refused) expect(artifactRefusalOf(textOf(await upload(name)))).toMatchObject({ reason: 'invalid' });
+    expect(edited()).toEqual([]);
+    expect(jsonOf(await upload())).toMatchObject({ status: 'uploaded' });
+    const [link] = edited();
+    await new Promise((resolve) => setTimeout(resolve, 5)); // a link written later would carry a later time
+    for (const name of refused) expect(artifactRefusalOf(textOf(await upload(name)))).toMatchObject({ reason: 'invalid' });
+    expect(edited()).toEqual([link]);
+  });
 });
 
 describe('artifact_export', () => {
@@ -431,6 +481,51 @@ describe('artifact_export', () => {
     expect(exported).toEqual({ status: 'exported', artifactId: plan.id, format: 'pdf', revision: 3, path: join(w.userData, 'artifacts', plan.id, 'exports', '3-pdf.pdf'), blockedRequests: 2 });
     answer = (request) => ({ ok: true, revision: request.revision, path: join(w.cwd, 'elsewhere.pdf') });
     expect(textOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: plan.id, format: 'pdf' }, w.ctx()))).toMatch(/outside/);
+  });
+
+  // P3-F (artifact-protocol finding 4): a copy is never written through a link out of the working directory
+  it('refuses a `to` a link under the working directory leads out of it, or that is a link itself, before asking main', async () => {
+    jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
+    const outside = mkdtempSync(join(tmpdir(), 'maws-tools-outside-'));
+    try {
+      writeFileSync(join(outside, 'report.pdf'), 'theirs');
+      symlinkSync(outside, join(w.cwd, 'out'));
+      symlinkSync(join(outside, 'report.pdf'), join(w.cwd, 'report.pdf'));
+      const sent: ArtifactExportRequest[] = [];
+      const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => (sent.push(request), writeFileSync(request.path, '%PDF-1.7'), queueMicrotask(() => exporter.answer(request.requestId, { ok: true, revision: request.revision, path: request.path }))), answerMs: 60_000 });
+      for (const to of ['out/report.pdf', 'out/new/report.pdf', 'report.pdf']) {
+        const refused = await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', to }, w.ctx());
+        expect(artifactRefusalOf(textOf(refused))).toMatchObject({ reason: 'invalid', path: join(w.cwd, to) });
+      }
+      expect(sent).toEqual([]);
+      expect(readFileSync(join(outside, 'report.pdf'), 'utf8')).toBe('theirs');
+      expect(existsSync(join(outside, 'new'))).toBe(false);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses the copy when its directory became a link out of the working directory while main exported', async () => {
+    jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
+    const outside = mkdtempSync(join(tmpdir(), 'maws-tools-outside-'));
+    try {
+      writeFileSync(join(outside, 'report.pdf'), 'theirs');
+      mkdirSync(join(w.cwd, 'out'));
+      const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({
+        send: (request) => {
+          writeFileSync(request.path, '%PDF-1.7');
+          rmSync(join(w.cwd, 'out'), { recursive: true });
+          symlinkSync(outside, join(w.cwd, 'out'));
+          queueMicrotask(() => exporter.answer(request.requestId, { ok: true, revision: request.revision, path: request.path }));
+        },
+        answerMs: 60_000,
+      });
+      const refused = textOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', to: 'out/report.pdf' }, w.ctx()));
+      expect(refused).toMatch(/^artifact_export: exported to .+, but the copy to .+ failed: .+outside the working directory/);
+      expect(readFileSync(join(outside, 'report.pdf'), 'utf8')).toBe('theirs');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('answers exportUnavailable for a pair main has no exporter for, and in a build without the service', async () => {

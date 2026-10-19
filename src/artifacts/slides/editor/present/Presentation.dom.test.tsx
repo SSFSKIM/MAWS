@@ -11,12 +11,13 @@ import { removeSlide } from '../../writers';
 import { Presentation, type PresentRole } from './Presentation';
 
 const pin = (id: string, attrs = '') => `<p id="${id}" ${attrs} style="position:absolute; left:100px; top:100px; width:400px; font-size:40px">${id}</p>`;
-function deck(): Doc {
+function deck(extra: Record<string, string> = {}): Doc {
   const files: Record<string, string> = {
     one: `<section id="one" data-transition="fade"><h1 id="t1" style="font-size:96px">One</h1><aside>Say hello</aside></section>`,
     two: `<section id="two">${pin('a', 'data-build-in="fade"')}${pin('b', 'data-build-in="rise"')}</section>`,
     secret: `<section id="secret" hidden><p id="x" style="font-size:40px">Hidden</p></section>`,
     three: `<section id="three"><p id="z" style="font-size:40px">Three</p></section>`,
+    ...extra,
   };
   const doc = newDoc();
   transact(doc, () => {
@@ -39,6 +40,18 @@ function show(doc: Doc, role: PresentRole, options: { paired?: boolean; start?: 
   return { ...utils, onEnd, artifactId, at: () => `${root().dataset.presentSlide}/${root().dataset.presentBuild}`, root };
 }
 const key = (k: string) => act(() => void fireEvent.keyDown(window, { key: k }));
+/** A key pressed on an element as Chromium does: its keydown, then a button's activation by Enter or Space unless cancelled. */
+const pressOn = (el: HTMLElement, k: string) =>
+  act(() => {
+    if (fireEvent.keyDown(el, { key: k }) && el instanceof HTMLButtonElement && (k === 'Enter' || k === ' ')) el.click();
+  });
+/** A mouse click on an element as Chromium does: its mousedown focuses it unless cancelled, then the click. */
+const clickOn = (el: HTMLElement) =>
+  act(() => {
+    if (fireEvent.mouseDown(el)) el.focus();
+    fireEvent.mouseUp(el);
+    fireEvent.click(el);
+  });
 
 afterEach(cleanup);
 
@@ -95,6 +108,32 @@ describe('the show', () => {
     expect(paired.container.querySelector('[data-present-view]')!.getAttribute('data-present-view')).toBe('audience');
   });
 
+  // P3-F slide-editor scalpel-4#3: Enter and Space on a focused presenter button are the button's, so End ends the show
+  it('leaves Enter and Space to a focused presenter button; the arrows still drive the show, and a press keeps focus off the bar', () => {
+    const s = show(deck(), 'presenter');
+    const button = (name: string) => s.getByRole('button', { name });
+    pressOn(button('Black'), ' ');
+    expect([s.at(), s.root().hasAttribute('data-present-black')]).toEqual(['one/0', true]);
+    pressOn(button('End show'), 'ArrowRight');
+    expect(s.at()).toBe('two/0');
+    pressOn(button('End show'), 'Enter');
+    expect([s.at(), s.onEnd.mock.calls.length]).toEqual(['two/0', 1]);
+    // a pointer press does not move focus onto the bar, so the show's Space and Enter still follow a click on a button
+    expect(fireEvent.mouseDown(button('Next'))).toBe(false);
+  });
+
+  // the wave's review (P3): a click on the bar also lets go of the focus a bar button took from the keyboard, so the
+  // Space after a click on → is the show's, not the ← that held focus
+  it('drops a bar button’s keyboard focus on a click on the bar, so the show’s Space follows the click', () => {
+    const s = show(deck(), 'presenter');
+    const button = (name: string) => s.getByRole('button', { name });
+    act(() => button('Previous').focus()); // a Tab onto the bar
+    clickOn(button('Next'));
+    expect(s.at()).toBe('two/0');
+    pressOn(document.activeElement as HTMLElement, ' ');
+    expect(s.at()).toBe('two/1');
+  });
+
   it('B shows black; Escape ends the show', () => {
     const s = show(deck(), 'audience');
     key('b');
@@ -110,6 +149,18 @@ describe('the show', () => {
     expect(s.container.querySelector('[data-present-notes]')!.textContent).toContain('New words');
     act(() => removeSlide(doc, 'two'));
     expect(s.at()).toBe('three/0');
+  });
+
+  // P3-F slide-editor scalpel-3#2: the removed slide sits mid-deck, so the slide after it is not also the last
+  it('gives a removed current slide’s place to the slide after it, there through later updates, and goes on from it', () => {
+    const doc = deck({ four: `<section id="four"><p id="w" style="font-size:40px">Four</p></section>` });
+    const s = show(doc, 'audience', { start: 'two' });
+    act(() => removeSlide(doc, 'two'));
+    expect(s.at()).toBe('three/0');
+    act(() => setNotes(doc, 'three', 'Still here'));
+    expect(s.at()).toBe('three/0');
+    key('ArrowRight');
+    expect(s.at()).toBe('four/0');
   });
 });
 

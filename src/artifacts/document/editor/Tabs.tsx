@@ -3,7 +3,8 @@
 // writes the tabs map (tabs.ts), so the other replicas see it at once; none of it is in a body's undo history.
 import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { Doc } from '../../yjs';
-import { addTab, deleteTab, moveTab, renameTab, type TabInfo } from '../tabs';
+import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
+import { TAB_LIMIT_REFUSAL, addTab, deleteTab, moveTab, renameTab, type TabInfo } from '../tabs';
 
 const DRAG_TYPE = 'application/x-maws-document-tab';
 
@@ -12,10 +13,18 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const index = tabs.findIndex((tab) => tab.id === active);
+  // the guide's limit (P3-F, tracker L155): Add tab is refused with the reason on it; a tab another replica added since
+  // this render is refused by the writer itself, which writes nothing
+  const full = tabs.length >= DOCUMENT_LIMITS.tabs;
 
   const add = () => {
-    if (readOnly) return;
-    const id = addTab(doc, { title: `Tab ${tabs.length + 1}`, ...(active ? { after: active } : {}) });
+    if (readOnly || full) return;
+    let id: string;
+    try {
+      id = addTab(doc, { title: `Tab ${tabs.length + 1}`, ...(active ? { after: active } : {}) });
+    } catch {
+      return;
+    }
     onSelect(id);
   };
   const move = (by: -1 | 1) => {
@@ -31,11 +40,13 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
     onSelect(next.id);
     setMenu(false);
   };
+  // P3-F: a dragged id that is no tab of this document (one from another document's strip, one deleted mid-drag) is
+  // not this strip's drop
   const drop = (event: DragEvent, target: TabInfo) => {
     const dragged = event.dataTransfer.getData(DRAG_TYPE);
-    if (!dragged || dragged === target.id) return;
-    event.preventDefault();
     const from = tabs.findIndex((tab) => tab.id === dragged);
+    if (from < 0 || dragged === target.id) return;
+    event.preventDefault();
     const to = tabs.findIndex((tab) => tab.id === target.id);
     moveTab(doc, dragged, from < to ? { after: target.id } : { before: target.id });
   };
@@ -99,7 +110,7 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
           )}
         </div>
       )}
-      <button type="button" className="doc-icon-button" aria-label="Add tab" disabled={readOnly} onClick={add}>
+      <button type="button" className="doc-icon-button" aria-label="Add tab" disabled={readOnly || full} title={full ? TAB_LIMIT_REFUSAL : undefined} onClick={add}>
         +
       </button>
     </div>

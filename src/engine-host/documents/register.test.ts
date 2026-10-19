@@ -2,7 +2,8 @@
 // M4): every host-owned command has a handler and one deadline shape, the store's refusals reach the caller typed, the
 // test-only commands answer only under MAWS_E2E=1, the change feed is emitted, and a document port main posts is
 // attached for a document kind and closed for anything else.
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -184,6 +185,20 @@ describe('the artifacts and spaces surface (M4)', () => {
     expect(Object.keys(delay).sort()).toEqual(['max', 'mean', 'p50', 'p99']);
   });
 
+  it('samples the loop delay with its own timer from the first call, which answers zeros, and reads a block in full (P3-F L158)', async () => {
+    surface!.close();
+    register({ MAWS_E2E: '1' });
+    expect(await call('artifacts.testLoopDelay', { reset: true })).toEqual({ p50: 0, p99: 0, max: 0, mean: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const until = performance.now() + 80;
+    while (performance.now() < until) {
+      // an 80 ms synchronous block on the host's loop
+    }
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const delay = await call('artifacts.testLoopDelay', { reset: true });
+    expect(delay.max).toBeGreaterThanOrEqual(80); // `call` validates the answer against the command's output schema
+  });
+
   it('keeps the defaults main relays, serves a byte kind’s file and an asset, and reports the store healthy', async () => {
     const system = (await call('artifacts.create', { kind: 'design_system', title: 'House' })).artifact;
     await call('artifacts.setDefaults', { owner: system.id, spaces: {} });
@@ -236,6 +251,139 @@ describe('the artifacts and spaces surface (M4)', () => {
     const closed = new Promise<void>((resolve) => port2.once('close', () => resolve()));
     docHandler!({ t: 'doc', channel: 1, artifactId: '33333333-3333-4333-8333-333333333333', actor: { kind: 'human' } }, asPortMain(port1));
     await closed;
+  });
+});
+
+// F's L139 (the P3-A landing's tracker row): the owner's file create, copy and restore hash a file artifact's bytes by a
+// streamed read before the write's batch opens, as the agent's `send_file` and `artifact_create` do, so a large file
+// never holds the host's event loop inside the transaction; what is recorded is still the bytes' own size and hash.
+describe('the owner’s file writes hash before their batch', () => {
+  it('creates, copies and restores a large file artifact without hashing inside a batch, recording its digest', async () => {
+    const big = Buffer.alloc(3 * 1024 * 1024 + 7);
+    for (let i = 0; i < big.length; i++) big[i] = (i * 31) % 251;
+    const file = join(dir, 'big.bin');
+    writeFileSync(file, big);
+    const inBatch: boolean[] = [];
+    const files = documents!.store.files;
+    const hashInPlace = files.describe.bind(files);
+    vi.spyOn(files, 'describe').mockImplementation((path) => (inBatch.push(documents!.storage.batchOpen), hashInPlace(path)));
+    const digest = { size: big.length, sha256: createHash('sha256').update(big).digest('hex') };
+
+    const created = (await call('artifacts.create', { kind: 'file', title: 'Big', content: { path: file } })).artifact;
+    expect(await call('artifacts.content', { artifactId: created.id })).toMatchObject({ kind: 'file', path: file, ...digest });
+    const copy = (await call('artifacts.duplicate', { artifactId: created.id })).artifact;
+    expect(await call('artifacts.content', { artifactId: copy.id })).toMatchObject({ kind: 'file', path: file, ...digest });
+    const [first] = (await call('artifacts.versions', { artifactId: created.id })).versions;
+    await call('artifacts.restore', { artifactId: created.id, versionId: first!.id });
+    expect(await call('artifacts.content', { artifactId: created.id })).toMatchObject({ kind: 'file', path: file, ...digest });
+
+    expect(inBatch).toEqual([]);
+  });
+
+  // F's L139 review: what the write would refuse is refused before anything is read, and only a regular file is ever
+  // opened, so a document's forbidden path is never read and a FIFO or a device never blocks the copy, create or restore.
+  // The stream is a stand-in here: nothing is read, whatever the code under test asks of it.
+  it('refuses an invalid create, and a path that is not a regular file, without opening a stream', async () => {
+    const file = join(dir, 'kept.bin');
+    writeFileSync(file, 'kept');
+    const kept = (await call('artifacts.create', { kind: 'file', title: 'Kept', content: { path: file } })).artifact;
+    const [first] = (await call('artifacts.versions', { artifactId: kept.id })).versions;
+    const streamed: string[] = [];
+    vi.spyOn(documents!.store.files, 'describeStreamed').mockImplementation(async (path) => {
+      streamed.push(path);
+      throw new Error('a stream was opened');
+    });
+    const missing = '00000000-0000-4000-8000-00000000dead';
+
+    expect(await refusal('artifacts.create', { kind: 'document', title: 'Doc', content: { path: file } })).toMatchObject({ issues: { reason: 'invalid' } });
+    expect(await refusal('artifacts.create', { kind: 'html', title: 'Page', content: { path: file } })).toMatchObject({ issues: { reason: 'invalid' } });
+    expect(await refusal('artifacts.create', { kind: 'file', title: 'F', content: { path: file }, designSystemId: missing })).toMatchObject({ issues: { reason: 'invalid' } });
+    expect(await refusal('artifacts.create', { kind: 'file', title: 'F', content: { path: file }, spaceId: missing })).toMatchObject({ issues: { reason: 'notFound' } });
+    for (const path of [dir, '/dev/null']) expect(await refusal('artifacts.create', { kind: 'file', title: 'F', content: { path } })).toMatchObject({ issues: { reason: 'invalid' } });
+    // the kept file's place now holds a directory: its copy and its restore are refused the same way, unread
+    rmSync(file);
+    mkdirSync(file);
+    expect(await refusal('artifacts.duplicate', { artifactId: kept.id })).toMatchObject({ issues: { reason: 'invalid' } });
+    expect(await refusal('artifacts.restore', { artifactId: kept.id, versionId: first!.id })).toMatchObject({ issues: { reason: 'invalid' } });
+
+    expect(streamed).toEqual([]);
+  });
+});
+
+// F's L139 review: a file's copy, create or restore awaits its hash, so what it validated may change meanwhile; the write
+// reads the source, its version and its references again where it writes, as if it had run then, keeping the content it
+// hashed. Each case holds the hash open while another write lands, then lets it finish.
+describe('a file write that awaited its hash validates again where it writes', () => {
+  function heldHash() {
+    const files = documents!.store.files;
+    const hash = files.describeStreamed.bind(files);
+    let reached!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => (reached = resolve));
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    vi.spyOn(files, 'describeStreamed').mockImplementation(async (path) => {
+      reached();
+      await gate;
+      return hash(path);
+    });
+    return { started, release };
+  }
+  async function governedFile() {
+    const system = (await call('artifacts.create', { kind: 'design_system', title: 'House' })).artifact;
+    const file = join(dir, 'governed.bin');
+    writeFileSync(file, 'governed');
+    const source = (await call('artifacts.create', { kind: 'file', title: 'Governed', content: { path: file }, designSystemId: system.id })).artifact;
+    return { system, source };
+  }
+
+  it('copies a file moved off its system, whose system was deleted meanwhile, with no reference to that system', async () => {
+    const { system, source } = await governedFile();
+    const held = heldHash();
+    const copying = call('artifacts.duplicate', { artifactId: source.id });
+    await held.started;
+    await call('artifacts.update', { artifactId: source.id, designSystemId: null });
+    await call('artifacts.delete', { artifactId: system.id });
+    held.release();
+    const copy = (await copying).artifact;
+    expect(copy.designSystemId).toBeUndefined();
+    expect(durable('SELECT COUNT(*) AS n FROM artifacts WHERE designSystemId = ?', system.id)).toBe(0);
+    expect(await call('artifacts.content', { artifactId: copy.id })).toMatchObject({ kind: 'file', size: 'governed'.length });
+  });
+
+  it('refuses the copy of a file deleted meanwhile, writing nothing', async () => {
+    const { source } = await governedFile();
+    const held = heldHash();
+    const copying = refusal('artifacts.duplicate', { artifactId: source.id });
+    await held.started;
+    await call('artifacts.delete', { artifactId: source.id });
+    held.release();
+    expect(await copying).toMatchObject({ issues: { reason: 'notFound' } });
+    expect(durable("SELECT COUNT(*) AS n FROM artifacts WHERE title LIKE 'Copy of %'")).toBe(0);
+  });
+
+  it('refuses the restore of a file deleted meanwhile, writing no version', async () => {
+    const { source } = await governedFile();
+    const [first] = (await call('artifacts.versions', { artifactId: source.id })).versions;
+    const held = heldHash();
+    const restoring = refusal('artifacts.restore', { artifactId: source.id, versionId: first!.id });
+    await held.started;
+    await call('artifacts.delete', { artifactId: source.id });
+    held.release();
+    expect(await restoring).toMatchObject({ issues: { reason: 'notFound' } });
+    expect(durable("SELECT COUNT(*) AS n FROM artifact_versions WHERE artifactId = ? AND kind = 'restore'", source.id)).toBe(0);
+  });
+
+  it('refuses the create of a file whose system was deleted meanwhile', async () => {
+    const system = (await call('artifacts.create', { kind: 'design_system', title: 'House' })).artifact;
+    const file = join(dir, 'late.bin');
+    writeFileSync(file, 'late');
+    const held = heldHash();
+    const creating = refusal('artifacts.create', { kind: 'file', title: 'Late', content: { path: file }, designSystemId: system.id });
+    await held.started;
+    await call('artifacts.delete', { artifactId: system.id });
+    held.release();
+    expect(await creating).toMatchObject({ issues: { reason: 'invalid', data: { designSystemId: system.id } } });
+    expect(durable("SELECT COUNT(*) AS n FROM artifacts WHERE title = 'Late'")).toBe(0);
   });
 });
 

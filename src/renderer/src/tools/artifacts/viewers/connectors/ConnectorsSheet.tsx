@@ -13,7 +13,8 @@
 // tools select (its server, transport and configuration file, MAWS's connection in words, Connect, Reconnect,
 // Disconnect), a server only a session can reach and why, saved MAWS connections no source uses (Disconnect), an
 // unreadable one (Forget) and a disconnect still unconfirmed (Retry). Controls wrap below a row's identity when narrow.
-// Its sentences then name both routes, never a session alone.
+// Its sentences then name both routes, never a session alone. P3-F: the section stands whenever it has rows, a page
+// with no tool declared or granted included, so those recovery actions stay reachable.
 import { useStore } from 'zustand';
 import { connectorToolKey, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { ConnectorServerRow } from '@shared/ipc/schema/connectors';
@@ -32,6 +33,7 @@ export function ArtifactConnectorsSheet({ tab, artifact }: { tab: ConnectorsTab;
 export function ConnectorsSheet({ tab, context }: { tab: ConnectorsTab; context: ArtifactSessionContext }) {
   const view = useStore(tab.view);
   const tools = sheetTools(view);
+  const servers = tools.length > 0 || (view.servers.rows?.length ?? 0) > 0; // P3-F: its recovery rows need no tool
   const body = (
     <>
       {tools.length === 0 ? (
@@ -43,7 +45,7 @@ export function ConnectorsSheet({ tab, context }: { tab: ConnectorsTab; context:
           ))}
         </ul>
       )}
-      {tab.owned && tools.length > 0 && <ServersSection tab={tab} />}
+      {tab.owned && servers && <ServersSection tab={tab} />}
       {view.needsSession && <StartRow tab={tab} context={context} />}
     </>
   );

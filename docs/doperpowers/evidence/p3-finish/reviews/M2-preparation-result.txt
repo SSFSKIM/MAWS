@@ -1,0 +1,5 @@
+M2 owner preparation: draft approved after one bounded correction
+Source/document change b9551cab8; correction0a64bcb47; reviewer adcc38ef2eb777453.
+Round1 found one material procedure gap: a ready observer session alone does not populate source attestation, and Start refreshes only existing watches. Controller verified ConnectorCalls.resolve/toolState and broker target-before-grant. Worker added explicit manual page refresh and completed route resolution before Connect and after relaunch before Archive, with chosen-source visibility check and not-run fallback.
+Round2 approved with no material findings. Script, blank results and source-grounding pin agree. This is source-reasoned human preparation only: no native/account/sitting step run, and M4.2 final-source/build/server recheck remains mandatory.
+Execution used only documentary checks; no app, engine, build, tests or GUI.

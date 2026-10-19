@@ -20,9 +20,9 @@ import * as Y from '../yjs/slides';
 import { DECK_LIMITS, DECK_PATH, parseDeckJson, serializeDeckJson, slideIdOf, slidePath, type DeckJson } from './deck';
 import { parseHtml } from './html';
 import { CONTAINER_TAGS, MARK_ORDER, TEXT_TAGS, isPinned, type Attrs, type ElementIR, type Marks, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
-import { cellMinter, childLists, groupOf, GROUP_BOUNDS, GROUPS, groupKey, heldOf, readDeckJson, readFlat, resolveParents, ROOT, slideFile, slideOrder, slideScalarsOf, toScalars, type Group } from './model';
+import { cellMinter, childLists, groupsOf, GROUP_BOUNDS, GROUPS, groupKey, heldOf, readDeckJson, readFlat, resolveParents, ROOT, slideFile, slideOrder, slideScalarsOf, toScalars, type Group } from './model';
 import { ANY, rekey, within } from './order';
-import { loadSlide } from './parse';
+import { loadSlide, normalizeNotes, normalizeText } from './parse';
 import { partition } from './serialize';
 
 /** A loader warning, or the publish's own, for the agent's answer (X25's deck part). `slide` is absent for the index. */
@@ -102,23 +102,26 @@ function liveViewOf(doc: Doc, slideId: string): LiveView {
   const byId = new Map(flat.map((e) => [e.id, e]));
   const keyOf = new Map<string, string>();
   const lists = childLists(flat, eff);
+  const groups = groupsOf(flat, eff); // a layer as the file carries it: over for every pinned child of a host with no flow child
   for (const [parent, kids] of lists) {
     const row = byId.get(parent)?.tag === 'tr';
     kids.forEach((e, i) => keyOf.set(e.id, row ? cellKey(parent, i) : e.id));
   }
-  const view: LiveView = { scalars: {}, notes: Y.readNotes(doc, slideId), els: new Map(), lists: new Map(), ids: new Map(), place: new Map() };
+  // notes and text as the loader reads the file (whitespace the serializer writes verbatim and the loader trims), so the
+  // live view compares as the agent's base and sent files do (P3-F slide-model scalpel-3#2); the writes still diff from the raw
+  const view: LiveView = { scalars: {}, notes: normalizeNotes(Y.readNotes(doc, slideId)), els: new Map(), lists: new Map(), ids: new Map(), place: new Map() };
   for (const [k, v] of Object.entries(Y.slideScalars(doc, slideId))) if (k.startsWith('style:') || k.startsWith('attr:')) view.scalars[k] = v;
   for (const e of flat) {
     const key = keyOf.get(e.id)!;
     const parent = eff.get(e.id)!;
-    const group = groupOf(e);
-    view.els.set(key, { key, tag: e.tag, parent: parent === ROOT ? ROOT : keyOf.get(parent)!, group, style: e.style, attrs: e.attrs, ...(e.text && { text: e.text }), ...(e.raw !== undefined && { raw: e.raw }) });
+    const group = groups.get(e.id)!;
+    view.els.set(key, { key, tag: e.tag, parent: parent === ROOT ? ROOT : keyOf.get(parent)!, group, style: e.style, attrs: e.attrs, ...(e.text && { text: normalizeText(e.text) }), ...(e.raw !== undefined && { raw: e.raw }) });
     view.ids.set(key, e.id);
     view.place.set(key, { ...(e.order !== undefined && { order: e.order }), ...(e.z !== undefined && { z: e.z }) });
   }
   for (const [parent, kids] of lists)
     for (const g of GROUPS) {
-      const keys = kids.filter((e) => groupOf(e) === g).map((e) => keyOf.get(e.id)!);
+      const keys = kids.filter((e) => groups.get(e.id) === g).map((e) => keyOf.get(e.id)!);
       if (keys.length) view.lists.set(listKey(parent === ROOT ? ROOT : keyOf.get(parent)!, g), keys);
     }
   return view;
@@ -141,8 +144,9 @@ function keysChanged(x: El, y: El): boolean {
   return px.size !== py.size || [...px].some(([k, v]) => py.get(k) !== v) || !sameText(x.text, y.text);
 }
 /**
- * An element's place differs between two views by meaning: its parent, its layer (flow, under or over), or its position
- * among the siblings both views share in that list; not the bytes of a fractional key.
+ * An element's place differs between two views by meaning: its parent, its layer (flow, under or over), or the sibling
+ * before it among the siblings both views share in that list (its neighbour relation: a move elsewhere in the list,
+ * before or after it, is not its change); not its index, nor the bytes of a fractional key (P3-F slide-model scalpel-2#2).
  */
 function placeChanged(key: string, x: View, y: View): boolean {
   const [ex, ey] = [x.els.get(key)!, y.els.get(key)!];
@@ -151,7 +155,12 @@ function placeChanged(key: string, x: View, y: View): boolean {
   const [lx, ly] = [x.lists.get(lk) ?? [], y.lists.get(lk) ?? []];
   const inY = new Set(ly);
   const common = new Set(lx.filter((k) => inY.has(k)));
-  return restrict(lx, common).indexOf(key) !== restrict(ly, common).indexOf(key);
+  return predecessor(restrict(lx, common), key) !== predecessor(restrict(ly, common), key);
+}
+/** The member before `key` in `seq`, null when it is first (and when `seq` lacks it). */
+function predecessor(seq: string[], key: string): string | null {
+  const at = seq.indexOf(key);
+  return at > 0 ? seq[at - 1]! : null;
 }
 /** Two views of one slide mean the same: its keys, notes, elements, their keys, text and places. */
 function sameSlide(x: View, y: View): boolean {
@@ -333,16 +342,19 @@ function mergeSequence(members: Set<string>, seqB: string[], seqA: string[], seq
   const reordered = !sameSeq(restrict(a, ab), restrict(b, ab));
   let conflict = false;
   // a member the agent brought into this list that someone else brought in too (by another route: both re-parented it
-  // here): its place is the agent's change, and a different place since is a conflict like any order
+  // here): its place is the agent's change, and a different place since (by its predecessor among the members both
+  // hold, the neighbour relation) is a conflict like any order
   const both = new Set(a.filter((k) => inL.has(k)));
   const [aBoth, lBoth] = [restrict(a, both), restrict(l, both)];
-  const misplaced = new Set(a.filter((k) => !inB.has(k) && inL.has(k) && aBoth.indexOf(k) !== lBoth.indexOf(k)));
+  const misplaced = new Set(a.filter((k) => !inB.has(k) && inL.has(k) && predecessor(aBoth, k) !== predecessor(lBoth, k)));
   if (misplaced.size > 0 && !force) conflict = true;
   let desired: string[];
   if (!reordered) {
     desired = [...l];
     a.forEach((k, i) => {
-      if (inB.has(k)) return;
+      // a member the agent read and live still holds keeps its live place; one removed since that the agent re-creates
+      // (under force) goes by its sent neighbours, as a new member does (P3-F slide-model scalpel-2#1)
+      if (inB.has(k) && inL.has(k)) return;
       if (desired.includes(k)) {
         if (!misplaced.has(k)) return;
         desired.splice(desired.indexOf(k), 1);

@@ -4,6 +4,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DirectConnectionPool, directConnectionKey, type DirectConnectionSpec, type DirectPoolOptions } from './direct-client';
+import { STDIO_STOP } from './direct-stdio';
 import { FakeMcpServer, FakeProcesses, fakeFetch, fakeSource } from './direct-test-fakes';
 
 const URL_ = 'http://127.0.0.1:4100/mcp';
@@ -426,6 +427,22 @@ describe('tools/list', () => {
     const lease = await leaseOf(pool, httpSpec());
     expect(await lease.listTools(new AbortController().signal)).toEqual({ ok: true, tools: [{ name: 'rows', readOnly: true, taskRequired: true }, { name: 'maybe', readOnly: false }, { name: 'plain', readOnly: false }] });
   });
+
+  // P3-F: each tools/list replaces the SDK's own output validators, so its last page alone would be checked
+  it('checks a tool’s structured output against its own schema when a later page listed other tools', async () => {
+    const { pool, server } = httpPool();
+    server.toolPages = [[{ name: 'rows', annotations: { readOnlyHint: true }, outputSchema: { type: 'object', properties: { rows: { type: 'array' } }, required: ['rows'] } }], [{ name: 'write' }]];
+    const lease = await leaseOf(pool, httpSpec());
+    expect(await lease.listTools(new AbortController().signal)).toEqual({ ok: true, tools: [{ name: 'rows', readOnly: true }, { name: 'write', readOnly: false }] });
+    const answered = async (result: unknown) => {
+      server.result = () => result;
+      return lease.callTool(call, { admit: () => true, signal: new AbortController().signal });
+    };
+    expect(await answered({ content: [], structuredContent: { other: 107 } })).toMatchObject({ ok: false, failure: 'failed', admitted: true });
+    expect(await answered({ content: [{ type: 'text', text: 'rows 107' }] })).toMatchObject({ ok: false, failure: 'failed', admitted: true });
+    expect(await answered({ content: [], structuredContent: { rows: [107] } })).toEqual({ ok: true, result: { content: [], structuredContent: { rows: [107] } } });
+    expect(await answered({ content: [{ type: 'text', text: 'no rows' }], isError: true })).toMatchObject({ ok: true }); // an error result carries none
+  });
 });
 
 describe('a tools/call over stdio', () => {
@@ -447,6 +464,25 @@ describe('a tools/call over stdio', () => {
     processes.children[0]!.emitStdout('z'.repeat(5_000)); // no newline: an unterminated line past the bound
     expect(await pending).toMatchObject({ ok: false, failure: 'tooLarge', admitted: true });
     expect(processes.children[0]!.stdinEnded).toBe(true);
+  });
+
+  // P3-F: a server that closed its input but did not exit fails the write only asynchronously (EPIPE)
+  it('fails a call whose write the server’s closed input refused, at once, and ends the connection', async () => {
+    vi.useFakeTimers();
+    const { pool, processes } = stdioPool();
+    processes.behaviour = { exitOnStdinEnd: false, exitOn: ['SIGTERM', 'SIGKILL'] };
+    const lease = await leaseOf(pool, stdioSpec());
+    const child = processes.children[0]!;
+    child.inputClosed = true;
+    let outcome: unknown = 'pending';
+    void lease.callTool(call, { admit: () => true, signal: new AbortController().signal }).then((value) => (outcome = value));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(outcome).toMatchObject({ ok: false, failure: 'unavailable', admitted: true });
+    await vi.advanceTimersByTimeAsync(STDIO_STOP.termAfterMs + STDIO_STOP.pollMs);
+    expect(processes.signals).toContainEqual({ pid: -child.pid, signal: 'SIGTERM' });
+    expect(processes.alive(child.pid)).toEqual([]);
+    expect(pool.size).toBe(0);
+    lease.release();
   });
 });
 

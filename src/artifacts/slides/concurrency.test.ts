@@ -12,6 +12,9 @@ import { deckFiles, deleteElementTree, moveInto, moveSlide, readFlat, readSlide,
 import { publishDeck } from './publish';
 
 const TRIALS = 200;
+// Each case runs its scenarios 200 times on fresh replica pairs: load-sensitive (measured 3.5 to 5.3 s under a load
+// average of about 255), so a case takes the timing projects' budget rather than vitest's 5 s default (P3-F slide-model sweep#3).
+const CASE_TIMEOUT = 30_000;
 const HUMAN: Actor = { kind: 'human' };
 const adapter = createPresentationAdapter();
 const BASE_SLIDE = `<section id="s1" style="background:#ffffff; padding:128px">
@@ -70,7 +73,7 @@ function run(scenario: (a: Doc, b: Doc) => string): Record<string, number> {
   return outcomes;
 }
 
-describe('the model under concurrency (S6, 200 trials per scenario)', () => {
+describe('the model under concurrency (S6, 200 trials per scenario)', { timeout: CASE_TIMEOUT }, () => {
   it('a concurrent move of one element lands as one replica’s whole position, in one transaction or two', () => {
     const one = run((a, b) => {
       setStyle(a, 's1', 'e1', { left: '111px', top: '222px' });

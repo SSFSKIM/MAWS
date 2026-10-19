@@ -9,6 +9,7 @@ import * as Y from '../yjs/slides';
 import { DECK_PATH, slidePath } from './deck';
 import { claudeExamples } from './fixtures/s6';
 import { deckFiles, deleteElementTree, groupOf, moveInto, moveSlide, readDeckJson, readFlat, readSlide, reorderFlow, resolveAnchor, setNotes, setStyle, setText, slideOrder, zOrder } from './model';
+import { loadSlide } from './parse';
 import { GOOGLE_FONTS_WARNING, publishDeck, type DeckPublishOutcome } from './publish';
 
 const P = (id: string) => slidePath(id);
@@ -679,5 +680,146 @@ describe('publishDeck: the final review', () => {
     expect(out.warnings).toContainEqual(expect.objectContaining({ element: 'chart', message: expect.stringContaining('<text>') }));
     expect(Y.elementIds(doc, 's1')).toContain('chart');
     expect(textOf(doc, 's1', 't')).toContain('Owner');
+  });
+});
+
+// The P3-F slide-model panel's reproducers (fix wave F-slide-model), each a regression.
+describe('publishDeck: the P3-F slide-model panel', () => {
+  const S = P('s1');
+  const small = (html: string): Doc => created({ [DECK_PATH]: JSON.stringify({ v: 4, order: ['s1'] }), [S]: html });
+  const kids = (doc: Doc, parent?: string) => {
+    const children = readSlide(doc, 's1').children;
+    return (parent === undefined ? children : children.find((c) => c.id === parent)!.children).map((c) => c.id);
+  };
+  const pin = (id: string, left: number) => `<div id="${id}" style="position:absolute; left:${left}px; top:0px; width:100px; height:100px"></div>`;
+  const without = (file: string, id: string) => file.replace(new RegExp(`\\n\\s*<div id="${id}"[^\\n]*`), '');
+
+  it('scalpel-3#1: send-to-back in an all-pinned section stays in the one list the file carries, so a fresh read deletes and re-orders without conflict', () => {
+    const html = `<section id="s1">${pin('a', 0)}${pin('b', 10)}</section>`;
+    const doc = small(html);
+    zOrder(doc, 's1', 'b', 'back', 'human');
+    expect(kids(doc)).toEqual(['b', 'a']);
+    const read = deckFiles(doc);
+    expect(publish(doc, read, { [S]: without(read[S]!, 'b') }).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['a']);
+    // the agent's re-order of what it read lands
+    const other = small(html);
+    zOrder(other, 's1', 'b', 'back', 'human');
+    const base = deckFiles(other);
+    expect(publish(other, base, { [S]: html })).toMatchObject({ conflicts: [], changed: [S] });
+    expect(kids(other)).toEqual(['a', 'b']);
+    expect(publish(other, deckFiles(other), { [S]: html })).toMatchObject({ conflicts: [], changed: [], updates: 0 });
+  });
+
+  it('scalpel-3#1: format.md’s relative host of absolute cards: send-to-back, then a fresh read deletes and swaps the cards without conflict', () => {
+    const host = (inner: string) => `<section id="s1"><p id="t">T</p><div id="host" style="position:relative; width:1664px; height:600px">${inner}</div></section>`;
+    const doc = small(host(pin('c1', 0) + pin('c2', 400)));
+    zOrder(doc, 's1', 'c2', 'back', 'human');
+    expect(kids(doc, 'host')).toEqual(['c2', 'c1']);
+    const read = deckFiles(doc);
+    expect(publish(doc, read, { [S]: without(read[S]!, 'c2') }).conflicts).toEqual([]);
+    expect(kids(doc, 'host')).toEqual(['c1']);
+    const other = small(host(pin('c1', 0) + pin('c2', 400)));
+    zOrder(other, 's1', 'c2', 'back', 'human');
+    const base = deckFiles(other);
+    expect(publish(other, base, { [S]: host(pin('c1', 0) + pin('c2', 400)) })).toMatchObject({ conflicts: [], changed: [S] });
+    expect(kids(other, 'host')).toEqual(['c1', 'c2']);
+    expect(deckFiles(other)[S]).not.toBe(base[S]);
+  });
+
+  it('scalpel-3#1: a z under the flow layer in a host with no flow child (a document written before the fix) reads as over and publishes consistently', () => {
+    const doc = small(`<section id="s1">${pin('a', 0)}${pin('b', 10)}</section>`);
+    transact(doc, () => Y.setElementKey(doc, 's1', 'b', 'z', 'Zz')); // what send-to-back wrote: a key in the under range
+    const b = el(doc, 's1', 'b')!;
+    expect(groupOf(b)).toBe('under'); // by its key alone
+    expect(groupOf(b, false)).toBe('over'); // in a host with no flow content
+    expect(kids(doc)).toEqual(['b', 'a']);
+    const read = deckFiles(doc);
+    expect(publish(doc, read, { [S]: without(read[S]!, 'b') }).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['a']);
+  });
+
+  it('scalpel-3#2: notes and text stored with a trailing newline or space: a fresh read appends without conflict, and the file is a fixed point', () => {
+    const doc = small('<section id="s1"><h2 id="t">Title</h2><aside>Say this</aside></section>');
+    setNotes(doc, 's1', 'Say this\n', 'human');
+    setText(doc, 's1', 't', [{ type: 'p', inline: [{ text: 'Title ', marks: {} }] }], 'human');
+    const read = deckFiles(doc);
+    const sent = read[S]!.replace(/Say this\s*<\/aside>/, 'Say this and more</aside>').replace(/>Title\s*<\/h2>/, '>Title of it</h2>');
+    expect(publish(doc, read, { [S]: sent }).conflicts).toEqual([]);
+    expect(Y.readNotes(doc, 's1')).toBe('Say this and more');
+    expect(Y.readText(doc, 's1', 't')).toEqual([{ type: 'p', inline: [{ text: 'Title of it', marks: {} }] }]);
+    // the text writer stores what the loader reads back, so its file round-trips byte for byte; the notes are kept as
+    // typed (the slide-model review) and read back trimmed
+    expect(loadSlide(read[S]!)).toMatchObject({ ok: true, slide: { notes: 'Say this' } });
+    expect(read[S]).toContain('<h2 id="t">Title</h2>');
+    setText(doc, 's1', 't', [{ type: 'p', inline: [{ text: ' Title\n', marks: {} }, { text: ' of  it ', marks: {} }, { br: true }, { text: ' x', marks: { b: {} } }] }], 'human');
+    expect(Y.readText(doc, 's1', 't')).toEqual([{ type: 'p', inline: [{ text: 'Title of it', marks: {} }, { br: true }, { text: 'x', marks: { b: {} } }] }]);
+    expect(loadSlide(deckFiles(doc)[S]!)).toMatchObject({ ok: true, slide: { children: [{ id: 't', text: Y.readText(doc, 's1', 't') }] } });
+  });
+
+  // the slide-model review: the notes field re-syncs from the model (another slide and back, another origin's change), so
+  // the model keeps what the owner typed, a trailing newline included; only the publish's live view reads it trimmed
+  it('setNotes keeps the notes as typed, and an append from a fresh read after it is still not refused', () => {
+    const doc = small('<section id="s1"><h2 id="t">Title</h2><aside>Say this</aside></section>');
+    setNotes(doc, 's1', 'Say this\n', 'human');
+    expect(Y.readNotes(doc, 's1')).toBe('Say this\n');
+    const read = deckFiles(doc);
+    expect(publish(doc, read, { [S]: read[S]!.replace(/Say this\s*<\/aside>/, 'Say this and more</aside>') }).conflicts).toEqual([]);
+    expect(Y.readNotes(doc, 's1')).toBe('Say this and more');
+  });
+
+  it('scalpel-3#2: the live view is compared as the loader reads the file: raw bytes another writer left do not refuse an append', () => {
+    const doc = small('<section id="s1"><h2 id="t">Title</h2><aside>Say this</aside></section>');
+    transact(doc, () => {
+      Y.patchNotes(doc, 's1', '  Say this\n');
+      Y.patchText(doc, 's1', 't', [{ type: 'p', inline: [{ text: 'Title\t', marks: {} }] }]);
+    });
+    const read = deckFiles(doc);
+    const sent = read[S]!.replace('Say this', 'Say this and more').replace('Title\t', 'Title of it');
+    expect(sent).not.toBe(read[S]);
+    expect(publish(doc, read, { [S]: sent }).conflicts).toEqual([]);
+    expect(Y.readNotes(doc, 's1')).toBe('Say this and more');
+    expect(Y.readText(doc, 's1', 't')).toEqual([{ type: 'p', inline: [{ text: 'Title of it', marks: {} }] }]);
+  });
+
+  it('scalpel-2#1: an element removed since the read and re-created under force keeps the place it was sent with', () => {
+    const doc = small('<section id="s1"><p id="a">A</p><p id="b">B</p><p id="c">C</p><p id="d">D</p></section>');
+    const base = deckFiles(doc);
+    deleteElementTree(doc, 's1', 'b', 'human');
+    const sent = base[S]!.replace('>B<', '>Bee<');
+    expect(publish(doc, base, { [S]: sent }).conflicts).toEqual([{ path: S, detail: 'element b: removed since your read' }]);
+    expect(publish(doc, base, { [S]: sent }, true).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('scalpel-2#2: an element’s place is its neighbour relation: deleting one whose predecessor did not move is no conflict; one that moved still is', () => {
+    const four = '<section id="s1"><p id="a">A</p><p id="b">B</p><p id="c">C</p><p id="d">D</p></section>';
+    const three = '<section id="s1"><p id="a">A</p><p id="b">B</p><p id="c">C</p></section>';
+    const doc = small(four);
+    const base = deckFiles(doc);
+    reorderFlow(doc, 's1', 'a', null, 'human'); // the owner moves a to the end; d still follows c
+    expect(kids(doc)).toEqual(['b', 'c', 'd', 'a']);
+    expect(publish(doc, base, { [S]: three }).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['b', 'c', 'a']);
+    const other = small(four);
+    const read = deckFiles(other);
+    reorderFlow(other, 's1', 'd', 'a', 'human'); // the owner moves d itself
+    expect(kids(other)).toEqual(['d', 'a', 'b', 'c']);
+    expect(publish(other, read, { [S]: three }).conflicts).toEqual([{ path: S, detail: 'element d: changed since your read' }]);
+  });
+
+  it('scalpel-2#2: both sides re-parent x to the same place after a, the owner also re-ordering the rest: no conflict, the owner’s order kept', () => {
+    const doc = small('<section id="s1"><p id="a">A</p><p id="b">B</p><p id="c">C</p><div id="g"><p id="x">X</p></div></section>');
+    const base = deckFiles(doc);
+    expect(publish(doc, deckFiles(doc), { [S]: '<section id="s1"><p id="c">C</p><p id="a">A</p><p id="x">X</p><p id="b">B</p><div id="g"></div></section>' }).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['c', 'a', 'x', 'b', 'g']);
+    expect(publish(doc, base, { [S]: '<section id="s1"><p id="a">A</p><p id="x">X</p><p id="b">B</p><p id="c">C</p><div id="g"></div></section>' }).conflicts).toEqual([]);
+    expect(kids(doc)).toEqual(['c', 'a', 'x', 'b', 'g']);
+    // a different place for x still conflicts
+    const other = small('<section id="s1"><p id="a">A</p><p id="b">B</p><p id="c">C</p><div id="g"><p id="x">X</p></div></section>');
+    const read = deckFiles(other);
+    moveInto(other, 's1', 'x', '', 'human'); // the owner: x last in the section
+    expect(kids(other)).toEqual(['a', 'b', 'c', 'g', 'x']);
+    expect(publish(other, read, { [S]: '<section id="s1"><p id="a">A</p><p id="x">X</p><p id="b">B</p><p id="c">C</p><div id="g"></div></section>' }).conflicts).toEqual([{ path: S, detail: 'order: changed since your read' }]);
   });
 });

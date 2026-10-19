@@ -1,0 +1,220 @@
+{
+  "rows": [
+    {
+      "id": "S-DRAG-FIDELITY",
+      "logged": "2026-10-18T08:19:21Z",
+      "bin": "defer",
+      "owner": "presentation test seam / P4",
+      "row": "| 2026-10-18 | The presentation test seam (P3-C; next seam change/P4) | The class-1 drag case’s stand-in agent calls `publishDeck` on the renderer thread (`src/renderer/src/tools/presentation/e2e-seam.ts`, `agentRepublishing`), while product agent publishes run through the host’s `artifact_publish` path; a measured bound on the stand-in path includes renderer loader work, not just the product drag path. | P3-F M0 read and L216 discriminator preparation; the host-faithful comparison is `e2e/presentations-scale.spec.ts` row 2, with probe identities in `docs/doperpowers/evidence/p3-finish/drag-discriminator.json`. | Closes when the class-1 drag case republishes through the host-faithful artifact_publish path with its fidelity regression and raw measurement evidence. Owner: the presentation seam’s next change (P4). P3-F promotes this to a bounded W-DECK fix only if the approved L216 discriminator shows the two paths diverge materially; until then deliberately deferred. |",
+      "promotion": "Only if L216 discriminator materially distinguishes paths and change is bounded; architect ruling."
+    },
+    {
+      "id": "S-ARTIFACTS-COMPILED",
+      "logged": "2026-10-18T09:23:34Z",
+      "bin": "defer",
+      "owner": "P4 / compiler-coverage sweep",
+      "row": "| 2026-10-18 | P4 or the compiler-coverage sweep (portable artifact components) | The portable `src/artifacts/**/*.dom.test.tsx` React suites remain in the uncompiled `artifacts-dom` project. P3-F L235 covers every `src/renderer/src` React suite (JSX or not) plus the existing design-system selection, not those portable suites. No compiler-dependent production defect is known in this remainder. | P3-F W-T review fix 412fe9a1f and the architect’s renderer-remit ruling; `vitest.config.ts` separates artifacts-dom and renderer-compiled. | Closes when portable artifact component suites also run under the React Compiler with their CSS-as-text configuration, or a scoped sweep supplies equivalent proof. Owner: P4 or the compiler-coverage sweep. A compiler-dependent defect found in a portable artifact component promotes the relevant coverage immediately. |"
+    },
+    {
+      "id": "S-SHOWPANE-RECAPTURE",
+      "logged": "2026-10-18T22:35:01Z",
+      "bin": "defer",
+      "owner": "P4 / protocol-probe fixtures",
+      "row": "| 2026-10-18 | P4 protocol-probe fixtures (show_pane recording on the current pane name) | The only show_pane recording, `spikes/protocol-probe/fixtures/pass3/p1-maws-show-pane.jsonl` (engine 2.1.291, 2026-10-06), calls the retired `deliverable` pane. The P3 range had rewritten its arguments, streamed content and responses to `artifact` under the original timestamps and request ids; the composition scale panel found it (scalpel-4#1, P2) and P3-F restored the recorded bytes. The conformance replay and the transcript unit and snapshot tests now read the recording as recorded (terminal opens; `deliverable` and `nope` return their recorded errors). The e2e show_pane replays need today's pane name, so they read `e2e/fixtures/derived/p1-maws-show-pane-artifact.jsonl`, the recording with the pane renamed, whose provenance record says it is derived and not recorded live. No live recording shows show_pane against the current `artifact` pane name. | Composition panel wf_5bc93935-4a1 and the architect's routing; P3-F 91d4874fa (fixture blob 2e0e38b22cc8, byte-equal to 5ad08789c), follow-ups 068f25725 (unit expectations, snapshot regenerated to 5ad08789c's blob 385886e8b) and bc837f236 (derived e2e fixture); `src/engine-host/conformance/fixtures.test.ts` p1-maws-show-pane. | Closes when show_pane is captured live on the pinned engine through the probe harness on the current pane names and the conformance suite replays that recording, and the derived e2e fixture is deleted with its two specs moved back to the recording. Owner: the protocol-probe fixtures (P4). |",
+      "source": "composition panel scalpel-4#1, architect routing 2026-10-18",
+      "corrected": "2026-10-18T23:08:13Z derived e2e fixture bc837f236 added to the close condition"
+    },
+    {
+      "id": "S-DOC-CARRY-LABELS",
+      "logged": "2026-10-18T22:35:01Z",
+      "bin": "defer",
+      "owner": "P4 / document history preview",
+      "row": "| 2026-10-18 | P4 document history preview (carry labels after compaction) | A compacted attribution row that straddles the comparison start brings carry attrs from earlier moves, and `src/artifacts/document/paint.ts:62-66` labels every carried block without checking that it changed in the diff, so an unchanged block can show 'Moved' in history preview after compaction. Cosmetic, after compaction only, no content effect. | Document-model scale panel wf_ace26740-012 scalpel-4#3 (P3, reproduced by the verifier); the architect's routing logs it without a fix. | Closes when carry labels are restricted to blocks changed within the comparison, with a regression across a compacted boundary. Owner: the document history preview's next change (P4). |",
+      "source": "document-model panel scalpel-4#3, architect routing 2026-10-18 (logged without a fix)"
+    },
+    {
+      "id": "S-PPTX-SKEW",
+      "logged": "2026-10-18T23:08:13Z",
+      "bin": "defer",
+      "owner": "P4 / slide PPTX export",
+      "row": "| 2026-10-18 | P4 slide PPTX export (skewed elements) | A skewed element (`skewX`/`skewY`, agent-written HTML only; the inspector exposes rotation alone) exports to PPTX as an unskewed or turned box, because `boxOf` decomposes the composed matrix into rotation and axis scales, and connectors inside a skewed group shear while their siblings do not. Rare and contained. | Exports-capture scale panel wf_306f7df2-89c scalpel-5#1 (P3, verified); the architect's routing logs it without a fix. | Closes when a non-similarity composed matrix routes the element to a `tree` picture captured with its transforms kept, with a skewX/skewY regression. Owner: the slide exporter's next change (P4). |",
+      "source": "scale panel tracker routing, 2026-10-18"
+    },
+    {
+      "id": "S-DESIGN-NOTES-STOPS",
+      "logged": "2026-10-18T23:08:13Z",
+      "bin": "defer",
+      "owner": "P4 / design history projection",
+      "row": "| 2026-10-18 | P4 design history projection (notes stops) | `src/artifacts/design/history.ts:210-227` counts one change per notes run and one per keyed board, while `designStops` emits one stop per board, so the change pill and the up/down stepping disagree when a design board's notes changed in more than one run. Unreachable from the workbench today (design boards have no notes UI). | History-anchors scale panel wf_94146ab3-668 scalpel-4#1 (P3); the architect's routing logs it without a fix. | Closes when the projection emits one `notes` stop per run, as the deck's `changeStops` does, with a regression on a board with a frame key and two notes runs. Owner: the design history projection's next change (P4). |",
+      "source": "scale panel tracker routing, 2026-10-18"
+    },
+    {
+      "id": "S-STORE-SUGGESTION-ATTRS",
+      "logged": "2026-10-18T23:08:13Z",
+      "bin": "defer",
+      "owner": "P4 / artifact store attributions",
+      "row": "| 2026-10-18 | P4 artifact store (suggestion attributions from storage) | `src/engine-host/documents/store.ts:1098-1101`: the storage fallback of `attributions` for a suggestion key answers the main doc's text as unattributed, without the overlay of the main doc's map that parent Decision Log 57(b) describes. Latent on the IPC surface, since the shipped caller takes the in-memory path. | Store-versions scale panel wf_95f0e036-74a scalpel-4#1 (P3); the architect's routing logs it without a fix. | Closes when the storage path overlays the main doc's rows for a suggestion key, with a regression after the suggestion doc's idle unload. Owner: the artifact store's next change (P4). |",
+      "source": "scale panel tracker routing, 2026-10-18"
+    },
+    {
+      "id": "S-DESIGN-FRAME-SLICES",
+      "logged": "2026-10-18T23:08:13Z",
+      "bin": "defer",
+      "owner": "P4 / design-scale measurement",
+      "row": "| 2026-10-18 | P4 design-scale measurement (whole-task frame work) | `e2e/support/design-frames.ts:100-103` measures frame work as per-BeginFrame slices, so on a display whose vsync interval is under the 10 ms bound the row could never miss. P3-F's design-proof wave makes the row assert and record `display.hz <= 100` as a precondition and describe what it measures; the measurement itself is still slices. | Design-proof scale panel wf_2e164f70-43f scalpel-2#1 (P3); the architect's routing fixes the precondition now and logs the measurement. | Closes when the whole-task measurement (main-thread task durations overlapping the gesture window, unclipped) replaces the slices, with the row recalibrated on the mini when it lands. Owner: the design-scale proof's next change (P4). |",
+      "source": "scale panel tracker routing, 2026-10-18"
+    },
+    {
+      "id": "S-AP-PATH-TOCTOU",
+      "logged": "2026-10-19T00:59:15Z",
+      "bin": "defer",
+      "owner": "P4 / tool-server path bounds",
+      "row": "| 2026-10-18 | P4 tool-server path bounds (final-component link race) | After P3-F's artifact-protocol #4 fix, `sourceUnderCwd` (`src/engine-host/tool-server/artifact-context.ts:133-138`) checks the real path but reads the named one, and the export re-checks `to` and then `copyFile`s, which follows a link placed at the final component between the two calls. Reachable only by something racing in the session's own cwd (in practice the agent, which has Bash anyway). | Artifact-protocol wave high review (fable) a25a5e4b, P3; P3-F records it rather than hardening now. | Closes when the source is read through its resolved path and the export destination is opened with O_NOFOLLOW (`O_WRONLY|O_CREAT|O_TRUNC|O_NOFOLLOW`) and streamed, with a race regression. Owner: the tool server's next change (P4). |",
+      "source": "artifact-protocol wave high review, 2026-10-18"
+    },
+    {
+      "id": "S-AP-PRESENCE-CROSS",
+      "logged": "2026-10-19T00:59:15Z",
+      "bin": "defer",
+      "owner": "P4 / document presence",
+      "row": "| 2026-10-18 | P4 document presence (old detach crossing a reconnect) | If an old connection's detach crossed the same client's reconnect, the host could remove that client's new presence. The artifact-protocol review found it unreachable in ordinary use: the host detaches synchronously before the port closes, and a reload or discard makes a new clientID; were it to occur, the 15 s awareness renewal re-sends the state, bounding the loss. | P3-F artifact-protocol #5 (3241445e5) worker report; high review (fable) a25a5e4b answer (b). | Closes when detach removes only presence entries whose clock is not newer than the detaching connection's last update for that client, with a crossing regression. Owner: the document presence's next change (P4). |",
+      "source": "artifact-protocol wave high review, 2026-10-18"
+    },
+    {
+      "id": "S-DS-VERSION-ASSETS",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / artifact exports",
+      "row": "| 2026-10-18 | P4 artifact exports (a version's assets) | A design-system version export's zip carries assets uploaded after that version: `artifacts.assets` has no version filter, and the exporter (`src/main/design-systems/export.ts:18-23`) has no host call to map the version's `assetRefs` (asset ids) to refs. Extra files only; nothing is lost. | Exports-capture scale panel wf_306f7df2-89c scalpel-1#1 (P3); the architect ruled it a tracker row rather than a shared IPC input change hours before the freeze. | Closes when `artifacts.assets` takes an optional `versionId` (additive), `src/engine-host/documents/register.ts` filters by that version's `assetRefs`, and the artifact exporter passes it, with a regression that a version export omits a later upload. Owner: the artifact exporter's next change (P4). |",
+      "source": "exports-capture scale panel scalpel-1#1; architect ruling, 2026-10-18"
+    },
+    {
+      "id": "S-DASH-REFRESH-LOG",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / dashboard refresh",
+      "row": "| 2026-10-18 | P4 dashboard refresh (unlogged unreadable-rows catch) | P3-F's dashboard-model fix (2f0e99a4c) gives `candidate()` in `src/engine-host/dashboards/refresh.ts:151-153` a backstop that turns any exception while reading a result's rows into the fixed state 'its rows could not be read', with no log line, so a real bug in `parseDataset` or `rowKeyProblem` would read as ordinary bad data in the host log. Diagnosis only; behaviour is correct. | Dashboard waves medium review (opus), P3. | Closes when the catch logs the thrown error's message through the refresher's `log` while keeping the closed wording in the stored state. Owner: the dashboard refresher's next change (P4). |",
+      "source": "dashboard waves medium review, 2026-10-18"
+    },
+    {
+      "id": "S-DOC-WRITER-REORDER",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / document patch writer",
+      "row": "| 2026-10-18 | P4 document patch writer (out-of-order identified children) | With P3-F's id-first pairing (f684b9fe4) the edit planner can hand `src/artifacts/document/patch-writer.ts:146` non-monotone pairs; `patchChildren` writes an out-of-order child as a new node and deletes the old one. When the agent also edited that item in the same batch, no drag carry is installed, its text is credited to the agent and stale concurrent edits into the old item are lost. Exposed, not introduced: ids and comments now land on the right blocks, strictly better than before. | Document-model wave high review (fable), P3. | Closes when patchChildren moves an identified child in place (or the host installs a carry for an id-preserving reinsert with edits), with a reorder-plus-edit regression. Owner: the document writer's next change (P4). |",
+      "source": "document-model edit-plan wave, 2026-10-18"
+    },
+    {
+      "id": "S-STORE-STAGED-LISTING",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / artifact store maintenance",
+      "row": "| 2026-10-19 | P4 artifact store maintenance (staged-file listing errors) | P3-F's staged-tmp sweep (dcceb8d4c) wraps only the discard in `collectStaged` (`src/engine-host/documents/store.ts:1107`); `stagedBefore` (`bytes.ts:64-75`) does readdir/stat per entry unguarded, so a plain file named tmp or an entry removed by an outside actor between readdir and stat rejects `Maintenance.pass`, skipping that pass's retired-asset collection, vacuum and last-run write (retried next interval). Needs an external actor in the app's data directory. | Store-versions wave high review (fable), P3. | Closes when the listing is guarded as `collectRetiredAssets` is (a per-entry or whole try/catch with a log line), with an ENOTDIR/ENOENT regression. Owner: the store maintenance's next change (P4). |",
+      "source": "store-versions wave high review, 2026-10-19"
+    },
+    {
+      "id": "S-MIRROR-RESIDUALS",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / library mirror",
+      "row": "| 2026-10-19 | P4 library mirror (two residual staleness paths) | After P3-F's library wave: (1) `removeFile` refuses silently under an `artifacts/` relinked inside one step's awaits, so the entry is dropped and the original files are no longer tracked (matters only if the owner restores the original directory in place); (2) `readNow`'s currency check (`src/engine-host/library/mirror.ts:347`) uses `existsSync`, which follows links, so a link put in a mirror file's place is replaced only at the artifact's next revision. Both stay on mirror-owned names; no write goes through a link. | Library wave high review (fable), triage of the worker's residuals 1 and 2. | Closes when `removeFile` throws on a link so remove/write keep the entry at revision -1, and `readNow` checks `isFile` (lstat), each with a regression. Owner: the library mirror's next change (P4). |",
+      "source": "library wave high review, 2026-10-19"
+    },
+    {
+      "id": "S-PPTX-TABLE-OUTLINE",
+      "logged": "2026-10-19T02:21:02Z",
+      "bin": "defer",
+      "owner": "P4 / slide PPTX export",
+      "row": "| 2026-10-19 | P4 slide PPTX export (collapsed-table outline and radius, unverified) | P3-F's exports-capture wave (2d9c5b3d2, ca288580b) draws a table's own fill and outline as shapes, the outline inset by half its width and rounded by the table's radius. Under CSS 2.1's collapsed model half the outer border may lie outside the measured box, and Chromium may not round a collapsed table, so the PPTX outline could sit up to half a border width inside the canvas's (8 px at the 16 px maximum) or be rounded where the canvas is square; a letterboxed image's native shadow also falls around the picture frame, not the box. Not observed; unverified. | Exports-capture wave medium review (opus), could-not-verify items. | Closes when an offscreen Electron probe measures a collapsed table's outer border and radius, and the exporter matches it (no inset or no radius where Chromium draws none), with a regression. Owner: the slide exporter's next change (P4). |",
+      "source": "exports-capture wave medium review, 2026-10-19"
+    },
+    {
+      "id": "S-DESIGN-ORDER-SETTLE",
+      "logged": "2026-10-19T04:21:41Z",
+      "bin": "defer",
+      "owner": "P4 / design board order",
+      "row": "| 2026-10-19 | P4 design board order (forced settle over-reverts owner re-orders) | After P3-F's design-workbench follow-up (eadd6bb7d), the forced board-order merge (`src/artifacts/design/order.ts:94-110`) counts a pair all three orders agree on as lost from the first round, including inversions only the initial moved-board placement created, so it can settle more boards into the sent order than needed: `mergeBoardOrder(abcde, adcbe, cedab, [], true)` gives the whole sent order, reverting five pairs only the owner re-ordered (the parent kept four). 36 of the 14,400 forced five-board cases, none at three or four; both invariants (no agent pair lost, no agreed pair inverted) hold, and a forced publish is 'the agent wins' by design. | Design-workbench follow-up recheck (opus), P3; brute force in /tmp/recheck-b/. | Closes when the settle runs in two phases (agreed pairs counted only once no agent pair is lost), with a brute-force regression that owner-only pairs are kept at least as well as the parent over every 3-, 4- and 5-board forced case and both invariants still hold. Owner: the design workbench's next change (P4). |",
+      "source": "design-workbench follow-up recheck, 2026-10-19"
+    },
+    {
+      "id": "S-DESIGN-SCALE-100HZ",
+      "logged": "2026-10-19T04:21:41Z",
+      "bin": "defer",
+      "owner": "P4 / design scale gate",
+      "row": "| 2026-10-19 | P4 design scale gate (frame-work precondition at exactly 100 Hz; unread display rate) | After P3-F's design-proof fix (d898af4e0), the frame-work rows' precondition admits a display at exactly 100 Hz (`e2e/design-scale.spec.ts:478`, `hz <= 100`): a 100 Hz frame lasts 10 ms, frameWork clips each slice to its BeginFrame interval and the rows are judged non-strictly, so a long task can still read 'met' there; design-frames.ts:11 and the spec header (18-19) state the opposite. Separately unverified: what displayFrequency the mini's display reports (Chromium's screen_mac has no 0-to-60 substitution), which would turn every frame-work row 'precondition unmet' (a red run, never a false pass). Design-scale runs only with MAWS_DESIGN_SCALE=1 and is not in p3f-measure. | Design-proof wave medium review (opus), P3. | Closes when the precondition is `hz < 100` with the rule and header text matching, and a design-scale run on the mini records the display rate it read. Owner: the design scale gate's next change (P4). |",
+      "source": "design-proof wave medium review, 2026-10-19"
+    },
+    {
+      "id": "S-SLIDE-STAGE-KEYBOARD-EXIT",
+      "logged": "2026-10-19T04:21:41Z",
+      "bin": "defer",
+      "owner": "P4 / slide editor keyboard",
+      "row": "| 2026-10-19 | P4 slide editor keyboard (stage to inspector with a middle selection) | After P3-F's slide-editor fix (7fae549e3) Tab leaves the stage only past either end of the level, so a keyboard user can carry only the first or last element's selection out to the inspector or notes; no trap remains (WCAG 2.1.2 holds). | Slide-editor wave worker A report, P3 residual. | Closes when a key moves focus off the stage with any selection kept (an F6-style landmark move or a shortcut that focuses the inspector), with a regression that a middle element's selection reaches the inspector by keyboard. Owner: the slide editor's next change (P4). |",
+      "source": "slide-editor wave worker A, 2026-10-19"
+    },
+    {
+      "id": "S-MIRROR-RELINK-RECONCILE",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / library mirror",
+      "row": "| 2026-10-19 | P4 library mirror (no reconcile when a Space's link reaches a directory again) | After P3-F's keyOf fix (8c8116859), a link S to A that stops reaching A is keyed S and A's mirror is cleaned at the next step anywhere; when the owner points S back at A, a full rewrite is queued only if S was recorded failing in the window (a Space change or a step for that Space's own artifacts). With only other Spaces' steps in the window, A holds only artifacts that change afterwards until the next Space change or host start, and an agent's grep misses the rest. No owner file is removed or overwritten and no mirror file goes unowned; the mechanism predates the fix (a retarget to an existing directory has it), the fix adds the detach-then-restore path. Also the HeaderInput comment at ByteViewer.tsx:394-395 still says the version id is set 'when it is not the latest'. | Library follow-up recheck (opus), P3 and a comment nit. | Closes when a reconciliation is queued whenever a Space's path resolves to a different key than at its previous step (not keyed on 'no manifest held', which an away directory never has), with a regression for detach, other-Space activity, then restore; and the comment is corrected. Owner: the library mirror's next change (P4). |",
+      "source": "library follow-up recheck, 2026-10-19"
+    },
+    {
+      "id": "S-COMPILER-BAILOUT-DECK",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / presentation renderer",
+      "row": "| 2026-10-19 | P4 presentation renderer (React Compiler bailouts in the shipped build) | The React Compiler (babel-plugin-react-compiler 1.0.0, the build's options) skips `Presentation` (src/artifacts/slides/editor/present/Presentation.tsx: 'Existing memoization could not be preserved') and `DeckBody` (src/renderer/src/tools/presentation/DeckBody.tsx: `??=` unsupported) at HEAD before and after P3-F's slide-editor wave, so both ship uncompiled. Pre-existing; no defect observed. | Slide-editor wave worker B report (compile check /private/tmp/p3f-b-compile-check.cjs). | Closes when both compile with no bailout under the build's plugin options (the design-workbench review#2 pattern: replace the construct the compiler refuses), confirmed by running the plugin on the files. Owner: the presentation renderer's next change (P4). |",
+      "source": "slide-editor wave worker B, 2026-10-19"
+    },
+    {
+      "id": "S-PRES-HOLD-SEAM",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / presentations e2e seam",
+      "row": "| 2026-10-19 | P4 presentations e2e seam (composition-hold receipt) | e2e/presentations.spec.ts's composition-hold step still waits a fixed 300 ms after the remote 'Remote ' prepend before asserting the composing text box does not show it; nothing proves the tab's replica received and buffered the frame first, so a regressed hold whose broadcast arrives late still passes (the final merged-text check passes either way). P3-F's editor-proof wave (14309d25f) took the routed fallback: `__maws_presentations` answers only an open tab's timings and the deck tab's provider is module-private. | Editor-proof scale panel scalpel-1#4 (P3), routed fallback. | Closes when the presentations e2e seam (src/renderer/src/tools/presentation/e2e-seam.ts) answers an open deck tab's held or received frame count and the step polls it above zero before the negative check, in place of the fixed wait. Owner: the presentations e2e's next change (P4). |",
+      "source": "editor-proof wave worker, routed fallback, 2026-10-19"
+    },
+    {
+      "id": "S-MARKUP-INERT",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / mark-up overlay",
+      "row": "| 2026-10-19 | P4 mark-up overlay (covered surface not inert) | P3-F's shell fix (aa9c9796f) traps Tab only for keys pressed inside the mark-up overlay (`src/renderer/src/markup/MarkupLayer.tsx:194-202`); nothing marks the covered surface or the card's layer `inert`, so focus that leaves the overlay another way (a header menu closed with Escape returns focus to its trigger; Radix's F8 toast hotkey) is one Tab from hidden live content, where a document editor takes unseen keystrokes and, under the Escape split (ad29e501c), the card's composer answers Escape (interrupting a running turn) before the discard. Needs focus to leave the overlay first; the routing allowed the trap. | Shell wave medium review (opus), P3. | Closes when the session marks the surface element and the `[data-markup-occluder]` card layer `inert` for its lifetime (the trap may stay), with a regression that Tab from the panel header after a closed menu never reaches the surface or the composer. Owner: the mark-up overlay's next change (P4). |",
+      "source": "shell wave medium review, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-DRAG-CARRY-DELETION",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / document adapter drag carry",
+      "row": "| 2026-10-19 | P4 document adapter drag carry (a concurrent deletion in the dragged block drops the carry) | The P1 move-carry fix (cbadc36cd) pairs a drag's copy against the source's live units, so when another replica deleted characters in the dragged block that the dragger had not seen (the replace_text A to B reproducer), the length guard in `src/artifacts/document/adapter.ts` drops the carry: no carry, no forwards, and text a replica put into the source after the dragger's read is lost with the source (the P1 class, for that block). P3-F's fix (1f57ce89f, paired against a tombstone-inclusive view) and its remedies (fbc7680f7, ed3ea8f3e) were reverted under the architect's bound after the final high recheck found a further carry-path defect. | Document-model scale panel and wave review (P2); rechecks /tmp/maws-review/p3f-dm-recheck-fable.txt and p3f-dm-recheck2-fable.txt (E/reviews/document-model-recheck-*-result.txt). | Closes when such a drag keeps its carry and the late text, with regressions for the A to B reproducer, and the fix also keeps: (1) a drag delivered in a sync step 2 (the reconnect path, port.ts:8-15), whose delete set restates every old deletion, keeps its carry on a block with edit history; (2) after gc a countable tombstone merged with a non-countable one (Item.mergeWith ignores countable) never counts as a dead unit; (3) the block forwards stay positional when a seen empty nested textblock is tombstoned. Owner: the document adapter's next change (P4). |",
+      "source": "document-model final recheck and architect bound, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-TAB-DRAG-SOURCE",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / document editor tabs",
+      "row": "| 2026-10-19 | P4 document editor tabs (a tab drag names no source document) | After P3-F's document-editor fix (89a722814) a tab drop is refused only when this document lacks the dragged id (`src/artifacts/document/editor/Tabs.tsx:46-51`); a copy made through Duplicate or Make a copy (`store.duplicate`/`copyOf` applies the source's whole Y state, src/engine-host/documents/store.ts:483-497) has every tab id of its source, so with a document and its copy both showing tab strips (main and panel), a drag from one strip onto the other reorders the same-id tab in the document not dragged from, and that write saves and syncs. Not a regression (the same drop moved it before). Also theme.css:146-148's comment describes a cascade with D's document.css that never occurs (theme.css and D's sheet are never loaded together). | Document-editor wave medium review (opus), P3 and a comment nit. | Closes when the drag records its source document at onDragStart (a module-level {doc, id} or a per-strip token in the drag data) and drop compares it, with a regression dragging a tab between a document and its copy; and the comment is corrected. Owner: the document editor's next change (P4). |",
+      "source": "document-editor wave medium review, 2026-10-19"
+    },
+    {
+      "id": "S-PRESENT-EMBED-FOCUS",
+      "logged": "2026-10-19T04:54:33Z",
+      "bin": "defer",
+      "owner": "P4 / presenter window",
+      "row": "| 2026-10-19 | P4 presenter window (focus left in an embed after a bar click) | Since P3-F's slide-editor fixes (b916bb78e, cc8a315a8) the presenter bar cancels mousedown and blurs only focus inside the bar (`src/artifacts/slides/editor/present/Presentation.tsx:261-265`); if the presenter clicked into a sandboxed embed in the current pane (src/artifacts/slides/canvas/elements.ts:115-120), a later bar click no longer moves focus out of the iframe, so Space and Enter go to the embed instead of the show keys. Unverified whether an embed in the presenter's pane takes pointer events at all. | Slide-editor follow-up low recheck (opus), backlog note. | Closes when a bar mousedown also clears focus held by an embed (or the presenter's embeds take no focus), with a regression that Space after clicking an embed and then the bar advances the show. Owner: the presenter's next change (P4). |",
+      "source": "slide-editor follow-up recheck, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-EXPORT-PREVIEW",
+      "logged": "2026-10-19T07:28:20Z",
+      "bin": "defer",
+      "owner": "P4 / document and dashboard export",
+      "row": "| 2026-10-19 | P4 document and dashboard export (header Export during a version preview) | While Version history previews a version, the document's and the dashboard's header Export export the live state (`src/renderer/src/tools/document/tab-state.ts:262-266` passes no version id), where the deck (L233) and the design (P3-E Decision Log 31) export what is shown and disable Export while comparing. | P3-F M2 sitting-sheet recheck at 073d10446 (the M4.2 worker); the owner records each export's content at the sitting's step 8.2. | Closes when `DocumentTabState.export` passes the previewed version's id and is disabled while two versions are compared, as the deck's is, with a regression; or when the owner rules the live-state export kept at 8.2. Owner: the document tab's next change (P4). |",
+      "source": "M2 sitting-sheet recheck, 2026-10-19"
+    }
+  ]
+}

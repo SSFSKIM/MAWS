@@ -64,12 +64,16 @@ describe('the keyboard and double-click', () => {
     expect(escapeUp(t, ['card'])).toEqual([]);
   });
 
-  it('Tab cycles the level’s elements in paint order; ⌘A takes them all', () => {
+  // P3-F (scalpel-4#1): past the level's last element (before its first) Tab has no next, so the keys leave the stage
+  it('Tab walks the level’s elements in paint order, with no next past either end; ⌘A takes them all', () => {
     const t = tree();
     expect(tabNext(t, [], false)).toEqual(['title']);
+    expect(tabNext(t, [], true)).toEqual(['badge']);
     expect(tabNext(t, ['title'], false)).toEqual(['card']);
-    expect(tabNext(t, ['badge'], false)).toEqual(['title']);
-    expect(tabNext(t, ['title'], true)).toEqual(['badge']);
+    expect(tabNext(t, ['badge'], false)).toBeNull();
+    expect(tabNext(t, ['title'], true)).toBeNull();
+    expect(tabNext(t, ['ct'], false)).toEqual(['cp']);
+    expect(tabNext(t, ['cp'], false)).toBeNull();
     expect(selectAll(t, ['ct'])).toEqual(['ct', 'cp']);
   });
 

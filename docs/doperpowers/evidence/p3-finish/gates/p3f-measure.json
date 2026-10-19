@@ -1,0 +1,46 @@
+{
+  "recordedAt": "2026-10-19T07:27:41Z",
+  "S": "de71da97afa48f2b19d3caeccf71406544b03e2c",
+  "void": {
+    "run": 39208915867,
+    "reason": "posture: the owner's Parsec viewer held the mini at 2560x1440@1x (presentations-scale whole; document-scale reconnected mid-job; artifacts-perf at @1x); the bounds (P3 Decision Logs 108, 109) were calibrated at @2x with no viewer; architect ruling: void as a measurement, kept as a posture-confounded reading",
+    "raw": "measurements/void-p3f-measure-39208915867-*"
+  },
+  "valid": {
+    "run": 39210430697,
+    "attempt": 1,
+    "conclusion": "success",
+    "posture": "every job 2560x1440@2x remote=none at start and end (posture go relayed by the architect: Parsec off 06:29:39Z, @2x 06:29:49Z, load1 4.67 and 3.82)",
+    "groups": {
+      "e2e:artifacts-perf": "5 passed",
+      "e2e:presentations-scale": "1 passed",
+      "e2e:document-scale": "2 passed"
+    },
+    "loads": {
+      "document": {
+        "launched": 5.05,
+        "steadyStart": 4.44,
+        "steadyEnd": 3.98
+      },
+      "presentations": {
+        "start": 4.29,
+        "end": 4.92
+      },
+      "artifacts": "trial loads 5.41/4.50/4.40 and 5.37 to 3.56"
+    },
+    "rows": "every row met or recorded: document 38, presentations 8, artifacts 3",
+    "highlights": {
+      "document row 1 p95": "17 ms (≤ 20)",
+      "document row 2 p95": "48 ms (≤ 50)",
+      "document row 3/4 p95": "27.3 / 45.2 ms (≤ 100)",
+      "renderer collected": "448.4 / 343.6 MB (≤ 600)",
+      "presentations drag p95": "20 ms (≤ 24, parent Decision Log 108)",
+      "preview / heavy preview": "62 / 115.1 ms (≤ 1,000)",
+      "open cold / warm": "96 / 83.3 ms",
+      "firstSync": "114.5 ms (≤ 150)",
+      "ack p95": "8.3 ms (≤ 10)",
+      "acked lost": "0"
+    },
+    "raw": "measurements/p3f-measure-39210430697-*"
+  }
+}

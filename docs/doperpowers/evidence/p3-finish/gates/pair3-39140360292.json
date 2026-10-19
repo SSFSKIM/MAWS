@@ -1,0 +1,82 @@
+{
+  "runId": 39140360292,
+  "sourceCommit": "6d9a8242085a2b4214b5678951e91124f6309833",
+  "wrapperHead": "8e6c8f48b9f5a3b3bdd0f2648caa66f5cb81040d",
+  "createdAt": "2026-10-18T15:24:48Z",
+  "recordedAt": "2026-10-18T16:44:55Z",
+  "label": "p3f-doc-a-deck",
+  "groups": [
+    "static",
+    "unit",
+    "probes",
+    "unit:darwin",
+    "e2e:document-app",
+    "e2e:document",
+    "e2e:design",
+    "e2e:side",
+    "e2e:presentations",
+    "e2e:tools",
+    "e2e:artifacts",
+    "e2e:design-systems",
+    "e2e:dashboard"
+  ],
+  "status": "completed",
+  "attempt": 1,
+  "conclusion": "failure",
+  "completionTask": "bt15x2m1r",
+  "completionMethod": "background Bash runs actual wrapper; automatic notification, no completion waiter",
+  "queueThresholdTask": "bcrpvzt6a",
+  "log": "/tmp/maws-review/gates/p3f-doc-a-deck-ci.log",
+  "integration": {
+    "master": "1f5cc7cd5",
+    "merge": "6d9a82420",
+    "tracker": "F tracker preserved except exact2upstream DC9 replacements/3new desk rows; folded aliases not resurrected"
+  },
+  "reviews": {
+    "DOC-A": "correct round1 a69c0ca8f5888e14f",
+    "DECK": "correct round2 a042b15ec9aa10fab aftera5359afa8/28f9eecb7; L211 partial carry"
+  },
+  "postGate": "hold began at completion; released explicitly at16:35Z, retry39145946170 launched16:38:48Z",
+  "notFinalSource": true,
+  "fullSetCounterAdvance": false,
+  "paidSpendUsd": 0,
+  "completedAt": "2026-10-18T15:40:09Z",
+  "exit": 1,
+  "rawLogs": "/private/tmp/p3f-pair3-completed-logs.685nZe/logs.zip",
+  "results": {
+    "static": "failure TS2345 foreground-trace.ts39:22 log inferred never[]; lint and47 gate-script tests passed",
+    "unit": "20383 passed,73 skipped;1528 files,7 skipped",
+    "probes": "219 passed",
+    "unit:darwin": "282 passed,14 files",
+    "e2e:design": "13 passed,1 failed; design.spec.ts556 scene at621 obsolete Comment count0, got1",
+    "e2e:presentations": "17 passed,2 skipped",
+    "e2e:artifacts": "4 passed,1 skipped",
+    "e2e:document-app": "10 passed",
+    "e2e:design-systems": "8 passed",
+    "e2e:dashboard": "11 passed",
+    "e2e:side": "12 passed",
+    "e2e:document": "9 passed",
+    "e2e:tools": "12 passed"
+  },
+  "fixes": {
+    "dc0247612": "TraceState annotation only, runtime unchanged; lint exit0",
+    "fba70d44e": "wide-main design no-context Comment entry and withdrawal; geometry/history/narrow assertions retained; lint exit0"
+  },
+  "fixReview": {
+    "reviewer": "a69c0ca8f5888e14f",
+    "result": "correct/no material findings, two-file focused recheck; execution still owed",
+    "range": "6d9a824208..fba70d44e"
+  },
+  "countEffects": {
+    "L277": "3/10",
+    "L199": "1/10 unchanged: to-human not selected",
+    "L217": "third post-fix named pass; recurrence is product failure",
+    "fullSet": false
+  },
+  "afterGateEvidenceStatus": "empty when checked after gate; no evidence outside p3-finish authored by F",
+  "viewerConfound": {
+    "record": "viewer-confound.json",
+    "note": "Confirmed attached interval12:49:09Z-19:33:02Z includes this run; old remote=none lines inside it are wrong (ci-kit#50, fixed#53/26d1033 at19:56Z). Context only; native traces, diagnoses and acceptance remain unchanged.",
+    "knownInputOverlap": "pair3 dashboard green at15:31:49/52Z"
+  }
+}

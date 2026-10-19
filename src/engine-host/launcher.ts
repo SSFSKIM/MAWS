@@ -24,6 +24,7 @@ import { TESTED_ENGINE_VERSION } from './engine-compat';
 import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './launch';
 import type { ProcessTable } from './process-table';
 import { replayEngine } from './replay-transport';
+import { seedOnFirstUser } from './replay-transcript'; // P3-F L242
 import { EngineSession } from './session';
 import type { EngineTransport } from './transport';
 import { unsettledPrompts } from './prompt-history'; // P2-C
@@ -38,6 +39,9 @@ export interface LauncherDeps {
   userData: string;
   replayEnabled: boolean;
   replayRowMs?: number; // E10: the replay transport's pause before each `in` row (the e2e pacing seam)
+  // P3-F L242: the e2e scratch store's projects directory a replay seeds its session's transcript into when it takes the
+  // first prompt (./replay-transcript.ts); null or absent outside C10's replay seam
+  replayTranscripts?: string | null;
   cwd: string; // resolves a relative replay path and the prelude
   table: ProcessTable;
   store: SessionStateStore;
@@ -111,7 +115,12 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
     }
 
     const replay = journal;
-    const spawn = replay !== null ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */ }) : deps.spawn;
+    const projects = deps.replayTranscripts ?? null; // P3-F L242
+    const onFirstUser =
+      projects === null
+        ? undefined
+        : seedOnFirstUser(projects, { cwd: plan.cwd, sessionId: plan.sessionId, engineVersion: plan.engineVersion, permissionMode: spec.permissionMode }, (message) => deps.log(`${spec.appSessionId}: ${message}`));
+    const spawn = replay !== null ? () => replayEngine(appReplayHandshake(replay, spec.trust), { prelude: prelude!, surfaceReads: true /* R2 */, rowDelayMs: deps.replayRowMs /* E10 */, onFirstUser }) : deps.spawn;
     const outcome = deps.table.reserve(spec.appSessionId, () => {
       const session = new EngineSession({
         spec, plan, spawn, store: deps.store, appVersion: deps.appVersion, relayHealth, log: (message) => deps.log(`${spec.appSessionId}: ${message}`),

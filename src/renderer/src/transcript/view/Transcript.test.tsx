@@ -1,7 +1,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { EventId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
 import { cellId, rowId, turnId } from '../model/keys';
 import { loadJournal } from '../../../../../test/support/fixtures';
@@ -151,6 +151,83 @@ describe('Transcript', () => {
     await act(async () => resolve(events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }))));
     await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('live'));
     await waitFor(() => expect(document.querySelector(`[data-cell-id="${target}"]`)?.contains(document.activeElement)).toBe(true));
+  });
+
+  // P3-F (tracker row 199, the must-read): the jump's focus waits a frame; a staged restart's install can reissue the jump
+  // before that frame comes, cancelling it. The reissue still owes the focus, since none was given: the reader is not
+  // taken to have moved on because focus sits on the control that asked for the jump (the Needs-you row).
+  describe('a jump whose frame the install cancelled', () => {
+    // The frames requested from here on are held until `run`; a cancelled one never runs.
+    function holdFrames() {
+      const frames = new Map<number, FrameRequestCallback>();
+      let next = 0;
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((frame) => {
+        frames.set(++next, frame);
+        return next;
+      });
+      vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => void frames.delete(id));
+      onTestFinished(() => {
+        vi.restoreAllMocks();
+      });
+      return {
+        run: () =>
+          act(() => {
+            const due = [...frames.values()];
+            frames.clear();
+            due.forEach((frame) => frame(performance.now()));
+          }),
+      };
+    }
+    const disk = (events: SessionEvent[]) => events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }));
+
+    it('focuses its target on the next frame, the asking control focused meanwhile', async () => {
+      const events = deniedThenAnswer();
+      const key = `transcript-test-${++keys}`;
+      const asker = document.body.appendChild(document.createElement('button'));
+      onTestFinished(() => asker.remove());
+      const first = render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }} variant="session" />);
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+      first.unmount(); // the tab left: the key's rows stay
+      act(() => asker.focus());
+      const frames = holdFrames();
+      const target = cellId.tool(tool('t1'));
+      act(() => useTranscriptStore.getState().jumpTo(key, target)); // asked on the kept rows, before the view remounts
+      let resolve: (events: SessionEvent[]) => void = () => {};
+      render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => new Promise((r) => (resolve = r)) }} variant="session" />);
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('hydrating'));
+      await act(async () => resolve(disk(events))); // the install reissues the jump before its frame came
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('live'));
+      expect(document.activeElement).toBe(asker);
+      frames.run();
+      expect(document.querySelector(`[data-cell-id="${target}"]`)?.contains(document.activeElement)).toBe(true);
+      expect(useTranscriptStore.getState().entries[key].jump).toBeNull();
+    });
+
+    it('focuses it when the same target was focused before and the reader asked for it again', async () => {
+      const events = deniedThenAnswer();
+      const key = `transcript-test-${++keys}`;
+      const asker = document.body.appendChild(document.createElement('button'));
+      onTestFinished(() => asker.remove());
+      const first = render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }} variant="session" />);
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key]?.phase).toBe('live'));
+      first.unmount();
+      let resolve: (events: SessionEvent[]) => void = () => {};
+      render(<Transcript source={{ key, subscribe: () => () => {}, snapshot: () => new Promise((r) => (resolve = r)) }} variant="session" />);
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('hydrating'));
+      const target = cellId.tool(tool('t1'));
+      act(() => useTranscriptStore.getState().jumpTo(key, target)); // the first request lands on the old rows
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key].jump).toBeNull());
+      expect(document.querySelector(`[data-cell-id="${target}"]`)!.contains(document.activeElement)).toBe(true);
+      act(() => asker.focus()); // the reader went elsewhere, then asked for the same place again
+      const frames = holdFrames();
+      act(() => useTranscriptStore.getState().jumpTo(key, target));
+      await act(async () => resolve(disk(events))); // its frame cancelled by the install's reissue
+      await waitFor(() => expect(useTranscriptStore.getState().entries[key].phase).toBe('live'));
+      expect(document.activeElement).toBe(asker);
+      frames.run();
+      expect(document.querySelector(`[data-cell-id="${target}"]`)?.contains(document.activeElement)).toBe(true);
+      expect(useTranscriptStore.getState().entries[key].jump).toBeNull();
+    });
   });
 
   it('the denied count of a collapsed turn opens its work area and focuses the standalone denied cell itself', async () => {

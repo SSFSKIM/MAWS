@@ -92,4 +92,19 @@ describe('a design tab’s state', () => {
     expect(state.exportContext()).toEqual({ board: 'poster', label: 'poster', shown: null }); // the live selection kept
     state.dispose();
   });
+
+  it('(design-workbench scalpel-2#2) leaves the hidden live view where it was when Zoom to fit lands while the history shows a version or a comparison', async () => {
+    const { state } = await opened();
+    state.view.setRoom({ w: 1000, h: 800 });
+    state.view.setViewport({ zoom: 0.5, x: 10, y: 20 });
+    for (const shown of [{ versionId: 3, board: 'phone', label: 'phone' }, 'compare'] as const) {
+      state.view.showVersion(shown);
+      state.fitAll();
+      expect(state.view.snapshot().viewport).toEqual({ zoom: 0.5, x: 10, y: 20 });
+    }
+    state.view.showVersion(null);
+    state.fitAll();
+    expect(state.view.snapshot().viewport!.zoom).toBeCloseTo((800 - 96) / 9000, 6); // the live design again: every board
+    state.dispose();
+  });
 });

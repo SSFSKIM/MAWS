@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '../src/shared/owner/contract';
 import { invoke, value } from './support/c7-replay';
+import { traceForeground } from './support/foreground-trace';
 import { launchMaws } from './support/launch';
 import { sessionJournal } from './support/live-turns';
 import { clearToasts, metaEvents } from './support/maws-tools';
@@ -89,12 +90,25 @@ test('M6 a question answered from its card: queued while the agent works, answer
     const needs = page.getByRole('list', { name: 'Needs you' }).locator(`[data-needs-you="${asking}"]`);
     await expect(needs).toContainText(`Must read — ${TO_HUMAN.essential}`);
 
-    // The Needs-you row opens the session at the mark, in the report.
-    await needs.click();
-    await page.mouse.move(700, 450);
-    await expect(pane.locator(`[data-composer="${asking}"]`)).toBeVisible();
-    await expect(pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
-    await expect.poll(() => page.evaluate(() => document.activeElement?.querySelector('[data-owner-card="essential"]') !== null)).toBe(true);
+    // The Needs-you row opens the session at the mark, in the report. P3-F (tracker row 199, the must-read): a focus that
+    // never lands reports the page's focus timeline, its frame rate and the window's state.
+    const trace = await traceForeground(maws.app, page);
+    await trace.step(
+      'must-read-focus',
+      async () => {
+        await needs.click();
+        await page.mouse.move(700, 450);
+        await expect(pane.locator(`[data-composer="${asking}"]`)).toBeVisible();
+        await expect(pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
+        await expect.poll(() => page.evaluate(() => document.activeElement?.querySelector('[data-owner-card="essential"]') !== null)).toBe(true);
+      },
+      () =>
+        page.evaluate(() => {
+          const card = document.querySelector('[data-owner-card="essential"]');
+          const row = card?.closest('[id]');
+          return { card: card !== null, row: row ? `${row.tagName.toLowerCase()}#${row.id} tabindex=${row.getAttribute('tabindex')}` : null, rowConnected: row?.isConnected ?? null, cardInView: card ? card.getBoundingClientRect().top : null };
+        }),
+    );
 
     // Mark read: the must-read reads Read, and Needs you moves on to the question.
     await must.getByRole('button', { name: 'Mark read' }).click();

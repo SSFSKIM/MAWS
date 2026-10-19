@@ -218,12 +218,9 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const [inspectorOpen, setInspectorOpen] = useState(!compact);
   const [boardsOpen, setBoardsOpen] = useState(!compact);
 
+  // the world's surface; World tells the owner (Mark-up's) each element React attaches and detaches there, since a
+  // version's preview takes the world away and Back mounts a new one
   const surface = useRef<HTMLDivElement | null>(null);
-  const hasBoards = boards.length > 0;
-  useEffect(() => {
-    onStage?.(surface.current);
-    return () => onStage?.(null);
-  }, [onStage, hasBoards]);
 
   // ---- the view's fits
   const allRect = useCallback((): Rect | null => unionRect(boards.flatMap((b) => (b.frame ? [b.frame] : []))), [boards]);
@@ -555,6 +552,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
             artifactId={artifactId}
             importAsset={importAsset}
             surface={surface}
+            onSurface={onStage}
             fitAll={fitAll}
             fitSelection={fitSelection}
             removeBoard={remove}

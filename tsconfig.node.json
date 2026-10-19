@@ -46,15 +46,16 @@
     "e2e/support/text-run.ts",
     // P3-C M10: test/support/live-lifecycle.test.ts runs the live runs' end (the stop, the cleanup, the engine's survival, the spend)
     "e2e/support/live-lifecycle.ts",
-    // P3-E1 M6: test/support/design-bundle.test.ts runs the Design final run's bundle checks
-    "e2e/support/design-bundle.ts",
-    "e2e/support/design-final-reporter.ts", // P3-E1 M6: test/support/design-final-reporter.test.ts drives it at its boundary
+    "e2e/support/design-final-reporter.ts", // P3-E1 M6; P3-F: test/support/final-bundle.test.ts drives it at its boundary
     "e2e/support/design-geometry.ts", // P3-E1 M6: test/support/design-geometry.test.ts runs the evidence probe's hidden-node rule
     // P3-E1 M6: test/support/design-frames.test.ts runs the design scale gate's frame readings
     "e2e/support/design-frames.ts",
     // P3-H: test/support/final-bundle.test.ts runs the final run's build bundle and its reporter (gate-offload Decision Log 50)
     "e2e/support/final-bundle.ts",
     "e2e/support/final-bundle-reporter.ts",
+    "e2e/support/final-invocation.ts", // P3-F: test/support/final-invocation.test.ts runs the converged invocation checks
+    "e2e/support/deck-history.ts", // P3-F: test/support/deck-history.test.ts checks the heavy deck's generation and export
+    "e2e/support/packaged-resolution.ts", // P3-F: test/support/packaged-resolution.test.ts checks packaged resolution
     // P3-H: test/support/send-to-approval.test.ts runs the Send to live run's approval predicate
     "e2e/support/send-to-approval.ts",
     // P3-HD M4a: test/support/connector-oauth*.test.ts run the toy OAuth fixture's logic, its scene support and fake browser
@@ -62,6 +63,7 @@
     "e2e/support/connector-oauth.ts",
     "e2e/support/connector-oauth-browser.ts",
     "e2e/support/connector-direct-checks.ts", // P3-HD M4b: test/support/connector-direct-checks.test.ts runs the integrated scenes' pure checks
+    "e2e/support/connector-direct-probe.ts", // P3-F W-RD: test/support/connector-direct-probe.test.ts runs the probe's auth-fixture exposure check
     // P2-F S-locale: the transcript model's day words and the agent tools' ages write through the renderer's date
     // formats (D2 widened), and the agent models' tests read the system locale's relative times; listed for the same
     // reason as C8a's
@@ -72,8 +74,8 @@
     "src/renderer/src/artifacts/connectors.ts", // P3-H H4: host.ts's connector family
     // P3-B: test/artifacts/document-writer-bench.test.ts benches the patch writer on the 200-page seed M9's gate uses
     "e2e/support/document-seed.ts",
-    // P3-E (E2 M6): test/support/dashboard-bundle.test.ts runs the dashboard acceptance run's final bundle checks
-    "e2e/support/dashboard-bundle.ts",
+    // P3-E (E2 M6); P3-F: test/support/final-bundle.test.ts drives the dashboard acceptance run's final reporter
+    "e2e/support/dashboard-final-reporter.ts",
     "e2e/support/dashboard-acceptance.ts",
     "e2e/support/dashboard-scale.ts", // P3-E (E2 M6): test/support/dashboard-scale.test.ts runs the scale gate's judging
     "e2e/support/live-data-bounds.ts" // E3 M4: test/support/live-data-bounds.test.ts runs the live block's on-screen judgement

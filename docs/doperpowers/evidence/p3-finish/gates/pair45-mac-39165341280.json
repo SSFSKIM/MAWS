@@ -1,0 +1,117 @@
+{
+  "recordedAt": "2026-10-18T20:57:54Z",
+  "runId": 39165341280,
+  "attempt": 1,
+  "sourceCommit": "cdf54fbeb36c98c9e0c2f10a65b89e09e25b33f6",
+  "wrapperHead": "c82767cdbbc1bb3c19fdb7df21f286f62f392dfc",
+  "createdAt": "2026-10-18T20:53:07Z",
+  "statusAtIdentityRead": "queued",
+  "conclusion": "failure",
+  "groups": [
+    "static",
+    "packaged",
+    "e2e:presentations-scale",
+    "e2e:artifacts-perf",
+    "e2e:document-scale"
+  ],
+  "class1a": "pool",
+  "runner": "macos",
+  "completionTask": "b6w1r4060",
+  "completionMethod": "actual wrapper background command, automatic notification, no completion poll",
+  "label": "p3f-pair45-mac",
+  "rule": "one DL59 relaunch, union with39156492025 greens and39162779550 static, current-tree static included; no unit job",
+  "integration": "corrected parentDL108 a963cf446 merged d81b68a67",
+  "review": {
+    "initial": "a6c00dc1f0a527021 accepted calibration, found P2 delayed20s poll due awaited post-click evidence",
+    "fix": "cdf54fbeb byace7bcff092c64bac, post-click diagnostic concurrent with original20s poll, immediate rejection handler",
+    "recheck": "same registered medium reviewer, exactcc9381f06..cdf54fbeb plus originald81b68a67 comparison; correct/no material findings, static only"
+  },
+  "quietRelay": {
+    "by": "architect relaying CI-opt",
+    "at": "20:51Z",
+    "loadSamples": [
+      {
+        "at": "2026-10-18T20:50:41Z",
+        "load1": 2.0
+      },
+      {
+        "at": "2026-10-18T20:51:11Z",
+        "load1": 2.27
+      }
+    ],
+    "noManimScenes": true,
+    "launcherHeldByQuietFlag": true,
+    "background": "one-core diagnostic loop and sminos daemon; record actual per-row loads",
+    "release": "architect releases CI-opt hold only after completed result relayed"
+  },
+  "boundaries": {
+    "drag": "DL10824ms calibration only; below16 product repair retained P4, old raw16ms readings unchanged",
+    "approval": "cause undetermined; one click/20s retained; pass unreproduced observation, recurrence product row with new evidence",
+    "announcement": "unchanged case; recurrence own DL59 red and gap fixed before hand-back",
+    "settleProtocol": "no implementation, deferred conditional row only",
+    "MainArea": "88/88 named proof; full-unit obligation remains final hand-back",
+    "fullSetCredit": false,
+    "paidSpendUsd": 0
+  },
+  "queueThresholdTask": "b21w80pyy",
+  "queueThreshold": "own pending taskb21w80pyy stopped after completion before30min threshold, no check/poll performed",
+  "recordedCompletedAt": "2026-10-18T21:28:37Z",
+  "status": "completed",
+  "exit": 1,
+  "completedAt": "2026-10-18T21:21:19Z",
+  "rawLogs": "/private/tmp/p3f-quiet-complete.bZ8EnY/logs.zip",
+  "rawLogsSha256": "2e7851c2127c043c7e3edfd80fe76122b738020d6e5a8a892a68aef28c292051",
+  "reports": "/tmp/maws-review/gates/ci-cdf54fbe",
+  "evidenceStatusAfterGate": "empty; no dirty evidence paths",
+  "quietRelease": "completed result sent to architect; only architect coordinates flag release",
+  "jobs": [
+    {
+      "name": "packaged",
+      "databaseId": 117787051754,
+      "conclusion": "success",
+      "startedAt": "2026-10-18T20:56:09Z",
+      "completedAt": "2026-10-18T21:11:43Z"
+    },
+    {
+      "name": "e2e:artifacts-perf",
+      "databaseId": 117787051783,
+      "conclusion": "success",
+      "startedAt": "2026-10-18T20:53:25Z",
+      "completedAt": "2026-10-18T20:56:07Z"
+    },
+    {
+      "name": "e2e:presentations-scale",
+      "databaseId": 117787051814,
+      "conclusion": "success",
+      "startedAt": "2026-10-18T21:15:56Z",
+      "completedAt": "2026-10-18T21:21:19Z"
+    },
+    {
+      "name": "e2e:document-scale",
+      "databaseId": 117787051832,
+      "conclusion": "failure",
+      "startedAt": "2026-10-18T21:11:45Z",
+      "completedAt": "2026-10-18T21:15:54Z"
+    },
+    {
+      "name": "static",
+      "databaseId": 117787051957,
+      "conclusion": "success",
+      "startedAt": "2026-10-18T20:54:52Z",
+      "completedAt": "2026-10-18T21:00:09Z"
+    }
+  ],
+  "results": {
+    "static": "green",
+    "packaged": "135passed/184skipped plus supervisor1 and voice1;137passed total, no failures",
+    "e2e:artifacts-perf": "5passed, announcement case76 passed unchanged and all3metrics passed",
+    "e2e:presentations-scale": "1passed, all8rows met24ms drag calibration; separate logical fixture non-repeatability discovered",
+    "e2e:document-scale": "1failed/1passed; typing17.2/16ms,preview-enter2 1016.9/1000ms,collected renderer1 519.7/500MB; parentDL109 calibration to be applied and singly relaunched after quiet relay"
+  },
+  "observationDisposition": {
+    "approval": "side.spec.ts931 passed3.3s at21:11:13.723Z; one unreproduced packaged observation, never fixed",
+    "announcement": "artifacts-store.spec.ts76 passed4.7s at20:54:29.912Z and again in packaged2.6s; P4 source-gap row retained, no causal-fix claim",
+    "settleTrigger": "no source settle implementation; actual first loads recorded, evaluate condition with completed extraction",
+    "fullSetCredit": false
+  }
+}

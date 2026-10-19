@@ -78,16 +78,37 @@ function openThree() {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true });
   resetShellStores();
   fillStores(nine);
   offs.push(registerShellActions(fakeBridge()));
   window.maws = fakeClient({ 'attention.request': { event: null } }).client;
 });
-afterEach(() => {
+async function cleanupShell() {
   cleanup();
-  delete (window as { maws?: MawsBridge }).maws;
-  resetSlots();
-  offs.splice(0).forEach((off) => off());
+  // Repeated hover events can overwrite Radix's timer handle; unmount cancels only the latest.
+  // Exhaust the remaining callbacks while happy-dom's window still exists, rather than discarding them.
+  await act(async () => { await vi.runAllTimersAsync(); });
+}
+afterEach(async () => {
+  try {
+    await cleanupShell();
+  } finally {
+    vi.useRealTimers();
+    delete (window as { maws?: MawsBridge }).maws;
+    resetSlots();
+    offs.splice(0).forEach((off) => off());
+  }
+});
+
+it('exhausts superseded sidebar hover timers during teardown', async () => {
+  render(<Shell />);
+  const row = sidebarRow('Charter + research');
+  fireEvent.pointerEnter(row, { pointerType: 'mouse' });
+  fireEvent.pointerEnter(row, { pointerType: 'mouse' });
+  expect(vi.getTimerCount()).toBeGreaterThanOrEqual(2);
+  await cleanupShell();
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 describe('tab strip reorders, closes, reopens', () => {
@@ -228,6 +249,42 @@ describe('tab strip reorders, closes, reopens', () => {
     await user.keyboard('{Delete}');
     expect(tabNames()).toEqual([]);
     expect(document.activeElement).toBe(within(within(main()).getByRole('tabpanel')).getByRole('button', { name: /^Overview/ }));
+  });
+
+  // P3-F (tracker rows 200 and 264): a close puts focus back in its pane a frame later, once React has replaced the tab;
+  // a surface that took focus within that frame (the Overview, opened at once) keeps it, and a close nobody followed
+  // still lands focus on the pane's selected tab.
+  describe('a closed tab’s focus, restored a frame later', () => {
+    const frames: FrameRequestCallback[] = [];
+    const nextFrame = () => act(() => frames.splice(0).forEach((frame) => frame(performance.now())));
+    beforeEach(() => {
+      frames.length = 0;
+      vi.spyOn(window, 'requestAnimationFrame').mockImplementation((frame) => frames.push(frame));
+    });
+    afterEach(() => vi.restoreAllMocks());
+    const middleClose = (name: string) => act(async () => void fireEvent(tab(name), new MouseEvent('auxclick', { bubbles: true, button: 1 })));
+
+    it('lands on the pane’s selected tab when nothing took focus meanwhile', async () => {
+      render(<Shell />);
+      openThree();
+      tab('Fix sidebar drag · MAWS').focus();
+      await middleClose('Fix sidebar drag · MAWS');
+      expect(tabNames()).not.toContain('Fix sidebar drag · MAWS');
+      nextFrame();
+      expect(document.activeElement).toBe(tab('Quota reset recovery · codex_somersault'));
+    });
+
+    it('leaves focus with the Overview opened before the frame came', async () => {
+      render(<Shell />);
+      openThree();
+      tab('Fix sidebar drag · MAWS').focus();
+      await middleClose('Fix sidebar drag · MAWS');
+      act(() => runAction('tab.overview'));
+      const dialog = within(main()).getByRole('dialog', { name: 'Overview' });
+      expect(document.activeElement).toBe(dialog);
+      nextFrame();
+      expect(document.activeElement).toBe(dialog);
+    });
   });
 
   it('the strip’s "+" is disabled with "Not available here" while no session creator is registered', () => {

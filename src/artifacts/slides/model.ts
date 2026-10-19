@@ -8,7 +8,7 @@ import * as Y from '../yjs/slides';
 import { DECK_PATH, serializeDeckJson, slidePath, type DeckFace, type DeckJson, type DeckSection } from './deck';
 import { CELL_TAGS, CONTAINER_TAGS, TEXT_TAGS, isPinned, type Attrs, type ElementIR, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
 import { ANY, FLOW_LAYER, OVER, UNDER, byKey, keyAfter, rekey, repairCollisions, type Bounds } from './order';
-import { hash4, ID_RE } from './parse';
+import { hash4, ID_RE, normalizeText } from './parse';
 import { boardQuote, storeRemovedQuotes } from './quote'; // P3-C M7 fix wave 1; P3-E: boardQuote
 import { partition, serializeSlide } from './serialize';
 
@@ -32,10 +32,20 @@ export const GROUPS: readonly Group[] = ['under', 'flow', 'over'];
 export const GROUP_BOUNDS: Record<Group, Bounds> = { under: UNDER, flow: ANY, over: OVER };
 export const groupKey = (g: Group): 'order' | 'z' => (g === 'flow' ? 'order' : 'z');
 
-/** Which sibling list an element is in, from its own state (pinned-ness and its z against the flow layer). */
-export function groupOf(e: Pick<FlatElement, 'tag' | 'style' | 'attrs' | 'z'>): Group {
+/**
+ * Which sibling list an element is in, from its own state (pinned-ness and its z against the flow layer). A z under
+ * the flow layer puts it under only while its host holds flow content to be under (`hostHasFlow`): with no flow child
+ * the host has one pinned list, over, the only one its file can carry (P3-F slide-model scalpel-3#1).
+ */
+export function groupOf(e: Pick<FlatElement, 'tag' | 'style' | 'attrs' | 'z'>, hostHasFlow = true): Group {
   if (!isPinned(e.tag, e.style, e.attrs)) return 'flow';
-  return e.z !== undefined && e.z < FLOW_LAYER ? 'under' : 'over';
+  return hostHasFlow && e.z !== undefined && e.z < FLOW_LAYER ? 'under' : 'over';
+}
+/** Every element's group, each host's flow content resolved: what the tree's read and the publish's live view use. */
+export function groupsOf(els: FlatElement[], eff = resolveParents(els)): Map<string, Group> {
+  const flowHosts = new Set<string>();
+  for (const e of els) if (groupOf(e) === 'flow') flowHosts.add(eff.get(e.id)!);
+  return new Map(els.map((e) => [e.id, groupOf(e, flowHosts.has(eff.get(e.id)!))]));
 }
 
 // ---------------------------------------------------------------- scalars <-> FlatElement
@@ -176,10 +186,11 @@ export function resolveParents(els: FlatElement[]): Map<string, string> {
 /** Children of each parent in paint/flow order: [under by z] [flow by order] [over by z], ties by id. */
 export function childLists(els: FlatElement[], eff = resolveParents(els)): Map<string, FlatElement[]> {
   const buckets = new Map<string, Record<Group, FlatElement[]>>();
+  const groups = groupsOf(els, eff);
   for (const e of els) {
     const p = eff.get(e.id)!;
     if (!buckets.has(p)) buckets.set(p, { under: [], flow: [], over: [] });
-    buckets.get(p)![groupOf(e)].push(e);
+    buckets.get(p)![groups.get(e.id)!].push(e);
   }
   const out = new Map<string, FlatElement[]>();
   for (const [p, b] of buckets) {
@@ -290,28 +301,38 @@ function setKeys(doc: Doc, slideId: string, id: string, prefix: string, values: 
   );
 }
 
-/** The speaker notes, by character diff (S6's `patchNotes`). */
+/**
+ * The speaker notes, by character diff (S6's `patchNotes`), kept as typed: the notes field re-syncs from the model (another
+ * slide and back, another origin's change), so a trailing newline the owner just typed stays. The publish's live view
+ * reads them trimmed, as the loader reads the file (P3-F slide-model scalpel-3#2 and its review).
+ */
 export function setNotes(doc: Doc, slideId: string, text: string, origin?: unknown): void {
   transact(doc, () => void Y.patchNotes(doc, slideId, text), origin);
 }
 
-/** A text element's blocks, by character diff where the block kinds match (S6's `patchText`). */
+/**
+ * A text element's blocks, by character diff where the block kinds match (S6's `patchText`), stored as the loader reads
+ * them back (`normalizeText`), so the file is a parse/serialize fixed point (P3-F slide-model scalpel-3#2). Typing never
+ * comes here (the canvas's editor writes through its own binding), so nothing re-syncs a field from a trimmed value.
+ */
 export function setText(doc: Doc, slideId: string, id: string, blocks: TextBlock[], origin?: unknown): void {
-  transact(doc, () => void Y.patchText(doc, slideId, id, blocks), origin);
+  transact(doc, () => void Y.patchText(doc, slideId, id, normalizeText(blocks)), origin);
 }
 
-/** The pinned siblings of an element in paint order with the flow layer between them, as the editor stacks them. */
+/** The pinned siblings of an element in paint order, under and over the flow layer (every one over in a host with no flow child), as the editor stacks them. */
 function pinnedStack(els: FlatElement[], eff: Map<string, string>, parent: string): FlatElement[][] {
-  const sibs = els.filter((e) => eff.get(e.id) === parent && groupOf(e) !== 'flow');
-  const under = sibs.filter((e) => groupOf(e) === 'under').sort(byKey((e) => e.z));
-  const over = sibs.filter((e) => groupOf(e) === 'over').sort(byKey((e) => e.z));
+  const groups = groupsOf(els, eff);
+  const sibs = els.filter((e) => eff.get(e.id) === parent);
+  const under = sibs.filter((e) => groups.get(e.id) === 'under').sort(byKey((e) => e.z));
+  const over = sibs.filter((e) => groups.get(e.id) === 'over').sort(byKey((e) => e.z));
   return [under, over];
 }
 
 /**
  * Z-order on a pinned element (D8): `front` over everything, `back` under the flow layer (before the first flow child),
  * `forward` and `backward` one step through the stack, the flow layer counting as one step. Flow content is one layer:
- * a flow element has no z.
+ * a flow element has no z. A host with no flow child has no flow layer: its stack is one over list, as its file carries
+ * it, so `back` and `backward` stay inside it (P3-F slide-model scalpel-3#1).
  */
 export function zOrder(doc: Doc, slideId: string, id: string, to: 'front' | 'back' | 'forward' | 'backward', origin?: unknown): void {
   const els = readFlat(doc, slideId, false);
@@ -319,15 +340,17 @@ export function zOrder(doc: Doc, slideId: string, id: string, to: 'front' | 'bac
   const me = els.find((e) => e.id === id);
   if (!me) throw new Error(`no element ${slideId}/${id}`);
   if (!isPinned(me.tag, me.style, me.attrs)) throw new Error('z-order applies to pinned elements; flow content is one layer');
-  const [under, over] = pinnedStack(els, eff, eff.get(id)!);
-  // the stack bottom to top, the flow layer as null
-  const stack: (FlatElement | null)[] = [...under!, null, ...over!];
+  const parent = eff.get(id)!;
+  const [under, over] = pinnedStack(els, eff, parent);
+  // the stack bottom to top, the flow layer as null where the host has one
+  const hasFlow = els.some((e) => eff.get(e.id) === parent && groupOf(e) === 'flow');
+  const stack: (FlatElement | null)[] = hasFlow ? [...under!, null, ...over!] : [...under!, ...over!];
   const at = stack.indexOf(me);
   stack.splice(at, 1);
   const place = to === 'front' ? stack.length : to === 'back' ? 0 : to === 'forward' ? Math.min(at + 1, stack.length) : Math.max(at - 1, 0);
   stack.splice(place, 0, me);
   const flowAt = stack.indexOf(null);
-  const group: Group = stack.indexOf(me) < flowAt ? 'under' : 'over';
+  const group: Group = flowAt !== -1 && stack.indexOf(me) < flowAt ? 'under' : 'over';
   const list = (group === 'under' ? stack.slice(0, flowAt) : stack.slice(flowAt + 1)) as FlatElement[];
   const current = new Map(list.filter((e) => e !== me && e.z !== undefined).map((e) => [e.id, e.z!]));
   const keys = rekey(

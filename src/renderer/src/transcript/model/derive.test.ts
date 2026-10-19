@@ -676,7 +676,8 @@ describe('cross-session rows (E7)', () => {
     expect(folded.map((row) => row.text)).toEqual(['Message from repo-b: hello from B']); // outbound rows are work
   });
 
-  it('keeps a SendMessage to a subagent this transcript knows to_child with the agent as `to` (task id, agent id or real name); main and parent are from_child', () => {
+  // P3-F L260: the row names a known agent by its ref's name, whatever the call addressed it by
+  it('keeps a SendMessage to a subagent this transcript knows to_child with the agent as `to` (task id, agent id or real name), named by its ref; main and parent are from_child', () => {
     const b = builder();
     agentTurn(b);
     b.turn('u2');
@@ -687,8 +688,8 @@ describe('cross-session rows (E7)', () => {
     b.end(['u2']);
     const list = messages(rows(b.events));
     expect(list.map((row) => [row.direction, row.text, row.to?.taskId ?? null, row.peer])).toEqual([
-      ['to_child', 'Sent message to a1: by id', 'a1', undefined],
-      ['to_child', 'Sent message to scout: by name', 'a1', undefined],
+      ['to_child', 'Sent message to Survey src: by id', 'a1', undefined],
+      ['to_child', 'Sent message to Survey src: by name', 'a1', undefined],
       ['from_child', 'Message from main: up', null, undefined],
       ['from_child', 'Message from parent: up too', null, undefined],
     ]);

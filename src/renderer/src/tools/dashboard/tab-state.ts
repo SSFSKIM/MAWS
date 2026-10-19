@@ -35,6 +35,7 @@ export class DashboardTabState {
   readonly live: LiveDatasetsController; // E3 M3
   private bodyShown = false; // E3 M3: the body on screen and its window's document visible
   private shown: SheetDataset[] = [];
+  private shownDoc: Doc | null = null; // P3-F: the document `shown` is of
   private stopShown = () => {};
   private readonly preview: PreviewHold; // E3 panel: the snapshots a displayed preview names, held while it is displayed
   // E3: how many times the live replica has come to be live and synced (a host restart's reconnection is one more)
@@ -96,6 +97,7 @@ export class DashboardTabState {
   displayed = (doc: Doc): void => {
     this.stopShown();
     const preview = doc !== this.document.snapshot().handle?.doc; // E3 panel
+    this.shownDoc = doc; // P3-F
     const capture = () => {
       this.shown = listDatasets(doc).map(({ id, descriptor }) => ({ id, descriptor }));
       this.preview.want(preview ? this.shown.flatMap(({ descriptor }) => snapshotOf(descriptor)?.ref ?? []) : []); // E3 panel
@@ -122,12 +124,13 @@ export class DashboardTabState {
   };
 
   /** E3 M3: the sheet opened again on the current capture of its datasets (each with the view it was opened from),
-   * `selected` shown: the owner's explicit way to a newer fetch or a replaced query. */
+   * `selected` shown: the owner's explicit way to a newer fetch or a replaced query. P3-F: its datasets all removed
+   * since, on the shown document's others (none only when none remain). */
   reopenSheet = (selected: string): void => {
     const views = new Map(this.sheet.snapshot().datasets.map(({ id, view }) => [id, view]));
     const ids = this.sheet.snapshot().open ? [...views.keys()] : [selected];
     const datasets = this.shown.filter(({ id }) => ids.includes(id)).map((dataset) => ({ ...dataset, ...(views.get(dataset.id) && { view: views.get(dataset.id) }) }));
-    this.openSheet(datasets, selected);
+    this.openSheet(datasets.length > 0 ? datasets : this.shown, selected);
   };
 
   /** The header's Datasets: the sheet on the shown document's datasets, or closed when it is open. */
@@ -138,27 +141,40 @@ export class DashboardTabState {
 
   // E3 (docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md R1b): the snapshots a sheet captured, held from its
   // opening (a painted view's cached hold duplicated at once) to its close; a hold the host's restart takes is answered by
-  // one recapture of the latest, once the replica has synced again since the hold was taken
+  // one recapture of the latest, once the replica has synced again since the hold was taken. P3-F: the latest of the
+  // document it opened on (the one displayed then), whatever the editor displays by the restart.
   private openSheet(datasets: readonly SheetDataset[], selected?: string): void {
-    this.sheet.open(datasets, selected, this.holdShown(datasets.map(({ descriptor }) => descriptor)), this.recapture(this.syncs), this.document.snapshot().previewing /* E3 M3 */);
+    this.sheet.open(datasets, selected, this.holdShown(datasets.map(({ descriptor }) => descriptor)), this.recapture(this.syncs, this.shownDoc), this.document.snapshot().previewing /* E3 M3 */);
   }
 
   private holdShown(descriptors: readonly DatasetDescriptor[]) {
     return this.reader.holdAll(descriptors.flatMap((descriptor) => snapshotOf(descriptor)?.ref ?? []));
   }
 
-  private recapture(since: number): SheetRecapture {
+  private recapture(since: number, on: Doc | null): SheetRecapture {
     return async (ids) => {
       if (!(await this.syncedSince(since)) || this.disposed) return null;
-      const views = new Map(this.sheet.snapshot().datasets.map(({ id, view }) => [id, view]));
+      const captured = this.sheet.snapshot().datasets;
+      const views = new Map(captured.map(({ id, view }) => [id, view]));
+      const latestOf = this.latestOn(on, captured);
       const datasets = ids.flatMap((id) => {
-        const latest = this.shown.find((dataset) => dataset.id === id);
+        const latest = latestOf.find((dataset) => dataset.id === id);
         const view = views.get(id);
         return latest ? [{ ...latest, ...(view && { view }) }] : [];
       });
       if (datasets.length === 0) return null;
       return { datasets, hold: this.holdShown(datasets.map(({ descriptor }) => descriptor)) };
     };
+  }
+
+  // P3-F: the latest datasets of the document `on` a sheet opened on: the live document's current ones, whatever the
+  // editor displays now; a preview's while it is still displayed; else (that preview ended) the sheet's own capture of
+  // it, a version's descriptors being immutable. The sheet keeps its own preview flag, so either is labelled as opened.
+  private latestOn(on: Doc | null, captured: readonly SheetDataset[]): readonly SheetDataset[] {
+    if (on === this.shownDoc) return this.shown;
+    const live = this.document.snapshot().handle?.doc;
+    if (on === null || on === live) return live ? listDatasets(live).map(({ id, descriptor }) => ({ id, descriptor })) : [];
+    return captured;
   }
 
   // Whether the live replica synced again after the host's loss: synced now, at a later sync than `since` (the hold's),

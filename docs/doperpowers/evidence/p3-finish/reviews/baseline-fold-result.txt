@@ -1,0 +1,3 @@
+Baseline folds dfa75d831 /344d7131c: correct, no material findings.
+Independent medium reviewer a1e3175e07d93770d checked both signatures, every inherited count/run id/closing clause including L199 ten consecutive Mac runs, exact unchanged remaining tracker lines and verbatim watcher closure. Frozen tracker-m0.json blob unchanged. tracker-current.json faithfully holds original/current/foldedRow.
+Static helper review confirmed frozen-handle lookup, frozen-original equality, unique exact-current match and existing empty-index/path/replacement/staging guards. No arbitrary changed-row acceptance. No helper/application/test/build/engine/GUI execution in review.

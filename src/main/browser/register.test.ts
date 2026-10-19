@@ -240,14 +240,30 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
   });
   // cua #90 end
 
-  it('hands placement and cover to the view manager with the sender, without waiting on the placeholders', () => {
+  it('hands placement and cover to the view manager with the sender', () => {
     const { views, handlers } = setup();
     const sender = {};
     const place = { tabId: 'b_aaaaaaaaaaaa', paneId: 'p', surface: 'panel', rect: null, claim: true };
     handlers.get('browser.view.place')!(place, { sender });
     expect(views.place).toHaveBeenCalledWith(place, sender);
-    expect(handlers.get('browser.view.cover')!({ covered: true }, { sender })).toBeUndefined();
+    void handlers.get('browser.view.cover')!({ covered: true }, { sender });
     expect(views.cover).toHaveBeenCalledWith(true, sender);
+  });
+
+  // P3-F L128: the view manager's cover settles once every shown page's still is sent and the page hidden, so answering
+  // then makes the renderer's coverAcknowledged a full barrier: Mark up's overlay never draws under a live page
+  it('answers a cover only once the view manager has hidden the pages', async () => {
+    let hidden!: () => void;
+    const cover = vi.fn(() => new Promise<void>((resolve) => void (hidden = resolve)));
+    const { handlers } = setup(() => ({ place: vi.fn(), cover }));
+    let answered = false;
+    const answer = Promise.resolve(handlers.get('browser.view.cover')!({ covered: true }, { sender: {} })).then(() => void (answered = true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(cover).toHaveBeenCalledTimes(1);
+    expect(answered).toBe(false);
+    hidden();
+    await answer;
+    expect(answered).toBe(true);
   });
 
   // P3-G (§D4.1): the still is the placed window's alone (capture.ts holds the caps and the null answers)
@@ -273,8 +289,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     const { handlers } = setup(() => ({ place: vi.fn(), cover: vi.fn(async () => Promise.reject(failing)) }));
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      handlers.get('browser.view.cover')!({ covered: true }, { sender: {} });
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await handlers.get('browser.view.cover')!({ covered: true }, { sender: {} }); // still answered, after the failure
       expect(logged).toHaveBeenCalledWith('[browser] the cover failed:', failing);
     } finally {
       logged.mockRestore();

@@ -16,7 +16,9 @@
 // - stderr is not read (ignored at the spawn, so it can never fill a pipe); stdout is always drained.
 // - Inbound frames are bounded: a line past `maxMessageBytes` with no newline closes the connection and fails its
 //   written requests as too large. An unparseable line is reported and skipped, as the SDK's own transport does.
-// - `send` performs the wire's final check and the write in one synchronous step.
+// - `send` performs the wire's final check and the write in one synchronous step, and settles with the write itself.
+//   P3-F: a write the server's input refused (EPIPE: it closed its stdin yet lives on) fails its send and closes the
+//   connection, ending its group, rather than leaving the request to its deadline on a connection still leased.
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/sdk/shared/stdio.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
@@ -96,7 +98,7 @@ export class OwnedStdioTransport implements Transport {
       this.leaderExited = true;
       void this.close();
     });
-    child.stdin?.on('error', () => {}); // a write after the server's exit; the exit closes the connection
+    child.stdin?.on('error', () => void this.close()); // P3-F: a pipe that cannot be written any more closes the connection
     child.stdout?.on('error', () => {});
     child.stdout?.on('data', (chunk: Buffer) => this.read(chunk));
     if (child.pid === undefined) return Promise.race([server, fail]);
@@ -110,12 +112,16 @@ export class OwnedStdioTransport implements Transport {
     return Promise.race([Promise.all([server, lifelineUp]).then(() => {}), fail]);
   }
 
-  // No await before the write: the wire's check and stdin's write are one step.
+  // No await before the write: the wire's check and stdin's write are one step. Its completion is awaited after.
   async send(message: JSONRPCMessage): Promise<void> {
     const stdin = this.child?.stdin;
     if (!stdin || this.stopped) throw new DirectWireRefusal('the direct connection is closed');
     this.wire.writing(message);
-    stdin.write(serializeMessage(message));
+    const written = new Promise<Error | null | undefined>((resolve) => stdin.write(serializeMessage(message), resolve));
+    if (await written) {
+      void this.close();
+      throw new Error('the server stopped reading its input');
+    }
   }
 
   close(): Promise<void> {

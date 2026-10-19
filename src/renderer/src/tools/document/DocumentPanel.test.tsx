@@ -4,7 +4,6 @@
 // scope given (the title, the saved word, History toggling the rail the tab holds, the close guard the tab's), the page
 // a Mark-up surface while visible, Comment offered only with a session to send to, and the page inside the governing
 // system's scope once D's apply API is provided.
-import '../../../../../test/support/artifacts-dom-setup'; // first: the editor loads KaTeX, which warns under happy-dom
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
@@ -19,7 +18,7 @@ import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
 import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
 import { useLayout } from '../../stores/layout';
 import { resetShellStores } from '../../test-support/shell-stores';
-import { provideDocumentDesignSystem, type DesignSystemScopeProps } from './design-system';
+import { PageSystemProvider, provideDocumentDesignSystem, SystemPage, type DesignSystemScopeProps } from './design-system';
 import { registerDocumentEditor } from './index';
 import type { DocumentTabDeps, DocumentTabState } from './tab-state';
 
@@ -227,5 +226,29 @@ describe('the document editor in L’s registry', () => {
     } finally {
       offSystem();
     }
+  });
+
+  // F's S-RESTYLE: a version the history shows is drawn in the system it pinned, with its own overrides, not the live one
+  it('draws a shown version in the system it pinned, with the version’s overrides', () => {
+    const scopes: Array<Omit<DesignSystemScopeProps, 'children'>> = [];
+    const Scope = ({ children, ...props }: DesignSystemScopeProps) => (scopes.push(props), <div data-testid="system-scope">{children}</div>);
+    const value = { system: { Scope, systemFor: () => ({ id: 'ds-1' }) }, governing: { id: 'ds-1' }, overrides: { '--ds-page-margin': '1in' } };
+    const { rerender } = render(
+      <PageSystemProvider value={value}>
+        <SystemPage pinned={{ system: { id: 'ds-1', versionSeq: 4 }, overrides: { '--ds-page-margin': '0.75in' } }}>
+          <p>page</p>
+        </SystemPage>
+      </PageSystemProvider>,
+    );
+    expect(scopes.at(-1)).toMatchObject({ system: { id: 'ds-1', versionSeq: 4 }, medium: 'document', overrides: { '--ds-page-margin': '0.75in' } });
+    rerender(
+      <PageSystemProvider value={value}>
+        <SystemPage>
+          <p>page</p>
+        </SystemPage>
+      </PageSystemProvider>,
+    );
+    expect(scopes.at(-1)).toMatchObject({ system: { id: 'ds-1' }, overrides: { '--ds-page-margin': '1in' } });
+    expect(scopes.at(-1)!.system).not.toHaveProperty('versionSeq');
   });
 });

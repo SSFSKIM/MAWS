@@ -12,20 +12,22 @@ export const normalized = (text: string) => text.replace(/ﬀ/g, 'ff').replace(/
 export type Extent = [number, number, number, number];
 // a list's marker LibreOffice draws as a word of its own (a bullet, or a number and its stop)
 const MARKER = /^(?:[•●◦▪‣∙·–-]|\d+[.)])$/;
-const letters = (text: string) => text.replace(/[^\p{L}\p{N}]/gu, '');
-const symbols = (text: string) => [...text.replace(/[\p{L}\p{N}]/gu, '')].sort().join('');
+// P3-F (L210): the symbol classes (Unicode's Sm, Sc, Sk and So: a `✕`, an arrow, a `÷`) are the glyphs a fallback face
+// may draw out of place; everything else (letters, digits, punctuation) is read in its place
+const ordered = (text: string) => text.replace(/\p{S}/gu, '');
+const symbols = (text: string) => [...text.replace(/[^\p{S}]/gu, '')].sort().join('');
 
 /**
  * The LibreOffice words of one text box. LibreOffice draws a box's text as one run of words in the page's stream,
- * wherever its lines broke, so the box's whole text is present when a contiguous run reads it word for word: its letters
- * and digits in order, exactly. The one exception is confined to a word that is all symbols (a glyph a fallback face
- * draws, which the PDF may emit out of place, a `✕` after the words it precedes): it may sit anywhere in its run, so long
- * as the run's symbols are the text's. A list's markers are passed over. Of the runs that read it, the one starting
+ * wherever its lines broke, so the box's whole text is present when a contiguous run reads it word for word: its letters,
+ * digits and punctuation in order, exactly. The one exception is confined to symbols (Unicode's symbol classes: a glyph a
+ * fallback face draws, which the PDF may emit out of place, a `✕` after the words it precedes): they may sit anywhere in
+ * their run, so long as the run's symbols are the text's. A list's markers are passed over. Of the runs that read it, the one starting
  * nearest the app's text; null when none does.
  */
 export function wordsOfBox(page: Word[], ink: Extent, text: string): { joined: string; box: Extent } | null {
   const flat = normalized(text);
-  const [wantLetters, wantSymbols] = [letters(flat), symbols(flat)];
+  const [wantOrdered, wantSymbols] = [ordered(flat), symbols(flat)];
   const room = (have: string, add: string) => {
     // the symbols of `have` plus `add`, still within the text's (as multisets)
     const left = [...wantSymbols];
@@ -38,17 +40,17 @@ export function wordsOfBox(page: Word[], ink: Extent, text: string): { joined: s
   };
   let best: { joined: string; box: Extent; distance: number } | null = null;
   for (let i = 0; i < page.length; i++) {
-    let [readLetters, readSymbols, joined] = ['', '', ''];
+    let [readOrdered, readSymbols, joined] = ['', '', ''];
     const run: Word[] = [];
     for (let j = i; j < page.length; j++) {
       const w = normalized(page[j]!.text);
       if (!w) continue;
       if (MARKER.test(w) && !flat.includes(w)) continue;
-      const [wl, ws] = [letters(w), symbols(w)];
-      if (wl === '' ? !room(readSymbols, ws) : !wantLetters.startsWith(readLetters + wl) || !room(readSymbols, ws)) break;
-      [readLetters, readSymbols, joined] = [readLetters + wl, readSymbols + ws, joined + w];
+      const [wo, ws] = [ordered(w), symbols(w)];
+      if (wo === '' ? !room(readSymbols, ws) : !wantOrdered.startsWith(readOrdered + wo) || !room(readSymbols, ws)) break;
+      [readOrdered, readSymbols, joined] = [readOrdered + wo, readSymbols + ws, joined + w];
       run.push(page[j]!);
-      if (readLetters === wantLetters && [...readSymbols].sort().join('') === wantSymbols) {
+      if (readOrdered === wantOrdered && [...readSymbols].sort().join('') === wantSymbols) {
         const box: Extent = [Math.min(...run.map((r) => r.x0)), Math.min(...run.map((r) => r.y0)), Math.max(...run.map((r) => r.x1)), Math.max(...run.map((r) => r.y1))];
         const distance = Math.hypot(box[0] - ink[0], box[1] - ink[1]);
         if (!best || distance < best.distance) best = { joined, box, distance };
@@ -62,8 +64,8 @@ export function wordsOfBox(page: Word[], ink: Extent, text: string): { joined: s
 /**
  * A turned text box's words (Decision Log 23 judges it by its centre): pdftotext breaks a turned line into pieces and
  * writes them in no reading order, so the pieces lying within the app's extent of it (grown by `slack` px), each part of
- * its text, are read along the line's angle (each line, then across it) and must give its letters and digits in order;
- * null when they do not.
+ * its text, are read along the line's angle (each line, then across it) and must give its letters, digits and punctuation
+ * in order (P3-F, L210), its symbols anywhere; null when they do not.
  */
 export function wordsAlong(page: Word[], ink: Extent, text: string, deg: number, slack = 24): { joined: string; box: Extent } | null {
   const flat = normalized(text);
@@ -86,6 +88,6 @@ export function wordsAlong(page: Word[], ink: Extent, text: string, deg: number,
     else lines.push([w]);
   }
   const joined = lines.flatMap((l) => l.sort((a, b) => along(a) - along(b))).map((w) => normalized(w.text)).join('');
-  if (letters(joined) !== letters(flat) || symbols(joined) !== symbols(flat)) return null;
+  if (ordered(joined) !== ordered(flat) || symbols(joined) !== symbols(flat)) return null;
   return { joined, box: [Math.min(...hits.map((w) => w.x0)), Math.min(...hits.map((w) => w.y0)), Math.max(...hits.map((w) => w.x1)), Math.max(...hits.map((w) => w.y1))] };
 }

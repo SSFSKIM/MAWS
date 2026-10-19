@@ -5,7 +5,7 @@
 // merging touching runs with ↑ ↓ visiting each; comment marks and a new node's attributes not counted; Show editors per
 // block from provenance; and the blocks a move or a retype re-inserted, from the carries A's attribution keeps.
 import { describe, expect, it } from 'vitest';
-import { applyV2, newDoc } from '../yjs';
+import { applyV2, newDoc, revertUpdate, stateV2, type Doc } from '../yjs';
 import { applyEdit } from './patch-writer';
 import { attributedRuns, carriedBlocks, changeList, countChanges, diffBody, diffTabs, documentChanges, nextChange, openDiff, prevChange, renderDiff, showEditors, type Run } from './history';
 import { AGENT_1, AGENT_2, HUMAN, HistoryHub, TAB, block, body, markFormat, seededHub, textOf, yblock, type Version } from './history.fixture';
@@ -312,6 +312,21 @@ describe('moved and retyped blocks', () => {
     const runs = attributedRuns(render(before, after, hub.attributions()));
     expect(runs.filter((run) => run.kind === 'ins' && run.who === AGENT_1 && !run.node && run.text.length > 1)).toEqual([]);
   });
+
+  // F's L160 (B's M9 addendum): the host's suggestion copies carry as moves do (an accepted proposal's copy `accept`, a
+  // rejected deletion's restored copy `reject`), so the preview labels them rather than showing the suggester's insertion
+  it('names an accepted or a restored copy by its carry kind', () => {
+    const hub = new HistoryHub();
+    hub.write(HUMAN, (doc) => createDocument(doc, { title: 'Main', id: TAB, body: schemaFor().nodeFromJSON(seed) }));
+    const agent = hub.connect(AGENT_1);
+    const copied = applyEdit(agent, [{ op: 'move', id: 'p1', after: 'p3' }]);
+    hub.carryLast(copied.carries.map((carry) => ({ ...carry, kind: 'accept' })));
+    const restored = applyEdit(agent, [{ op: 'move', id: 'p2', after: 'p1' }]);
+    hub.carryLast(restored.carries.map((carry) => ({ ...carry, kind: 'reject' })));
+    const nextDoc = newDoc();
+    applyV2(nextDoc, hub.version('after', AGENT_1).state);
+    expect(Object.fromEntries(carriedBlocks(tabBody(nextDoc, TAB)!, hub.attributions()))).toEqual({ p1: 'accept', p2: 'reject' });
+  });
 });
 
 // M5 fix wave 1 (the review's finding 1): a tab the later state no longer has is part of the comparison, inspectable
@@ -416,6 +431,104 @@ describe('the whole comparison’s changes', () => {
     } finally {
       diff.destroy();
     }
+  });
+});
+
+// F's L187 (P3-C M8's second walk defect, relayed): the deck's per-slide walk drew nothing of a slide or an element a
+// restore brought back and someone deleted again, since the key's last item there is the restore's, inserted and deleted
+// inside the window. B's comparison against the same sequence: a version, a deletion, the owner's restore of the version
+// (A's `revertUpdate`, as restore.ts applies it), the deletion again; the comparison from the version shows what is gone.
+describe('a block or a tab a restore brought back and someone deleted again', () => {
+  const paragraphs = (ids: string[], tab: string) =>
+    schemaFor().nodeFromJSON({ type: 'doc', content: ids.map((id) => ({ type: 'paragraph', attrs: { id }, content: [{ type: 'text', text: `${tab} ${id} as the human wrote it.` }] })) });
+  const deleteBlock = (doc: Doc, id: string) => {
+    const top = body(doc);
+    top.delete(
+      top.toArray().findIndex((child) => (child as { getAttr?(k: string): unknown }).getAttr?.('id') === id),
+      1,
+    );
+  };
+  // the version, the first deletion, the owner's restore of the version, the second deletion; compared from the version
+  function sequence(remove: (doc: Doc) => void) {
+    const hub = new HistoryHub();
+    hub.write(HUMAN, (doc) => {
+      createDocument(doc, { title: 'Main', id: TAB, body: paragraphs(['p1', 'p2', 'p3'], 'Main') });
+      addTab(doc, { title: 'Appendix', id: 'apx', body: paragraphs(['x1'], 'Appendix') });
+    });
+    const before = hub.version('before', HUMAN);
+    remove(hub.connect(AGENT_1));
+    const owner = hub.connect(HUMAN);
+    applyV2(owner, revertUpdate(before.state, stateV2(owner)));
+    remove(hub.connect(AGENT_2));
+    const after = hub.version('after', AGENT_2);
+    return openDiff({ prevState: before.state, nextState: after.state, attributions: hub.attributions(before.seq, after.seq) });
+  }
+
+  it('draws the block as deleted and counts it as the one change', () => {
+    const diff = sequence((doc) => deleteBlock(doc, 'p2'));
+    try {
+      const shown = renderDiff(diffBody(diff, TAB)!, diff.renderer);
+      expect(shown.textContent).toContain('Main p2 as the human wrote it.');
+      const removed = attributedRuns(shown).filter((run) => run.kind === 'del' && run.text.includes('Main p2'));
+      expect(removed, 'the block drawn as deleted').not.toEqual([]);
+      expect(new Set(removed.map((run) => run.who)), 'by who deleted the version’s own block').toEqual(new Set([AGENT_1]));
+      expect(countChanges(diff)).toBe(1);
+    } finally {
+      diff.destroy();
+    }
+  });
+
+  it('lists the tab as removed, draws its content as deleted and counts it as the one change', () => {
+    const diff = sequence((doc) => deleteTab(doc, 'apx'));
+    try {
+      expect(diffTabs(diff).map(({ id, change }) => ({ id, change }))).toEqual([
+        { id: TAB, change: undefined },
+        { id: 'apx', change: 'removed' },
+      ]);
+      const removed = renderDiff(diffBody(diff, 'apx')!, diff.renderer);
+      expect(removed.textContent).toBe('Appendix x1 as the human wrote it.');
+      const deleted = attributedRuns(removed).filter((run) => run.kind === 'del');
+      expect(deleted, 'the tab’s content drawn as deleted').not.toEqual([]);
+      expect(new Set(deleted.map((run) => run.who)), 'by who deleted the version’s own tab, as a block is').toEqual(new Set([AGENT_1]));
+      expect(countChanges(diff)).toBe(1);
+    } finally {
+      diff.destroy();
+    }
+  });
+});
+
+// P3-F document-model sweep#4: a selection inside formatted text names who formatted it. A format marker formats the text
+// after it up to the next marker of its key, so it counts wherever that text meets the selection; a marker ending a run
+// formats nothing after it.
+describe('Show editors inside formatted text', () => {
+  const seeded = () => {
+    const hub = new HistoryHub();
+    hub.write(HUMAN, (doc) => createDocument(doc, { title: 'Main', id: TAB, body: schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'abcdefghij' }] }] }) }));
+    return { hub, agent: hub.connect(AGENT_1) };
+  };
+  const editors = (hub: HistoryHub, from: number, to: number) =>
+    showEditors({ doc: ynodeToPmnode(body(hub.host), schemaFor()), from, to, liveRoot: body(hub.host), provenance: hub.attributions() }).map((e) => `${e.who === AGENT_1 ? 'agent' : e.who}:${e.kinds.join(',')}`);
+
+  it('names who bolded the paragraph when a word inside it is selected', () => {
+    const { hub, agent } = seeded();
+    agent.transact(() => block(agent, 'p1').format(0, 10, markFormat({ type: 'bold' })));
+    expect(editors(hub, 1, 11)).toEqual(['agent:fmt', `${HUMAN}:ins`]);
+    expect(editors(hub, 4, 7), "'def'").toEqual(['agent:fmt', `${HUMAN}:ins`]);
+  });
+
+  it('does not name who formatted only text before the selection', () => {
+    const { hub, agent } = seeded();
+    agent.transact(() => block(agent, 'p1').format(0, 3, markFormat({ type: 'bold' })));
+    expect(editors(hub, 7, 10), "'ghi', after the bold 'abc'").toEqual([`${HUMAN}:ins`]);
+  });
+
+  // P3-F document-model review (fable): a comment is not formatting (parent Decision Log 29), so who commented a passage
+  // is not named for a selection inside it, nor for one holding the comment's start; the thread shows who commented.
+  it('does not name who commented the passage, inside it or over it', () => {
+    const { hub, agent } = seeded();
+    agent.transact(() => block(agent, 'p1').format(0, 10, markFormat({ type: 'comment', attrs: { threadId: 't1' } })));
+    expect(editors(hub, 4, 7), "'def' inside the commented passage").toEqual([`${HUMAN}:ins`]);
+    expect(editors(hub, 1, 11), 'the whole passage').toEqual([`${HUMAN}:ins`]);
   });
 });
 

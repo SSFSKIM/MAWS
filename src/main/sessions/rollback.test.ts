@@ -326,6 +326,7 @@ describe('rollback per resource', () => {
   it('forks to a new worktree: the worktree under the repository root, the fork launched there with the pin, the source untouched', async () => {
     const sid = '00000000-0000-4000-8000-0000000f0f0f' as SessionId;
     const source = h.index.sessions.upsertFromSummary(summary({ sessionId: sid, directory: repo.root })).record;
+    h.writeTranscript(repo.root, sid); // its conversation, which the fork copies (P3-F L242)
     const outcome = await h.service.fork(source.appId, { kind: 'newWorktree', name: 'forked', branch: { kind: 'new', name: 'worktree-forked', base: 'HEAD' } }, { message: MESSAGE, rewindTo: null });
     expect(outcome).toMatchObject({ status: 'starting' });
     expect(await h.settled(outcome.appSessionId)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });

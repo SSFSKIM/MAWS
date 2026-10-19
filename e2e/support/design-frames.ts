@@ -7,9 +7,12 @@
 // that renderer (its compositor's vsync-driven frames). A frame's work is the main thread's executing time inside it: the
 // union of its top-level tasks (`RunTask`, else `ThreadControllerImpl::RunTask`; nested and overlapping slices counted
 // once), clipped to the frame, so React, style, layout and paint inside those tasks all count, and time the thread waits
-// idle for the next frame does not. An active frame is one in which the main thread handled input (an `EventDispatch` of
-// a wheel or pointer event) or produced a frame (style, layout, pre-paint, paint, layerize or commit); idle frames inside
-// the window are kept in `all` but the bound is judged on the active ones.
+// idle for the next frame does not. These are per-frame slices, not whole tasks: a task longer than a frame is split
+// across the frames it spans, so no frame reads more than its own interval, and a bound at or over the display's frame
+// interval can never be missed (design-scale.spec.ts judges its 10 ms rows only on a display at most 100 Hz). An active
+// frame is one in which the main thread handled input (an `EventDispatch` of a wheel or pointer event) or produced a
+// frame (style, layout, pre-paint, paint, layerize or commit); idle frames inside the window are kept in `all` but the
+// bound is judged on the active ones.
 //
 // Dropped frames, two separately labelled readings: the compositor's own (its `PipelineReporter` frames and their
 // `STATE_DROPPED` share, with the timeline's `DroppedFrame` instants beside it; null when the trace carries no reporter

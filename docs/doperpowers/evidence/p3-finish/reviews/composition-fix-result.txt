@@ -1,0 +1,51 @@
+Composition scalpel-4#1 fix review, recorded 2026-10-18T23:08:13Z.
+First dispatch (reviewer-medium on sol) died at its first request on the sol usage limit with no verdict. Re-dispatched once on opus (reviewer-medium, model override).
+Range 6a2a30e20..91d4874fa. Verdict: incorrect. The restore is byte-exact and the conformance test truthful, but three other consumers still read the rewritten form.
+Follow-up worker (opus): 068f25725 (maws.test.ts expectations; snapshot regenerated with -u to blob 385886e8b, equal to 5ad08789c) and bc837f236 (derived e2e fixture e2e/fixtures/derived/p1-maws-show-pane-artifact.jsonl with a derived provenance record; maws-tools.spec.ts and deliverables.spec.ts bare and seeded cases repointed; a comment-only correction in test/live/maws-tools.live.test.ts). RED /tmp/maws-review/p3f-comp2-red.log (maws.test 1 fail/23 pass; snapshot 1 fail); GREEN /tmp/maws-review/p3f-comp2-green.log (renderer 231/231, conformance 240/240). e2e checked statically only; the hand-back gate proves them. One bounded recheck pending.
+
+Reviewer's report, verbatim:
+## Findings
+- [P1] Restore the renderer test's `deliverable` labels for the restored recording — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/renderer/src/transcript/model/maws.test.ts:356-357
+  This test still expects the rewritten recording, so it now fails in the CI unit suite. It is named `p1-maws-show-pane: Terminal opened, the absent pane and the unknown pane as error cells` and builds its rows from `loadJournal('pass3', 'p1-maws-show-pane')` (line 325). `paneLabel` in src/renderer/src/transcript/model/cells.ts:256 takes the error label directly from the recorded tool_result. The restored recording reads `the deliverable pane is not available in this build of MAWS` and `known panes: diff, file, terminal, tasks, deliverable, browser, source-control`. The test still expects the P3-L rewrite (`the artifact pane is not available…` and `…tasks, artifact, browser…`) and keeps the comment "the recording's pane renamed". The implementer's green log ran only conformance/fixtures.test.ts, so it did not cover this file. Putting lines 356-357 back to their 5ad08789c text and dropping that comment makes the test match the recording.
+- [P1] Regenerate the transcript snapshot of the show-pane recording — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/test/snapshots/transcript/pass3/p1-maws-show-pane.rows.json:180-194
+  This snapshot still holds the rewritten values, so the CI snapshot test now fails. `presentation model snapshots > pass3/p1-maws-show-pane` in src/renderer/src/transcript/model/snapshots.test.ts derives rows from every pass3 journal and compares them to this file with `toMatchFileSnapshot`. In CI the update state is `none`, so a mismatch fails. P3-L (913e2b19e) rewrote nine values here to the `artifact` form: the user prompt at line 20, the cell's input, result, structured text and label at 180-194, the unknown-pane result and label at 221-231, and the assistant markdown at 245. This commit left the file unchanged. Rows derived from the restored recording now differ starting at line 20. Regenerate the file with `-u` from the restored recording rather than editing it by hand; the expected diff is the reverse of 913e2b19e's change to this file.
+- [P2] Give the e2e show_pane replays a derived fixture or update them — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/e2e/maws-tools.spec.ts:528-542
+  Two e2e specs replay `SHOW_PANE` (pass3/p1-maws-show-pane.jsonl) through the product host and still expect the rewritten recording.
+  - maws-tools.spec.ts:528 expects the journaled call arguments `{ pane: 'artifact', target: 'none' }`. Lines 531 and 535 expect the host's live `artifactNotFound('none')`, and line 542 expects the cell text "the artifact pane is not available".
+  - e2e/deliverables.spec.ts:881-910 also needs the second call to name `artifact`, so that the seeded case opens the Artifacts viewer and answers `panel-tool`.
+
+  With the restored bytes, the replay sends `pane: 'deliverable'`. Today's host rejects it in `parseToolArguments` with `unknownPane('deliverable')`, because `PANE_NAMES` has no such pane and no alias. No `maws.pane.shown` event follows, so all of these assertions fail. The seeded Artifacts-viewer case loses its only replay route. These specs run on the Mac e2e gate, not CI. The architect's routing already covers this case: a separately named derived fixture whose header says it is the recording with the pane renamed, used by these specs.
+
+## Verdict
+incorrect — The fixture restore is byte-exact. The conformance test asserts exactly what normalizer-controls.ts produces from the recording, its description is truthful, and none of its assertions is weaker. But three other consumers still read the rewritten `artifact` form of the same recording: two unit-suite tests in the CI gate (renderer maws.test.ts and the transcript snapshot) and two Mac e2e show_pane replays now fail.
+
+### Answers to the brief's questions
+1. Yes. The fixture blob is 2e0e38b22cc8e1b25ebb70516d836a3d13a2ed9b at both 91d4874fa and 5ad08789c; 6a2a30e20 had 10d9f1f862c9….
+2. Yes, the test asserts what today's normalizer produces:
+   - normalizer-controls.ts:145-146 admits a maws call only when `parseToolArguments` succeeds, and `PaneSchema` (src/shared/maws/panes.ts:8) has no `deliverable` and no alias.
+   - So the `deliverable` and `nope` calls are not admitted, and `mapMawsAnswer` returns at :217. Only `terminal` emits `maws.pane.shown`, and its `opened` comes from the recorded answer.
+   - `toMatchObject` on an array pins the length to 1.
+   - The tool.use inputs and both tool.result texts match the recording (fixture lines 96 and 111).
+   - The red log separately shows exactly one event received.
+3. Yes. The test name and comment are accurate: there is no alias, and today's host would answer `unknownPane('deliverable')` and list `artifact`. "recorded live" is true again.
+4. Yes, the three consumers in the findings. Unaffected:
+   - test/live/maws-tools.live.test.ts:190 sends its own prompt.
+   - deliverables.spec.ts:1161 (the attention test) only needs three permissions.
+   - Nothing hashes or lists this fixture's bytes.
+5. No assertion is weaker:
+   - The terminal assertion is unchanged.
+   - The unknown-pane check went from `toContain(TOOL_ERRORS.unknownPane('nope'))` to an exact `toBe` of the recorded text.
+   - The call inputs and the absence of events for the two refused calls are now pinned.
+   - The only removed assertion, an `artifact` error event, existed only in the rewritten bytes.
+   - One side effect: the replay no longer exercises the error path of `maws.pane.shown` for an admitted call. session-maws.test.ts:135-162 still covers it with a constructed session.
+
+### Not verified
+- I ran no tests, per the brief.
+- Findings 1 and 2 are inferred from the source (`paneLabel` in cells.ts, `toMatchFileSnapshot` in snapshots.test.ts). Finding 3 is inferred from the e2e source and the replay's documented "compares no bodies" behaviour; I did not run them.
+- I did not check that 5ad08789c's snapshot bytes equal today's derivation exactly, which is why I recommend regenerating with `-u`.
+
+### Context outside this commit (not a finding)
+The normalizer still accepts calls to retired tools as recorded: the browser tools and `artifact_update` (normalizer-controls.ts:142-149). It has no such handling for the `deliverable` pane, so session journals on disk from before P3-L lose `maws.pane.shown` for `deliverable` calls. That was P3-L's choice; this commit documents it correctly and does not change it.
+
+
+Bounded recheck (2026-10-19T00:59:15Z): reviewer-medium on opus over 068f25725 and bc837f236: correct. One P3 comment nit (e2e/maws-tools.spec.ts header still says every case replays a live recording) folded into the editor-proof worker's e2e wave.

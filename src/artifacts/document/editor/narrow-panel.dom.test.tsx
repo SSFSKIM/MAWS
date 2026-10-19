@@ -208,6 +208,34 @@ describe('the rail in the body’s width', () => {
     expect((within(rail()!).getByRole('textbox', { name: 'Version name' }) as HTMLInputElement).value).toBe('Draft to legal');
   });
 
+  // F's L241: closing History ends its preview, so the page Escape gives the keyboard back to is the live one, once the
+  // preview has gone (the preview's page, focused first, went with it and the focus with it)
+  it('as a drawer closes History on Escape while a version is previewed and gives the keyboard back to the live page', async () => {
+    // happy-dom renders nothing: a page under `hidden` (the live one while a version is previewed) reads as visible and
+    // takes the focus, neither of which a browser's does; this case holds happy-dom to the browser's rule
+    const unrendered = (element: Element) => element.closest('[hidden]') !== null;
+    const focus = HTMLElement.prototype.focus;
+    vi.spyOn(Element.prototype, 'checkVisibility').mockImplementation(function (this: Element) {
+      return !unrendered(this);
+    });
+    vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+      if (!unrendered(this)) focus.call(this, options);
+    });
+    width = 600;
+    const container = await mount({ withHistory: true });
+    history!.version('named', undefined, { label: 'Before' });
+    press('Version history');
+    const rail = () => screen.queryByRole('complementary', { name: 'Version history' });
+    await until(() => rail() !== null && within(rail()!).queryAllByRole('button', { name: /^Version Before/ }).length > 0, 'the version list');
+    expect(layout(container)).toBe('drawer');
+    act(() => fireEvent.click(within(rail()!).getByRole('button', { name: /^Version Before/ })));
+    await until(() => container.querySelector('[data-editor="preview"]') !== null && screen.queryByText('Loading the version…') === null, 'the preview');
+    act(() => fireEvent.keyDown(within(rail()!).getByRole('checkbox', { name: 'Named only' }), { key: 'Escape' }));
+    expect(rail()).toBeNull();
+    const live = container.querySelector('[data-editor="live"]');
+    await until(() => container.querySelector('[data-editor="preview"]') === null && document.activeElement === live, 'the live page focused once the preview went');
+  });
+
   it('does not take an Escape the page handles itself (find closes, the drawer stays)', async () => {
     width = 600;
     await mount();

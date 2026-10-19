@@ -3,7 +3,7 @@
 // edited the selection and when each last did, from provenance (so an edit older than a compaction is named too). A
 // right-click with nothing selected keeps the system's menu.
 import type { Editor } from '@tiptap/core';
-import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type { HistoryController, ShownEditor } from './controller';
 
 interface Open {
@@ -40,27 +40,42 @@ export function useShowEditors(editor: Editor, controller: HistoryController | n
 }
 
 export function ShowEditorsMenu({ open, onShow, onClose }: { open: Open; onShow(): void; onClose(): void }) {
+  // Closing (× or Escape) gives the keyboard back to where it was as the menu opened (the page a right-click on its
+  // selection focuses), since the control clicked takes it and then goes; unless the owner has since put it elsewhere.
+  // An Escape something else already took (a comment card's) is that one's, and the menu stays.
+  const root = useRef<HTMLDivElement>(null);
+  const opener = useRef<Element | null>(null);
+  useEffect(() => {
+    opener.current = document.activeElement;
+  }, []);
+  const close = useCallback(() => {
+    const active = document.activeElement;
+    const lost = active === null || active === document.body || !active.isConnected || root.current?.contains(active) === true;
+    const page = opener.current;
+    if (lost && page instanceof HTMLElement && page.isConnected) page.focus({ preventScroll: true });
+    onClose();
+  }, [onClose]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && !event.defaultPrevented) close();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [close]);
   const style = { left: open.x, top: open.y };
   if (!open.asked)
     return (
-      <div className="doc-menu doc-context-menu" role="menu" aria-label="Selection" style={style} data-markup-occluder>
+      <div ref={root} className="doc-menu doc-context-menu" role="menu" aria-label="Selection" style={style} data-markup-occluder>
         <button type="button" role="menuitem" className="doc-menu-item" onClick={onShow}>
           Show editors
         </button>
       </div>
     );
   return (
-    <div className="doc-popover doc-editors" role="dialog" aria-label="Editors" style={style} data-markup-occluder>
+    <div ref={root} className="doc-popover doc-editors" role="dialog" aria-label="Editors" style={style} data-markup-occluder>
       <header className="doc-editors-header">
         <span>Editors of the selection</span>
-        <button type="button" className="doc-tool" aria-label="Close editors" onClick={onClose}>
+        <button type="button" className="doc-tool" aria-label="Close editors" onClick={close}>
           ×
         </button>
       </header>
@@ -73,7 +88,7 @@ export function ShowEditorsMenu({ open, onShow, onClose }: { open: Open; onShow(
       ) : (
         <ul className="doc-editors-list">
           {open.editors.map((who) => (
-            <li key={`${who.name}-${who.at}`} className="doc-editors-row">
+            <li key={who.key} className="doc-editors-row">
               <span className="doc-author-chip" style={{ background: `var(${who.color})` }} aria-hidden />
               {who.name} · {who.when}
             </li>

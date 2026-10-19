@@ -12,7 +12,7 @@ import type { StartOutcome } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
 import type { StartOptions } from '@shared/ipc/schema/session';
 import { attachCommand } from '@shared/sessions/attach';
-import { hostCall, isDirectory, reservationOf } from './context';
+import { hostCall, isDirectory, pathExists, reservationOf, transcriptPathOf } from './context';
 import { holderAuthority, type PausedHolder } from './holders';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf } from './intent-rules';
 import { runResume } from './resume';
@@ -53,7 +53,7 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   if (!dirs.ok && dirs.kind === 'invalid') return reject({ status: 'invalid', appSessionId, field: dirs.field, message: dirs.message });
   if (intent.kind === 'fork') {
     // E3: a side thread forks a parent with a turn running, which is the moment it exists for (Design §3)
-    const refusal = intent.lineage?.kind === 'side-thread' ? sideThreadRefusal(s, intent.source!.appSessionId) : await forkRefusal(s, intent.source!.appSessionId);
+    const refusal = intent.lineage?.kind === 'side-thread' ? await sideThreadRefusal(s, intent.source!.appSessionId) : await forkRefusal(s, intent.source!.appSessionId);
     if (refusal !== null) return reject({ status: 'refused', appSessionId, ...refusal });
   }
   // a relay alias on the direct route (C7's model chip, or a Direct default route, can leave one): refused before any
@@ -96,10 +96,10 @@ const pendingMessageRefusal = (appSessionId: AppSessionId): StartOutcome => ({ s
 export const directRouteRefusal = (model: string) =>
   `${model} is a gateway model, which the Direct route cannot serve · choose a Claude model, or start on the gateway`;
 
-// A fork is refused for a source that is gone, has no engine id, or has a turn open in MAWS (a copy taken mid-turn
-// would hold a half-written turn).
+// A fork is refused for a source that is gone, has no engine conversation yet, or has a turn open in MAWS (a copy taken
+// mid-turn would hold a half-written turn).
 export async function forkRefusal(s: Setup, sourceId: AppSessionId): Promise<{ reason: 'no_engine_session' | 'busy' | 'unknown_session'; message: string } | null> {
-  const refusal = sideThreadRefusal(s, sourceId);
+  const refusal = await sideThreadRefusal(s, sourceId);
   if (refusal !== null) return refusal;
   const live = await reservationOf(s.dispatch, sourceId);
   if (live !== null && live.turn !== null) return { reason: 'busy', message: 'the session has a turn running; fork it once the turn ends' };
@@ -107,12 +107,18 @@ export async function forkRefusal(s: Setup, sourceId: AppSessionId): Promise<{ r
 }
 
 // E3 (Design §3): a side thread's guard is the fork's without the turn: the engine forks a parent mid-turn (M0's verdict
-// (a), the engine copying up to its last flushed record), and the comment carries its own context.
-export function sideThreadRefusal(s: Pick<Setup, 'sessions'>, sourceId: AppSessionId): { reason: 'no_engine_session' | 'unknown_session'; message: string } | null {
+// (a), the engine copying up to its last flushed record), and the comment carries its own context. P3-F L242: a pinned
+// engine id is not yet a conversation: a blank chat (a no-message Start) has no transcript for `--resume <pin>
+// --fork-session` to copy, a launch that fails only after the start answered `starting` (and a comment card would read
+// it sent), so the transcript must exist, where the index found it or where a launch in the record's directory writes it.
+const NO_CONVERSATION = 'the session has no engine conversation to fork yet';
+export async function sideThreadRefusal(s: Pick<Setup, 'sessions' | 'env'>, sourceId: AppSessionId): Promise<{ reason: 'no_engine_session' | 'unknown_session'; message: string } | null> {
   const source = s.sessions.get(sourceId);
   if (source === null) return { reason: 'unknown_session', message: `no session ${sourceId}` };
-  if (source.engineSessionId === null) return { reason: 'no_engine_session', message: 'the session has no engine conversation to fork yet' };
-  return null;
+  if (source.engineSessionId === null) return { reason: 'no_engine_session', message: NO_CONVERSATION };
+  const known = s.sessions.summaryOf(sourceId)?.transcriptPath;
+  const transcript = (known !== undefined && (await pathExists(known))) || (await pathExists(await transcriptPathOf(s.env, source.directory, source.engineSessionId)));
+  return transcript ? null : { reason: 'no_engine_session', message: NO_CONVERSATION };
 }
 
 export async function guardResumeStart(s: Setup, record: SessionRecord, args: { message: FirstMessage | null; options: StartOptions }, resumeMessages: Map<string, FirstMessage>, paused?: PausedHolder): Promise<Guarded> {

@@ -144,6 +144,13 @@ describe('overrides reach Office (Decision Log 25; B’s `dsOverrides`)', () => 
     expect(officeTheme(set(withoutOffice(complete)), { 'color-accent': '#123456', '--ds-font-display': 'var(--ds-font-body)' })).toEqual(plain);
   });
 
+  // the wave's review: the theme takes the overrides a scope and an export take (`safeOverrides`)
+  it('ignores an override carrying a priority, as a scope and an export do', () => {
+    const base = set(withoutOffice(complete));
+    expect(officeTheme(base, { '--ds-font-body': 'Menlo !important' }).fonts.minor.latin).toBe(officeTheme(base).fonts.minor.latin);
+    expect(officeTheme(base, { '--ds-color-accent': '#123456 !important' }).colors).toEqual(officeTheme(base).colors);
+  });
+
   it('replaces a font role with an override that reads as a font stack, unless the extension names the face', () => {
     const theme = officeTheme(set(withoutOffice(complete)), { '--ds-font-display': '"Source Serif 4", Georgia, serif', '--ds-font-body': 'system-ui, sans-serif' });
     expect(theme.fonts).toEqual({ major: { latin: 'Source Serif 4' }, minor: { latin: 'Arial' } });

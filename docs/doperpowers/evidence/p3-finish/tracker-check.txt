@@ -1,0 +1,7 @@
+Inventory validation after L211 partial-fix carry
+255 original table rows =17 preclosed +238 M0 open.
+Every M0 open row has exactly one bin; missing=0; duplicate=0.
+DL106 promotions and DL107 reversal retained; L211 fix to defer by architect2026-10-18. New supplemental debt stays outside frozen denominator.
+Counts: {'defer': 125, 'sitting': 10, 'theirs': 42, 'fix': 52, 'close': 9}
+RESULT: pass (inventory; gates still pending)
+Verified at 2026-10-18T15:29:51Z

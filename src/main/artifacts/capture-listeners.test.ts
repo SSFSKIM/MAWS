@@ -9,7 +9,7 @@ vi.mock('electron', () => ({ BrowserWindow: class {} }));
 import { loadSettled, settled } from './capture';
 
 type Contents = EventEmitter & { loadURL(url: string): Promise<void> };
-const EVENTS = ['did-finish-load', 'did-fail-load', 'paint'] as const;
+const EVENTS = ['did-finish-load', 'did-fail-load', 'destroyed', 'paint'] as const;
 
 /** A window whose page loads, then paints (or not), or fails, as `next` says. */
 function windowOf(next: () => 'paint' | 'quiet' | 'fail') {
@@ -28,7 +28,7 @@ function windowOf(next: () => 'paint' | 'quiet' | 'fail') {
   return { win: { webContents: contents } as never, contents };
 }
 const counts = (contents: EventEmitter) => Object.fromEntries(EVENTS.map((event) => [event, contents.listenerCount(event)]));
-const none = { 'did-finish-load': 0, 'did-fail-load': 0, paint: 0 };
+const none = { 'did-finish-load': 0, 'did-fail-load': 0, destroyed: 0, paint: 0 };
 
 afterEach(() => vi.useRealTimers());
 
@@ -60,6 +60,18 @@ describe('the capture window’s load helpers on a reused window', () => {
     expect(counts(contents)).toEqual(none);
   });
 
+  // exports-capture scalpel-4#2: Electron reports no load failure for a navigation the window's destruction aborts (its
+  // own `loadURL` promise listens for `destroyed`), so a load cut short by an export's cancellation must still end
+  it('leave none after a load the window’s destruction cuts short, which rejects rather than waiting forever', async () => {
+    const contents = new EventEmitter() as Contents;
+    contents.loadURL = () => new Promise<void>((_, reject) => contents.once('destroyed', () => reject(new Error('ERR_ABORTED (-3)'))));
+    const loading = loadSettled({ webContents: contents } as never, 'file:///tmp/deck.html');
+    contents.emit('destroyed');
+    const pending = new Promise((resolve) => setTimeout(() => resolve('still pending'), 100));
+    await expect(Promise.race([loading, pending])).rejects.toThrow('the window was closed before the page loaded');
+    expect(counts(contents)).toEqual(none);
+  });
+
   it('settled alone: a paint resolves it, a timeout resolves it, neither leaves its listener', async () => {
     const contents = new EventEmitter();
     const win = { webContents: contents } as never;
@@ -70,6 +82,25 @@ describe('the capture window’s load helpers on a reused window', () => {
     const quiet = settled(win);
     await vi.advanceTimersByTimeAsync(600);
     await quiet;
+    expect(contents.listenerCount('paint')).toBe(0);
+  });
+
+  // exports-capture scalpel-4#1: an export's deadline or a capture's guard destroys the window while it settles, and a
+  // destroyed window answers nothing but `isDestroyed` (Electron's `Object has been destroyed`)
+  it('settled on a window destroyed while it waits: the timeout resolves it, never reading the window again', async () => {
+    const contents = new EventEmitter();
+    let destroyed = false;
+    const win = {
+      get webContents() {
+        if (destroyed) throw new TypeError('Object has been destroyed');
+        return contents;
+      },
+    } as never;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const waiting = settled(win);
+    destroyed = true;
+    await vi.advanceTimersByTimeAsync(600);
+    await waiting;
     expect(contents.listenerCount('paint')).toBe(0);
   });
 });

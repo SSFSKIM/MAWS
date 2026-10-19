@@ -14,11 +14,13 @@ import { registerSlot, resetSlots } from '../app/slots';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { registerFocusTarget, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
+import { useNotices } from '../stores/notices'; // P3-F (F-shell)
 import { useSessions } from '../stores/sessions';
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
 import { dockPanel, floatPanel, useColumnWidth, useFloatingCard } from './floating';
-import { resetMarkup, useMarkup } from '../markup/session'; // P3-G (M4)
+import { ChromePill } from './FloatingPill'; // P3-F (F-shell)
+import { MARKUP_COPY, resetMarkup, useMarkup } from '../markup/session'; // P3-G (M4)
 import { resetMarkupSurfaces, useRegionMarkupSurface } from '../markup/surface'; // P3-G (M4)
 import { EditorHostScopeContext } from '../panel/editor-host'; // P3-G (M4)
 import { CommentCardHost } from '../side/card/CardHost'; // P3-G (M4)
@@ -122,6 +124,47 @@ describe('the floating card in the Shell', () => {
     await user.click(pill);
     expect(card()).not.toBeNull();
     expect(composers()).toEqual([A]);
+  });
+
+  // P3-F (F-shell, scalpel-4#5): Close unmounts the focused Close button with the card; the pill it leaves takes the
+  // keyboard, the layer's or the one a browser chrome's row hosts, so focus never drops to the body
+  it.each([
+    ['the layer’s', false],
+    ['a browser chrome’s row’s', true],
+  ])('after Close, %s pill has the keyboard', async (_, hosted) => {
+    const user = userEvent.setup();
+    if (hosted) registerSlot('panelHost', () => <ChromePill />);
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    expect(card()).toBeNull();
+    const pill = screen.getByRole('button', { name: 'Show session card' });
+    expect(pill.dataset.floatingPill).toBe(hosted ? 'inline' : 'floating');
+    expect(document.activeElement).toBe(pill);
+  });
+
+  // P3-F L129: the panel header's Float names what a click does: over a card closed to its pill it brings the card back
+  it('the header’s Float reads "Open session card" while the card is a pill and brings it back; over the open card it reads "Dock session"', async () => {
+    const user = userEvent.setup();
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    const header = () => region('panel').querySelector<HTMLElement>('[data-editor-header]')!;
+    expect(within(header()).getByRole('button', { name: 'Dock session', pressed: true })).toBeTruthy();
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    expect(within(header()).queryByRole('button', { name: 'Dock session' })).toBeNull();
+    await user.click(within(header()).getByRole('button', { name: 'Open session card', pressed: true }));
+    expect(card()).not.toBeNull();
+    expect(composers()).toEqual([A]);
+    expect(within(header()).getByRole('button', { name: 'Dock session', pressed: true })).toBeTruthy();
+  });
+
+  // P3-F L132: `overflow-y-auto` alone makes x-overflow auto too; a child wider than the card is clipped, never scrolled
+  it('the card’s body scrolls vertically and clips a horizontally overflowing child', () => {
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    const body = card()!.querySelector<HTMLElement>('[data-pane="card"]')!;
+    expect(body.classList).toContain('overflow-y-auto');
+    expect(body.classList).toContain('overflow-x-hidden');
   });
 
   it('Dock restores the column at its width and the main pane’s composer takes the keyboard', async () => {
@@ -389,8 +432,11 @@ describe('a mark-up still taken under the open card', () => {
     render(<Shell />);
     const shown = card()!;
     const occluders = () => [...document.querySelectorAll<HTMLElement>('[data-markup-occluder]')];
-    const named = () => occluders().map((el) => (el.hasAttribute('data-floating-layer') ? 'card layer' : el.hasAttribute('data-card-host') ? 'comment card host' : el.tagName));
-    expect(named()).toEqual(['comment card host', 'card layer']);
+    const named = () =>
+      occluders().map((el) =>
+        el.hasAttribute('data-floating-layer') ? 'card layer' : el.hasAttribute('data-card-host') ? 'comment card host' : el.hasAttribute('data-toast-viewport') ? 'toast viewport' : el.tagName,
+      );
+    expect(named()).toEqual(['toast viewport', 'comment card host', 'card layer']); // P3-F (F-shell): the toasts too
 
     const during: { visibility: string[]; card: HTMLElement | null; rect: unknown }[] = [];
     installFakeMain((name, input) => {
@@ -401,8 +447,8 @@ describe('a mark-up still taken under the open card', () => {
     await userEvent.click(within(region('panel')).getByRole('button', { name: 'Mark up' }));
     await waitFor(() => expect(useMarkup.getState().session).not.toBeNull());
 
-    expect(during).toEqual([{ visibility: ['hidden', 'hidden'], card: shown, rect: { x: 300, y: 180, width: 800, height: 500 } }]);
-    expect(occluders().map((el) => el.style.visibility)).toEqual(['', '']);
+    expect(during).toEqual([{ visibility: ['hidden', 'hidden', 'hidden'], card: shown, rect: { x: 300, y: 180, width: 800, height: 500 } }]);
+    expect(occluders().map((el) => el.style.visibility)).toEqual(['', '', '']);
     expect(card()).toBe(shown);
   });
 
@@ -431,6 +477,49 @@ describe('a mark-up still taken under the open card', () => {
     await userEvent.click(within(region('panel')).getByRole('button', { name: 'Mark up' }));
     await waitFor(() => expect(warn).toHaveBeenCalledWith('[markup] the still was not taken:', 'the window went'));
     expect(useMarkup.getState().session).toBeNull();
-    expect([...document.querySelectorAll<HTMLElement>('[data-markup-occluder]')].map((el) => el.style.visibility)).toEqual(['', '']);
+    expect([...document.querySelectorAll<HTMLElement>('[data-markup-occluder]')].map((el) => el.style.visibility)).toEqual(['', '', '']);
+  });
+
+  // P3-F (F-shell, scalpel-4#3): the toasts sit at the shell's bottom right, over the panel. A retry right after a
+  // refused capture would otherwise take the refusal's own toast into the still and the picture sent to chat.
+  it('hides a showing toast while main takes the still: the retry’s still holds no “Couldn’t capture” toast', async () => {
+    registerSlot('panelHost', () => (
+      <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
+        <ViewerProbe />
+      </EditorHostScopeContext.Provider>
+    ));
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const r = this.hasAttribute('data-probe-viewer') ? { left: 300, top: 180, width: 800, height: 500 } : { left: 0, top: 0, width: 0, height: 0 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => ({}) } as DOMRect;
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    useNotices.setState({ notices: [] });
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [{ id: TAB, toolId: 'artifacts', pinned: false }], activeTabId: TAB }]]) });
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    let refuse = true;
+    const during: { toast: boolean; visibility: string }[] = [];
+    // the toast as it shows, in the viewport (Radix also announces its text in a body child, which is never drawn)
+    const viewport = () => document.querySelector<HTMLElement>('[data-toast-viewport]')!;
+    const showing = () => viewport().textContent?.includes(MARKUP_COPY.captureFailed) === true;
+    installFakeMain((name) => {
+      if (name !== 'layout.captureRegion') return fail(`unexpected ${name}`);
+      if (refuse) {
+        refuse = false;
+        return fail('not now');
+      }
+      during.push({ toast: showing(), visibility: viewport().style.visibility });
+      return ok({ image: still });
+    });
+    const markUp = within(region('panel')).getByRole('button', { name: 'Mark up' });
+    await userEvent.click(markUp);
+    await waitFor(() => expect(showing()).toBe(true));
+    expect(useMarkup.getState().session).toBeNull();
+    await userEvent.click(markUp);
+    await waitFor(() => expect(useMarkup.getState().session).not.toBeNull());
+    expect(during).toEqual([{ toast: true, visibility: 'hidden' }]);
+    expect(viewport().style.visibility).toBe('');
   });
 });

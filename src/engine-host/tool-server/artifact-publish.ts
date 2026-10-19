@@ -5,7 +5,9 @@
 //      a session that has none (it never read it, or the host restarted, or its replica closed) reads first.
 //   2. A sent file nobody changed since that read applies over the live artifact, the others kept.
 //   3. A sent file someone else changed since the read refuses the whole publish naming it ("removed by restore" when a
-//      restore since the read took it away); `force` skips 2 and 3 for the files sent.
+//      restore since the read took it away); `force` skips 2 and 3 for the files sent. A merge the kind's loader would
+//      hold or that would lose content is refused even under force, its detail naming why (P3-F, L214; the parent's
+//      Decision Log 73), and the refusal says so rather than offering force.
 //
 // An `html` page is its one file (`index.html`, or the name it was created under), written as a new immutable version;
 // its answer carries E2's fields the transcript's artifact row is drawn from (`id`, `deliverableId`, the version's place
@@ -66,36 +68,50 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
         if (held) throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard', held }, `${input.artifact}: ${legacyDashboardReason(held)}; nothing was written`);
         throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard' }, 'a dashboard is edited block by block (artifact_edit) and its data bound with artifact_dataset, not published');
       }
-      const suggest = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
-      if (suggest && !isDocKind(artifact.kind)) {
-        const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
-        throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}, and an html page takes none; nothing was written`);
-      }
-      // P3-C (the parent's Decision Log 53 (2)): nothing shows or settles a deck's suggestions in P3; P3-E: nor a design's,
-      // whether or not its adapter is registered (the parent's Decision Log 21 (2))
-      if (suggest && (artifact.kind === 'presentation' || artifact.kind === 'design')) {
-        const a = artifact.kind === 'design' ? 'a design' : 'a presentation';
-        const why = input.mode === 'suggest' ? `mode "suggest" asks for a suggestion, and ${a} takes none in this build of MAWS: publish with mode "direct"` : `the user set ${artifact.title} to take agent edits as suggestions, and ${a} takes none in this build of MAWS: ask the user to turn off agent edits as suggestions for it`;
-        throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}; nothing was written`);
-      }
+      suggestionPolicy(artifact, input); // a refusal before anything is migrated; read again where the publish writes
       // P3-E (E1's M2; Decision Log 11 (1)): an earlier build's shape is migrated by this session before its replica and
       // base are looked at, so the publish lands on the kind's model
       await store.ensureMigrated(artifact.id, actorOf(ctx));
-      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx, suggest) : await placed(store, await publishPage(deps, store, artifact, input, ctx), input, ctx);
+      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx) : await placed(store, await publishPage(deps, store, artifact, input, ctx), input, ctx);
       return toolText(result);
     })),
   );
+}
+
+// Whether the publish is a suggestion (`mode: 'suggest'`, or the owner's `agentEditsAsSuggestions`), throwing the refusal
+// of a kind that takes none. P3-F (artifact-protocol finding 8): asked again inside the publish's write, of the artifact
+// as it is then, so an owner who turned the setting on while the publish waited (on a batch, a migration) is obeyed;
+// that refusal is store state, released after the batch it was read in.
+function suggestionPolicy(artifact: Artifact, input: ArtifactPublishInput): boolean {
+  const suggest = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
+  if (suggest && !isDocKind(artifact.kind)) {
+    const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
+    throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}, and an html page takes none; nothing was written`);
+  }
+  // P3-C (the parent's Decision Log 53 (2)): nothing shows or settles a deck's suggestions in P3; P3-E: nor a design's,
+  // whether or not its adapter is registered (the parent's Decision Log 21 (2))
+  if (suggest && (artifact.kind === 'presentation' || artifact.kind === 'design')) {
+    const a = artifact.kind === 'design' ? 'a design' : 'a presentation';
+    const why = input.mode === 'suggest' ? `mode "suggest" asks for a suggestion, and ${a} takes none in this build of MAWS: publish with mode "direct"` : `the user set ${artifact.title} to take agent edits as suggestions, and ${a} takes none in this build of MAWS: ask the user to turn off agent edits as suggestions for it`;
+    throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}; nothing was written`);
+  }
+  return suggest;
 }
 
 const staleBase = (liveRevision: number, sentence: string) => refuse(TOOL, { reason: 'staleBase', liveRevision }, sentence);
 const NEVER_READ = 'read the artifact first: this session has not read it since MAWS started (or its read expired)';
 const notLastRead = (sent: number, read: number) => `baseRevision ${sent} is not the revision your last read returned (${read}); read the artifact again`;
 
-// Layer 3's refusal, with each file's reason.
-function conflict(conflicts: { path: string; detail?: string }[]): ToolRefusal {
+// Layer 3's refusal, with each file's reason. P3-F (L214): what a forced publish still conflicts on is a merge force does
+// not settle (held or lossy), so its copy does not offer force; unforced, the copy names that case beside force.
+function conflict(conflicts: { path: string; detail?: string }[], forced: boolean): ToolRefusal {
   const paths = conflicts.map((c) => c.path);
   const named = conflicts.map((c) => (c.detail ? `${c.path} (${c.detail})` : c.path)).join(', ');
-  return refuse(TOOL, { reason: 'conflict', paths, conflicts }, `changed by someone else since your read: ${named}; read the artifact again, apply your change to what you read and publish again (force: true overwrites them)`);
+  const again = 'read the artifact again, apply your change to what you read and publish again';
+  const sentence = forced
+    ? `even with force, merging with the changes since your read would leave content held or lost: ${named}; ${again}`
+    : `changed by someone else since your read: ${named}; ${again} (force: true overwrites their changes, but never a merge that would leave content held or lost)`;
+  return refuse(TOOL, { reason: 'conflict', paths, conflicts }, sentence);
 }
 
 async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
@@ -115,25 +131,32 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifac
         if (paths.length !== 1 || !names.has(paths[0]!) || text === null || text === undefined) {
           throw refuse(TOOL, { reason: 'invalid', paths }, `an html artifact is one file: send files: {"${PAGE}": "<the whole page>"}`);
         }
+        try {
+          suggestionPolicy(store.get(artifact.id) ?? artifact, input); // P3-F: the owner's setting where the publish writes
+        } catch (refusal) {
+          return refusedAfterCommit(store, refusal as ToolRefusal);
+        }
         if (!base) return refusedAfterCommit(store, staleBase(live.revision, NEVER_READ));
         if (input.baseRevision !== base.revision) return refusedAfterCommit(store, staleBase(live.revision, notLastRead(input.baseRevision, base.revision)));
         const bytes = Buffer.from(text, 'utf8');
         const sha256 = createHash('sha256').update(bytes).digest('hex');
-        if (live.ref.sha256 !== base.sha256 && sha256 !== live.ref.sha256 && !input.force) return refusedAfterCommit(store, conflict([{ path: PAGE, detail: 'changed since your read' }]));
+        if (live.ref.sha256 !== base.sha256 && sha256 !== live.ref.sha256 && !input.force) return refusedAfterCommit(store, conflict([{ path: PAGE, detail: 'changed since your read' }], false));
         const answer = (revision: number): ArtifactPublishResult => ({
           status: 'published', artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision, changed: revision === live.revision ? [] : [PAGE], kept: [], removed: [],
         });
-        const linked = store.link(artifact.id, ctx.appSessionId, 'edited');
-        linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
+        // the op and the session's `edited` link, recorded in the frame of what the publish writes (P3-F)
+        const settled = (result: ArtifactPublishResult) => {
+          op.record(result);
+          store.linkInWrite(artifact.id, ctx.appSessionId, 'edited');
+        };
         let result: ArtifactPublishResult;
         if (sha256 === live.ref.sha256) {
           result = answer(live.revision); // the page as it is: nothing to write but the op
-          await store.service.inBatch(() => op.record(result));
+          await store.service.inBatch(() => settled(result));
         } else {
-          const written = await store.writeContent(artifact.id, { bytes, name: live.ref.name }, actor, {}, (w) => op.record(answer(w.revision)));
+          const written = await store.writeContent(artifact.id, { bytes, name: live.ref.name }, actor, {}, (w) => settled(answer(w.revision)));
           result = answer(written.revision);
         }
-        await linked;
         deps.session.byteBases.set(artifact.id, { revision: result.revision, sha256 });
         return result;
       },
@@ -161,10 +184,10 @@ async function placed(store: ArtifactStore, recorded: ArtifactPublishResult, inp
   return { ...recorded, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version: place, externalReferences: externalReferenceCount(text), ...(owner !== null && owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
 }
 
-async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext, suggest: boolean): Promise<ArtifactPublishResult> {
+async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
   const actor = actorOf(ctx);
   const replica = store.service.replica(ctx.appSessionId, artifact.id);
-  const status = suggest ? 'suggested' : 'published';
+  let suggest = false;
   const base = replica.base;
   const publish = publisherOf(store, artifact.kind);
   const outcome: { conflicts?: { path: string; detail?: string }[]; failure?: unknown; result?: ArtifactPublishResult } = {};
@@ -175,14 +198,18 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
       TOOL,
       artifact.id,
       async (op) => {
+        try {
+          suggest = suggestionPolicy(store.get(artifact.id) ?? artifact, input); // P3-F: the owner's setting where the publish writes
+        } catch (refusal) {
+          return refusedAfterCommit(store, refusal as ToolRefusal);
+        }
+        const status = suggest ? 'suggested' : 'published';
         if (!base) return refusedAfterCommit(store, staleBase(store.revision(artifact.id), NEVER_READ));
         if (input.baseRevision !== base.revision) return refusedAfterCommit(store, staleBase(store.revision(artifact.id), notLastRead(input.baseRevision, base.revision)));
         baseFiles = base.files ?? withDoc(base.state, (doc) => filesOf(store, artifact.kind, doc)); // P3-C: the files the session read, kept on its base
         const assets = artifact.kind === 'presentation' || artifact.kind === 'design' ? new Set(store.listAssets(artifact.id).map((asset) => asset.ref)) : null; // P3-C: D6's warnings; P3-E: a design's by board path
         const pictureWarnings = artifact.kind === 'design' ? boardAssetWarnings : assetWarnings; // P3-E
         const restoredSince = store.listVersions(artifact.id).some((v) => v.kind === 'restore' && v.seq > base.revision);
-        const linked = store.link(artifact.id, ctx.appSessionId, 'edited');
-        linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
         const target = suggest ? store.service.suggestionDoc(artifact.id) : artifact.id;
         await store.service.writeAs(
           target,
@@ -213,14 +240,14 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
               const warnings = [...(outcome.result.warnings ?? []), ...(assets ? pictureWarnings(doc, assets, changedLive) : [])]; // P3-C; P3-E
               outcome.result = { ...outcome.result, revision, changed: changedLive, kept, removed, ...(warnings.length > 0 && { warnings }) };
               op.record(outcome.result);
+              store.linkInWrite(artifact.id, ctx.appSessionId, 'edited'); // P3-F: only with files taken, never on a refusal
             },
           },
         );
-        await linked;
         if (outcome.failure !== undefined) throw outcome.failure;
         if (outcome.conflicts) {
           const restored = (path: string) => restoredSince && path in baseFiles && !pathsOf(store, artifact.kind, store.service.live(target)).includes(path); // P3-C: paths
-          throw conflict(outcome.conflicts.map((c) => (restored(c.path) ? { path: c.path, detail: 'removed by restore' } : c)));
+          throw conflict(outcome.conflicts.map((c) => (restored(c.path) ? { path: c.path, detail: 'removed by restore' } : c)), input.force ?? false);
         }
         return outcome.result!;
       },
@@ -228,12 +255,20 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
     ),
   );
   // What the session now knows: the files it read with its own changes, at the revision it wrote (a later publish
-  // still conflicts on a file someone else changed that it never saw); none when that view cannot be built.
+  // still conflicts on a file someone else changed that it never saw); none when that view cannot be built. P3-F
+  // (artifact-protocol finding 1): only the files its publish changed move, so a file a read of some files did not
+  // return keeps the text the session knew of it, however its base's state holds it (still one read of the files).
   if (outcome.result) {
     try {
       replica.base = withDoc(base!.state, (doc) => {
-        publish(doc, baseFiles, input.files, true);
-        return { revision: recorded.revision, state: stateV2(doc), files: filesOf(store, artifact.kind, doc) /* P3-C: kept for the next publish */ };
+        const { changed } = publish(doc, baseFiles, input.files, true);
+        const after = filesOf(store, artifact.kind, doc);
+        const files = { ...baseFiles }; // P3-C: kept for the next publish
+        for (const path of changed) {
+          if (path in after) files[path] = after[path]!;
+          else delete files[path];
+        }
+        return { revision: recorded.revision, state: stateV2(doc), files };
       });
     } catch {
       replica.base = null;

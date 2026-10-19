@@ -264,19 +264,23 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
 
     // P2-E1 (M3): re-pin's locate round trip (P2-E1 document, D8): the page answers where an element is now, by selector,
     // null for one it has not or an invalid selector, each answer carrying its ask's id; a locate starts no picking and
-    // leaves nothing in the page
+    // leaves nothing in the page. The answers are matched by id, not arrival: an invalid selector is answered at once,
+    // an absent one only after the page's wait for it (P3-F L198), so the invalid one's answer comes first.
     await maws.page.evaluate(() => {
       const element = document.getElementById('e2-frame') as HTMLIFrameElement;
       ['#hero', 'body > p:nth-of-type(1)', '#gone', 'h1['].forEach((selector, i) => element.contentWindow!.postMessage({ type: 'maws:locate', id: i + 1, selector }, '*'));
     });
     await expect.poll(posted).toHaveLength(6);
-    expect((await posted()).slice(2)).toEqual([
+    const located = (await posted()).slice(2) as { id: number }[];
+    expect([...located].sort((a, b) => a.id - b.id)).toEqual([
       { type: 'maws:located', id: 1, selector: '#hero', rect: { x: 0, y: 0, width: FRAME.width, height: 200 } },
       { type: 'maws:located', id: 2, selector: 'body > p:nth-of-type(1)', rect: { x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) } },
       { type: 'maws:located', id: 3, selector: '#gone', rect: null },
       { type: 'maws:located', id: 4, selector: 'h1[', rect: null },
     ]);
-    const lead = (await posted())[3] as { rect: { y: number; height: number } };
+    const arrival = (id: number) => located.findIndex((reply) => reply.id === id);
+    expect(arrival(4)).toBeLessThan(arrival(3)); // the invalid selector did not wait behind the absent one
+    const lead = located.find((reply) => reply.id === 2) as unknown as { rect: { y: number; height: number } };
     expect(lead.rect.y).toBeGreaterThanOrEqual(200); // under the heading
     expect(lead.rect.height).toBeGreaterThan(0);
     expect(await frame.locator('[data-maws-pick-overlay]').count()).toBe(0);
@@ -292,6 +296,7 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
 const ARTIFACTS = `${PASS3}/p1-maws-artifacts.jsonl`;
 const SEND_FILE = `${PASS3}/p1-maws-send-file.jsonl`;
 const SHOW_PANE = `${PASS3}/p1-maws-show-pane.jsonl`;
+const SHOW_PANE_ARTIFACT = 'e2e/fixtures/derived/p1-maws-show-pane-artifact.jsonl'; // derived, not recorded: SHOW_PANE with its retired `deliverable` pane renamed `artifact`, which (4) needs to open the viewer
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const PDF_VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/';
 
@@ -858,7 +863,7 @@ test('a 64 px image and a short video fill the pane, in the panel and in a main 
   });
 });
 
-// ---- (4) show_pane 'artifact' (E2's 'deliverable'; the recording's pane renamed with the tool's enum, P3-L M6b) ------
+// ---- (4) show_pane 'artifact' (E2's 'deliverable'; over the recording's derived copy, its pane renamed) --------------
 
 test('show_pane: a target no record answers to is the model’s error; an artifact the target names opens in the Artifacts viewer and answers panel-tool', async () => {
   test.setTimeout(180_000);
@@ -874,7 +879,7 @@ test('show_pane: a target no record answers to is the model’s error; an artifa
     const panesShown = async (id: string) => ofKind(await s.events(id), 'maws.pane.shown').map((e) => [e.pane, e.opened?.kind ?? null, e.error]);
 
     await show(s, bare);
-    await replay(s, bare, SHOW_PANE);
+    await replay(s, bare, SHOW_PANE_ARTIFACT);
     for (let k = 0; k < 3; k++) await allowNext(s, bare); // terminal, artifact, nope (seqs 68, 85, 100)
     await idle(s, bare);
     expect(answers(bare)[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactNotFound('none') }], isError: true });
@@ -882,12 +887,12 @@ test('show_pane: a target no record answers to is the model’s error; an artifa
       ['terminal', 'panel-tool', null],
       ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
     ]);
-    // the cell draws the engine's recorded tool_result, E1's words (Surprises, M4); the replay compares no bodies
+    // the cell draws the fixture's tool_result, E1's words with the pane renamed (Surprises, M4); the replay compares no bodies
     await unfoldWork(s.pane);
     await expect(s.pane.getByText('Could not open pane: the artifact pane is not available in this build of MAWS')).toBeVisible();
 
     await show(s, seeded);
-    await replay(s, seeded, SHOW_PANE);
+    await replay(s, seeded, SHOW_PANE_ARTIFACT);
     await allowNext(s, seeded); // terminal
     await allowNext(s, seeded); // artifact "none": the viewer opens on the artifact
     const viewer = viewerOf(s.panel);

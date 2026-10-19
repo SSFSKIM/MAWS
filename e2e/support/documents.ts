@@ -13,9 +13,10 @@ export function documents(page: Page) {
     page.evaluate(([m, a]) => ((window as unknown as { __maws_documents: Seam }).__maws_documents[m as string] as (...x: unknown[]) => unknown)(...(a as unknown[])), [method, args] as const) as Promise<T>;
   return {
     open: (artifactId: string) => call<number>('open', artifactId),
-    json: (id: number) => call<Json>('json', id),
+    // `root`: the doc's root node by name (a design system's `tokens`, say); `root` itself when omitted
+    json: (id: number, root?: string) => call<Json>('json', id, root),
     insertText: (id: number, index: number, text: string) => call<void>('insertText', id, index, text),
-    setAttr: (id: number, key: string, value: unknown) => call<void>('setAttr', id, key, value),
+    setAttr: (id: number, key: string, value: unknown, root?: string) => call<void>('setAttr', id, key, value, root),
     state: (id: number) => call<{ phase: string; synced: boolean; unsaved: number; revision: number; readOnly: boolean }>('state', id),
     restores: (id: number) => call<number[]>('restores', id),
     startTyping: (id: number, prefix: string, everyMs: number) => call<void>('startTyping', id, prefix, everyMs),

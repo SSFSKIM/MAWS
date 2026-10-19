@@ -111,7 +111,7 @@
     "from": null,
     "id": "agentmsg:replay:journal:57:1",
     "kind": "agent_message",
-    "text": "Sent message to ad1synthagent0001: Skip node_modules entirely.",
+    "text": "Sent message to Survey src for TODOs: Skip node_modules entirely.",
     "to": {
       "agentId": "ad1synthagent0001",
       "glyph": 0,

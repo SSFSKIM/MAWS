@@ -60,15 +60,19 @@ export interface TaskNode {
 // order: first seen. byToolUse: every tool-use id that started a task (a resumed agent keeps both of its own). issuer:
 // the dispatching agent of each `Agent`/`Task` call a child made (Gate G1 verdict (7): C3's subagent.started carries no
 // parent field, but the child's own `tool.use` names it and arrives first), read when that call's task starts.
+// monitorCalls: every `Monitor` call's tool-use id (P3-F L258): a command Monitor runs as a `local_bash` task whose
+// `task_started` names the call (the engine's source; the tie by tool-use id is recorded for Bash, engine 2.1.295), so
+// the call, not the task type, makes it a monitor.
 export interface TaskGraph {
   tasks: Map<TaskId, TaskNode>;
   order: TaskId[];
   byToolUse: Map<ToolUseId, TaskId>;
   issuer: Map<ToolUseId, AgentId>;
+  monitorCalls: Set<ToolUseId>;
 }
 
 export function emptyGraph(): TaskGraph {
-  return { tasks: new Map(), order: [], byToolUse: new Map(), issuer: new Map() };
+  return { tasks: new Map(), order: [], byToolUse: new Map(), issuer: new Map(), monitorCalls: new Set() };
 }
 
 export function kindOf(taskType: string): TaskKind {
@@ -77,6 +81,12 @@ export function kindOf(taskType: string): TaskKind {
   if (taskType === 'local_bash') return 'shell';
   if (taskType.startsWith('monitor')) return 'monitor';
   return 'other';
+}
+
+// A started task's kind: its type's, except a shell a Monitor call started (by the call's tool-use id), a monitor.
+function startedKind(draft: Draft, taskType: string, toolUseId: ToolUseId | null): TaskKind {
+  const kind = kindOf(taskType);
+  return kind === 'shell' && toolUseId !== null && draft.isMonitorCall(toolUseId) ? 'monitor' : kind;
 }
 
 const TERMINAL: ReadonlySet<TaskStatus> = new Set(['completed', 'failed', 'stopped', 'exited']);
@@ -103,6 +113,7 @@ class Draft {
   private order: TaskId[] | null = null;
   private byToolUse: Map<ToolUseId, TaskId> | null = null;
   private issuer: Map<ToolUseId, AgentId> | null = null;
+  private monitorCalls: Set<ToolUseId> | null = null;
 
   constructor(private readonly base: TaskGraph) {}
 
@@ -116,6 +127,10 @@ class Draft {
 
   issuerOf(toolUseId: ToolUseId): AgentId | undefined {
     return (this.issuer ?? this.base.issuer).get(toolUseId);
+  }
+
+  isMonitorCall(toolUseId: ToolUseId): boolean {
+    return (this.monitorCalls ?? this.base.monitorCalls).has(toolUseId);
   }
 
   nodes(): TaskNode[] {
@@ -168,9 +183,18 @@ class Draft {
     this.issuer.set(toolUseId, agentId);
   }
 
+  addMonitorCall(toolUseId: ToolUseId): void {
+    if (this.isMonitorCall(toolUseId)) return;
+    this.monitorCalls ??= new Set(this.base.monitorCalls);
+    this.monitorCalls.add(toolUseId);
+  }
+
   result(): TaskGraph {
-    if (!this.tasks && !this.order && !this.byToolUse && !this.issuer) return this.base;
-    return { tasks: this.tasks ?? this.base.tasks, order: this.order ?? this.base.order, byToolUse: this.byToolUse ?? this.base.byToolUse, issuer: this.issuer ?? this.base.issuer };
+    if (!this.tasks && !this.order && !this.byToolUse && !this.issuer && !this.monitorCalls) return this.base;
+    return {
+      tasks: this.tasks ?? this.base.tasks, order: this.order ?? this.base.order, byToolUse: this.byToolUse ?? this.base.byToolUse, issuer: this.issuer ?? this.base.issuer,
+      monitorCalls: this.monitorCalls ?? this.base.monitorCalls,
+    };
   }
 }
 
@@ -210,7 +234,7 @@ export function parseOutputPath(resultText: string): string | null {
 // not stopping, no end, the new tool use and background flag, the usage and summary kept until progress replaces them.
 function applyStart(draft: Draft, e: Extract<SessionEvent, { kind: 'subagent.started' | 'task.started' }>): void {
   const taskType = e.kind === 'subagent.started' ? 'local_agent' : e.taskType;
-  const kind = e.kind === 'subagent.started' ? 'agent' : kindOf(e.taskType);
+  const kind = e.kind === 'subagent.started' ? 'agent' : startedKind(draft, e.taskType, e.toolUseId);
   const current = draft.get(e.taskId) ?? blankNode(e.taskId, kind, 'running');
   const restarted = current.status !== 'running';
   let agent = current.agent;
@@ -302,6 +326,13 @@ function applyEvent(draft: Draft, e: SessionEvent): void {
       snapshotInto(draft, e.tasks);
       return;
     case 'tool.use': {
+      // P3-F L258: a Monitor call types the shell task it starts, whichever of the two arrives first
+      if (e.toolName === 'Monitor') {
+        draft.addMonitorCall(e.toolUseId);
+        const startedBy = draft.toolUse(e.toolUseId);
+        if (startedBy !== undefined && draft.get(startedBy)?.kind === 'shell') draft.patch(startedBy, { kind: 'monitor' });
+        return;
+      }
       // A child's own Agent/Task call names its dispatcher (R5); the parent's calls (agentId null) and every other tool
       // are not the graph's.
       if ((e.toolName !== 'Agent' && e.toolName !== 'Task') || e.agentId === null) return;
