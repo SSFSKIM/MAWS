@@ -1,0 +1,70 @@
+LC-2: what a printable key does on an object-selected text box in Google Slides and in Canva, and whether the first
+Hangul syllable arrives intact there. Written 2026-10-19 in P4-B2's spike, first phase; NOT RUN. It decides T10 (typing
+on a selected text box replaces its text: MAWS's pick, research/p4-ux-prior-art.md §2.2, "Follow Slides if the live check
+finds otherwise") and puts the references' first-syllable behaviour beside MAWS's armed box.
+Spec: docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.9 (X39), §4.10 (LC-2), §5 P4-B2; research §2.5 checks 2 and 6.
+
+Where and with what
+- The MacBook (SK), in the owner's Chrome profile that holds both the Google and the Canva sessions, with the owner's
+  go (the architect asks). The owner names the profile: Default unless they say otherwise (`pw-profile` lists the
+  aliases). Credentials are never typed by the agent; a sign-in or 2FA prompt is the owner's.
+- Navigation, the folder and the deletion go through the Playwright extension attached to that profile (/playwright-cli;
+  DOM-level, reliable). Every press that selects the box and every key goes through cua_repl on the Mac
+  (cua.getApp('Google Chrome'): click by screenshot coordinates, pressKey one physical key at a time), because only a
+  key at the HID level passes through the input method; Playwright's keys and cua's typeText do not.
+- Input sources (read 2026-10-19 on SK from com.apple.HIToolbox): ABC and Korean 2-Set enabled, ABC selected;
+  ⌃Space ("Select the previous input source") enabled. Check the selection after each switch with
+  `defaults read com.apple.HIToolbox AppleSelectedInputSources`.
+- X39: one folder "MAWS UX check" in Google Drive and one in Canva, created at the start and deleted at the end; no
+  sharing, no invites, no other document opened for writing. About 30 minutes of the MacBook's GUI; the owner away from
+  the keyboard and the mouse meanwhile (or watching without touching).
+
+Record for each product (a line each in this file's "Results" when run, and a screenshot per step in /tmp/maws-lc2/)
+- P (printable key, ABC): replaced | appended | ignored | a shortcut fired (which) | other; and where the caret is after.
+- H (2-Set 한글 on an object-selected box): the box's exact text after (e.g. 한글, Hello한글, ㅎ한글, ㅎㅏㄴ글, nothing);
+  whether the first syllable arrived intact; whether the first key replaced or appended.
+- H-fast (optional): the same with the first key within about 100 ms of the press that selects the box.
+- The browser's version (chrome://version) and the date.
+
+Google Slides
+S1. Drive (drive.google.com, the profile above): New › New folder "MAWS UX check". Open it; New › Google Slides › Blank
+    presentation (it is created inside the folder). Rename it "LC-2 typing". Close the theme panel if it opens.
+S2. Slide 1: Insert › Text box; drag a box about 400 × 100 px in the middle; type Hello (ABC). Press Escape twice:
+    the first leaves the text and selects the box (Slides: "return focus to the layout element"), the second clears the
+    selection.
+S3. Object selection: click once in the box's text, then press Escape. Screenshot: eight handles, no caret, is the
+    object selection (a click on the text alone gives a caret in Slides; this is research check 1, recorded too: what a
+    first click on the text did).
+S4. P: press x. Wait 500 ms. Screenshot; record. Then ⌘Z until the box reads Hello again; Escape twice.
+S5. H: switch to 2-Set (⌃Space; check). Object-select the box as in S3; wait 500 ms (the editor, if any, has its input
+    context by then); press g k s r m f (60 ms apart); wait 500 ms; screenshot; record the exact text from the zoomed
+    screenshot (reading it through ⌘C and `pbpaste` would replace the owner's clipboard: only with their OK). Escape
+    twice.
+S6. H-fast (optional): clear the selection, wait a second, then in one cua call press the box's text, Escape, and
+    g k s r m f with no waits; record as H.
+S7. Switch back to ABC (⌃Space; check).
+
+Canva
+C1. canva.com (the same profile): Projects › + (Add new) › Folder "MAWS UX check". Inside it: Create a design ›
+    Presentation (16:9); if it is not created inside the folder, move it there (File › Move to folder) before anything
+    else. Rename it "LC-2 typing".
+C2. Add a text box (the Text panel › Add a text box), type Hello (ABC), click the empty page to deselect.
+C3. Object selection: click the box once (Canva selects the element: a frame with handles, no caret). Screenshot.
+    Also record research check 4 while here: a second single click on the selected box, after a pause, does it place a
+    caret? (Then Escape twice and click it once again to return to the object selection.)
+C4. P: press x. Wait 500 ms. Screenshot; record (Canva's single letters are shortcuts in some states: T, R, L, C, S;
+    x is none of them). Then ⌘Z until Hello is back; click the empty page; click the box once.
+C5. H: switch to 2-Set (⌃Space; check); the box object-selected (C3); wait 500 ms; press g k s r m f; wait 500 ms;
+    screenshot; record. Note whether a 2-Set key (r is ㄱ, f is ㄹ) fired one of Canva's letter shortcuts instead.
+C6. H-fast (optional), as S6.
+C7. Switch back to ABC.
+
+Clean-up (X39), whatever the results
+D1. Canva: Projects › the folder "MAWS UX check" › … › Move to Trash; then Trash › the folder › Delete forever, if the
+    owner agreed to empty it (else it leaves Canva's Trash on its own after 30 days).
+D2. Drive: right-click "MAWS UX check" › Move to trash; then Trash › the folder › Delete forever, if the owner agreed.
+D3. Check nothing was shared: Drive's "Shared" column and Canva's sharing state of the design both untouched (no share
+    dialog was opened in this run). Close the tabs the run opened.
+
+Results
+(not run yet)
