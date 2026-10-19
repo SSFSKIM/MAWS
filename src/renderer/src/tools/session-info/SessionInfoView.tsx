@@ -18,7 +18,7 @@ import { useSessions } from '../../stores/sessions';
 import { useSettings } from '../../stores/settings';
 import { useTranscriptStore } from '../../stores/transcript';
 import { useSessionWindows, useUsage } from '../../stores/usage';
-import { rowOf } from '../../widgets/model';
+import { heldModel, rowOf, useModelRequests } from '../../widgets/model';
 import { Group, KeyValues } from '../../widgets/parts';
 import { useEngineRead } from '../../widgets/read';
 import { useObservedFacts } from '../../sessions/observed'; // P2-A
@@ -69,6 +69,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   // the model's catalogue entry, when C7 listed the session's models (the lane reads only its value, which the status
   // names anyway)
   const models = useComposerStore((s) => listedModelsOf(s, appSessionId));
+  const held = useModelRequests((s) => heldModel(s, appSessionId, status)) ?? null; // the request the chip and the selector read
   // the transcript's state only while it holds rows for the session (the reviews count is omitted otherwise)
   const transcript = useTranscriptStore((s) => (s.entries[appSessionId]?.rows.length ? s.entries[appSessionId].state : undefined));
   const now = useNow(POPOVER_TICK_MS);
@@ -102,6 +103,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
     directLogin,
     lane,
     models: models ?? null,
+    held,
     windows,
     budget, // C12
     browserTabs, // E4a
