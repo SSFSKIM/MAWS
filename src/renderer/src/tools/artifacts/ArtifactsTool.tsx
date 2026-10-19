@@ -20,6 +20,7 @@
 // list follows the shown session.
 import { useEffect, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Icon } from '../../app/IconButton';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
@@ -27,6 +28,7 @@ import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { askEditorHostClose, clearEditorHost, type EditorHostScope } from '../../panel/editor-host';
 import { panelHost, usePanelHost } from '../../panel/host';
 import type { PanelTool, PanelToolContext } from '../../panel/tool';
+import { useLayout } from '../../stores/layout';
 import { ARTIFACTS_TOOL_COPY } from './copy';
 import { ArtifactsList, type ArtifactsScope } from './List';
 import { ArtifactRecordView } from './RecordView';
@@ -47,11 +49,17 @@ export interface ArtifactsParams {
 
 // An artifact in the panel's Artifacts tool, in the session's panel, activated (P3-L M5b: the comment card's re-dock;
 // M6b: a transcript row's Open, `TranscriptActions.openArtifact`), at the version `at` asks for (none: the latest,
-// followed as new ones land). Until a build registers the tool, nothing.
-export function openArtifactInPanel(appSessionId: AppSessionId, artifactId: string, at?: ArtifactOpenAt): void {
-  if (!usePanelHost.getState().tools.has(ARTIFACTS_TOOL_ID)) return;
-  panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, params: { target: artifactId, ...(at !== undefined && { at }) }, activate: true });
+// followed as new ones land). Until a build registers the tool, nothing. P3-F wave S (F16): no session (null) is the
+// panel with no session in view, which shows only the pins: the artifact opens in a pinned Artifacts tab when there is
+// one, and nothing pins one for it.
+export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactId: string, at?: ArtifactOpenAt): void {
+  if (!canShowArtifactInPanel(appSessionId)) return;
+  panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params: { target: artifactId, ...(at !== undefined && { at }) }, activate: true });
 }
+
+// Whether `openArtifactInPanel` has a panel to show the artifact in, for a caller that offers it.
+export const canShowArtifactInPanel = (appSessionId: AppSessionId | null, pinned: PanelTabRef[] = useLayout.getState().panelPinned, registered = usePanelHost.getState().tools.has(ARTIFACTS_TOOL_ID)): boolean =>
+  registered && (appSessionId !== null || pinned.some((t) => t.toolId === ARTIFACTS_TOOL_ID));
 
 export type ArtifactsView = { kind: 'list' } | { kind: 'record'; artifactId: string };
 

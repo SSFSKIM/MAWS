@@ -430,12 +430,34 @@ describe('the record view', () => {
     expect(listed()).toHaveLength(5);
   });
 
-  it('Open in tab opens the artifact in a main tab of its own', async () => {
-    testEditor();
-    await mount({ target: NOTES.id });
+  // P3-F wave S (F16, obs 7a): Open in tab moves the artifact: it opens in a main tab of its own and the record here goes
+  // Back, through the editor's closeGuard as Back does, so a replica with unacknowledged edits stays until it allows
+  it('Open in tab moves the artifact to a main tab of its own: the record goes Back', async () => {
+    const editor = testEditor();
+    const { handle } = await mount({ target: NOTES.id });
     await screen.findByText(/panel editor for/);
     fireEvent.click(button('Open in tab')!);
+    await settle();
     expect(allTabs(useLayout.getState().main).find((t) => t.kind === 'artifact')).toMatchObject({ artifactId: NOTES.id });
+    expect(handle.snapshot().view).toEqual({ kind: 'list' });
+    expect(editor.dispose).toHaveBeenCalledTimes(1);
+    expect(listed()).toHaveLength(5);
+  });
+
+  it('Open in tab asks the editor’s closeGuard before the record goes: false keeps it, the main tab open', async () => {
+    const editor = testEditor({ guarded: true });
+    const { handle } = await mount({ target: NOTES.id });
+    await screen.findByText(/panel editor for/);
+    fireEvent.click(button('Open in tab')!);
+    await settle();
+    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact')).toMatchObject([{ artifactId: NOTES.id }]);
+    expect(handle.snapshot().view, 'the guard kept it').toEqual({ kind: 'record', artifactId: NOTES.id });
+    expect(editor.dispose).not.toHaveBeenCalled();
+    (editor.createState.mock.results[0]!.value as TestState).allowClose = true;
+    fireEvent.click(button('Open in tab')!);
+    await settle();
+    expect(handle.snapshot().view).toEqual({ kind: 'list' });
+    expect(allTabs(useLayout.getState().main).filter((t) => t.kind === 'artifact'), 'one tab per artifact').toHaveLength(1);
   });
 
   it('a pinned tab keeps its record when the shown session changes; its list follows the session', async () => {

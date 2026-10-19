@@ -4,7 +4,8 @@
 // with Back and Open in tab. The editor's own X32 header shows above the panel tab; Back and Open in tab are the
 // surface's, so they sit in the body rather than in the editor's registration. The editor's state is the tab's (the
 // registry's hold), given back by the tool state at Back, at a re-target and when the instance goes; Back and a
-// re-target ask the editor's closeGuard first.
+// re-target ask the editor's closeGuard first. Open in tab is a move (P3-F wave S, F16; the owner's obs 7): the artifact
+// opens in its main tab and the record here goes Back, through the same guard, so a refusal keeps it here as well.
 import { ArtifactView } from '../../library/ArtifactTab';
 import { openArtifactTab } from '../../library/actions';
 import type { EditorHostScope } from '../../panel/editor-host';
@@ -20,7 +21,14 @@ export function ArtifactRecordView({ artifactId, scope, visible, onBack }: { art
           {ARTIFACTS_TOOL_COPY.back}
         </button>
         <span className="flex-1" />
-        <button type="button" onClick={() => openArtifactTab(artifactId)} className={bar}>
+        <button
+          type="button"
+          onClick={() => {
+            openArtifactTab(artifactId);
+            onBack();
+          }}
+          className={bar}
+        >
           {ARTIFACTS_TOOL_COPY.openInTab}
         </button>
       </div>
