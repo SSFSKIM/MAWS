@@ -50,6 +50,27 @@ describe('the group chat', () => {
     expect(items.find((i) => i.kind === 'system' && i.offset === 10)).toMatchObject({ text: 'maws-45 retired by human' });
   });
 
+  it('carries each line as its subject and its words, a question its list of questions, a request its session', () => {
+    const items = buildStream({ kind: 'group' }, log(), aliases, [placed('toolu_9', S2, 2)]);
+    expect(items.find((i) => i.kind === 'system' && i.offset === 1)).toMatchObject({ session: S1, subject: 'maws-45', rest: 'joined on mini', text: 'maws-45 joined on mini' });
+    expect(items.find((i) => i.kind === 'question')).toMatchObject({ questions: ['Which column?'], text: 'Which column?' });
+    expect(items.find((i) => i.kind === 'request')).toMatchObject({ session: S2 });
+  });
+
+  it('names a rename by the alias the session had before, and says nothing of a rename to the name it already has', () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '' }), // 1
+      ev(`mini/${S1}`, 'renamed', { session: S1, alias: 'maws-45' }), // 2: the same name
+      ev(`mini/${S1}`, 'renamed', { session: S1, alias: 'grid-7c' }), // 3
+      ev(`mini/${S1}`, 'in-charge', { session: S1, text: 'the grid' }), // 4
+    ];
+    const items = buildStream({ kind: 'group' }, entries, new Map([[S1, 'grid-7c']]), []);
+    expect(shape(items)).toEqual(['system:1', 'system:3', 'system:4']);
+    expect(items[1]).toMatchObject({ subject: 'maws-45', rest: 'is now grid-7c', text: 'maws-45 is now grid-7c' });
+    expect(items[2]).toMatchObject({ subject: 'grid-7c', text: 'grid-7c is in charge of: the grid' }); // the sidebar's name for it now
+  });
+
   it('names who retired a session: you, another member of the org by its id, or what sminos recorded', () => {
     const OTHER = '0f1e2d3c4b5a69788796a5b4c3d2e1f0';
     const retired = (by: string) => [...log().slice(0, 1), ev(`mini/${S1}`, 'retired', { session: S1, by, reason: 'retire' })];
@@ -67,6 +88,21 @@ describe('the group chat', () => {
       placed('toolu_late', S1, 99),
     ]);
     expect(shape(items)).toEqual(['system:1', 'message:2', 'request:toolu_9', 'agents:3,4,5', 'human:6', 'question:7', 'agents:8', 'system:10', 'request:toolu_late']);
+  });
+
+  it("dates a placed request by the last entry it was first seen behind, among every entry and not only the channel's", () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'joined', { ts: '2026-10-15T08:00:00.000Z', session: S1, alias: 'maws-45', machine: 'mini', seat: '' }), // 1
+      ev(`mini/${S1}`, 'message', { ts: '2026-10-15T08:01:00.000Z', from: 'maws-45', to: 'host', text: 'hi', src: 'r1#0' }), // 2
+      ev(`SK.local/${S2}`, 'state', { ts: '2026-10-15T08:07:00.000Z', session: S2, state: 'busy', machine: 'SK.local' }), // 3: not in S1's channel
+    ];
+    const items = buildStream({ kind: 'session', session: S1 }, entries, aliases, [placed('toolu_a', S1, 3), placed('toolu_b', S1, 1), placed('toolu_0', S1, 0)]);
+    expect(items.flatMap((i) => (i.kind === 'request' ? [[i.request, i.ts]] : []))).toEqual([
+      ['toolu_0', null], // seen before any entry
+      ['toolu_b', '2026-10-15T08:00:00.000Z'],
+      ['toolu_a', '2026-10-15T08:07:00.000Z'],
+    ]);
   });
 
   it("joins a question event only to its own session's request: another session's request under the same id stays its own card", () => {

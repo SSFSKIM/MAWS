@@ -559,6 +559,21 @@ test('@layout on an engine without scroll anchoring (Safari before 27), a reader
   const oldest = center(page).getByText('the migration is merged', { exact: true });
   await expect(oldest).toBeInViewport();
   await holds('a row below shrinking, at the oldest edge', oldest, () => toggle(runs.nth(1), false));
+  // A sender's run is one block, so a message arriving in the run the reader is in changes that block from inside it:
+  // the run below the traffic grows past a screen at the tail, and the reader, scrolled back within it, keeps their row.
+  await events.evaluate((el) => (el.scrollTop = 0));
+  for (let n = 34; n <= 80; n++) await message(n);
+  await expect(line(80)).toBeInViewport();
+  await events.evaluate((el) => (el.scrollTop = -150));
+  await page.waitForTimeout(300);
+  const reader = line(76);
+  await expect(reader).toBeInViewport();
+  await expect(line(31)).not.toBeInViewport();
+  await expect(center(page).getByTestId('run').filter({ has: page.getByText('line 31', { exact: true }) })).toContainText('line 80'); // the view's top is inside the run
+  await holds('a message arriving in the run the reader is in', reader, async () => {
+    await message(81);
+    await expect(center(page).getByTestId('run').filter({ has: page.getByText('line 31', { exact: true }) })).toContainText('line 81');
+  });
   test.info().annotations.push({ type: `row moved (px), ${browserName}, no anchoring (native: ${native})`, description: moves.join('; ') });
   console.log(`row moved in ${browserName} without anchoring (native: ${native}): ${moves.join('; ')}`);
 });

@@ -204,6 +204,187 @@
   color: var(--warning);
 }
 
+/* The group chat on the session view's rendering (§4, amended 2026-10-19; StreamView.tsx): the rows in MAWS's reading
+   column with its typography. A run of a sender's messages under one header; lifecycle as quiet lines; agent traffic as
+   MAWS's line for a message between sessions; the owner's message as MAWS's user bubble with each recipient's delivery
+   in its foot (the tail's foot, DeliveryFoot.tsx, a glyph by outcome), another human's bubble on the left. */
+.desk-chat .transcript-time {
+  padding: 18px 0 8px;
+}
+.desk-chat-head {
+  padding: 12px 0 2px;
+  line-height: 1.5;
+}
+.desk-chat-time {
+  color: var(--fg-faint);
+  font-size: var(--text-ui-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.desk-chat-run .transcript-question,
+.desk-chat-run [data-item="request"] > article {
+  margin-top: 6px;
+}
+/* Quiet lines: one per session, its words joined; a run of more than a few behind a disclosure. */
+.desk-chat-quiet {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 4px 0 8px;
+  list-style: none;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.desk-chat-quiet-subject {
+  color: var(--fg);
+  font-weight: 500;
+}
+.desk-chat-quiet-run {
+  padding: 2px 0 6px;
+}
+.desk-chat-quiet-run > .transcript-disclosure .desk-chat-time,
+.desk-chat-agents .desk-chat-time {
+  margin-left: 4px;
+}
+.desk-chat-quiet-run[aria-expanded="true"] .desk-chat-quiet {
+  padding-top: 0;
+}
+/* Agent traffic: MAWS's lifecycle line with the bubble mark; a run's messages open under it, indented past the mark. On
+   a narrow pane the fold's words wrap beside the mark rather than under it, its time range following the words. */
+.desk-chat-agents {
+  flex: 1 1 0;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  padding: 0;
+}
+.desk-chat-quiet-run > .transcript-disclosure {
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.desk-chat-said {
+  color: var(--fg);
+}
+.desk-chat-elsewhere {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}
+.desk-chat-says {
+  display: grid;
+  gap: 3px;
+  margin: 2px 0 8px 24px;
+  padding: 0 0 0 10px;
+  border-left: 2px solid var(--border);
+  list-style: none;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.desk-chat-work {
+  margin: 0;
+  padding: 4px 0;
+  color: var(--fg-faint);
+  font-size: var(--text-ui-sm);
+}
+/* The owner's bubble on the right (MAWS's), another human's on the left under who they are, its time and Copy to its
+   right on hover. */
+.desk-chat-send {
+  padding-top: 6px;
+}
+.desk-chat-send[data-side="other"] {
+  align-items: flex-start;
+}
+.desk-chat-send[data-side="other"] .transcript-user-actions {
+  right: auto;
+  left: 100%;
+  margin-right: 0;
+  margin-left: 8px;
+}
+.desk-chat-send > .desk-chat-head {
+  padding-top: 0;
+}
+.desk-chat-send[data-state="sending"] .transcript-user-content {
+  opacity: 0.6;
+}
+/* Each recipient's outcome in the foot, with the tail foot's glyphs (DeliveryFoot.tsx) drawn by outcome. */
+.desk-chat-deliveries {
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 8px 0 0;
+  padding: 6px 0 0;
+  list-style: none;
+}
+.desk-chat-deliveries li::before {
+  content: "◷";
+  margin-right: 5px;
+  font-size: 11px;
+}
+.desk-chat-deliveries li[data-wake]::before,
+.desk-chat-deliveries li[data-outcome="uncertain"]::before {
+  content: none;
+}
+.desk-chat-deliveries li[data-outcome="delivered"]::before {
+  content: "✓";
+}
+.desk-chat-deliveries li[data-outcome="recorded"]::before {
+  content: "◇";
+}
+.desk-chat-deliveries li[data-outcome="refused-read-only"]::before {
+  content: "⊘";
+}
+.desk-chat-deliveries li[data-outcome="failed"]::before {
+  content: "!";
+}
+.desk-chat-deliveries li[data-outcome="uncertain"] {
+  font-style: italic;
+}
+.desk-chat-deliveries li[data-outcome="pending"],
+.desk-chat-deliveries li[data-wake] {
+  color: var(--fg-faint);
+}
+.desk-chat-deliveries li:is([data-outcome="recorded"], [data-outcome="refused-read-only"]) {
+  color: var(--warning);
+}
+.desk-chat-deliveries li[data-outcome="failed"] {
+  color: var(--danger);
+}
+.desk-chat-reason {
+  color: var(--fg-faint);
+}
+/* The whole bubble tinted when the send reached no one it was meant for, as a tail send is: warning for one every
+   recipient's machine held back, danger for one that failed everywhere. */
+.desk-chat-send[data-state="held"] .transcript-user-bubble {
+  background: color-mix(in srgb, var(--warning) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 45%, transparent);
+}
+.desk-chat-send[data-state="held"] .desk-delivery-foot {
+  border-top-color: color-mix(in srgb, var(--warning) 30%, transparent);
+}
+.desk-chat-send[data-state="failed"] .transcript-user-bubble {
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.desk-chat-send[data-state="failed"] .desk-delivery-foot {
+  border-top-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  color: var(--danger);
+}
+/* A question's receipt in the chat: with no header, the question itself is the line's label and wraps whole (in the
+   session view the call's row above carries it; here the receipt is the one place it is read). */
+.desk-chat-question .transcript-question-label[data-long] {
+  max-width: none;
+  white-space: normal;
+}
+.desk-chat-question[data-waiting] {
+  border-color: var(--border-strong);
+}
+
 /* "N waiting ↓": the requests at the tail, for a reader scrolled away from them (the owner's 2B). */
 .desk-waiting-pill {
   position: absolute;
