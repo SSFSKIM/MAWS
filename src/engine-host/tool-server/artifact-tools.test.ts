@@ -419,6 +419,22 @@ describe('artifact_upload_asset and artifact_list_assets', () => {
       rmSync(outside, { recursive: true, force: true });
     }
   });
+
+  // P3-F (artifact-protocol #3 completion): the `edited` link commits with the upload's rows or not at all
+  it('links the session edited only with an upload that landed: a refused one leaves no link, nor moves an existing one', async () => {
+    const design = jsonOf<{ artifactId: string }>(await create({ kind: 'design', title: 'Site' }));
+    writeFileSync(join(w.cwd, 'logo.png'), 'png');
+    const upload = (name?: string) => artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path: 'logo.png', ...(name === undefined ? {} : { name }) }, w.ctx());
+    const edited = () => w.store.links(design.artifactId).filter((link) => link.role === 'edited');
+    const refused = ['query-11111111-1111-4111-8111-111111111111.json', '..']; // the query snapshots' namespace; no usable name
+    for (const name of refused) expect(artifactRefusalOf(textOf(await upload(name)))).toMatchObject({ reason: 'invalid' });
+    expect(edited()).toEqual([]);
+    expect(jsonOf(await upload())).toMatchObject({ status: 'uploaded' });
+    const [link] = edited();
+    await new Promise((resolve) => setTimeout(resolve, 5)); // a link written later would carry a later time
+    for (const name of refused) expect(artifactRefusalOf(textOf(await upload(name)))).toMatchObject({ reason: 'invalid' });
+    expect(edited()).toEqual([link]);
+  });
 });
 
 describe('artifact_export', () => {

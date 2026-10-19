@@ -29,10 +29,12 @@ export function artifactUploadAssetTool(deps: ArtifactToolDeps): McpToolDefiniti
           artifactId,
           async (op) => {
             const answer = (asset: { assetId: string; ref: string }): ArtifactUploadAssetResult => ({ status: 'uploaded', artifactId, ...asset, name: asset.ref.slice('assets/'.length), size: bytes.length });
-            const linked = store.link(artifactId, ctx.appSessionId, 'edited');
-            linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
-            const uploaded = await store.uploadAsset(artifactId, bytes, { name, mime: mimeOf(name) }, actor, (asset) => op.record(answer(asset)));
-            await linked;
+            // P3-F (artifact-protocol finding 3's completion): the `edited` link in the upload's own frame, beside its op, so
+            // it commits with the asset or not at all (a refused upload links nothing)
+            const uploaded = await store.uploadAsset(artifactId, bytes, { name, mime: mimeOf(name) }, actor, (asset) => {
+              store.linkInWrite(artifactId, ctx.appSessionId, 'edited');
+              op.record(answer(asset));
+            });
             return answer(uploaded);
           },
           { actor },
