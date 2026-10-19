@@ -100,24 +100,35 @@ async function render(win: BrowserWindow, url: string, consoleErrors: string[]):
 }
 
 // Loads `url` in a capture window and waits for its first paint after the load (or CAPTURE_SETTLE_MS); rejects with the
-// load's failure. The export service's renders wait the same way.
+// load's failure, or when the window is destroyed first. The export service's renders wait the same way.
 export async function loadSettled(win: BrowserWindow, url: string): Promise<void> {
   const contents = win.webContents;
-  // P3-E (E2 M5 correction; P3-E Decision Log 33): both callbacks are removed once the load ends either way, so a window
-  // reused for many pages (a dashboard export's pictures) does not gather one per page; others' listeners stay
+  // P3-E (E2 M5 correction; P3-E Decision Log 33): its callbacks are removed once the load ends any way, so a window
+  // reused for many pages (a dashboard export's pictures) does not gather them per page; others' listeners stay.
+  // P3-F (exports-capture scalpel-4#2): a load the window's destruction aborts (an export's cancellation) reports no
+  // failure, so the destruction ends the wait as one.
   const loaded = new Promise<void>((resolve, reject) => {
-    const finished = () => {
+    const off = () => {
+      contents.off('did-finish-load', finished);
       contents.off('did-fail-load', failed);
+      contents.off('destroyed', gone);
+    };
+    const finished = () => {
+      off();
       resolve();
     };
     const failed = (_event: unknown, code: number, description: string, _url: string, isMainFrame: boolean) => {
       if (!isMainFrame) return;
-      contents.off('did-finish-load', finished);
-      contents.off('did-fail-load', failed);
+      off();
       reject(new CaptureFailure(`the page did not load (${code} ${description})`));
+    };
+    const gone = () => {
+      off();
+      reject(new CaptureFailure('the window was closed before the page loaded'));
     };
     contents.once('did-finish-load', finished);
     contents.on('did-fail-load', failed);
+    contents.once('destroyed', gone);
   });
   contents.loadURL(url).catch(() => {}); // the load events above decide
   await loaded;

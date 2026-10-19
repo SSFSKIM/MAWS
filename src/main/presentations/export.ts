@@ -218,7 +218,11 @@ export const STAGE = (slideId: string, elementId: string | null, mode: PictureJo
   });
 })()`;
 
-/** A hidden export window for the length of `use`, destroyed when it ends or `signal` aborts. */
+/**
+ * A hidden export window for the length of `use`, destroyed when it ends or `signal` aborts. P3-F (exports-capture
+ * scalpel-4#2): the abort releases the rest as well (the page's directory, the request filter), so a cancellation that
+ * leaves `use` waiting on the destroyed window leaks nothing; the end releases them again, each release idempotent.
+ */
 export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: (win: DeckWindow) => Promise<T>): Promise<T> {
   if (signal.aborted) throw new Error('the export was cancelled');
   const dir = await mkdtemp(join(tmpdir(), 'maws-deck-'));
@@ -226,13 +230,19 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
   const url = pathToFileURL(file).href;
   let win: BrowserWindow | null = null;
   let unrestrict = () => {};
-  const destroy = () => {
+  const release = () => {
+    unrestrict();
     if (win && !win.isDestroyed()) win.destroy();
+  };
+  const removePage = () => rm(dir, { recursive: true, force: true }).catch(() => {});
+  const cancel = () => {
+    release();
+    void removePage();
   };
   try {
     if (signal.aborted) throw new Error('the export was cancelled');
     win = openCaptureWindow(SLIDE_W, SLIDE_H, env);
-    signal.addEventListener('abort', destroy, { once: true });
+    signal.addEventListener('abort', cancel, { once: true });
     win.setBackgroundColor('#00000000'); // an element's picture keeps what lies under it see-through
     const contents = win.webContents;
     unrestrict = restrictRequests(contents.id, (requested) => !printRequestAllowed(requested, url));
@@ -267,10 +277,9 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
       },
     });
   } finally {
-    signal.removeEventListener('abort', destroy);
-    unrestrict();
-    destroy();
-    await rm(dir, { recursive: true, force: true }).catch(() => {});
+    signal.removeEventListener('abort', cancel);
+    release();
+    await removePage();
   }
 }
 

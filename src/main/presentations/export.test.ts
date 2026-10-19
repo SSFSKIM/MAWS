@@ -2,9 +2,12 @@
 // D12; X31): the five formats registered; the design system a deck exports in (D's `designSystems.governing`: a version's
 // pin, else the host's chain, else the floor; Decision Log 27 (2)) with D's export helpers bound to it; the `claude` zip through A's `runExport`; the `embedded` PPTX variant refused with its reason.
 // The window's formats (html, pdf, png, pptx) run in `e2e/presentations-export.spec.ts` on the product build.
+import { EventEmitter } from 'node:events';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeSystem } from '@artifacts/design-system/model';
 import { officeThemeXml } from '@artifacts/design-system/office';
@@ -17,10 +20,29 @@ import type { CommandName } from '@shared/ipc/schema';
 import { artifactExportName } from '@shared/maws/tools';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
+// the deck window's case: the window a stand-in, the load helpers and the request filter A's own (the filter's entries
+// followed through its answer)
+const filters = vi.hoisted(() => ({ live: new Set<number>() }));
+vi.mock('../artifacts/capture', async (actual) => ({ ...(await actual<typeof import('../artifacts/capture')>()), openCaptureWindow: vi.fn() }));
+vi.mock('../artifacts/policies', async (actual) => {
+  const real = await actual<typeof import('../artifacts/policies')>();
+  return {
+    ...real,
+    restrictRequests: (id: number, cancel: (url: string) => boolean) => {
+      const off = real.restrictRequests(id, cancel);
+      filters.live.add(id);
+      return () => {
+        off();
+        filters.live.delete(id);
+      };
+    },
+  };
+});
 
+import { openCaptureWindow } from '../artifacts/capture';
 import { ExporterRegistry, runExport, type ExportRequest, type ExportSources } from '../artifacts/export';
 import { readZip } from '../design-systems/read-zip.test-support';
-import { deckSystem, registerPresentationExporters, STAGE, systemFacesCss, type PresentationExportDeps } from './export';
+import { deckSystem, registerPresentationExporters, STAGE, systemFacesCss, withDeckWindow, type PresentationExportDeps } from './export';
 
 const DECK = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
 const OWN = '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e';
@@ -75,6 +97,57 @@ describe('the presentation’s exporters', () => {
 describe('the staging script for a picture', () => {
   it('parses for every mode, with any id', () => {
     for (const mode of ['slide', 'background', 'self', 'tree'] as const) expect(() => new Function(`return ${STAGE('c"1', mode === 'slide' ? null : `e'2`, mode)}`), mode).not.toThrow();
+  });
+});
+
+// exports-capture scalpel-4#2: an export's deadline that lands while a page loads destroys the window; Electron reports no
+// load failure for the navigation that aborts, so the deck window's page and request filter go with the cancellation
+describe('the deck window', () => {
+  /** A capture window as Electron's behaves: its page never finishes loading; destroyed, its contents emit `destroyed`
+   * (aborting the load) and the window answers nothing but `isDestroyed`. */
+  function hangingWindow() {
+    const contents = Object.assign(new EventEmitter(), {
+      id: 4242,
+      loading: null as string | null,
+      loadURL(url: string) {
+        contents.loading = url;
+        return new Promise<void>((_, reject) => contents.once('destroyed', () => reject(new Error('ERR_ABORTED (-3)'))));
+      },
+    });
+    let destroyed = false;
+    const live = () => {
+      if (destroyed) throw new TypeError('Object has been destroyed');
+    };
+    const win = {
+      get webContents() {
+        live();
+        return contents;
+      },
+      setBackgroundColor: () => live(),
+      isDestroyed: () => destroyed,
+      destroy() {
+        live();
+        destroyed = true;
+        contents.emit('destroyed');
+      },
+    };
+    return { win, contents };
+  }
+
+  it('removes its page and its request filter when the export is cancelled during a load that never ends', async () => {
+    const { win, contents } = hangingWindow();
+    vi.mocked(openCaptureWindow).mockReturnValueOnce(win as never);
+    const controller = new AbortController();
+    const used = withDeckWindow({}, controller.signal, (deck) => deck.load('<!doctype html><p>a slide</p>'));
+    used.catch(() => {});
+    await vi.waitFor(() => expect(contents.loading).not.toBeNull());
+    const dir = dirname(fileURLToPath(contents.loading!));
+    expect(existsSync(join(dir, 'deck.html'))).toBe(true);
+    expect(filters.live.has(4242)).toBe(true);
+    controller.abort();
+    await vi.waitFor(() => expect(existsSync(dir), 'the deck page’s directory').toBe(false));
+    expect(filters.live.has(4242)).toBe(false);
+    await expect(used).rejects.toThrow();
   });
 });
 
