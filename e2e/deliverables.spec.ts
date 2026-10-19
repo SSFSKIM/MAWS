@@ -1039,7 +1039,9 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
 
     // an element at the bottom of its frame: the card opens above it, its bottom edge 4 px over the element's top
     await show(s, id); // P3-L M6b: the session again, its panel tools with it (an `artifact` main tab is the library's)
-    await s.panel.getByRole('button', { name: 'Back' }).click();
+    // Open in tab moved the artifact (P3-F wave S, F16): the session's Artifacts tool is back on its list
+    await expect(listOf(s)).toBeVisible();
+    await expect(viewer).toHaveCount(0);
     await rowOf(listOf(s), notes).click();
     await expect(viewer).toHaveAttribute('data-artifact-viewer', notes.id);
     const foot = (await frameAt(s.page, await pageUrlOf(s.page, notes.id))).locator('#foot');

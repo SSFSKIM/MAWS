@@ -194,8 +194,12 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await panel.getByRole('button', { name: 'Open in tab' }).click();
   const inMain = page.locator(`[data-region="main"] [data-deck-artifact="${id}"]`);
   await expect(inMain.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
-  await panel.getByRole('tab', { name: 'Artifacts' }).click(); // with no session shown, the pinned tab is picked again
-  await expect(inPanel.locator('[data-deck-editor]')).toBeVisible();
+  // Open in tab moves the deck (P3-F wave S, F16): with no session shown, the pinned tab is picked again, back on its
+  // list. Opened from it again, it is the panel's replica beside the main tab's (the parent's Decision Log 8).
+  await panel.getByRole('tab', { name: 'Artifacts' }).click();
+  await expect(inPanel).toHaveCount(0);
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('[data-region="main"] [data-editor-header] [data-header-title]')).toHaveText('Q3 review');
   await expect(page.locator('[data-region="main"] [data-editor-header] [data-header-saved]')).toHaveText('All changes saved');
   // the owner's view recorded once a slide is on screen (L's onShown)

@@ -97,8 +97,12 @@ async function inPanelAndTab(page: Page, id: string): Promise<{ panel: Locator; 
   await panel.getByRole('button', { name: 'Open in tab' }).click();
   const inMain = page.locator(`[data-region="main"] [data-design-artifact="${id}"]`);
   await expect(inMain.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
+  // Open in tab moves the design (P3-F wave S, F16): the pinned tab is back on its list. Opened from it again, it is the
+  // panel's replica beside the main tab's (the parent's Decision Log 8).
   await panel.getByRole('tab', { name: 'Artifacts' }).click();
-  await expect(inPanel.locator('[data-design-editor]')).toBeVisible();
+  await expect(inPanel).toHaveCount(0);
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await expect(inPanel.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
   return { panel, inPanel, inMain };
 }
 
