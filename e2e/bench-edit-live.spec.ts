@@ -13,7 +13,8 @@
 // exported after; the checker; the session stopped (the transcript complete); a manifest beside the before and after
 // copies naming the transcript, the X8 journal, the relay logs, the load before and after and the checker's verdict; the
 // parser's row; X34's reading of the journal (readToolSpans). A repetition that fails still writes its manifest, so the
-// record shows what was excluded and why.
+// record shows what was excluded and why; a later attempt at the same repetition writes into its own …-a2, …-a3
+// directory, so nothing recorded is overwritten.
 //
 // The scope (MAWS_BENCH_SCOPE):
 //   owner   the arm of record: the app's launch names no CLAUDE_CONFIG_DIR, so every session reads the owner's user
@@ -31,8 +32,8 @@
 // Run on purpose only (it spends; no cap but the receipts are reported):
 //   MAWS_LIVE=1 [MAWS_BENCH_TASKS=B1,B3,B5,B7] [MAWS_BENCH_REPS=1] [MAWS_BENCH_REP_FROM=1] [MAWS_BENCH_SCOPE=mirror|owner]
 //   [MAWS_BENCH_PIN=<model>:<effort>] [MAWS_BENCH_OUT=<dir>] [MAWS_BENCH_PROFILE=<dir>] pnpm e2e:bench-edit-live
-import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, loadavg } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
@@ -91,6 +92,20 @@ const note = (line: string) => {
   console.log(line);
 };
 const python = (args: string[]) => execFileSync('/usr/bin/python3', ['-I', ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+// check.py's verdict, read from its stdout whatever its exit code (it exits 1 on a failed check, a real result); only a
+// missing or unparsable verdict is the harness's failure.
+function checker(args: string[]): { pass: boolean; detail: string } {
+  const run = spawnSync('/usr/bin/python3', ['-I', join(BENCH, 'check.py'), ...args], { encoding: 'utf8' });
+  const verdict = (() => {
+    try {
+      return JSON.parse(run.stdout) as { pass?: unknown; detail?: unknown };
+    } catch {
+      return null;
+    }
+  })();
+  if (verdict !== null && typeof verdict.pass === 'boolean' && typeof verdict.detail === 'string') return { pass: verdict.pass, detail: verdict.detail };
+  throw new Error(`check.py ${args[0]} gave no verdict (exit ${run.status ?? run.signal}): ${(run.stderr || run.error?.message || '').slice(-300)}`);
+}
 const load = () => loadavg().map((x) => Math.round(x * 100) / 100);
 
 // The owner's settings cut to what decides the model, effort, permissions and route; no hooks, plugins, status line,
@@ -103,7 +118,8 @@ function mirrorConfigHome(): string {
   const settings: Record<string, unknown> = {};
   for (const key of MIRRORED) if (owner[key] !== undefined) settings[key] = owner[key];
   const env = (owner.env ?? {}) as Record<string, string>;
-  settings.env = Object.fromEntries(Object.entries(env).filter(([key]) => !/TOKEN|KEY|SECRET|PASSWORD|PLUGIN_DIRS/i.test(key)));
+  // A secret's name ends in TOKEN, KEY, SECRET or PASSWORD (CLAUDE_CODE_MAX_CONTEXT_TOKENS is a setting, kept).
+  settings.env = Object.fromEntries(Object.entries(env).filter(([key]) => !/(^|_)(TOKEN|KEY|SECRET|PASSWORD)$/i.test(key) && !/PLUGIN_DIRS/i.test(key)));
   writeFileSync(join(home, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
   const trusted = { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true };
   writeFileSync(join(home, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, theme: 'light', projects: { [CWD]: trusted, [realpathSync(CWD)]: trusted } }, null, 2)}\n`, { mode: 0o600 });
@@ -165,15 +181,32 @@ async function waitTurn(page: Page, id: string, label: string): Promise<void> {
   }
 }
 
-// A fresh session in the bench's directory, started with its first message as the composer's Send starts one.
-async function startSession(page: Page, message: string, options: { model?: string; effort?: string } = {}): Promise<string> {
+// A fresh session in the bench's directory with the arm's model and effort; its id goes to the caller before anything
+// can throw past it, so the caller's stop always reaches a session that started.
+async function createSession(page: Page, options: { model?: string; effort?: string } = {}): Promise<string> {
   const { appSessionId } = await ok(page, 'session.create', { projectId: bench!.projectId as never, location: { kind: 'directory', path: CWD } });
   if (options.model || options.effort) await ok(page, 'session.intent.patch', { appSessionId, patch: { ...(options.model && { model: options.model }), ...(options.effort && { effort: options.effort as never }) } });
+  return appSessionId;
+}
+
+// The session started with its first message as the composer's Send starts one, then its launch awaited.
+async function startSession(page: Page, id: string, message: string): Promise<void> {
+  const appSessionId = id as AppSessionId;
   let outcome = await ok(page, 'session.start', { appSessionId, message: { content: message, display: message }, options: {} });
   if (outcome.status === 'needs_trust') outcome = await ok(page, 'session.start', { appSessionId, message: null, options: { trust: 'accepted' } });
   expect(outcome.status, `the session started (${JSON.stringify(outcome)})`).toBe('starting');
-  await expect.poll(async () => (await statusOf(page, appSessionId))?.process ?? 'unknown to the host', { timeout: 120_000, message: 'the session launched' }).not.toBe('unknown to the host');
-  return appSessionId;
+  await expect.poll(async () => (await statusOf(page, id))?.process ?? 'unknown to the host', { timeout: 120_000, message: 'the session launched' }).not.toBe('unknown to the host');
+}
+
+// A repetition's records are never overwritten: a later attempt at it goes to …-a2, …-a3, created fresh.
+function attemptDir(task: Task, rep: number): { dir: string; attempt: number } {
+  for (let attempt = 1; ; attempt++) {
+    const dir = join(OUT, attempt === 1 ? `maws-${task}-r${rep}` : `maws-${task}-r${rep}-a${attempt}`);
+    if (existsSync(join(dir, 'manifest.json'))) continue;
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    return { dir, attempt };
+  }
 }
 
 async function stopSession(page: Page, id: string): Promise<void> {
@@ -205,7 +238,8 @@ async function seeds(page: Page): Promise<{ document: string; presentation: stri
     const prompt =
       `Call mcp__maws__artifact_create exactly once with kind "document", title "${PRISTINE.document}" and content set to the markdown between the two marker lines below, copied character for character (the marker lines themselves excluded). Make no other MAWS call and reply DONE.\n` +
       `----- BEGIN -----\n${markdown}----- END -----`;
-    const id = await startSession(page, prompt, { model: 'haiku' });
+    const id = await createSession(page, { model: 'haiku' });
+    await startSession(page, id, prompt);
     await waitTurn(page, id, 'the document seed');
     const journalPath = await journalPathOf(page, id);
     await stopSession(page, id);
@@ -213,7 +247,7 @@ async function seeds(page: Page): Promise<{ document: string; presentation: stri
     const made = (await ok(page, 'artifacts.list', { filter: { appSessionId: id as AppSessionId, kind: 'document' } })).artifacts.find((a) => a.title === PRISTINE.document);
     expect(made, 'the seed session made the pristine document').toBeDefined();
     const exported = await exportContent(page, 'document', made!.id, join(OUT, 'seed-document'));
-    const same = JSON.parse(python([join(BENCH, 'check.py'), 'same', join(BENCH, 'seed/document.md'), exported])) as { pass: boolean; detail: string };
+    const same = checker(['same', join(BENCH, 'seed/document.md'), exported]);
     note(`seed: the document ${made!.id} by a Haiku session's artifact_create; against seed/document.md: ${same.detail}`);
     expect(same.pass, `the seeded document matches seed/document.md: ${same.detail}`).toBe(true);
     out.document = made!.id;
@@ -255,8 +289,7 @@ for (let rep = REP_FROM; rep < REP_FROM + REPS; rep++) {
     test(`${task} repetition ${rep}`, async () => {
       const { page } = bench!;
       const { kind, text } = PROMPTS[task];
-      const dir = join(OUT, `maws-${task}-r${rep}`);
-      mkdirSync(dir, { recursive: true });
+      const { dir, attempt } = attemptDir(task, rep);
       const title = TASKS_FILE.titles[kind];
       for (const old of (await ok(page, 'artifacts.list', { filter: { kind } })).artifacts.filter((a) => a.title === title)) await ok(page, 'artifacts.delete', { artifactId: old.id });
       const { artifact: work } = await ok(page, 'artifacts.duplicate', { artifactId: bench!.seeds[kind] });
@@ -269,14 +302,15 @@ for (let rep = REP_FROM; rep < REP_FROM + REPS; rep++) {
       const loadBefore = load();
       let id = '';
       let failure: unknown = null;
-      let check = { pass: false, detail: 'not checked' };
+      let check: { pass: boolean; detail: string };
       let journalPath: string | null = null;
       try {
-        id = await startSession(page, prompt, PIN ?? {});
+        id = await createSession(page, PIN ?? {});
+        await startSession(page, id, prompt);
         journalPath = await journalPathOf(page, id);
         await waitTurn(page, id, `${task} repetition ${rep}`);
         const after = await exportContent(page, kind, work.id, join(dir, 'after'));
-        check = JSON.parse(python([join(BENCH, 'check.py'), task, before, after])) as typeof check;
+        check = checker([task, before, after]);
       } catch (error) {
         failure = error;
         check = { pass: false, detail: `the run failed: ${error instanceof Error ? error.message : String(error)}` };
@@ -291,7 +325,7 @@ for (let rep = REP_FROM; rep < REP_FROM + REPS; rep++) {
       const cost = journalCost(rows).costUsd;
       spent.push({ label: `${task} r${rep}`, usd: cost });
       const manifest = {
-        arm: 'maws', task, rep, kind, host: hostname(), scope: SCOPE, startedAt, prompt, promptMatch: text.slice(text.indexOf('{ref}') + '{ref}'.length), artifactId: work.id,
+        arm: 'maws', task, rep, attempt, surface: 'maws', kind, host: hostname(), scope: SCOPE, startedAt, prompt, promptMatch: text.slice(text.indexOf('{ref}') + '{ref}'.length), artifactId: work.id,
         transcript, journal: journalPath, relay: relayLogs(startedMs), landing: LANDING, sessionId, appSessionId: id,
         load: { before: loadBefore, after: loadAfter }, check, pin: PIN, measurementOnly: PIN !== null,
         engine: { bin: bench!.engine.bin, version: bench!.engine.version }, costUsd: cost,
@@ -308,7 +342,7 @@ for (let rep = REP_FROM; rep < REP_FROM + REPS; rep++) {
       }
       const artifactSpans = spans.filter((s) => s.name.startsWith('artifact_'));
       note(
-        `${task} r${rep}: ${check.pass ? 'PASS' : 'FAIL'} (${check.detail}); landed ${m?.sendToEditLanded ?? '-'} s, first token ${m?.sendToFirstToken ?? '-'} s, turn end ${m?.sendToTurnEnd ?? '-'} s, ` +
+        `${task} r${rep}${attempt > 1 ? ` attempt ${attempt}` : ''}: ${check.pass ? 'PASS' : 'FAIL'} (${check.detail}); landed ${m?.sendToEditLanded ?? '-'} s, first token ${m?.sendToFirstToken ?? '-'} s, turn end ${m?.sendToTurnEnd ?? '-'} s, ` +
           `${m?.requests ?? '-'} requests, ${m?.outputTokens ?? '-'} output tokens, ${JSON.stringify(m?.models ?? [])} ${JSON.stringify(m?.efforts ?? [])}, cache ${m?.cache?.state ?? '-'}; ` +
           `MAWS tool time ${artifactSpans.map((s) => `${s.name} ${s.ms ?? 'unanswered'} ms`).join(', ') || 'none'}; load ${loadBefore[0]} -> ${loadAfter[0]}; US$${cost.toFixed(4)}; ${manifestPath}`,
       );
