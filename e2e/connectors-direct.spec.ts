@@ -41,7 +41,7 @@
 //   transport http: the 127.0.0.1 fixture through the guarded fetch: POST only, no standalone GET, one call per
 //          admitted call, none for a refused one.
 //   transport host death: a stand-in host starts the same plan and is SIGKILLed; the lifeline alone ends the group.
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'; // P3-F (scalpel-4#2): ChildProcess
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'; // P3-HD M4b: rmSync
 import { join, resolve } from 'node:path'; // P3-F W-PKG: resolve
 import { test, expect, type TestInfo } from '@playwright/test';
@@ -546,13 +546,15 @@ test('transport http: the 127.0.0.1 fixture through the guarded fetch, POST only
 test('transport host death: a host killed outright leaves no member of its instance behind', async () => {
   const info = test.info();
   const layout = probeLayout();
+  const wrapper = writeWrapper(layout);
+  let host: ChildProcess | null = null;
+  let started: { server: number; lifeline: number } | null = null;
   try {
-    const wrapper = writeWrapper(layout);
     const plan = stdioSpawnPlan(wrappedLaunch(layout, wrapper, 'orphan'));
-    const host = spawn(process.execPath, [DIRECT_HOST, JSON.stringify({ server: plan.server, lifeline: plan.lifeline(-1) })], { stdio: ['ignore', 'pipe', 'inherit'] });
-    const started = await new Promise<{ server: number; lifeline: number }>((resolve, reject) => {
-      host.stdout!.once('data', (chunk: Buffer) => resolve(JSON.parse(chunk.toString('utf8').split('\n')[0]!) as { server: number; lifeline: number }));
-      host.once('exit', (code) => reject(new Error(`the stand-in host exited (${code})`)));
+    const spawned = (host = spawn(process.execPath, [DIRECT_HOST, JSON.stringify({ server: plan.server, lifeline: plan.lifeline(-1) })], { stdio: ['ignore', 'pipe', 'inherit'] }));
+    started = await new Promise<{ server: number; lifeline: number }>((resolve, reject) => {
+      spawned.stdout!.once('data', (chunk: Buffer) => resolve(JSON.parse(chunk.toString('utf8').split('\n')[0]!) as { server: number; lifeline: number }));
+      spawned.once('exit', (code) => reject(new Error(`the stand-in host exited (${code})`)));
     });
     await until(() => readLog(layout).some((entry) => entry.event === 'start') && wrapperPids(wrapper.log).sleepers.length === 1, 10_000);
     const fixture = readLog(layout).find((entry) => entry.event === 'start')!.pid;
@@ -561,12 +563,26 @@ test('transport host death: a host killed outright leaves no member of its insta
     const members = [started.server, fixture, ...pids.sleepers];
     expect([...members, started.lifeline].every(alive)).toBe(true);
     const killed = Date.now();
-    host.kill('SIGKILL');
-    await until(() => members.every((pid) => !alive(pid)) && !alive(started.lifeline), 5_000);
+    spawned.kill('SIGKILL');
+    const lifeline = started.lifeline;
+    await until(() => members.every((pid) => !alive(pid)) && !alive(lifeline), 5_000);
     const goneMs = Date.now() - killed;
     await evidence(info, 'transport-host-death', { goneMs, members: members.length });
     expect(goneMs).toBeLessThan(5_000);
   } finally {
+    // P3-F (scalpel-4#2): the stand-in host and all it started end on every path. A failed wait or expect left the host
+    // alive, and with it the wrapper's group (the wrapper, the fixture server, the bare `sleep 600` no scratch sweep can
+    // match) and the lifeline, which acts only on the host's end. Each group (the wrapper and the lifeline lead their
+    // own) is signalled whole; after a passing run they are gone already.
+    if (host !== null && host.exitCode === null && host.signalCode === null) host.kill('SIGKILL');
+    const groups = new Set([...(started ? [started.server, started.lifeline] : []), ...wrapperPids(wrapper.log).wrappers]);
+    for (const group of groups) {
+      try {
+        process.kill(-group, 'SIGKILL');
+      } catch {
+        // no such group: already gone
+      }
+    }
     layout.close();
   }
 });
