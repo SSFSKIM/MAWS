@@ -192,8 +192,12 @@ function fakeHost() {
         return answer({ bytes: bytes(`version ${(input as { versionId: number }).versionId}`) });
       case 'artifacts.state':
         return answer({ revision: liveRevision, bytes: bytes(`live@${liveRevision}`) });
-      case 'artifacts.assets':
-        return row ? answer({ assets: [{ ref: 'assets/a.png', name: 'a.png', mime: 'image/png', size: 3 }, { ref: 'assets/font.woff2', name: 'font.woff2', mime: 'font/woff2', size: 9 }] }) : { ok: false, error: { code: 'invalid_input', message: 'not found', issues: { reason: 'notFound', data: {} } } } as CommandResult<CommandName>;
+      case 'artifacts.assets': {
+        // P4 (W1, L245): a version's listing is what it pinned (here, the image alone)
+        const all = [{ ref: 'assets/a.png', name: 'a.png', mime: 'image/png', size: 3 }, { ref: 'assets/font.woff2', name: 'font.woff2', mime: 'font/woff2', size: 9 }];
+        const pinned = (input as { versionId?: number }).versionId === undefined ? all : all.slice(0, 1);
+        return row ? answer({ assets: pinned }) : { ok: false, error: { code: 'invalid_input', message: 'not found', issues: { reason: 'notFound', data: {} } } } as CommandResult<CommandName>;
+      }
       case 'artifacts.content': {
         const path = (input as { path?: string }).path;
         if (path === 'assets/a.png') return answer({ revision: 4, kind: row!.kind, name: 'a.png', size: 3, sha256: 'x', path: asset });
@@ -434,6 +438,22 @@ describe('the export’s snapshot and its asset reads (fix wave 1, the review’
       { ref: 'assets/a.png', name: 'a.png', mime: 'image/png', size: 3 },
       { ref: 'assets/font.woff2', name: 'font.woff2', mime: 'font/woff2', size: 9 },
     ]);
+  });
+
+  // P4 (W1, tracker 2026-10-18 L245 and 2026-10-14 L160): a retained version's export lists that version's assets, from
+  // the library and through the bridge alike, never the artifact's current ones
+  it('lists a version’s own assets for an exporter of that version', async () => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    registry.register(writing('document', 'pdf', async (_req, ctx) => JSON.stringify((await ctx.assets.list()).map((asset) => asset.ref))));
+    const service = startExportService(host.deps(registry));
+    const { path } = await service.exportForLibrary({ artifactId: DOC, format: 'pdf', versionId: 3 });
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(['assets/a.png']);
+    const asked = join(root, 'tool', 'notes-v3.pdf'); // where the host names the tool's file
+    host.emit(hostRequest({ artifactId: DOC, kind: 'document', revision: 5, versionId: 3, path: asked }));
+    await until(() => host.answered.length === 1);
+    expect(host.answered[0]!.answer).toMatchObject({ ok: true, path: asked });
+    expect(JSON.parse(await readFile(asked, 'utf8'))).toEqual(['assets/a.png']);
   });
 
   it('answers a missing asset null, and fails the export on any other failure to read one', async () => {

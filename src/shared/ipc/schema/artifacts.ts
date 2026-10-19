@@ -208,9 +208,11 @@ export const commands = {
   // Main-only.
   'artifacts.state': host(z.strictObject({ artifactId: Id }), z.strictObject({ revision: Seq, bytes: Bytes })),
   // The artifact's assets, each by the ref a format names it with (`assets/<name>`), so an exporter can carry those its
-  // content does not name (P3-D's request, Decision Log 45e). Main-only.
+  // content does not name (P3-D's request, Decision Log 45e). Main-only. P4 (W1, L245 and L160): `versionId`, only the
+  // assets that version pinned (its `assetRefs`), so a retained version's export carries none uploaded after it; an
+  // unknown version is notFound.
   'artifacts.assets': host(
-    z.strictObject({ artifactId: Id }),
+    z.strictObject({ artifactId: Id, versionId: z.number().int().positive().optional() }),
     z.strictObject({ assets: z.array(z.strictObject({ ref: z.string(), name: z.string(), mime: z.string(), size: z.number().int().nonnegative() })) }),
   ),
   // The store's health (Decision Log 12, 24h): `recovered` when a broken file was moved aside this run.

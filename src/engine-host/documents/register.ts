@@ -238,11 +238,14 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
       return { revision: content.revision, kind, name: content.ref.name, size: content.ref.size, sha256: content.ref.sha256, path: content.path };
     });
   });
-  serve('artifacts.assets', ({ artifactId }) => {
+  serve('artifacts.assets', ({ artifactId, versionId }) => {
     const store = storeOf();
     return store.readCommitted(() => {
       required(store, artifactId);
-      return { assets: store.listAssets(artifactId).map(({ ref, name, mime, size }) => ({ ref, name, mime, size })) };
+      // P4 (W1, L245 and L160): a version's listing is what it pinned
+      const pinned = versionId === undefined ? null : new Set(JSON.parse(store.requireVersion(artifactId, versionId).assetRefs) as string[]);
+      const assets = pinned ? store.listAssets(artifactId).filter((asset) => pinned.has(asset.assetId)) : store.listAssets(artifactId);
+      return { assets: assets.map(({ ref, name, mime, size }) => ({ ref, name, mime, size })) };
     });
   });
   serve('artifacts.state', async ({ artifactId }) => {
