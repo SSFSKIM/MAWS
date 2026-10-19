@@ -373,7 +373,7 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     // it, is recorded beside it
     for (const renderer of memory.renderers) {
       const after = collected.renderers.find((r) => r.windowId === renderer.windowId)?.workingSetMB;
-      rows.add(`8 renderer ${renderer.windowId}`, `renderer working set just after three previews, before a forced collection (window ${renderer.windowId})`, renderer.workingSetMB, 'MB', null, 'recorded; the ≤ 500 MB bound reads after a forced collection (Decision Log 44)', after === undefined ? undefined : `${after} MB right after the forced collection`);
+      rows.add(`8 renderer ${renderer.windowId}`, `renderer working set just after three previews, before a forced collection (window ${renderer.windowId})`, renderer.workingSetMB, 'MB', null, 'recorded; the ≤ 600 MB bound (Decision Log 109) reads after a forced collection (Decision Log 44)', after === undefined ? undefined : `${after} MB right after the forced collection`);
     }
     rows.write({ memoryAfterPreviews: { ...memory, ...heaps, afterCollection: { ...collected, jsHeapA: await jsHeapMB(page), jsHeapB: await jsHeapMB(pageB) } } });
   });
