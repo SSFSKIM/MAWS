@@ -8,7 +8,7 @@ import * as Y from '../yjs/slides';
 import { DECK_PATH, serializeDeckJson, slidePath, type DeckFace, type DeckJson, type DeckSection } from './deck';
 import { CELL_TAGS, CONTAINER_TAGS, TEXT_TAGS, isPinned, type Attrs, type ElementIR, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
 import { ANY, FLOW_LAYER, OVER, UNDER, byKey, keyAfter, rekey, repairCollisions, type Bounds } from './order';
-import { hash4, ID_RE, normalizeNotes, normalizeText } from './parse';
+import { hash4, ID_RE, normalizeText } from './parse';
 import { boardQuote, storeRemovedQuotes } from './quote'; // P3-C M7 fix wave 1; P3-E: boardQuote
 import { partition, serializeSlide } from './serialize';
 
@@ -302,14 +302,19 @@ function setKeys(doc: Doc, slideId: string, id: string, prefix: string, values: 
 }
 
 /**
- * The speaker notes, by character diff (S6's `patchNotes`), stored as the loader reads them back (trimmed), so the file
- * is a parse/serialize fixed point and an agent's base equals the live notes (P3-F slide-model scalpel-3#2).
+ * The speaker notes, by character diff (S6's `patchNotes`), kept as typed: the notes field re-syncs from the model (another
+ * slide and back, another origin's change), so a trailing newline the owner just typed stays. The publish's live view
+ * reads them trimmed, as the loader reads the file (P3-F slide-model scalpel-3#2 and its review).
  */
 export function setNotes(doc: Doc, slideId: string, text: string, origin?: unknown): void {
-  transact(doc, () => void Y.patchNotes(doc, slideId, normalizeNotes(text)), origin);
+  transact(doc, () => void Y.patchNotes(doc, slideId, text), origin);
 }
 
-/** A text element's blocks, by character diff where the block kinds match (S6's `patchText`), stored as the loader reads them back (likewise). */
+/**
+ * A text element's blocks, by character diff where the block kinds match (S6's `patchText`), stored as the loader reads
+ * them back (`normalizeText`), so the file is a parse/serialize fixed point (P3-F slide-model scalpel-3#2). Typing never
+ * comes here (the canvas's editor writes through its own binding), so nothing re-syncs a field from a trimmed value.
+ */
 export function setText(doc: Doc, slideId: string, id: string, blocks: TextBlock[], origin?: unknown): void {
   transact(doc, () => void Y.patchText(doc, slideId, id, normalizeText(blocks)), origin);
 }

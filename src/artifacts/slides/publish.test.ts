@@ -748,12 +748,24 @@ describe('publishDeck: the P3-F slide-model panel', () => {
     expect(publish(doc, read, { [S]: sent }).conflicts).toEqual([]);
     expect(Y.readNotes(doc, 's1')).toBe('Say this and more');
     expect(Y.readText(doc, 's1', 't')).toEqual([{ type: 'p', inline: [{ text: 'Title of it', marks: {} }] }]);
-    // the writers store what the loader reads back, so the file round-trips byte for byte
-    expect(read[S]).toContain('<aside>Say this</aside>');
+    // the text writer stores what the loader reads back, so its file round-trips byte for byte; the notes are kept as
+    // typed (the slide-model review) and read back trimmed
+    expect(loadSlide(read[S]!)).toMatchObject({ ok: true, slide: { notes: 'Say this' } });
     expect(read[S]).toContain('<h2 id="t">Title</h2>');
     setText(doc, 's1', 't', [{ type: 'p', inline: [{ text: ' Title\n', marks: {} }, { text: ' of  it ', marks: {} }, { br: true }, { text: ' x', marks: { b: {} } }] }], 'human');
     expect(Y.readText(doc, 's1', 't')).toEqual([{ type: 'p', inline: [{ text: 'Title of it', marks: {} }, { br: true }, { text: 'x', marks: { b: {} } }] }]);
     expect(loadSlide(deckFiles(doc)[S]!)).toMatchObject({ ok: true, slide: { children: [{ id: 't', text: Y.readText(doc, 's1', 't') }] } });
+  });
+
+  // the slide-model review: the notes field re-syncs from the model (another slide and back, another origin's change), so
+  // the model keeps what the owner typed, a trailing newline included; only the publish's live view reads it trimmed
+  it('setNotes keeps the notes as typed, and an append from a fresh read after it is still not refused', () => {
+    const doc = small('<section id="s1"><h2 id="t">Title</h2><aside>Say this</aside></section>');
+    setNotes(doc, 's1', 'Say this\n', 'human');
+    expect(Y.readNotes(doc, 's1')).toBe('Say this\n');
+    const read = deckFiles(doc);
+    expect(publish(doc, read, { [S]: read[S]!.replace(/Say this\s*<\/aside>/, 'Say this and more</aside>') }).conflicts).toEqual([]);
+    expect(Y.readNotes(doc, 's1')).toBe('Say this and more');
   });
 
   it('scalpel-3#2: the live view is compared as the loader reads the file: raw bytes another writer left do not refuse an append', () => {
