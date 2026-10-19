@@ -266,6 +266,24 @@ describe('find', () => {
 
   const findCount = () => within(screen.getByRole('search')).getByRole('status').textContent;
 
+  // P3-F panel scalpel-1#2 (X26): the keys of an IME composition are the IME's; its commit Enter does not step and its
+  // Escape (a cancelled composition) does not close the bar
+  it('neither steps nor closes on a key of an IME composition', async () => {
+    const { editor } = await mount(doc(para('p1', '알파 베타'), para('p2', '베타 감마')));
+    act(() => void editor().commands.setTextSelection(1));
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'f', metaKey: true }));
+    const input = screen.getByRole('searchbox', { name: 'Find in document' });
+    act(() => fireEvent.change(input, { target: { value: '베' } }));
+    act(() => fireEvent.change(input, { target: { value: '베타' } }));
+    expect(findCount()).toBe('1 of 2');
+    act(() => void fireEvent.keyDown(input, { key: 'Enter', isComposing: true }));
+    expect(findCount(), 'after the composition’s commit Enter').toBe('1 of 2');
+    act(() => void fireEvent.keyDown(input, { key: 'Escape', isComposing: true }));
+    expect(screen.queryByRole('searchbox'), 'the bar after the composition’s Escape').not.toBeNull();
+    act(() => void fireEvent.keyDown(input, { key: 'Enter' }));
+    expect(findCount()).toBe('2 of 2');
+  });
+
   // P3-F panel sweep#1: the bar's query goes with it to the editor shown, a version opened from History and the live
   // document again, matched there at once (the preview has its own editor, M9)
   it('keeps finding its query in the editor shown: a version from History, then the live document', async () => {

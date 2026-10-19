@@ -19,6 +19,7 @@ export function FindBar({ editor, onClose }: { editor: Editor; onClose(): void }
     editor.commands.focus();
   };
   const onKeyDown = (event: KeyboardEvent) => {
+    if (event.nativeEvent.isComposing) return; // P3-F (X26): a key of an IME composition is the IME's
     if (event.key === 'Escape') {
       event.preventDefault();
       close();
