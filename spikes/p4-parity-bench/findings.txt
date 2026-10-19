@@ -6,8 +6,10 @@ f3ac0e8cfd701a95e4dde4a2b847bf1e04e49189 at master bb8b9de7d. Root spec docs/cha
 merge of a verdict; the harness lands as a live spec.
 
 Status: phase 1 of 2 (Decision Log 19), the harness, done 2026-10-19. No record run has happened and no verdict exists.
-The decision rule below is fixed before any record run. The record run is phase 2, in a GUI hold the architect
-schedules (§7 "The record run").
+The decision rule below is fixed before any record run. It was amended the same day, after the harness's review and
+still before any record run: a voiding control is compared only where both arms' records carry it, the validity rules
+gained the permission mode, human stops, missing records and a rebuilt seed's check, and a task is judged on one Desktop
+surface. The record run is phase 2, in a GUI hold the architect schedules (§7 "The record run").
 
 The question, in the owner's words (Decision Log 10): if Claude Desktop is equally slow from server round trips and
 output time, MAWS has no problem; if not, something else is wrong. The verdict decides whether the edit-protocol child
@@ -17,24 +19,35 @@ P4-A3 exists, and it is a close criterion: P4 closes only at parity on every jud
 ## 1. The decision rule (fixed 2026-10-19, before any record run)
 
 Tasks and cells. Four tasks, the prompt verbatim in both apps (tasks.json, which both arms read): B1 a one-word fix in
-the document's schedule paragraph; B3 a rewrite of its introduction paragraph at about the same length; B5 a date
-change on slide 2 of a six-slide deck; B7 a slide added after slide 2 with a title and three bullets. A cell is one
-task in one arm (MAWS, Desktop). The artifacts are equivalent seeds in each app's native form (seed/; §4). The only
-words that differ between the apps' prompts are the artifact's handle ({ref}): MAWS's `maws-artifact:` link, Desktop's
-file name or artifact name.
+the document's schedule paragraph; B3 a rewrite of its introduction paragraph at about the same length; B5 a date change
+on slide 2 of a six-slide deck; B7 a slide added after slide 2 with a title and three bullets. A cell is one task in one
+arm on one surface (MAWS; Desktop's Code session or Cowork). A task is judged on one Desktop surface: if Desktop ran it
+on more than one, the report needs the judged one named (`parse.py report --judge B5=cowork`, the owner's deck call of
+§7) and gives no verdict until it is; the other surfaces are reported beside the verdict. The artifacts are equivalent
+seeds in each app's native form (seed/; §4). The only words that differ between the apps' prompts are the artifact's
+handle ({ref}): MAWS's `maws-artifact:` link, Desktop's file name or artifact name.
 
 The measure decided on: send to edit landed, per edit, from each app's own engine transcript through the one parser
 (parse.py):
 - send is the engine's human `user` record (the engine's clock; the host's in both apps), so neither driver's latency
   counts;
 - edit landed is the `tool_result` record of the turn's first successful landing call (MAWS: `artifact_edit`,
-  `artifact_publish`; Desktop: `Edit`, `Write`, `MultiEdit`, `Artifact`, Cowork's `update_artifact`).
+  `artifact_publish`; Desktop's Code session: `Edit`, `Write`, `MultiEdit` on the artifact's own file, doc.md or
+  deck.html; Cowork's deck: the `Artifact` publish, or `update_artifact`, never a local edit before it).
 
 Repetitions. At least five valid repetitions per cell, each a fresh session, the two arms interleaved in the order of
-§7 fixed now, the cache state recorded per repetition. A repetition is valid when its edit landed and the checker
-(check.py, one set of rules for both apps, read from the artifact before and after the turn) passed. An invalid
-repetition is listed with its reason, never dropped silently. A cell short of five valid repetitions is run again in
-the same hold, never judged short.
+§7 fixed now, the cache state recorded per repetition. A repetition is valid when (parse.py `valid`):
+- its records are there (the manifest names a transcript, and every record it names is on disk);
+- its turn ran in Auto mode: both arms run in Auto, and a repetition whose turn the records show in another mode (the
+  human `user` record's `permissionMode`) is invalid;
+- no human stopped it: a permission card the Desktop driver had to answer makes it invalid (MAWS's arm already fails a
+  repetition that waits on a permission);
+- its edit landed, and the checker (check.py, one set of rules for both apps, read from the artifact before and after
+  the turn) passed;
+- for a Cowork deck whose seed was rebuilt from its records, that seed is the bench's (`check.py same seed/maws-deck`).
+An invalid repetition is listed with its reason, never dropped silently; an attempt made again keeps its own directory
+(…-a2, …-a3) and nothing recorded is overwritten. A cell short of five valid repetitions is run again in the same hold,
+never judged short.
 
 Reported per cell: the median with the spread (minimum, quartiles, maximum) of send to edit landed, and beside it, per
 edit, §4.2's breakdown: requests, input tokens (the context size), first-byte wait, generation time and output tokens,
@@ -44,12 +57,16 @@ The verdict, per task, with no middle band: MAWS's median send-to-edit-landed ab
 Desktop is faster on that task; otherwise parity. (§4.2; the architect's "about 20 %" made one threshold by Decision
 Log 16.2.)
 
-What voids a cell's verdict: the model (the request's `model`), `output_config.effort` or the thinking type differing
-between the arms, read from the records (parse.py `verdicts`). Recorded beside the verdict and not voiding it: the cache
-state, the route, the load, the permission mode, the engine versions, the requested context variant. The route differs
-by design: MAWS runs through the owner's relay (the gateway route, as the owner runs it) and Desktop's Code sessions go
-direct (§3); the relay's first-byte overhead is therefore inside MAWS's numbers and, if the breakdown names it, it is a
-cause outside the levers.
+What voids a task's verdict: the model (the request's `model`), the effort (`output_config.effort`, else the record's
+`effort`) or the thinking type differing between the arms, where both arms' records carry it (parse.py `VOIDING`). A
+control one arm's records lack is not compared, and the report says "<control> not in <arm>'s records" beside the
+verdict. Desktop's engine 2.1.299 writes no `api-request` records, so its thinking type is not recorded; the report
+gives instead whether thinking ran (a thinking block or thinking tokens in the turn's responses), never a type. Recorded
+beside the verdict and not voiding it: the cache state, the route, the load, the engine versions, the requested context
+variant, the advisor model and any usage iteration that is not a message (Desktop's records carry `advisorModel:
+claude-opus-5-5`, MAWS's none). The route differs by design: MAWS runs through the owner's relay (the gateway route, as
+the owner runs it) and Desktop's Code sessions go direct (§3); the relay's first-byte overhead is therefore inside
+MAWS's numbers and, if the breakdown names it, it is a cause outside the levers.
 
 What follows (binding, Decision Logs 10, 16.2 and 17):
 - parity on every judged task closes the question and tracker row 296 (its closing line written at A1's landing,
@@ -137,14 +154,22 @@ relay logs of 2026-10-19 (191 rows joined):
 On Desktop records: the newest Desktop Code session on disk (2026-10-01, d04310a8-…, entrypoint `claude-desktop`, engine
 2.1.284, claude-opus-5-5 at xhigh, Auto mode) parses with no `api-request` records (requests grouped by request id, sent
 at the preceding record), its effort, cache state and mode read; it made no edit, so no landing was measured. Desktop's
-current engine 2.1.299 writes no `api-request` records (they begin at 2.1.300), which is the path just validated. No
-Cowork audit exists after July, so the audit path is untested on real records.
+current engine 2.1.299 writes no `api-request` records (they begin at 2.1.300), which is the path just validated, and
+why its thinking type is unrecorded (§1). No Cowork audit exists after July, so the audit path is untested on real
+records; the parser takes the session's first `result` written at or after the measured turn's send.
+
+The rule itself is checked on synthesized records (parse_test.py; fixtures/ holds one B1 turn as each engine records
+it, with identical timings): five MAWS and five transcript-only Desktop repetitions give parity at a ratio of 1.0, a
+control both arms record and that differs still voids, two Desktop surfaces give no verdict until one is named, and a
+missing record, another permission mode, a human stop, a failed seed or an edit of another file each exclude the
+repetition with the reason.
 
 Learned from the journal while validating: the engine writes `tools/call` to MAWS as soon as the response's end reaches
 it and only then the `message_delta` and `message_stop` stream events, so the stream's end is the earlier of the two
 (parse.py uses it). And in auto mode every MAWS call waits for the response's end (the server's verdict) before it runs,
 so the post-tool hold falls inside MAWS's send-to-edit-landed; a Desktop session in Accept-edits mode runs `Edit` without
-that wait. The permission mode is therefore a control the hold sets to Auto in Desktop (§7), and it is reported per cell.
+that wait. The permission mode is therefore a validity rule (§1): the hold sets Auto on every Desktop session (§7), the
+driver checks the control shows it, and the records decide.
 
 
 ## 5. The MAWS arm (e2e/bench-edit-live.spec.ts)
@@ -170,20 +195,41 @@ one repetition per task; smoke-2026-10-19/ holds the run's log and the parser's 
 | B7 | pass | 10.33 s | 0.79 s | 14.25 s | 6 | 1,371 | read 11, describe 3, publish 15, read 10 ms | 0.278 |
 
 These are not record-run numbers (one repetition, the mirror scope's 13.5K-token context against the owner scope's
-larger one). Spend in this phase: US$0.955 (the smoke US$0.862 with its Haiku seed; an earlier shakedown on B1 pinned to
-sonnet:low US$0.093).
+larger one; the smoke's mirror also dropped CLAUDE_CODE_MAX_CONTEXT_TOKENS with the secrets, since fixed). Spend in this
+phase: US$0.955 (the smoke US$0.862 with its Haiku seed; an earlier shakedown on B1 pinned to sonnet:low US$0.093).
 
 
 ## 6. The Desktop arm
 
-desktop-prep.py is the non-GUI half: `before` lays the pristine doc.md and deck.html in the arm's folder and prints the
-exact prompt; `after` finds Desktop's own records for the session (Code: claude-code-sessions/<account>/<org>/
-local_<id>.json's `cliSessionId`, then ~/.claude/projects/<slug>/<id>.jsonl; Cowork: local-agent-mode-sessions/…/
-audit.jsonl and its private transcript), copies the edited artifact, runs the checker and writes the manifest; `kinds`
-is the first read of §3. Dry-run end to end against a fake Desktop store (a stand-in transcript) through `report`.
+desktop-prep.py is the non-GUI half. `before` opens the repetition's attempt (desktop-<task>-r<rep>, a later attempt
+…-a2; an attempt laid and never closed by `after` is closed as aborted), lays the pristine doc.md and deck.html in the
+arm's folder, removes the folder's .claude/ (where a permission answered "always" would carry over) and prints the exact
+prompt. `after --permissions-answered N` finds Desktop's own records for the session (Code: claude-code-sessions/
+<account>/<org>/local_<id>.json's `cliSessionId`, then ~/.claude/projects/<slug>/<id>.jsonl; Cowork:
+local-agent-mode-sessions/…/audit.jsonl and its private transcript), copies or rebuilds the edited artifact, runs the
+checker, writes the manifest (N above 0 is a human stop) and prints the turn's recorded permission mode and whether the
+attempt is valid, so the hold knows at once which cell needs another repetition. `deck` rebuilds a Cowork deck from a
+session's records for the hold's first read; `kinds` is the first read of §3.
+
+A Cowork deck is rebuilt from the records. The engine's `Artifact` tool publishes local files (2.1.302's schema:
+`file_path` the page or a data file; `edits`, old_str/new_str pairs applied to that file on disk and then published;
+`files`, published paths mapped to source paths, not to texts), so the deck's text lives in the transcript's own `Write`,
+`Edit` and `MultiEdit` calls and the publish's `edits`. The rebuild replays the successful calls in order: the seed's
+(`after --seed-transcript T`, T possibly the timed transcript itself; its calls up to the timed turn's send) give the deck
+before, checked `same` against seed/maws-deck and recorded as seedCheck; the timed turn's calls carry it on to the deck
+after. A file named under another session's mount of the folder is matched by its trailing path. Anything the rebuild
+cannot follow (an edit of a file whose text is not in the records, an `Artifact` action other than a publish or a read,
+an edit of an unknown shape, published files outside the deck's layout) fails loudly; for the deck after, the files the
+driver's untimed follow-up has the model write to bench-after/ are then the last resort, and the manifest says so
+(`afterSource`). The rebuild is tested on synthesized records only (prep_test.py); the hold's first step tries it on real
+ones.
+
+Dry-run end to end against a fake Desktop store (the Desktop fixture as the session's transcript) through `report`.
 desktop-driver.js is the GUI half for `cua_repl`: written, not run (no GUI automation in this phase). Its labels are
-Desktop 2.42304's in English and Korean (the owner's Desktop runs ko-KR); `bench.probe()` checks each against the live
-accessibility tree as the hold's first step.
+Desktop 2.42304's in English and Korean (the owner's Desktop runs ko-KR), each Korean label its own pattern (JavaScript's
+`\b` is ASCII-only, so it never sits beside Hangul), checked with node on sample lines; `bench.probe()` checks each
+against the live accessibility tree as the hold's first step. After choosing Auto it checks that the permission-mode
+control shows Auto; a permission card it has to answer is counted in `bench.rep()`'s result, which step 3 passes on.
 
 
 ## 7. The record run
@@ -205,18 +251,25 @@ Preconditions, each confirmed at the hold's start:
    that name. Deleted after the run: the Code sessions, the Cowork tasks and the Space or project, every Slides artifact
    the bench made. No sharing, no invites.
 4. The owner's two calls: the deck surface (§3: (a) Cowork, (b) `enableArtifact` removed for the hold, or (c) plain
-   deck.html), and the MAWS arm on the owner's real ~/.claude (MAWS_BENCH_SCOPE=owner: the engine writes the bench
-   sessions' transcripts under ~/.claude/projects and the bench folder's entry in ~/.claude.json, as any MAWS session
-   would; the harness writes nothing there).
+   deck.html; if decks run on more than one, which one is judged, passed to `report --judge`), and the MAWS arm on the
+   owner's real ~/.claude (MAWS_BENCH_SCOPE=owner: the engine writes the bench sessions' transcripts under
+   ~/.claude/projects and the bench folder's entry in ~/.claude.json, as any MAWS session would; the harness writes
+   nothing there).
 5. The relay (ClaudeUsage) answering /api/hello; this branch built (`scripts/e2e-build.sh plain`); MAWS_E2E_QUIET=1
    and lockf /tmp/macbook-e2e.lock for every MAWS repetition; no other MAWS e2e or heavy run on the host.
 
 The hold's first step (untimed): `bench.probe()`; the probe sessions and `desktop-prep.py kinds` (§3); the MAWS seeds
 (one MAWS invocation that seeds the bench profile, MAWS_BENCH_PROFILE kept for the whole run); for Cowork decks, the
-Slides seed made from seed/maws-deck by an untimed Cowork turn, titled as tasks.json's deck title, and the operation of `Artifact` that publishes read from that turn's record (desktop-prep's `after --landing-actions Artifact=<op>`, so the parser does not take a read for the landing).
+Slides seed made from seed/maws-deck by an untimed Cowork turn, titled as tasks.json's deck title, then `desktop-prep.py
+deck <that session's transcript> <run>/cowork-seed`, which prints `check.py same seed/maws-deck` on the rebuilt deck:
+it must pass before any timed Cowork repetition, else the decks run on (b) or (c). The parser counts `Artifact`'s
+publish (an omitted action included) as the landing; if the seed's record shows another publishing operation,
+`after --landing-actions Artifact=<op>` names it.
 
 The interleaving order, fixed now (random.Random(20261019) over the four tasks per round; the first arm alternates per
-round; rounds 5 and 6 complete any cell an invalid repetition left short, and run only as far as needed):
+round). Five rounds always run: each gives every cell one repetition, and a cell needs five valid. Round 6 only
+completes the cells an invalid repetition left short, running just their tasks in its order (a cell still short after it
+is run again the same way):
 
   round 1 (MAWS first):    B3, B1, B7, B5
   round 2 (Desktop first): B1, B5, B7, B3
@@ -227,14 +280,17 @@ round; rounds 5 and 6 complete any cell an invalid repetition left short, and ru
 
 Each MAWS repetition: `MAWS_LIVE=1 MAWS_BENCH_SCOPE=owner MAWS_BENCH_TASKS=<task> MAWS_BENCH_REP_FROM=<round>
 MAWS_BENCH_OUT=<run> MAWS_BENCH_PROFILE=<run>/maws-profile lockf /tmp/macbook-e2e.lock pnpm exec playwright test
-e2e/bench-edit-live.spec.ts` (MAWS_HARNESS=0, after one build). Each Desktop repetition: desktop-driver.js's three steps
-(§6). After the last: `python3 -I spikes/p4-parity-bench/parse.py report <run> --json <run>/report.json`, the verdict
-written into this file under the rule of §1.
+e2e/bench-edit-live.spec.ts` (MAWS_HARNESS=0, after one build; a repetition run again writes its own …-a2 directory).
+Each Desktop repetition: desktop-driver.js's three steps (§6), step 3 with `--permissions-answered` from step 2's result
+and, for a Cowork deck, `--seed-transcript` naming the transcript of the repetition's own untimed seed turn; `after`
+prints whether the attempt is valid. After the last: `python3 -I spikes/p4-parity-bench/parse.py report <run> --json
+<run>/report.json [--judge <task>=<surface> ...]`, the verdict written into this file under the rule of §1.
 
 The hold's length: about 2.5 to 3 hours. Setup and first reads 30 minutes; a round about 16 minutes (a MAWS repetition
 about 1.5 minutes with the app's launch, a Desktop one about 2.5 minutes with the folder, picker and mode); five rounds
-80 minutes and a sixth if needed; Cowork deck repetitions add about 2 minutes each for the seed and the follow-up that
-writes the deck's files; cleanup 15 minutes. It can split into two windows (documents, then decks).
+80 minutes and a sixth if needed; Cowork deck repetitions add about 2 minutes each for their seed turn (and the
+follow-up that writes the deck's files, only where the rebuild fails); cleanup 15 minutes. It can split into two windows
+(documents, then decks).
 
 Expected spend: about US$15 to 25 at list price, on the owner's subscription accounts in practice. MAWS on the owner's
 scope about US$0.25 to 0.45 per repetition (the smoke's US$0.14 to 0.28 at the mirror's smaller context), 24 at most;
