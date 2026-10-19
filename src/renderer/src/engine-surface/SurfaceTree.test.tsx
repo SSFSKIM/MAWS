@@ -2,16 +2,22 @@
 // X2 bridge (the trees as 2.1.287 answered them in pass3/mods-surface-*).
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { registerTranscriptActions } from '../transcript';
 import type { Site } from './actions';
 import { fenced, SurfaceTree } from './SurfaceTree';
 import { parseTree, type SurfaceNode } from './tree';
 
-afterEach(cleanup);
+const offs: (() => void)[] = [];
+afterEach(() => {
+  cleanup();
+  offs.splice(0).forEach((off) => off());
+});
 
 const ID = 'app-r2' as AppSessionId;
+const ARTIFACT = '0b4f3c1e-6a2d-4c8e-9f1a-2b3c4d5e6f70';
 function setup(raw: unknown, engine: React.ReactNode = <span>MAWS own</span>) {
   const fake = fakeClient({ 'session.ui.press': { handled: true, element: null }, 'session.ui.input': { handled: true, element: null, value: null }, 'session.ui.select': { handled: true, element: null, value: null }, 'layout.openExternal': undefined });
   const site: Site = { appSessionId: ID, component: 'Pane', instanceId: 'mods-probe-pane', client: fake.client };
@@ -96,6 +102,22 @@ describe('SurfaceTree (R2)', () => {
     fireEvent.click(await screen.findByText('pressed'));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://example.com/md' }]);
     expect(fake.invoked('session.ui.press')).toEqual([{ appSessionId: ID, plugin: 'mods-probe', handle: 12, key: 'md', href: 'https://example.com/p' }]);
+  });
+
+  // P3-F wave S (F14, the owner's obs 2): a plugin's Markdown names an artifact as the transcript does, and the chip
+  // opens it for the surface's session
+  it('a Markdown artifact link opens the artifact in the site session’s panel, and in its main tab on ⌘-click', () => {
+    const openArtifact = vi.fn();
+    const openArtifactTab = vi.fn();
+    offs.push(registerTranscriptActions({ openArtifact, openArtifactTab }));
+    const fake = setup({ type: 'Markdown', props: { text: `[the plan](maws-artifact:${ARTIFACT})`, key: 'md' }, press: { plugin: 'mods-probe', handle: 12 } });
+    const chip = screen.getByRole('button', { name: 'the plan' });
+    fireEvent.click(chip);
+    expect(openArtifact).toHaveBeenCalledWith(ID, ARTIFACT);
+    fireEvent.click(chip, { metaKey: true });
+    expect(openArtifactTab).toHaveBeenCalledWith(ARTIFACT);
+    expect(openArtifact).toHaveBeenCalledTimes(1);
+    expect(fake.invoked('session.ui.press')).toEqual([]); // MAWS's own chip: nothing is pressed in the plugin
   });
 
   it('an Svg is a data: image, or a frame with an empty sandbox when interactive', () => {

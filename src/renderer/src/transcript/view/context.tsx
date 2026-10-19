@@ -32,6 +32,9 @@ export interface TranscriptActions {
   // P3-L M6b: the panel's Artifacts tool on the artifact (a delivery's id is the artifact's), at the version `at` asks for
   openArtifact(appSessionId: AppSessionId, artifactId: string, at?: ArtifactOpenAt): void; // P3-L M6b fix wave 2: none, the latest
   // E2 end
+  // P3-F wave S (F14): an artifact link's ⌘-click, the artifact in a main tab of its own (library/actions.ts's
+  // openArtifactTab, registered from App.tsx's E2 block); when omitted, the link opens it as a plain click does
+  openArtifactTab?(artifactId: string): void;
   // E4d start: a page element comment's chip (tools/browser/comment/actions.ts, registered from App.tsx's E4d block)
   openBrowserUrl(appSessionId: AppSessionId, url: string): void; // the in-app browser on the page: the session's, a side thread's parent's
   // E4d end

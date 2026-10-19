@@ -303,6 +303,11 @@ describe('X9 artifact tools (E2)', () => {
     expect(MAWS_TOOLS.artifact_create.description).toContain('a document starts empty or from markdown content');
   });
 
+  // P3-F wave S (F14, the owner's obs 2): where the agent learns an artifact's id, it learns to link it for the human
+  it('tells the agent to write an artifact it names as a maws-artifact link, in the create and list descriptions', () => {
+    for (const name of ['artifact_create', 'artifact_list'] as const) expect(MAWS_TOOLS[name].description, name).toContain('[its title](maws-artifact:<artifactId>)');
+  });
+
   // P3-F wave S (F5, the owner's DL13 change): a create into a Space, and the Space a listed artifact is in
   it('admits a Space on artifact_create by its id or its name, answers and lists the Space, and says so in the descriptions', () => {
     expect(parseToolArguments('artifact_create', { kind: 'presentation', title: 'Deck', space: 'P3 sitting' })).toEqual({ ok: true, data: { kind: 'presentation', title: 'Deck', space: 'P3 sitting' } });

@@ -550,6 +550,63 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
   });
 });
 
+// ---- P3-F wave S (F14, the owner's obs 2): an artifact the agent names opens with a click ---------------------------
+
+// The show_pane recording with its closing reply rewritten to `text` (its streamed deltas and the whole message both), so
+// the reply names artifacts as links. Sound as askFixture is: the replay plays the engine's frames as given and matches
+// MAWS's writes by kind, and a reply's words are none of them.
+function replyFixture(dir: string, fixture: string, text: string): string {
+  const rows = fixtureRows(fixture).map((row) => ({ ...row, frame: structuredClone(row.frame) as Frame }));
+  const isIn = (k: number, type: string) => rows[k]!.direction === 'in' && rows[k]!.frame.type === type;
+  const event = (k: number) => rows[k]!.frame.event as { type: string; delta?: { type: string; text?: string } };
+  let last = rows.length - 1;
+  while (!(isIn(last, 'assistant') && (rows[last]!.frame.message as { content: { type: string }[] }).content.some((b) => b.type === 'text'))) last--;
+  let start = last;
+  while (!(isIn(start, 'stream_event') && event(start).type === 'content_block_start')) start--;
+  let deltas = 0;
+  for (let k = start + 1; k < last; k++) {
+    const delta = isIn(k, 'stream_event') ? event(k).delta : undefined;
+    if (delta?.type === 'text_delta') delta.text = deltas++ === 0 ? text : '';
+  }
+  for (const block of (rows[last]!.frame.message as { content: { type: string; text?: string }[] }).content) if (block.type === 'text') block.text = text;
+  expect(deltas, `the closing reply of ${fixture} streamed`).toBeGreaterThan(0);
+  const path = join(dir, fixture.slice(fixture.lastIndexOf('/') + 1).replace(/\.jsonl$/, '-reply.jsonl'));
+  writeFileSync(path, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
+
+test('an artifact link in the agent’s reply: a click opens it in the panel’s Artifacts tool, ⌘-click in its main tab, and an id no record answers to opens the not-found notice', async () => {
+  await scene({ titles: ['P3-F: artifact links'] }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id);
+    const { artifact } = value(await invoke(s.page, 'artifacts.create', { kind: 'document', title: 'Linked plan' }));
+    const GONE = '00000000-0000-4000-8000-00000000f14a';
+    await replay(s, id, replyFixture(s.scratch.root, SHOW_PANE, `The plan is [Linked plan](maws-artifact:${artifact.id}); the old one was [Old notes](maws-artifact:${GONE}).`));
+    for (let k = 0; k < 3; k++) await allowNext(s, id); // the recording's three show_pane calls
+    await idle(s, id);
+
+    const chip = (name: string) => s.pane.locator('[data-chip="artifact"]').filter({ hasText: name });
+    await expect(chip('Linked plan')).toHaveAttribute('data-artifact-id', artifact.id);
+    await expect(s.pane.locator('a[href^="maws-artifact:"]'), 'no element carries the href').toHaveCount(0);
+
+    // a click: the panel's Artifacts tool on its record, the transcript still in front
+    await chip('Linked plan').click();
+    await expect(s.panel.locator(`[data-artifact-record="${artifact.id}"]`)).toBeVisible();
+    await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(chip('Linked plan')).toBeVisible();
+
+    // an id no record answers to: the record's not-found notice, as the tool says it
+    await chip('Old notes').click();
+    const gone = s.panel.locator(`[data-artifact-record="${GONE}"]`);
+    await expect(gone.getByText('Artifact not found')).toBeVisible(); // library/copy.ts's goneTitle (the e2e project lists no renderer copy module)
+
+    // ⌘-click: the artifact in a main tab of its own
+    await chip('Linked plan').click({ modifiers: ['Meta'] });
+    await expect(s.page.locator(`[data-region="main"] [data-artifact-tab="${artifact.id}"]`)).toBeVisible();
+    await expect(s.page.locator(`[data-region="main"] [role="tab"][data-tab-id="artifact:${artifact.id}"]`)).toHaveAttribute('aria-selected', 'true');
+  });
+});
+
 // ---- G1 and G7 in the app: E0a's round trip ------------------------------------------------------------------------
 
 test('the SDK MCP round trip: the app answers the engine’s handshake with the seventeen tools and refuses the probe’s own tool', async () => {

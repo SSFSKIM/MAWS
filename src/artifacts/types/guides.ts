@@ -18,12 +18,17 @@ import htmlGuide from './html/SKILL.md?raw';
 import presentationFormat from './presentation/format.md?raw';
 import presentationGuide from './presentation/SKILL.md?raw';
 
+// P3-F wave S (F14, the owner's obs 2): every guide ends under its "Before you finish" with how to name the artifact to
+// the user, a link MAWS's transcript draws as a chip that opens it, so nobody has to ask where it is.
+const LINKED = (guide: string) =>
+  `${guide.trimEnd()}\n\nWhen a message to the user names this artifact, write it as a Markdown link, [its title](maws-artifact:<artifactId>): the user opens it in MAWS with a click. Call show_pane only when the user should see it now.\n`;
+
 export const KIND_GUIDES: Record<ArtifactKind, { guide: string; format: string }> = {
-  document: { guide: documentGuide, format: documentFormat },
-  presentation: { guide: presentationGuide, format: presentationFormat },
-  design: { guide: designGuide, format: designFormat },
-  design_system: { guide: designSystemGuide, format: designSystemFormat },
-  dashboard: { guide: dashboardGuide, format: dashboardFormat },
-  html: { guide: htmlGuide, format: htmlFormat },
-  file: { guide: fileGuide, format: fileFormat },
+  document: { guide: LINKED(documentGuide), format: documentFormat },
+  presentation: { guide: LINKED(presentationGuide), format: presentationFormat },
+  design: { guide: LINKED(designGuide), format: designFormat },
+  design_system: { guide: LINKED(designSystemGuide), format: designSystemFormat },
+  dashboard: { guide: LINKED(dashboardGuide), format: dashboardFormat },
+  html: { guide: LINKED(htmlGuide), format: htmlFormat },
+  file: { guide: LINKED(fileGuide), format: fileFormat },
 };

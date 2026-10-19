@@ -46,4 +46,13 @@ describe('the kinds’ guides and format references', () => {
     for (const name of ['artifact_create', 'artifact_read', 'sinceRevision', 'artifact_edit', 'baseRevision', 'answering', 'artifact_comments', 'artifact_reply', 'artifact_resolve']) expect(guide).toContain(name);
     for (const form of ['^id', '<!-- ^id -->', '<c:ID>', '<chip kind="date"', ':::table', ':::row', ':::callout', ':::pending', 'two to four spaces']) expect(format).toContain(form);
   });
+
+  // P3-F wave S (F14, the owner's obs 2): the guide a create hands the agent says how to name the artifact to the human
+  it('ends every kind’s guide, under Before you finish, with the link the human opens the artifact by', () => {
+    for (const kind of ARTIFACT_KINDS) {
+      const last = KIND_GUIDES[kind].guide.split('\n## ').at(-1)!;
+      expect(last.split('\n')[0], kind).toBe('Before you finish');
+      expect(last, kind).toContain('[its title](maws-artifact:<artifactId>)');
+    }
+  });
 });
