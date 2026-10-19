@@ -13,9 +13,9 @@
 // - The manifest `<linkedDir>/artifacts/.maws-mirror.json` names every file the mirror wrote, per artifact, with the
 //   revision and slug it wrote them at. A rename, a move out of the Space, a delete or an unlink removes exactly those
 //   files; a file at a target name that the manifest does not own is left alone (logged), never overwritten. An
-//   artifact whose revision and slug match its entry, with its files present, is not rewritten. A name that differs
-//   from one the mirror owns by case or Unicode normalization only, and reaches that same file, is that file, so a
-//   rename by case only on a case-insensitive volume keeps it; any other name, an owner's hard link included, is not.
+//   artifact whose revision and slug match its entry, with its files present, is not rewritten. A name that the volume
+//   resolves to the very entry of one the mirror owns (on APFS: by case or Unicode normalization, ß and SS, a final
+//   sigma) is that file, so such a rename keeps it; any other name, an owner's hard link included, is not.
 // - Something at the manifest's path that is not a MAWS manifest (another file, a link, dangling or not) is the
 //   owner's: the directory is refused (logged, as a failing one) and that entry never rewritten or removed.
 // - Two Spaces linked to one directory share its manifest (the desired set is per directory). A directory is known by
@@ -377,6 +377,7 @@ export class LibraryMirror {
     const files = content === null ? {} : this.produce(artifact, content, read.assets);
     const owned = new Set(Object.values(manifest.artifacts).flatMap((other) => other.files));
     const mine = new Set(entry?.files ?? []);
+    const reached = entries(root);
     const written: string[] = [];
     let failure: { error: unknown } | null = null;
     for (const [file, data] of Object.entries(files)) {
@@ -385,8 +386,9 @@ export class LibraryMirror {
         continue;
       }
       const target = join(root, file);
-      // one of this artifact's own names spelled another way (a rename by case only on a case-insensitive volume)
-      const sameAs = mine.has(file) ? undefined : [...mine].find((own) => aliases(root, own, file));
+      // one of this artifact's own names spelled another way (a rename the volume folds to one name: by case only on a
+      // case-insensitive volume, ß to SS on APFS)
+      const sameAs = mine.has(file) ? undefined : [...mine].find((own) => aliases(root, file, own, reached.of));
       if (!mine.has(file) && sameAs === undefined && (owned.has(file) || occupied(target))) {
         this.log(`${artifactId}: ${target} is not the mirror's file; not written`);
         continue;
@@ -402,6 +404,7 @@ export class LibraryMirror {
           written.push(file);
           continue;
         }
+        reached.forget(file, sameAs); // their entry is replaced below
         if (sameAs !== undefined) renameSync(join(root, sameAs), target); // the entry takes the new name's case first
         if (isMirrorCopyFrom(data)) {
           if (!this.copyFrom(root, file, data.copyFrom, artifactId)) continue; // mirrored as nothing: what it had there goes as a leftover
@@ -415,9 +418,12 @@ export class LibraryMirror {
     // The entry names every file of the artifact the mirror has on disk: what it just wrote, and what it no longer
     // produces but could not remove (all of it, after a write that failed half-way). Any failure leaves the entry at
     // revision -1, which no revision matches, so the next change tries again.
+    // P4 (tracker L136): what each name reaches read afresh, the writes done; an old spelling that still reaches what was
+    // written is that file, so its removal would remove it
+    const now = entries(root);
     const leftover: string[] = [];
     for (const file of mine) {
-      if (written.some((done) => done === file || aliases(root, file, done))) continue; // the name now reaches what was written
+      if (written.includes(file) || written.some((done) => aliases(root, file, done, now.of))) continue; // the name now reaches what was written
       if (failure) {
         leftover.push(file);
         continue;
@@ -636,21 +642,44 @@ function isFile(path: string): boolean {
   }
 }
 
-// Two mirror paths that are one directory entry spelled two ways (a case-insensitive, normalization-insensitive volume
-// such as APFS): equal but for case and Unicode normalization (a cheap first test), one file that is not a link (one
-// device and inode, by lstat), and one canonical entry (`realpath`, which spells an alias as the entry's own name but
-// keeps a hard link's own). An owner's hard link under another name, by case only on a case-sensitive volume included,
-// is not an alias; anything that cannot be resolved is not either.
-function aliases(root: string, a: string, b: string): boolean {
-  const folded = (name: string) => name.normalize('NFC').toLowerCase();
-  if (folded(a) !== folded(b)) return false;
+// Two mirror paths that are one directory entry spelled two ways (a volume that folds case or Unicode normalization, as
+// APFS does): one file that is not a link (one device and inode, by `reached`), reached through no link inside the
+// mirror, and one canonical entry (`realpath`, which spells an alias as the entry's own name but keeps a hard link's
+// own). P4 (tracker L136): the volume decides, not a fold of the mirror's own (lowercasing after NFC told ß from SS, a
+// final sigma from σ, a ligature from its letters, each one name on APFS, and no fold matches every volume's). An
+// owner's hard link under another name, by case only on a case-sensitive volume included, is not an alias; anything
+// that cannot be resolved is not either. `a` is read first, so a name that reaches nothing reads no other.
+function aliases(root: string, a: string, b: string, reached: (file: string) => string | undefined): boolean {
+  const entry = reached(a);
+  if (entry === undefined || reached(b) !== entry) return false;
   try {
-    const [first, second] = [lstatSync(join(root, a)), lstatSync(join(root, b))];
-    if (first.isSymbolicLink() || second.isSymbolicLink() || first.dev !== second.dev || first.ino !== second.ino) return false;
-    return realpathSync.native(join(root, a)) === realpathSync.native(join(root, b));
+    return realDirsUnder(root, a) && realDirsUnder(root, b) && realpathSync.native(join(root, a)) === realpathSync.native(join(root, b));
   } catch {
     return false;
   }
+}
+
+// P4 (tracker L136): what each mirror path reaches, by lstat (never followed) once per pass, so comparing every old name
+// with every new one costs a read per name, not per pair: its device and inode, or undefined when nothing is there, a
+// link is, or it cannot be read. `forget` drops names whose entry the pass replaces, read again when next asked.
+function entries(root: string): { of: (file: string) => string | undefined; forget: (...files: (string | undefined)[]) => void } {
+  const read = new Map<string, string | undefined>();
+  const of = (file: string): string | undefined => {
+    if (read.has(file)) return read.get(file);
+    let entry: string | undefined;
+    try {
+      const stat = lstatSync(join(root, file));
+      entry = stat.isSymbolicLink() ? undefined : `${stat.dev}:${stat.ino}`;
+    } catch {
+      entry = undefined;
+    }
+    read.set(file, entry);
+    return entry;
+  };
+  const forget = (...files: (string | undefined)[]): void => {
+    for (const file of files) if (file !== undefined) read.delete(file);
+  };
+  return { of, forget };
 }
 
 // `artifacts/` is made in the linked directory only while that exists: never the linked directory itself.

@@ -209,6 +209,28 @@ describe('the linked-directory mirror (M2)', () => {
     expect(listed()).toEqual([]);
   });
 
+  // P4 (tracker L136): the volume says which names are one entry, not a fold of the mirror's own. On APFS (this Mac's
+  // tmpdir) each pair is one entry that lowercasing after NFC tells apart; on a case-sensitive volume each is two names.
+  it.each([
+    ['Straße', 'STRASSE'],
+    ['οδος', 'οδοσ'], // a final sigma
+    ['ﬁle', 'file'], // a ligature
+  ])('keeps the mirror of an artifact renamed from %s to %s, one name or two on this machine’s filesystem (tracker L136)', async (before, after) => {
+    await startMirror();
+    const space = await linkedSpace();
+    const page = await store().create({ kind: 'html', title: before, spaceId: space.id, content: html('x') }, agent);
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(page)}.html`]);
+
+    await store().update(page.id, { title: after });
+    await mirror!.flush();
+    const renamed = `${mirrorSlug({ id: page.id, title: after })}.html`;
+    expect(listed()).toEqual([MIRROR_MANIFEST, renamed]);
+    expect(read(renamed)).toBe('<p>x</p>');
+    expect(manifest().artifacts[page.id].files).toEqual([renamed]);
+    expect(logs).toEqual([]);
+  });
+
   it('refuses a directory whose manifest path is a link, dangling or not, leaving the link and what it points at alone (fix wave 2)', async () => {
     const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
     try {
@@ -928,6 +950,7 @@ describe('the mirror over a directory that goes away, is relinked or is spelled 
       rmSync(root, { recursive: true, force: true });
     }
   });
+
 });
 
 // P3-F (F10, tracker L142; the owner: "something in real use might have something bigger … production-level product for
