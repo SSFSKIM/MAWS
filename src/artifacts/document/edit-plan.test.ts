@@ -27,3 +27,15 @@ describe('a copied ^id keeps its block', () => {
     expect(liveThreads(doc).has('t7')).toBe(true);
   });
 });
+
+// scalpel-1#3: milestones are the read's outside raw regions only; a raw source (a diagram's) is literal, so text in it
+// shaped like a milestone survives an edit, as it survives the read.
+describe('literal milestone text in a raw source', () => {
+  it('survives a quoted edit and a rewrite of the diagram', () => {
+    const doc = seedDoc({ type: 'doc', content: [{ type: 'diagram', attrs: { id: 'd1', source: 'graph TD\n  A["<c:label>"] --> B' } }] }, {});
+    applyEdit(doc, [{ op: 'replace_text', block: 'd1', old: '--> B', new: '--> C' }]);
+    expect(pmOf(doc, 'd1').attrs.source).toBe('graph TD\n  A["<c:label>"] --> C');
+    applyEdit(doc, [{ op: 'replace_block', id: 'd1', markdown: ':::diagram\ngraph TD\n  A["<c:label>"] --> D\n:::\n^d1' }]);
+    expect(pmOf(doc, 'd1').attrs.source).toBe('graph TD\n  A["<c:label>"] --> D');
+  });
+});

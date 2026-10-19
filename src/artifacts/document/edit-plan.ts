@@ -484,9 +484,10 @@ class Planner {
     return keepUnwrittenWhitespace(old, unwrap(this.parse(markdown)[0]), neu);
   }
 
+  /** The agent's markdown as blocks; the parse drops the read's milestones outside raw regions (a raw source is literal). */
   private parse(markdown: string): PMNode[] {
     try {
-      return this.md.parse(stripMilestones(markdown), { generateID: this.generateID });
+      return this.md.parse(markdown, { generateID: this.generateID });
     } catch (error) {
       return this.invalid(`the markdown does not parse: ${error instanceof Error ? error.message : String(error)}`);
     }
