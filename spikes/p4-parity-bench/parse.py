@@ -17,7 +17,8 @@ Definitions (stated here so the result cannot be argued after the run):
   `result.ttft_ms`; else the transcript estimate (the first request's sent time plus its first-byte estimate).
 - send to edit landed: the `tool_result` record of the turn's first successful landing call (the arm's edit tools:
   MAWS `artifact_edit` and `artifact_publish`; Desktop `Edit`, `Write`, `MultiEdit`, `Artifact`, Cowork's
-  `update_artifact`; a manifest may name its own).
+  `update_artifact`; a manifest may name its own, the operations of a tool that also reads (`landingActions`) and the
+  artifact's file names (`landingFiles`: a call counts only when its `file_path` or `path` names one of them)).
 - send to turn end: the turn's last main-thread assistant record (the model's last block; Stop hooks after it are
   reported apart).
 - Per request: first-byte wait (journal `ttft_ms`, else relay `firstByteSeconds`, else the transcript estimate: the
@@ -28,17 +29,22 @@ Definitions (stated here so the result cannot be argued after the run):
   end to the last tool_result of the request; the journal adds MAWS's own `tools/call` to `control_response` span).
 - The symmetric tool span both apps have: tool_use record to tool_result record (hold, permission check and execution).
 - Cache state: the turn's first request reading at least half its context from cache is warm, else cold.
+- Thinking where the request's type is not recorded (no `api-request` records): seen when a response carried a thinking
+  block or thinking tokens; never read as a type.
 
 Subcommands (run with `python3 -I`):
   turns  <transcript> [--journal J] [--relay LOG ...] [--all]   per-turn table (validation against the grounding)
   edit   <manifest.json>                                        one repetition as JSON
-  report <run dir or manifest> ... [--json OUT]                 per edit, per cell (medians and spread), the verdict
+  report <run dir or manifest> ... [--json OUT] [--judge B5=cowork ...]
+                                                                per edit, per cell (medians and spread), the verdict
 
-A manifest (one per repetition; written by `e2e/bench-edit-live.spec.ts` for MAWS and `desktop-driver.js` for
-Desktop) is JSON: {arm: "maws"|"desktop", task: "B1"|"B3"|"B5"|"B7", rep, kind, host, transcript, journal?, relay?,
-audit?, landing?, sessionId?, promptMatch?, startedAt, load: {before: [1,5,15], after: [1,5,15]}, check: {pass,
-detail}, pin: null | {model, effort}, measurementOnly: bool, prompt}. Relative paths resolve against the manifest's
-directory. The parser prints aggregates only, never message content.
+A manifest (one per repetition attempt; written by `e2e/bench-edit-live.spec.ts` for MAWS and `desktop-prep.py after`
+for Desktop) is JSON: {arm: "maws"|"desktop", task: "B1"|"B3"|"B5"|"B7", rep, attempt, surface?: "code"|"cowork" (MAWS's
+is "maws"), kind, host, transcript, journal?, relay?, audit?, landing?, landingActions?, landingFiles?, sessionId?,
+promptMatch?, startedAt, load: {before: [1,5,15], after: [1,5,15]}, check: {pass, detail}, humanStop?: null | reason,
+seedCheck?: {pass, detail}, pin: null | {model, effort}, measurementOnly: bool, prompt}. Relative paths resolve against
+the manifest's directory. A cell is a task in an arm on a surface. What makes a repetition valid is `valid()`; what
+voids a verdict is VOIDING. The parser prints aggregates only, never message content.
 """
 import argparse
 import glob
@@ -116,14 +122,19 @@ def parse_transcript(path):
             continue
         if t == 'assistant' and (r.get('message') or {}).get('content') is not None:
             m = r['message']
-            rec = dict(t=ts(r['timestamp']), mid=m.get('id'), ref=r.get('requestRef'), rid=r.get('requestId'), usage=m.get('usage') or {},
+            usage = m.get('usage') or {}
+            rec = dict(t=ts(r['timestamp']), mid=m.get('id'), ref=r.get('requestRef'), rid=r.get('requestId'), usage=usage,
                        blocks=[b.get('type') for b in m.get('content', [])], thinkMs=r.get('thinkingDurationMs'), model=m.get('model'),
-                       requestedModel=r.get('requestedModel'), effort=r.get('effort'), thinkingDisplay=r.get('thinkingDisplay'))
+                       requestedModel=r.get('requestedModel'), effort=r.get('effort'), thinkingDisplay=r.get('thinkingDisplay'),
+                       advisor=r.get('advisorModel'), iterTypes=[i.get('type') for i in usage.get('iterations') or [] if isinstance(i, dict) and i.get('type') != 'message'])
             cur['asst'].append(rec)
             for b in m.get('content', []):
                 if b.get('type') == 'tool_use':
+                    inp = b.get('input') if isinstance(b.get('input'), dict) else {}
+                    path = inp.get('file_path') or inp.get('path')
                     cur['uses'][b['id']] = dict(id=b['id'], name=b['name'], t=rec['t'], key=rec['ref'] or rec['rid'] or rec['mid'], inChars=len(json.dumps(b.get('input', {}))),
-                                                action=next((b['input'][k] for k in ('action', 'command', 'operation', 'type') if isinstance(b.get('input'), dict) and isinstance(b['input'].get(k), str)), None))
+                                                action=next((inp[k] for k in ('action', 'command', 'operation', 'type') if isinstance(inp.get(k), str)), None),
+                                                file=os.path.basename(path) if isinstance(path, str) else None)
         elif t == 'user':
             c = (r.get('message') or {}).get('content')
             if isinstance(c, list):
@@ -230,7 +241,7 @@ def parse_relay(paths, session_id):
 
 # ---- one turn -------------------------------------------------------------------------------------------------------
 
-def measure(turn, api, journal=None, relay=None, audit=None, landing=DEFAULT_LANDING, landing_actions=None):
+def measure(turn, api, journal=None, relay=None, audit=None, landing=DEFAULT_LANDING, landing_actions=None, landing_files=None):
     send = turn['send']
     reqs = {}
     order = []
@@ -303,6 +314,8 @@ def measure(turn, api, journal=None, relay=None, audit=None, landing=DEFAULT_LAN
                          out=u.get('output_tokens') or 0, think=((u.get('output_tokens_details') or {}).get('thinking_tokens') or 0),
                          model=params.get('model') or recs[0]['model'], effort=(params.get('output_config') or {}).get('effort') or recs[0]['effort'],
                          thinking=(params.get('thinking') or {}).get('type'), requestedModel=recs[0]['requestedModel'],
+                         thinkingBlocks=any(b in ('thinking', 'redacted_thinking') for r in recs for b in r['blocks']),
+                         advisors=sorted({r['advisor'] for r in recs if r['advisor']}), iterationTypes=sorted({x for r in recs for x in r['iterTypes'] if x}),
                          serviceTier=u.get('service_tier'), speed=u.get('speed'), tools=[short(x['name']) for x in tools],
                          relayJoined=ro is not None, account=(ro or {}).get('account')))
         prev_end = max([last_rec] + ends)
@@ -316,6 +329,8 @@ def measure(turn, api, journal=None, relay=None, audit=None, landing=DEFAULT_LAN
         if x['name'] not in names:
             continue
         if landing_actions and x['name'] in landing_actions and x['action'] not in landing_actions[x['name']]:
+            continue
+        if landing_files and x['file'] not in landing_files:  # an edit of another file is not the artifact's edit
             continue
         landing_calls += 1
         res = turn['results'].get(x['id'])
@@ -357,7 +372,12 @@ def measure(turn, api, journal=None, relay=None, audit=None, landing=DEFAULT_LAN
                    read=sum(r['cacheRead'] for r in rows), write=sum(r['cacheWrite'] for r in rows)),
         models=sorted({r['model'] for r in rows if r['model']}), requestedModels=sorted({r['requestedModel'] for r in rows if r['requestedModel']}),
         efforts=sorted({r['effort'] for r in rows if r['effort']}),
-        thinking=sorted({r['thinking'] for r in rows if r['thinking']}), serviceTiers=sorted({r['serviceTier'] for r in rows if r['serviceTier']}),
+        thinking=sorted({r['thinking'] for r in rows if r['thinking']}),
+        # Thinking as the records show it where the request's type is not recorded (a transcript without api-request records):
+        # it ran when a response carried a thinking block or thinking tokens; nothing here says it was off.
+        thinkingSeen='thinking blocks present' if any(r['thinkingBlocks'] for r in rows) else 'thinking tokens present' if any(r['think'] for r in rows) else None,
+        advisorModels=sorted({a for r in rows for a in r['advisors']}), iterationTypes=sorted({x for r in rows for x in r['iterationTypes']}),
+        serviceTiers=sorted({r['serviceTier'] for r in rows if r['serviceTier']}),
         speeds=sorted({r['speed'] for r in rows if r['speed']}), relayJoined=sum(1 for r in rows if r['relayJoined']),
         accounts=sorted({r['account'] for r in rows if r['account']}), sources=sorted(sources),
         perRequest=[{k: (rnd(v) if isinstance(v, float) and k != 'sent' and k != 'end' else v) for k, v in r.items() if k not in ('sent', 'end', 'account')} for r in rows],
@@ -391,17 +411,38 @@ def resolve(base, p):
     return p if os.path.isabs(p) else os.path.join(base, p)
 
 
-def audit_result(path, session_id):
+def audit_result(path, session_id, since):
+    """The `result` that closed the measured turn: the session's first written at or after the turn's send (an audit holds
+    one per turn)."""
     for r in jsonl(path):
         if r.get('type') == 'result' and (session_id is None or r.get('session_id') == session_id):
-            return r
+            at = r.get('_audit_timestamp')
+            if isinstance(at, str) and ts(at) >= since:
+                return r
     return None
 
 
+def missing_records(m, base):
+    """What the manifest names that is not on disk, or no transcript named at all; such a row measures nothing."""
+    if not m.get('transcript'):
+        return 'no transcript in the manifest'
+    named = [('transcript', m['transcript'])] + [(k, m[k]) for k in ('journal', 'audit') if m.get(k)] + [('relay log', p) for p in m.get('relay') or []]
+    gone = ['%s %s' % (k, resolve(base, p)) for k, p in named if not os.path.isfile(resolve(base, p))]
+    return 'records missing: ' + ', '.join(gone) if gone else None
+
+
 def edit_row(manifest_path):
-    m = json.load(open(manifest_path, encoding='utf-8'))
+    with open(manifest_path, encoding='utf-8') as f:
+        m = json.load(f)
     base = os.path.dirname(os.path.abspath(manifest_path))
+    row = dict(arm=m['arm'], task=m['task'], rep=m['rep'], attempt=m.get('attempt') or 1, surface=m.get('surface') or ('maws' if m['arm'] == 'maws' else 'unknown'),
+               kind=m.get('kind'), host=m.get('host'), startedAt=m.get('startedAt'), manifest=os.path.relpath(manifest_path), sessionId=None, entrypoint=None,
+               engine=None, route=None, load=m.get('load'), check=m.get('check'), pin=m.get('pin'), measurementOnly=bool(m.get('measurementOnly')),
+               humanStop=m.get('humanStop'), seedCheck=m.get('seedCheck'), measured=None, error=missing_records(m, base))
+    if row['error']:
+        return row
     meta, api, turns = parse_transcript(resolve(base, m['transcript']))
+    row.update(sessionId=meta['sessionId'], entrypoint=meta['entrypoint'], engine=meta['version'])
     match = m.get('promptMatch')  # the task's words after its {ref}, verbatim in both apps' prompts
     turn = None
     for t in turns:
@@ -409,18 +450,23 @@ def edit_row(manifest_path):
         if match is None or match in p:
             turn = t
             break
+    if turn is None:
+        row['error'] = 'no turn matched the prompt in the transcript'
+        return row
     journal = parse_journal(resolve(base, m['journal'])) if m.get('journal') else None
     relay = parse_relay([resolve(base, p) for p in m.get('relay') or []], meta['sessionId']) if m.get('relay') else None
-    audit = audit_result(resolve(base, m['audit']), meta['sessionId']) if m.get('audit') else None
+    audit = audit_result(resolve(base, m['audit']), meta['sessionId'], turn['send']) if m.get('audit') else None
     landing = tuple(m.get('landing') or DEFAULT_LANDING)
-    row = measure(turn, api, journal, relay, audit, landing, m.get('landingActions')) if turn else None
+    x = measure(turn, api, journal, relay, audit, landing, m.get('landingActions'), m.get('landingFiles'))
     route = (journal or {}).get('route')
     if route is None and relay is not None:
-        route = 'gateway' if row and row['relayJoined'] else 'direct (no relay rows for the session)'
-    return dict(arm=m['arm'], task=m['task'], rep=m['rep'], kind=m.get('kind'), host=m.get('host'), startedAt=m.get('startedAt'),
-                manifest=os.path.relpath(manifest_path), sessionId=meta['sessionId'], entrypoint=meta['entrypoint'], engine=meta['version'],
-                route=route, load=m.get('load'), check=m.get('check'), pin=m.get('pin'), measurementOnly=bool(m.get('measurementOnly')),
-                measured=row, error=None if row else 'no turn matched the prompt in the transcript')
+        route = 'gateway' if x and x['relayJoined'] else 'direct (no relay rows for the session)'
+    row.update(route=route, measured=x, error=None if x else 'the matched turn has no assistant record')
+    return row
+
+
+def label(r):
+    return 'r%s' % r['rep'] if r['attempt'] == 1 else 'r%sa%d' % (r['rep'], r['attempt'])
 
 
 # ---- cells and the verdict ------------------------------------------------------------------------------------------
@@ -435,15 +481,27 @@ def spread(vals):
 
 MEASURES = ('sendToEditLanded', 'sendToFirstToken', 'sendToTurnEnd', 'requests', 'contextFirst', 'firstByteWait', 'generation',
             'serverHold', 'toolExec', 'mawsExec', 'toolSpanUnion', 'outputTokens', 'thinkingTokens')
+# What voids a task's verdict when both arms record it and the two differ (findings.txt §1); a control one arm's records
+# lack is compared on nothing and said so beside the verdict.
+VOIDING = (('models', 'model'), ('efforts', 'effort'), ('thinking', 'thinking'))
 
 
 def valid(r):
-    """A repetition counts when its turn was found, its edit landed and its checker passed."""
+    """A repetition counts when its records are there and its turn was found; the turn ran in auto mode with no human stop;
+    its edit landed and its checker passed; and, where its seed was rebuilt (a Cowork deck), the seed was the bench's."""
     why = []
-    if r['measured'] is None:
+    x = r['measured']
+    if x is None:
         why.append(r['error'])
-    elif r['measured']['sendToEditLanded'] is None:
-        why.append('no landing call succeeded')
+    else:
+        if x['sendToEditLanded'] is None:
+            why.append('no landing call succeeded')
+        if x['permissionMode'] != 'auto':
+            why.append('permission mode %s, not auto' % x['permissionMode'])
+    if r.get('humanStop'):
+        why.append('a human stop: %s' % r['humanStop'])
+    if r.get('seedCheck') is not None and not r['seedCheck'].get('pass'):
+        why.append("the seed was not the bench's: %s" % r['seedCheck'].get('detail'))
     if not (r.get('check') or {}).get('pass'):
         why.append('checker: %s' % ((r.get('check') or {}).get('detail') or 'not passed'))
     return why
@@ -452,49 +510,76 @@ def valid(r):
 def cells(rows):
     out = {}
     for r in rows:
-        key = (r['task'], r['arm'])
-        c = out.setdefault(key, dict(task=r['task'], arm=r['arm'], reps=[], excluded=[]))
+        key = (r['task'], r['arm'], r['surface'])
+        c = out.setdefault(key, dict(task=r['task'], arm=r['arm'], surface=r['surface'], reps=[], excluded=[]))
         why = valid(r)
-        (c['excluded'] if why else c['reps']).append(r if not why else dict(rep=r['rep'], why=why))
+        (c['excluded'] if why else c['reps']).append(r if not why else dict(rep=label(r), why=why))
     for c in out.values():
         reps = c['reps']
         c['measures'] = {k: spread([x['measured'][k] for x in reps]) for k in MEASURES}
         c['controls'] = dict(models=sorted({m for x in reps for m in x['measured']['models']}),
                              requestedModels=sorted({m for x in reps for m in x['measured']['requestedModels']}), efforts=sorted({e for x in reps for e in x['measured']['efforts']}),
-                             thinking=sorted({e for x in reps for e in x['measured']['thinking']}), routes=sorted({str(x['route']) for x in reps}),
+                             thinking=sorted({e for x in reps for e in x['measured']['thinking']}), thinkingSeen=sum(1 for x in reps if x['measured']['thinkingSeen']),
+                             advisorModels=sorted({a for x in reps for a in x['measured']['advisorModels']}),
+                             iterationTypes=sorted({t for x in reps for t in x['measured']['iterationTypes']}), routes=sorted({str(x['route']) for x in reps}),
                              engines=sorted({str(x['engine']) for x in reps}), entrypoints=sorted({str(x['entrypoint']) for x in reps}),
                              permissionModes=sorted({str(x['measured']['permissionMode']) for x in reps}),
                              cache=dict(cold=sum(1 for x in reps if x['measured']['cache']['state'] == 'cold'), warm=sum(1 for x in reps if x['measured']['cache']['state'] == 'warm')),
                              load1=spread([((x.get('load') or {}).get('before') or [None])[0] for x in reps]),
                              pins=sorted({json.dumps(x['pin']) for x in reps}), measurementOnly=any(x['measurementOnly'] for x in reps),
                              kinds=sorted({str(x['kind']) for x in reps}), hosts=sorted({str(x['host']) for x in reps}))
-        c['reps'] = [x['rep'] for x in reps]
+        c['reps'] = [label(x) for x in reps]
     return out
 
 
-def verdicts(cs):
+def verdicts(cs, judge=None):
+    """Per task: MAWS's cell against the Desktop cell of its one surface, or of the surface `judge` names for the task when
+    Desktop ran it on more than one; the others are reported beside."""
+    judge = judge or {}
     out = []
     for task in TASKS:
-        m, d = cs.get((task, 'maws')), cs.get((task, 'desktop'))
-        v = dict(task=task, verdict=None, ratio=None, why=[])
-        if d is None:
+        m = next((c for c in cs.values() if c['task'] == task and c['arm'] == 'maws'), None)
+        ds = {c['surface']: c for c in cs.values() if c['task'] == task and c['arm'] == 'desktop'}
+        v = dict(task=task, verdict=None, ratio=None, surface=None, why=[], beside=[])
+        surface = next(iter(ds)) if len(ds) == 1 else judge.get(task)
+        if not ds:
             v['verdict'] = 'no verdict: no Desktop repetitions (a kind Desktop lacks reports its components alone)'
         elif m is None:
             v['verdict'] = 'no verdict: no MAWS repetitions'
+        elif surface is None:
+            v['verdict'] = 'no verdict: Desktop ran on more than one surface (%s); name the judged one (--judge %s=<surface>)' % (', '.join(sorted(ds)), task)
+        elif surface not in ds:
+            v['verdict'] = 'no verdict: the judged surface %s has no Desktop repetitions (Desktop ran on %s)' % (surface, ', '.join(sorted(ds)))
         else:
+            d = ds[surface]
+            v['surface'] = surface
             mm, dm = m['measures']['sendToEditLanded'], d['measures']['sendToEditLanded']
             if not mm or not dm or mm['n'] < MIN_REPS or dm['n'] < MIN_REPS:
                 v['verdict'] = 'no verdict yet: fewer than %d valid repetitions (MAWS %d, Desktop %d)' % (MIN_REPS, mm['n'] if mm else 0, dm['n'] if dm else 0)
             else:
-                for k in ('models', 'efforts', 'thinking'):
+                for k, name in VOIDING:
+                    mv, dv = m['controls'][k], d['controls'][k]
+                    if mv and dv and mv != dv:
+                        v['why'].append('controls differ on %s: MAWS %s, Desktop %s' % (name, mv, dv))
+                    for arm, vals, c in (('MAWS', mv, m), ('Desktop', dv, d)):
+                        if not vals:
+                            seen = ' (thinking seen in %d of %d repetitions)' % (c['controls']['thinkingSeen'], len(c['reps'])) if k == 'thinking' else ''
+                            v['beside'].append("%s not in %s's records%s" % (name, arm, seen))
+                for k, name in (('advisorModels', 'advisor model'), ('iterationTypes', 'non-message iterations')):
                     if m['controls'][k] != d['controls'][k]:
-                        v['why'].append('controls differ on %s: MAWS %s, Desktop %s' % (k, m['controls'][k], d['controls'][k]))
+                        v['beside'].append('%s: MAWS %s, Desktop %s (not voiding)' % (name, m['controls'][k], d['controls'][k]))
                 v['ratio'] = rnd(mm['median'] / dm['median'], 3)
                 if v['why']:
                     v['verdict'] = 'no verdict: the controls did not hold'
                 else:
                     v['verdict'] = 'Desktop faster' if v['ratio'] > THRESHOLD else 'parity'
                 v['measurementOnly'] = m['controls']['measurementOnly'] or d['controls']['measurementOnly']
+        for s, c in sorted(ds.items()):
+            if s != v['surface']:
+                med = (c['measures']['sendToEditLanded'] or {}).get('median')
+                mmed = ((m or {}).get('measures', {}).get('sendToEditLanded') or {}).get('median')
+                v['beside'].append('Desktop on %s, not judged: median %s over %d valid (MAWS/that %s)' % (
+                    s, fmt(med), len(c['reps']), fmt(rnd(mmed / med, 3)) if med and mmed else '-'))
         out.append(v)
     return out
 
@@ -514,25 +599,26 @@ def fmt(x):
 
 
 def print_report(rows, cs, vs):
-    print('per edit: arm task rep | landed first-token turn-end | req ctx0 | first-byte gen hold exec maws | out think | cache | route load1 | check')
-    for r in sorted(rows, key=lambda r: (r['task'], r['rep'], r['arm'])):
+    print('per edit: arm task rep surface | landed first-token turn-end | req ctx0 | first-byte gen hold exec maws | out think | cache | route load1 | check')
+    for r in sorted(rows, key=lambda r: (r['task'], r['rep'], r['attempt'], r['arm'], r['surface'])):
         x = r['measured'] or {}
-        print('%-7s %s %2s | %6s %6s %6s | %2s %7s | %5s %5s %5s %5s %5s | %5s %5s | %-4s | %s %s | %s' % (
-            r['arm'], r['task'], r['rep'], fmt(x.get('sendToEditLanded')), fmt(x.get('sendToFirstToken')), fmt(x.get('sendToTurnEnd')),
+        print('%-7s %s %-5s %-6s | %6s %6s %6s | %2s %7s | %5s %5s %5s %5s %5s | %5s %5s | %-4s | %s %s | %s%s' % (
+            r['arm'], r['task'], label(r), r['surface'], fmt(x.get('sendToEditLanded')), fmt(x.get('sendToFirstToken')), fmt(x.get('sendToTurnEnd')),
             fmt(x.get('requests')), fmt(x.get('contextFirst')), fmt(x.get('firstByteWait')), fmt(x.get('generation')), fmt(x.get('serverHold')),
             fmt(x.get('toolExec')), fmt(x.get('mawsExec')), fmt(x.get('outputTokens')), fmt(x.get('thinkingTokens')),
             (x.get('cache') or {}).get('state', '-'), r['route'], fmt(((r.get('load') or {}).get('before') or [None])[0]),
-            'pass' if (r.get('check') or {}).get('pass') else 'FAIL'))
+            'pass' if (r.get('check') or {}).get('pass') else 'FAIL', '' if not valid(r) else ' (excluded: %s)' % '; '.join(map(str, valid(r)))))
     print('\ncells (median [min..max], n): send to edit landed | first token | turn end | requests | output tokens')
-    for (task, arm), c in sorted(cs.items()):
+    for (task, arm, surface), c in sorted(cs.items()):
         f = lambda k: '-' if not c['measures'][k] else '%s [%s..%s] n=%d' % (c['measures'][k]['median'], c['measures'][k]['min'], c['measures'][k]['max'], c['measures'][k]['n'])
-        print('%s %-7s | %s | %s | %s | %s | %s | controls %s%s' % (task, arm, f('sendToEditLanded'), f('sendToFirstToken'), f('sendToTurnEnd'), f('requests'),
-                                                                       f('outputTokens'), json.dumps({k: c['controls'][k] for k in ('models', 'efforts', 'routes', 'cache')}),
-                                                                       '; excluded %s' % c['excluded'] if c['excluded'] else ''))
+        print('%s %-7s %-6s | %s | %s | %s | %s | %s | controls %s%s' % (task, arm, surface, f('sendToEditLanded'), f('sendToFirstToken'), f('sendToTurnEnd'), f('requests'),
+                                                                             f('outputTokens'), json.dumps({k: c['controls'][k] for k in ('models', 'efforts', 'thinking', 'advisorModels', 'routes', 'cache')}),
+                                                                             '; excluded %s' % c['excluded'] if c['excluded'] else ''))
     print('\nverdict (threshold %.1f x, at least %d repetitions per cell):' % (THRESHOLD, MIN_REPS))
     for v in vs:
-        print('%s: %s%s%s%s' % (v['task'], v['verdict'], '' if v['ratio'] is None else ' (MAWS/Desktop median %.3f)' % v['ratio'],
-                                ' [measurement-only]' if v.get('measurementOnly') else '', '; ' + '; '.join(v['why']) if v['why'] else ''))
+        print('%s: %s%s%s%s%s%s' % (v['task'], v['verdict'], ' (Desktop on %s)' % v['surface'] if v['surface'] else '',
+                                    '' if v['ratio'] is None else ' (MAWS/Desktop median %.3f)' % v['ratio'], ' [measurement-only]' if v.get('measurementOnly') else '',
+                                    '; ' + '; '.join(v['why']) if v['why'] else '', ''.join('\n    beside: %s' % b for b in v['beside'])))
 
 
 def main(argv):
@@ -550,6 +636,7 @@ def main(argv):
     c = sub.add_parser('report')
     c.add_argument('paths', nargs='+')
     c.add_argument('--json')
+    c.add_argument('--judge', action='append', default=[], metavar='TASK=SURFACE', help="the Desktop surface judged for a task Desktop ran on more than one (B5=cowork)")
     args = ap.parse_args(argv)
     if args.cmd == 'turns':
         meta, api, turns = parse_transcript(args.transcript)
@@ -573,16 +660,24 @@ def main(argv):
                 fmt(r['toolExec']), fmt(r['mawsExec']), r['outputTokens'], r['thinkingTokens'], min(ctx) // 1000, max(ctx) // 1000, r['cache']['state'],
                 '/'.join(r['efforts']), ', '.join(r['sources']), ' → '.join(x['name'].replace('artifact_', '') for x in r['tools'])))
         if args.json:
-            json.dump(out, open(args.json, 'w'), indent=1)
+            with open(args.json, 'w', encoding='utf-8') as f:
+                json.dump(out, f, indent=1)
     elif args.cmd == 'edit':
         print(json.dumps(edit_row(args.manifest), indent=1))
     else:
+        judge = {}
+        for spec in args.judge:
+            task, _, surface = spec.partition('=')
+            if task not in TASKS or not surface:
+                ap.error('--judge takes TASK=SURFACE, e.g. B5=cowork, not %r' % spec)
+            judge[task] = surface
         rows = [edit_row(p) for p in collect(args.paths)]
         cs = cells(rows)
-        vs = verdicts(cs)
+        vs = verdicts(cs, judge)
         print_report(rows, cs, vs)
         if args.json:
-            json.dump(dict(rows=rows, cells=[dict(c) for c in cs.values()], verdicts=vs, threshold=THRESHOLD, minReps=MIN_REPS), open(args.json, 'w'), indent=1, default=str)
+            with open(args.json, 'w', encoding='utf-8') as f:
+                json.dump(dict(rows=rows, cells=[dict(c) for c in cs.values()], verdicts=vs, judge=judge, threshold=THRESHOLD, minReps=MIN_REPS), f, indent=1, default=str)
 
 
 if __name__ == '__main__':
