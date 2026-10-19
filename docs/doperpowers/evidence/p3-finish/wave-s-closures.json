@@ -1,0 +1,10 @@
+{
+  "recordedAt": "2026-10-19T16:41:53Z",
+  "rule": "rows closed by P3-F wave S fixes, removed from the tracker as M1-record and M4 removed closed rows; their text is kept here verbatim",
+  "rows": {
+    "L142": {
+      "closedBy": "P3-F wave S F10 on the owner's ruling (\"fix it\"): 4bce76e3f (an APFS clone for a File artifact over the cap), 542a69459 and eb1f90cbf (a flagged source refuses the clone, read through a link); residual S-MIRROR-COPY-CAP",
+      "row": "| 2026-10-14 | P3-L (landing) | Files over 64 MiB are mirrored as nothing (the executor's cap). | L's final hand-back; `library/mirror`. | The owner's call on the cap or a streamed copy; a dated line. Owner: P3-F. |"
+    }
+  }
+}

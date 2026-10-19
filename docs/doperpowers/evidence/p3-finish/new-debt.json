@@ -431,6 +431,14 @@
       "owner": "P4 / edit-speed benchmark (ruled by the owner, first in line)",
       "row": "| 2026-10-19 | P4 edit-speed benchmark, ruled by the owner and first in line (MAWS against Claude Desktop) | Agent edits felt very slow at the sitting. The owner: \"extremely slow … we need some kind of benchmark or a parity verification.\" The sitting's split: model time 21 to 77 s per turn at load 108 to 126; MAWS tool time 0 to 4 s except the deck's `artifact_publish` (14 s; 16 s send-to-answer at 09:33:39-09:33:55Z) and `artifact_reply` (11 s). | owner-results R.3 second irritation; `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 79; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) rows R.3:2, c79. | Closes when the same tasks run in MAWS and in Claude Desktop with the same model and effort on an idle host, the result split into model time and tool time, and the improvements it names are routed (the deck's publish and reply first on the tool-time side). Owner: P4, first in line. |",
       "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-MIRROR-COPY-CAP",
+      "logged": "2026-10-19T16:41:53Z",
+      "bin": "defer",
+      "owner": "P4 / library mirror",
+      "row": "| 2026-10-19 | P4 library mirror (a File artifact over 64 MiB that cannot be cloned is mirrored as nothing) | The owner ruled the 64 MiB mirror cap \"fix it\" (\"something in real use might have something bigger, so I would say fix it … production-level product for general use\"). Wave S (4bce76e3f, 542a69459) mirrors a File artifact over the cap by an APFS clone (`/bin/cp -c`, no shell, 2 s timeout) when the source is a regular file with no BSD flags on the same APFS volume as the linked folder; Node's `COPYFILE_FICLONE_FORCE` throws ENOSYS on macOS (Node 22, Electron 44's Node 24), so it cannot serve. Still mirrored as nothing, with a log line: a file over the cap on another volume or a non-APFS disk (exFAT, HFS+, SMB), a flagged file (a Finder lock), or a failed or timed-out clone. | P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row R.1:L142; the C2 worker's clone check on this Mac and the independent review of 4bce76e3f (the locked-file temp, fixed by 542a69459). | Closes when such a file is mirrored whole by an async or chunked copy outside the store barrier that never blocks the engine host's loop, keeping temp-then-rename, 0o444, the never-through-a-link rule and the failure contract (no temp left, the entry at revision -1), with a test that a forced clone refusal still mirrors a file over the cap whole. Constraint: the mirror's synchronous write path holds no unbounded buffer and runs no unbounded copy in the engine host. Owner: P4. |",
+      "source": "P3-F wave S, the residual of L142"
     }
   ]
 }
