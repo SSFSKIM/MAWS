@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createDesignSystemAdapter, readOrigin, writeSystem } from '@artifacts/design-system/model'; // P4 W1 (L277)
 import type { KindAdapter } from '@artifacts/host';
+import { defaultSystem } from '@artifacts/types/design_system/defaults'; // P4 W1 (L277)
 import { applyV1, applyV2, canonicalV2, contentIdsOf, decodeMap, diffV1, idAt, insertedBy, newDoc, stateV2, stateVector, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -13,6 +15,21 @@ import { restoreArtifact } from './restore';
 import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
 import { ArtifactStore, AUTO_EVERY_MS, AUTO_IDLE_MS, type ArtifactChanged } from './store';
+
+// P4 (W1, L248): one step run just before `statSync` of a given path, where an outside actor could remove the entry
+const fsRace = vi.hoisted(() => ({ beforeStat: null as { path: string; run: () => void } | null }));
+vi.mock('node:fs', async (original) => {
+  const actual = await original<typeof import('node:fs')>();
+  const statSync = ((...args: Parameters<typeof actual.statSync>) => {
+    const hook = fsRace.beforeStat;
+    if (hook !== null && String(args[0]) === hook.path) {
+      fsRace.beforeStat = null;
+      hook.run();
+    }
+    return actual.statSync(...args);
+  }) as typeof actual.statSync;
+  return { ...actual, default: { ...actual, statSync }, statSync };
+});
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -371,6 +388,25 @@ describe('ArtifactStore: duplicate (Decision Log 23b)', () => {
     expect(rootText(copy.id)).toBe('first');
     expect(store.listAssets(copy.id)).toHaveLength(1);
     expect(store.listVersions(copy.id).map((v) => v.kind)).toEqual(['import']);
+  });
+});
+
+describe('ArtifactStore: a duplicate’s origin (P4 W1, tracker 2026-10-19 L277)', () => {
+  // The kind's copy hook runs in the copy's own write: a design system's copy names the system it was copied from, its
+  // route and key kept (a copy of the house system still resolves by the `maws` key); the source is unchanged
+  it('names the source of a duplicated design system in its origin, keeping the route and key, a version’s copy too', async () => {
+    reopen([createDesignSystemAdapter()]);
+    const origin = { route: 'default' as const, key: 'maws', at: now };
+    const house = await store.create({ kind: 'design_system', title: 'MAWS', initial: (doc) => void writeSystem(doc, defaultSystem('maws')!.files, origin, { name: 'MAWS' }) }, human);
+    const v1 = (await store.createVersion(house.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    const copy = await store.duplicate(house.id, {}, human);
+    expect(readOrigin(service.live(copy.id))).toEqual({ ...origin, copiedFrom: 'MAWS' });
+    expect(readOrigin(service.live(house.id))).toEqual(origin);
+    await store.update(house.id, { title: 'House' });
+    const old = await store.duplicate(house.id, { versionId: v1, title: 'Mine' }, human);
+    expect(readOrigin(service.live(old.id))).toEqual({ ...origin, copiedFrom: 'House' });
+    const again = await store.duplicate(copy.id, {}, human);
+    expect(readOrigin(service.live(again.id))).toEqual({ ...origin, copiedFrom: 'Copy of MAWS' });
   });
 });
 
@@ -1168,6 +1204,55 @@ describe('ArtifactStore: maintenance and thinning (Decision Log 5, 8)', () => {
     expect(existsSync(inPlace)).toBe(true);
     expect(store.contentRef(file.id).path).toBe(inPlace);
   });
+
+  // P4 (W1, tracker 2026-10-19 L248): an outside actor in the data directory never ends the pass early: a plain file
+  // where an artifact's tmp/ would be (ENOTDIR) skips that artifact, an entry gone between the listing and its stat
+  // (ENOENT) skips that entry, and the rest of the sweep and the pass (its last run) go on
+  const agedStaged = (artifactId: string) => {
+    const path = join(dir, artifactId, 'tmp', randomUUID());
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, 'bytes');
+    utimesSync(path, (now - DAY) / 1000, (now - DAY) / 1000);
+    return path;
+  };
+  it('collects the other staged files and finishes the pass past a plain file named tmp', async () => {
+    const plain = join(dir, randomUUID(), 'tmp');
+    mkdirSync(dirname(plain), { recursive: true });
+    writeFileSync(plain, 'not a directory');
+    const stale = agedStaged(randomUUID());
+    await expect(store.maintenance.run()).resolves.toMatchObject({ versionsThinned: 0 });
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(plain)).toBe(true);
+    expect(store.maintenance.lastRun()).toBe(now);
+    expect(logs.filter((line) => /staged/.test(line))).toEqual([]);
+  });
+
+  it('collects the other staged files and finishes the pass past an entry removed between the listing and its stat', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const vanishing = agedStaged(doc.id);
+    const stale = agedStaged(randomUUID());
+    fsRace.beforeStat = { path: vanishing, run: () => rmSync(vanishing) };
+    await expect(store.maintenance.run()).resolves.toMatchObject({ versionsThinned: 0 });
+    expect(fsRace.beforeStat).toBeNull(); // the entry was listed, then gone before its stat
+    expect(existsSync(stale)).toBe(false);
+    expect(store.maintenance.lastRun()).toBe(now);
+    expect(logs.filter((line) => /staged/.test(line))).toEqual([]);
+  });
+
+  it('logs a staged listing that fails otherwise and still finishes the pass', async () => {
+    const stale = join(dir, randomUUID(), 'tmp', randomUUID());
+    mkdirSync(dirname(stale), { recursive: true });
+    writeFileSync(stale, 'bytes');
+    fsRace.beforeStat = {
+      path: stale,
+      run: () => {
+        throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+      },
+    };
+    await expect(store.maintenance.run()).resolves.toMatchObject({ versionsThinned: 0 });
+    expect(store.maintenance.lastRun()).toBe(now);
+    expect(logs).toContainEqual(expect.stringMatching(/staged files could not be listed.*EACCES/));
+  });
 });
 
 describe('ArtifactStore: the change feed and attributions', () => {
@@ -1199,6 +1284,29 @@ describe('ArtifactStore: the change feed and attributions', () => {
     expect(insertedBy(first, agentChar)?.actor).toBe('session:app-1');
     expect(insertedBy(first, humanChar)).toBeNull();
     expect(insertedBy(decodeMap(store.attributions(doc.id, r2, r2)), humanChar)?.actor).toBe('human');
+  });
+
+  // P4 (W1, tracker 2026-10-18 L241 and 2026-10-14 L149): a suggestion doc holds its main doc's content, so its answer
+  // lays the main doc's rows beneath its own (parent Decision Log 57(b)) on every path: the whole history while loaded,
+  // a part of it while loaded, and the whole of it from storage once it is unloaded, with or without the main doc loaded
+  it('answers a suggestion doc’s attributions with its main doc’s beneath, loaded or not, whole or in part', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, agent, (d) => d.get('root').insert(0, 'agent'));
+    const key = service.suggestionDoc(doc.id);
+    const proposal = await write(key, other, (d) => d.get('root').insert(5, ' proposal'));
+    const live = newDoc();
+    applyV2(live, service.readState(key).state);
+    const mainChar = idAt(live.get('root'), 0)!;
+    const proposed = idAt(live.get('root'), 6)!;
+    const credits = (bytes: Uint8Array) => [insertedBy(decodeMap(bytes), mainChar)?.actor, insertedBy(decodeMap(bytes), proposed)?.actor];
+    const both = ['session:app-1', 'session:app-2'];
+    expect(credits(store.attributions(key, 0, proposal))).toEqual(both);
+    expect(credits(store.attributions(key, proposal, proposal))).toEqual(both);
+    reopen();
+    expect(service.loaded(key)).toBeNull();
+    expect(credits(store.attributions(key, 0, proposal))).toEqual(both);
+    service.live(doc.id);
+    expect(credits(store.attributions(key, 0, proposal))).toEqual(both);
   });
 });
 

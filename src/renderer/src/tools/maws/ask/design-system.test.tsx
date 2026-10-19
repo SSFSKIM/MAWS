@@ -22,6 +22,7 @@ import { record } from '../../../../../../test/support/builders';
 import { resetLibrary } from '../../../library/store';
 import type { PanelToolContext } from '../../../panel/tool';
 import { askSheetTool } from './AskSheetTool';
+import { SHEET } from './copy';
 import { AnsweredSection } from './QuestionSection';
 import { resetAskSheets } from './store';
 
@@ -155,6 +156,33 @@ describe('the design_system question', () => {
 
     expect(within(section('s1')).getByRole('button', { name: 'Decide for me' })).toBeTruthy();
     expect(within(section('s1')).getByRole('button', { name: 'Skip' })).toBeTruthy();
+  });
+
+  // P4 (W1, tracker 2026-10-19 L277): a duplicate of the house system reads as a copy of its source, not "Built in"; an
+  // adopted system's source, which the law's sentence gave whole, reads as a phrase, never a cut fragment
+  it('labels a duplicate by its source and an adopted system by the phrase that names its source', async () => {
+    docs[HOUSE] = systemDoc('maws', { route: 'default', key: 'maws', at: AT, copiedFrom: 'MAWS' }, 'MAWS');
+    docs[ACME] = systemDoc('classroom', { route: 'adopted', from: 'the GOV.UK Design System (design-system.service.gov.uk and www.gov.uk):', at: AT }, 'Acme web');
+    await mountWith([PICK]);
+    expect(within(rowOf(HOUSE)).getByText('Copy of MAWS')).toBeTruthy();
+    expect(within(rowOf(HOUSE)).queryByText('Built in')).toBeNull();
+    expect(within(rowOf(ACME)).getByText('Adopted from the GOV.UK Design System')).toBeTruthy();
+  });
+
+  it('clips a source with no break in it to a few words', () => {
+    expect(SHEET.systemOrigin({ route: 'derived', from: 'the shared tokens of every product page our design team has published over the last five years' })).toBe('Derived from the shared tokens of every product page our…');
+    expect(SHEET.systemOrigin({ route: 'adopted', from: 'https://acme.com/brand' })).toBe('Adopted from https://acme.com/brand'); // a URL's colon is no break
+    expect(SHEET.systemOrigin({ route: 'adopted', from: 'acme.com' })).toBe('Adopted from acme.com');
+    expect(SHEET.systemOrigin({ route: 'imported' })).toBe('Imported from Claude');
+  });
+
+  // P4 (W1, L277): a title is no sentence, so a dash or colon in it is part of the name, and only its length is clipped
+  it('keeps a duplicate source’s whole title, clipping a long one at a word', () => {
+    expect(SHEET.systemOrigin({ route: 'default', copiedFrom: 'Acme — Light' })).toBe('Copy of Acme — Light');
+    expect(SHEET.systemOrigin({ route: 'derived', copiedFrom: 'Acme — Dark' })).toBe('Copy of Acme — Dark');
+    expect(SHEET.systemOrigin({ route: 'adopted', copiedFrom: 'Brand: Marketing' })).toBe('Copy of Brand: Marketing');
+    expect(SHEET.systemOrigin({ route: 'adopted', copiedFrom: 'Brand (2026)' })).toBe('Copy of Brand (2026)');
+    expect(SHEET.systemOrigin({ route: 'default', copiedFrom: 'The shared tokens of every product page our design team has published' })).toBe('Copy of The shared tokens of every product page our…');
   });
 
   it('answers the chosen system by its id and name, once Submit has read it live', async () => {

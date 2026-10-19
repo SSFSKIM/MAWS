@@ -13,7 +13,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { HistoryApi } from '../../document/editor/history/api';
 import { DeckHistoryController } from '../../slides/editor/history/controller';
 import { DeckSession } from '../../slides/editor/session';
-import { setStyle } from '../../slides/model';
+import { setNotes, setStyle } from '../../slides/model';
 import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, newDoc, onUpdate, stateV2, transact, type ContentMap, type Doc } from '../../yjs';
 import { writeBoards, type BoardSeed } from '../fixtures/support';
 import { countDesignChanges } from '../history';
@@ -105,13 +105,17 @@ describe('a version’s preview in the workbench', () => {
     h.land(HUMAN, (d) => setStyle(d, 'b', 'title', { color: '#ff0000' }));
     h.land(HUMAN, (d) => deleteBoard(d, 'c'));
     h.version(HUMAN, 'named', 'Reviewed');
+    return { ...open(h, props), moved };
+  }
+  /** The workbench over a host, its history rail open. */
+  function open(h: ReturnType<typeof host>, props: Partial<DesignWorkbenchProps> = {}) {
     const session = new DeckSession(h.doc, 0);
     session.toggleRail('history');
     const view = new DesignView();
     view.setRoom({ w: 1000, h: 800 });
     view.setViewport({ zoom: 0.5, x: 0, y: 0 });
     const utils = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={false} history={{ api: h.api, handle: h.handle, countChanges: countDesignChanges }} {...props} />);
-    return { ...h, session, view, moved, ...utils };
+    return { ...h, session, view, ...utils };
   }
 
   it('draws the version in place of the live world with the projection’s count, edges, a move’s marks and a deleted board', async () => {
@@ -171,6 +175,29 @@ describe('a version’s preview in the workbench', () => {
     await settle();
     expect(screen.getByRole('toolbar', { name: 'Design' })).toBeTruthy();
     expect(session.writable()).toBe(true);
+  });
+
+  it('steps through each run of a board’s (hidden) notes on its board, as many stops as the bar counts (L240)', async () => {
+    const h = host();
+    h.land(HUMAN, (d) => setNotes(d, 'c', 'notes for the spare'));
+    h.version(HUMAN, 'named', 'Draft');
+    h.land(HUMAN, (d) => setBoardFrame(d, 'b', { x: 600 }));
+    h.land(HUMAN, (d) => setBoardFrame(d, 'c', { x: 2100 }));
+    h.land(AGENT, (d) => setNotes(d, 'c', 'first, notes for the spare'));
+    h.land(HUMAN, (d) => setNotes(d, 'c', 'first, notes for the spare, last'));
+    h.version(HUMAN, 'named', 'Reviewed');
+    open(h);
+    await settle();
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Version history' })).getByRole('button', { name: /^Version Reviewed/ }));
+    await settle();
+    const bar = screen.getByRole('toolbar', { name: 'Version preview' });
+    expect(bar.querySelector('[data-history-count]')!.textContent).toBe('4 changes'); // b's frame, c's frame, c's two notes runs
+    const reached: (string | null)[] = [];
+    for (let i = 0; i < 5; i++) {
+      fireEvent.click(within(bar).getByRole('button', { name: 'Next change' }));
+      reached.push(screen.getByRole('region', { name: 'Design in this version' }).querySelector('[data-history-board][data-focused]')?.getAttribute('data-history-board') ?? null);
+    }
+    expect(reached).toEqual(['b', 'c', 'c', 'c', 'b']); // b's frame, c's frame, c's notes run by run, then round again
   });
 
   it('M5 (Decision Log 31): the tab’s view says what is shown for its Export: the version alone, Compare, then live again; unmounted, live', async () => {

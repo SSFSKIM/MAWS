@@ -174,12 +174,14 @@ describe('a query refresh at the host boundary', () => {
         ],
       },
     };
-    for (const [result, message] of [
-      [nested, 'the last refresh was refused: record 1 holds a nested value in "v"'],
-      [throwing, 'the last refresh was refused: its rows could not be read'],
+    // P4 (W1, tracker 2026-10-18 L246): the reading that threw is logged with its own message, the stored words unchanged
+    for (const [result, message, logged] of [
+      [nested, 'the last refresh was refused: record 1 holds a nested value in "v"', []],
+      [throwing, 'the last refresh was refused: its rows could not be read', [`${id}'s dataset "live": its rows could not be read: boom`]],
     ] as const) {
       const ends: unknown[] = [];
-      const admission = await refresher().admit(start(id), { ...page(), ended: (end) => ends.push(end) });
+      const logs: string[] = [];
+      const admission = await datasetRefresher(store(), { now: () => now, log: (line) => logs.push(line) }).admit(start(id), { ...page(), ended: (end) => ends.push(end) });
       if (!admission.ok) throw new Error(admission.refusal);
       const publication = await admission.publish({ kind: 'result', result }, HELD);
       const after = live(id)!;
@@ -189,6 +191,7 @@ describe('a query refresh at the host boundary', () => {
       expect(assetsOf(id)).toEqual(assets);
       expect(publication).toMatchObject({ published: { revision: store().revision(id), columns: good.columns, rows: 2, state: { status: 'error', message } }, failed: 'validation' });
       expect(ends).toEqual([publication]);
+      expect(logs).toEqual(logged);
     }
   });
 

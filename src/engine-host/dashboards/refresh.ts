@@ -135,8 +135,10 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
 
   // The candidate, validated before the frame: the parsed rows and their bytes, or the error state's words and failure.
   // It never throws (P3-F): a reading that throws is refused like any invalid result, so every failure after the
-  // admission writes the error state and ends the scope.
-  function candidate(prior: DatasetDescriptor, raw: RefreshRaw): { table: ParsedDataset; bytes: Uint8Array } | { problem: string; failure: RefreshFailure } {
+  // admission writes the error state and ends the scope. P4 (W1, L246): that throw is logged with its own message under
+  // `subject` (the dashboard and dataset), so a fault in the reading reads apart from bad data; the state keeps the
+  // closed words.
+  function candidate(prior: DatasetDescriptor, raw: RefreshRaw, subject: string): { table: ParsedDataset; bytes: Uint8Array } | { problem: string; failure: RefreshFailure } {
     if (raw.kind === 'failed') return { problem: FAILED[raw.reason], failure: FAILURE_OF[raw.reason] };
     const refused = (problem: string, failure: RefreshFailure = 'validation') => ({ problem: bounded(`the last refresh was refused: ${problem}`), failure });
     try {
@@ -148,7 +150,8 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
       const keyProblem = prior.rowKey === undefined ? null : rowKeyProblem(table, prior.rowKey);
       if (keyProblem) return refused(keyProblem);
       return { table, bytes };
-    } catch {
+    } catch (error) {
+      log(`${subject}: ${UNREADABLE}: ${error instanceof Error ? error.message : String(error)}`);
       return refused(UNREADABLE);
     }
   }
@@ -157,7 +160,7 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
     const adapter = dashboardAdapterOf(store)!;
     const { artifactId } = start;
     const { id } = start.dataset;
-    const made = candidate(prior, raw);
+    const made = candidate(prior, raw, `${artifactId}'s dataset "${id}"`);
     const at = now();
     const { actor } = scope;
     let recorded: ArtifactDatasetResult | undefined;

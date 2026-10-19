@@ -11,7 +11,7 @@ import JSZip from 'jszip';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 import { exportTheme } from '@artifacts/dashboard/export';
-import { descriptor, exportDashboard, NEW_REF, OLD_REF, REPLACED_AT, SNAPSHOTS } from '@artifacts/dashboard/fixtures/export';
+import { BOUND_AT, descriptor, exportDashboard, NEW_REF, OLD_REF, OWNER, REPLACED_AT, SNAPSHOTS } from '@artifacts/dashboard/fixtures/export';
 import { setDataset } from '@artifacts/dashboard/datasets';
 import { renderView } from '@artifacts/dashboard/render';
 import { writeSystem } from '@artifacts/design-system/model';
@@ -20,7 +20,7 @@ import { newDoc, stateV2 } from '@artifacts/yjs';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import type { DocumentExportContext, DocumentExporter, DocumentExportFormat, DocumentExportRequest } from '../artifacts/export-document';
-import { registerDashboardExporters, type OpenPictures } from './export';
+import { registerDashboardExporters, type DashboardExportDeps, type OpenPictures } from './export';
 
 const ID = '00000000-0000-4000-8000-0000000000d1';
 const PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
@@ -48,14 +48,14 @@ function host(over: { readDataset?: (input: CommandInput<'artifacts.readDataset'
   return { call, pages, page };
 }
 
-function exporters(call: ReturnType<typeof host>['call'], pictures?: OpenPictures): Map<DocumentExportFormat, DocumentExporter> {
+function exporters(call: ReturnType<typeof host>['call'], pictures?: OpenPictures, sessionTitle?: DashboardExportDeps['sessionTitle']): Map<DocumentExportFormat, DocumentExporter> {
   const out = new Map<DocumentExportFormat, DocumentExporter>();
   registerDashboardExporters(
     (exporter) => {
       out.set(exporter.format, exporter);
       return () => out.delete(exporter.format);
     },
-    { call: call as never, env: {}, ...(pictures && { pictures }) },
+    { call: call as never, env: {}, ...(pictures && { pictures }), ...(sessionTitle && { sessionTitle }) },
   );
   return out;
 }
@@ -197,6 +197,33 @@ describe('registerDashboardExporters', () => {
       await expect(exporters(call).get(format)!.run(request(format), ctx)).rejects.toThrow(/made before dashboards were documents and holds files \(index\.html\)/);
       expect(written.size).toBe(0);
     }
+  });
+
+  it('credits the data and the comments to a session by its title, "Claude" only without one, and the human "Owner" (P4 L287)', async () => {
+    const { call } = host();
+    const titles: Record<string, string> = { 'session-a': 'Quarterly review' };
+    const titled = exporters(call, fakePictures(), (appSessionId) => titles[appSessionId]);
+    const md = context(captured());
+    await titled.get('md')!.run(request('md'), md.ctx);
+    expect(String(md.written.get('/exports/9-md'))).toContain('updated 2026-10-01 09:00 UTC by Quarterly review');
+    expect(String(md.written.get('/exports/9-md'))).not.toContain('by Claude');
+    // Word's comments on the chart name the same session, and the human as "Owner"
+    const docx = context(captured());
+    await titled.get('docx')!.run(request('docx'), docx.ctx);
+    const comments = await (await JSZip.loadAsync(docx.written.get('/exports/9-docx') as Uint8Array)).file('word/comments.xml')!.async('string');
+    expect([...comments.matchAll(/w:author="([^"]*)"/g)].map((m) => m[1])).toEqual(['Owner', 'Quarterly review']);
+    // a session without a title (unknown to the index, or titled blank) is "Claude"
+    for (const none of [{}, { 'session-a': '  ' }]) {
+      const out = context(captured());
+      await exporters(call, undefined, (appSessionId) => (none as Record<string, string>)[appSessionId]).get('md')!.run(request('md'), out.ctx);
+      expect(String(out.written.get('/exports/9-md'))).toContain('updated 2026-10-01 09:00 UTC by Claude');
+    }
+    // the human who bound the data is "Owner", never "You"
+    const owned = exportDashboard().doc;
+    setDataset(owned, 'sales', descriptor(OLD_REF, BOUND_AT, OWNER));
+    const out = context(stateV2(owned));
+    await titled.get('md')!.run(request('md'), out.ctx);
+    expect(String(out.written.get('/exports/9-md'))).toContain('updated 2026-10-01 09:00 UTC by Owner');
   });
 
   it('a view with no dataset and one that cannot be read export their named states; a dashboard with no view reads nothing', async () => {

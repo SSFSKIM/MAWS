@@ -3,7 +3,7 @@
 // or the measures writes the token, and the previews follow in the same frame; the check lists the fixture's
 // violations; the canon frames carry their policy and load assets through the host.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyV1, diffV1, newDoc, stateVector, type Doc } from '../../yjs';
 import { validateCanon, type HtmlParser } from '../canon';
 import complete from '../fixtures/complete.tokens.json';
@@ -315,5 +315,42 @@ describe('whole-branch review: edits of what the page shows', () => {
     expect(listed).toEqual(problems.map((p) => `${p.path} ${p.message}`));
     expect(check.textContent).not.toContain('keeps every checked rule');
     expect(check.querySelector('.dsp-summary')!.textContent).toContain(`${problems.length} file ${problems.length === 1 ? 'problem' : 'problems'}`);
+  });
+});
+
+// L279 (P3-F sitting candidate 61): a component drawn at the deck's scale fits its card, and an alias reads as the token
+// it refers to rather than its raw reference
+describe('the canon’s components and the aliases on the page', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('draws each component on the slide canvas, scaled to its box as a layout is', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('dsp-slide') ? new DOMRect(0, 0, 384, 216) : new DOMRect();
+    });
+    const view = render(<DesignSystemPage artifactId="ds1" handle={{ doc: systemDoc() }} host={host} />);
+    for (const title of ['layouts/title.html', 'components/chip.html']) {
+      const frame = view.getByTitle(title);
+      expect(frame.parentElement!.classList.contains('dsp-slide')).toBe(true);
+      expect(frame.parentElement!.style.aspectRatio).toBe('1920 / 1080');
+      expect([frame.getAttribute('width'), frame.getAttribute('height'), frame.style.transform]).toEqual(['1920', '1080', 'scale(0.2)']);
+    }
+  });
+
+  it('shows an alias as the name the page gives the token it refers to, with the reference on hover', () => {
+    const file = structuredClone(complete) as unknown as Record<string, Record<string, unknown>>;
+    file.color!.link = { $value: '{color.accent.$root}' };
+    file.space!['3'] = { $value: '{space.2}' };
+    file.type!.h3 = { $value: '{type.h2}' };
+    const doc = newDoc();
+    writeSystem(doc, { ...FILES, 'tokens.tokens.json': JSON.stringify(file) }, { route: 'derived', at: AT }, { name: 'Harbor' });
+    const view = render(<DesignSystemPage artifactId="ds1" handle={{ doc }} host={host} />);
+    const alias = (owner: string) => {
+      const note = view.container.querySelector(`${owner} .dsp-alias`)!;
+      return [note.textContent, note.getAttribute('title')];
+    };
+    expect(alias('[data-token="color.link"]')).toEqual(['= --ds-color-accent', '{color.accent.$root}']);
+    expect(alias('[data-token="color.accent.text"]')).toEqual(['= --ds-color-bg-raised', '{color.bg.raised}']);
+    expect(alias('[data-token="space.3"]')).toEqual(['= --ds-space-2', '{space.2}']);
+    expect(alias('[data-role="h3"]')).toEqual(['= .ds-type-h2', '{type.h2}']);
   });
 });

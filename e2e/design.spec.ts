@@ -416,7 +416,7 @@ test('board frames: moved and snapped, resized, sized by preset and refused past
     await expect(row).toHaveAttribute('style', /translate3d\(0px, [1-9]/, { timeout: 250 });
   }).toPass();
   const next = before[before.indexOf('tablet') + 1]!;
-  await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: `over droppable area ${next}.` })).toHaveCount(1);
+  await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: `Tablet, moved to position ${before.indexOf('tablet') + 2}.` })).toHaveCount(1); // W1-C L283: by name and position, no id
   await page.keyboard.press('Space');
   const at = before.indexOf('tablet');
   await expect.poll(ids).toEqual([...before.slice(0, at), next, 'tablet', ...before.slice(at + 2)]);

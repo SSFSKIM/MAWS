@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { newDoc, onUpdate, transact, type Doc } from '../yjs';
 import { childLists, importSlide, readFlat, readSlide, ROOT, slideFile, writeDeckKeys } from './model';
-import { loadSlide } from './parse';
+import { loadSlide, SHAPE_KINDS } from './parse';
 import { copyElements, detachWithin, duplicateWithin, groupElements, insertElements, newElement, pasteElements, restyle, setStyles, tableColumn, tableRow, ungroup } from './writers-elements';
 
 function deckWith(section: string): Doc {
@@ -165,6 +165,16 @@ describe('insert and paste', () => {
     const table = loaded.slide.children.find((c) => c.tag === 'table')!;
     expect(table.children).toHaveLength(2);
     expect(table.children[0]!.children).toHaveLength(3);
+  });
+
+  // W1 (tech debt, 2026-10-19): the accent appears once on a slide, so it is never a default; the owner picks it
+  it('a new shape of every kind takes the raised surface with a border edge, never the accent', () => {
+    for (const kind of SHAPE_KINDS) {
+      const el = newElement(`shape:${kind}`, { x: 960, y: 540 });
+      expect(el.style.background, kind).toBe('var(--ds-color-bg-raised, #ffffff)');
+      expect(el.style.border, kind).toBe('2px solid var(--ds-color-border, #e3e2df)');
+      expect(JSON.stringify(el.style), kind).not.toContain('--ds-color-accent');
+    }
   });
 
   it('copies the selection as a slide file and pastes it into another deck with every id kept', () => {

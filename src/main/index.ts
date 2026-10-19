@@ -608,7 +608,7 @@ void startWithProfileLock(app, () => {
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
   registerPresentationExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude; the governing system from D's `designSystems.governing` (Decision Log 27 (2))
   // P3-E (E2 M5; E's Decision Log 32): `dashboard` as md, html, docx, pdf: B's four, governed by D, over the captured views
-  shutdown.add('dashboard-exporters', registerDashboardExporters((exporter) => artifacts.exporters.register(exporter), { call: engineHostCall(hosts.dispatch), env: process.env }));
+  shutdown.add('dashboard-exporters', registerDashboardExporters((exporter) => artifacts.exporters.register(exporter), { call: engineHostCall(hosts.dispatch), env: process.env, sessionTitle: (appSessionId) => index.sessions.get(appSessionId as AppSessionId)?.title.text })); // P4 L287: a session credited by its title, as the library names it
   registerDesignExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-E (E1's M5): `design` as png and pdf over C's capture window, never cropped (XE9)
   shutdown.add('presenter', registerPresenter({ register: registerMainHandler, appUrl, env: process.env }).end); // P3-C M6: `presentations.present`, the show's windows
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host

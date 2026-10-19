@@ -273,7 +273,7 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
     'filmstrip-reorder',
     async () => {
       await expect(lifted).toHaveAttribute('style', /translate3d\(0px, [1-9]/);
-      await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: `over droppable area ${before[1]}.` })).toHaveCount(1);
+      await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: /^Slide 1(, .*)?, moved to position 2\.$/ })).toHaveCount(1); // W1-C L283: by position, no id
     },
     () =>
       inMain.locator('.deck-filmstrip-list').evaluate((list) => ({

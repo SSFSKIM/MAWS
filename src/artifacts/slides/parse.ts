@@ -40,7 +40,7 @@ const ATTRS: Partial<Record<Tag, readonly string[]>> = {
 };
 /** On any element: text fit, the layout placeholder role (X28, kept so "new slide from layout" can strip it) and builds. */
 const COMMON_ATTRS = ['data-fit', 'data-ph', 'data-build-in', 'data-build-out'];
-const SHAPE_KINDS = ['rect', 'rounded', 'ellipse', 'diamond', 'arrow-right', 'arrow-left', 'arrow-up', 'arrow-down', 'line'];
+export const SHAPE_KINDS = ['rect', 'rounded', 'ellipse', 'diamond', 'arrow-right', 'arrow-left', 'arrow-up', 'arrow-down', 'line'];
 export const ICON_NAMES = ('Activity Book Chart Chat Check CheckCircle Clock Cloud Code Database Globe GraduationCap Home Key Lightbulb ' +
   'Lightning Link Lock PaperPlane Play Search Settings Star ThumbsUp Tool Trust Users Verified Warning Wrench').split(' ');
 const ENUMS: Record<string, readonly string[]> = {

@@ -7,9 +7,11 @@
 // silently); it goes right after its predecessor in the sent order (first when it has none), everything else keeping
 // its live place. The result is then checked pair by pair among the boards all three orders hold: every pair the agent
 // put in a new relative order, and every pair the live order did, must come out that way; a pair that does not names its
-// boards, unless `force`, under which the agent's order wins: the boards of every pair that came out against the sent
-// order, but for one only the live order re-ordered, take the sent sequence in the places they hold, the other boards
-// keeping theirs.
+// boards, unless `force`, under which the agent's order wins: the boards of every pair it re-ordered that came out
+// otherwise take the sent sequence in the places they hold, the other boards keeping theirs, until none is lost; only
+// then are the boards of a pair all three orders agree on that came out inverted settled the same way, so an inversion
+// the agent's own pairs put right takes no board into the sent order, and with it none of the owner's re-orders. Where
+// settling both kinds from the first round keeps more of the owner's re-orders, that order is taken.
 
 export interface OrderMerge {
   /** The boards the design will hold in their wanted order. */
@@ -79,40 +81,56 @@ export function mergeBoardOrder(base: string[], sent: string[] | null, live: str
       const before = A.slice(0, A.indexOf(id)).reverse().find((p) => desired.includes(p));
       desired.splice(before === undefined ? 0 : desired.indexOf(before) + 1, 0, id);
     }
-    // the pairs a side put in a new relative order that come out otherwise; forced, every pair that comes out against
-    // the sent order but one only the live side re-ordered (one all three orders agree on, too)
     const at = (seq: string[]) => new Map(seq.map((id, i) => [id, i]));
     const [pb, pa, pl] = [at(b), at(a), at(l)];
     const before = (p: Map<string, number>, x: string, y: string) => p.get(x)! < p.get(y)!;
-    const lost = (): [string, string][] => {
-      const pd = at(desired.filter((id) => set.has(id)));
-      const kept = (p: Map<string, number>, x: string, y: string) => before(p, x, y) === before(pb, x, y) || before(pd, x, y) === before(p, x, y);
+    /** The pairs of shared boards `test` picks, read in `order`. */
+    const pairsIn = (order: string[], test: (x: string, y: string, pd: Map<string, number>) => boolean): [string, string][] => {
+      const pd = at(order.filter((id) => set.has(id)));
       const out: [string, string][] = [];
-      for (let i = 0; i < shared.length; i++)
-        for (let j = i + 1; j < shared.length; j++) {
-          const [x, y] = [shared[i]!, shared[j]!];
-          const liveReordered = before(pl, x, y) !== before(pb, x, y);
-          if (!kept(pa, x, y) || (force ? !liveReordered && before(pd, x, y) !== before(pa, x, y) : !kept(pl, x, y))) out.push([x, y]);
-        }
+      for (let i = 0; i < shared.length; i++) for (let j = i + 1; j < shared.length; j++) if (test(shared[i]!, shared[j]!, pd)) out.push([shared[i]!, shared[j]!]);
       return out;
     };
+    // the pairs a side put in a new relative order that come out otherwise (the live side's counted only unforced);
+    // forced and `agreed`, also every pair all three orders agree on that comes out inverted
+    const lost = (order: string[], agreed: boolean) =>
+      pairsIn(order, (x, y, pd) => {
+        const kept = (p: Map<string, number>) => before(p, x, y) === before(pb, x, y) || before(pd, x, y) === before(p, x, y);
+        const inverted = agreed && before(pa, x, y) === before(pb, x, y) && before(pl, x, y) === before(pb, x, y) && before(pd, x, y) !== before(pb, x, y);
+        return !kept(pa) || (force ? inverted : !kept(pl));
+      });
     if (!force)
-      for (const [x, y] of lost()) {
+      for (const [x, y] of lost(desired, false)) {
         const named = [x, y].filter((id) => liveMoved.has(id) || !agentKept.has(id));
         for (const id of named.length ? named : [x, y]) clashes.add(id);
       }
     else {
       // the agent's order wins (a moved board after its predecessor can still land before a board the owner moved): the
-      // boards of the pairs lost take the sent sequence in the places they hold, until none is lost. Counting a pair no
-      // side re-ordered keeps a board so settled from jumping one outside the set. A round leaves every pair among its
-      // boards in the sent order, so each one adds a board or ends (at most: every shared board in the sent order)
-      const settled = new Set<string>();
-      for (let pairs = lost(); pairs.length > 0; pairs = lost()) {
-        for (const [x, y] of pairs) settled.add(x).add(y);
-        const sequence = a.filter((id) => settled.has(id));
-        let k = 0;
-        for (let i = 0; i < desired.length; i++) if (settled.has(desired[i]!)) desired[i] = sequence[k++]!;
-      }
+      // boards of the pairs lost take the sent sequence in the places they hold, until none is lost. A board so settled,
+      // or so placed, can jump one outside the set, inverting a pair all three orders agree on: its boards are settled the
+      // same way. A round leaves every pair among its boards in the sent order, so each one adds a board or ends (at
+      // most: every shared board in the sent order)
+      const settle = (pairs: (order: string[]) => [string, string][]): string[] => {
+        const order = [...desired];
+        const settled = new Set<string>();
+        for (let found = pairs(order); found.length > 0; found = pairs(order)) {
+          for (const [x, y] of found) settled.add(x).add(y);
+          const sequence = a.filter((id) => settled.has(id));
+          let k = 0;
+          for (let i = 0; i < order.length; i++) if (settled.has(order[i]!)) order[i] = sequence[k++]!;
+        }
+        return order;
+      };
+      // every board settled loses the owner's re-orders among the settled, so the agreed pairs count only once no pair of
+      // the agent's is lost (settling those often puts them right); counting them from the first round settles fewer
+      // where a board settled alone would jump several, so that order is taken when it keeps more of the owner's
+      const owners = (order: string[]) => pairsIn(order, (x, y, pd) => before(pa, x, y) === before(pb, x, y) && before(pl, x, y) !== before(pb, x, y) && before(pd, x, y) === before(pl, x, y)).length;
+      const phased = settle((order) => {
+        const agents = lost(order, false);
+        return agents.length > 0 ? agents : lost(order, true);
+      });
+      const eager = settle((order) => lost(order, true));
+      desired.splice(0, desired.length, ...(owners(eager) > owners(phased) ? eager : phased));
     }
   }
   // a board the publish adds, as a moved one: right after its nearest predecessor in the sent order, first when it has none

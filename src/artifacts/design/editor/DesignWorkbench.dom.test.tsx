@@ -324,6 +324,39 @@ describe('the board list', () => {
     expect(screen.queryByRole('textbox', { name: 'Rename board' })).toBeNull();
     expect(Y.slideScalars(doc, 'b2').title).toBe('Desktop');
   });
+
+  // W1 (tech debt, 2026-10-19): dnd-kit's default announcements read the boards' ids; a keyboard reorder names the board
+  // by position and name (an untitled one by position), each row given a box down the list (happy-dom lays nothing out)
+  it('a keyboard reorder is heard by board position and name, never an id', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const row = this.closest<HTMLElement>('[data-board-row]');
+      const i = row ? [...row.parentElement!.children].indexOf(row) : -1;
+      const top = i < 0 ? 0 : i * 40;
+      const [width, height] = i < 0 ? [0, 0] : [200, 32];
+      return { x: 0, y: top, left: 0, top, width, height, right: width, bottom: top + height, toJSON: () => ({}) } as DOMRect;
+    });
+    const { doc, container } = mount({ doc: design([...BOARDS, { id: 'b4', at: { x: 3300, y: 0, w: 390, h: 844 } }]) });
+    const row = (n: number) => container.querySelectorAll<HTMLElement>('[data-board-row] .design-board-row')[n - 1]!;
+    const heard = () => document.querySelector('[id^="DndLiveRegion"]')?.textContent ?? '';
+    const key = async (code: string, target: Element | Document = document) => {
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 0))); // the keyboard sensor listens a tick after the pick-up
+      act(() => void fireEvent.keyDown(target, { code, key: code === 'Space' ? ' ' : code }));
+    };
+    const said: string[] = [];
+    for (const [code, target] of [['Space', row(2)], ['ArrowDown'], ['Space']] as [string, Element?][]) {
+      await key(code, target);
+      said.push(heard());
+    }
+    expect(said).toEqual(['Board 2, Desktop, picked up.', 'Board 2, Desktop, moved to position 3.', 'Board 2, Desktop, dropped at position 3.']);
+    expect(boardOrder(doc)).toEqual(['b1', 'b3', 'b2', 'b4']);
+    await key('Space', row(4));
+    said.push(heard());
+    await key('Escape');
+    said.push(heard());
+    expect(said.slice(3)).toEqual(['Board 4, picked up.', 'Board 4, move cancelled, back at position 4.']);
+    for (const s of said) expect(s).not.toMatch(/\bb[1-4]\b/);
+    vi.restoreAllMocks();
+  });
 });
 
 describe('one undo stack, and what writes nothing', () => {

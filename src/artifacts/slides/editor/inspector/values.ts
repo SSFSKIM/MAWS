@@ -2,8 +2,10 @@
 // the design system's colour tokens with the house system's literals as their fallbacks, the font list, and the composite
 // values the panel edits in parts (a linear gradient, a box shadow, a crop) read from and written back to the dialect's
 // forms. Everything written here still passes through css.ts's checks before it reaches the model.
+import { TYPE_ROLES, type TypeRole } from '../../../design-system/roles';
 import { borderParts, SHARED_DS_NAMES } from '../../css';
 import type { DeckFace } from '../../deck';
+import { ROLE_LABELS } from '../menus/TextStyle';
 
 // ---------------------------------------------------------------- tokens
 
@@ -42,12 +44,35 @@ const VAR_NAME = /^var\(\s*(--ds-[a-z0-9-]+)\s*(?:,.*)?\)$/;
 /** The `--ds-*` a value is wholly, or null. */
 export const varName = (value: string | undefined): string | null => (value === undefined ? null : (VAR_NAME.exec(value.trim())?.[1] ?? null));
 
+const SIZES: Record<string, string> = { sm: 'Small', md: 'Medium', lg: 'Large', full: 'Full' };
+const FACES: Record<string, string> = { display: 'Display', body: 'Body', mono: 'Mono' };
+
+/**
+ * A `--ds-*` name as the panel shows it, the friendly name its role goes by: a colour's swatch label, a type class's as
+ * the Text style menu names it, a face's as the Font list does; a name outside the shared roles as written.
+ */
+export function tokenLabel(name: string): string {
+  const colour = COLOUR_TOKENS.find((t) => t.name === name);
+  if (colour) return colour.label;
+  const type = /^--ds-type-([a-z0-9]+)-(?:size|line|weight)$/.exec(name)?.[1];
+  if (type !== undefined && (TYPE_ROLES as readonly string[]).includes(type)) return ROLE_LABELS[type as TypeRole];
+  const face = /^--ds-font-([a-z]+)$/.exec(name)?.[1];
+  if (face !== undefined && face in FACES) return `${FACES[face]} (system)`;
+  const space = /^--ds-space-(\d+)$/.exec(name)?.[1];
+  if (space !== undefined) return `Space ${space}`;
+  const size = /^--ds-(?:radius|shadow)-([a-z]+)$/.exec(name)?.[1];
+  if (size !== undefined && size in SIZES) return SIZES[size]!;
+  return name;
+}
+
+/** What a hover over a token's friendly name says: the name and the token, as a swatch's title does. */
+export const tokenTitle = (name: string): string => `${tokenLabel(name)} (${name})`;
+
 /** A colour as a field shows it: a system colour by its role's name, anything else as written. */
 export function showColour(value: string | undefined): string {
   if (value === undefined) return '';
   const name = varName(value);
-  if (name === null) return value;
-  return COLOUR_TOKENS.find((t) => t.name === name)?.label ?? name;
+  return name === null ? value : tokenLabel(name);
 }
 
 /** What a colour field's text means: a role's name or `--ds-*` name is its token (with its fallback); else as typed. */
@@ -71,7 +96,7 @@ export const bareOf = (value: string | undefined): number | null => (value !== u
 export const round2 = (n: number): number => Math.round(n * 100) / 100;
 export const fmt = (n: number | null): string => (n === null ? '' : String(round2(n)));
 
-/** A placeholder for a value the number field cannot show (a token's name, a %), else ''. */
+/** A placeholder for a value the number field cannot show (a token's name, which the field shows friendly; a %), else ''. */
 export function rawHint(value: string | undefined): string {
   if (value === undefined) return '';
   return varName(value) ?? value;
@@ -292,17 +317,17 @@ export function fontGroups(faces: Readonly<Record<string, DeckFace>>): { label: 
     {
       label: 'Design system',
       options: [
-        { label: 'Display (system)', value: 'var(--ds-font-display, system-ui, sans-serif)' },
-        { label: 'Body (system)', value: 'var(--ds-font-body, system-ui, sans-serif)' },
+        { label: tokenLabel('--ds-font-display'), value: 'var(--ds-font-display, system-ui, sans-serif)' },
+        { label: tokenLabel('--ds-font-body'), value: 'var(--ds-font-body, system-ui, sans-serif)' },
       ],
     },
     { label: 'Basic', options: BASIC_FACES.map(([family, generic]) => ({ label: family, value: `${quoteFamily(family)}, ${generic}` })) },
   ].filter((g) => g.options.length > 0);
 }
 
-/** A family value's name to show when it is in no list: its first family, unquoted. */
+/** A family value's name to show when it is in no list: a token's friendly name, else its first family, unquoted. */
 export function familyLabel(value: string): string {
   const name = varName(value);
-  if (name) return name;
+  if (name) return tokenLabel(name);
   return (splitTop(value, ',')[0] ?? value).replace(/^['"]|['"]$/g, '');
 }

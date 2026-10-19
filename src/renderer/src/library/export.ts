@@ -60,9 +60,10 @@ export function resetExportFormats(): void {
 const savedToast = (path: string) => void toast({ level: 'info', text: VIEWERS_COPY.saved(path), actions: [], dismissible: true });
 
 // The artifact's live revision (or the version `versionId`) exported as `format`, then saved where the owner chooses.
-// The save dialog names the file by the artifact's title, which main reads itself.
+// The save dialog names the file by the artifact's title, which main reads itself. P4 (W1, L302): the export is a file
+// of its own (`ownFile`), saved by its id, so another export of the same revision and format meanwhile never swaps it.
 export async function exportArtifact(artifactId: string, format: ArtifactExportFormat, versionId?: number, client: MawsBridge = ipc): Promise<void> {
-  const exported = await client.invoke('artifacts.export', { artifactId, format, ...(versionId !== undefined && { versionId }) });
+  const exported = await client.invoke('artifacts.export', { artifactId, format, ...(versionId !== undefined && { versionId }), ownFile: true });
   if (!exported.ok) return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
   const { revision, exportId } = exported.value;
   const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) /* P3-E (Decision Log 33) */ } } });

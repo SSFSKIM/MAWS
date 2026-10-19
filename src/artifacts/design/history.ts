@@ -67,7 +67,7 @@ export interface DesignChanges {
 }
 
 /** One stop of ↑ ↓, in the order they visit. */
-export type DesignStop = { part: 'deck' } | { part: 'board'; boardId: string } | { part: 'element'; boardId: string; elementId: string };
+export type DesignStop = { part: 'deck' } | { part: 'board'; boardId: string } | { part: 'element'; boardId: string; elementId: string } | { part: 'notes'; boardId: string; run: number };
 
 interface Side extends Touch {
   board: string;
@@ -218,13 +218,17 @@ function latestTouch(keys: readonly KeyChange[]): Touch {
   return best;
 }
 
-/** ↑ ↓'s stops: the deck, then per board its own change, then each element change but the ghosts of moves away. */
+/**
+ * ↑ ↓'s stops, one per change counted: the deck, then per board its own change, each element change but the ghosts of
+ * moves away, each run of its notes (C's `changeStops`).
+ */
 export function designStops(changes: DesignChanges): DesignStop[] {
   const stops: DesignStop[] = [];
   if (changes.deck) stops.push({ part: 'deck' });
   for (const b of changes.boards) {
-    if (b.kind !== 'changed' || b.keys.length > 0 || b.notes > 0) stops.push({ part: 'board', boardId: b.id });
+    if (b.kind !== 'changed' || b.keys.length > 0) stops.push({ part: 'board', boardId: b.id });
     for (const e of b.elements) if (e.kind !== 'movedAway') stops.push({ part: 'element', boardId: b.id, elementId: e.id });
+    for (let run = 0; run < b.notes; run++) stops.push({ part: 'notes', boardId: b.id, run });
   }
   return stops;
 }

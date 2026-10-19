@@ -80,7 +80,6 @@
 .dsp-canon-item { display: flex; flex-direction: column; gap: calc(var(--space) * 1.5); margin: 0; }
 .dsp-slide { position: relative; width: 100%; overflow: hidden; border-radius: var(--radius-sm); border: 1px solid var(--border); }
 .dsp-slide iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: 0 0; }
-.dsp-component-frame { width: 100%; height: 180px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .dsp-document-frame { width: 100%; height: 640px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 
 /* Law */

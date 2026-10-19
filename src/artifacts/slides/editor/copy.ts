@@ -4,6 +4,15 @@ export const DECK_COPY = {
   slides: 'Slides in order',
   slideLabel: (n: number, hidden: boolean, held: boolean) => `Slide ${n}${hidden ? ', hidden' : ''}${held ? ', held' : ''}`,
   slideOptions: (n: number) => `Slide ${n} options`,
+  // W1: a reorder as assistive technology hears it, the item by its position and title (an untitled one by position)
+  reorderItem: (n: number, title: string) => (title ? `Slide ${n}, ${title}` : `Slide ${n}`),
+  reorder: {
+    start: (item: string) => `${item}, picked up.`,
+    over: (item: string, to: number) => `${item}, moved to position ${to}.`,
+    away: (item: string) => `${item}, not over the list.`,
+    end: (item: string, to: number) => `${item}, dropped at position ${to}.`,
+    cancel: (item: string, at: number) => `${item}, move cancelled, back at position ${at}.`,
+  },
   newSlide: 'New slide',
   duplicate: 'Duplicate slide',
   hide: 'Hide slide',

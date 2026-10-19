@@ -2,7 +2,7 @@
 // the filmstrip's thumbnails, sections, hidden and held slides; the slide gestures as one undo step each; the notes
 // bound by character diff in both directions. Drag reorder, zoom by fit and paint are the e2e's.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { HistoryApi } from '../../document/editor/history/api';
 import { applyV1, diffV1, encodeMap, mergeMaps, newDoc, stateV2, stateVector, transact, type Doc } from '../../yjs';
@@ -369,5 +369,129 @@ describe('the editor-wide ⌘Z (scalpel-4#2)', () => {
     expect(readSlide(doc, 'a').notes).toBe('Notes a, then more');
     expect(fireEvent.keyDown(notesField(), { key: 'z', metaKey: true })).toBe(false);
     expect(readSlide(doc, 'a').notes).toBe('Notes a');
+  });
+});
+
+// ---- W1 (tech debt, 2026-10-19): the fit zoom -------------------------------------------------------------------------
+
+describe('Fit follows the stage, with the rails open and closed and after a version’s preview', () => {
+  // happy-dom lays nothing out and its ResizeObserver never reports: a stand-in that reports every observed node when the
+  // test lays the window out, the stage (connected) at the size given, a detached node (or a hidden stage) at 0 × 0, as
+  // a browser reports an observed node taken out of the document
+  let stage = { w: 1200, h: 800 };
+  const observers = new Set<StubObserver>();
+  class StubObserver {
+    readonly nodes = new Set<Element>();
+    constructor(readonly callback: ResizeObserverCallback) {
+      observers.add(this);
+    }
+    observe(node: Element) {
+      this.nodes.add(node);
+    }
+    unobserve(node: Element) {
+      this.nodes.delete(node);
+    }
+    disconnect() {
+      this.nodes.clear();
+      observers.delete(this);
+    }
+  }
+  const layout = (size?: { w: number; h: number }) => {
+    if (size) stage = size;
+    act(() => {
+      for (const o of [...observers]) if (o.nodes.size) o.callback([...o.nodes].map((target) => ({ target }) as ResizeObserverEntry), o as unknown as ResizeObserver);
+    });
+  };
+  beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', StubObserver);
+    const side = (axis: 'w' | 'h') =>
+      function (this: HTMLElement) {
+        return this.isConnected && this.classList.contains('deck-stage') ? stage[axis] : 0;
+      };
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(side('w'));
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(side('h'));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    observers.clear();
+    stage = { w: 1200, h: 800 };
+  });
+
+  function withHistory() {
+    const doc = deck();
+    const states = [stateV2(doc)];
+    setNotes(doc, 'a', 'Notes a, revised');
+    states.push(stateV2(doc));
+    const versions: ArtifactVersion[] = states.map((_, i) => ({ id: i + 1, seq: i + 1, at: Date.UTC(2026, 9, 19, 9, i), actor: { kind: 'human' as const }, kind: 'named' as const, label: `Draft ${i + 1}`, assetRefs: [] }));
+    const api: HistoryApi = {
+      versions: async () => versions,
+      lastViewedAt: async () => null,
+      versionState: async (id) => states[id - 1]!,
+      attributions: async () => encodeMap(mergeMaps([])),
+      saveVersion: async () => ({ versionId: 3 }),
+      restore: async () => ({ revision: 3, versionId: 3 }),
+      duplicate: async () => ({ artifactId: 'copy' }),
+      markViewed: async () => {},
+    };
+    const session = new DeckSession(doc);
+    const utils = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} history={{ api, handle: { doc, onRestored: () => () => {} } }} />);
+    /** Opens the history rail, shows a version in place of the editor, and closes the rail: the live editor is back. */
+    const preview = async () => {
+      act(() => session.toggleRail('history'));
+      fireEvent.click(await screen.findByRole('button', { name: /^Version Draft 1 by/ }));
+      await waitFor(() => expect(utils.container.querySelector('[data-history-previewing]')).not.toBeNull());
+      layout(); // the live stage, taken out of the document, reads 0 × 0
+      act(() => session.toggleRail('history'));
+      await waitFor(() => expect(utils.container.querySelector('[data-history-previewing]')).toBeNull());
+    };
+    return { session, preview, ...utils };
+  }
+  const zoom = () => screen.getByRole('combobox', { name: 'Zoom' }) as HTMLSelectElement;
+  /** The zoom select's shown option (by its value: happy-dom's `selectedOptions` can lag a controlled select's update). */
+  const shown = () => [...zoom().options].find((o) => o.value === zoom().value)!.text;
+  // (w − 48) / 1920 against (h − 48) / 1080: 1200 × 800 fits at 60 %, 900 × 800 at 44 %
+  const WIDE = { w: 1200, h: 800 };
+  const NARROW = { w: 900, h: 800 };
+
+  it('refits as a rail opens and closes beside the stage', () => {
+    const { session } = withHistory();
+    expect(shown()).toBe('Fit (60%)');
+    act(() => session.toggleRail('comments'));
+    layout(NARROW);
+    expect(shown()).toBe('Fit (44%)');
+    act(() => session.toggleRail('comments'));
+    layout(WIDE);
+    expect(shown()).toBe('Fit (60%)');
+  });
+
+  for (const rail of ['closed', 'open'] as const)
+    it(`refits the stage a version’s preview gave back, with the comments rail ${rail}`, async () => {
+      const { session, container, preview } = withHistory();
+      await preview();
+      if (rail === 'open') act(() => session.toggleRail('comments'));
+      layout(rail === 'open' ? NARROW : WIDE);
+      expect(shown()).toBe(rail === 'open' ? 'Fit (44%)' : 'Fit (60%)');
+      expect(container.querySelector('[data-stage-slide] .maws-slide')).not.toBeNull();
+    });
+
+  it('a 0 × 0 reading (the stage hidden, a tab in the background) keeps the last scale', () => {
+    withHistory();
+    layout(WIDE);
+    layout({ w: 0, h: 0 });
+    expect(shown()).toBe('Fit (60%)');
+    layout(NARROW);
+    expect(shown()).toBe('Fit (44%)');
+  });
+
+  it('Fit chosen again after a fixed zoom draws at the fit of the stage a preview gave back', async () => {
+    const { preview } = withHistory();
+    await preview();
+    layout(WIDE);
+    fireEvent.change(zoom(), { target: { value: '1' } });
+    expect(shown()).toBe('100%');
+    expect(zoom().options[0]!.text).toBe('Fit (60%)'); // what Fit would draw at, read before it is chosen
+    fireEvent.change(zoom(), { target: { value: 'fit' } });
+    expect(shown()).toBe('Fit (60%)');
   });
 });

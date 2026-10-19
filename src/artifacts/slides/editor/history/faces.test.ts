@@ -33,12 +33,11 @@ describe('the preview’s faces (R2)', () => {
     expect(faces.css).not.toMatch(/font-family: "Brand"/); // the authored name stays the live editor's
   });
 
-  it('rewrites a drawn slide’s font-family values to the state’s private names, leaving other families and tokens', () => {
+  it('rewrites a drawn slide’s font-family values to the state’s private names, leaving other families', () => {
     const aliases = new Map([['brand', 'deck-face-x'], ['old face', 'deck-face-y']]);
     expect(aliasFamilyList('"Brand", Arial, sans-serif', aliases)).toBe('"deck-face-x", Arial, sans-serif');
     expect(aliasFamilyList("'Old Face', serif", aliases)).toBe('"deck-face-y", serif');
     expect(aliasFamilyList('Georgia, serif', aliases)).toBe('Georgia, serif');
-    expect(aliasFamilyList('var(--ds-font-body, Brand)', aliases)).toBe('var(--ds-font-body, Brand)');
     const root = document.createElement('section');
     root.style.setProperty('font-family', 'Brand, sans-serif');
     const p = document.createElement('p');
@@ -47,6 +46,17 @@ describe('the preview’s faces (R2)', () => {
     aliasFaces(root, aliases);
     expect(root.style.getPropertyValue('font-family')).toContain('deck-face-x');
     expect(p.style.getPropertyValue('font-family')).toContain('deck-face-y');
+  });
+
+  // L180: an uploaded family a value names only as an unresolved token's fallback still draws as the upload
+  it('rewrites the families inside a var() fallback, a nested one too, and keeps each var() and its token', () => {
+    const aliases = new Map([['brand', 'deck-face-x'], ['old face', 'deck-face-y']]);
+    expect(aliasFamilyList('var(--ds-font-x, Brand, serif)', aliases)).toBe('var(--ds-font-x, "deck-face-x", serif)');
+    expect(aliasFamilyList("var(--ds-font-x, var(--brand-face, 'Old Face'), Brand)", aliases)).toBe('var(--ds-font-x, var(--brand-face, "deck-face-y"), "deck-face-x")');
+    expect(aliasFamilyList('var(--ds-font-body), Brand, serif', aliases)).toBe('var(--ds-font-body), "deck-face-x", serif');
+    expect(aliasFamilyList('var(--ds-font-body)', aliases)).toBe('var(--ds-font-body)');
+    expect(aliasFamilyList('var(--ds-font-body, Georgia, serif)', aliases)).toBe('var(--ds-font-body, Georgia, serif)');
+    expect(aliasOverrides({ '--ds-font-display': 'var(--brand-display, "Brand")' }, aliases)).toEqual({ '--ds-font-display': 'var(--brand-display, "deck-face-x")' });
   });
 
   it('maps the font-token overrides (the Theme’s Body and Display faces) through the same private names (fix wave 3)', () => {

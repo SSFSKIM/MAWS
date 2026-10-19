@@ -217,8 +217,10 @@ describe('a document tab’s state', () => {
   // export service and then saved where the owner chooses, as the deck's Export saves, its outcome a toast.
   it('exports what is shown, the live document or the version previewed, with the page size chosen, and saves it where the owner chooses', async () => {
     useNotices.setState({ notices: [] });
+    const OWN = '00000000-0000-4000-8000-0000000000e1';
     const w = world({
-      'artifacts.export': (input: { versionId?: number; format: string }) => ({ path: `/u/artifacts/a/exports/${input.versionId === undefined ? 9 : 5}-${input.format}.x`, revision: input.versionId === undefined ? 9 : 5 }),
+      // P4 (W1, tracker 2026-10-19 L302): each export a file of its own, which the save names by its id
+      'artifacts.export': (input: { versionId?: number; format: string }) => ({ path: `/u/artifacts/a/exports/${input.versionId === undefined ? 9 : 5}-${input.format}-${OWN}.x`, revision: input.versionId === undefined ? 9 : 5, exportId: OWN }),
       'library.saveAs': { saved: true, path: '/Users/o/Downloads/Launch plan.pdf' },
     });
     const state = w.open();
@@ -226,8 +228,8 @@ describe('a document tab’s state', () => {
     const exporting = () => w.calls.filter(([name]) => name === 'artifacts.export' || name === 'library.saveAs');
     await state.export('pdf', 'a4');
     expect(exporting()).toEqual([
-      ['artifacts.export', { artifactId: A, format: 'pdf', pageSize: 'a4' }],
-      ['library.saveAs', { artifactId: A, source: { export: { revision: 9, format: 'pdf' } } }],
+      ['artifacts.export', { artifactId: A, format: 'pdf', pageSize: 'a4', ownFile: true }],
+      ['library.saveAs', { artifactId: A, source: { export: { revision: 9, format: 'pdf', exportId: OWN } } }],
     ]);
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Saved to /Users/o/Downloads/Launch plan.pdf']);
     expect(state.snapshot().exporting, 'nothing left in the header: the toast said where it went').toBeNull();
@@ -236,12 +238,12 @@ describe('a document tab’s state', () => {
     state.setPreviewing(true, { versionId: 3 });
     await state.export('md', 'letter');
     expect(exporting().slice(2)).toEqual([
-      ['artifacts.export', { artifactId: A, format: 'md', versionId: 3, pageSize: 'letter' }],
-      ['library.saveAs', { artifactId: A, source: { export: { revision: 5, format: 'md' } } }],
+      ['artifacts.export', { artifactId: A, format: 'md', versionId: 3, pageSize: 'letter', ownFile: true }],
+      ['library.saveAs', { artifactId: A, source: { export: { revision: 5, format: 'md', exportId: OWN } } }],
     ]);
     state.setPreviewing(false, null);
     await state.export('html', 'letter');
-    expect(exporting().slice(4)[0]).toEqual(['artifacts.export', { artifactId: A, format: 'html', pageSize: 'letter' }]);
+    expect(exporting().slice(4)[0]).toEqual(['artifacts.export', { artifactId: A, format: 'html', pageSize: 'letter', ownFile: true }]);
   });
 
   it('exports nothing while two versions are compared', async () => {

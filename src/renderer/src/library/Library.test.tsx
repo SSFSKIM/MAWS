@@ -398,7 +398,7 @@ describe('the row actions', () => {
     expect(formats.map((item) => item.textContent)).toEqual(['PDF', 'PNG']);
     fireEvent.click(formats[0]!);
     await waitFor(() => expect(main.callsOf('library.saveAs')).toEqual([{ artifactId: id(2), source: { export: { revision: 1, format: 'pdf' } } }]));
-    expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: id(2), format: 'pdf' }]);
+    expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: id(2), format: 'pdf', ownFile: true }]); // P4 (W1, L302): a file of its own
 
     await user.keyboard('{Escape}');
     await user.click(within(await openMenu(user, 'export.csv')).getByRole('menuitem', { name: 'Export' }));

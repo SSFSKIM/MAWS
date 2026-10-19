@@ -255,36 +255,75 @@ describe('renderView', () => {
     expect(tips(renderView({ view: 'pie', x: 'k', y: 'v' }, { columns: t.columns, rows: t.rows.slice(1) }, theme, 't').svg!).map((tip) => tip.split(':')[0])).toEqual(['b', 'c', 'd', 'e', 'f', 'g']);
   });
 
-  it('names the categories whose unaggregated bars overlap within one series and measure, pointing at agg (E2 panel)', () => {
-    const repeatOf = (warnings: string[]) => warnings.filter((w) => w.includes('bars overlap'));
-    const t: ViewTable = { columns: [{ name: 'k', type: 'string' }, { name: 'v', type: 'number' }, { name: 'w', type: 'number' }, { name: 's', type: 'string' }], rows: [['A', 4, 1, 's1'], ['A', 10, 2, 's2'], ['B', 3, 3, 's1']] };
-    const { svg = '', warnings } = renderView({ view: 'bar', x: 'k', y: 'v', title: 'Kept' }, t, theme, 't');
-    expect(repeatOf(warnings)).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
-    expect(tips(svg)).toHaveLength(3); // every row still drawn, the caption kept, no layout change
-    expect(svg).toContain('aria-label="Kept"');
-    // past three, the rest counted; in the order the axis shows them, as it names them
-    const many: ViewTable = { columns: t.columns, rows: ['E', 'D', 'C', 'B', 'A', 'Z'].flatMap((k) => (k === 'Z' ? [[k, 1, 1, 's1']] : [[k, 1, 1, 's1'], [k, 2, 1, 's1']])) };
-    expect(repeatOf(renderView({ view: 'bar', x: 'k', y: 'v' }, many, theme, 't').warnings)).toEqual(['k repeats E, D, C and 2 more; bars overlap. Set agg to combine repeated categories.']);
-    // the same category in two series (side by side), in two measures, aggregated, or with only one drawable value: no overlap
-    expect(repeatOf(renderView({ view: 'bar', x: 'k', y: 'v', series: 's' }, t, theme, 't').warnings)).toEqual([]);
-    expect(repeatOf(renderView({ view: 'bar', x: 'k', y: ['v', 'w'] }, { columns: t.columns, rows: [t.rows[0], t.rows[2]] }, theme, 't').warnings)).toEqual([]);
-    expect(repeatOf(renderView({ view: 'bar', x: 'k', y: 'v', agg: 'sum' }, t, theme, 't').warnings)).toEqual([]);
-    expect(repeatOf(renderView({ view: 'bar', x: 'k', y: 'v' }, { columns: t.columns, rows: [['A', null, 1, 's1'], ['A', 3, 1, 's1']] }, theme, 't').warnings)).toEqual([]);
-    // a line or a scatter at a repeated x is not a bar overlap
-    expect(repeatOf(renderView({ view: 'scatter', x: 'w', y: 'v' }, { columns: t.columns, rows: [['A', 1, 1, 's1'], ['A', 2, 1, 's1']] }, theme, 't').warnings)).toEqual([]);
-  });
+  it('lays out the rows that repeat a category in one series side by side in its slot, each its own bar, label and tip (S-REPEATED-BARS)', () => {
+    /** Each bar (a mark with a tip): its horizontal extent from its path's x coordinates. */
+    const barsOf = (svg: string) =>
+      [...svg.matchAll(/<path d="([^"]*)"[^>]*? data-tip="([^"]*)"/g)].map(([, d, tip]) => {
+        const xs: number[] = [];
+        for (const [, op, args] of d.matchAll(/([MVAHhZ])([^MVAHhZ]*)/g)) {
+          const n = args.split(',').filter(Boolean).map(Number);
+          if (op === 'M' || op === 'H') xs.push(n[0]);
+          if (op === 'A') xs.push(n[5]);
+          if (op === 'h') xs.push(xs[xs.length - 1] + n[0]);
+        }
+        return { tip, x0: Math.min(...xs), x1: Math.max(...xs) };
+      });
+    /** The texts centred on a point (the x labels and the value labels) by their words. */
+    const centred = (svg: string) => new Map([...svg.matchAll(/<text x="([\d.-]+)" y="[\d.-]+" text-anchor="middle"[^>]*>([^<]*)<\/text>/g)].map((m) => [m[2], Number(m[1])]));
+    const disjoint = (list: { x0: number; x1: number }[]) => list.every((a, i) => list.every((b, j) => i === j || a.x1 <= b.x0 || b.x1 <= a.x0));
+    const columns: ViewTable['columns'] = [{ name: 'k', type: 'string' }, { name: 'v', type: 'number' }, { name: 's', type: 'string' }];
+    const draw = (rows: (string | number | null)[][], series?: string) => renderView({ view: 'bar', x: 'k', y: 'v', ...(series ? { series } : {}) }, { columns, rows }, theme, 't');
+    // A category's band, from the x labels' centres (the band is 0.8 of the step between them).
+    const bandOf = (at: Map<string, number>, key: string) => {
+      const step = Math.abs(at.get('B')! - at.get('A')!);
+      return [at.get(key)! - 0.4 * step, at.get(key)! + 0.4 * step];
+    };
 
-  it('exempts bars of opposite sign at one category, which stand on either side of zero, from the overlap warning (P3-F L251)', () => {
-    const repeatOf = (warnings: string[]) => warnings.filter((w) => w.includes('bars overlap'));
-    const columns: ViewTable['columns'] = [{ name: 'k', type: 'string' }, { name: 'v', type: 'number' }];
-    const bar = (rows: [string, number][]) => repeatOf(renderView({ view: 'bar', x: 'k', y: 'v' }, { columns, rows }, theme, 't').warnings);
-    expect(bar([['A', 4], ['A', -3], ['B', 1]])).toEqual([]);
-    // a second bar on either side of zero still overlaps its own side's
-    expect(bar([['A', 4], ['A', -3], ['A', 2]])).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
-    expect(bar([['A', -1], ['A', -2]])).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
-    // a zero bar stands on the zero line with the positive bars, so it overlaps them and not a negative one
-    expect(bar([['A', 0], ['A', 5]])).toEqual(['k repeats A; bars overlap. Set agg to combine repeated categories.']);
-    expect(bar([['A', 0], ['A', -5]])).toEqual([]);
+    // two rows of one series at A: two bars side by side inside A's band, each with its own value label over it
+    const one = draw([['A', 4, 's1'], ['A', 10, 's1'], ['B', 3, 's1']]);
+    expect(one.warnings).toEqual([]); // no overlap to warn of
+    const bars = barsOf(one.svg!);
+    expect(bars.map((b) => b.tip)).toEqual(['A · v: 4', 'A · v: 10', 'B · v: 3']);
+    const at = centred(one.svg!);
+    const [a1, a2, b] = bars;
+    expect(disjoint(bars)).toBe(true);
+    expect(a1.x1).toBeLessThanOrEqual(a2.x0); // in the rows' order
+    const [lo, hi] = bandOf(at, 'A');
+    for (const bar of [a1, a2]) expect(bar.x0 >= lo && bar.x1 <= hi, bar.tip).toBe(true);
+    expect((a1.x0 + a2.x1) / 2).toBeCloseTo(at.get('A')!, 1); // the repeats centred on their category
+    expect(at.get('4')).toBeCloseTo((a1.x0 + a1.x1) / 2, 1);
+    expect(at.get('10')).toBeCloseTo((a2.x0 + a2.x1) / 2, 1);
+    // a category without a repeat is drawn as it was: one bar centred on its label
+    expect((b.x0 + b.x1) / 2).toBeCloseTo(at.get('B')!, 1);
+    expect(at.get('3')).toBeCloseTo((b.x0 + b.x1) / 2, 1);
+
+    // series and repeats share the band: s1's two rows in s1's half, s2's one row in s2's, none overlapping
+    const both = draw([['A', 4, 's1'], ['A', 6, 's1'], ['A', 10, 's2'], ['B', 3, 's1']], 's');
+    expect(both.warnings).toEqual([]);
+    const shared = barsOf(both.svg!);
+    const sharedAt = centred(both.svg!);
+    const inA = shared.filter((bar) => bar.tip.startsWith('A '));
+    expect(inA.map((bar) => bar.tip)).toEqual(['A · s1 · v: 4', 'A · s1 · v: 6', 'A · s2 · v: 10']);
+    expect(disjoint(inA)).toBe(true);
+    const [sharedLo, sharedHi] = bandOf(sharedAt, 'A');
+    const middle = sharedAt.get('A')!;
+    for (const bar of inA) expect(bar.x0 >= sharedLo && bar.x1 <= sharedHi, bar.tip).toBe(true);
+    expect(inA[0].x1 <= middle && inA[1].x1 <= middle && inA[2].x0 >= middle).toBe(true);
+    for (const [bar, label] of [[inA[0], '4'], [inA[1], '6'], [inA[2], '10']] as const) expect(sharedAt.get(label), label).toBeCloseTo((bar.x0 + bar.x1) / 2, 1);
+
+    // opposite signs at one category are two rows too: side by side, one above the zero line and one below
+    const signs = barsOf(draw([['A', 4, 's1'], ['A', -3, 's1'], ['B', 1, 's1']]).svg!);
+    expect(signs.map((bar) => bar.tip)).toEqual(['A · v: 4', 'A · v: −3', 'B · v: 1']);
+    expect(disjoint(signs)).toBe(true);
+    // a row with nothing to draw takes no slot (it is counted under the view): the one drawable row is centred alone
+    const gap = draw([['A', null, 's1'], ['A', 3, 's1'], ['B', 1, 's1']]);
+    const [lone] = barsOf(gap.svg!);
+    expect((lone.x0 + lone.x1) / 2).toBeCloseTo(centred(gap.svg!).get('A')!, 1);
+    expect(gap.warnings).toEqual(['1 row has no v; not drawn']);
+    // no overlap warning is left for repeats anywhere
+    const many = draw([['A', 1, 's1'], ['A', 2, 's1'], ['B', 1, 's1'], ['B', 2, 's1'], ['C', 3, 's1'], ['D', 4, 's1'], ['D', 5, 's1']]);
+    expect(many.warnings).toEqual([]);
+    expect(disjoint(barsOf(many.svg!))).toBe(true);
   });
 
   it('keeps series identity from the unfiltered snapshot: a filter never changes a surviving series\' form', () => {

@@ -391,8 +391,9 @@ interface HeaderInput {
   content: LibraryContent | null;
   body: BodyKind | null;
   session: AppSessionId | null;
-  // the shown revision, and the shown version's id when it is not the latest (an export of what is shown); null while
-  // either is unresolved, when Export and Save a copy are disabled
+  // the shown revision, and the shown version's id whenever a version was chosen (the latest included) or, following
+  // the latest, the shown read is not at the row's revision (a publish since it): an export of what is shown; null
+  // while either is unresolved, when Export and Save a copy are disabled
   selection: { revision: number; versionId: number | undefined } | null;
   commentable: boolean;
   picking: boolean;

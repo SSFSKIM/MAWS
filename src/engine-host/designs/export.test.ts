@@ -6,7 +6,7 @@
 // answer; the library's `artifacts.export` input schema into `exportForLibrary`. The design's `board`, `boards` and
 // `scale` reach the exporter on both routes; a picture over the cap is refused `exportTooLarge {board, w, h, maxScale}`
 // on both, and the stated scale then exports.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -267,7 +267,7 @@ describe('managed export files (Decision Log 33)', () => {
     const secondTo = join(userData, 'second.png');
     await libraryFiles(async () => secondTo).saveAs({ artifactId: id, source: { export: { revision: second.revision, format: 'png', exportId: second.exportId! } } });
     expect(readFileSync(secondTo, 'utf8')).toBe('png:poster');
-    expect([readFileSync(first.path, 'utf8'), readFileSync(second.path, 'utf8')]).toEqual(['png:phone', 'png:poster']);
+    expect([existsSync(first.path), existsSync(second.path)]).toEqual([false, false]); // P4 (W1, L302): each save removed its own file
   });
 
   it('P3-H’s ownFile with a design’s selectors (P3 Decision Log 91): one id, minted once, the board and scale reaching the exporter, Save As copying it', async () => {

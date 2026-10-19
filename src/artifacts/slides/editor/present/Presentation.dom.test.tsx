@@ -32,10 +32,12 @@ function deck(extra: Record<string, string> = {}): Doc {
 }
 
 let deckIds = 0;
-function show(doc: Doc, role: PresentRole, options: { paired?: boolean; start?: string | null; artifactId?: string } = {}) {
+function show(doc: Doc, role: PresentRole, options: { paired?: boolean; start?: string | null; artifactId?: string; embedUrl?: () => string } = {}) {
   const onEnd = vi.fn();
   const artifactId = options.artifactId ?? `00000000-0000-4000-8000-${String(++deckIds).padStart(12, '0')}`;
-  const utils = render(<Presentation doc={doc} artifactId={artifactId} role={role} paired={options.paired ?? false} start={options.start ?? null} system={null} assetUrl={() => null} onEnd={onEnd} />);
+  const utils = render(
+    <Presentation doc={doc} artifactId={artifactId} role={role} paired={options.paired ?? false} start={options.start ?? null} system={null} assetUrl={() => null} embedUrl={options.embedUrl} onEnd={onEnd} />,
+  );
   const root = () => utils.container.querySelector('[data-present-role]') as HTMLElement;
   return { ...utils, onEnd, artifactId, at: () => `${root().dataset.presentSlide}/${root().dataset.presentBuild}`, root };
 }
@@ -132,6 +134,19 @@ describe('the show', () => {
     expect(s.at()).toBe('two/0');
     pressOn(document.activeElement as HTMLElement, ' ');
     expect(s.at()).toBe('two/1');
+  });
+
+  // L259: the current pane's embeds are live frames a click goes into, and a key typed there is the frame's page's
+  it('takes focus back from an embed the presenter clicked into on a press on the bar, so the show’s Space follows', () => {
+    const embed = `<x-embed id="e" style="position:absolute; left:100px; top:100px; width:800px; height:400px">Hello</x-embed>`;
+    const s = show(deck({ one: `<section id="one">${embed}</section>` }), 'presenter', { embedUrl: () => 'about:blank' });
+    const frame = s.container.querySelector<HTMLIFrameElement>('[data-present-current] iframe')!;
+    act(() => frame.focus()); // a click into the embed's page
+    expect(document.activeElement).toBe(frame);
+    clickOn(s.container.querySelector<HTMLElement>('[data-present-count]')!);
+    expect(document.activeElement).not.toBe(frame);
+    act(() => void fireEvent.keyDown(document, { key: ' ' }));
+    expect(s.at()).toBe('two/0');
   });
 
   it('B shows black; Escape ends the show', () => {
