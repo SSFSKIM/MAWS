@@ -1,0 +1,10 @@
+{
+  "about": "The parity bench's four tasks (P4 spec §4.2), verbatim in both apps. {ref} is the artifact's native handle: MAWS a maws-artifact link titled as the working copy; Desktop the file the Code session edits (doc.md, deck.html) or the Slides artifact's name. Both arms read this file.",
+  "titles": { "document": "Riverside Community Garden: Spring Season Plan", "presentation": "Autumn Workshops 2026" },
+  "tasks": {
+    "B1": { "kind": "document", "text": "In the document {ref}, change \"Thursday\" to \"Friday\" in the schedule paragraph. Change nothing else." },
+    "B3": { "kind": "document", "text": "In the document {ref}, rewrite the introduction paragraph to be warmer, keeping it about the same length. Change nothing else." },
+    "B5": { "kind": "presentation", "text": "In the slide deck {ref}, on slide 2, change the session lead's date to 21 October. Change nothing else." },
+    "B7": { "kind": "presentation", "text": "In the slide deck {ref}, add a slide after slide 2 titled \"Getting there\" with three bullets: \"Bus 14 stops at the gate\", \"Bike racks stand by the tool shed\" and \"Parking is on Mill Lane\". Change nothing else." }
+  }
+}

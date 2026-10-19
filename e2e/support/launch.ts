@@ -57,6 +57,10 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // loader), so a spec can observe what main does from its first moment (P2-C's restart check records notifications
   // from there). The built app only: the packaged one's fuses refuse Node switches.
   requireFirst?: string;
+  // P4-A1: the parity bench's arm of record runs on the owner's user scope like any MAWS session (P4 §4.2, X39), so its
+  // launch names no CLAUDE_CONFIG_DIR at all: the engine and main then read `~/.claude` and `~/.claude.json` as the
+  // owner's own MAWS does (a CLAUDE_CONFIG_DIR of `~/.claude` would move the global config file inside it).
+  ownerConfigHome?: boolean;
 }
 // C5 end
 
@@ -105,6 +109,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   const shellHome = writeScratchShellHome(join(userData, 'shell-home'));
   Object.assign(env, shellHome.env);
   Object.assign(env, opts.env); // C3
+  if (opts.ownerConfigHome) delete env.CLAUDE_CONFIG_DIR; // P4-A1
 
   let app: ElectronApplication | null = null;
   let closed = false;
