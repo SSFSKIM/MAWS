@@ -14,11 +14,12 @@ import { registerSlot, resetSlots } from '../app/slots';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { registerFocusTarget, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
+import { useNotices } from '../stores/notices'; // P3-F (F-shell)
 import { useSessions } from '../stores/sessions';
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
 import { dockPanel, floatPanel, useColumnWidth, useFloatingCard } from './floating';
-import { resetMarkup, useMarkup } from '../markup/session'; // P3-G (M4)
+import { MARKUP_COPY, resetMarkup, useMarkup } from '../markup/session'; // P3-G (M4)
 import { resetMarkupSurfaces, useRegionMarkupSurface } from '../markup/surface'; // P3-G (M4)
 import { EditorHostScopeContext } from '../panel/editor-host'; // P3-G (M4)
 import { CommentCardHost } from '../side/card/CardHost'; // P3-G (M4)
@@ -413,8 +414,11 @@ describe('a mark-up still taken under the open card', () => {
     render(<Shell />);
     const shown = card()!;
     const occluders = () => [...document.querySelectorAll<HTMLElement>('[data-markup-occluder]')];
-    const named = () => occluders().map((el) => (el.hasAttribute('data-floating-layer') ? 'card layer' : el.hasAttribute('data-card-host') ? 'comment card host' : el.tagName));
-    expect(named()).toEqual(['comment card host', 'card layer']);
+    const named = () =>
+      occluders().map((el) =>
+        el.hasAttribute('data-floating-layer') ? 'card layer' : el.hasAttribute('data-card-host') ? 'comment card host' : el.hasAttribute('data-toast-viewport') ? 'toast viewport' : el.tagName,
+      );
+    expect(named()).toEqual(['toast viewport', 'comment card host', 'card layer']); // P3-F (F-shell): the toasts too
 
     const during: { visibility: string[]; card: HTMLElement | null; rect: unknown }[] = [];
     installFakeMain((name, input) => {
@@ -425,8 +429,8 @@ describe('a mark-up still taken under the open card', () => {
     await userEvent.click(within(region('panel')).getByRole('button', { name: 'Mark up' }));
     await waitFor(() => expect(useMarkup.getState().session).not.toBeNull());
 
-    expect(during).toEqual([{ visibility: ['hidden', 'hidden'], card: shown, rect: { x: 300, y: 180, width: 800, height: 500 } }]);
-    expect(occluders().map((el) => el.style.visibility)).toEqual(['', '']);
+    expect(during).toEqual([{ visibility: ['hidden', 'hidden', 'hidden'], card: shown, rect: { x: 300, y: 180, width: 800, height: 500 } }]);
+    expect(occluders().map((el) => el.style.visibility)).toEqual(['', '', '']);
     expect(card()).toBe(shown);
   });
 
@@ -455,6 +459,49 @@ describe('a mark-up still taken under the open card', () => {
     await userEvent.click(within(region('panel')).getByRole('button', { name: 'Mark up' }));
     await waitFor(() => expect(warn).toHaveBeenCalledWith('[markup] the still was not taken:', 'the window went'));
     expect(useMarkup.getState().session).toBeNull();
-    expect([...document.querySelectorAll<HTMLElement>('[data-markup-occluder]')].map((el) => el.style.visibility)).toEqual(['', '']);
+    expect([...document.querySelectorAll<HTMLElement>('[data-markup-occluder]')].map((el) => el.style.visibility)).toEqual(['', '', '']);
+  });
+
+  // P3-F (F-shell, scalpel-4#3): the toasts sit at the shell's bottom right, over the panel. A retry right after a
+  // refused capture would otherwise take the refusal's own toast into the still and the picture sent to chat.
+  it('hides a showing toast while main takes the still: the retry’s still holds no “Couldn’t capture” toast', async () => {
+    registerSlot('panelHost', () => (
+      <EditorHostScopeContext.Provider value={{ surface: 'panel', tabId: TAB }}>
+        <ViewerProbe />
+      </EditorHostScopeContext.Provider>
+    ));
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const r = this.hasAttribute('data-probe-viewer') ? { left: 300, top: 180, width: 800, height: 500 } : { left: 0, top: 0, width: 0, height: 0 };
+      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => ({}) } as DOMRect;
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    useNotices.setState({ notices: [] });
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [{ id: TAB, toolId: 'artifacts', pinned: false }], activeTabId: TAB }]]) });
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    let refuse = true;
+    const during: { toast: boolean; visibility: string }[] = [];
+    // the toast as it shows, in the viewport (Radix also announces its text in a body child, which is never drawn)
+    const viewport = () => document.querySelector<HTMLElement>('[data-toast-viewport]')!;
+    const showing = () => viewport().textContent?.includes(MARKUP_COPY.captureFailed) === true;
+    installFakeMain((name) => {
+      if (name !== 'layout.captureRegion') return fail(`unexpected ${name}`);
+      if (refuse) {
+        refuse = false;
+        return fail('not now');
+      }
+      during.push({ toast: showing(), visibility: viewport().style.visibility });
+      return ok({ image: still });
+    });
+    const markUp = within(region('panel')).getByRole('button', { name: 'Mark up' });
+    await userEvent.click(markUp);
+    await waitFor(() => expect(showing()).toBe(true));
+    expect(useMarkup.getState().session).toBeNull();
+    await userEvent.click(markUp);
+    await waitFor(() => expect(useMarkup.getState().session).not.toBeNull());
+    expect(during).toEqual([{ toast: true, visibility: 'hidden' }]);
+    expect(viewport().style.visibility).toBe('');
   });
 });

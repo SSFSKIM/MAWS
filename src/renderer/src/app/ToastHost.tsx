@@ -46,8 +46,9 @@ export function ToastHost() {
           )}
         </Toast.Root>
       ))}
-      {/* E4a: data-toast-viewport marks where the browser's cover watch finds the toasts that can sit over a pane */}
-      <Toast.Viewport data-toast-viewport="" label="Notifications ({hotkey})" className="absolute right-3 bottom-3 z-40 flex flex-col gap-2 outline-none" />
+      {/* E4a: data-toast-viewport marks where the browser's cover watch finds the toasts that can sit over a pane. P3-F
+          (F-shell): over the panel, the toasts are hidden while the DOM route takes a mark-up still (markup/surface.ts). */}
+      <Toast.Viewport data-toast-viewport="" data-markup-occluder="" label="Notifications ({hotkey})" className="absolute right-3 bottom-3 z-40 flex flex-col gap-2 outline-none" />
     </Toast.Provider>
   );
 }
