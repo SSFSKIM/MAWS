@@ -6,8 +6,9 @@
 // `readCommitted`, writes run inside `writeCommitted`, and an answer that carries store state is re-read through
 // `readCommitted` or built in the write's `inFrame`. A refusal computed from store state (a stale base, a conflict, a
 // missing artifact) is held the same way, so no answer names rows a failed batch takes back.
-import { lstat, readFile, realpath, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, readFile, realpath, stat, type FileHandle } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { publishFiles, readFiles, type PublishOutcome } from '@artifacts/files';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
@@ -128,13 +129,80 @@ export function pathUnderCwd(tool: ArtifactToolName, cwd: string, path: string):
 
 // P3-F (artifact-protocol finding 4): `pathUnderCwd` checks the words; these check where they lead once every link on
 // the path and on the working directory is resolved. A source (a file read) must lead inside; a path that leads
-// nowhere is answered by its read. A destination (a file written) must not be a link itself, and the nearest of it and
+// nowhere is answered as no file. A destination (a file written) must not be a link itself, and the nearest of it and
 // its directories that exists must lead inside (the directory itself included), so what is made below it stays inside.
-export async function sourceUnderCwd(tool: ArtifactToolName, cwd: string, path: string): Promise<string> {
+// P4 (the tech-debt row of 2026-10-18): and what is read or written is what was checked, so a link a process racing in
+// the working directory puts in a file's place after the check is never followed. A source is read through one
+// descriptor of the very file validated; a destination is opened through its real directory, through no link.
+//
+// macOS 11 and later: O_NOFOLLOW_ANY (not in Node's fs.constants, so passed numerically) refuses a link anywhere on the
+// path the kernel walks, the last component included. It replaces O_NOFOLLOW, since macOS answers EINVAL for the two
+// together, and it refuses /tmp and /var themselves, which is why both open a real path. Linux ignores the bit, and its
+// O_NOFOLLOW guards the last component alone: there a directory above turned into a link after the check is the
+// documented gap of the Linux unit lane (MAWS ships on macOS), as for datasets.ts's read. O_NONBLOCK: a FIFO put in a
+// file's place opens at once (or, written with no reader, fails) and is refused as not a regular file, never holding a
+// thread.
+const NO_LINK = process.platform === 'darwin' ? 0x20000000 : constants.O_NOFOLLOW;
+const READ_FLAGS = constants.O_RDONLY | constants.O_NONBLOCK | NO_LINK;
+const WRITE_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NONBLOCK | NO_LINK;
+const errnoOf = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code;
+
+// A source the agent named: a regular file of at most ARTIFACT_MAX_BYTES under the working directory once its links
+// are resolved, read whole through one descriptor, opened by its real path. The opened file must be the regular file
+// validated (its device and inode), so one replaced since, by a link out, another file or a FIFO, is refused; the read
+// stops one byte past the cap, so one grown since is refused by size.
+export async function readSourceUnderCwd(tool: ArtifactToolName, cwd: string, path: string): Promise<{ path: string; bytes: Buffer }> {
   const named = pathUnderCwd(tool, cwd, path);
   const real = await realpath(named).catch(() => null);
-  if (real !== null) await leadsInside(tool, cwd, named, real, false);
-  return named;
+  if (real === null) throw new ToolRefusal(TOOL_ERRORS.artifactNotAFile(tool, named));
+  await leadsInside(tool, cwd, named, real, false);
+  const validated = await lstat(real).catch(() => null);
+  if (!validated?.isFile()) throw new ToolRefusal(TOOL_ERRORS.artifactNotAFile(tool, named));
+  if (validated.size > ARTIFACT_MAX_BYTES) throw new ToolRefusal(TOOL_ERRORS.tooLarge(tool, named, validated.size));
+  const changed = () => refuse(tool, { reason: 'invalid', path: named }, `${named} changed after it was checked; it was not read`);
+  const handle = await open(real, READ_FLAGS).catch((error: unknown) => {
+    throw errnoOf(error) === 'ELOOP' || errnoOf(error) === 'ENOENT' ? changed() : error;
+  });
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.dev !== validated.dev || opened.ino !== validated.ino) throw changed();
+    // sized by the opened file, one byte over to see it grow; a file that did grow is read on, never past the cap
+    const chunks: Buffer[] = [];
+    let length = 0;
+    let room = Math.min(opened.size, ARTIFACT_MAX_BYTES) + 1;
+    while (length <= ARTIFACT_MAX_BYTES) {
+      const chunk = Buffer.alloc(Math.min(room, ARTIFACT_MAX_BYTES + 1 - length));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null);
+      if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
+      length += bytesRead;
+      room = 1024 * 1024;
+    }
+    if (length > ARTIFACT_MAX_BYTES) throw new ToolRefusal(TOOL_ERRORS.tooLarge(tool, named, Math.max(opened.size, length)));
+    return { path: named, bytes: chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks, length) };
+  } finally {
+    await handle.close();
+  }
+}
+
+// A destination the agent named, opened to be written whole (made, or emptied): checked as `destinationUnderCwd`
+// checks it, its directory made, that directory's real path checked to lie inside, and the file opened there through
+// no link; anything but a regular file there is refused. The caller writes and closes the handle.
+export async function openDestinationUnderCwd(tool: ArtifactToolName, cwd: string, path: string): Promise<FileHandle> {
+  const named = await destinationUnderCwd(tool, cwd, path);
+  await mkdir(dirname(named), { recursive: true });
+  const directory = await realpath(dirname(named));
+  await leadsInside(tool, cwd, named, directory, true);
+  const handle = await open(join(directory, basename(named)), WRITE_FLAGS).catch((error: unknown) => {
+    throw errnoOf(error) === 'ELOOP' ? refuse(tool, { reason: 'invalid', path: named }, `${named} became a link after it was checked; a file is not written through one`) : error;
+  });
+  const opened = await handle.stat().catch(async (error: unknown) => {
+    await handle.close();
+    throw error;
+  });
+  if (opened.isFile()) return handle;
+  await handle.close();
+  throw refuse(tool, { reason: 'invalid', path: named }, `${named} is not a regular file; it was not written`);
 }
 
 export async function destinationUnderCwd(tool: ArtifactToolName, cwd: string, path: string): Promise<string> {
