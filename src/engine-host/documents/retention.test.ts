@@ -450,7 +450,9 @@ describe('versions, restore and duplicate', () => {
     const v1 = (await store().createVersion(id, { kind: 'named', actor: human, label: 'With A' }))!;
     await refresh(id, 'live', 'B');
     await refresh(id, 'live', 'C');
-    vi.spyOn(store(), 'autoVersion').mockRejectedValueOnce(new Error('the pre-restore version failed'));
+    vi.spyOn(store(), 'versionInFrame').mockImplementationOnce(() => {
+      throw new Error('the pre-restore version failed');
+    });
     await expect(store().restore(id, v1, human)).rejects.toThrow('the pre-restore version failed');
     await store().pruneVersions(id, Date.now() + 1);
     expect(rowOf(id, a)).toBeUndefined(); // nothing held it any more
