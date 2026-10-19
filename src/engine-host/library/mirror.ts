@@ -689,8 +689,8 @@ let apfs: number | undefined; // P3-F (F10): the file system type of `/`, read o
  * ENOSYS there (Node 22 and Electron 44's Node 24); `cp -c` falls back to a byte copy where the clone fails, so it runs
  * only where the clone cannot: `from` on the volume of `to`'s folder, an APFS one (the file system of `/`, APFS on every
  * macOS MAWS runs on), and carrying no BSD file flag. clonefile copies the flags, so a locked (`uchg`) or append-only
- * source would clone as a temp that neither chmod nor rm can touch; Node reads no flags, so `stat -f %f` does, one spawn
- * of about 3 ms. Elsewhere a reflink (COPYFILE_FICLONE_FORCE), refused where the file system has none.
+ * source would clone as a temp that neither chmod nor rm can touch; Node reads no flags, so `stat -L -f %f` does (of
+ * the file a link names, which `cp` follows too), one spawn of about 3 ms. Elsewhere a reflink (COPYFILE_FICLONE_FORCE), refused where the file system has none.
  */
 export function cloneFile(from: string, to: string): void {
   const [source, folder] = [statSync(from), dirname(to)];
@@ -698,7 +698,7 @@ export function cloneFile(from: string, to: string): void {
   if (process.platform !== 'darwin') return copyFileSync(from, to, constants.COPYFILE_FICLONE_FORCE);
   if (source.dev !== statSync(folder).dev) throw new Error(`${from} is on another volume than ${folder}`);
   if (statfsSync(folder).type !== (apfs ??= statfsSync('/').type)) throw new Error(`${folder} is on a volume that cannot clone (not APFS)`);
-  const flags = execFileSync('/usr/bin/stat', ['-f', '%f', '--', from], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: MIRROR_CLONE_TIMEOUT_MS }).trim();
+  const flags = execFileSync('/usr/bin/stat', ['-L', '-f', '%f', '--', from], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: MIRROR_CLONE_TIMEOUT_MS }).trim();
   if (flags !== '0') throw new Error(`${from} carries file flags (${flags}: locked or append-only, perhaps), which its clone would copy`);
   execFileSync('/bin/cp', ['-c', '--', from, to], { stdio: ['ignore', 'ignore', 'pipe'], timeout: MIRROR_CLONE_TIMEOUT_MS });
 }

@@ -1048,8 +1048,12 @@ describe('a File artifact over the in-memory cap (P3-F F10)', () => {
   });
 
   // F10's review (P1): clonefile copies the source's BSD flags, and a File artifact's file is the owner's own, so one locked
-  // in Finder (`uchg`) cloned as a temp that neither chmod nor rm could touch, one more left in the owner's folder each pass
-  it('mirrors a locked file over the cap as nothing, refused before a clone that would copy the lock, no temp left (macOS)', async (ctx) => {
+  // in Finder (`uchg`) cloned as a temp that neither chmod nor rm could touch, one more left in the owner's folder each pass.
+  // Its recheck: a path is stored as given, and a link to a locked file read as flagless (stat without -L reads the link).
+  it.for([
+    ['named directly', false],
+    ['named through a symlink', true],
+  ] as const)('mirrors a locked file over the cap (%s) as nothing, refused before a clone that would copy the lock, no temp left (macOS)', async ([, viaLink], ctx) => {
     if (process.platform !== 'darwin') ctx.skip('BSD file flags (a Finder lock is `uchg`) and chflags are macOS’s');
     if (!volumeClones()) ctx.skip('this volume cannot clone: the guard refuses it before reading any flag');
     await startMirror({ maxFileBytes: 16 }); // the default clone
@@ -1058,7 +1062,9 @@ describe('a File artifact over the in-memory cap (P3-F F10)', () => {
     writeFileSync(locked, new Uint8Array(17));
     execFileSync('/usr/bin/chflags', ['uchg', locked]);
     try {
-      const large = await fileArtifact('Locked', locked, space.id);
+      const path = viaLink ? join(userData, 'link.bin') : locked;
+      if (viaLink) symlinkSync(locked, path);
+      const large = await fileArtifact('Locked', path, space.id);
       await mirror!.flush();
       expect(existsSync(out())).toBe(false); // no temp, no folder
       expect(logs.some((line) => line.includes(large.id) && line.includes('flags') && line.includes('mirrored as nothing'))).toBe(true);
