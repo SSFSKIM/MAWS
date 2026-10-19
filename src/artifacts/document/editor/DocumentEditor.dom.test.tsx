@@ -553,6 +553,67 @@ describe('tabs', () => {
     await until(() => editor().getText() === '', 'the remaining tab’s body shown');
     expect(screen.queryByLabelText('Delete Second'), 'a × on the last tab').toBeNull();
   });
+
+  // P4 W1-B (tracker L300): a Mac has no context-menu key and the × is outside the tab order, so a focused tab takes the
+  // menu's actions from the keyboard: F2 renames, Delete or ⌫ deletes (the same question and last-tab guard), ⌥⇧← and
+  // ⌥⇧→ move it, Shift+F10 opens its menu; the focus stays on the tab acted on, or after a deletion its neighbour's
+  it('take rename, delete and move from the keyboard on the focused tab, and open its menu', async () => {
+    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    act(() => {
+      addTab(handle.doc, { title: 'Bravo', id: 'tab00002' });
+      addTab(handle.doc, { title: 'Charlie', id: 'tab00003' });
+    });
+    await until(() => screen.getAllByRole('tab').length === 3, 'three tabs');
+    const tab = (name: string) => screen.getByRole('tab', { name });
+    const key = (name: string, init: KeyboardEventInit) => {
+      act(() => tab(name).focus());
+      act(() => void fireEvent.keyDown(tab(name), init));
+    };
+    const titles = () => listTabs(handle.doc).map((t) => t.title);
+    const focused = () => document.activeElement?.getAttribute('aria-label');
+
+    key('Bravo', { key: 'F2' });
+    act(() => fireEvent.change(screen.getByLabelText('Tab title'), { target: { value: 'Beta' } }));
+    act(() => fireEvent.keyDown(screen.getByLabelText('Tab title'), { key: 'Enter' }));
+    expect(titles()).toEqual(['Main', 'Beta', 'Charlie']);
+    await until(() => focused() === 'Beta', 'the focus back on the renamed tab');
+
+    key('Charlie', { key: 'ArrowLeft', altKey: true, shiftKey: true });
+    expect(titles()).toEqual(['Main', 'Charlie', 'Beta']);
+    await until(() => focused() === 'Charlie', 'the focus on the moved tab');
+    key('Main', { key: 'ArrowLeft', altKey: true, shiftKey: true }); // already first
+    key('Main', { key: 'ArrowRight', altKey: true, shiftKey: true });
+    expect(titles()).toEqual(['Charlie', 'Main', 'Beta']);
+    key('Charlie', { key: 'ArrowRight', shiftKey: true }); // not the chord
+    expect(titles()).toEqual(['Charlie', 'Main', 'Beta']);
+
+    key('Charlie', { key: 'F10', shiftKey: true });
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Rename', 'Move left', 'Move right', 'Delete']);
+    act(() => void fireEvent.keyDown(menu, { key: 'Escape' }));
+    await until(() => screen.queryByRole('menu') === null, 'the menu closed');
+
+    key('Charlie', { key: 'Backspace' }); // empty: no question
+    await until(() => titles().length === 2, 'Charlie deleted');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await until(() => focused() === 'Main', 'the focus on its neighbour');
+
+    key('Main', { key: 'Delete' }); // the tab with content asks first
+    const asked = await screen.findByRole('alertdialog');
+    act(() => fireEvent.click(within(asked).getByRole('button', { name: 'Cancel' })));
+    await until(() => screen.queryByRole('alertdialog') === null && focused() === 'Main', 'the focus back on the tab kept');
+    expect(titles()).toEqual(['Main', 'Beta']);
+    key('Main', { key: 'Delete' });
+    const ask = await screen.findByRole('alertdialog');
+    act(() => fireEvent.click(within(ask).getByRole('button', { name: 'Delete tab' })));
+    await until(() => titles().length === 1, 'Main deleted once confirmed');
+    expect(titles()).toEqual(['Beta']);
+    await until(() => focused() === 'Beta', 'the focus on the last tab');
+    key('Beta', { key: 'Delete' }); // the last tab stays
+    key('Beta', { key: 'Backspace' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(titles()).toEqual(['Beta']);
+  });
 });
 
 describe('find', () => {
