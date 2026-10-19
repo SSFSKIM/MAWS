@@ -17,7 +17,8 @@
 // folder, with the composer card's two answers (Trust and start, Start without trusting); the comment's draft stays
 // meanwhile, and the owner's click starts the same session again with that answer (StartOptions.trust, the one way the
 // composer's card sends it), the card then opening on the same passage. Nothing here answers trust by itself. Open
-// session stays for every other card and refusal.
+// session stays for every other card and refusal. The notice says of the folder what the composer's card says
+// (TrustCard's `TrustDetails`): the repository trust is recorded for, and what trust would turn on.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
 import { create } from 'zustand';
 import type { PassageRect } from '@artifacts/document/editor/comments/surface';
@@ -26,7 +27,7 @@ import type { TrustState } from '@shared/sessions/trust'; // P3-F F4
 import { NO_SESSION_CONTEXT, startArtifactSession, useArtifactSessionContext, type ArtifactSessionContext, type ArtifactSessionEnd, type StartTrust } from '../../artifacts/session-context'; // P3-F F4: StartTrust
 import { useLibraryRow, useLibrarySpaces } from '../../library/store';
 import { shownSession } from '../../panel/host';
-import { HOME_TRUST_COPY } from '../../sessions/TrustCard'; // P3-F F4
+import { TrustDetails } from '../../sessions/TrustCard'; // P3-F F4
 import { PRIMARY, QUIET, SECONDARY } from '../../sessions/ui'; // P3-F F4: PRIMARY, QUIET
 import { SIDE_COPY } from '../../side/copy';
 import { placeCard, pinOf, type CardStyle } from '../../side/card/placement';
@@ -37,9 +38,8 @@ const COPY = SIDE_COPY.card;
 const STARTING = 'Starting a session for this comment…';
 const COULD_NOT_START = 'The session did not start';
 const OPEN_SESSION = 'Open session';
-// P3-F F4: the trust question in the card's place, and what trust loads (the composer card's words, TrustCard.tsx)
+// P3-F F4: the trust question in the card's place (what it records and turns on is the composer card's, TrustDetails)
 const TRUST_ASK = 'Trust this folder to start a session for this comment?';
-const TRUST_LOADS = 'Trust loads its settings, hooks, MCP servers and plugins, exactly as the terminal does.';
 
 // ---- the target --------------------------------------------------------------------------------------------------------
 
@@ -261,10 +261,9 @@ function Notice({ pending, locate, layoutKey, onClose }: NoticeProps) {
           {notice.words}
         </p>
         {trust !== null && (
-          // P3-F F4: the folder and what trust loads, then the composer card's two answers
+          // P3-F F4: what the composer's card says of the folder, then its two answers
           <>
-            <p className="m-0 font-mono text-ui-sm break-all text-fg">{trust.trust.directory}</p>
-            <p className="m-0 text-ui-sm text-fg-muted">{trust.trust.isHome ? HOME_TRUST_COPY : TRUST_LOADS}</p>
+            <TrustDetails trust={trust.trust} />
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" className={PRIMARY} onClick={() => trust.decide('accepted')}>
                 Trust and start

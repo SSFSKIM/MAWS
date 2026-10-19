@@ -324,6 +324,23 @@ describe('a comment from a document with no chat beside it', () => {
     expect(fake.invoked('session.start'), 'no decision sent without the owner’s click').toEqual([{ appSessionId: STARTED, message: null, options: { requireEmptyMessage: true } }]);
   });
 
+  // P3-F F4 fix wave (review B 1): the consent says what the answer records, as the composer's card says it: a folder in a
+  // repository is trusted as the repository (main's trustKeyOf), and trust turns on what the folder holds
+  it('a folder inside a repository: the notice names the repository trust is recorded for, the config file, and what trust would turn on', async () => {
+    const { comment } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    const nested = { ...TRUST, directory: '/work/p1/docs', trustKey: '/work/p1', keyKind: 'repo', found: [{ file: '.claude/settings.json', summary: '2 hooks' }, { file: '.mcp.json', summary: '1 MCP server' }] };
+    await act(() => fake.reply('session.start', { status: 'needs_trust', appSessionId: STARTED, trust: nested }));
+    const words = notice()!.textContent!;
+    expect(words).toContain('/work/p1/docs');
+    expect(words).toContain('Trust is recorded for the repository at /work/p1');
+    expect(words).toContain(TRUST.configPath);
+    for (const text of ['.claude/settings.json', '2 hooks', '.mcp.json', '1 MCP server']) expect(words).toContain(text);
+    expect(screen.getByRole('button', { name: 'Trust and start' })).toBeTruthy();
+  });
+
   for (const [choice, trust] of [['Trust and start', 'accepted'], ['Start without trusting', 'declined']] as const) {
     it(`${choice}: the session it made starts again with the trust ${trust}, and on ready the card opens on the same passage with its draft`, async () => {
       const { reach, comment } = mount({ context: DIRECTORY });
