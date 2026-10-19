@@ -35,6 +35,7 @@ import { actorFromKey, VersionStore, type DesignSystemRef, type VersionKind } fr
 export const AUTO_IDLE_MS = 2 * 60_000; // an auto version 2 minutes after the last human update (§4.7)
 export const AUTO_EVERY_MS = 10 * 60_000; // and every 10 minutes of continuous activity, by anyone
 export const CHANGE_COALESCE_MS = 250; // a Y doc's commits reach the change feed at most this often per artifact
+export const STAGED_MAX_AGE_MS = 3_600_000; // a staged temp file this old is a killed write's (collectStaged)
 
 export type ArtifactChange = 'created' | 'updated' | 'deleted' | 'linked';
 export interface ArtifactChanged {
@@ -1091,6 +1092,23 @@ export class ArtifactStore {
       const live = this.storage.db.prepare('SELECT 1 FROM artifact_updates WHERE artifactId = ? AND content = ? AND seq = (SELECT MAX(seq) FROM artifact_updates WHERE artifactId = ? AND content IS NOT NULL)').get(artifactId, JSON.stringify(ref), artifactId);
       const kept = this.storage.db.prepare('SELECT 1 FROM artifact_versions WHERE artifactId = ? AND content = ?').get(artifactId, JSON.stringify(ref));
       if (!live && !kept) this.files.removeContent(artifactId, ref);
+    }
+  }
+
+  // The maintenance pass's (P3-F store-versions scalpel-1#2): the temp files a write killed between its stage and its
+  // place or discard left in an artifact's `tmp/`, once older than STAGED_MAX_AGE_MS (no write in flight holds its file
+  // that long), go; a fresh one stays, and so does any file a row names in place (a `file` artifact's).
+  collectStaged(now: number): void {
+    const named = this.storage.db.prepare(
+      "SELECT 1 FROM artifacts WHERE linkedPath = ? UNION ALL SELECT 1 FROM artifact_updates WHERE json_extract(content, '$.path') = ? UNION ALL SELECT 1 FROM artifact_versions WHERE json_extract(content, '$.path') = ? LIMIT 1",
+    );
+    for (const path of this.files.stagedBefore(now - STAGED_MAX_AGE_MS)) {
+      if (named.get(path, path, path)) continue;
+      try {
+        this.files.discard(path);
+      } catch (error) {
+        this.log(`a staged file was not collected (${path}): ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 

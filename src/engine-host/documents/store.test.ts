@@ -1,6 +1,7 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
@@ -1084,6 +1085,30 @@ describe('ArtifactStore: maintenance and thinning (Decision Log 5, 8)', () => {
     expect(existsSync(store.contentRef(page.id).path)).toBe(true);
     const latest = store.listVersions(doc.id)[0];
     expect(canonicalV2(store.versionState(doc.id, latest.id))).toEqual(canonicalV2(service.readState(doc.id).state));
+  });
+
+  // P3-F (store-versions scalpel-1#2): a file staged for a write a kill interrupted is collected once past the age any
+  // write in flight could hold it for; a fresh one, and a file a row names in place, stay
+  it('collects staged temp files a kill left once an hour old, keeping a fresh one and a file artifact’s file in place', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const staged = (artifactId: string, name: string, age: number) => {
+      const path = join(dir, artifactId, 'tmp', name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, 'bytes');
+      utimesSync(path, (now - age) / 1000, (now - age) / 1000);
+      return path;
+    };
+    const stale = staged(doc.id, randomUUID(), 2 * HOUR);
+    const orphaned = staged(randomUUID(), randomUUID(), DAY); // under the directory of a create the kill took back
+    const fresh = staged(doc.id, randomUUID(), MIN);
+    const inPlace = staged(doc.id, 'report.pdf', DAY);
+    const file = await store.create({ kind: 'file', title: 'report.pdf', content: { path: inPlace } }, agent);
+    await store.maintenance.run();
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(orphaned)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    expect(existsSync(inPlace)).toBe(true);
+    expect(store.contentRef(file.id).path).toBe(inPlace);
   });
 });
 
