@@ -9,8 +9,8 @@ toolchain. This page says where everything is and how to cite it.
 | | location | current build | older builds kept |
 |---|---|---|---|
 | ChatGPT / Codex app | `~/codex-app-src/readable/<build>/` | `chatgpt-26.928.40906` (published 2026-10-01, runtime 0.0.27, `@oai/cua` 0.2.5) | `chatgpt-26.928.31416`, `chatgpt-26.924`, `chatgpt-26.917`, `codex-26.623`, `cua-node-0.0.24` |
-| Claude Desktop | `~/claude-desktop-re/readable/<build>/` | `app-2.16120.0` (2026-09-29, Electron 44.4.3) | `app-2.9939.2` |
-| claude.ai web app | inside `app-2.16120.0/web/` (shipped with the app from 2.16120 on) | | `~/claude-desktop-re/readable/web-2026-09-25/` (cache capture) |
+| Claude Desktop | `~/claude-desktop-re/readable/<build>/` | `app-2.42304.0` (2026-10-18, Electron 44.7.2) | `app-2.16120.0`, `app-2.9939.2` |
+| claude.ai web app | inside `app-2.42304.0/web/` (shipped with the app from 2.16120 on) | | `app-2.16120.0/web/`, `~/claude-desktop-re/readable/web-2026-09-25/` (cache capture) |
 | T3 Code (open source, MIT) | `~/t3code-src` (git clone of `pingdotgg/t3code`) | `148e6dee` (2026-10-01) | `git -C ~/t3code-src log` holds the history; cite `<path>:<line>` at a named commit |
 | toolchain | `~/app-source-tools` (git) | | |
 
@@ -24,7 +24,7 @@ Start at `MAP.md`. Then:
 - `CATALOGS.md` and `catalogs/*.json`: env vars (reads vs. sets), log tags, IPC channels or services, Statsig
   gates, GrowthBook features, analytics events, routes, RPC method names, sockets and pipes, test ids, utility
   processes, contextBridge keys, native-addon strings. Every entry carries `file:line`.
-- Claude only: `ipc-services.md`, the full IPC surface (93 services, 1,096 methods in 2.16120) with zod parameter
+- Claude only: `ipc-services.md`, the full IPC surface (96 services, 1,161 methods in 2.42304) with zod parameter
   schemas, events, stores, and the declaration and `setImplementation` sites; `i18n-web.json`, the hashed message
   id to English text map the web UI uses.
 - `ui-strings*.json`: react-intl messages (id, defaultMessage, description, chunk). Grep an on-screen string here,
