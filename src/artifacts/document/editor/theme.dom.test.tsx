@@ -94,7 +94,8 @@ describe('a link', () => {
   it('takes no colour of its own in any state', () => {
     expect(rule('.ds-doc a').color).toBe('inherit');
     for (const { selector, property, value } of states) {
-      if (/color/.test(property) || property === 'text-decoration') expect(value, `${selector} { ${property}: ${value} }`).not.toMatch(/accent/);
+      // the focus ring included (wave S review of F18): an accent ring is the accent on a link
+      if (/color/.test(property) || property === 'text-decoration' || property.startsWith('outline')) expect(value, `${selector} { ${property}: ${value} }`).not.toMatch(/accent/);
     }
   });
 

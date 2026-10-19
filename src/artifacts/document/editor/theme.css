@@ -62,7 +62,7 @@
 }
 /* a link is the colour of its text with its underline, in every state (P3-F, sitting candidate 11, the architect's
    ruling: the bundled systems' law gives the accent to the reader's one action, never to a link). Hover thickens the
-   underline; keyboard focus draws the app's focus ring, in the page's accent token as every value here is a system's */
+   underline; keyboard focus draws the app's focus ring's shape in the link's own colour, which the HTML export keeps */
 .ds-doc a {
   color: inherit;
   text-decoration-line: underline;
@@ -72,7 +72,7 @@
   text-decoration-thickness: 0.125em;
 }
 .ds-doc a:focus-visible {
-  outline: 2px solid var(--ds-color-accent, var(--accent));
+  outline: 2px solid currentColor;
   outline-offset: 2px;
   border-radius: var(--ds-radius-sm, var(--radius-sm));
 }
