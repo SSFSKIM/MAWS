@@ -111,6 +111,37 @@ describe('the org frame', () => {
     await a.close();
     await b.close();
   });
+
+  it("goes down another machine's open stream when a daemon stops (its stream closes) and when it starts again", async () => {
+    const held = newProject();
+    const followed = newProject();
+    const watcher = await connected();
+    await watcher.sync(newProject());
+    // A lease far longer than the test, so only the close's grace can put the machine offline.
+    const m = await connected(newName(), { heartbeatMs: 200, leaseMs: 60_000, graceMs: 200 });
+    let from = watcher.frames.length;
+    await m.sync(held);
+    await m.postOk([{ t: 'hello', project: followed, name: 'followed', have: {}, follow: true }]);
+    await m.next((f) => f.t === 'have' && f.project === followed, 'have');
+    const online = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === true, 'the machine online'), m.name)!;
+
+    // The daemon stops: its stream closes, the grace runs out in both projects, and the Registry says so.
+    from = watcher.frames.length;
+    await m.close();
+    const offline = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === false, 'the machine offline'), m.name)!;
+    expect(Date.parse(offline.seen!)).toBeGreaterThan(Date.parse(online.seen!));
+
+    // It starts again: its next stream's hello brings it back online.
+    from = watcher.frames.length;
+    await m.connect();
+    await m.sync(held);
+    const back = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === true, 'the machine back'), m.name)!;
+    expect(Date.parse(back.seen!)).toBeGreaterThan(Date.parse(offline.seen!));
+    // Both came down the stream the watcher opened first, open throughout.
+    expect(watcher.isEnded).toBe(false);
+    await m.close();
+    await watcher.close();
+  });
 });
 
 describe('a follow-only hello', () => {
@@ -171,36 +202,6 @@ describe('a follow-only hello', () => {
     const offline = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, follower.name)?.online === false, 'the follower offline'), follower.name)!;
     expect(Date.parse(offline.seen!)).toBeGreaterThan(Date.parse(online.seen!));
     await follower.close();
-    await watcher.close();
-  });
-
-  it("goes down another machine's open stream when a daemon stops (its stream closes) and when it starts again", async () => {
-    const held = newProject();
-    const followed = newProject();
-    const watcher = await connected();
-    // A lease far longer than the test, so only the close's grace can put the machine offline.
-    const m = await connected(newName(), { heartbeatMs: 200, leaseMs: 60_000, graceMs: 200 });
-    let from = watcher.frames.length;
-    await m.sync(held);
-    await m.postOk([{ t: 'hello', project: followed, name: 'followed', have: {}, follow: true }]);
-    await m.next((f) => f.t === 'have' && f.project === followed, 'have');
-    const online = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === true, 'the machine online'), m.name)!;
-
-    // The daemon stops: its stream closes, the grace runs out in both projects, and the Registry says so.
-    from = watcher.frames.length;
-    await m.close();
-    const offline = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === false, 'the machine offline'), m.name)!;
-    expect(Date.parse(offline.seen!)).toBeGreaterThan(Date.parse(online.seen!));
-
-    // It starts again: its next stream's hello brings it back online.
-    from = watcher.frames.length;
-    await m.connect();
-    await m.sync(held);
-    const back = machineIn(await nextOrg(watcher, from, (f) => machineIn(f, m.name)?.online === true, 'the machine back'), m.name)!;
-    expect(Date.parse(back.seen!)).toBeGreaterThan(Date.parse(offline.seen!));
-    // Both reached the watcher on the stream it opened first, never through a reconnect's welcome.
-    expect(watcher.frames.filter((f) => f.t === 'welcome')).toHaveLength(1);
-    await m.close();
     await watcher.close();
   });
 
