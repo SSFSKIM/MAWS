@@ -8,7 +8,7 @@ import type { DeckFace } from '../../deck';
 import type { DeckSession } from '../session';
 import { INSPECTOR_COPY as C } from './copy';
 import type { Picked, Props } from './selection';
-import { COLOUR_TOKENS, fmt, readColour, round2, showColour, tokenValue } from './values';
+import { COLOUR_TOKENS, fmt, readColour, round2, showColour, tokenLabel, tokenTitle, tokenValue } from './values';
 
 /** How a change is written: one gesture (its own undo step), or into the typing step of one field. */
 export type Write = 'edit' | { typing: string };
@@ -75,7 +75,7 @@ export interface NumberFieldProps {
   caption?: string;
   value: number | null;
   mixed?: boolean;
-  /** What the field shows greyed when the value is not a plain number (a token's name, a %). */
+  /** What the field shows greyed when the value is not a plain number (a token's name, shown by its friendly name, a %). */
   hint?: string;
   unit?: string;
   step?: number;
@@ -92,6 +92,7 @@ export function NumberField({ label, caption, value, mixed = false, hint = '', u
   const [error, setError] = useState<string | null>(null);
   const shown = draft ?? fmt(value);
   const how: Write = { typing: label };
+  const token = hint.startsWith('--ds-') ? hint : null;
 
   const commit = (text: string, keep: boolean) => {
     const t = text.trim();
@@ -119,7 +120,8 @@ export function NumberField({ label, caption, value, mixed = false, hint = '', u
           aria-describedby={error !== null ? `${id}-error` : undefined}
           disabled={readOnly}
           value={shown}
-          placeholder={mixed ? C.mixed : hint}
+          placeholder={mixed ? C.mixed : token !== null ? tokenLabel(token) : hint}
+          title={!mixed && token !== null ? tokenTitle(token) : undefined}
           onChange={(event) => {
             setDraft(event.target.value);
             setError(null);
@@ -241,6 +243,8 @@ export function ColourField({ label, value, mixed = false, placeholder = C.none,
 export interface Choice {
   value: string;
   label: string;
+  /** A hover title: a token's own name beside its friendly label. */
+  title?: string;
 }
 export const MIXED_CHOICE = '\u0000mixed';
 
@@ -254,7 +258,7 @@ export function SelectField({ label, value, mixed = false, choices, groups, onCh
 }) {
   const { readOnly } = useInspector();
   const option = (c: Choice) => (
-    <option key={c.value} value={c.value}>
+    <option key={c.value} value={c.value} title={c.title}>
       {c.label}
     </option>
   );

@@ -3,6 +3,7 @@
 export const INSPECTOR_COPY = {
   panel: 'Inspector',
   slide: 'Slide',
+  group: 'Group',
   selected: (n: number) => `${n} selected`,
   mixed: 'Mixed',
   none: 'None',

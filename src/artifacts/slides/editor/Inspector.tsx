@@ -10,13 +10,15 @@
 import { useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
 import { onUpdate, type Doc } from '../../yjs';
 import type { DeckFace } from '../deck';
+import { TEXT_TAGS } from '../ir';
 import { ROOT } from '../model';
 import { restyle, setAttrsOf } from '../writers-elements';
 import { INSPECTOR_COPY as C } from './inspector/copy';
 import { InspectorContext, type InspectorApi, type Write } from './inspector/fields';
 import { ConnectorSection, IconSection, ImageSection, ShapeSection, TableSection } from './inspector/kinds';
 import { Arrange, Border, Fill, ShadowSection, Text } from './inspector/sections';
-import { pickedOf, planStyle, type Props } from './inspector/selection';
+import { pickedOf, planStyle, type Picked, type Props } from './inspector/selection';
+import { ROLE_LABELS, roleOfStyle } from './menus/TextStyle';
 import type { DeckSession } from './session';
 import './inspector.css';
 
@@ -37,6 +39,14 @@ const TAG_NAMES: Record<string, string> = {
   table: 'Table', tr: 'Table row', th: 'Header cell', td: 'Cell', hr: 'Line', svg: 'Drawing', 'x-shape': 'Shape', 'x-icon': 'Icon',
   'x-connector': 'Connector', 'x-embed': 'Embed',
 };
+
+/** An element's name: the type class it is set in, as the toolbar's Text style menu names it; else its kind by the tag. */
+function nameOf(p: Picked): string {
+  const role = p.tag !== 'section' && TEXT_TAGS.has(p.tag) ? roleOfStyle(p.style) : null;
+  if (role !== null) return ROLE_LABELS[role];
+  if (p.tag === 'div' && p.attrs['data-group'] !== undefined) return C.group;
+  return TAG_NAMES[p.tag] ?? p.tag;
+}
 
 /** A number that moves on every update of the replica, so the panel re-reads the model. */
 function useDocVersion(doc: Doc): number {
@@ -93,7 +103,7 @@ export function Inspector({ session, slideId, readOnly, faces, uploadAsset, meas
   }, [session, doc, slideId, picked, selection, readOnly, faces, uploadAsset, measure]);
 
   const slide = picked.length === 1 && picked[0]!.id === ROOT;
-  const title = picked.length === 0 ? '' : slide ? C.slide : picked.length > 1 ? C.selected(picked.length) : (TAG_NAMES[picked[0]!.tag] ?? picked[0]!.tag);
+  const title = picked.length === 0 ? '' : slide ? C.slide : picked.length > 1 ? C.selected(picked.length) : nameOf(picked[0]!);
   return (
     <aside aria-label={C.panel} className="deck-inspector">
       {picked.length > 0 && (
