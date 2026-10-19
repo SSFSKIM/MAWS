@@ -2,8 +2,9 @@
 // stage's overlay. It sits beside the scaled slide in screen pixels (handles keep their size at any zoom) and draws the
 // selection's outlines, the eight resize handles and the rotation handle, a connector's two ends, the snapping guides,
 // the marquee and a flow child's insertion bar. It takes the stage's pointer presses (click, shift-click, ⌘-click,
-// double-click, marquee, drags), its keys (Escape, Tab, Enter, Delete, arrows, ⌘D, ⌘G, ⇧⌘G, ⌘] and ⌘[, ⌘A) and the
-// clipboard while the stage has focus. Gestures are gestures.ts's; which element a press picks is selection.ts's.
+// double-click, marquee, drags), its keys (Escape, Tab, Enter, Delete, arrows, ⌘D, ⌘G, ⇧⌘G, ⌘] and ⌘[, ⌘A, and P3-F
+// F9's printable key on a selected text element, typed into its edit) and the clipboard while the stage has focus.
+// Gestures are gestures.ts's; which element a press picks is selection.ts's.
 // M7: the comment pins (../comments/Pins.tsx), at each commented element's top-right; a press on a pin is the pin's.
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import type { SlideCanvas } from '../../canvas';
@@ -321,6 +322,12 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
         done();
       } else if (mod && key.toLowerCase() === 'a') {
         session.select(selectAll(tree, sel));
+        done();
+      } else if (!mod && !e.isComposing && [...key].length === 1 && sel.length === 1 && !readOnly && isText(tree.element(sel[0]!)?.tag)) {
+        // P3-F F9 (c43): a printable key on the one selected text element enters its edit carrying the key, which the
+        // text box types over the text it opens with selected (a key typed on a selection replaces it); ⌫ above still
+        // deletes the element, as in Slides and Canva
+        session.editText(sel[0]!, { typed: key });
         done();
       }
     };

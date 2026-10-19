@@ -6,6 +6,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { newDoc, onUpdate, transact, type Doc } from '../../../yjs';
+import * as Y from '../../../yjs/slides';
+import { DesignWorkbench } from '../../../design/editor/DesignWorkbench';
+import { DesignView } from '../../../design/editor/viewport';
+import { design } from '../../../design/fixtures/support';
 import { SlideCanvas } from '../../canvas';
 import { childLists, importSlide, readFlat, ROOT, slideFile, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
@@ -494,5 +498,122 @@ describe('P3-F: a flow text element’s width only, Shift or not (scalpel-1#2)',
     r.end();
     expect(styleOf(doc, 'body').width).toBe('1564px');
     expect(styleOf(doc, 'body').height).toBeUndefined(); // a fixed height would clip or gap the text as it reflows
+  });
+});
+
+// P3-F wave S, F9 (docs/doperpowers/plans/2026-10-18-p3-f-finish.md, Wave S triage c43, obs 5a): with one text element
+// selected, a printable key enters its edit carrying the key, typed over the text as a key typed on a selection
+// replaces it (Slides, Canva, Keynote, PowerPoint); the typed words were dropped. ⌫ and Delete still delete the element
+// (the executor's ruling: the triage row's Backspace clause not taken, as ⌫ on a selected object deletes it in those
+// apps); a group, a non-text element, several elements, a read-only stage, ⌘ or Ctrl, a composing IME and a named key
+// type nothing and enter nothing (level picking unchanged).
+describe('P3-F F9: a key typed on the one selected text element', () => {
+  const SLIDE_WITH_GROUP = `<section id="s" style="background:#ffffff">
+<h2 id="title" style="font-size:64px">Title</h2>
+<div id="a" style="position:absolute; left:300px; top:300px; width:200px; height:100px; background:#ff0000"></div>
+<div id="g" data-group="" style="position:absolute; left:800px; top:300px; width:400px; height:200px"><h2 id="inner" style="position:absolute; left:0px; top:0px; width:400px; height:100px; font-size:48px">Grouped</h2></div>
+</section>`;
+  const plain = (doc: Doc, id: string) =>
+    Y.readText(doc, 's', id)
+      .map((b) => b.inline.map((r) => ('text' in r ? r.text : '\n')).join(''))
+      .join('\n');
+  function mount(readOnly = false) {
+    const doc = deck(SLIDE_WITH_GROUP);
+    const session = new DeckSession(doc, 0);
+    const utils = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={readOnly} />);
+    const stage = utils.container.querySelector('[data-stage-surface]') as HTMLElement;
+    stage.focus();
+    return { doc, session, stage, ...utils };
+  }
+  const key = (target: HTMLElement, init: KeyboardEventInit) => target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+
+  it('enters the edit with the key typed over the text, the box focused; Escape returns to the element selected', () => {
+    const { doc, session, stage, container } = mount();
+    act(() => session.select(['title']));
+    let typedOn = true;
+    act(() => void (typedOn = key(stage, { key: 'N' })));
+    expect(typedOn, 'the key is the edit’s, not the page’s').toBe(false);
+    expect(session.snapshot().editingText).toBe('title');
+    expect(plain(doc, 'title')).toBe('N');
+    const box = container.querySelector<HTMLElement>('[data-eid="title"] .deck-textbox')!;
+    expect(document.activeElement).toBe(box);
+    act(() => void fireEvent.keyDown(box, { key: 'Escape' }));
+    expect(session.snapshot()).toMatchObject({ editingText: null, selection: ['title'] });
+    act(() => session.undoStep());
+    expect(plain(doc, 'title')).toBe('Title');
+  });
+
+  it('keys pressed before the box takes the focus all land, in order; a heading reached inside a group is typed on too', () => {
+    const { doc, session, stage } = mount();
+    act(() => session.select(['title']));
+    act(() => {
+      for (const k of ['H', 'i', ' ', '!']) key(stage, { key: k, shiftKey: k === 'H' || k === '!' });
+    });
+    expect(plain(doc, 'title')).toBe('Hi !');
+    act(() => session.editText(null));
+    act(() => session.select(['inner'])); // where a double-click on the group drills
+    act(() => void key(stage, { key: '한' }));
+    expect(session.snapshot().editingText).toBe('inner');
+    expect(plain(doc, 'inner')).toBe('한');
+  });
+
+  it('types nothing and enters nothing on a group, a non-text element, two elements, with ⌘ or Ctrl, while composing, or for a named key', () => {
+    const { doc, session, stage } = mount();
+    const unchanged = (why: string) => {
+      expect(session.snapshot().editingText, why).toBeNull();
+      expect([plain(doc, 'title'), plain(doc, 'inner')], why).toEqual(['Title', 'Grouped']);
+    };
+    for (const [selection, init] of [
+      [['g'], { key: 'z' }],
+      [['a'], { key: 'z' }],
+      [['title', 'a'], { key: 'z' }],
+      [['title'], { key: 'b', metaKey: true }],
+      [['title'], { key: 'b', ctrlKey: true }],
+      [['title'], { key: 'z', isComposing: true }],
+      [['title'], { key: 'Process' }],
+      [['title'], { key: 'Dead' }],
+      [['title'], { key: 'F5' }],
+      [['title'], { key: 'Shift', shiftKey: true }],
+    ] as const) {
+      act(() => session.select(selection));
+      act(() => void key(stage, init));
+      unchanged(`${selection.join(', ')}: ${JSON.stringify(init)}`);
+      expect(session.snapshot().selection).toEqual(selection);
+    }
+  });
+
+  it('on a design board the same overlay types the key into the selected heading (the world’s own keys pass it on)', () => {
+    const doc = design();
+    const session = new DeckSession(doc, 0);
+    const view = new DesignView();
+    view.setRoom({ w: 1000, h: 800 });
+    view.setViewport({ zoom: 1, x: 0, y: 0 });
+    const { container } = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={false} />);
+    const world = container.querySelector<HTMLElement>('[data-design-world]')!;
+    act(() => {
+      session.show('b1');
+      session.select(['title']);
+    });
+    world.focus();
+    act(() => void key(world, { key: 'W' }));
+    expect(session.snapshot().editingText).toBe('title');
+    expect(Y.readText(doc, 'b1', 'title')[0]!.inline).toEqual([{ text: 'W', marks: {} }]);
+    expect(document.activeElement).toBe(container.querySelector('[data-board-id="b1"] [data-eid="title"] .deck-textbox'));
+  });
+
+  it('a read-only stage types nothing; ⌫ on the selected heading still deletes it, one undo step', () => {
+    const ro = mount(true);
+    act(() => ro.session.select(['title']));
+    act(() => void key(ro.stage, { key: 'z' }));
+    expect(ro.session.snapshot().editingText).toBeNull();
+    expect(plain(ro.doc, 'title')).toBe('Title');
+    cleanup();
+    const { doc, session, stage } = mount();
+    act(() => session.select(['title']));
+    act(() => void key(stage, { key: 'Backspace' }));
+    expect(session.snapshot().editingText).toBeNull();
+    expect(readFlat(doc, 's', false).some((e) => e.id === 'title')).toBe(false);
+    act(() => session.undoStep());
+    expect(plain(doc, 'title')).toBe('Title');
   });
 });

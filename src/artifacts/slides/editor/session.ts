@@ -101,6 +101,7 @@ export class DeckSession {
   private disposed = false; // B4
   private writesHeld = false; // B4: the editor shows a version in place of the live deck
   private readonly notesDrafts = new Map<string, NotesDraft>(); // L203
+  private typed: { id: string; text: string } | null = null; // P3-F F9: keys typed on the edited element, not yet in its box
 
   constructor(
     readonly doc: Doc,
@@ -145,7 +146,11 @@ export class DeckSession {
     const next = { ...this.state, ...patch };
     if ((Object.keys(patch) as (keyof DeckSessionState)[]).every((k) => next[k] === this.state[k])) return;
     this.state = next;
+    if (this.typed && this.typed.id !== next.editingText) this.typed = null; // its edit ended before its box took them
     this.publish();
+    this.notify();
+  }
+  private notify(): void {
     for (const listener of [...this.listeners]) listener();
   }
 
@@ -251,10 +256,25 @@ export class DeckSession {
     this.set({ selection, editingText: this.state.editingText !== null && ids.includes(this.state.editingText) ? this.state.editingText : null });
   }
 
-  /** Starts (or with null ends) editing a text element in place; it becomes the selection. */
-  editText(id: string | null): void {
+  /**
+   * Starts (or with null ends) editing a text element in place; it becomes the selection. P3-F F9: `typed` is a key the
+   * owner pressed on the selected element, which its text box types once it binds (`takeTyped`); the keys pressed before
+   * the box takes the focus are kept in order, and dropped with an edit that ends first.
+   */
+  editText(id: string | null, options: { typed?: string } = {}): void {
     if (id !== null) this.set({ selection: Object.freeze([id]), editingText: id });
     else this.set({ editingText: null });
+    if (id === null || !options.typed) return;
+    this.typed = { id, text: (this.typed?.id === id ? this.typed.text : '') + options.typed };
+    this.notify(); // a box already open takes them now
+  }
+
+  /** P3-F F9: the keys typed on `id` that its text box has not typed yet, once; null when there are none. */
+  takeTyped(id: string): string | null {
+    if (this.typed?.id !== id || this.state.editingText !== id) return null;
+    const { text } = this.typed;
+    this.typed = null;
+    return text;
   }
 
   /** A drag: the writes between `begin` and `end` are one undo step. */

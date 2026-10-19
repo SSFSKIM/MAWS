@@ -20,6 +20,7 @@
 //   bounds are read.
 // - P3-F wave S F3: the design in the panel at its 280 px minimum, its toolbar wrapped by whole controls (C's
 //   `.deck-toolbar` rules, no longer the workbench's own).
+// - P3-F wave S F9: words typed on a board's selected text element enter its edit typed over its text (C's overlay).
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -535,8 +536,16 @@ test('elements on boards: an inactive board’s press activates and selects with
   await page.getByRole('menuitem', { name: 'Zoom to board' }).click();
   await tab.getByRole('button', { name: /^Desktop, / }).click();
   const note = (await tab.locator('[data-board-id="desktop"] [data-eid="note"]').boundingBox())!;
-  await page.mouse.dblclick(note.x + 20, note.y + note.height / 2);
   const box = tab.locator('.deck-textbox');
+  // P3-F F9 (c43, obs 5a): words typed on the board's selected element enter its edit, typed over its text (C's overlay)
+  await page.mouse.click(note.x + 20, note.y + note.height / 2);
+  await expect.poll(async () => (await tabView()).selection).toEqual(['note']);
+  await page.keyboard.type('Hi there');
+  await expect(box).toBeFocused();
+  await expect.poll(async () => plain(await element('note'))).toBe('Hi there');
+  await page.keyboard.press('Escape');
+  await expect(box).toHaveCount(0);
+  await page.mouse.dblclick(note.x + 20, note.y + note.height / 2);
   await expect(box).toBeFocused();
   await page.keyboard.press('Meta+a');
   await page.keyboard.type('Hello');

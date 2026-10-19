@@ -21,6 +21,8 @@
 //   republishes, measured through the seam, the 1-minute load average beside it.
 // - P3-F wave S F3: the deck in the panel at its 280 px minimum, its toolbar wrapped by whole controls (the owner's
 //   obs 9: labels one letter a line over the canvas).
+// - P3-F wave S F9: words typed on a selected text element, and on a grouped heading after the first double-click, enter
+//   its edit typed over its text (c43: they were dropped).
 import { loadavg } from 'node:os';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
@@ -394,7 +396,8 @@ const LAB: Record<string, string> = {
 <div id="b" style="position:absolute; left:700px; top:500px; width:200px; height:120px; background:#00aa00"></div>
 <x-shape id="c" kind="ellipse" style="position:absolute; left:1300px; top:640px; width:200px; height:200px; background:#0000ff"></x-shape>
 </section>`,
-  'project/slides/text.html': `<section id="text" style="background:#ffffff; padding:128px"><p id="note" style="position:absolute; left:300px; top:300px; width:1000px; font-size:48px">Edit me</p></section>`,
+  // P3-F F9: a heading inside a group (c43: the owner's head group)
+  'project/slides/text.html': `<section id="text" style="background:#ffffff; padding:128px"><p id="note" style="position:absolute; left:300px; top:300px; width:1000px; font-size:48px">Edit me</p><div id="hg" data-group="" style="position:absolute; left:300px; top:600px; width:1000px; height:200px"><h2 id="gh" style="position:absolute; left:0px; top:0px; width:1000px; font-size:64px">Grouped heading</h2></div></section>`,
   // fix wave 1: an element drawn scaled, and a group drawn turned (its children measured as drawn)
   'project/slides/xf.html': `<section id="xf" style="background:#ffffff">
 <div id="sc" style="position:absolute; left:300px; top:300px; width:200px; height:100px; transform:scale(2); background:#ff00ff"></div>
@@ -687,8 +690,17 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   // text in place: typed, a word made bold, then a Korean composition while another replica edits the same box
   await tab.locator('[data-slide-thumb="text"] .deck-thumb-button').click();
   const note = (await tab.locator('[data-stage-slide="text"] [data-eid="note"]').boundingBox())!;
-  await page.mouse.dblclick(note.x + 40, note.y + note.height / 2);
   const box = tab.locator('.deck-textbox');
+  // P3-F F9 (c43, obs 5a): words typed on the selected element enter its edit, typed over its text (they were dropped)
+  await page.mouse.click(note.x + 40, note.y + note.height / 2);
+  await expect(tab.locator('[data-overlay] [data-selected="note"]')).toHaveCount(1);
+  await page.keyboard.type('Hi there');
+  await expect(box).toBeFocused();
+  await expect.poll(async () => plain(await element('note', 'text'))).toBe('Hi there');
+  await page.keyboard.press('Escape');
+  await expect(box).toHaveCount(0);
+  await expect(tab.locator('[data-overlay] [data-selected="note"]')).toHaveCount(1); // back to the element selected
+  await page.mouse.dblclick(note.x + 40, note.y + note.height / 2);
   await expect(box).toBeFocused();
   await page.keyboard.type('Hello world');
   // the word picked by a double-click on it (the text box's own: the stage leaves it alone)
@@ -736,6 +748,17 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   await page.keyboard.press('Escape');
   await expect(box).toHaveCount(0);
   await expect(tab.locator('[data-stage-slide="text"] [data-eid="note"]')).toHaveText('Remote Hello world한글');
+
+  // P3-F F9 (c43): the owner's grouped heading: the first double-click goes into the group and selects the heading, and
+  // the words typed then enter its edit (the first double-click plus typing dropped them)
+  const grouped = (await tab.locator('[data-stage-slide="text"] [data-eid="gh"]').boundingBox())!;
+  await page.mouse.dblclick(grouped.x + 40, grouped.y + grouped.height / 2);
+  await expect(tab.locator('[data-overlay] [data-selected="gh"]')).toHaveCount(1);
+  await page.keyboard.type('Owners first');
+  await expect(box).toBeFocused();
+  await expect.poll(async () => plain(await element('gh', 'text'))).toBe('Owners first');
+  await page.keyboard.press('Escape');
+  await expect(box).toHaveCount(0);
 
   // copy in one deck, paste into another: the dialect on the Mac's pasteboard, loaded on the way in
   await tab.locator('[data-slide-thumb="lab"] .deck-thumb-button').click();
