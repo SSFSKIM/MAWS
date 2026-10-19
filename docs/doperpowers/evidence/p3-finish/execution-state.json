@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M3 fix waves closed: all twenty areas fixed and reviewed; final interim gate, freeze and p3f-final next",
+  "phase": "M4.1: S frozen; p3f-final running on S",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -1400,5 +1400,21 @@
       "sentAt": "2026-10-18T23:31Z",
       "S": "~06:30Z"
     }
+  },
+  "frozenSource": {
+    "S": "de71da97afa48f2b19d3caeccf71406544b03e2c",
+    "frozenAt": "2026-10-19T05:05Z",
+    "masterMerge": "none needed: master had not moved (git log HEAD..master empty at the freeze)",
+    "prefreezeGate": 39201844046,
+    "ownDiffReview": "Decision Log 32: own-diff high review of 1c007d713..070e23f49 correct; each later fix wave reviewed its own range (E/reviews)",
+    "quietSignal": "CI-opt flag up 04:54:23Z, mini quiet 04:55:05Z, relayed by the architect before launch"
+  },
+  "finalGate": {
+    "label": "p3f-final",
+    "ref": "ci/p3f-final-de71da97",
+    "run": 39202806940,
+    "startedAt": "2026-10-19T05:06:06Z",
+    "status": "running",
+    "log": "/tmp/maws-review/gates/p3f-final-de71da97a-ci.log"
   }
 }

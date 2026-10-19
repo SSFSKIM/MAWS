@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-10-19T04:54:33Z",
+  "recordedAt": "2026-10-19T05:07:24Z",
   "meaning": "interim class-1a proofs on branch commits during the fix waves (pool; --gates static,unit,probes,unit:darwin); not the hand-back; they supply remote GREEN for findings committed under the Decision Log 29 slot rule",
   "runs": {
     "p3f-waves1": {
@@ -46,6 +46,18 @@
         "unit:darwin": "success",
         "probes": "success"
       }
+    },
+    "p3f-prefreeze": {
+      "run": 39201844046,
+      "sha": "de71da97afa48f2b19d3caeccf71406544b03e2c",
+      "conclusion": "success",
+      "jobs": {
+        "static": "success",
+        "unit": "success",
+        "unit:darwin": "success",
+        "probes": "success"
+      },
+      "note": "the final interim gate on S itself, before the hand-back gate"
     }
   }
 }
