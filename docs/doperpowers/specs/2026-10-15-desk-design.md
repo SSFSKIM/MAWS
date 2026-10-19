@@ -1833,8 +1833,9 @@ consumers start after that gate.
     `settled` and writes its audit record from it, once per request: a
     `settled` for a request it has already settled (a daemon relaying a
     settlement again after a restart) is taken without a second broadcast
-    or audit record; after a reconnect it drops any request the daemon
-    does not republish;
+    or audit record, unless the request was raised again since (once per
+    raise, 2026-10-19, Decision Log); after a reconnect it drops any
+    request the daemon does not republish;
   - **a delivery outcome** is `delivery {event: {writer, seq}, session,
     outcome: "delivered" | "recorded" | "refused-read-only" | "uncertain" |
     "failed", reason, mac}`, produced by the daemon when `deliver_next`
@@ -2656,7 +2657,7 @@ and `streaming` are that agent's own.
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
 | `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
 | `raised` | no | `{request, session, tool, input, agentId?, truncated?, deadline?, async?, toolUseId?, mac}`: `request` the call's tool-use id where the engine gives one (`toolu_…`; an ask-mod question's `toolu_plugin_…`), otherwise a synthetic `request-…`, opaque to every consumer, the DX6 digest included; `toolUseId` the transcript's tool-use id of the call the request belongs to, a non-empty string of at most 512 characters (else `bad-shape`), present only where it differs from `request` (the ask mod's blocking question, whose `request` is the engine dialog it opens inside its own call, a call no transcript row names), so `toolUseId ?? request` is always the id a transcript row carries, or a synthetic id no row carries; `deadline` ISO 8601 UTC with milliseconds (the producer converts DX5's epoch milliseconds); `async: true` for the ask mod's async question, answered or withdrawn, never denied; `agentId` the subagent that asked (absent for the main thread), a non-empty string; `truncated: true` when the bridge capped the input it shows, and the DX6 digest is over that capped input on both sides. The code covers every field, and the hub keeps and relays them as received; another form of `agentId`, `truncated`, `deadline`, or `async` is refused `bad-shape` |
-| `settled` | no | `{request, winner: "web" \| "terminal" \| "other", outcome, by, mac}`; taken once per request: the hub removes the request and records its decision from the first, and a `settled` for a request it already settled (a daemon that restarted between sending and recording it) is accepted without a second broadcast or decision; the settled ids are in storage, kept a month, so this holds across an eviction |
+| `settled` | no | `{request, winner: "web" \| "terminal" \| "other", outcome, by, mac}`; taken once per request: the hub removes the request and records its decision from the first, and a `settled` for a request it already settled (a daemon that restarted between sending and recording it) is accepted without a second broadcast or decision; the settled ids are in storage, kept a month, so this holds across an eviction. **[2026-10-19, MAWS #65]** Once per raise: a request raised again after its settlement (the open ask a resumed session's bridge raises under its call's id) is pending again, and the next `settled` for it removes it and records its decision; the daemon sends that `settled` though it sent one for the id before |
 | `delivery` | no | `{event: {writer, seq}, session, outcome: "delivered" \| "recorded" \| "refused-read-only" \| "uncertain" \| "failed", reason, mac}`; a `recorded` for a closed terminal session can be followed by `delivered` for the same key after Resume; `uncertain` is a push whose frame was taken but never answered |
 | `compact` | no | `{rpc, phase: "start" \| "end", tokensBefore?, tokensAfter?, skip?, error?}`: a compaction's progress, from the bridge's DX5 `compact` events; `rpc` the nonce of the DX6 `compact` that asked for it, or null for one the session started itself; on `end`, `tokensBefore` and `tokensAfter` (null when the engine recorded none), or `skip` (a hook vetoed it), or `error` (the engine refused it) |
 
@@ -5026,6 +5027,32 @@ a hub that connects into machines (§2).
   counts from the pending set).
   Date/Author: 2026-10-18, the owner's ruling; built by the delegated
   executor.
+- Decision: A settlement is taken once per raise, not once per request
+  (MAWS #65; DX4 `settled` amended, which flags DC7, its producer, and DC3
+  and DC9, its consumers). A resumed session's bridge raises its
+  still-open async ask again under the call's id, which the first
+  process's end had settled (`withdrawn`). The answer's `settled` was then
+  dropped twice: by the daemon, on its ledger of settlements the hub took,
+  and by the hub at `markSettled`. The request stayed pending, and with
+  the open-question count above, its session stayed in `waiting` and the
+  badge, until the uplink's next reconnect sent a complete set. Now the
+  daemon sends a settlement of a request it holds pending whatever its
+  ledger says, and passes by a snapshot's settlement of a request that
+  snapshot lists pending again, since it came before that raise. The hub
+  settles a request that is pending again though its id is marked settled,
+  and still takes a resend for a request no longer pending without a
+  second broadcast or decision. No storage change: the hub reads the
+  `settled` table and the pending set as they are. Built as doperpowers
+  7.188.2 (`sminos_requests.py`) and the hub's `settled` (`project.ts`);
+  this closes the tech-debt tracker's row for it. The web still draws such
+  a request with its first settlement in a tab that saw it (a new tracker
+  row, DC9's). Rejected: clearing the `settled` mark at each raise (a
+  raise settles nothing, and the mark also answers the count's
+  `isSettled`; the pending set already tells a request raised again from a
+  resend); a generation number on `raised` and `settled` (a contract
+  change for both producers, for a case the pending set already tells
+  apart).
+  Date/Author: 2026-10-19, MAWS #65's executor.
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or

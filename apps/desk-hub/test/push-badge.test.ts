@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { GridDown, ProjectSummary, PushNotice } from '../src/protocol/browser';
 import { importOrgKey, newNonce, seal } from '../src/protocol/codes';
 import type { SessionMessage } from '../src/protocol/session';
-import { enroll, GridClient, MachineClient } from './support/clients';
+import { BrowserClient, enroll, GridClient, MachineClient, waitFor } from './support/clients';
 import { ADMIN, startLocalHub, type LocalHub } from './support/local';
 import { decrypt, userAgent, type UserAgent } from './support/push';
 
@@ -300,6 +300,44 @@ describe('an open async question', () => {
     await m.postOk([{ t: 'session', message: envelope(m, A, 'presence', presence('busy')) }]);
     await summary(grid, A, { working: 1, waiting: 1 }, 'the resumed session');
 
+    grid.close();
+    await m.close();
+  });
+
+  // MAWS #65: a resumed session's bridge raises its still-open ask again under the call's id, which the first process's
+  // end settled (withdrawn). The answer's settlement settles it on the same stream; no reconnect republishes the set.
+  it("a bridge's, raised again under its id when its session resumes: counted again, and gone with its answer's settlement", async () => {
+    const grid = await GridClient.open(hub, ADMIN);
+    const m = await machine('open-r', A);
+    const b = await BrowserClient.open(hub, ADMIN, A);
+    const pending = () => b.frames.flatMap((f) => (f.t === 'pending' ? [f.requests] : [])).at(-1)?.map((r) => r.raised.request);
+    const decisions = () => b.frames.filter((f) => f.t === 'decided' && f.decision.settled.request === 'toolu_resumed').length;
+    await m.postOk([{ t: 'session', message: envelope(m, A, 'presence', presence('busy')) }]);
+
+    await raise(m, await asyncAsk('toolu_resumed'));
+    await summary(grid, A, { working: 1, waiting: 1 }, 'the raised ask');
+    // Its process ends: the bridge withdraws it.
+    await settle(m, 'toolu_resumed', 'withdrawn');
+    await summary(grid, A, { waiting: 0 }, 'the withdrawal');
+    // Resumed: raised again, under the same id.
+    await raise(m, await asyncAsk('toolu_resumed'));
+    await summary(grid, A, { working: 1, waiting: 1 }, 'the ask raised again');
+    await waitFor(() => (pending()?.includes('toolu_resumed') ? true : undefined));
+
+    // Answered.
+    await settle(m, 'toolu_resumed', 'answered');
+    await summary(grid, A, { working: 1, waiting: 0 }, 'the answer');
+    await waitFor(() => (pending()?.length === 0 ? true : undefined));
+    await waitFor(() => (decisions() === 2 ? true : undefined));
+
+    // The answer sent again (a daemon restarted before recording it) is taken once: a marker after it shows it did nothing.
+    await settle(m, 'toolu_resumed', 'answered');
+    await m.postOk([{ t: 'session', message: envelope(m, A, 'presence', presence('busy'), OTHER) }]);
+    await b.next((f) => f.t === 'session' && f.message.kind === 'presence' && f.message.session === OTHER, 'the marker');
+    expect(decisions()).toBe(2);
+    expect(b.frames.filter((f) => f.t === 'session' && f.message.kind === 'settled')).toHaveLength(2);
+
+    b.close();
     grid.close();
     await m.close();
   });
