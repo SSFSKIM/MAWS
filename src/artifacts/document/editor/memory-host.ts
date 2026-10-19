@@ -147,7 +147,7 @@ export function whenSynced(handle: DocumentHandle): Promise<void> {
 
 /**
  * The editor's slice of `ArtifactHost` over memory: uploads are kept as object URLs keyed by their ref, so an image
- * inserted from a file shows at once.
+ * inserted from a file shows at once. One map serves every artifact, so a copy is a new ref showing the same picture.
  */
 export function memoryEditorHost(identity: { actor: Actor; name: string; color: string }): EditorHost & { assets: Map<string, string> } {
   const assets = new Map<string, string>();
@@ -162,6 +162,15 @@ export function memoryEditorHost(identity: { actor: Actor; name: string; color: 
       const ref = `maws-artifact:${assetId}/${meta.name}`;
       assets.set(ref, URL.createObjectURL(new Blob([bytes.slice()], { type: meta.mime })));
       return { assetId, ref };
+    },
+    copyAsset: async (from, ref) => {
+      const url = assets.get(ref);
+      if (url === undefined) throw new Error(`no asset ${ref} in ${from}`);
+      n += 1;
+      const assetId = `asset${n}`;
+      const copied = `maws-artifact:${assetId}/${ref.slice(ref.lastIndexOf('/') + 1)}`;
+      assets.set(copied, url);
+      return { assetId, ref: copied };
     },
   };
 }
