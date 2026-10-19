@@ -166,7 +166,8 @@ export class SessionStore {
     return !known;
   }
 
-  /** Marks a request settled; false when it already was, so its `settled` is one sent again. */
+  /** Marks a request settled; false when it already was, so its `settled` is one sent again, or one of the request
+   * raised again since (`project.ts` `settled` tells them apart by the pending set). */
   markSettled(machine: string, session: string, request: string, now: number): boolean {
     this.sql.exec('DELETE FROM settled WHERE at < ?', now - SETTLED_MS);
     const known = this.sql.exec('SELECT 1 FROM settled WHERE machine = ? AND session = ? AND request = ?', machine, session, request).toArray().length > 0;
