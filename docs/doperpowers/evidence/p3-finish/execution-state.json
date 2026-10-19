@@ -1336,7 +1336,10 @@
       "S-DOC-WRITER-REORDER",
       "S-STORE-STAGED-LISTING",
       "S-MIRROR-RESIDUALS",
-      "S-PPTX-TABLE-OUTLINE"
+      "S-PPTX-TABLE-OUTLINE",
+      "S-DESIGN-ORDER-SETTLE",
+      "S-DESIGN-SCALE-100HZ",
+      "S-SLIDE-STAGE-KEYBOARD-EXIT"
     ],
     "compositionFix": "91d4874fa2f799261fffe8208c8fc3b3d88f773d",
     "compositionFollowUp": [
@@ -1382,8 +1385,12 @@
     "rule": "architect reading of A-13: up to four workers plus up to two read-only reviewers, six agents at most; reviewers run nothing heavy; vitest slots, commit lock, e2e lock and load rule unchanged; parent DL110 at landing"
   },
   "freezeEstimate": {
-    "sentAt": "2026-10-18T23:31Z",
-    "lastReviewLanding": "~2026-10-19T05:30Z (04:30-07:00)",
-    "S": "~06:30Z (05:30-08:00)"
+    "sentAt": "2026-10-19T03:53Z",
+    "lastReviewLanding": "~2026-10-19T07:15Z (06:30-08:00)",
+    "S": "~08:00Z (07:15-09:00)",
+    "previous": {
+      "sentAt": "2026-10-18T23:31Z",
+      "S": "~06:30Z"
+    }
   }
 }

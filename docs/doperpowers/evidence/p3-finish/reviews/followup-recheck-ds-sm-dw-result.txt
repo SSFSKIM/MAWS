@@ -1,0 +1,80 @@
+Recorded 2026-10-19T04:21:41Z. Bounded recheck (reviewer-medium on opus) of the design-systems and slide-model follow-up (bfaf19269, b68e2d871, 6101c2ace) and the design-workbench follow-up (eadd6bb7d, 410d15358, 2f8113ea4). Both correct. Its residual P3 (the forced settle can over-revert owner re-orders, 36 of 14,400 five-board cases) is P4 row S-DESIGN-ORDER-SETTLE; the publish.test.ts:742 title nit is dismissed (test title wording only).
+
+Reviewer report, verbatim:
+## Recheck A: design-systems and slide-model follow-up (bfaf19269, b68e2d871, 6101c2ace)
+
+**Findings:** none material.
+
+**Verdict: correct.** All three fixes close their findings, and I found no false refusal or false "changed" in any publish path.
+
+**view.ts (bfaf19269):**
+- `snapshotCss` now passes every accepted literal through `aliasedStack`: `if (faces.aliases.size) own = own.map(...)` ([view.ts](/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/artifacts/design-system/view.ts#L64)).
+- The `families` filter and its two imports are gone.
+- `aliasedStack` leaves alone any value whose comma-split items name no bundled face. Colours, lengths and shadows therefore come through byte-identical.
+- A literal never carries a `var()`, because `literalOf` resolves non-`--ds-` references to their fallback.
+- The scope's aliases are the faces `systemFaces` declares for these tokens, the same set the export declares under the authored names, so the scope and the export now agree.
+
+**office.ts (b68e2d871):**
+- `themeOverrides` iterates `safeOverrides(overrides)`, and the local `OVERRIDE_NAME` regex is removed.
+- No import cycle: resolve-vars imports `./css` and only a type from `./view`, and css.ts does not reach office.ts.
+- `safeOverrides` sorts and trims. That is harmless here because the results go into name-keyed maps.
+
+**model.ts (6101c2ace):** `setNotes` now passes the raw text to `patchNotes`, and `normalizeNotes` is used only in the loader (parse.ts:223) and in `liveViewOf` (publish.ts:112).
+
+**Publish paths with raw notes:**
+- `sameSlide` and `mergeNotes` compare the live notes trimmed, and `b` and `a` come from the loader, so a trailing-whitespace difference returns `keep`. No write and no `w.paths` entry follows, so there is no false "changed".
+- A `set` patches from the raw live value, so it diffs correctly.
+- `projectedLoss` copies the raw notes into the scratch doc, and the loader trims them before its limit check.
+- The notes field's limit counts the raw length, which is at least the trimmed length. A field-accepted value can never be held for its notes length.
+- Byte comparisons remain in `planRemoval` and the held-file branch. If the owner makes a whitespace-only notes edit after the agent's read, a removal is refused once, and a re-read clears it. That matches the behaviour before the wave and the treatment of any other live edit, so it is not a false refusal.
+
+**Changed scalpel-3#2 assertion:** it is right. `escText` leaves `\n` alone, so `read[S]` holds `<aside>Say this\n</aside>`, and `loadSlide(read[S])` reading `notes: 'Say this'` is the correct check. The new test pins `readNotes === 'Say this\n'` and shows that an append from a fresh read lands. One non-blocking nit: the test title at [publish.test.ts:742](/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/artifacts/slides/publish.test.ts#L742) still says "and the file is a fixed point", which is now true only for the text.
+
+**A1 regression:** it is meaningful. In the old code, `families.has('--ds-font-note')` was false, so the value stayed unaliased. /tmp/maws-review/p3f-ds-7-red.log fails on the exact assertion: `expected '"Iowan Old Style", Georgia, serif' to match /^ds-face-…/`. The FACE fixture exercises the same code path as Official's `var(--ds-font-body)`.
+
+**Not verified:**
+- I ran no vitest, typecheck, lint or e2e.
+- I did not independently confirm why the renderer-compiled project reads the bundled `document.css` as empty. apply.test.tsx runs only in that project. I accepted the worker's account on the strength of the valid RED.
+- The GREEN run (18:26:54) came about two minutes before the commits. I could not prove its tree is byte-identical to theirs.
+
+## Recheck B: design-workbench follow-up (eadd6bb7d, 410d15358, 2f8113ea4)
+
+**Findings:**
+- **[P3] Forced settle can revert all of the owner's re-orders when the parent kept them** ([order.ts:94-95, 110](/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/artifacts/design/order.ts#L94)).
+  - **Cause:** the new rule counts a pair all three orders agree on as lost from the first round. That includes inversions created only by the initial moved-board placement, which settling the agent's own pairs would have fixed anyway, so extra boards get settled into the sent order.
+  - **Example:** `mergeBoardOrder(abcde, adcbe, cedab, [], true)` now gives `a,d,c,b,e`, the whole sent order, which reverts all 5 pairs only the owner re-ordered. The parent gave `d,c,e,a,b`, which keeps 4 of those 5 and also violates neither invariant.
+  - **Frequency:** this happens in 36 of the 14,400 forced five-board cases, and none at three or four boards.
+  - **Possible fix:** a two-phase settle, which counts agreed pairs only once no agent pair is lost. I prototyped it: zero violations at 3, 4 and 5 boards. It keeps owner-only pairs better in 39 cases and worse in 1 (20,581 vs 20,498 of 36,000).
+  - **Why only P3:** it is a forced publish only, at five or more boards, and "the agent wins" is the stated force semantics. Logging it as debt is reasonable.
+
+**Verdict: correct.** Both invariants hold, the unforced path is unchanged, and the ref and draft fixes are sound.
+
+**Order merge:**
+- I ran my own brute force with node type-stripping on the extracted committed `order.ts` and its parent. For every sent/live order of 3, 4 and 5 boards:
+  - the unforced output is identical to the parent's (0 diffs);
+  - every forced result is a permutation of the boards;
+  - forced results lose 0 agent pairs and invert 0 agreed pairs.
+- The unforced condition is textually unchanged, since `liveReordered` is only read under `force`.
+- Termination holds: each round leaves the settled set in sent order, so the next round's lost pairs must add a board.
+- The committed regression asserts both invariants over 4 and 5 boards and fails without the fix ("expected 1 to be less than 0").
+
+**Surface ref:**
+- World's `attachSurface` writes `surface.current` and then calls `onSurface`. React attaches refs before layout and passive effects, so World's effects that read `surface.current` (lines 141, 175, 329, 356) and the overlay get the element.
+- When `onSurface` changes identity, React calls the old ref with null and then the new one with the element, the same sequence as the old memo object.
+- `surface` is now a stable `useRef`, so World's `[surface, …]` effects no longer re-run when `onStage` changes.
+- The `surfaceRef` alias is the same object, so ref semantics are untouched.
+
+**Name draft:** `if (next !== title && !onCommit(next)) setDraft(title)`, with `rename` returning false when `!writable()`. The test now checks the field's value after each refused blur and was red before ('Phone, tall').
+
+**Compiler:** I reran /private/tmp/p3f-dw-compile.mjs on copies of the committed files. All three compile with no error or skip events:
+- DesignWorkbench 299 memo slots, World 151, BoardInspector 53, NameField 13.
+- The plugin's default options match electron.vite.config.ts:91.
+
+**Not verified:**
+- I ran no vitest, lint, typecheck or e2e.
+- The design editor's DOM suites run uncompiled, so the compiled callback ref is untested at runtime.
+- I checked compilation through the plugin only, not the vite build.
+- I did not check Mark-up capture end to end.
+- My brute force covers only orders with the same members on every side (no added, removed or live-only boards).
+
+My scratch scripts and the extracted sources are in /tmp/recheck-b/.
