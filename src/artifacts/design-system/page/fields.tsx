@@ -4,6 +4,9 @@
 // that does not read yet (`#12`, `1e`) stays in the field, shown as invalid with the model's reason, and is not
 // written; Escape drops it. A remote change replaces an invalid draft; a written draft stands until the field is left.
 import { useState, type KeyboardEvent } from 'react';
+import type { ResolvedTokens } from '../resolve';
+import { byIdentity, cssNamesOf, tokenIdentity, typeRoleOf } from '../roles';
+import { aliasPath, type TokenType } from '../values';
 
 export function CommitField(props: {
   label: string;
@@ -47,6 +50,23 @@ export function CommitField(props: {
           {error}
         </span>
       ) : null}
+    </span>
+  );
+}
+
+/** The name the page shows a token under: a type role's class, any other token's CSS name. */
+function pageName(path: string, type: TokenType): string {
+  const role = type === 'typography' ? typeRoleOf(path) : null;
+  return role ? `.ds-type-${role}` : (cssNamesOf(path, type)[0] ?? tokenIdentity(path));
+}
+
+/** L279: an alias, as the token it refers to under the name the page shows it by, the reference itself on hover. */
+export function AliasOf(props: { reference: string; resolved: ResolvedTokens }) {
+  const path = aliasPath(props.reference);
+  const target = byIdentity(props.resolved.tokens, path);
+  return (
+    <span className="dsp-alias" title={props.reference}>
+      = {target ? pageName(target.path, target.type) : tokenIdentity(path)}
     </span>
   );
 }

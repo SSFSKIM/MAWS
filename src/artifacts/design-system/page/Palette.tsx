@@ -8,7 +8,7 @@ import type { TokenSet } from '../tokens';
 import { isAlias } from '../values';
 import type { DesignSystemView } from '../view';
 import { editToken } from './edit';
-import { CommitField } from './fields';
+import { AliasOf, CommitField } from './fields';
 import { PreviewScope } from './PreviewScope';
 
 // The floor the defaults meet (Acceptance 8): body text 4.5 : 1, large text and controls 3 : 1.
@@ -54,7 +54,7 @@ export function Palette(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedT
               <div className="dsp-chip" style={{ background: `var(${name})` }} />
               <div className="dsp-swatch-text">
                 <code className="dsp-name">{name}</code>
-                {isAlias(raw) ? <span className="dsp-alias">= {raw}</span> : null}
+                {isAlias(raw) ? <AliasOf reference={raw} resolved={resolved} /> : null}
                 <span className="dsp-swatch-edit">
                   <CommitField label={`${name} hex`} value={hex} disabled={readOnly} width="9ch" commit={(text) => fromHex(token, text)} />
                   <input

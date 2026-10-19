@@ -10,7 +10,7 @@ import type { TokenSet } from '../tokens';
 import { isAlias, type DimensionValue } from '../values';
 import type { DesignSystemView } from '../view';
 import { dimensionOf, dimensionText, editToken, numberOf } from './edit';
-import { CommitField } from './fields';
+import { AliasOf, CommitField } from './fields';
 import { PreviewScope } from './PreviewScope';
 
 const SAMPLE = 'Density is mass per unit volume. 밀도는 단위 부피당 질량입니다.';
@@ -74,7 +74,7 @@ export function TypeScale(props: { doc: Doc; tokens: TokenSet; resolved: Resolve
           <div key={role} className="dsp-type-row" data-role={role}>
             <div className="dsp-type-name">
               <code className="dsp-name">.ds-type-{role}</code>
-              {aliased ? <span className="dsp-alias">= {String(token.token.$value)}</span> : null}
+              {aliased ? <AliasOf reference={String(token.token.$value)} resolved={resolved} /> : null}
             </div>
             <div className="dsp-type-cell">
               <PreviewScope view={view} artifactId={artifactId} medium="document" className="dsp-specimen">

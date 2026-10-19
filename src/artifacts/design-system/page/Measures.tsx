@@ -8,7 +8,7 @@ import type { TokenSet } from '../tokens';
 import { isAlias } from '../values';
 import type { DesignSystemView } from '../view';
 import { dimensionOf, dimensionText, editToken } from './edit';
-import { CommitField } from './fields';
+import { AliasOf, CommitField } from './fields';
 import { PreviewScope } from './PreviewScope';
 
 const SPACES = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `space.${n}`);
@@ -26,7 +26,7 @@ export function Measures(props: { doc: Doc; tokens: TokenSet; resolved: Resolved
   const field = (token: Extract<ResolvedToken, { type: 'dimension' }>) => (
     <>
       <CommitField label={`${token.path} value`} value={dimensionText(token.value)} disabled={readOnly} width="7ch" commit={writeDimension(token)} />
-      {isAlias(token.token.$value) ? <span className="dsp-alias">= {token.token.$value}</span> : null}
+      {isAlias(token.token.$value) ? <AliasOf reference={token.token.$value} resolved={resolved} /> : null}
     </>
   );
   return (

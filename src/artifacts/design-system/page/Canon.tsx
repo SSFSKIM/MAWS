@@ -1,6 +1,7 @@
 // D14 §4, the canon rendered in the system: each layout as a 1920×1080 slide scaled to the page's width, each component
-// on the system's ground, and `components/document.css` applied to a fixed sample document. Each renders in its own
-// sandboxed frame (frame.ts); a change of the system rewrites the frames' sources.
+// on the system's ground on such a slide (L279: it is drawn at the deck's scale, so 1:1 it overflowed its card), and
+// `components/document.css` applied to a fixed sample document. Each renders in its own sandboxed frame (frame.ts); a
+// change of the system rewrites the frames' sources.
 import { useLayoutEffect, useRef, useState } from 'react';
 import { fontFaceCss, rewriteCssUrls, type AssetUrl } from '../assets';
 import { canonKind, DOCUMENT_CSS_PATH } from '../canon';
@@ -10,8 +11,10 @@ import { assetSource, frameCsp, frameDocument, rewriteHtmlAssets } from './frame
 
 const SLIDE = { width: 1920, height: 1080 };
 const BASE = 'html, body { margin: 0; }';
-const SLIDE_BASE = `body { width: ${SLIDE.width}px; height: ${SLIDE.height}px; overflow: hidden; } body > section { width: ${SLIDE.width}px; height: ${SLIDE.height}px; box-sizing: border-box; overflow: hidden; }`;
-const COMPONENT_BASE = 'body { padding: 24px; background: var(--ds-color-bg); }';
+const CANVAS = `body { width: ${SLIDE.width}px; height: ${SLIDE.height}px; overflow: hidden; }`;
+const SLIDE_BASE = `${CANVAS} body > section { width: ${SLIDE.width}px; height: ${SLIDE.height}px; box-sizing: border-box; overflow: hidden; }`;
+// a component held in the middle of the slide, inside a content layout's inset (the defaults' 128px)
+const COMPONENT_BASE = `${CANVAS} body { box-sizing: border-box; padding: 128px; display: flex; flex-direction: column; justify-content: safe center; background: var(--ds-color-bg); }`;
 
 // A US high-school handout (the product's frame, the spec's Decision Log 6), in the blocks B's editor writes.
 export const SAMPLE_DOCUMENT = `<article class="ds-doc">
@@ -52,7 +55,7 @@ export function canonFrames(tokens: TokenSet, files: Readonly<Record<string, str
   };
 }
 
-/** A slide frame drawn at 1920×1080 and scaled to its box's width. */
+/** A slide frame drawn at 1920×1080 and scaled to its box's width (a sandboxed frame's content cannot be measured). */
 function SlideFrame(props: { title: string; srcDoc: string }) {
   const box = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.25);
@@ -107,7 +110,7 @@ export function Canon(props: { tokens: TokenSet; files: Readonly<Record<string, 
         <div className="dsp-canon-grid">
           {frames.components.map((frame) => (
             <figure key={frame.path} className="dsp-canon-item">
-              <iframe title={frame.path} sandbox="" referrerPolicy="no-referrer" srcDoc={frame.srcDoc} className="dsp-component-frame" />
+              <SlideFrame title={frame.path} srcDoc={frame.srcDoc} />
               <figcaption className="dsp-name">{frame.path}</figcaption>
             </figure>
           ))}
