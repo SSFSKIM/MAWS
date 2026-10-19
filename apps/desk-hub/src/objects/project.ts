@@ -872,24 +872,30 @@ export class Project extends DurableObject<Env> {
    * The project's line on the org's grid, sent to the registry when it changes. Its counts are of the machines that hold
    * the project; `machines_state` names every machine leased here, followers included, with whether its lease is fresh
    * and the credential of the stream that opened it, which is how the Registry knows each machine's online state.
+   * `live` counts sessions with a process on every holder, a lapsed lease's too: a machine asleep keeps its sessions,
+   * and one gone for good is revoked.
    */
   private reportSummary(): void {
     // A revoked machine is no machine of the project, unless its name was enrolled anew and opened the project since.
     const leased = this.plane.leases().filter((l) => !this.isRevoked(l.machine, l.generation));
     const revoked = (machine: string) => this.isRevoked(machine, this.plane.lease(machine)?.generation ?? 0);
     const holding = leased.filter((l) => !l.follow);
-    const machines = new Set([...holding.map((l) => l.machine), ...this.plane.machinePresence().map((p) => p.machine).filter((m) => !revoked(m))]);
+    const holders = new Set(holding.map((l) => l.machine));
+    const machines = new Set([...holders, ...this.plane.machinePresence().map((p) => p.machine).filter((m) => !revoked(m))]);
     const online = new Set(holding.filter((l) => this.isFresh(l)).map((l) => l.machine));
     let working = 0;
+    let live = 0;
     for (const { machine, message } of this.plane.presence()) {
-      const status = message.body.record?.status;
-      if (online.has(machine) && (status === 'busy' || status === 'shell')) working++;
+      const record = message.body.record;
+      if (online.has(machine) && (record?.status === 'busy' || record?.status === 'shell')) working++;
+      if (holders.has(machine) && record !== null) live++;
     }
     const summary: SummaryReport = {
       machines: machines.size,
       machines_online: online.size,
       working,
       waiting: this.waitingSessions().size,
+      live,
       machines_state: leased.map((l) => ({ name: l.machine, online: this.isFresh(l), client: l.client })),
     };
     const text = JSON.stringify(summary);

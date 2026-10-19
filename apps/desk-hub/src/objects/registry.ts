@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   endpoint TEXT PRIMARY KEY, member TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS summaries (
   project TEXT PRIMARY KEY, machines INTEGER NOT NULL, machines_online INTEGER NOT NULL, working INTEGER NOT NULL,
-  waiting INTEGER NOT NULL, report_seq INTEGER);
+  waiting INTEGER NOT NULL, report_seq INTEGER, live INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS machine_states (
   project TEXT NOT NULL, name_key TEXT NOT NULL, client TEXT NOT NULL, online INTEGER NOT NULL,
   PRIMARY KEY (project, name_key, client));
@@ -82,22 +82,23 @@ const ADDED_COLUMNS: Record<string, string[]> = {
   org: ['key_check TEXT', 'key_auth TEXT'],
   machines: ['online INTEGER NOT NULL DEFAULT 0', 'seen TEXT'],
   projects: ["kind TEXT NOT NULL DEFAULT 'hub'", 'machine TEXT', 'retired INTEGER NOT NULL DEFAULT 0'],
-  summaries: ['report_seq INTEGER'],
+  summaries: ['report_seq INTEGER', 'live INTEGER NOT NULL DEFAULT 0'],
 };
 
 /** A member's devices: enough for a person's phones, tablets, and browsers, and a bound on what one member can store. */
 const MAX_PUSH_SUBSCRIPTIONS = 20;
 const MAX_ENDPOINT = 2048;
-type Counts = Pick<ProjectSummary, 'machines' | 'machines_online' | 'working' | 'waiting'>;
+type Counts = Pick<ProjectSummary, 'machines' | 'machines_online' | 'working' | 'waiting' | 'live'>;
 
 /**
  * What a `Project` reports when its line changes: its counts; `seq`, rising with each report it sends, since reports
  * travel asynchronously and one can arrive after a later one; and every machine leased there, a follower too, with
  * whether its lease is fresh and the credential (`client`, the Access client id) of the stream that opened it. A lease
  * is evidence only for the enrollment holding that credential: one of a revoked enrollment, reported late, says nothing
- * of the machine enrolled since under the name, in whatever case. A `Project` on the version before this sends neither.
+ * of the machine enrolled since under the name, in whatever case. A `Project` on the version before this sends neither,
+ * and one on the version before `live` sends no `live`: the count stored for the project stands.
  */
-export type SummaryReport = Counts & { seq?: number; machines_state?: Array<{ name: string; online: boolean; client: string }> };
+export type SummaryReport = Omit<Counts, 'live'> & { live?: number; seq?: number; machines_state?: Array<{ name: string; online: boolean; client: string }> };
 
 const MACHINE_COLUMNS = 'name, client_id, token_name, state, enrollment, created, confirmed';
 const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, ttl_s';
@@ -453,22 +454,28 @@ export class Registry extends DurableObject<Env> {
   /**
    * A project's counts and its machines' leases, as its `Project` object reports them when they change. A report older
    * than the latest taken from the project changes nothing; a newer one supersedes all the project said before. One
-   * without `seq` (a `Project` on the previous version) still sets the counts but leaves the leases as they were. A
-   * retired project's are kept and drawn on no grid.
+   * without `seq` (a `Project` on the previous version) still sets the counts but leaves the leases as they were; one
+   * without `live` leaves that count as it was (0 for a project first reported so). A retired project's are kept and
+   * drawn on no grid.
    */
   summary(project: string, report: SummaryReport): void {
     const seq = Number.isSafeInteger(report.seq) ? (report.seq as number) : null;
+    const live = Number.isSafeInteger(report.live) && (report.live as number) >= 0 ? (report.live as number) : null;
     const taken = this.ctx.storage.transactionSync(() => {
       const last = this.sql.exec<{ report_seq: number | null }>('SELECT report_seq FROM summaries WHERE project = ?', project).toArray()[0]?.report_seq ?? null;
       if (seq !== null && last !== null && seq <= last) return false;
       this.sql.exec(
-        'INSERT INTO summaries (project, machines, machines_online, working, waiting, report_seq) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (project) DO UPDATE SET machines = excluded.machines, machines_online = excluded.machines_online, working = excluded.working, waiting = excluded.waiting, report_seq = COALESCE(excluded.report_seq, summaries.report_seq)',
+        // `live` is bound twice: SQLite checks NOT NULL before the conflict, so a report without it inserts 0, and its
+        // update keeps the stored count (`excluded.live` would read that 0).
+        'INSERT INTO summaries (project, machines, machines_online, working, waiting, report_seq, live) VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, 0)) ON CONFLICT (project) DO UPDATE SET machines = excluded.machines, machines_online = excluded.machines_online, working = excluded.working, waiting = excluded.waiting, report_seq = COALESCE(excluded.report_seq, summaries.report_seq), live = COALESCE(?, summaries.live)',
         project,
         report.machines,
         report.machines_online,
         report.working,
         report.waiting,
         seq,
+        live,
+        live,
       );
       if (seq === null || !Array.isArray(report.machines_state)) return true;
       this.sql.exec('DELETE FROM machine_states WHERE project = ?', project);
@@ -485,8 +492,8 @@ export class Registry extends DurableObject<Env> {
   }
 
   private summaryOf(project: ProjectRecord): ProjectSummary {
-    const counts = this.sql.exec<Counts>('SELECT machines, machines_online, working, waiting FROM summaries WHERE project = ?', project.id).toArray()[0];
-    return { id: project.id, name: project.name, kind: project.kind, ...(counts ?? { machines: 0, machines_online: 0, working: 0, waiting: 0 }) };
+    const counts = this.sql.exec<Counts>('SELECT machines, machines_online, working, waiting, live FROM summaries WHERE project = ?', project.id).toArray()[0];
+    return { id: project.id, name: project.name, kind: project.kind, ...(counts ?? { machines: 0, machines_online: 0, working: 0, waiting: 0, live: 0 }) };
   }
 
   private toGrid(frame: GridDown): void {

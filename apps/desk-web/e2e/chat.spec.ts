@@ -41,7 +41,7 @@ const ANSWER_SUMMARY = 'Your questions have been answered: "Keep the Playwright 
 
 /** A day of `acceptance-scratch`, as two machines' daemons and the owner's browser would leave it on the hub. */
 export async function stageChat(hub: HubDouble): Promise<void> {
-  hub.setGrid([{ id: PROJECT, name: 'acceptance-scratch', kind: 'hub', machines: 2, machines_online: 2, working: 1, waiting: 1 }]);
+  hub.setGrid([{ id: PROJECT, name: 'acceptance-scratch', kind: 'hub', machines: 2, machines_online: 2, working: 1, waiting: 1, live: 2 }]);
   const joined = (session: string, alias: string, machine: string, ts: string) =>
     hub.append(PROJECT, { writer: `${machine}/${session}`, kind: 'joined', session, alias, name_source: 'user', machine, cwd: '/Users/new/Developer/GitHub/MAWS', worktree: '', role: '', seat: '', by: '' }, ts);
   const charge = (session: string, machine: string, text: string, ts: string) => hub.append(PROJECT, { writer: `${machine}/${session}`, kind: 'in-charge', session, text, source: 'set' }, ts);

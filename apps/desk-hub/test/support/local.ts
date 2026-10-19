@@ -39,6 +39,7 @@ import {
   SEND_HOLD_PATH,
   SEND_RELEASE_PATH,
   REPORT_PATH,
+  SUMMARIES_BEFORE_LIVE_PATH,
   TIMING_PATH,
   UNREGISTER_PATH,
 } from './send-fault';
@@ -316,6 +317,11 @@ export async function startLocalHub() {
     /** Hands the Registry a project's summary report, as one delivered late would arrive; the org's directory after. */
     async report(project: string, report: unknown): Promise<OrgFrame> {
       return JSON.parse(await seam('REGISTRY', ORG, REPORT_PATH, { project, report })) as OrgFrame;
+    },
+    /** Drops `live` from the Registry's `summaries`, as a registry stored before it; evict the Registry next, and its
+     * construction adds the column again. */
+    async summariesBeforeLive() {
+      await seam('REGISTRY', ORG, SUMMARIES_BEFORE_LIVE_PATH);
     },
     /** Puts `count` projects straight into the Registry, with long names. */
     async addProjects(count: number, prefix: string) {

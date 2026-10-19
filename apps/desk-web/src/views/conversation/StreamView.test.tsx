@@ -316,7 +316,7 @@ it('tints a send reaching none of its recipients as failed when any failed, else
 it("marks the sender's copy with its destination and the delivering event with its origin, by the projects' names", () => {
   const connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
   const [THERE, ELSEWHERE] = ['a5c3c1de-7a5e-5d2b-9f3a-2c6b7e1d4f20', 'c0ffee00-0000-4000-8000-000000000000'];
-  useGrid.setState({ projects: [{ id: THERE, name: 'mini', kind: 'machine', machines: 1, machines_online: 1, working: 0, waiting: 0 }] });
+  useGrid.setState({ projects: [{ id: THERE, name: 'mini', kind: 'machine', machines: 1, machines_online: 1, working: 0, waiting: 0, live: 0 }] });
   const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
   const at = (seq: number, kind: string, fields: Record<string, unknown>) =>
     ({ ts: '2026-10-18T08:00:00.000Z', writer: `macbook/${S1}`, seq, kind, mac: { nonce: `n${seq}`, value: 'v' }, from: 'maws-45', text: `text ${seq}`, ...fields }) as LogEvent;

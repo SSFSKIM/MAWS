@@ -4,6 +4,7 @@
 // evict), which drops a `Project`'s memory and keeps its sockets open; a `Machine` holding a stream is an active
 // reference workerd will not evict, so its termination is `ctx.abort()` through a suite seam.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { FakeMachine, loadRecording, TWO_SUBAGENTS } from '../fake-machine';
 import type { GridDown, ProjectDown, ProjectSummary, ProjectUp } from '../src/protocol/browser';
 import { FRAME_LIMIT } from '../src/protocol/parts';
 import { importOrgKey, newNonce, seal, sealRpc, verify } from '../src/protocol/codes';
@@ -1208,6 +1209,107 @@ describe('the grid', () => {
     await gridReached(grid, project, from, { machines: 0, machines_online: 0 }, 'the removed machine no longer counted');
     grid.close();
     await m.close();
+  });
+});
+
+// smns remote identity §5 (owner, 2026-10-19): the web shows a project with a live session or waiting on the owner.
+describe("the grid's live count", () => {
+  const ended = { record: null, bridge: false };
+
+  it('counts each session whose presence names a process, never a null record, and keeps them while the lease lapses', async () => {
+    const project = newProject();
+    const m = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    await m.postOk([
+      { t: 'session', message: envelope(m, project, 'presence', presence('busy')) },
+      { t: 'session', message: envelope(m, project, 'presence', ended, SECOND) },
+    ]);
+    await gridReached(grid, project, 0, { working: 1, live: 1 }, 'the one session with a process');
+    let from = grid.frames.length;
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'presence', presence('idle'), SECOND) }]);
+    await gridReached(grid, project, from, { working: 1, live: 2 }, 'the second session running');
+    from = grid.frames.length;
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'presence', ended, SECOND) }]);
+    await gridReached(grid, project, from, { working: 1, live: 1 }, 'the second session ended');
+    // The stream closes and the lease lapses: nothing works on an offline machine, and its session is still live there.
+    from = grid.frames.length;
+    await m.close();
+    await gridReached(grid, project, from, { machines: 1, machines_online: 0, working: 0, live: 1 }, 'the machine offline, its session kept');
+    grid.close();
+  });
+
+  it('counts no session of a machine that only follows the project, its presence kept from when it held it', async () => {
+    const project = newProject();
+    const holder = await machine(project, CLOSES);
+    const other = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    await holder.postOk([{ t: 'session', message: envelope(holder, project, 'presence', presence('busy')) }]);
+    await other.postOk([{ t: 'session', message: envelope(other, project, 'presence', presence('idle'), SECOND) }]);
+    await gridReached(grid, project, 0, { machines: 2, live: 2 }, 'both sessions');
+    const from = grid.frames.length;
+    await other.postOk([{ t: 'hello', project, name: 'demo', have: other.vector(project), follow: true }]);
+    await gridReached(grid, project, from, { machines: 1, machines_online: 1, live: 1 }, 'the follower out of the count');
+    grid.close();
+    await other.close();
+    await holder.close();
+  });
+
+  it('is played by the fake machine: its only session ends, the machine still online, and the project counts none live', async () => {
+    const project = newProject();
+    const name = `sp-${++machines}`;
+    const fake = new FakeMachine({ hub: hub.url, machine: name, credentials: await enroll(hub, ADMIN, name), orgKey: new Uint8Array(32).fill(9), project, recordings: [loadRecording(TWO_SUBAGENTS)] });
+    const grid = await GridClient.open(hub, ADMIN);
+    await fake.connect();
+    await gridReached(grid, project, 0, { machines_online: 1, live: 1 }, 'its session live');
+    const from = grid.frames.length;
+    await fake.end();
+    await gridReached(grid, project, from, { machines_online: 1, live: 0 }, 'its session ended');
+    grid.close();
+    await fake.close();
+  });
+
+  it("drops a revoked machine's sessions from the count", async () => {
+    const project = newProject();
+    const kept = await machine(project, CLOSES);
+    const revoked = await machine(project, CLOSES);
+    const grid = await GridClient.open(hub, ADMIN);
+    await kept.postOk([{ t: 'session', message: envelope(kept, project, 'presence', presence('busy')) }]);
+    await revoked.postOk([{ t: 'session', message: envelope(revoked, project, 'presence', presence('idle'), SECOND) }]);
+    await gridReached(grid, project, 0, { live: 2 }, 'both sessions');
+    const from = grid.frames.length;
+    expect((await hub.fetchAs(ADMIN, `/api/machines/${revoked.name}`, { method: 'DELETE' })).status).toBe(200);
+    await gridReached(grid, project, from, { machines: 1, live: 1 }, 'the revoked machine no longer counted');
+    grid.close();
+    await revoked.close();
+    await kept.close();
+  });
+
+  it('is added to a registry stored before it, read as none until a report carries it; a report without it keeps the count', async () => {
+    const prefix = `live-${projects}`;
+    await hub.addProjects(2, prefix);
+    const [project, fresh] = [0, 1].map((i) => `${prefix}-${String(i).padStart(12, '0')}`);
+    const counts = { machines: 1, machines_online: 1, working: 0, waiting: 0 };
+    await hub.report(project, { ...counts, live: 2, seq: 1 });
+    let grid = await GridClient.open(hub, ADMIN);
+    await gridReached(grid, project, 0, { live: 2 }, 'the stored count');
+    grid.close();
+
+    // The registry as it stood before the column, constructed again.
+    await hub.summariesBeforeLive();
+    await hub.evict('Registry', ORG);
+    grid = await GridClient.open(hub, ADMIN);
+    await gridReached(grid, project, 0, { machines: 1, live: 0 }, 'the column added, the older row read as none live');
+    let from = grid.frames.length;
+    await hub.report(project, { ...counts, live: 3, seq: 2 });
+    await gridReached(grid, project, from, { live: 3 }, 'a report carrying the count');
+    // A `Project` on the version before `live` sends neither it nor a sequence: its counts are taken, the live count kept;
+    // for a project the registry holds no counts of yet, none live.
+    from = grid.frames.length;
+    await hub.report(project, { ...counts, working: 1 });
+    await hub.report(fresh, { ...counts, working: 1 });
+    await gridReached(grid, project, from, { working: 1, live: 3 }, 'the older report, the count kept');
+    await gridReached(grid, fresh, from, { working: 1, live: 0 }, "the older report of a project with no counts yet");
+    grid.close();
   });
 });
 

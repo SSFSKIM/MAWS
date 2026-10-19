@@ -1,5 +1,6 @@
 // The web app against DC3's local hub and its session plane (its M3) with DC3's fake machine (its M4) as the machine:
-// M1's owed proof — the grid's counts change within 2 s of a change on the machine side — and M3's G2 clauses against
+// M1's owed proof — the grid's counts change within 2 s of a change on the machine side — the grid's default, a project
+// whose only session ends going behind "Show all" (smns remote identity §5), and M3's G2 clauses against
 // the hub's real routing: the pending set decided and answered from the web (the decision drawn again after a reload,
 // from the audit record's `decided`); RPC states, `uncertain` among them, and its retry under the same nonce; each
 // recipient's delivery outcome surviving a reload; a machine gone offline leaving the conversation with its presence
@@ -164,6 +165,27 @@ test("M1: the grid's counts change within 2 s of a change on the machine side (a
   const offlineBound = hub.heartbeatMs + 500;
   const bounds: Record<string, number> = { busy: 2000, waiting: 2000, 'busy again': 2000, shell: 2000, offline: offlineBound };
   expect(Object.entries(took).filter(([what, ms]) => ms > bounds[what]), `the tile's latencies (ms): ${JSON.stringify(took)}; bounds ${JSON.stringify(bounds)}`).toEqual([]);
+});
+
+// smns remote identity §5: the grid shows a project with a live session; one whose only session ends goes behind Show all.
+test('the grid: a project whose only session ends drops behind Show all once its presence goes null, its machine online', async () => {
+  test.setTimeout(90_000);
+  const fm = await fakeMachine({ recordings: [recording()] });
+  await page.goto(hub.localhost);
+  const tile = page.locator(`[data-project="${fm.project}"]`);
+  await expect(tile).toHaveAttribute('data-live', '1', { timeout: 20_000 });
+  await expect(tile).toContainText('1 idle');
+
+  await fm.end();
+  await expect(tile).toHaveCount(0, { timeout: 10_000 });
+  const show = page.getByTestId('grid-show');
+  await expect(show).toHaveText(/^Show all \(\d+\)$/);
+  await show.click();
+  await expect(tile).toContainText('Quiet');
+  await expect(tile.getByTestId('machines')).toContainText('1 machine');
+  // Back to the default, which this page's other cases meet.
+  await page.getByTestId('grid-show').click();
+  await expect(tile).toHaveCount(0);
 });
 
 test('G2: the pending set is decided and answered from the web through the routing, and a reload draws each decision again', async () => {

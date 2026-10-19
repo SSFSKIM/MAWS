@@ -14,7 +14,7 @@ const policy = { read_only: false, ceiling: 'default' };
 
 async function stageOrg(hub: Parameters<typeof stageProject>[0]): Promise<void> {
   await stageProject(hub);
-  hub.setGrid([summary(), { id: MINI, name: 'mini', kind: 'machine', machines: 1, machines_online: 1, working: 0, waiting: 1 }]);
+  hub.setGrid([summary(), { id: MINI, name: 'mini', kind: 'machine', machines: 1, machines_online: 1, working: 0, waiting: 1, live: 2 }]);
   // Later than every join of the MAWS project: the newest join of the waiting group.
   const later = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
   const joined = (session: string, alias: string, cwd: string) => ({ writer: `mini/${session}`, kind: 'joined', session, alias, name_source: 'derived', machine: 'mini', cwd, worktree: '', role: '', seat: '', by: '', session_kind: 'interactive', repo: '', branch: '' });
