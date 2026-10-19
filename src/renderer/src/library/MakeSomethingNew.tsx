@@ -7,7 +7,8 @@
 // P3-F wave S (F5, the owner's change to Decision Log 13): from a Space, Ask Claude starts the chat in the Space's
 // linked folder, in that folder's project by the index's membership rule (New chat's Open folder,
 // `session.projects.addFolder`), else in the focused project, and its words name the Space ("Make a <kind> in the Space
-// “<name>”: "), which the agent's `artifact_create` takes as its `space`.
+// “<name>”: "), which the agent's `artifact_create` takes as its `space`. P4: so it is disabled while the narrowed
+// Space is not known (the Spaces list not read yet, or holding no such Space).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
@@ -53,7 +54,7 @@ async function askClaude(kind: ArtifactKind, space: LibrarySpace | undefined): P
 
 function KindCard({ kind, spaceId, space }: { kind: ArtifactKind; spaceId: string | null; space: LibrarySpace | undefined }) {
   const editor = useArtifactEditor(kind);
-  const canAsk = useSessionCreatorRegistered();
+  const canAsk = useSessionCreatorRegistered() && (spaceId === null || space !== undefined);
   const label = KIND_LABELS[kind];
   const asking = askClaudePrefill(kind, space?.name);
   const primary =
