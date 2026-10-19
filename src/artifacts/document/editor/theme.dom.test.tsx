@@ -160,6 +160,29 @@ describe('the rendered page without a design system', () => {
     }
   });
 
+  // P3-F (sitting candidate 53): the app's root takes `color-scheme: dark` in the dark theme, and the page declared none,
+  // so its native controls (a checklist's boxes, the date field, the selects) drew dark on a light page, an unticked box a
+  // solid dark square; the page takes the scheme of its own ground (`data-ground`, read from its computed background)
+  it('takes the colour scheme of its own ground, not the app’s theme', async () => {
+    const container = await mountPage(doc({ type: 'taskList', attrs: { id: 'k1' }, content: [{ type: 'taskItem', attrs: { id: 'ik1', checked: false }, content: [para('pk1', 'Task')] }] }), '.ds-doc ul[data-type="taskList"]');
+    const page = container.querySelector<HTMLElement>('.ds-doc')!;
+    const scheme = () => getComputedStyle(page).getPropertyValue('color-scheme');
+    const system = document.head.appendChild(document.createElement('style'));
+    document.documentElement.dataset.theme = 'dark';
+    try {
+      system.textContent = '.ds-doc { --ds-color-bg: #ffffff; }'; // a light system in the dark app
+      await ticks(3);
+      expect(page.dataset.ground).toBe('light');
+      expect(scheme()).toBe('light');
+      system.textContent = '.ds-doc { --ds-color-bg: #1f1e1b; }'; // a dark one
+      await until(() => page.dataset.ground === 'dark', 'the dark ground read');
+      expect(scheme()).toBe('dark');
+    } finally {
+      system.remove();
+      delete document.documentElement.dataset.theme;
+    }
+  });
+
   // Each app colour token as this engine computes it.
   function tokenColours(): Set<string> {
     const probe = document.body.appendChild(document.createElement('div'));

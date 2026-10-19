@@ -9,6 +9,10 @@
 
 .ds-doc {
   container-type: inline-size; /* the page's margin is measured against the column it is shown in */
+  /* the page's native controls (a checklist's boxes, the date field, the selects) draw in its own ground's scheme, not
+     the app root's: a dark app drew them dark on a light page, an unticked box a solid square (P3-F, sitting candidate
+     53); a dark ground takes the dark scheme below */
+  color-scheme: light;
   background: var(--ds-color-bg, var(--bg));
   color: var(--ds-color-text, var(--fg));
   font-family: var(--ds-font-body, var(--font-prose));
@@ -289,4 +293,7 @@
    from the page's computed background: the system's `--ds-color-bg`, the app's without a system), never the app theme */
 .ds-doc[data-ground="dark"] .doc-code-token {
   color: var(--shiki-dark) !important;
+}
+.ds-doc[data-ground="dark"] {
+  color-scheme: dark;
 }

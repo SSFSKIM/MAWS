@@ -499,6 +499,38 @@ test.describe('the document editor', () => {
     await expect(line).toContainText('later');
     expect(await json(page, 'a')).toMatch(/"type":"date","attrs":\{"iso":"\d{4}-\d{2}-\d{2}"\}/);
   });
+
+  // P3-F (sitting candidate 53): in the dark app a light page draws its native controls in the light scheme (an unticked
+  // checklist box is no solid dark square), and a dark page in the dark one
+  test('a page draws its checklist boxes in its own ground’s colour scheme, not the app’s', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+    await bar.getByRole('button', { name: 'Checklist', exact: true }).click();
+    await page.keyboard.type('Unticked');
+    const sheet = replica(page, 'a').locator('.ds-doc');
+    const box = content(page, 'a').locator('ul[data-type="taskList"] input[type="checkbox"]').last();
+    const scheme = () => box.evaluate((el) => getComputedStyle(el).colorScheme);
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = 'dark';
+      const system = document.head.appendChild(document.createElement('style'));
+      system.id = 'p3f-page-system';
+      system.textContent = '.ds-doc { --ds-color-bg: rgb(250, 249, 246); --ds-color-text: rgb(31, 30, 27); }';
+    });
+    try {
+      await expect(sheet).toHaveAttribute('data-ground', 'light');
+      await expect.poll(scheme).toBe('light');
+      await expect(box).not.toBeChecked();
+      await page.evaluate(() => void (document.getElementById('p3f-page-system')!.textContent = '.ds-doc { --ds-color-bg: rgb(31, 30, 27); --ds-color-text: rgb(250, 249, 246); }'));
+      await expect(sheet).toHaveAttribute('data-ground', 'dark');
+      await expect.poll(scheme).toBe('dark');
+    } finally {
+      await page.evaluate(() => {
+        delete document.documentElement.dataset.theme;
+        document.getElementById('p3f-page-system')?.remove();
+      });
+    }
+  });
 });
 
 // One step of S4's 2-set model, as S7b's ime scenario sends it (spikes/p3-store/s7/electron/main.ts, `imeStep`).
