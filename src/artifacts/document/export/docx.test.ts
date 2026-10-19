@@ -6,6 +6,7 @@ import JSZip from 'jszip';
 import mammoth from 'mammoth';
 import { describe, expect, it } from 'vitest';
 import { AGENT, everyKindSource, HUMAN, sourceOf, threadOf } from '../convert.fixture';
+import type { Thread } from '../threads';
 import { HOUSE_TOKENS, houseSystem, type DesignSystemExport, type LocalTokens } from './design-system';
 import { exportDocx } from './docx';
 import { imageSize } from './image-size';
@@ -73,13 +74,13 @@ describe('exportDocx', () => {
       [1, 'Claude', 'Quarterly matches the release train.'],
       [2, 'Claude', 'Linked the review notes.'],
       [3, 'Owner', 'Drop the log before shipping.'],
+      [4, 'Owner', 'An orphaned thread.'], // its passage gone: on its quote in the note at the end (P4 L288)
     ]);
-    expect(comments).not.toContain('An orphaned thread.'); // no passage to hang it on
     const extended = xml['word/commentsExtended.xml'];
     expect(extended.match(/w15:paraIdParent=/g)).toHaveLength(1); // the reply
     expect(extended).toMatch(/w15:done="1"/); // the resolved thread
     const document = xml['word/document.xml'];
-    for (const id of [0, 1, 2, 3]) {
+    for (const id of [0, 1, 2, 3, 4]) {
       expect(document).toContain(`<w:commentRangeStart w:id="${id}"/>`);
       expect(document).toContain(`<w:commentRangeEnd w:id="${id}"/>`);
       expect(document).toContain(`<w:commentReference w:id="${id}"/>`);
@@ -87,6 +88,67 @@ describe('exportDocx', () => {
     // t1's range opens before "ships quarterly with " and closes after "design review"
     const plain = document.replace(/<w:(?!commentRange)[^>]*>|<\/w:[^>]*>/g, '');
     expect(plain).toMatch(/The plan <w:commentRangeStart w:id="0"\/><w:commentRangeStart w:id="1"\/>ships quarterly with <w:commentRangeStart w:id="2"\/>design review<w:commentRangeEnd w:id="0"\/><w:commentRangeEnd w:id="1"\/> notes<w:commentRangeEnd w:id="2"\/>/);
+  });
+
+  // P4 L288: a thread with no passage in the document (an orphan, a resolved thread whose passage was deleted, a block
+  // thread whose block went) is carried to a note at the document's end, each a Word comment on its own line there, so
+  // nothing in the body is commented that the thread never was
+  it('carries the threads with no passage to a note at the end, each a comment on its quote there, resolved ones done', async () => {
+    const comment = (threadId: string) => ({ type: 'comment', attrs: { threadId } });
+    const blocks = [{ type: 'paragraph', content: [{ type: 'text', text: 'Kept', marks: [comment('k1')] }, { type: 'text', text: ' text.' }] }];
+    const kept = threadOf('k1', 'open', [[HUMAN, 'On the kept words.']]);
+    const passageless: Thread[] = [
+      { ...threadOf('o1', 'open', [[HUMAN, 'Was this cut on purpose?'], [AGENT, 'Yes, it repeated the intro.']]), quote: 'a passage that is gone' },
+      { ...threadOf('r1', 'resolved', [[AGENT, 'Settled.']]), quote: 'settled words' },
+      { ...threadOf('b1', 'open', [[HUMAN, 'Where did the chart go?']]), quote: 'chart: Sales by region', blockId: 'gone', anchor: { kind: 'block' } },
+      { ...threadOf('e1', 'open', [[HUMAN, 'x']]), messages: [] }, // nothing said: no comment
+    ];
+    const plain = await parts(await exportDocx(sourceOf(blocks, [kept])));
+    const bytes = await exportDocx(sourceOf(blocks, [kept, ...passageless]));
+    const xml = await parts(bytes);
+    const authored = [...xml['word/comments.xml'].matchAll(/<w:comment w:id="(\d+)"[^>]*w:author="([^"]*)"[^>]*>(.*?)<\/w:comment>/gs)].map(([, id, author, body]) => [Number(id), author, body.replace(/<[^>]+>/g, '')]);
+    expect(authored).toEqual([
+      [0, 'Owner', 'On the kept words.'],
+      [1, 'Owner', 'Was this cut on purpose?'],
+      [2, 'Claude', 'Yes, it repeated the intro.'],
+      [3, 'Claude', 'Settled.'],
+      [4, 'Owner', 'Where did the chart go?'],
+    ]);
+    // the body is the file without those threads, comment for comment; the note follows it, before the section's end
+    const document = xml['word/document.xml'];
+    const end = (part: string) => part.lastIndexOf('<w:sectPr');
+    const body = plain['word/document.xml'].slice(0, end(plain['word/document.xml']));
+    expect(document.startsWith(body)).toBe(true);
+    const note = [...document.slice(body.length, end(document)).matchAll(/<w:p>(.*?)<\/w:p>/gs)].map(([, p]) => ({
+      style: /<w:pStyle w:val="([^"]*)"\/>/.exec(p)?.[1],
+      text: p.replace(/<w:t[^>]*>([^<]*)<\/w:t>|<[^>]+>/g, '$1'),
+      ranges: [...p.matchAll(/<w:commentRangeStart w:id="(\d+)"\/>/g)].map((m) => Number(m[1])),
+      closed: [...p.matchAll(/<w:commentRangeEnd w:id="(\d+)"\/>.*?<w:commentReference w:id="\1"\/>/gs)].map((m) => Number(m[1])),
+    }));
+    expect(note).toEqual([
+      { style: 'Placeholder', text: 'Removed passage: “a passage that is gone”', ranges: [1, 2], closed: [1, 2] },
+      { style: 'Placeholder', text: 'Removed passage: “settled words”', ranges: [3], closed: [3] },
+      { style: 'Placeholder', text: 'Removed block: “chart: Sales by region”', ranges: [4], closed: [4] },
+    ]);
+    // the reply under its thread, the resolved one done, as Word keeps them; the package is whole and reads back
+    const paraIds = new Map([...xml['word/comments.xml'].matchAll(/<w:comment w:id="(\d+)".*?<w:p w14:paraId="([0-9A-F]{8})"/gs)].map(([, id, para]) => [Number(id), para]));
+    const entry = (id: number) => new RegExp(`<w15:commentEx [^>]*w15:paraId="${paraIds.get(id)}"[^>]*/>`).exec(xml['word/commentsExtended.xml'])?.[0] ?? '';
+    expect(entry(2)).toContain(`w15:paraIdParent="${paraIds.get(1)}"`);
+    expect(entry(3)).toContain('w15:done="1"');
+    for (const id of [0, 1, 4]) expect(entry(id), String(id)).toMatch(/^<w15:commentEx (?![^>]*w15:done="1")/); // open: not done
+    expect(xml['word/_rels/document.xml.rels']).toContain('Target="comments.xml"');
+    expect(xml['[Content_Types].xml']).toContain('PartName="/word/comments.xml"');
+    const { value: text } = await mammoth.extractRawText(input(bytes));
+    expect(text).toMatch(/Kept text\.[\s\S]*Removed passage: “a passage that is gone”[\s\S]*Removed block: “chart: Sales by region”/);
+  });
+
+  it('leaves a tab’s export the threads that live in another tab or belong to it', async () => {
+    // tab-2 holds none of the fixture's passages; t9, tab-1's orphan, goes with tab-1's export, not this one
+    const second = await parts(await exportDocx(everyKindSource(), { tab: 'tab-2' }));
+    expect(second['word/comments.xml'] ?? '').not.toContain('<w:comment ');
+    expect(second['word/document.xml']).not.toContain('Removed passage');
+    const whole = (await parts(await exportDocx(everyKindSource())))['word/document.xml'];
+    expect(whole.replace(/<[^>]+>/g, '')).toMatch(/안녕하세요, 팀 여러분\. The notes continue here\.Removed passage: “a passage that is gone”$/);
   });
 
   it('writes the system’s fonts and colours as the Word theme', async () => {
