@@ -9,7 +9,7 @@ import type { Doc, Node } from '../yjs';
 import { DocIndex, type TopBlock } from './block-index';
 import { docMarkdown } from './markdown';
 import { listTabs, tabBody } from './tabs';
-import { isBlockAnchor /* P3-E */, liveThreadIds, locate, markExtents, threadStates, type ThreadState } from './threads';
+import { isBlockAnchor /* P3-E */, liveThreadIds, locate, markExtents, threadStates, type Extent, type ThreadState } from './threads';
 
 export const DEFAULT_COUNT = 200;
 export const MAX_COUNT = 1000;
@@ -99,6 +99,14 @@ export function readDocument(doc: Doc, { tab, from, count = DEFAULT_COUNT, only 
     while (top.parent && top.parent !== body) top = top.parent;
     return top;
   };
+  // a passage spanning blocks is in the range when any block it runs through is shown
+  const position = new Map(blocks.map((top, i) => [top.node, i]));
+  const shownAt = shown.map((top) => position.get(top.node)!);
+  const spansShown = (extent: Extent): boolean => {
+    const first = position.get(topOf(extent.first.node));
+    const last = position.get(topOf(extent.last.node));
+    return first !== undefined && last !== undefined && shownAt.some((at) => at >= first && at <= last);
+  };
   // P3-E (E2 M4): a live block thread is on its block, here when this tab holds the block (it carries no mark)
   const onBlockHere = (thread: ThreadState): boolean => thread.live && isBlockAnchor(thread.anchor) && thread.blockId !== null && index.find(thread.blockId)?.top.tabId === tabId;
   const open = states.filter((thread) => thread.status === 'open' && (extents.has(thread.id) || (thread.orphan && thread.tabId === tabId) || onBlockHere(thread) /* P3-E */));
@@ -116,7 +124,7 @@ export function readDocument(doc: Doc, { tab, from, count = DEFAULT_COUNT, only 
     // P3-E end
     const extent = extents.get(thread.id);
     if (extent) {
-      if (!inRange.has(topOf(extent.first.node))) outside += 1;
+      if (!spansShown(extent)) outside += 1;
       else lines.push(`- c:${thread.id} on ^${shownBlock(extent.first.node, body) ?? '?'} · ${quoted(thread)} · ${messages(thread)}`);
       continue;
     }
