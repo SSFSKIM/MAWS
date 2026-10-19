@@ -215,6 +215,222 @@
       "owner": "P4 / document and dashboard export",
       "row": "| 2026-10-19 | P4 document and dashboard export (header Export during a version preview) | While Version history previews a version, the document's and the dashboard's header Export export the live state (`src/renderer/src/tools/document/tab-state.ts:262-266` passes no version id), where the deck (L233) and the design (P3-E Decision Log 31) export what is shown and disable Export while comparing. | P3-F M2 sitting-sheet recheck at 073d10446 (the M4.2 worker); the owner records each export's content at the sitting's step 8.2. | Closes when `DocumentTabState.export` passes the previewed version's id and is disabled while two versions are compared, as the deck's is, with a regression; or when the owner rules the live-state export kept at 8.2. Owner: the document tab's next change (P4). |",
       "source": "M2 sitting-sheet recheck, 2026-10-19"
+    },
+    {
+      "id": "S-SESSION-SCOPE",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / session launch profile",
+      "row": "| 2026-10-19 | P4 session launch profile (the owner's global plugins and output style reach MAWS sessions) | MAWS launches the engine over the owner's user configuration, so user-scope plugins and the owner's output style come along: at the sitting the in-MAWS agent drove the MAWS GUI through cua on its own (candidate 6), called the owner's ptc plugin for nothing (candidate 74; the owner: \"also it used ptc:ptc tool for some reason\"), and its reply carried the owner's global to-human block (candidate 31; `src/shared/owner/contract.ts:86` skips MAWS's append when the owner's style carries the contract). Not a P3 defect (the architect's rule 3): D-1 forbids patching and MAWS writes nothing under `~/.claude`. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidates 6, 31, 74; owner-results R.3; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) rows R.3:4, c6, c31, c74. | Closes when a MAWS-owned per-session profile of plugins and output style is applied through the launch's own settings surface (`--settings` JSON or `--setting-sources`), with a regression that a session launched under the profile lists only its plugins. Constraint: never by editing the owner's files; the engine stays unpatched (D-1). Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DASH-FILE-REFRESH",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / dashboard file datasets",
+      "row": "| 2026-10-19 | P4 dashboard file datasets (a bound project file changing is not noticed) | A dashboard bound to a project file did not change when only the file was edited; it changed after the agent re-bound it (step 7.2, candidate 67). By design today: `artifact_dataset` stores a copy of the file, read once under the session's cwd (`src/engine-host/tool-server/datasets.ts:1-14`, XE5/XE6), and only connector datasets refresh on a schedule. Nothing watches the file and nothing says it changed: a daily-use gap, not a spec defect. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 67; owner-results 7.2; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) rows 7.2, c67. | Closes when a file-bound dataset shows that its file changed since the binding and a re-read is one action, with a regression. Constraint: the stored copy stays the version's data (history previews keep what was seen); a re-read makes a new version by the actor who triggered it; the staleness signal is the cheap half. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-HISTORY-SUMMARY-WORDS",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / version history lines",
+      "row": "| 2026-10-19 | P4 version history lines (tool-level text with internal ids) | Version history shows the tools' own lines, \"replaced N occurrence(s) in ^id\" (`src/artifacts/document/edit-plan.ts:753,794`), \"set cell (r, c) of ^id\" (`:859`), \"replied on c:<threadId>\" (`src/engine-host/tool-server/documents.ts:503`), a deck preview banner listing raw keys (\"Deck settings changed: cover, createdOnFiles, sections, title, v\", `src/artifacts/slides/editor/history/copy.ts:26`) and \"1 edits\" (`src/artifacts/document/adapter.ts:504`), where §4.7 asks for a one-line summary and the agent's own `message` is not shown. The time format is L140's. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidates 27, 54, 69; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) rows c27, c54, c69. | Closes when the shown line prefers the agent's message or the block's words over ids and counts are pluralised, with a regression per kind. Constraint: the provenance line stays in the version record. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-HISTORY-LIST-LIVE",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / version history rail",
+      "row": "| 2026-10-19 | P4 version history rail (an open list does not add new versions) | The open Version history list fetches versions once on open (`src/artifacts/document/editor/history/controller.ts:150`, `history-api.ts:36`) with no subscription to the artifact's version events, so a new version appears only after reopening. §4.7 does not say live; the staleness misleads. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 46; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c46. | Closes when the list refreshes on `artifact.changed` for the open artifact, with a regression. Constraint: the selected entry and the preview survive the refresh. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-NEW-CHANGES-PILL",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / document history pill",
+      "row": "| 2026-10-19 | P4 document history pill (\"See N new changes\" missed after the first away-edit) | The pill did not appear after the first edit the agent made while the owner was away and appeared after the second (observed once, not reproduced from source). It compares the agent's versions against `lastViewedAt`, recorded once per showing (`src/renderer/src/tools/document/tab-state.ts:220`, `history-api.ts:37`, `history/controller.ts:150`), and the tab stayed in the strip between the two edits. An observed gap pending a trace, not a guessed repair. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 28; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c28. | Closes when a trace shows the cause and the record of the owner's look advances on every return to the tab, with a regression of two away-edits each raising the pill. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-COMMENT-CARD-LABEL",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / document comment card",
+      "row": "| 2026-10-19 | P4 document comment card (the title repeated as \"P3 sitting note, P3 sitting note\") | The comment card and side thread are labelled `${title}, ${tabTitle}` (`src/renderer/src/tools/document/comments.tsx:30`), and a single default tab carries the document's title, so the label repeats. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 24; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c24. | Closes when the tab title is omitted where it equals the document's or the document has one tab, with a regression. Constraint: the anchor field's LABEL_MAX stays. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-ASK-ANSWER-ECHO",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / transcript ask answers",
+      "row": "| 2026-10-19 | P4 transcript ask answers (the answer shown as \"Your message\" holding raw JSON) | An answered agent question appears in the transcript twice: as its \"Asked 1 question · Answered · View answers\" card, and as a user turn \"Your message\" holding the raw envelope (`{\"status\":\"answered\",\"askId\":…}`), which is how the answer reaches the engine (`src/renderer/src/tools/maws/ask/connect.ts`). | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 30; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c30. | Closes when the transcript renders a user message that is an ask answer as a chip under its card (or hides it), with a regression. Constraint: the envelope keeps reaching the engine unchanged (the wire is the engine's). Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-ASK-SYSTEM-ORIGIN",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / design-system ask sheet",
+      "row": "| 2026-10-19 | P4 design-system ask sheet (a duplicate labelled \"Built in\"; a cut subtitle) | The ask sheet labels a duplicated system \"Built in\" because the label comes from `origin.route === 'default'` (`src/renderer/src/tools/maws/ask/copy.ts:63-68`), which a Duplicate inherits, and shows the origin's `from` text verbatim as the subtitle (the GOV.UK sample's read as a cut law fragment). \"Submit · 1 skipped\" before anything is chosen is the draft rule (`ask/draft.ts:5,80`), by design. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 63; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c63. | Closes when a duplicate's origin names its source (\"Copy of MAWS\") and the subtitle is clipped to a phrase, with a regression. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DS-CHECK-CASCADE",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / design-system checker",
+      "row": "| 2026-10-19 | P4 design-system checker (contrast checked without the cascade) | Check against law reported a 1:1 white-on-white contrast violation in `components/warning-text.html` that the agent's own script passed: the checker tests a rule only where one rule declares both sides of the pair (\"the cascade between rules is not known here\", `src/artifacts/design-system/check.ts:343-352`), so white text over a parent-set ground reads 1:1. A misleading result, not lost input. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 60; owner-results 6.1; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) rows 6.1, c60. | Closes when the contrast check resolves the ground through the cascade, with a regression on a parent-set ground. Constraint: the checker stays pure over the canon files (no browser), or it renders the canon in the hidden capture window and reads computed colours. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DS-CANON-PREVIEW",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / design-system page",
+      "row": "| 2026-10-19 | P4 design-system page (canon previews cropped; alias references raw) | The design-system page crops its component previews (`.dsp-specimen` and `.dsp-slide` are `overflow: hidden` frames at the card edge, `src/artifacts/design-system/page/page.css:65,81`) and shows an aliased token as its raw reference \"= {color.accent.$root}\" (`page/Palette.tsx:57`). | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 61; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c61. | Closes when the canon frame scales its component to fit, as the deck thumbnails do, and an alias shows the resolved token's friendly name with the reference on hover, with a regression. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DECK-INSPECTOR-REFRESH",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / deck inspector",
+      "row": "| 2026-10-19 | P4 deck inspector (stale after a drag, resize or detach) | The deck inspector keeps the old position and size after a drag, resize or detach until the element is reselected, and shows fractional widths: it reads the session snapshot (`src/artifacts/slides/editor/Inspector.tsx:50`) and its `measure` callback (`:32,70`) is not re-run at a transform's end. Obs 5's state machine (S-SLIDE-CLICK-TO-EDIT) touches the same files. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 33; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c33. | Closes when the inspector follows the model after every gesture end, with a regression. Constraint: rounding is display-only; the model keeps fractions. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DECK-INSPECTOR-NAMES",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / deck inspector",
+      "row": "| 2026-10-19 | P4 deck inspector (element and token names) | The inspector names the title \"Heading 1\" while Text style says \"Title\", a group \"Box\", and shows raw `--ds-*` token names truncated: names come from the tag table (`src/artifacts/slides/editor/Inspector.tsx:36`), the toolbar's from the design system's type class. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 34; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c34. | Closes when the inspector names an element by the type class the toolbar uses, falling back to the tag, and token fields show friendly names as the colour swatches do, with a regression. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DECK-INSERT-DEFAULT-FILL",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / deck insert",
+      "row": "| 2026-10-19 | P4 deck insert (a new shape filled with the accent) | A newly inserted shape is filled with Accent by default (`src/artifacts/slides/editor/menus/Insert.tsx`), against the governing system's law that the accent appears once. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 36; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c36. | Closes when a new shape takes a neutral surface token, with a regression. Constraint: the accent stays the owner's explicit pick. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-FILMSTRIP-A11Y",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / deck filmstrip",
+      "row": "| 2026-10-19 | P4 deck filmstrip (reorder announcements name internal ids) | Slide reorder announces internal ids to assistive technology (\"Draggable item s1wil85gy3z9-1 was dropped over droppable area plan\"): dnd-kit's default announcements (`src/artifacts/slides/editor/Filmstrip.tsx:73`, a DndContext without `accessibility.announcements`). | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 38; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c38. | Closes when the announcements name the slide by its title and position, with a regression. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DECK-FIT-ZOOM",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / deck zoom",
+      "row": "| 2026-10-19 | P4 deck zoom (\"Fit\" does not refit; re-choosing it blanked the stage) | Fit did not refit when the stage area changed, and choosing Fit again left the stage blank until a fixed zoom was picked (observed, not reproduced from source). Fit comes from a ResizeObserver on the viewport with a 5 % floor (`src/artifacts/slides/editor/DeckEditor.tsx:106-120`); the blank stage points at a null `room` or a select value that round-trips without a render. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 44; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c44. | Closes when a reproduce with the rails open and closed names the cause and 'fit' always draws, with a regression. Constraint: a null room draws at the last known scale; the zoom select shows the percentage beside Fit. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-HIGHLIGHT-SWATCH",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / document toolbar",
+      "row": "| 2026-10-19 | P4 document toolbar (the Highlight button kept the old accent after a recolour) | After the accent recolour the Highlight button still showed the old terracotta (observed once). The Highlight tool draws no swatch in code (`src/artifacts/document/editor/Toolbar.tsx:247`), so the stale colour comes from the icon's CSS variable scope outside `.ds-doc`; not reproduced from source. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 52; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c52. | Closes when a reproduce names the scope and toolbar colours read the governing system's live tokens through the page, with a regression. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-CREATE-LEADING-BLANK",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / document create path",
+      "row": "| 2026-10-19 | P4 document create path (an agent-made note starts with an empty paragraph) | The agent-made note started with an empty first paragraph, although the agent's `artifact_create` content began with its first sentence; the create path adds it (not reproduced from source). The mirror's trailing `&#160;` paragraph is by design, the markdown placeholder of the schema's trailing node (`src/artifacts/document/markdown.ts:105,383`). | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 8; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c8. | Closes when a document created from markdown content starts with that content, with a regression. Constraint: the trailing node stays (the editor needs it). Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-EXPORT-AUTHOR",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / dashboard export",
+      "row": "| 2026-10-19 | P4 dashboard export (data credited to \"Claude\") | The dashboard's Markdown export credits the data to \"Claude\" while the UI names the session's title: the export's author falls to `defaultAuthorName` (`src/main/dashboard/export.ts:74`; `src/artifacts/document/export/source.ts:89-90`, \"the session's title or Claude\") because the export context names no session title. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 69; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c69. | Closes when the exporter resolves the session's title from the actor table as the UI does, with a regression. Constraint: \"Claude\" only when no title exists. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-DOCX-THREADS",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / DOCX comments",
+      "row": "| 2026-10-19 | P4 DOCX comments (resolved and orphaned threads dropped) | The DOCX export drops resolved and orphaned threads silently; Word supports a resolved (\"done\") comment. The owner's comment credited to \"Owner\" is by design (`src/artifacts/document/export/source.ts:89-90`: the human is \"Owner\", never \"You\", in a file). | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 73; owner-results X.2; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) rows X.2, c73. | Closes when resolved threads export as done comments and orphans are carried, with a regression. Constraint: an orphan goes to the document's end as a comment on nothing or into a trailing note, never an invented anchor. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-QUIT-SHEET-WORDS",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / quit sheet",
+      "row": "| 2026-10-19 | P4 quit sheet (the sentence contradicts the default button) | The quit sheet says \"Quitting stops them. Transcripts stay on disk…\" while its default button is \"Quit and keep sessions running\": `src/main/lifecycle/quit-guard.ts:184` writes one sentence for every variant. | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 70; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c70. | Closes when the sentence names what each button does, with a regression. Constraint: the keep-running default (the owner's P2 choice) stays. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-PANEL-TOOL-RESTORE",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / panel restore",
+      "row": "| 2026-10-19 | P4 panel restore (the pinned Artifacts tool loses its record at relaunch) | After relaunch the pinned panel tool came back as Session overview instead of its record: a panel tab ref carries no artifact id (`src/shared/ipc/schema/layout.ts:19-23`). | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 71; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c71. | Closes when the record survives a relaunch, with a regression. Constraint: the artifact id rides the tool's own persisted state, not a new key in the strictly parsed `regions` (X15 slot), unless P4 takes a layout version. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-RELAUNCH-HYDRATION-FLASH",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / relaunch",
+      "row": "| 2026-10-19 | P4 relaunch (\"No open tabs\" for a moment) | After relaunch the window shows \"No open tabs\" for a moment: the main pane renders its empty state before the layout store hydrates (`src/renderer/src/main/Pane.tsx:139`; `src/renderer/src/stores/layout.ts:41` `hydrated`). | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 71; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c71. | Closes when the pane renders nothing (or the last paint) until `hydrated`, with a regression. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-AGENTS-RUNS-STARTING",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / background work section",
+      "row": "| 2026-10-19 | P4 background work section (a red refusal while the session starts) | A red \"Workflow runs unavailable: unknown app session\" shows for a few seconds at session start: the Background work section asks for runs before the session is registered and shows the refusal in the danger colour (`src/renderer/src/tools/agents/background/BackgroundSummary.tsx:36`; `copy.ts:102`). | `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 3; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row c3. | Closes when, while the session is Starting…, that answer reads as \"Starting…\" rather than an error, with a regression. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-SLIDE-CLICK-TO-EDIT",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / slide and design editing (high priority)",
+      "row": "| 2026-10-19 | P4 slide and design text editing, high priority (the Slides and Canva click-to-edit state machine) | Editing text on a slide or a design board takes two or three double-clicks, a level-by-level picking design that the owner now judges wrong against Google Slides and Canva. The owner: \"슬라이드 편집이 상당히 스무스하지 않다. 캔바나 구글 슬라이드처럼 컴포넌트를 눌렀을 때 바로 편집 가능한 게 아니라 두 번, 세 번, 더블 클릭, 트리플 클릭해야지 텍스트를 수정할 수 있는 상태가 나온다 … Design도 마찬가지 … 구글 슬라이드/캔바의 검증된 메커니즘을 그대로 Adopt하기.\" Mechanism and plan: `docs/doperpowers/evidence/p3-finish/owner-observations-2026-10-19.md` §5 (`selection.ts` pick and drill, `Overlay.tsx`, `TextBox.tsx`, `session.ts:254-257`, `design/editor/World.tsx`). | Owner observation 5 (2026-10-19) and the architect's ruling (e); `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidates 43, 33, 38, 35, 42; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) row obs5b. | Closes when idle, selected and editing follow the Slides and Canva model: a double-click reaches the deepest text under the pointer and edits with the caret there; a second click on a selected text element edits while a drag still moves; Escape steps back; a design board activates and drills in one gesture; with the regressions the plan names. Element-level accessibility roles are a separate row at that cut. The next cut's first editor item. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-HEADER-SEND",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / editor-header Send to (ruled by the owner)",
+      "row": "| 2026-10-19 | P4 editor-header Send to, ruled by the owner (a direct send through MAWS's own connection, no Claude turn) | Sending an artifact to Notion needs a Claude session and a model turn, and the editor header has no Send to (library only, DL95/97/105). The owner: \"do we really have to open a session to export to Notion? Like why can't we just let the user directly export to Notion?\" Route D (MAWS's own connection, \"Connected through MAWS\") was live at the sitting. Until the direct send lands, the Send to sheet's \"You approve the connector in the session, as for any tool.\" (`src/renderer/src/library/copy.ts:173`) is untrue under Auto mode, which approved both Notion writes itself. | owner-results R.1 S-HEADER-SEND (P4), R.2 H, R.3 third irritation; `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidates 78, 80; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) rows R.1:S-HEADER-SEND, R.2:H, R.3:3, c78, c80. | Closes when the editor header and the library send straight through MAWS's own connection with no Claude turn, the delivery as a readable page rather than an attached .md, with an e2e on the fixture server. Interim clause: until then the sheet states the session's permission mode instead of the approval sentence. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-GWS-DRIVE",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / Drive delivery (ruled by the owner)",
+      "row": "| 2026-10-19 | P4 Drive delivery, ruled by the owner (through the gws CLI with a streamlined setup) | Drive delivery was not run at the sitting (A.2 Drive: owner: not run); the owner agreed to deliver to Drive through the gws CLI with a streamlined setup (\"gws cli셋업을 두는건 어떤가? … 그렇게 동의한다\"). | owner-results A.2, R.3 first irritation, S-REAL-SEND; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) rows A.2, R.3:1. | Closes when Drive delivery runs through the gws CLI with a setup the owner can complete in MAWS, with a fixture regression and one owner-run delivery. Constraint: MAWS holds no Google credential of its own beyond what the CLI's setup stores. Owner: P4. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
+    },
+    {
+      "id": "S-EDIT-SPEED-BENCH",
+      "logged": "2026-10-19T15:27:40Z",
+      "bin": "defer",
+      "owner": "P4 / edit-speed benchmark (ruled by the owner, first in line)",
+      "row": "| 2026-10-19 | P4 edit-speed benchmark, ruled by the owner and first in line (MAWS against Claude Desktop) | Agent edits felt very slow at the sitting. The owner: \"extremely slow … we need some kind of benchmark or a parity verification.\" The sitting's split: model time 21 to 77 s per turn at load 108 to 126; MAWS tool time 0 to 4 s except the deck's `artifact_publish` (14 s; 16 s send-to-answer at 09:33:39-09:33:55Z) and `artifact_reply` (11 s). | owner-results R.3 second irritation; `docs/doperpowers/evidence/p3-finish/sitting-findings.md` candidate 79; P3-F wave S triage (`docs/doperpowers/plans/2026-10-18-p3-f-finish.md`, Wave S triage) rows R.3:2, c79. | Closes when the same tasks run in MAWS and in Claude Desktop with the same model and effort on an idle host, the result split into model time and tool time, and the improvements it names are routed (the deck's publish and reply first on the tool-time side). Owner: P4, first in line. |",
+      "source": "P3-F wave S triage of the owner's sitting, 2026-10-19"
     }
   ]
 }
