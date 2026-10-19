@@ -34,7 +34,7 @@ import { allBlocks, applyRepair, planRepair, repairNeeded } from './repair';
 import { nanoid8 } from './schema';
 import { TABS, createDocument, ensureTab, listTabs } from './tabs';
 import { deepSlotIds, formatAt, itemAt, itemOf, locateSlot, nodeAt, slotKey, textblocksY, charSlots } from './structs';
-import { THREADS, blockThreads /* P3-E */, getThread, isCommentKey, listThreads, refreshAnchors, stripMarklessComments, type Thread } from './threads';
+import { THREADS, blockThreads /* P3-E */, getThread, isBlockAnchor, isCommentKey, listThreads, refreshAnchors, stripMarklessComments, type Thread } from './threads';
 
 export interface DocumentAdapter extends KindAdapter {
   /** The carries of a batch the tool handler just applied on the agent's replica (S4's `registerCarry`). */
@@ -132,6 +132,22 @@ const threadRow = (thread: Thread): ThreadRow => ({
   ...(thread.createdBy.kind === 'session' ? { appSessionId: (thread.createdBy as Extract<Actor, { kind: 'session' }>).appSessionId } : {}),
 });
 
+/**
+ * The threads whose recorded block is no longer in the document (deleted, with the text their anchor named): a mark they
+ * still have in another block re-anchors them, which the refresh scope of the changed blocks alone never reaches. Block
+ * threads are left out: they carry no mark and nothing re-anchors them, and placing one walks every node of every tab.
+ */
+export function unplacedThreads(doc: Doc): string[] {
+  const index = DocIndex.of(doc);
+  const out: string[] = [];
+  for (const [id, node] of doc.get(THREADS).attrEntries()) {
+    if (!(node instanceof YNode) || isBlockAnchor(node.getAttr('anchor'))) continue;
+    const blockId: unknown = node.getAttr('blockId');
+    if (typeof blockId === 'string' && !index.find(blockId)) out.push(String(id));
+  }
+  return out;
+}
+
 export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions = {}): DocumentAdapter {
   const registries = new Map<string, CarryRegistry>();
   const registryFor = (artifactId: string): CarryRegistry => {
@@ -185,20 +201,6 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
       threads,
       blocks: (tabId: string) => (threads.size === 0 ? [] : index.tops(tabId).filter((top) => carriesAny(index.threads(top), threads)).map((top) => top.node)),
     };
-  }
-
-  /**
-   * The threads whose recorded block is no longer in the document (deleted, with the text their anchor named): a mark
-   * they still have in another block re-anchors them, which the scope of the changed blocks alone never reaches.
-   */
-  function unplacedThreads(doc: Doc): string[] {
-    const index = DocIndex.of(doc);
-    const out: string[] = [];
-    for (const [id, node] of doc.get(THREADS).attrEntries()) {
-      const blockId: unknown = node instanceof YNode ? node.getAttr('blockId') : null;
-      if (typeof blockId === 'string' && !index.find(blockId)) out.push(String(id));
-    }
-    return out;
   }
 
   function mirrorRows(doc: Doc, threadIds: Iterable<string>): ThreadChange | undefined {

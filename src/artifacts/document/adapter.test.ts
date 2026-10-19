@@ -32,7 +32,7 @@ import {
   type Doc,
 } from '../yjs';
 import { pmnodeToDelta } from '../yjs/prosemirror';
-import { documentAdapter, type DocumentAdapter } from './adapter';
+import { documentAdapter, unplacedThreads, type DocumentAdapter } from './adapter';
 import { DocIndex } from './block-index';
 import { applyEdit } from './patch-writer';
 import { readDocument } from './read';
@@ -973,5 +973,23 @@ describe('the id repair and a losing copy’s replayed text', () => {
     expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('h1') + 1);
     expect(textOf(host.live, 'p3')).toBe('BEFORE A plain paragraph the human types into. Words to keep.');
     expect(dupes(ids(host.live))).toEqual([]);
+  });
+});
+
+// P3-F document-model review (fable, P3): a block thread carries no mark and nothing in the refresh can move it, so one
+// whose block is gone is left out of the refresh scope (in it, every deletion update walked every node of every tab);
+// a text thread whose recorded block is gone is in it, for the mark it may still have elsewhere.
+describe('unplacedThreads', () => {
+  it('names text threads whose recorded block is gone, never block threads', () => {
+    const doc = seedDoc();
+    transact(doc, () => nodeOf(doc, 'p1').format(0, 3, { 'comment--t9mark00': { threadId: 't9' } }));
+    addThread(doc, { threadId: 't9', tabId: TAB, blockId: 'p1', quote: 'The', anchor: anchorOfMark(body(doc), 't9')!, by: human, at: now(), body: 'Text.' });
+    addThread(doc, { threadId: 'tb', tabId: TAB, blockId: 'c1', quote: 'const x = 1', anchor: { kind: 'block' }, by: human, at: now(), body: 'Block.' });
+    expect(unplacedThreads(doc)).toEqual([]);
+    transact(doc, () => {
+      body(doc).delete(order(doc).indexOf('c1'), 1);
+      body(doc).delete(order(doc).indexOf('p1'), 1);
+    });
+    expect(unplacedThreads(doc)).toEqual(['t9']);
   });
 });
