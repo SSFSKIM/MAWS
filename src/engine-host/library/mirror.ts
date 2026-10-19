@@ -44,8 +44,9 @@ import { datasetRefsOf } from '../documents/retention'; // E3
 export const MIRROR_SETTLE_MS = 1_000;
 export const MIRROR_MAX_WAIT_MS = 10_000;
 export const MIRROR_FILE_MAX_BYTES = 64 * 1024 * 1024; // P3-F (F10): a File artifact larger than this is cloned, not read
-// P3-F (F10): a clone takes milliseconds whatever the size (2 GiB in under 10 ms on this Mac's APFS, a spawn of cp about
-// 3 ms); a clone that hangs (a file system that stalls) holds the host no longer than this, and is a failed clone
+// P3-F (F10): a clone takes milliseconds whatever the size (2 GiB in under 10 ms on this Mac's APFS, a spawn of cp or of
+// stat about 3 ms); each spawn of one that hangs (a file system that stalls) holds the host no longer than this, and is a
+// failed clone
 export const MIRROR_CLONE_TIMEOUT_MS = 2_000;
 export const MIRROR_MANIFEST = '.maws-mirror.json';
 const MIRROR_DIR = 'artifacts';
@@ -461,22 +462,28 @@ export class LibraryMirror {
 
   // P3-F (F10, tracker L142): a File artifact's file copied in as `file`: within the cap through memory, as before (a small
   // file never spawns a clone); over it cloned into the temp. False, logged, when it is mirrored as nothing: over the cap
-  // (or unreadable) and its clone failed, its temp and any folder made for it removed. A failure after the copy throws, as
-  // any write's does.
+  // (or unreadable) and its clone failed, its temp and any folder made for it removed (one that cannot be is named in the
+  // line). A failure after the clone throws, as any write's does.
   private copyFrom(root: string, file: string, from: string, artifactId: string): boolean {
     const bytes = fileBytes(from, this.maxFileBytes);
-    if (bytes) return writeReadOnly(root, file, bytes);
-    let failure: unknown;
-    const cloned = writeReadOnly(root, file, (temp) => {
-      try {
+    if (bytes) {
+      writeReadOnly(root, file, bytes);
+      return true;
+    }
+    const step = { cloning: false };
+    try {
+      writeReadOnly(root, file, (temp) => {
+        step.cloning = true;
         this.cloneFile(from, temp);
-      } catch (error) {
-        failure = error;
-        return false;
-      }
-    });
-    if (!cloned) this.log(`${artifactId}: ${from} is over ${this.maxFileBytes} bytes or cannot be read, and its clone failed (${reasonOf(failure)}); mirrored as nothing`);
-    return cloned;
+        step.cloning = false;
+      });
+      return true;
+    } catch (error) {
+      if (!step.cloning) throw error; // its chmod or its rename: a failed write, the entry at -1
+      this.log(`${artifactId}: ${from} is over ${this.maxFileBytes} bytes or cannot be read, and its clone failed (${reasonOf(error)}); mirrored as nothing`);
+      removeEmpty(root, dirname(join(root, file))); // the folders made for its temp
+      return false;
+    }
   }
 
   // Removes the artifact's files; the entry keeps the ones whose removal failed (at revision -1) and the first failure
@@ -652,25 +659,24 @@ function ensureRoot(root: string): void {
 }
 
 // `data` written at a temp beside the target (P3-F F10: or put there by `data` itself, a clone), made 0444 and renamed
-// over it. A temp is never left: a `data` that answers false (nothing to write) removes it and the folders made for it,
-// and a failure removes it and throws.
-function writeReadOnly(root: string, file: string, data: string | Uint8Array | ((temp: string) => boolean | void)): boolean {
+// over it. A failure removes the temp and throws; a temp that cannot be removed is named in what is thrown, beside the
+// failure, never in its place.
+function writeReadOnly(root: string, file: string, data: string | Uint8Array | ((temp: string) => void)): void {
   const target = join(root, file);
   ensureRoot(root);
   mkdirSync(dirname(target), { recursive: true }); // a writer's folders, under `artifacts/`
   const temp = join(dirname(target), `.mirror-${randomUUID().slice(0, 8)}.tmp`);
   try {
-    if (typeof data !== 'function') writeFileSync(temp, data);
-    else if (data(temp) === false) {
-      rmSync(temp, { force: true });
-      removeEmpty(root, dirname(target));
-      return false;
-    }
+    if (typeof data === 'function') data(temp);
+    else writeFileSync(temp, data);
     chmodSync(temp, 0o444);
     renameSync(temp, target); // over a read-only file too: replacing a name needs the directory's permission only
-    return true;
   } catch (error) {
-    rmSync(temp, { force: true });
+    try {
+      rmSync(temp, { force: true });
+    } catch (cleanup) {
+      throw new Error(`${reasonOf(error)}; and its temp ${temp} could not be removed: ${reasonOf(cleanup)}`, { cause: cleanup });
+    }
     throw error;
   }
 }
@@ -682,14 +688,18 @@ let apfs: number | undefined; // P3-F (F10): the file system type of `/`, read o
  * no space), or throws. On macOS by APFS's clonefile(2) through `/bin/cp -c`, since Node's COPYFILE_FICLONE_FORCE answers
  * ENOSYS there (Node 22 and Electron 44's Node 24); `cp -c` falls back to a byte copy where the clone fails, so it runs
  * only where the clone cannot: `from` on the volume of `to`'s folder, an APFS one (the file system of `/`, APFS on every
- * macOS MAWS runs on). Elsewhere a reflink (COPYFILE_FICLONE_FORCE), refused where the file system has none.
+ * macOS MAWS runs on), and carrying no BSD file flag. clonefile copies the flags, so a locked (`uchg`) or append-only
+ * source would clone as a temp that neither chmod nor rm can touch; Node reads no flags, so `stat -f %f` does, one spawn
+ * of about 3 ms. Elsewhere a reflink (COPYFILE_FICLONE_FORCE), refused where the file system has none.
  */
 export function cloneFile(from: string, to: string): void {
-  if (process.platform !== 'darwin') return copyFileSync(from, to, constants.COPYFILE_FICLONE_FORCE);
   const [source, folder] = [statSync(from), dirname(to)];
   if (!source.isFile()) throw new Error(`${from} is not a regular file`);
+  if (process.platform !== 'darwin') return copyFileSync(from, to, constants.COPYFILE_FICLONE_FORCE);
   if (source.dev !== statSync(folder).dev) throw new Error(`${from} is on another volume than ${folder}`);
   if (statfsSync(folder).type !== (apfs ??= statfsSync('/').type)) throw new Error(`${folder} is on a volume that cannot clone (not APFS)`);
+  const flags = execFileSync('/usr/bin/stat', ['-f', '%f', '--', from], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: MIRROR_CLONE_TIMEOUT_MS }).trim();
+  if (flags !== '0') throw new Error(`${from} carries file flags (${flags}: locked or append-only, perhaps), which its clone would copy`);
   execFileSync('/bin/cp', ['-c', '--', from, to], { stdio: ['ignore', 'ignore', 'pipe'], timeout: MIRROR_CLONE_TIMEOUT_MS });
 }
 

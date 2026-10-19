@@ -1,6 +1,7 @@
 // The linked-directory mirror over a real store (the P3-L document, M2; Decision Log 12): a linked Space's artifacts
 // written read-only under `<linkedDir>/artifacts/` after each change settles, the manifest owning exactly what the
 // mirror wrote, and a host start bringing the directory up to date.
+import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1044,6 +1045,58 @@ describe('a File artifact over the in-memory cap (P3-F F10)', () => {
     expect(temps()).toEqual([]);
     expect(read(name, 'owner.txt')).toBe('kept');
     expect(logs.some((line) => line.includes(large.id) && line.includes('could not be mirrored'))).toBe(true);
+  });
+
+  // F10's review (P1): clonefile copies the source's BSD flags, and a File artifact's file is the owner's own, so one locked
+  // in Finder (`uchg`) cloned as a temp that neither chmod nor rm could touch, one more left in the owner's folder each pass
+  it('mirrors a locked file over the cap as nothing, refused before a clone that would copy the lock, no temp left (macOS)', async (ctx) => {
+    if (process.platform !== 'darwin') ctx.skip('BSD file flags (a Finder lock is `uchg`) and chflags are macOS’s');
+    if (!volumeClones()) ctx.skip('this volume cannot clone: the guard refuses it before reading any flag');
+    await startMirror({ maxFileBytes: 16 }); // the default clone
+    const space = await linkedSpace();
+    const locked = join(userData, 'locked.bin');
+    writeFileSync(locked, new Uint8Array(17));
+    execFileSync('/usr/bin/chflags', ['uchg', locked]);
+    try {
+      const large = await fileArtifact('Locked', locked, space.id);
+      await mirror!.flush();
+      expect(existsSync(out())).toBe(false); // no temp, no folder
+      expect(logs.some((line) => line.includes(large.id) && line.includes('flags') && line.includes('mirrored as nothing'))).toBe(true);
+    } finally {
+      execFileSync('/usr/bin/chflags', ['-R', 'nouchg', userData, project]); // else a lock copied to a temp outlives the test
+    }
+  });
+
+  it('logs a temp it cannot remove beside the clone’s own failure, neither masking the other', async () => {
+    await startMirror({
+      maxFileBytes: 16,
+      cloneFile: (_, to) => {
+        mkdirSync(to); // a temp that rm cannot remove: a folder with something in it
+        writeFileSync(join(to, 'part'), 'x');
+        throw new Error('the clone stalled');
+      },
+    });
+    const space = await linkedSpace();
+    const big = join(userData, 'big.bin');
+    writeFileSync(big, new Uint8Array(17));
+    const large = await fileArtifact('Big', big, space.id);
+    await mirror!.flush();
+    expect(logs.some((line) => line.includes(large.id) && line.includes('the clone stalled') && line.includes('could not be removed') && line.includes('mirrored as nothing'))).toBe(true);
+  });
+
+  // F10's review (P3): the real clone's own refusals, which keep `cp -c` from its silent byte copy
+  it('the real clone refuses a source that is not a regular file, making nothing', () => {
+    const to = join(project, 'clone');
+    expect(() => cloneFile(userData, to)).toThrow(/not a regular file/);
+    expect(existsSync(to)).toBe(false);
+  });
+
+  it('the real clone refuses a folder on another device before any copy (macOS)', (ctx) => {
+    if (process.platform !== 'darwin') ctx.skip('the guard of `cp -c` is macOS’s; elsewhere the reflink itself refuses another device');
+    const from = join(userData, 'a.bin');
+    writeFileSync(from, 'x');
+    expect(() => cloneFile(from, '/dev/maws-mirror-clone')).toThrow(/another volume/); // devfs: another device, never APFS
+    expect(existsSync('/dev/maws-mirror-clone')).toBe(false);
   });
 });
 
