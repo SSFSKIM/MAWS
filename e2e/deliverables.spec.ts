@@ -533,7 +533,10 @@ test('the Artifacts tool: groups newest first, Back to the list’s scroll, the 
     await expect(list.locator('[data-artifact-row][data-kind="html"] [data-part="title"]')).toHaveText(['Sales dashboard']);
     // P3-L M6b: the Deliverables list's version count on the row's line ("v2 · …") is gone with it (the line is the
     // library's "Edited … by …")
-    await expect(list.locator('[data-artifact-row][data-kind="file"] [data-part="title"]')).toHaveText(notes.map((n) => n.title!).reverse());
+    // The rows mounted are the list's first, newest first; the rest mount as the list scrolls (L134)
+    const newestFirst = notes.map((n) => n.title!).reverse();
+    const fileTitles = () => list.locator('[data-artifact-row][data-kind="file"] [data-part="title"]').allTextContents();
+    await expect.poll(async () => { const shown = await fileTitles(); return shown.length > 0 && shown.every((title, i) => title === newestFirst[i]); }).toBe(true);
     // P3-L M6b: the row's caption ("the first note") is gone with the Deliverables list (Decision Log 18e: the caption is
     // the transcript's delivery row's)
 
