@@ -4,7 +4,7 @@
 // lift, arrows to move, Space to drop), and the slide gestures: new (blank, after the current slide), duplicate, hide,
 // delete. Hidden slides are dimmed; held slides badged with their reasons. Every gesture is one transaction and one
 // undo step (the session's `edit`).
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -13,7 +13,9 @@ import type { AssetUrl, SlideCanvas } from '../canvas';
 import type { FaceAliases } from '../canvas/faces';
 import { DECK_LIMITS } from '../deck';
 import { moveSlide, setAttrs, ROOT } from '../model';
+import { slideTitle } from '../threads';
 import { addSlide, blankSlide, duplicateSlide, mintSectionKey, mintSlideId, removeSlide, setSection } from '../writers';
+import { reorderAnnouncements } from './announcements';
 import type { DeckView, SectionHeader, SlideEntry } from './deck-view';
 import type { DeckSession } from './session';
 import { SLIDE_W, SlideView } from './SlideView';
@@ -39,6 +41,12 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const ids = view.slides.map((s) => s.id);
   const scale = width / SLIDE_W;
+  // a reorder as assistive technology hears it: the slides by position and title, over the order last drawn
+  const drawn = useRef(ids);
+  useLayoutEffect(() => {
+    drawn.current = ids;
+  });
+  const accessibility = useMemo(() => ({ announcements: reorderAnnouncements(() => drawn.current, (id, n) => C.reorderItem(n, slideTitle(session.doc, id))) }), [session]);
 
   // every thumbnail of the first showing laid out: reported once
   const canvases = useRef(new Map<string, SlideCanvas>());
@@ -70,7 +78,7 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
   const headersBefore = (id: string) => view.sections.filter((s) => s.before === id);
   return (
     <nav className="deck-filmstrip" aria-label={C.filmstrip} style={{ width: width + 40 }}>
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd} accessibility={accessibility}>
         <SortableContext items={ids} strategy={verticalListSortingStrategy} disabled={readOnly}>
           <ol className="deck-filmstrip-list" aria-label={C.slides}>
             {view.slides.map((slide, index) => (
