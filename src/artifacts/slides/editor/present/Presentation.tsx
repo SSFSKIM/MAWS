@@ -6,7 +6,7 @@
 // audience window is the only one and P shows the presenter view in it. The two windows keep one position over a
 // `BroadcastChannel` (channel.ts). The deck is a live replica nobody writes here: an edit, an agent's republish, a slide
 // hidden or removed while the show runs shows at once, and the show stays where it can (sequence.ts).
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { DesignSystemScope, type DesignSystemRef } from '../../../design-system/apply';
 import { onUpdate, type Doc } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
@@ -193,8 +193,9 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
     const following = read.following;
     body = (
       <div className="present-presenter" data-present-view="presenter">
-        {/* P3-F: a pointer press leaves focus where it was, so the show's Enter and Space still follow a click on a button */}
-        <header className="present-bar" onMouseDown={(event) => event.preventDefault()}>
+        {/* P3-F: a pointer press never focuses a bar button and lets go of the focus one took from the keyboard, so the
+            show's Enter and Space follow a click on a button */}
+        <header className="present-bar" onMouseDown={dropBarFocus}>
           <Elapsed since={startedAt} />
           <span className="present-count" data-present-count>
             {C.count(read.index, read.count)}
@@ -254,6 +255,13 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
       {body}
     </div>
   );
+}
+
+/** A press on the presenter bar: no focus moves to a button, and a button holding focus (a Tab onto the bar) lets it go. */
+function dropBarFocus(event: ReactMouseEvent<HTMLElement>): void {
+  event.preventDefault();
+  const focused = event.currentTarget.ownerDocument.activeElement;
+  if (focused instanceof HTMLElement && event.currentTarget.contains(focused)) focused.blur();
 }
 
 /** One view of the show, fitted to its box. Its ShowStage plays each move it is given (see stage.ts). */

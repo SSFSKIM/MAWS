@@ -45,6 +45,13 @@ const pressOn = (el: HTMLElement, k: string) =>
   act(() => {
     if (fireEvent.keyDown(el, { key: k }) && el instanceof HTMLButtonElement && (k === 'Enter' || k === ' ')) el.click();
   });
+/** A mouse click on an element as Chromium does: its mousedown focuses it unless cancelled, then the click. */
+const clickOn = (el: HTMLElement) =>
+  act(() => {
+    if (fireEvent.mouseDown(el)) el.focus();
+    fireEvent.mouseUp(el);
+    fireEvent.click(el);
+  });
 
 afterEach(cleanup);
 
@@ -113,6 +120,18 @@ describe('the show', () => {
     expect([s.at(), s.onEnd.mock.calls.length]).toEqual(['two/0', 1]);
     // a pointer press does not move focus onto the bar, so the show's Space and Enter still follow a click on a button
     expect(fireEvent.mouseDown(button('Next'))).toBe(false);
+  });
+
+  // the wave's review (P3): a click on the bar also lets go of the focus a bar button took from the keyboard, so the
+  // Space after a click on → is the show's, not the ← that held focus
+  it('drops a bar button’s keyboard focus on a click on the bar, so the show’s Space follows the click', () => {
+    const s = show(deck(), 'presenter');
+    const button = (name: string) => s.getByRole('button', { name });
+    act(() => button('Previous').focus()); // a Tab onto the bar
+    clickOn(button('Next'));
+    expect(s.at()).toBe('two/0');
+    pressOn(document.activeElement as HTMLElement, ' ');
+    expect(s.at()).toBe('two/1');
   });
 
   it('B shows black; Escape ends the show', () => {
