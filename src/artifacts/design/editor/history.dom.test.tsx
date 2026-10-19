@@ -19,7 +19,7 @@ import { writeBoards, type BoardSeed } from '../fixtures/support';
 import { countDesignChanges } from '../history';
 import { moveElementToBoard } from '../move';
 import { deleteBoard, insertBoard, setBoardFrame } from '../writers';
-import { DesignWorkbench } from './DesignWorkbench';
+import { DesignWorkbench, type DesignWorkbenchProps } from './DesignWorkbench';
 import { DesignView } from './viewport';
 
 const SESSION = '00000000-0000-4000-8000-0000000000e2' as AppSessionId;
@@ -95,7 +95,7 @@ describe('the new-change pill (C’s `countChanges` hook)', () => {
 });
 
 describe('a version’s preview in the workbench', () => {
-  function mount() {
+  function mount(props: Partial<DesignWorkbenchProps> = {}) {
     const h = host();
     h.version(HUMAN, 'named', 'Draft');
     let moved = '';
@@ -110,7 +110,7 @@ describe('a version’s preview in the workbench', () => {
     const view = new DesignView();
     view.setRoom({ w: 1000, h: 800 });
     view.setViewport({ zoom: 0.5, x: 0, y: 0 });
-    const utils = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={false} history={{ api: h.api, handle: h.handle, countChanges: countDesignChanges }} />);
+    const utils = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={false} history={{ api: h.api, handle: h.handle, countChanges: countDesignChanges }} {...props} />);
     return { ...h, session, view, moved, ...utils };
   }
 
@@ -241,5 +241,22 @@ describe('a version’s preview in the workbench', () => {
     fireEvent.click(within(ask).getByRole('button', { name: 'Restore' }));
     await settle();
     expect(restore).toHaveBeenCalledWith(1);
+  });
+
+  it('(design-workbench sweep#2) gives its owner the live world for Mark-up again after Back, never the world the version replaced', async () => {
+    const stage = vi.fn<(element: HTMLElement | null) => void>();
+    mount({ onStage: stage });
+    await settle();
+    const live = () => screen.getByRole('region', { name: 'Design canvas' });
+    expect(stage).toHaveBeenLastCalledWith(live());
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Version history' })).getByRole('button', { name: /^Version Reviewed/ }));
+    await settle();
+    expect(screen.queryByRole('region', { name: 'Design canvas' })).toBeNull();
+    expect(stage).toHaveBeenLastCalledWith(null); // no live world while the version shows
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Version preview' })).getByRole('button', { name: 'Back to design' }));
+    await settle();
+    const shown = stage.mock.lastCall![0];
+    expect(shown).toBe(live());
+    expect(shown!.isConnected).toBe(true);
   });
 });

@@ -13,7 +13,7 @@
 // "Move to board…" in the inspector (MoveToBoard.tsx, the one cross-board move), and version history (history.tsx: C's
 // controller and B's rail, the design's projection, bar and read-only world in place of the live one while a version
 // shows; the pill and the restore banner as C's).
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { CommentAuthor, DocumentComments } from '../../document/editor/comments/surface';
 import { onUpdate, type Doc } from '../../yjs';
@@ -218,12 +218,21 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const [inspectorOpen, setInspectorOpen] = useState(!compact);
   const [boardsOpen, setBoardsOpen] = useState(!compact);
 
-  const surface = useRef<HTMLDivElement | null>(null);
-  const hasBoards = boards.length > 0;
-  useEffect(() => {
-    onStage?.(surface.current);
-    return () => onStage?.(null);
-  }, [onStage, hasBoards]);
+  // the world's surface, told to the owner (Mark-up's) as React attaches and detaches it: a version's preview takes the
+  // world away and Back mounts a new one. World and C's overlay read it as a ref object, so the object's writes, which
+  // React makes at mount and unmount, are what a callback ref's calls would be.
+  const surface = useMemo<RefObject<HTMLDivElement | null>>(() => {
+    let element: HTMLDivElement | null = null;
+    return {
+      get current() {
+        return element;
+      },
+      set current(next) {
+        element = next;
+        onStage?.(next);
+      },
+    };
+  }, [onStage]);
 
   // ---- the view's fits
   const allRect = useCallback((): Rect | null => unionRect(boards.flatMap((b) => (b.frame ? [b.frame] : []))), [boards]);
