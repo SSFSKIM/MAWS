@@ -59,15 +59,10 @@ interface DecodedItem {
   length: number;
 }
 
-/** A slot of a node with its character (null for a node or an embed), the unit two copies are matched by. */
+/** A visible slot of a node with its character (null for a node or an embed), the unit two copies are matched by. */
 interface Unit {
   slot: Slot;
   ch: string | null;
-}
-
-/** A unit of a source as a dragging replica saw it: live in the host's doc, or already deleted there (its character collected). */
-interface ViewUnit extends Unit {
-  live: boolean;
 }
 
 /** A run of characters to replay: after the carried character before it, or before the one after it, or into its textblock. */
@@ -81,14 +76,14 @@ interface Run {
 
 /**
  * A move a human made (a block's node deleted and re-inserted under its id in one update), seen before the apply. The
- * copy is the source as the dragging replica saw it: the units its update deletes (`view`, what the copy holds unit for
- * unit, those a replica it had not seen deleted since included), and not the text that reached the source after that
- * replica's state (`late`, carried into the copy).
+ * copy is the source as the dragging replica saw it: the units its update deletes (`shared`, what the copy holds unit
+ * for unit), and not the text that reached the source after that replica's state (`late`, carried into the copy).
  */
 interface Drag {
   blockId: string;
   source: Slot;
-  view: ViewUnit[];
+  shared: Unit[];
+  sourceBlocks: Slot[]; // the source's textblocks the copy holds, paired in order with the copy's for the block forwards
   late: Run[];
   node: Slot;
   name: string; // the source node's type: a re-insert as another type is a retype
@@ -241,49 +236,11 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
   }
 
   /**
-   * The source as the replica whose deletions `seen` names saw it: its units in document order that the replica's update
-   * deletes (what its copy holds, unit for unit). A unit already deleted here, by a replica the dragger had not seen, is
-   * counted from its tombstone (gc keeps an item's length and whether it was countable, not its characters); a node the
-   * dragger had not seen is left out with its subtree. Not in a sync step 2: it restates the sender's whole delete set,
-   * so a tombstone the dragger still held cannot be told from an older one, and the live units alone are paired (a
-   * tombstone the dragger held then drops the carry, as before the tombstone view).
-   */
-  function seenUnits(node: Node, seen: (slot: Slot) => boolean, step2: boolean, out: ViewUnit[] = []): ViewUnit[] {
-    for (let item = node._start; item !== null; item = item.right) {
-      if (!item.countable) continue;
-      const content = item.content;
-      if (item.deleted) {
-        if (step2) continue;
-        for (let k = 0; k < item.length; k++) {
-          const slot: Slot = [item.id.client, item.id.clock + k];
-          if (seen(slot)) out.push({ slot, ch: null, live: false });
-        }
-      } else if (content instanceof ContentString) {
-        for (let k = 0; k < content.str.length; k++) {
-          const slot: Slot = [item.id.client, item.id.clock + k];
-          if (seen(slot)) out.push({ slot, ch: content.str[k], live: true });
-        }
-      } else if (content instanceof ContentType) {
-        const slot: Slot = [item.id.client, item.id.clock];
-        if (!seen(slot)) continue;
-        out.push({ slot, ch: null, live: true });
-        seenUnits(content.type as Node, seen, step2, out);
-      } else {
-        for (let k = 0; k < item.length; k++) {
-          const slot: Slot = [item.id.client, item.id.clock + k];
-          if (seen(slot)) out.push({ slot, ch: null, live: true });
-        }
-      }
-    }
-    return out;
-  }
-
-  /**
    * Blocks of `live` the incoming update deletes and re-inserts under the same id (seen before the apply). A nested block
    * of a dragged block is a drag of its own (its carry and forwards), but the text that reached the subtree is carried
    * once, by the outermost.
    */
-  function drags(live: Doc, inserted: Map<string, Slot>, deletes: ContentIds['deletes'], carried: Set<string>, step2: boolean): Drag[] {
+  function drags(live: Doc, inserted: Map<string, Slot>, deletes: ContentIds['deletes'], carried: Set<string>): Drag[] {
     if (inserted.size === 0) return [];
     const out: Array<Drag & { sourceNode: Node }> = [];
     const seen = (slot: Slot) => deletes.has(slot[0], slot[1]);
@@ -296,7 +253,8 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
       out.push({
         blockId: id as string,
         source: itemOf(node),
-        view: seenUnits(node, seen, step2),
+        shared: deepUnits(node).filter((unit) => seen(unit.slot)),
+        sourceBlocks: textblocksY(node).filter((block) => seen(itemOf(block))).map(itemOf),
         late: lateRuns(node, seen, () => false),
         node: now,
         name: node.name,
@@ -397,7 +355,7 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     const items = structs.filter((struct): struct is DecodedItem => struct instanceof Item) as unknown as DecodedItem[];
     const carriedNodes = new Set(performing.map((carry) => carry.node).filter((slot): slot is Slot => slot !== undefined).map(slotKey));
     const inserted = insertedBlocks(items);
-    const moved = ids.deletes.isEmpty() ? [] : drags(live, inserted, ds, carriedNodes, step2);
+    const moved = ids.deletes.isEmpty() ? [] : drags(live, inserted, ds, carriedNodes);
     const late = performing.map((carry) => lateEdits(live, carry, ds)).filter((entry): entry is Late => entry !== null);
     if (performing.length === 0 && moved.length === 0 && !registry.hasActive) return null;
     // Deletions that are part of a move are not edits: the moves this update performs (registered or a drag), and any
@@ -405,7 +363,7 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
     // delete of an old copy whole: the move overtook it, and forwarding it would empty the moved copy (P3-F, L168).
     const own = new Set([
       ...performing.flatMap((carry) => carry.from.map(slotKey)),
-      ...moved.flatMap((drag) => drag.view.map((unit) => slotKey(unit.slot))),
+      ...moved.flatMap((drag) => drag.shared.map((unit) => slotKey(unit.slot))),
       ...registry.carriedOf(new Set(inserted.keys())),
       ...registry.carriedOfDeletedSources(ds),
     ]);
@@ -450,34 +408,21 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
         const node = nodeAt(doc, drag.node);
         if (!node) continue;
         const now = deepUnits(node);
-        // not the copy of what the replica saw (a unit already deleted here is matched by count alone, its character
-        // collected): no carry, as for any other re-insert
-        if (now.length !== drag.view.length || drag.view.some((unit, k) => unit.live && unit.ch !== now[k].ch)) continue;
-        const unitAt = new Map(now.map((unit, k) => [slotKey(unit.slot), k]));
+        if (now.length !== drag.shared.length || now.some((unit, k) => unit.ch !== drag.shared[k].ch)) continue; // not the copy of what the replica saw: no carry, as for any other re-insert
+        const blocks = textblocksY(node).map(itemOf);
         const carry: Carry = {
           kind: node.name === drag.name ? 'move' : 'retype',
           blockId: drag.blockId,
-          from: drag.view.map((unit) => unit.slot),
+          from: drag.shared.map((unit) => unit.slot),
           to: now.map((unit) => unit.slot),
           source: drag.source,
           node: drag.node,
-          // each textblock of the copy with the view's counterpart of its node unit (a dead one too, so the blocks after
-          // it keep their own), the dragged block itself for its own textblock
-          blocks: textblocksY(node).map((block): [Slot, Slot] => {
-            const k = unitAt.get(slotKey(itemOf(block)));
-            return [k === undefined ? drag.source : drag.view[k].slot, itemOf(block)];
-          }),
+          blocks: drag.sourceBlocks.slice(0, blocks.length).map((old, k): [Slot, Slot] => [old, blocks[k]]),
         };
         registry.register([carry]);
         registry.activate(carry);
         registry.reported(carry);
         copied.push(carry);
-        // the copy's units of characters a replica the dragger had not seen deleted go again, then the late text comes in
-        drag.view.forEach((unit, k) => {
-          if (unit.live) return;
-          const at = locateSlot(doc, now[k].slot);
-          if (at) at.node.delete(at.index, 1);
-        });
         for (const run of drag.late) copy('move', run.slots, replay(registry, doc, run.text, run.slots, run.after, run.before, run.block));
       }
       if (copied.length) stash.set(doc, copied);

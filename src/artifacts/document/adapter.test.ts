@@ -34,11 +34,9 @@ import {
 import { pmnodeToDelta } from '../yjs/prosemirror';
 import { documentAdapter, unplacedThreads, type DocumentAdapter } from './adapter';
 import { DocIndex } from './block-index';
-import type { Carry } from './edit-ops';
 import { applyEdit } from './patch-writer';
 import { readDocument } from './read';
 import { schemaFor } from './schema';
-import { itemOf, slotKey } from './structs';
 import { TABS, addTab, createDocument, deleteTab, listTabs } from './tabs';
 import { addThread, anchorOfMark, getThread, listThreads, locate, reply, resolve } from './threads';
 import { body, coveredIn, dupes, ids, marksOf, nodeOf, now, order, replica, seedDoc, sequence, textOf, TAB } from './writer.fixture';
@@ -894,61 +892,6 @@ describe('the tab restore and a held legacy dashboard', () => {
   });
 });
 
-// P3-F document-model review (fable, P2): a drag of a block that lost characters the dragger had not seen (the agent's
-// replace_text reached the host first) keeps its carry: the dragger's view is paired from the source's items in the
-// drag's delete set, tombstones included, so the copy's resurrected characters go again and the agent's new ones are
-// carried in.
-describe('a human drag of a block a concurrent replacement reached', () => {
-  const drag = (doc: Doc, id: string, after: string) => {
-    const pm = DocIndex.of(doc).pm(DocIndex.of(doc).find(id)!.top);
-    transact(doc, () => {
-      body(doc).delete(order(doc).indexOf(id), 1);
-      body(doc).insert(order(doc).indexOf(after) + 1, [pmnodeToDelta(pm)]);
-    });
-  };
-
-  it('ends with the replacement in the dragged copy and nothing resurrected', () => {
-    const adapter = adapterOf();
-    const host = new Host(seedDoc(), adapter);
-    const agent = host.peer();
-    const dragger = host.peer(); // drags without having seen the replacement
-    agentBatch(host, adapter, agent, agent1, [{ op: 'replace_text', block: 'p3', old: 'A', new: 'B' }]);
-    expect(textOf(host.live, 'p3')).toBe('B plain paragraph the human types into. Words to keep.');
-    drag(dragger, 'p3', 'c1');
-    host.send(dragger, human);
-    host.pull(dragger);
-    host.pull(agent);
-    const text = 'B plain paragraph the human types into. Words to keep.';
-    expect(textOf(host.live, 'p3')).toBe(text);
-    expect(marksOf(host.live, 'p3')).toBe('B plain paragraph the human types into. |Words[c:t4]| to keep.');
-    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('c1') + 1);
-    expect(adapter.stats().carries).toBe(1);
-    expect(dupes(ids(host.live))).toEqual([]);
-    expect(textOf(dragger, 'p3')).toBe(text);
-    expect(textOf(agent, 'p3')).toBe(text);
-  });
-
-  it('a replacement inside the block, and a stale keystroke after it, both land in the dragged copy', () => {
-    const adapter = adapterOf();
-    const host = new Host(seedDoc(), adapter);
-    const agent = host.peer();
-    const dragger = host.peer(); // sees neither the replacement nor the keystroke
-    const typist = host.peer(); // sees neither the replacement nor the drag
-    agentBatch(host, adapter, agent, agent1, [{ op: 'replace_text', block: 'p3', old: 'types into', new: 'writes in' }]);
-    drag(dragger, 'p3', 'p4');
-    host.send(dragger, human);
-    expect(textOf(host.live, 'p3')).toBe('A plain paragraph the human writes in. Words to keep.');
-    typeAt(typist, 'p3', 'end', ' Late.');
-    host.send(typist, human);
-    for (const doc of [agent, dragger, typist]) host.pull(doc);
-    const text = 'A plain paragraph the human writes in. Words to keep. Late.';
-    expect(textOf(host.live, 'p3')).toBe(text);
-    expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('p4') + 1);
-    expect(dupes(ids(host.live))).toEqual([]);
-    for (const doc of [agent, dragger, typist]) expect(textOf(doc, 'p3')).toBe(text);
-  });
-});
-
 // P3-F document-model review (fable, P3): text replayed into a losing copy (a run that reached the block before a drag)
 // is matched to the kept copy by its origin, so a winner whose base already holds that run does not get it again.
 describe('the id repair and a losing copy’s replayed text', () => {
@@ -1032,47 +975,5 @@ describe('a human drag delivered in a sync step 2', () => {
     expect(order(host.live).indexOf('p3')).toBe(order(host.live).indexOf('c1') + 1);
     expect(dupes(ids(host.live))).toEqual([]);
     for (const doc of [dragger, typist, agent]) expect(textOf(doc, 'p3')).toBe(text);
-  });
-});
-
-// P3-F document-model recheck (fable, P3): the drag's block forwards pair as its units do. A nested textblock the dragger
-// saw but another replica deleted is a dead unit of the view, and its copy goes again; the block pairs are taken from
-// the copy's textblocks and the view's counterparts of their node units, the dead one included, so the textblocks
-// after it still pair with their own. (Each nested textblock also gets a drag of its own, whose root pair is right and
-// registers after the list's when the items are in one client's order, so the list's own pairs are what is checked.)
-describe('a human drag of a list whose empty paragraph another replica deleted', () => {
-  const drag = (doc: Doc, id: string, after: string) => {
-    const pm = DocIndex.of(doc).pm(DocIndex.of(doc).find(id)!.top);
-    transact(doc, () => {
-      body(doc).delete(order(doc).indexOf(id), 1);
-      body(doc).insert(order(doc).indexOf(after) + 1, [pmnodeToDelta(pm)]);
-    });
-  };
-
-  it('pairs each textblock of the copy with its own source, the deleted one included, and a stale edit into the next lands', () => {
-    const adapter = adapterOf();
-    const seed = seedDoc();
-    const paragraph = (id: string) => pmnodeToDelta(schemaFor().nodes.paragraph.create({ id }));
-    transact(seed, () => nodeOf(seed, 'li1').insert(1, [paragraph('e1'), paragraph('lp3')])); // li1: 'first item', empty, empty
-    const host = new Host(seed, adapter);
-    const deleter = host.peer();
-    const dragger = host.peer(); // drags without having seen the deletion
-    const typist = host.peer(); // stale for the drag
-    transact(deleter, () => nodeOf(deleter, 'li1').delete(1, 1)); // e1
-    host.send(deleter, human);
-    const lp3 = itemOf(nodeOf(host.live, 'lp3'));
-    drag(dragger, 'l1', 'c1');
-    const dragged = host.send(dragger, human);
-    const pairs = (dragged?.provenance as Carry[] | undefined)?.find((carry) => carry.blockId === 'l1')?.blocks ?? [];
-    expect(pairs.find(([old]) => slotKey(old) === slotKey(lp3))?.[1], "the list's pair for lp3 is the copy's lp3").toEqual(itemOf(nodeOf(host.live, 'lp3')));
-    expect(ids(host.live)).not.toContain('e1');
-    typeAt(typist, 'lp3', 0, 'X'); // into the empty paragraph: no character neighbour, the block forward alone places it
-    host.send(typist, human);
-    host.pull(typist);
-    expect(textOf(host.live, 'lp3')).toBe('X');
-    expect(textOf(host.live, 'lp1')).toBe('first item');
-    expect(order(host.live).indexOf('l1')).toBe(order(host.live).indexOf('c1') + 1);
-    expect(dupes(ids(host.live))).toEqual([]);
-    expect(textOf(typist, 'lp3')).toBe('X');
   });
 });
