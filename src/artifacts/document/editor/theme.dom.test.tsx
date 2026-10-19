@@ -2,9 +2,11 @@
 // colour in the editor's stylesheets; the page reads only the design system's names, each falling back to an app
 // token; with no `--ds-*` defined every computed colour of a rendered document is an app token's, and a design
 // system's value, once defined, wins over it.
+import { DOMSerializer } from '@tiptap/pm/model';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AUTHOR_COLORS } from '@shared/artifacts/actor';
+import { schemaFor } from '../schema';
 import tokensCss from '../../../renderer/src/styles/tokens.css?raw';
 import chromeCss from './chrome.css?raw';
 import { DocumentEditor } from './DocumentEditor';
@@ -227,6 +229,23 @@ describe('the rendered page without a design system', () => {
       system.remove();
       delete document.documentElement.dataset.theme;
     }
+  });
+
+  // P3-F panel scalpel-3#3: the attributed callout (a deletion inside it, in a version or the suggestion review) is the
+  // inert variant, no node view and no class, only `data-callout-tone`; it keeps the callout's box and tone as drawn
+  it('draws the attributed callout with the callout’s box and tone', async () => {
+    const container = await mountEveryKind();
+    const drawn = container.querySelector<HTMLElement>('.ds-doc aside[data-callout-tone="warn"]')!;
+    const schema = schemaFor();
+    const attributed = schema.nodes['callout--attributed'].create({ tone: 'warn', 'y-attributed': true }, schema.nodes.paragraph.create({ id: 'pa' }, schema.text('warn')));
+    const aside = DOMSerializer.fromSchema(schema).serializeNode(attributed) as HTMLElement;
+    expect(aside.tagName).toBe('ASIDE');
+    expect(aside.className).toBe('');
+    container.querySelector('.ds-doc-page')!.append(aside);
+    const box = ['background-color', 'border-top-width', 'border-top-color', 'border-left-width', 'border-left-color', 'border-left-style', 'border-radius', 'padding-top', 'padding-left', 'display'];
+    const style = (el: HTMLElement) => Object.fromEntries(box.map((property) => [property, getComputedStyle(el).getPropertyValue(property)]));
+    expect(style(drawn)['border-left-width'], 'the node view’s callout, boxed').toBe('4px');
+    expect(style(aside)).toEqual(style(drawn));
   });
 
   it('takes its code type from the design system too, the app’s code size only a fallback', async () => {
