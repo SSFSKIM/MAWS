@@ -181,14 +181,20 @@ const idle = async (s: Live) => {
   return status.turn === null && status.pendingRequests === 0;
 };
 
+// The user messages the host has written to the engine so far.
+const sentPrompts = (s: Live) => s.rows().filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user').length;
+
 // A prompt through the real composer, then the turn driven to its end.
+// P3-F (editor-proof scalpel-4#5): the prompt reached the engine when a user message beyond the ones before it is in
+// the journal; from the second prompt on, an earlier prompt's frame answered at once.
 async function ask(s: Live, prompt: string): Promise<number> {
   const ended = mainTurnsEnded(await s.events()).length;
+  const sent = sentPrompts(s);
   const message = s.pane.getByRole('textbox', { name: 'Message', exact: true });
   await message.click();
   await s.page.keyboard.insertText(prompt);
   await s.page.keyboard.press('Meta+Enter'); // `composer.send`: a multi-line prompt's plain Enter breaks the line
-  await expect.poll(() => s.rows().some((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user'), { timeout: 15_000, message: 'the prompt reached the engine' }).toBe(true);
+  await expect.poll(() => sentPrompts(s), { timeout: 15_000, message: 'the prompt reached the engine' }).toBeGreaterThan(sent);
   return ended;
 }
 async function turnEnd(s: Live, ended: number, what: string): Promise<string> {
