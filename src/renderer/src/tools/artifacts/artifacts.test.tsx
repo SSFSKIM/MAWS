@@ -245,6 +245,26 @@ describe('the list', () => {
     expect(handle.snapshot().scrollTop).toBe(0);
   });
 
+  // The list Back mounts again is put back where it was; a scope chosen after that is another list, which starts at its
+  // top even when its lines arrive only after a reading (they mount afresh then, and must not be put back).
+  it('a scope change after Back starts the list at its top, though its lines mount again once the scope is read', async () => {
+    testEditor();
+    const { handle } = await mount();
+    const list = () => document.querySelector<HTMLElement>('[data-artifacts-list]')!;
+    list().scrollTop = 120;
+    fireEvent.scroll(list());
+    await openRow(1);
+    fireEvent.click(button('Back')!);
+    await settle();
+    expect(list().scrollTop, 'Back returns to where the list was').toBe(120);
+    fireEvent.click(button('All')!); // a scope the library has not read yet: its lines wait for the reading
+    expect(screen.getByText('Reading…')).toBeTruthy();
+    await settle();
+    expect(listed()).toContain(OTHER.id);
+    expect(list().scrollTop).toBe(0);
+    expect(handle.snapshot().scrollTop).toBe(0);
+  });
+
   it('with no session shown, This session says so and All still lists', async () => {
     await mount(undefined, null);
     expect(screen.getByText('Open a session to see its artifacts')).toBeTruthy();

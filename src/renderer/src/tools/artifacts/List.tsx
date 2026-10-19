@@ -38,17 +38,14 @@ interface Props {
 
 export function ArtifactsList({ appSessionId, scope, scrollTop, onScope, onScroll, onOpen }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
-  const [restoreTo] = useState(scrollTop); // Back and a remount return to where the list was
+  // Where the list is put back to: Back and a remount return to where the list was; another scope is another list, which
+  // starts at its top (the tool state's offset is zeroed with it), and so do its lines when they mount only once that
+  // scope is read (adjusted while rendering, so they never mount at the old offset).
+  const [restore, setRestore] = useState({ scope, top: scrollTop });
+  if (restore.scope !== scope) setRestore({ scope, top: 0 });
   useEffect(() => {
-    if (scroller.current) scroller.current.scrollTop = restoreTo;
-  }, [restoreTo]);
-  // Another scope is another list: it starts at its top (the tool state's offset is zeroed with it).
-  const shownScope = useRef(scope);
-  useEffect(() => {
-    if (shownScope.current === scope) return;
-    shownScope.current = scope;
-    if (scroller.current) scroller.current.scrollTop = 0;
-  }, [scope]);
+    if (scroller.current) scroller.current.scrollTop = restore.top;
+  }, [restore]);
   const filter: LibraryFilter | null = scope === 'all' ? {} : appSessionId === null ? null : { appSessionId, lineage: true };
   return (
     <div data-artifacts-list="" ref={scroller} onScroll={(e) => onScroll(e.currentTarget.scrollTop)} className="relative flex h-full min-h-0 flex-col overflow-auto">
@@ -65,7 +62,7 @@ export function ArtifactsList({ appSessionId, scope, scrollTop, onScope, onScrol
           {ARTIFACTS_TOOL_COPY.openLibrary}
         </button>
       </div>
-      {filter === null ? <Quiet>{ARTIFACTS_TOOL_COPY.noSession}</Quiet> : <Groups filter={filter} scope={scope} initialOffset={restoreTo} onOpen={onOpen} />}
+      {filter === null ? <Quiet>{ARTIFACTS_TOOL_COPY.noSession}</Quiet> : <Groups filter={filter} scope={scope} initialOffset={restore.top} onOpen={onOpen} />}
     </div>
   );
 }
