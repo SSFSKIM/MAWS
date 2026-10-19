@@ -7,7 +7,7 @@ import { fakeClient } from '../../../../test/support/fake-client';
 import { registerShellActions } from '../app/shell-actions';
 import { runAction } from '../keymap/actions-runtime';
 import { useComposerStore } from '../stores/composer';
-import { useLayout } from '../stores/layout';
+import { persistLayout, useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices'; // P3-F wave S (F6)
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
@@ -142,6 +142,21 @@ describe('a float with no session to draw', () => {
     await microtasks();
     expect(state()).toBe('docked');
     expect(useLayout.getState().regions.panel.width).toBe(444);
+  });
+
+  // P3-F wave S (F6 review): the dock reaches layout.json. Written inside the hydration's own notification, persistence
+  // would take the docked state for its baseline and never write it, and the float would come back at a later launch.
+  it('the dock of a float stored with an artifact tab in front is written to layout.json', async () => {
+    const stored = { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, width: 444, floating: true } };
+    const values: Record<string, unknown> = { regions: stored, 'main.tabs': showing(ARTIFACT), 'panel.pinned': null };
+    const fake = fakeClient({ 'layout.list': { keys: ['regions', 'main.tabs'] }, 'layout.get': (input: unknown) => ({ value: values[(input as { key: string }).key] ?? null }), 'layout.set': undefined });
+    useLayout.setState({ hydrated: false, main: LAYOUT_DEFAULTS.main, regions: LAYOUT_DEFAULTS.regions });
+    const stop = persistLayout(fake.client); // subscribed before hydration, as App.tsx does
+    await useLayout.getState().hydrate(fake.client, () => true);
+    await microtasks();
+    stop(); // writes what is pending at once
+    const written = fake.invoked('layout.set').filter((input) => (input as { key: string }).key === 'regions');
+    expect(written.at(-1)).toMatchObject({ value: { panel: { floating: false, width: 444 } } });
   });
 
   it('a float stored with a session tab in front comes back floating', async () => {
