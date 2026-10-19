@@ -51,6 +51,11 @@ export function BoardInspector({ session, board, readOnly }: BoardInspectorProps
       throw error;
     }
   };
+  const rename = (title: string): boolean => {
+    if (!writable()) return false;
+    session.edit(() => writeBoardEntry(session.doc, board.id, { title: title || undefined })); // inside the edit's transaction, under its origin
+    return true;
+  };
   const preset = board.frame ? (BOARD_PRESETS.find((p) => p.w === board.frame!.w && p.h === board.frame!.h)?.id ?? 'custom') : 'custom';
 
   return (
@@ -59,7 +64,7 @@ export function BoardInspector({ session, board, readOnly }: BoardInspectorProps
         <h2 className="deck-inspector-title">{boardLabel(board)}</h2>
         <Section title={C.board}>
           <Row caption={C.boardName} wide>
-            <NameField key={board.title} title={board.title} disabled={locked} onCommit={(title) => writable() && session.edit(() => writeBoardEntry(session.doc, board.id, { title: title || undefined }))} /* inside the edit's transaction, under its origin */ />
+            <NameField key={board.title} title={board.title} disabled={locked} onCommit={rename} />
           </Row>
           {PAIRS.map((pair) => (
             <div key={pair.join('')} className="deck-inspector-pair">
@@ -98,12 +103,15 @@ export function BoardInspector({ session, board, readOnly }: BoardInspectorProps
   );
 }
 
-/** The board's name, written on Enter or on leaving the field (empty: no title; the id names it). */
-function NameField({ title, disabled, onCommit }: { title: string; disabled: boolean; onCommit: (title: string) => void }) {
+/**
+ * The board's name, written on Enter or on leaving the field (empty: no title; the id names it). A commit refused (false)
+ * drops the draft, as C's number field does, so a later blur cannot write it.
+ */
+function NameField({ title, disabled, onCommit }: { title: string; disabled: boolean; onCommit: (title: string) => boolean }) {
   const [draft, setDraft] = useState(title);
   const commit = () => {
     const next = draft.trim();
-    if (next !== title) onCommit(next);
+    if (next !== title && !onCommit(next)) setDraft(title);
   };
   return (
     <span className="deck-inspector-input-wrap">

@@ -635,6 +635,8 @@ describe('the board inspector beside other writers (design-workbench fix wave)',
         expect(boardFrame(doc, 'b1')!.w, `${turn}, ${field}`).toBe(390);
         expect(Y.slideScalars(doc, 'b1').title, `${turn}, ${field}`).toBe('Phone');
         expect(session.undo.canUndo(), `${turn}, ${field}: nothing on the undo stack`).toBe(false);
+        // the refused draft is dropped, not kept for a later blur to commit: the field shows the board's value again
+        expect(screen.getByRole<HTMLInputElement>('textbox', { name: field }).value, `${turn}, ${field}: the field`).toBe(field === 'Board width' ? '390' : 'Phone');
         cleanup();
       }
   });
