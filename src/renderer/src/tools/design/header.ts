@@ -24,6 +24,8 @@ export interface DesignHeaderState {
   exports?: readonly EditorHostExport[];
   /** M4: version history is offered (the tab has the design's history). */
   history?: boolean;
+  /** The history shows a version (or two compared) in place of the live world: Zoom to fit, the live world's, is disabled. */
+  previewing?: boolean;
 }
 
 /** What the header's actions do, on the tab's own state. */
@@ -36,7 +38,7 @@ function designActions(state: DesignHeaderState, commands: DesignHeaderCommands)
   return [
     ...(state.history ? [{ id: 'history', label: 'Version history', icon: HistoryIcon, pressed: state.rail === 'history', onSelect: () => commands.toggleRail('history') }] : []), // M4
     { id: 'comments', label: 'Comments', icon: CommentsIcon, pressed: state.rail === 'comments', onSelect: () => commands.toggleRail('comments') }, // M4
-    { id: 'zoom-to-fit', label: 'Zoom to fit', icon: ZoomToFitIcon, onSelect: () => commands.fitAll() },
+    { id: 'zoom-to-fit', label: 'Zoom to fit', icon: ZoomToFitIcon, onSelect: () => commands.fitAll(), ...(state.previewing && { disabled: true }) },
     { id: 'theme', label: 'Theme', icon: ThemeIcon, pressed: state.rail === 'theme', onSelect: () => commands.toggleRail('theme') },
   ];
 }

@@ -30,10 +30,14 @@ export class DesignTabState extends DeckTabState {
     this.canvases = canvases;
   };
 
-  /** Every board in view (the header's Zoom to fit); waits for the body's room when none is measured yet. */
+  /**
+   * Every board in view (the header's Zoom to fit); waits for the body's room when none is measured yet. Nothing while the
+   * history shows a version in place of the live world: that world has its own view, which the tab does not hold (the
+   * header offers the action disabled then), and the live view stays where Back finds it.
+   */
   fitAll = (): void => {
     const doc = this.snapshot().handle?.doc;
-    if (!doc) return;
+    if (!doc || this.view.snapshot().shown !== null) return;
     const rect = unionRect(boardOrder(doc).flatMap((id): BoardFrame[] => {
       const frame = boardFrame(doc, id);
       return frame ? [frame] : [];

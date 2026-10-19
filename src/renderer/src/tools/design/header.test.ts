@@ -40,4 +40,11 @@ describe('the design header', () => {
     expect(header.saved).toBe('readonly');
     expect(designHeader(state()).actions).toBeUndefined();
   });
+
+  it('(design-workbench scalpel-2#2) offers Zoom to fit disabled while the history shows a version in place of the live world', () => {
+    const zoom = (previewing?: boolean) => designHeader(state({ previewing }), { fitAll: () => {}, toggleRail: () => {} }).actions!.find((a) => a.id === 'zoom-to-fit')!;
+    expect(zoom(true).disabled).toBe(true);
+    expect(zoom(false).disabled).toBeFalsy();
+    expect(zoom().disabled).toBeFalsy();
+  });
 });
