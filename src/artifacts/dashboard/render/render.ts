@@ -420,7 +420,6 @@ function cartesian(v: View): Rendered {
       if (spec.view !== 'scatter') s.marks = s.marks.map((m, i) => ({ m, i })).sort((a, b) => xValue(a.m.x)! - xValue(b.m.x)! || a.i - b.i).map(({ m }) => m);
     }
   } else for (const s of all) s.marks = s.marks.filter((m) => !(m.x === null && m.y === null));
-  if (spec.view === 'bar' && spec.agg === undefined) repeatedBars(all, xCol, xFormat, warnings);
   const named = si !== undefined && (faceted || all.length > 1);
   for (const s of all) for (const m of s.marks) m.tip = `${formatCell(m.x, xCol, xFormat)}${named ? ` · ${s.seriesName}` : ''} · ${s.measure}: ${formatCell(m.y, undefined, s.format)}`;
 
@@ -606,38 +605,6 @@ function cartesian(v: View): Rendered {
   return { svg: frame(theme, height, v.caption, desc, body), warnings };
 }
 
-/**
- * An unaggregated bar view draws every row, so two drawable rows of one series and measure at one category on the same
- * side of zero stand on one another: the warning names those categories (the first three as the axis names them, in
- * its order, then how many more) and points at `agg` (E2 panel). The same category in two series or two measures sits
- * side by side, no overlap; nor do a negative bar and a positive or zero one at one category, which stand on either
- * side of the zero line (P3-F L251).
- */
-function repeatedBars(all: Series[], xCol: ViewColumn, xFormat: ValueFormat | undefined, warnings: string[]): void {
-  const repeated = new Set<string>();
-  for (const s of all) {
-    const seen = new Set<string>();
-    for (const m of s.marks) {
-      if (m.y === null) continue;
-      const key = typedKey(m.x);
-      const side = `${m.y < 0 ? '-' : '+'}${key}`;
-      if (seen.has(side)) repeated.add(key);
-      else seen.add(side);
-    }
-  }
-  if (repeated.size === 0) return;
-  const names: string[] = [];
-  const named = new Set<string>();
-  for (const s of all)
-    for (const m of s.marks) {
-      const key = typedKey(m.x);
-      if (names.length === 3 || !repeated.has(key) || named.has(key)) continue;
-      named.add(key);
-      names.push(nameOf(m.x, xCol, xFormat));
-    }
-  warnings.push(VIEW_STATES.repeatedX(xCol.name, names, repeated.size - names.length));
-}
-
 /** A line's end labels (four series or fewer), each in its measure's format, or none when two would sit closer than a line apart. */
 function endLabels(list: Series[], scale: Ticks, theme: Theme): { m: Mark; label: string; y: number }[] {
   if (list.length > 4) return [];
@@ -674,18 +641,27 @@ function keyMark(view: string, style: number, x: number, y: number, theme: Theme
 }
 
 /** Columns from the zero line, at most 24 px thick, the data end rounded 4 px, a 2 px ground gap between neighbours; each
- * in its series' own form (a series alone after a filter keeps the form it has in the whole snapshot; a panel's, the first). */
+ * in its series' own form (a series alone after a filter keeps the form it has in the whole snapshot; a panel's, the first).
+ * Without `agg` every row is drawn, so the drawable rows a series repeats at one category share its slot side by side, in
+ * the rows' order, each its own bar, value label and tip (the owner's S-REPEATED-BARS); a lone row has the whole slot. */
 function bars(series: Series[], band: { starts: number[]; bandwidth: number; keys: string[] }, y: Ticks, theme: Theme, labels: boolean): string {
   const n = series.length;
   const slot = band.bandwidth / n;
-  const thick = Math.max(1, Math.min(24, slot - 2));
   const zero = y.map(Math.max(y.domain[0], Math.min(0, y.domain[1])));
   const at = new Map(band.keys.map((key, i) => [key, band.starts[i]]));
   let out = '';
   series.forEach((s, k) => {
+    const rows = new Map<string, number>();
+    for (const m of s.marks) if (m.y !== null) rows.set(typedKey(m.x), (rows.get(typedKey(m.x)) ?? 0) + 1);
+    const placed = new Map<string, number>();
     for (const m of s.marks) {
       if (m.y === null) continue;
-      const x = at.get(typedKey(m.x))! + slot * k + (slot - thick) / 2;
+      const key = typedKey(m.x);
+      const i = placed.get(key) ?? 0;
+      placed.set(key, i + 1);
+      const sub = slot / rows.get(key)!;
+      const thick = Math.max(1, Math.min(24, sub - 2));
+      const x = at.get(key)! + slot * k + sub * i + (sub - thick) / 2;
       const tip = y.map(m.y);
       out += treated(roundedBar(x, thick, zero, tip), { x0: x, y0: Math.min(zero, tip), x1: x + thick, y1: Math.max(zero, tip) }, s.form, theme, ` data-tip="${esc(m.tip)}"`);
       if (labels) {
