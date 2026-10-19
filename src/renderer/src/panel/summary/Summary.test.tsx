@@ -93,6 +93,22 @@ describe('summary card', () => {
     expect(card.textContent).toMatch(/Tools stay with this session\. Pin a tab to keep it with you as you switch\.$/);
   });
 
+  // P3-F wave S (c2): beside a long session title (a new chat titled by its first prompt) the heading's text was a bare
+  // flex item that shrank, wrapping "Session overview" one or two letters a line; the title is what gives way
+  it('keeps "Session overview" on one line beside a long session title, which truncates', async () => {
+    const long = 'Fix the dashboard so the weekly revenue chart reads the new warehouse table and the totals match finance’s export';
+    act(() => useSessions.setState((s) => ({ records: new Map([[A, { ...s.records.get(A)!, title: { text: long, source: 'generated' } }]]) })));
+    await mount();
+    const heading = screen.getByRole('heading', { level: 2, name: new RegExp(`^Session overview`) });
+    const [label, title] = Array.from(heading.children) as HTMLElement[];
+    expect(label!.textContent).toBe('Session overview');
+    expect(label!.classList).toContain('shrink-0');
+    expect(label!.classList).toContain('whitespace-nowrap');
+    expect(title!.textContent).toBe(long);
+    expect(title!.classList).toContain('truncate');
+    expect(title!.classList).toContain('min-w-0');
+  });
+
   it('shows the footer alone when no session is shown', async () => {
     act(() => useLayout.setState({ main: LAYOUT_DEFAULTS.main }));
     await mount();
