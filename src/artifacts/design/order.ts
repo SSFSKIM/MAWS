@@ -7,8 +7,9 @@
 // silently); it goes right after its predecessor in the sent order (first when it has none), everything else keeping
 // its live place. The result is then checked pair by pair among the boards all three orders hold: every pair the agent
 // put in a new relative order, and every pair the live order did, must come out that way; a pair that does not names its
-// boards, unless `force`, under which the agent's order wins: the boards of every pair it re-ordered that came out
-// otherwise take its sequence in the places they hold, the other boards keeping theirs.
+// boards, unless `force`, under which the agent's order wins: the boards of every pair that came out against the sent
+// order, but for one only the live order re-ordered, take the sent sequence in the places they hold, the other boards
+// keeping theirs.
 
 export interface OrderMerge {
   /** The boards the design will hold in their wanted order. */
@@ -78,7 +79,8 @@ export function mergeBoardOrder(base: string[], sent: string[] | null, live: str
       const before = A.slice(0, A.indexOf(id)).reverse().find((p) => desired.includes(p));
       desired.splice(before === undefined ? 0 : desired.indexOf(before) + 1, 0, id);
     }
-    // the pairs a side put in a new relative order that come out otherwise (the live side's counted only unforced)
+    // the pairs a side put in a new relative order that come out otherwise; forced, every pair that comes out against
+    // the sent order but one only the live side re-ordered (one all three orders agree on, too)
     const at = (seq: string[]) => new Map(seq.map((id, i) => [id, i]));
     const [pb, pa, pl] = [at(b), at(a), at(l)];
     const before = (p: Map<string, number>, x: string, y: string) => p.get(x)! < p.get(y)!;
@@ -89,7 +91,8 @@ export function mergeBoardOrder(base: string[], sent: string[] | null, live: str
       for (let i = 0; i < shared.length; i++)
         for (let j = i + 1; j < shared.length; j++) {
           const [x, y] = [shared[i]!, shared[j]!];
-          if (!kept(pa, x, y) || (!force && !kept(pl, x, y))) out.push([x, y]);
+          const liveReordered = before(pl, x, y) !== before(pb, x, y);
+          if (!kept(pa, x, y) || (force ? !liveReordered && before(pd, x, y) !== before(pa, x, y) : !kept(pl, x, y))) out.push([x, y]);
         }
       return out;
     };
@@ -100,9 +103,9 @@ export function mergeBoardOrder(base: string[], sent: string[] | null, live: str
       }
     else {
       // the agent's order wins (a moved board after its predecessor can still land before a board the owner moved): the
-      // boards of the pairs it lost take the sent sequence in the places they hold, until none is lost. A round leaves
-      // every pair among its boards in the sent order, so each one adds a board or ends (at most: every shared board in
-      // the sent order)
+      // boards of the pairs lost take the sent sequence in the places they hold, until none is lost. Counting a pair no
+      // side re-ordered keeps a board so settled from jumping one outside the set. A round leaves every pair among its
+      // boards in the sent order, so each one adds a board or ends (at most: every shared board in the sent order)
       const settled = new Set<string>();
       for (let pairs = lost(); pairs.length > 0; pairs = lost()) {
         for (const [x, y] of pairs) settled.add(x).add(y);
