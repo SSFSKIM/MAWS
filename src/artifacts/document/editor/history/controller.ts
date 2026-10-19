@@ -15,7 +15,7 @@ import { dsOverrides, type TokenOverrides } from '../../meta';
 import { tabBody } from '../../tabs';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { HistoryApi } from './api';
-import { authorOf, formatWhen, newChangesBase, versionTitle } from './model';
+import { authorOf, documentWords, formatWhen, newChangesBase, versionTitle, type SummaryWords } from './model';
 
 export type PreviewTarget = { kind: 'version'; versionId: number } | { kind: 'compare'; versionIds: [number, number] } | { kind: 'since'; versionId: number | null };
 
@@ -123,6 +123,8 @@ export class HistoryController {
   getSnapshot = (): HistorySnapshot => this.snapshot;
   /** The time the list's days are named against: the history's clock, else the wall clock. */
   now = (): number => this.api.now?.() ?? Date.now();
+  /** P4 W1-B (tracker L272): what the rail's lines name blocks and comments by, the live document's words. */
+  words = (): SummaryWords => documentWords(this.handle.doc);
 
   /**
    * The editor opened: follow restores (the banner) and new versions; the first time, read the list and the last view,

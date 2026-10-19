@@ -35,6 +35,25 @@ export const HISTORY_COPY = {
   by: (name: string, when: string) => `${name} · ${when}`,
 };
 
+// P4 W1-B (sitting candidate 54): deck.json's own keys as the preview's banner names them, in this order; the keys
+// that record the file's format (`v`, `createdOnFiles`, `lists`) as one, last; any other key by `keyLabel`.
+const DECK_KEY_LABELS = new Map([
+  ['title', 'title'],
+  ['cover', 'cover slide'],
+  ['sections', 'sections'],
+  ['faces', 'fonts'],
+  ['dsOverrides', 'theme overrides'],
+  ['designSystems', 'design systems'],
+]);
+const FORMAT_KEYS = new Set(['v', 'createdOnFiles', 'lists']);
+
+/** The deck's own changed keys as the banner lists them ("title, cover slide, sections, file format"). */
+export function deckKeysLabel(keys: readonly string[]): string {
+  const known = [...DECK_KEY_LABELS].filter(([key]) => keys.includes(key)).map(([, label]) => label);
+  const other = keys.filter((key) => !DECK_KEY_LABELS.has(key) && !FORMAT_KEYS.has(key)).map(keyLabel);
+  return [...new Set([...known, ...other, ...(keys.some((key) => FORMAT_KEYS.has(key)) ? ['file format'] : [])])].join(', ');
+}
+
 /** A deck key as the owner reads it. */
 export function keyLabel(key: string): string {
   if (key.startsWith('style:')) return key.slice('style:'.length);

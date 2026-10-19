@@ -501,7 +501,7 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
         if (typeof line === 'string') return [line];
         return Array.isArray(list) ? list.map((entry) => (entry as { line?: unknown } | null)?.line).filter((entry): entry is string => typeof entry === 'string') : [];
       });
-      return lines.length ? lines.join('\n') : `${results.length} edits`;
+      return lines.length ? lines.join('\n') : `${results.length} edit${results.length === 1 ? '' : 's'}`;
     },
   };
 }

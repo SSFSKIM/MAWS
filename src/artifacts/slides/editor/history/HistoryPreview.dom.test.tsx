@@ -16,7 +16,7 @@ import { HistoryPreview } from './HistoryPreview';
 
 afterEach(cleanup);
 
-function previewOf(setup: (doc: Doc) => void = () => {}): { preview: DeckPreview; destroy(): void } {
+function previewOf(setup: (doc: Doc) => void = () => {}, change: (replica: Doc) => void = (replica) => setStyle(replica, 's', 'box', { color: '#ff0000' })): { preview: DeckPreview; destroy(): void } {
   const host = newDoc();
   const l = loadSlide('<section id="s"><p id="box" style="position:absolute; left:100px; top:100px; width:200px; height:100px; font-size:32px">Box</p></section>');
   if (!l.ok) throw new Error('fixture');
@@ -33,7 +33,7 @@ function previewOf(setup: (doc: Doc) => void = () => {}): { preview: DeckPreview
     applyV2(host, stateV2(replica));
     maps.push(attributionMap(contentIdsOf(u), { insertActor: 'human', deleteActor: 'human', at: 60_000 }));
   });
-  setStyle(replica, 's', 'box', { color: '#ff0000' });
+  change(replica);
   off();
   const diff = openDeckDiff({ prevState: before, nextState: stateV2(host), attributions: maps[0]! });
   const changes = deckChanges(diff);
@@ -121,3 +121,19 @@ describe('the preview’s font-token overrides (fix wave 3)', () => {
   });
 });
 
+// P4 W1-B (the tracker's "P4 version history lines"; sitting candidate 54): the banner over a version whose deck
+// settings changed named deck.json's raw keys ("Deck settings changed: cover, createdOnFiles, sections, title, v").
+describe('the deck’s own changes', () => {
+  it('are named as the owner reads them, the file-format keys as one', () => {
+    const { preview, destroy } = previewOf(undefined, (replica) =>
+      transact(replica, () => writeDeckKeys(replica, { v: 5, createdOnFiles: { v: 1, at: '2026-10-19T09:00:00Z' }, title: 'Q4 review', cover: 's', sections: { intro: { description: 'Intro', start: 's' } }, order: ['s'] })),
+    );
+    try {
+      const { container } = render(<HistoryPreview controller={controller} preview={preview} liveSystem={null} assets={{ shown: () => null, earlier: () => null }} faces={{ shown: new Map(), earlier: new Map() }} zoom={1} thumbnailWidth={240} />);
+      expect(preview.changes.deck?.keys.map((k) => k.key)).toEqual(['cover', 'createdOnFiles', 'sections', 'title', 'v']);
+      expect(container.querySelector('.deck-history-deck')?.textContent).toBe('Deck settings changed: title, cover slide, sections, file format');
+    } finally {
+      destroy();
+    }
+  });
+});

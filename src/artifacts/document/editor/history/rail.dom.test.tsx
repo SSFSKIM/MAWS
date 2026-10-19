@@ -12,6 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { applyEdit } from '../../patch-writer';
 import { schemaFor } from '../../schema';
 import { addTab, createDocument, deleteTab, renameTab, tabBody } from '../../tabs';
+import { addThread } from '../../threads';
 import { isBindingTransaction, newDoc, stateV2 } from '../../../yjs';
 import { ynodeToPmnode } from '../../../yjs/prosemirror';
 import { DesignSystemHostContext, DesignSystemScope } from '../../../design-system/apply';
@@ -167,6 +168,47 @@ describe('the list', () => {
     const saved = (await h.versions()).find((v) => v.kind === 'named');
     expect(saved).toMatchObject({ label: 'Draft to legal', note: 'Tightened the second paragraph', actor: HUMAN });
     expect(within(row('Draft to legal')).getByText('Tightened the second paragraph')).toBeTruthy();
+  });
+});
+
+// P4 W1-B (the tracker's "P4 version history lines"; §4.7's one-line summary): a turn's stored summary is the tools' own
+// lines, which name blocks as ^id and comments as c:id; the row names them by the live document's words instead, from
+// any of its tabs, and says "a block" for one the document no longer holds. The stored summary is left as it is.
+describe('a row’s line', () => {
+  const cell = (type: 'tableHeader' | 'tableCell', id: string, text: string) => ({ type, attrs: { id, colspan: 1, rowspan: 1, colwidth: null }, content: [{ type: 'paragraph', attrs: { id: `${id}p` }, content: [{ type: 'text', text }] }] });
+  const table = {
+    type: 'table',
+    attrs: { id: 'tb1' },
+    content: [
+      { type: 'tableRow', attrs: { id: 'tr0' }, content: [cell('tableHeader', 'th1', 'Region'), cell('tableHeader', 'th2', 'Q1')] },
+      { type: 'tableRow', attrs: { id: 'tr1' }, content: [cell('tableCell', 'td1', 'North'), cell('tableCell', 'td2', '4.2')] },
+    ],
+  };
+
+  it('names the blocks and the comment a turn touched by their words, not their ids', async () => {
+    const clock = { value: new Date(2026, 9, 15, 12).getTime() };
+    await setup(
+      ({ host: h, history: hist }) => {
+        h.write((doc) => {
+          addTab(doc, { title: 'Figures', id: 't2', body: schemaFor().nodeFromJSON({ type: 'doc', content: [table] }) });
+          addThread(doc, { threadId: 'c1', tabId: TAB, blockId: 'p1', quote: 'The first paragraph.', anchor: { kind: 'block' }, by: HUMAN, at: 1, body: 'Shorter?' });
+        });
+        for (const summary of ['replaced 1 occurrence(s) in ^p2', 'set cell (1, 0) of ^tb1', 'replied on c:c1', 'replaced 2 occurrence(s) in ^gone']) {
+          clock.value += 60_000;
+          hist.version('turn', AGENT, { summary });
+        }
+      },
+      { now: () => clock.value },
+    );
+    await openHistory();
+    const rows = within(rail()).getAllByRole('button', { name: /^Version / });
+    expect(rows.map((button) => button.querySelector('.doc-version-summary')?.textContent)).toEqual([
+      'Edited a block in 2 places',
+      'Replied to the comment on “The first paragraph.”',
+      'Edited row 2, column 1 of the table “Region, Q1”',
+      'Edited “The second paragraph.”',
+    ]);
+    expect(rows[0].getAttribute('aria-label')).toMatch(/ by Fix the build: Edited a block in 2 places$/);
   });
 });
 

@@ -682,6 +682,7 @@ describe('restore (revertScope, afterRestore)', () => {
     const adapter = adapterOf();
     expect(adapter.summarizeTurn!([{ results: [{ line: 'replaced ^p1' }, { line: 'deleted ^p2' }] }, { results: [{ line: 'moved ^p3 after ^c1' }] }])).toBe('replaced ^p1\ndeleted ^p2\nmoved ^p3 after ^c1');
     expect(adapter.summarizeTurn!([{ ok: true }, {}])).toBe('2 edits');
+    expect(adapter.summarizeTurn!([{ status: 'dataset', artifactId: 'a1', id: 'sales', revision: 3 }])).toBe('1 edit'); // a dashboard's one dataset call (sitting candidate 69: "1 edits")
   });
 
   it('takes a reply’s or a resolve’s own line beside the batches’ lines, in call order', () => {
