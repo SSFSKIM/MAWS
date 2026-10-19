@@ -26,7 +26,8 @@ import { adoptTerminals, terminalTool } from './tools/terminal';
 import { ComposerAppKeys, connectComposer, connectInlineEdit, WidgetDialogHost } from './composer';
 import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
-import { registerTranscriptActions } from './transcript';
+import { DEFAULT_ACTIONS, registerTranscriptActions } from './transcript';
+import { setHostActions } from './transcript/view/context'; // P3-F wave S (F14 review 2)
 // C7 end
 // C8c start
 import { connectCodeEvents } from './ipc/events';
@@ -143,6 +144,10 @@ registerSetupIntentHook(useSetupIntent);
 // so it is provided at module load, before any page renders, and fixed for the page's life (C7's rule, as C10's above)
 provideDocumentDesignSystem(DOCUMENT_DESIGN_SYSTEM);
 // P3-D end
+// P3-F wave S (F14 review 2): the actions a Markdown surface outside any Transcript reads (the Side tool's answer, the ask
+// sheet's previews, the Code tool's preview, a plugin surface) open an artifact link's main tab, so its chip works there;
+// at module load, before any surface renders
+setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab });
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);

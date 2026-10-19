@@ -1,13 +1,14 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { NO_ACTIONS, TranscriptProvider, useTranscriptContext, type TranscriptActions } from '../context';
+import { NO_ACTIONS, setHostActions, TranscriptProvider, useTranscriptContext, type TranscriptActions } from '../context';
+import { DEFAULT_ACTIONS } from '../default-actions';
 import { Markdown } from './Markdown';
 
 afterEach(cleanup);
 
-function renderWith(markdown: string, live = false, storeKey?: string) {
-  const actions: TranscriptActions = { ...NO_ACTIONS, openExternal: vi.fn(), openFile: vi.fn(), openArtifact: vi.fn(), openArtifactTab: vi.fn() };
+function renderWith(markdown: string, live = false, storeKey?: string, opts: { tab?: boolean } = {}) {
+  const actions: TranscriptActions = { ...NO_ACTIONS, openExternal: vi.fn(), openFile: vi.fn(), openArtifact: vi.fn(), ...(opts.tab !== false && { openArtifactTab: vi.fn() }) };
   function WithActions() {
     const context = useTranscriptContext();
     return (
@@ -86,6 +87,27 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
       fireEvent.click(screen.getByRole('button', { name: 'page' }));
       fireEvent.click(screen.getByRole('button', { name: 'v2' }));
       expect(vi.mocked(actions.openArtifact).mock.calls).toEqual([[SESSION, ARTIFACT], [SESSION, ARTIFACT]]);
+    });
+
+    // P3-F wave S (F14 review 2): where nothing can open it (the desk's actions, a mount with no main tab to give), the
+    // link is its text, as before the scheme was kept
+    it('with no openArtifactTab action is its text, never a chip that does nothing', () => {
+      const { container, actions } = renderWith(`See [the plan](maws-artifact:${ARTIFACT}).`, live, SESSION, { tab: false });
+      expect(container.querySelector('button, a')).toBeNull();
+      expect(actions.openArtifact).not.toHaveBeenCalled();
+      expect(container.textContent).toContain('See the plan.');
+    });
+
+    it('outside any Transcript, opens the main tab through the host’s actions (the Side tool, the ask sheet, a preview)', () => {
+      const openArtifactTab = vi.fn();
+      setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab });
+      try {
+        render(<Markdown markdown={`[the plan](maws-artifact:${ARTIFACT})`} live={live} />);
+        fireEvent.click(screen.getByRole('button', { name: 'the plan' }));
+        expect(openArtifactTab).toHaveBeenCalledWith(ARTIFACT);
+      } finally {
+        setHostActions(DEFAULT_ACTIONS);
+      }
     });
 
     it('that names no artifact id (a handle, a path) is its text', () => {

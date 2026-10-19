@@ -1,5 +1,7 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { setHostActions } from '../context';
+import { DEFAULT_ACTIONS } from '../default-actions';
 import { Markdown } from './Markdown';
 import { transcriptUrlTransform } from './sanitize';
 
@@ -75,10 +77,15 @@ describe.each([false, true])('markdown sanitisation (live: %s)', (live) => {
   // P3-F wave S (F14, the owner's obs 2): an artifact link survives every gate as a chip that only calls an action; no
   // element carries the href, so nothing loads or navigates by it
   it('keeps a maws-artifact link as an artifact chip, never a navigable link', () => {
-    const root = render(<Markdown markdown={`Open [the plan](maws-artifact:${ARTIFACT}) now.`} live={live} />).container;
-    expect([...root.querySelectorAll('[data-chip="artifact"]')].map((chip) => [chip.tagName, chip.getAttribute('data-artifact-id'), chip.textContent])).toEqual([['BUTTON', ARTIFACT, 'the plan']]);
-    expect(root.querySelector('a')).toBeNull();
-    expect(root.innerHTML).not.toContain('maws-artifact:');
+    setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab: () => {} }); // App.tsx's host actions: the chip is drawn where a tab can open (Link.tsx)
+    try {
+      const root = render(<Markdown markdown={`Open [the plan](maws-artifact:${ARTIFACT}) now.`} live={live} />).container;
+      expect([...root.querySelectorAll('[data-chip="artifact"]')].map((chip) => [chip.tagName, chip.getAttribute('data-artifact-id'), chip.textContent])).toEqual([['BUTTON', ARTIFACT, 'the plan']]);
+      expect(root.querySelector('a')).toBeNull();
+      expect(root.innerHTML).not.toContain('maws-artifact:');
+    } finally {
+      setHostActions(DEFAULT_ACTIONS);
+    }
   });
 
   it('loads no image by URL: a non-data image becomes an image chip, a data image stays', () => {

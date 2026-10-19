@@ -5,7 +5,8 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { registerTranscriptActions } from '../transcript';
+import { DEFAULT_ACTIONS, registerTranscriptActions } from '../transcript';
+import { setHostActions } from '../transcript/view/context';
 import type { Site } from './actions';
 import { fenced, SurfaceTree } from './SurfaceTree';
 import { parseTree, type SurfaceNode } from './tree';
@@ -110,6 +111,10 @@ describe('SurfaceTree (R2)', () => {
     const openArtifact = vi.fn();
     const openArtifactTab = vi.fn();
     offs.push(registerTranscriptActions({ openArtifact, openArtifactTab }));
+    // App.tsx's host actions, which a surface's Markdown reads outside any Transcript: the chip is drawn where they can
+    // open a main tab (F14 review 2)
+    setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab });
+    offs.push(() => setHostActions(DEFAULT_ACTIONS));
     const fake = setup({ type: 'Markdown', props: { text: `[the plan](maws-artifact:${ARTIFACT})`, key: 'md' }, press: { plugin: 'mods-probe', handle: 12 } });
     const chip = screen.getByRole('button', { name: 'the plan' });
     fireEvent.click(chip);

@@ -39,12 +39,15 @@ export function TranscriptLink({ href, children }: ComponentProps<'a'> & ExtraPr
   if (!href) return <span>{children}</span>;
   if (/^maws-artifact:/i.test(href)) {
     const artifactId = artifactOf(href);
-    if (artifactId === null) return <span>{children}</span>;
-    // a click opens it in the row session's panel, a ⌘-click in its main tab; with no session, the main tab is the one
-    // place it can show. Under a plugin's surface (engine-surface/SurfaceTree.tsx) the click is taken before it.
+    // a mount that cannot open a main tab (the desk) is taken to open no artifact at all: the link is its text
+    const openTab = actions.openArtifactTab;
+    if (artifactId === null || !openTab) return <span>{children}</span>;
+    // a click opens it in the row session's panel, a ⌘-click in its main tab; with no session (a Markdown surface outside
+    // any Transcript, whose host actions App.tsx gives the tab), the main tab is the one place it can show. Under a
+    // plugin's surface (engine-surface/SurfaceTree.tsx) the click is taken before it.
     const open = (event: MouseEvent) => {
-      if (session !== null && !(event.metaKey && actions.openArtifactTab)) actions.openArtifact(session, artifactId);
-      else actions.openArtifactTab?.(artifactId);
+      if (session !== null && !event.metaKey) actions.openArtifact(session, artifactId);
+      else openTab(artifactId);
     };
     return (
       <button type="button" className="transcript-chip" data-chip="artifact" data-artifact-id={artifactId} title={ARTIFACT_CHIP_TITLE} onClick={open}>
