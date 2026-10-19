@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -172,5 +172,32 @@ describe('the SessionStart hook bound a launch runs with', () => {
     expect(await bound({ env: { HOME: home, CLAUDE_CONFIG_DIR: join(base, 'scratch') } })).toBe(2_700_000);
     write(join(home, '.claude', 'remote-settings.json'), '{ not json');
     expect(await bound()).toBe(SESSION_START_HOOK_MS);
+  });
+
+  it('reads the user file as cowork_settings.json, and the plugins under cowork_plugins, when CLAUDE_CODE_USE_COWORK_PLUGINS is on in the engine\'s words', async () => {
+    const config = join(home, '.claude');
+    write(join(config, 'settings.json'), { enabledPlugins: { 'p@market': true }, ...sessionStart(700) });
+    write(join(config, 'cowork_settings.json'), sessionStart(2800));
+    write(join(config, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { 'p@market': [{ scope: 'user', installPath: join(base, 'p') }] } });
+    write(join(base, 'p', 'hooks', 'hooks.json'), sessionStart(2900));
+    for (const on of ['1', 'TRUE ', 'yes', 'on']) expect(await bound({ env: { HOME: home, CLAUDE_CODE_USE_COWORK_PLUGINS: on } }), on).toBe(2_800_000);
+    for (const off of ['0', 'false', 'off', '']) expect(await bound({ env: { HOME: home, CLAUDE_CODE_USE_COWORK_PLUGINS: off } }), off).toBe(2_900_000);
+  });
+
+  it('reads past hostile entries: a fragment that is a directory or a link, a malformed manifest, a v1 install record', async () => {
+    const fragments = join(managed, 'managed-settings.d');
+    mkdirSync(join(fragments, 'dir.json'), { recursive: true }); // a directory named .json: nothing to read
+    write(join(base, 'elsewhere', 'linked.json'), sessionStart(3000));
+    symlinkSync(join(base, 'elsewhere', 'linked.json'), join(fragments, 'link.json')); // a link the engine admits
+    symlinkSync(join(base, 'elsewhere'), join(fragments, 'linkdir.json')); // a link to a directory: nothing to read
+    expect(await bound()).toBe(3_000_000);
+    rmSync(join(fragments, 'link.json'));
+    expect(await bound()).toBe(SESSION_START_HOOK_MS);
+    const root = join(base, 'v1');
+    write(join(home, '.claude', 'settings.json'), { enabledPlugins: { 'v1@market': true } });
+    write(join(home, '.claude', 'plugins', 'installed_plugins.json'), { version: 1, plugins: { 'v1@market': { installPath: root, version: '1.0.0' } } }); // one record, not a list
+    write(join(root, '.claude-plugin', 'plugin.json'), '{ not json'); // the manifest unreadable, its hooks.json still read
+    write(join(root, 'hooks', 'hooks.json'), sessionStart(3100));
+    expect(await bound()).toBe(3_100_000);
   });
 });

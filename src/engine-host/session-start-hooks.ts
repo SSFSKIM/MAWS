@@ -6,7 +6,8 @@
 // sources is the bound. The sources, as the pinned engine resolves them for the plan's environment and working
 // directory (read from the 2.1.302 bundle, unchanged since 2.1.283; MAWS launches with `--setting-sources
 // user,project,local` and the `--settings` JSON):
-// - user: `settings.json` under CLAUDE_CONFIG_DIR, else `~/.claude`;
+// - user: `settings.json` under CLAUDE_CONFIG_DIR, else `~/.claude` (`cowork_settings.json` when
+//   CLAUDE_CODE_USE_COWORK_PLUGINS is on, which also moves the plugins to `cowork_plugins`);
 // - project: `<cwd>/.claude/settings.json` (the working directory's only: the engine reads no project file at a git root);
 // - local: `<cwd>/.claude/settings.local.json`, and the one at the canonical git root above cwd (a linked worktree's
 //   main checkout), where the engine keeps the local file when that root differs from cwd;
@@ -61,19 +62,20 @@ export interface HookSources {
 
 export async function sessionStartHookMs(plan: Pick<LaunchPlan, 'env' | 'cwd' | 'flagSettings'>, opts: HookSources = {}): Promise<number> {
   const configDir = plan.env.CLAUDE_CONFIG_DIR || (plan.env.HOME ? join(plan.env.HOME, '.claude') : null);
+  const cowork = envOn(plan.env.CLAUDE_CODE_USE_COWORK_PLUGINS);
   const root = await canonicalGitRoot(plan.cwd);
   const localFiles = [...new Set([join(plan.cwd, '.claude', 'settings.local.json'), ...(root === null ? [] : [join(root, '.claude', 'settings.local.json')])])];
   const preferences = await managedPreferences(opts.managedPreferencesDir === undefined ? MANAGED_PREFERENCES_DIR : opts.managedPreferencesDir, opts.convertPlist ?? plutilJson);
   // in the engine's precedence, user < project < local < flag < managed, which decides `enabledPlugins` per plugin (the
   // managed sources last, the one the engine prefers last of all: server-managed, then the MDM plists, then the file)
   const settings = [
-    ...(await Promise.all([...(configDir === null ? [] : [join(configDir, 'settings.json')]), join(plan.cwd, '.claude', 'settings.json'), ...localFiles].map(readJson))),
+    ...(await Promise.all([...(configDir === null ? [] : [join(configDir, cowork ? 'cowork_settings.json' : 'settings.json')]), join(plan.cwd, '.claude', 'settings.json'), ...localFiles].map(readJson))),
     plan.flagSettings,
     ...(await managedSettings(opts.managedDir ?? managedSettingsDir())),
     ...preferences.reverse(),
     ...(configDir === null ? [] : [await readJson(join(configDir, 'remote-settings.json'))]),
   ];
-  const plugins = configDir === null ? [] : await pluginHooks(plan.env.CLAUDE_CODE_PLUGIN_CACHE_DIR || join(configDir, plan.env.CLAUDE_CODE_USE_COWORK_PLUGINS ? 'cowork_plugins' : 'plugins'), settings);
+  const plugins = configDir === null ? [] : await pluginHooks(plan.env.CLAUDE_CODE_PLUGIN_CACHE_DIR || join(configDir, cowork ? 'cowork_plugins' : 'plugins'), settings);
   let longest = SESSION_START_HOOK_MS;
   for (const seconds of [...settings, ...plugins].flatMap(sessionStartTimeouts)) longest = Math.max(longest, seconds * 1000);
   return Math.min(longest, MAX_HOLD_MS);
@@ -174,6 +176,9 @@ function sessionStartTimeouts(settings: unknown): number[] {
     });
   });
 }
+
+// An environment switch the engine reads as on: 1, true, yes or on, in any case.
+const envOn = (value: string | undefined): boolean => ['1', 'true', 'yes', 'on'].includes((value ?? '').trim().toLowerCase());
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
