@@ -477,6 +477,28 @@ test.describe('the document editor', () => {
     await dialog.getByRole('button', { name: 'Close editors' }).click();
     await expect(dialog).toHaveCount(0);
   });
+
+  // P3-F (sitting candidate 16): Return in a new date chip's field commits its date and keeps the chip, the line whole,
+  // and the typing after it lands right after the chip
+  test('Return in a new date chip’s field keeps the chip, and the next typing lands after it', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+    await page.keyboard.type('Due ');
+    await bar.getByRole('combobox', { name: 'Block style' }).focus(); // the keyboard off the page, as the owner's was
+    await bar.getByRole('button', { name: 'Insert', exact: true }).click();
+    await bar.getByRole('menuitem', { name: 'Date', exact: true }).click();
+    await expect(page.locator(':focus')).toHaveAttribute('aria-label', 'Date');
+    const lines = await content(page, 'a').locator('p').count();
+    await page.keyboard.press('Enter');
+    await page.keyboard.type(' later');
+    await expect(content(page, 'a').locator('p')).toHaveCount(lines);
+    const line = content(page, 'a').locator('p').last();
+    await expect(line.locator('[data-node="date"]')).toHaveCount(1);
+    await expect(line).toContainText('Due');
+    await expect(line).toContainText('later');
+    expect(await json(page, 'a')).toMatch(/"type":"date","attrs":\{"iso":"\d{4}-\d{2}-\d{2}"\}/);
+  });
 });
 
 // One step of S4's 2-set model, as S7b's ime scenario sends it (spikes/p3-store/s7/electron/main.ts, `imeStep`).

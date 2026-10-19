@@ -55,24 +55,32 @@ export const atomView =
       if (control instanceof HTMLInputElement) control.type = field.kind === 'date' ? 'date' : 'text';
       control.setAttribute('aria-label', field.label);
       control.spellcheck = false;
-      control.value = String(node.attrs[field.attr] ?? '');
-      control.addEventListener('input', () => setAttr(editor, getPos, field.attr, control.value));
+      const shown = () => String(node.attrs[field.attr] ?? '');
+      control.value = shown();
+      control.addEventListener('input', () => {
+        // P3-F (sitting candidate 16): a date the field cannot read (a segment cleared) writes nothing, so the chip
+        // keeps its last date rather than emptying
+        if (field.kind === 'date' && !control.value) return;
+        setAttr(editor, getPos, field.attr, control.value);
+      });
       (control as HTMLElement).addEventListener('keydown', (event: KeyboardEvent) => {
         // Escape, or Enter in a one-line field, hands the caret back to the document after the node: right after an
         // inline atom, in the nearest text after a block one (before it, or the atom itself, when nothing follows)
         const done = event.key === 'Escape' || (event.key === 'Enter' && !(control instanceof HTMLTextAreaElement && !event.metaKey && !event.ctrlKey));
         if (!done) return;
+        // P3-F: the field's key, kept from the page and from any surface around it
         event.preventDefault();
+        event.stopPropagation();
+        if (field.kind === 'date') {
+          // Enter commits the date the field shows; Escape, or a field that reads no date, shows the chip's again
+          if (event.key === 'Enter' && control.value && control.value !== shown()) setAttr(editor, getPos, field.attr, control.value);
+          else control.value = shown();
+        }
         const pos = getPos();
         if (typeof pos !== 'number') return;
-        editor
-          .chain()
-          .focus()
-          .command(({ tr }) => {
-            tr.setSelection(Selection.near(tr.doc.resolve(pos + node.nodeSize)));
-            return true;
-          })
-          .run();
+        // the page takes the keyboard now (P3-F), not on the frame after, which the hidden field would leave to nothing
+        editor.view.focus();
+        editor.view.dispatch(editor.state.tr.setSelection(Selection.near(editor.state.doc.resolve(pos + node.nodeSize))).scrollIntoView());
       });
       input = control;
       panel.append(control);

@@ -300,6 +300,57 @@ describe('leaving an atom’s field', () => {
   });
 });
 
+// P3-F (sitting candidate 16): a date chip's field keeps the chip. A date the field cannot read (a segment cleared)
+// writes nothing, so the chip keeps its last date; Return commits what the field shows and Escape shows the chip's date
+// again, each handing the caret back right after the chip, the key kept from the page (no split line) and from any
+// surface around it
+describe('a date chip’s field', () => {
+  const dated = () => doc({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Due ' }, { type: 'date', attrs: { iso: '2026-10-13' } }, { type: 'text', text: ' now' }] });
+  const press = (field: HTMLElement, key: string) => {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    field.dispatchEvent(event);
+    return event;
+  };
+  const open = (e: Editor) => {
+    select(e, 'date');
+    const field = view(e, 'date').querySelector<HTMLInputElement>('[aria-label="Date"]')!;
+    field.focus();
+    return field;
+  };
+
+  it('keeps its last date through an entry it cannot read, and Escape shows that date again', () => {
+    const e = make(dated());
+    const around = vi.fn();
+    document.body.addEventListener('keydown', around);
+    try {
+      const field = open(e);
+      typeInto(field, '2026-11-02');
+      typeInto(field, ''); // a segment cleared: the field reads no date
+      expect(attrsOf(e, 'date').iso).toBe('2026-11-02');
+      expect(view(e, 'date').querySelector('.doc-chip')!.textContent).toBe('Nov 2, 2026');
+      expect(press(field, 'Escape').defaultPrevented).toBe(true);
+      expect(field.value).toBe('2026-11-02');
+      expect(attrsOf(e, 'date').iso).toBe('2026-11-02');
+      expect(e.state.doc.childCount).toBe(1);
+      expect(e.state.selection.empty && e.state.selection.from).toBe(atPos(e, 'date') + 1);
+      expect(around).not.toHaveBeenCalled();
+    } finally {
+      document.body.removeEventListener('keydown', around);
+    }
+  });
+
+  it('commits the date the field shows on Return, the chip kept and the line whole', () => {
+    const e = make(dated());
+    const field = open(e);
+    field.value = '2026-12-24'; // shown, its input event not yet delivered
+    expect(press(field, 'Enter').defaultPrevented).toBe(true);
+    expect(attrsOf(e, 'date').iso).toBe('2026-12-24');
+    expect(e.state.doc.childCount).toBe(1);
+    expect(e.state.doc.child(0).textContent).toBe('Due  now');
+    expect(e.state.selection.empty && e.state.selection.from).toBe(atPos(e, 'date') + 1);
+  });
+});
+
 describe('code blocks', () => {
   it('are highlighted by shiki, decorations only (the stored text carries no marks)', async () => {
     const e = make(doc({ type: 'codeBlock', attrs: { id: 'c1', language: 'js' }, content: [{ type: 'text', text: 'const x = 1;' }] }));
