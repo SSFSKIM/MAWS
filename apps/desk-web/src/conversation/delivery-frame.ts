@@ -7,8 +7,8 @@
 //   `{kind: "plugin", asUser: true}`);
 // - while the main turn runs (doperpowers #233 on), the bridge appends it into the turn (`$.session.append`), read at the
 //   loop's next model request: the engine keeps a plugin's appended row as a user row, `isMeta`, origin `{kind:
-//   "plugin", name: "doperpowers"}` and no `asUser` (`isBridgeRow`), whatever the plugin asks, so the frame is the only
-//   word that it is one. The bridge's steers, interrupt rows and notes have the same shape, and none opens with a whole
+//   "plugin", name: <the bridge's plugin>}` and no `asUser` (`isBridgeRow`), whatever the plugin asks, so the frame is
+//   the only word that it is one. The bridge's steers, interrupt rows and notes have the same shape, and none opens with a whole
 //   frame line (a steer's own first line, `[sminos steer from human]`, names no event: `depth/source/bridge-rows.ts`);
 // - through sminos's inbox, the engine's messaging socket (a session with no bridge, or #233's fallback after an Esc),
 //   the engine keeps it as a peer message: a user row (idle) or a `queued_command` (busy) of origin `peer`, the frame
@@ -50,7 +50,12 @@ import { INTERRUPT_MARKER } from '../../../../src/engine-host/normalizer-support
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
 
-const BRIDGE_PLUGIN = 'doperpowers';
+/**
+ * The plugins the bridge has run in: sminos from sminos 1.0.0, doperpowers before it (doperpowers' sminos plugin design,
+ * §11). Transcripts keep either, and a project's machines may be on either, so both are read, for good.
+ */
+export const BRIDGE_PLUGINS = ['sminos', 'doperpowers'] as const;
+const isBridgePlugin = (name: unknown): boolean => (BRIDGE_PLUGINS as readonly unknown[]).includes(name);
 
 /**
  * A row the bridge appended (`$.session.append`), as the engine keeps it: a meta user row with the plugin's origin. A
@@ -59,7 +64,7 @@ const BRIDGE_PLUGIN = 'doperpowers';
  */
 export function isBridgeRow(row: JsonObject): boolean {
   const origin = object(row.origin);
-  return row.type === 'user' && row.isMeta === true && row.turnCompanion !== true && origin?.kind === 'plugin' && origin.name === BRIDGE_PLUGIN;
+  return row.type === 'user' && row.isMeta === true && row.turnCompanion !== true && origin?.kind === 'plugin' && isBridgePlugin(origin.name);
 }
 
 /**
@@ -151,7 +156,7 @@ export function supersededDeliveries(rows: readonly JsonObject[]): Set<string> {
   return superseded;
 }
 
-/** The first line of every prompt the doperpowers bridge sends of its own to wake a session (#233: `STEER_WAKE`, `DELIVERY_WAKE`). */
+/** The first line of every prompt the bridge sends of its own to wake a session (#233: `STEER_WAKE`, `DELIVERY_WAKE`). */
 export const BRIDGE_WAKE_LINE = '[sminos bridge]';
 
 /**

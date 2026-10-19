@@ -32,16 +32,20 @@ export const CUA_JS_TOOLS = ['mcp__plugin_cua_cua_repl__js', 'mcp__cua_repl__js'
 export const isCuaJsTool = (toolName: string): boolean => (CUA_JS_TOOLS as readonly string[]).includes(toolName);
 // E13 end
 
-// DC9 start (the desk's session view, 2026-10-17; desk composite §9.5): doperpowers' ask tool, which stands in for the
-// built-in AskUserQuestion in a terminal session running the doperpowers ask mod; its result is read in ask-mod.ts
-export const ASK_MOD_TOOL = 'mcp__doperpowers__AskUserQuestion';
+// DC9 start (the desk's session view, 2026-10-17; desk composite §9.5): the ask mod's tool, which stands in for the
+// built-in AskUserQuestion in a terminal session running the ask mod; its result is read in ask-mod.ts. The engine names
+// it by the plugin that registers it: doperpowers' until the ask moved to the sminos plugin (doperpowers' sminos plugin
+// design, §11), sminos's after. Transcripts and machines not yet rolled keep the old name, so both are read, for good.
+export const ASK_MOD_TOOLS = ['mcp__sminos__AskUserQuestion', 'mcp__doperpowers__AskUserQuestion'] as const;
+export const isAskModTool = (toolName: string): boolean => (ASK_MOD_TOOLS as readonly string[]).includes(toolName);
 // DC9 end
 
 const ROW_KIND_TOOLS: Record<string, Presentation> = {
   Agent: 'subagent', Task: 'subagent', Workflow: 'subagent',
   SendMessage: 'agent_message',
   AskUserQuestion: 'question',
-  [ASK_MOD_TOOL]: 'question', // DC9: the ask mod's question, a question as the built-in's is
+  // DC9: the ask mod's question, a question as the built-in's is, under either name
+  ...Object.fromEntries(ASK_MOD_TOOLS.map((name) => [name, 'question' as const])),
   ExitPlanMode: 'plan',
   // E1 start: an ask is a capsule, a delivered file a delivery row
   [MAWS_TOOL_USE.ask]: 'ask',

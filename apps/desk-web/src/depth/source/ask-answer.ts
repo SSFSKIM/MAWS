@@ -9,7 +9,7 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { JsonObject } from 'desk-hub/protocol';
 import { eventBase, type BackfillContext } from '../../../../../src/engine-host/fs/backfill';
-import { ASK_MOD_TOOL } from '../../../../../src/renderer/src/transcript/model/classify';
+import { isAskModTool } from '../../../../../src/renderer/src/transcript/model/classify';
 import { answeredWords, askAnswers, isAnswerPrompt } from '../../conversation/ask-answer';
 
 /** What the line names, before the answers. */
@@ -27,7 +27,7 @@ function noteCalls(row: JsonObject, calls: Map<string, Questions>): void {
   if (!Array.isArray(content)) return;
   for (const block of content) {
     const use = object(block);
-    if (use?.type !== 'tool_use' || use.name !== ASK_MOD_TOOL || typeof use.id !== 'string') continue;
+    if (use?.type !== 'tool_use' || typeof use.name !== 'string' || !isAskModTool(use.name) || typeof use.id !== 'string') continue;
     const questions = object(use.input)?.questions;
     calls.set(
       use.id,

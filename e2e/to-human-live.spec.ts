@@ -750,7 +750,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const asks = mcpCalls(journal(s2)).filter((call) => call.name === 'ask');
       const tools = await initTools(s2, spawn.launchId);
       const initAskTools = asksOf(tools);
-      const nativeAsks = tools.filter((tool) => tool === 'AskUserQuestion' || tool === 'mcp__doperpowers__AskUserQuestion');
+      const nativeAsks = tools.filter((tool) => ['AskUserQuestion', 'mcp__sminos__AskUserQuestion', 'mcp__doperpowers__AskUserQuestion'].includes(tool)); // the ask mod's tool by either plugin's name
       const band = pane(page).locator('[data-plugin-band]');
       const bandText = (await band.count()) > 0 ? (await band.first().innerText()).replaceAll('\n', ' ') : '(no band)';
       const reply = lastReply(s2);

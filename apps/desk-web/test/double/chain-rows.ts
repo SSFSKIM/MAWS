@@ -15,7 +15,12 @@ export class Chain {
   leaf: JsonObject | null = null;
   readonly rows: JsonObject[] = [];
 
-  constructor(private readonly tag = 'c4a10000') {}
+  /** `plugin`: the plugin the bridge and the ask mod run under, which names their rows — doperpowers on a machine not yet
+   * rolled, sminos from sminos 1.0.0 (the tool `mcp__<plugin>__AskUserQuestion`, the framing `The <plugin> plugin …`). */
+  constructor(
+    private readonly tag = 'c4a10000',
+    readonly plugin: 'doperpowers' | 'sminos' = 'doperpowers',
+  ) {}
 
   /** A row of `type` under `parent` (the leaf when omitted; null for a root), written next. */
   row(type: string, fields: JsonObject, parent: JsonObject | null | undefined = this.leaf): JsonObject {
@@ -81,7 +86,7 @@ export class Chain {
 
   /** A row the bridge appended (`$.session.append`), as the engine keeps it: meta, the plugin's origin, one text block. */
   appended(text: string, parent?: JsonObject | null): JsonObject {
-    return this.row('user', { isMeta: true, origin: { kind: 'plugin', name: 'doperpowers' }, promptId: `a${this.n}`, message: { role: 'user', content: [{ type: 'text', text }] } }, parent);
+    return this.row('user', { isMeta: true, origin: { kind: 'plugin', name: this.plugin }, promptId: `a${this.n}`, message: { role: 'user', content: [{ type: 'text', text }] } }, parent);
   }
 
   /** The owner's message the bridge delivered as an appended row: its frame line, then the words. */
@@ -94,17 +99,17 @@ export class Chain {
     return this.appended(`[sminos steer from human]\n${words}`, parent);
   }
 
-  /** The ask mod's async question (`mcp__doperpowers__AskUserQuestion`, `async: true`) and the result it returns at once. */
-  asyncAsk(id: string, questions: Array<{ question: string; header: string; options: Array<{ label: string }> }>): JsonObject {
-    const call = this.assistant([{ type: 'tool_use', id, name: 'mcp__doperpowers__AskUserQuestion', input: { questions: questions.map((q) => ({ ...q, multiSelect: false })), async: true } }]);
+  /** The ask mod's async question (`mcp__<plugin>__AskUserQuestion`, `async: true`) and the result it returns at once. */
+  asyncAsk(id: string, questions: Array<{ question: string; header: string; options: Array<{ label: string }> }>, plugin = this.plugin): JsonObject {
+    const call = this.assistant([{ type: 'tool_use', id, name: `mcp__${plugin}__AskUserQuestion`, input: { questions: questions.map((q) => ({ ...q, multiSelect: false })), async: true } }]);
     const text = 'Your questions are waiting for the human; this call does not wait for them. Their answer will reach you in a later message that quotes each question. Go on with work that does not depend on it.';
     return this.row('user', { message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] }, sourceToolAssistantUUID: call.uuid, toolUseResult: text }, call);
   }
 
   /** The answer's prompt the ask mod submits while the session is idle (`$.prompt.submit({text})`), as 2.1.302 keeps it. */
   answerPrompt(text: string, parent?: JsonObject | null): JsonObject {
-    const framed = `The doperpowers plugin sent a message:\n${text}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.`;
-    return this.row('user', { origin: { kind: 'plugin', name: 'doperpowers' }, promptId: `q${this.n}`, message: { role: 'user', content: framed } }, parent);
+    const framed = `The ${this.plugin} plugin sent a message:\n${text}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.`;
+    return this.row('user', { origin: { kind: 'plugin', name: this.plugin }, promptId: `q${this.n}`, message: { role: 'user', content: framed } }, parent);
   }
 
   /** The answer as context on a tool's result (`tool.call`) or on the human's next prompt (`prompt.submit`). */
@@ -115,7 +120,7 @@ export class Chain {
 
   /** The bridge's mirror of an append (`$.ui.log`), a notice under the plugin's name. */
   mirror(kind: 'delivered' | 'steer', text: string, parent?: JsonObject | null): JsonObject {
-    return this.row('system', { subtype: 'informational', content: `doperpowers: ${kind}: ${text.replaceAll('\n', ' ')}`, isMeta: false, level: 'notice' }, parent);
+    return this.row('system', { subtype: 'informational', content: `${this.plugin}: ${kind}: ${text.replaceAll('\n', ' ')}`, isMeta: false, level: 'notice' }, parent);
   }
 
   /** The bridge's wake through the inbox (doperpowers #238: after an Esc), as the engine keeps the peer message. */
@@ -134,7 +139,7 @@ export class Chain {
 
   /** The bridge's wake as the user (`$.prompt.submit({asUser: true})`): an idle session's. */
   userWake(body: string, parent?: JsonObject | null): JsonObject {
-    return this.row('user', { origin: { kind: 'plugin', name: 'doperpowers', asUser: true }, promptId: `w${this.n}`, message: { role: 'user', content: body } }, parent);
+    return this.row('user', { origin: { kind: 'plugin', name: this.plugin, asUser: true }, promptId: `w${this.n}`, message: { role: 'user', content: body } }, parent);
   }
 }
 

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 export { FakeMachine, type FakeMachineOptions, type RpcRecord, type RpcScript } from './machine';
 export { emptyMemory, type LedgerEntry, type Memory } from './memory';
 export { loadRecording, type LoadOptions, type Recording, type Row, type Step } from './recording';
-export { ENGINE_TMP, SessionDepth, SNAPSHOT_ROW_BUDGET, type Producer, type SnapshotOptions } from './session';
+export { ENGINE_TMP, SessionDepth, SNAPSHOT_ROW_BUDGET, type BridgePlugin, type Producer, type SnapshotOptions } from './session';
 export { derive, deriveFromRows, LoopIndex, TABLE, type Body, type BridgeAgent } from './jobs';
 export { answerOutput } from './output';
 export type { Credentials } from './link';

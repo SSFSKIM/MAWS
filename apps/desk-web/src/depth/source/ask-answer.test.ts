@@ -124,3 +124,52 @@ describe("the ask mod's answer", () => {
     ]);
   });
 });
+
+// The sminos plugin (doperpowers' sminos plugin design, §3 and §11): the ask moves out of doperpowers into a plugin of its
+// own, so a rolled machine's ask is `mcp__sminos__AskUserQuestion` and its idle answer `The sminos plugin sent a
+// message:` under origin `sminos`; a machine not yet rolled writes the old names, and a session resumed across the roll
+// holds a call under one name and its answer under the other. Every one is read, for good.
+describe("the ask mod's answer under either plugin's name", () => {
+  it.each(['doperpowers', 'sminos'] as const)('%s: the idle answer draws its line by the call’s headers, in a turn the session continued', async (plugin) => {
+    const c = new Chain('c4a10000', plugin);
+    c.prompt('Pick my colors, then write the palette.');
+    c.asyncAsk('toolu_01RZQ8nn9jVyPaqznEmsoXMr', QUESTIONS);
+    c.answer('Asked; waiting on you.');
+    c.end();
+    const idle = c.answerPrompt(delivered('toolu_01RZQ8nn9jVyPaqznEmsoXMr', CHOSEN));
+    c.answer('<message>The palette is blue and summer-bright.</message>');
+    c.end();
+    expect(isAnswerPrompt(idle)).toBe(true);
+    expect(askAnswers(idle)).toEqual([{ call: 'toolu_01RZQ8nn9jVyPaqznEmsoXMr', text: CHOSEN }]);
+    const { rows } = await drawn(c.rows);
+    expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
+    expect(lines(rows)).toEqual([`${ANSWERED}: Color → Blue · Season → Summer`]);
+    expect(dividers(rows)).toEqual(['engine']);
+    expect([...bubbles(rows), ...lines(rows)].some((text) => HARNESS.test(text))).toBe(false);
+  });
+
+  it.each([
+    ['doperpowers', 'sminos'],
+    ['sminos', 'doperpowers'],
+  ] as const)('a call under %s answered under %s (a session resumed across the roll): the line still reads the call’s headers', async (asked, answered) => {
+    const c = new Chain('c4a10000', answered);
+    c.prompt('Pick my colors.');
+    c.asyncAsk('toolu_roll', QUESTIONS, asked);
+    c.answer('Asked.');
+    c.end();
+    c.answerPrompt(delivered('toolu_roll', CHOSEN));
+    c.answer('Blue.');
+    c.end();
+    const { rows } = await drawn(c.rows);
+    expect(lines(rows)).toEqual([`${ANSWERED}: Color → Blue · Season → Summer`]);
+    expect(bubbles(rows)).toEqual(['Pick my colors.']);
+  });
+
+  it('never another plugin’s prompt, even framed as the ask’s', () => {
+    const c = new Chain();
+    const framed = `The another plugin sent a message:\n${delivered('toolu_x', CHOSEN)}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.`;
+    const row = c.row('user', { origin: { kind: 'plugin', name: 'another' }, message: { role: 'user', content: framed } });
+    expect(isAnswerPrompt(row)).toBe(false);
+    expect(askAnswers(row)).toEqual([]);
+  });
+});

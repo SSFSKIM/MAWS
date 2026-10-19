@@ -1,12 +1,14 @@
-// The ask mod's answer to an async question, as the transcript holds it (doperpowers `hooks/mods/ask.tsx`; its design,
-// `docs/doperpowers/specs/2026-10-13-ask-async-design.md`). An async ask returns at once; the human's answer reaches the
-// model later as `The human responded to your async AskUserQuestion (call <tool_use_id>): <the engine's summary>` (the
-// text the blocking call would have returned), by one of three routes, each stored differently (local transcripts,
-// 2.1.296–2.1.302):
+// The ask mod's answer to an async question, as the transcript holds it (doperpowers `hooks/mods/ask.tsx`, in the
+// sminos plugin from sminos 1.0.0; its design, `docs/doperpowers/specs/2026-10-13-ask-async-design.md`). An async ask
+// returns at once; the human's answer reaches the model later as `The human responded to your async AskUserQuestion
+// (call <tool_use_id>): <the engine's summary>` (the text the blocking call would have returned), by one of three
+// routes, each stored differently (local transcripts, 2.1.296–2.1.302):
 // - the session idle: a prompt the plugin submits (`$.prompt.submit({text})`, not as the user), a user row of origin
-//   `{kind: "plugin", name: "doperpowers"}` that opens a turn, its text the engine's framing around the plugin's: `The
-//   doperpowers plugin sent a message:\n`, the answers (several joined by a blank line when more waited), then `\n\nThis
-//   is how Claude Code surfaces a prompt a plugin submits between turns — …`;
+//   `{kind: "plugin", name: "<plugin>"}` that opens a turn, its text the engine's framing around the plugin's: `The
+//   <plugin> plugin sent a message:\n`, the answers (several joined by a blank line when more waited), then `\n\nThis
+//   is how Claude Code surfaces a prompt a plugin submits between turns — …`. The plugin is doperpowers until the ask
+//   moved to the sminos plugin (doperpowers' sminos plugin design, §11), sminos after; transcripts keep either, and a
+//   session resumed across the move holds both, so both are read, for good;
 // - a turn running: context on the result of the model's next call (`hook_additional_context`, hook `tool.call`);
 // - after a stop: context on the human's next prompt (`hook_additional_context`, hook `prompt.submit`).
 // MAWS's backfill draws the first as the owner's bubble, harness text and all, and the two attachments as nothing. Each
@@ -21,9 +23,10 @@ import { QUESTION } from '../../../../src/renderer/src/transcript/model/copy';
 export type AskAnswer = { call: string; text: string };
 
 const DELIVERY = /The human responded to your async AskUserQuestion \(call ([^)\s]+)\): /g;
-const PLUGIN = 'doperpowers';
+/** The plugins the ask mod has run in: sminos from sminos 1.0.0, doperpowers before it. */
+const PLUGINS: readonly unknown[] = ['sminos', 'doperpowers'];
 /** The engine's framing of a prompt a plugin submits (2.1.302), around the plugin's own text. */
-const PLUGIN_PROMPT = /^The doperpowers plugin sent a message:\n/;
+const PLUGIN_PROMPT = /^The (?:sminos|doperpowers) plugin sent a message:\n/;
 const PLUGIN_PROMPT_END = /\n\nThis is how Claude Code surfaces a prompt a plugin submits[^\n]*$/;
 
 const object = (value: unknown): JsonObject | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as JsonObject) : null);
@@ -37,7 +40,7 @@ function answersIn(text: string): AskAnswer[] {
 /** The plugin's own text of a prompt it submitted that opens with an answer, else null. */
 function promptText(row: JsonObject): string | null {
   const origin = object(row.origin);
-  if (row.type !== 'user' || origin?.kind !== 'plugin' || origin.name !== PLUGIN || origin.asUser === true || row.isMeta === true) return null;
+  if (row.type !== 'user' || origin?.kind !== 'plugin' || !PLUGINS.includes(origin.name) || origin.asUser === true || row.isMeta === true) return null;
   const content = object(row.message)?.content;
   const text = typeof content === 'string' ? content : Array.isArray(content) && content.length === 1 && object(content[0])?.type === 'text' ? (object(content[0])!.text as string) : null;
   if (typeof text !== 'string') return null;
