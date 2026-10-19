@@ -941,7 +941,12 @@
   position: absolute;
   z-index: 3;
 }
+/* the list stacks under its header (a popover lays its children in a row, which squeezed the title to a word a line and
+   put the × under the pointer that chose Show editors at the corner; P3-F, sitting candidate 29): the title on one line,
+   the × at the header's far end */
 .doc-editors {
+  flex-direction: column;
+  align-items: stretch;
   min-width: calc(var(--space) * 56);
 }
 .doc-editors-header {
@@ -950,6 +955,9 @@
   justify-content: space-between;
   gap: var(--space);
   font-weight: 600;
+}
+.doc-editors-title {
+  white-space: nowrap;
 }
 .doc-editors-list {
   display: flex;

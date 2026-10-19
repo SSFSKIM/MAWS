@@ -74,7 +74,7 @@ export function ShowEditorsMenu({ open, onShow, onClose }: { open: Open; onShow(
   return (
     <div ref={root} className="doc-popover doc-editors" role="dialog" aria-label="Editors" style={style} data-markup-occluder>
       <header className="doc-editors-header">
-        <span>Editors of the selection</span>
+        <span className="doc-editors-title">Editors of the selection</span>
         <button type="button" className="doc-tool" aria-label="Close editors" onClick={close}>
           ×
         </button>

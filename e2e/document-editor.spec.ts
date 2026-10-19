@@ -449,6 +449,34 @@ test.describe('the document editor', () => {
       });
     }
   });
+
+  // P3-F (sitting candidate 29): Show editors' list keeps its title on one line, its × at the header's far end, away from
+  // the pointer that chose Show editors at the popover's corner
+  test('Show editors lists the editors under a one-line title, its × away from the pointer', async () => {
+    const { page } = maws;
+    await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', id, text), ['para0002', 'river runs north'] as const);
+    const selection = await page.evaluate(() => {
+      const box = getSelection()!.getRangeAt(0).getBoundingClientRect();
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    });
+    await page.mouse.click(selection.x, selection.y, { button: 'right' });
+    const item = replica(page, 'a').getByRole('menuitem', { name: 'Show editors' });
+    const choice = (await item.boundingBox())!;
+    const pointer = { x: choice.x + choice.width / 2, y: choice.y + choice.height / 2 };
+    await page.mouse.click(pointer.x, pointer.y);
+    const dialog = replica(page, 'a').getByRole('dialog', { name: 'Editors' });
+    await expect(dialog.getByText('Reading the history…')).toHaveCount(0, { timeout: 15_000 });
+    const title = dialog.getByText('Editors of the selection', { exact: true });
+    const line = await title.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.5);
+    const titleBox = (await title.boundingBox())!;
+    expect(titleBox.height).toBeLessThan(line * 1.5); // one line
+    const close = (await dialog.getByRole('button', { name: 'Close editors' }).boundingBox())!;
+    expect(close.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width);
+    const under = pointer.x >= close.x && pointer.x <= close.x + close.width && pointer.y >= close.y && pointer.y <= close.y + close.height;
+    expect(under, 'the × is not under the pointer').toBe(false);
+    await dialog.getByRole('button', { name: 'Close editors' }).click();
+    await expect(dialog).toHaveCount(0);
+  });
 });
 
 // One step of S4's 2-set model, as S7b's ime scenario sends it (spikes/p3-store/s7/electron/main.ts, `imeStep`).
