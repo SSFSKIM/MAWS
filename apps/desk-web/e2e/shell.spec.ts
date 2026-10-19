@@ -116,6 +116,36 @@ test('an event whose code fails is not drawn, and the view reports it', async ({
   await expect(audit).toContainText('mini refused SK.local/human:7 (seen-nonce)');
 });
 
+test("the audit record says each refusal's machine and when it was recorded, and leaves out a stream's not-open handshake", async ({ page, hub }) => {
+  await stageProject(hub);
+  // Recorded before this visit (the hub replays its record on every connect): a machine's stream sending before its
+  // hello, which its uplink heals by itself, three times; and a refusal that stands, from yesterday.
+  const notOpen = { reason: 'not-open', machine: 'SK.local', message: 'send hello for this project on this stream first' } as const;
+  for (let i = 0; i < 3; i++) hub.refuse(PROJECT, notOpen);
+  hub.refuse(PROJECT, { reason: 'gap', machine: 'mini', writer: `mini/${S.asks}`, seq: 12, message: 'a seq not one past the writer’s last', at: '2026-10-18T09:30:00.000Z' });
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}`);
+  await expect(page.getByRole('region', { name: 'Channel' })).toContainText('the migration is merged');
+
+  const audit = page.getByTestId('audit');
+  await expect(audit.locator('summary')).toContainText("One refusal in the project's audit record, the latest");
+  await expect(audit.locator('summary time')).toHaveAttribute('datetime', '2026-10-18T09:30:00.000Z');
+  await audit.locator('summary').click();
+  const lines = audit.getByTestId('audit-line');
+  await expect(lines).toHaveCount(1);
+  await expect(lines.first()).toContainText(`The hub refused mini/${S.asks}:12 from mini (gap): a seq not one past the writer’s last`);
+  await expect(lines.first().locator('time')).toHaveAttribute('title', /2026/);
+  await expect(audit).not.toContainText('not-open');
+
+  // Live: another handshake is left out as well; a machine's rejection of an event joins the record, named by its machine.
+  hub.refuse(PROJECT, notOpen);
+  hub.reject(PROJECT, { machine: 'mini', event: { writer: 'SK.local/human', seq: 7 }, nonce: 'AQEBAQEBAQEBAQEBAQEBAQ', reason: 'seen-nonce', message: 'a nonce this machine has seen' });
+  await expect(lines).toHaveCount(2);
+  await expect(lines.nth(1)).toContainText('mini refused SK.local/human:7 (seen-nonce)');
+  await expect(audit.locator('summary')).toContainText('2 refusals');
+  await expect(audit).not.toContainText('not-open');
+});
+
 test('a reload resumes after the offset the browser recorded, and draws what it recorded', async ({ page, hub }) => {
   await stageProject(hub);
   await seedKey(page, hub);

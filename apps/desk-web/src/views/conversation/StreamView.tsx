@@ -177,9 +177,9 @@ export function dayLabel(ts: string, now: number): string {
 /**
  * The time the day separators are labelled against, one for the stream, changing only when the local day does: it is
  * read again at the next local midnight (a second past, so the new day has begun), and when the page is shown again,
- * since a phone's page sleeps through its timers and may wake on another day.
+ * since a phone's page sleeps through its timers and may wake on another day. The audit record's lines read it too.
  */
-function useDayClock(): number {
+export function useDayClock(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;

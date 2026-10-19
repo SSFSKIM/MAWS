@@ -9,6 +9,7 @@ import { useAccess } from '../../hub/access';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
 import { drawable, refused } from '../../log/project-log';
+import { auditText, auditWhen, shownAudit } from '../../project/audit';
 import { useProjectConnection } from '../../project/registry';
 import type { AuditItem, ProjectConnection } from '../../project/connection';
 import { useDeskLayout, type Channel } from '../../shell/layout';
@@ -20,6 +21,7 @@ import { useGrid } from '../../state/grid';
 import { LapsedBanner } from '../access/SignInAgain';
 import { UnlockForm } from '../key/UnlockForm';
 import { DeskContext } from '../conversation/desk-context';
+import { useDayClock } from '../conversation/StreamView';
 import { ChannelView } from './ChannelView';
 import { Sidebar } from './Sidebar';
 import { SpawnDialog } from './SpawnDialog';
@@ -37,7 +39,7 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
   const logState = useStore(connection.log.store);
   const status = useStore(connection.live, (s) => s.status);
   const lapsed = useAccess((s) => s.lapsed);
-  const audit = useStore(connection.live, (s) => s.audit);
+  const audit = shownAudit(useStore(connection.live, (s) => s.audit));
   const unverified = useStore(connection.conversation.store, (s) => s.unverified);
   const { sessions, groups } = useDeskSessions(connection);
   const [spawning, setSpawning] = useState(false);
@@ -113,7 +115,7 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
             {unverified.map((u) => `${u.what === 'request' ? 'a request' : u.what === 'settlement' ? 'a settlement' : 'a delivery'} ${u.id}${u.machine ? ` from ${u.machine}` : ''}`).join(', ')}
           </div>
         )}
-        {audit.length > 0 && <AuditNotice audit={audit} />}
+        {audit.length > 0 && <AuditNotice audit={audit} member={me.member.id} />}
         {locked ? (
           <Locked me={me} name={name} loading={keyState === 'loading'} />
         ) : (
@@ -154,20 +156,34 @@ function Locked({ me, name, loading }: { me: Me; name: string; loading: boolean 
   );
 }
 
-/** The project's audit record: what the hub refused, and what a machine refused of what it was sent (§6: refused, reported). */
-function AuditNotice({ audit }: { audit: AuditItem[] }) {
-  const line = (item: AuditItem) => {
-    if (item.kind === 'refused') return `The hub refused ${item.entry.writer ? `${item.entry.writer}:${item.entry.seq ?? '?'}` : 'a request'} (${item.entry.reason}): ${item.entry.message}`;
-    const what = item.entry.event ? `${item.entry.event.writer}:${item.entry.event.seq}` : 'an event';
-    return `${item.entry.machine} refused ${what} (${item.entry.reason})${item.entry.message ? `: ${item.entry.message}` : ''}`;
-  };
+/**
+ * The project's audit record (`project/audit.ts`): what the hub refused, and what a machine refused of what it was sent
+ * (§6: refused, reported), each line with when it was recorded and the machine it was about, the latest's time in the
+ * summary; a stream's `not-open` handshake left out.
+ */
+function AuditNotice({ audit, member }: { audit: AuditItem[]; member: string }) {
+  const now = useDayClock();
+  const latest = auditWhen(audit.at(-1)!.entry.at, now);
   return (
     <details className="border-b border-border px-4 py-1.5 text-ui-sm text-danger" data-testid="audit">
-      <summary className="cursor-pointer">{audit.length === 1 ? 'One refusal' : `${audit.length} refusals`} in the project's audit record</summary>
+      <summary className="cursor-pointer">
+        {audit.length === 1 ? 'One refusal' : `${audit.length} refusals`} in the project's audit record, the latest{' '}
+        <time dateTime={audit.at(-1)!.entry.at} title={latest.title}>
+          {latest.when}
+        </time>
+      </summary>
       <ul className="m-0 list-none p-0 text-fg-muted">
-        {audit.map((item) => (
-          <li key={item.entry.id}>{line(item)}</li>
-        ))}
+        {audit.map((item) => {
+          const at = auditWhen(item.entry.at, now);
+          return (
+            <li key={item.entry.id} data-testid="audit-line">
+              <time className="text-fg-faint" dateTime={item.entry.at} title={at.title}>
+                {at.when}
+              </time>{' '}
+              · {auditText(item, member)}
+            </li>
+          );
+        })}
       </ul>
     </details>
   );
