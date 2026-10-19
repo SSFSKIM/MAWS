@@ -1,5 +1,6 @@
 {
-  "recordedAt": "2026-10-19T18:05:39Z",
+  "recordedAt": "2026-10-19T18:20:20Z",
+  "handbackNote": "handback = the gate on the merge of origin/master 9fd93735e (3d473cc3d): class 1a and the groups importing or exercising master's merged files; master's own gating covers its commits (Decision Log 57)",
   "label": "P3-F wave S final gate and its relaunch (Decision Log 56 named groups, --class1a pool --runner macos --evidence; red groups relaunched alone under Decision Logs 29 and 59)",
   "runs": {
     "final": {
@@ -227,6 +228,46 @@
           "skipped": 183,
           "passed": 109,
           "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.09/3.29/3.25 computeruse=none"
+        }
+      }
+    },
+    "handback": {
+      "run": 39300116340,
+      "sha": "3d473cc3dc3104cc1e9fa7fc76da278ffc622083",
+      "startedAt": "2026-10-19T18:08:57Z",
+      "conclusion": "success",
+      "jobs": {
+        "e2e:desk-web": "success",
+        "e2e:to-human": "success",
+        "e2e:transcript": "success",
+        "packaged": "skipped",
+        "plan": "success",
+        "probes": "success",
+        "static": "success",
+        "unit": "success",
+        "unit:darwin": "skipped"
+      },
+      "groups": {
+        "unit": {
+          "Test Files": "1555 passed | 7 skipped (1562)",
+          "Tests": "21085 passed | 78 skipped (21163)"
+        },
+        "e2e:desk-web": {
+          "passed": 152
+        },
+        "e2e:transcript": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.39/2.62/2.94 computeruse=none",
+          "passed": 35,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.08/2.74/2.93 computeruse=none"
+        },
+        "e2e:to-human": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.68/2.67/2.90 computeruse=none",
+          "passed": 2,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.39/2.84/2.95 computeruse=none"
+        },
+        "static": {
+          "node --test pass": 54,
+          "node --test fail": 0
         }
       }
     }
