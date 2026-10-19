@@ -5,6 +5,9 @@ import { chmodSync, copyFileSync, existsSync, linkSync, lstatSync, mkdirSync, mk
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { documentMirrorWriter } from '@artifacts/document/mirror'; // P3-F (F11)
+import { schemaFor } from '@artifacts/document/schema'; // P3-F (F11)
+import { addTab, createDocument, deleteTab } from '@artifacts/document/tabs'; // P3-F (F11)
 import { mirrorSlug, registerMirrorWriter, type MirrorInput, type MirrorOutput, type MirrorWriter } from '@artifacts/library/mirror';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -1041,5 +1044,36 @@ describe('a File artifact over the in-memory cap (P3-F F10)', () => {
     expect(temps()).toEqual([]);
     expect(read(name, 'owner.txt')).toBe('kept');
     expect(logs.some((line) => line.includes(large.id) && line.includes('could not be mirrored'))).toBe(true);
+  });
+});
+
+// P3-F (F11, the sitting's candidate 18): a document's images are mirrored with it, in `<slug>/assets/` beside its
+// `<slug>.md`, whose `src` points there; an image the document drops goes at the next pass by the mirror's leftover rule.
+describe('a document’s image assets (P3-F F11)', () => {
+  it('mirrors a document’s image where its markdown’s src points, and removes it and its folder once the document drops it', async () => {
+    offs.push(registerMirrorWriter('document', documentMirrorWriter));
+    await startMirror();
+    const space = await linkedSpace();
+    const schema = schemaFor();
+    const paragraph = (...inline: ReturnType<typeof schema.text>[]) => schema.nodes.doc.create(null, [schema.nodes.paragraph.create({ id: 'p0aaaaaa' }, inline)]);
+    let first = '';
+    const picture = paragraph(schema.text('See '), schema.nodes.image.create({ src: 'assets/sample-image.png', alt: 'A sample', assetId: 'as1' }));
+    const doc = await store().create({ kind: 'document', title: 'Notes', spaceId: space.id, initial: (ydoc) => void (first = createDocument(ydoc, { title: 'Overview', body: picture })) }, human);
+    const { ref } = await store().uploadAsset(doc.id, new Uint8Array([137, 80, 78, 71]), { name: 'sample-image.png', mime: 'image/png' }, human);
+    expect(ref).toBe('assets/sample-image.png');
+    const slug = mirrorSlug(doc);
+    await until(() => existsSync(out(slug, 'assets', 'sample-image.png')));
+    expect(read(`${slug}.md`)).toContain(`src="${slug}/assets/sample-image.png"`);
+    expect([...readFileSync(out(slug, 'assets', 'sample-image.png'))]).toEqual([137, 80, 78, 71]);
+    expect(mode(slug, 'assets', 'sample-image.png')).toBe(0o444);
+
+    await store().writeWithAssets(doc.id, human, [], (ydoc) => {
+      addTab(ydoc, { title: 'Overview', body: paragraph(schema.text('No picture now.')), after: first });
+      deleteTab(ydoc, first);
+    });
+    await new Promise((resolve) => setTimeout(resolve, CHANGE_COALESCE_MS + 50));
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, `${slug}.md`]);
+    expect(read(`${slug}.md`)).toContain('No picture now.');
   });
 });
