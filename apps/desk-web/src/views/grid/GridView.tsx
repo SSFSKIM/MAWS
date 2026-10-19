@@ -4,12 +4,14 @@
 // how old they are; tiles still open). Once the hub refuses this browser (its sign-in expired), the notice says so and
 // offers to sign in again, in place of waiting for an answer that will not come. On a phone, two columns of the same
 // tiles (mockups/desk/05-phone.html, 2). Above the tiles, "All sessions" opens the org view: every live session of every
-// project on one screen (smns org directory §8).
-import { useMemo } from 'react';
+// project on one screen (smns org directory §8). By default the tiles are the active projects, those with a live session
+// or waiting on you; below them, "Show all (N)" reveals every project and becomes "Show active", a choice this browser
+// keeps (smns remote identity §5). The sort, "All sessions", and the waiting counts read every project either way.
+import { useMemo, useState } from 'react';
 import { useAccess } from '../../hub/access';
 import { orgWaiting } from '../../pwa/badge';
 import { useDeskLayout } from '../../shell/layout';
-import { sortForGrid, useGrid } from '../../state/grid';
+import { gridShowsAll, isActive, keepGridShowsAll, sortForGrid, useGrid } from '../../state/grid';
 import { LapsedBanner } from '../access/SignInAgain';
 import { GridPushBanner } from '../notifications/PushBanner';
 import { ProjectCard } from './ProjectCard';
@@ -20,6 +22,13 @@ export function GridView({ onEnroll }: { onEnroll: () => void }) {
   const { projects, loaded, status, asOf } = useGrid();
   const navigate = useDeskLayout((s) => s.navigate);
   const sorted = useMemo(() => sortForGrid(projects), [projects]);
+  const active = useMemo(() => sorted.filter(isActive), [sorted]);
+  const [all, setAll] = useState(gridShowsAll);
+  const shown = all ? sorted : active;
+  const showAll = (next: boolean) => {
+    keepGridShowsAll(next);
+    setAll(next);
+  };
   const waiting = orgWaiting(projects);
   const lapsed = useAccess((s) => s.lapsed);
   const stale = loaded && (status === 'connecting' || lapsed !== null);
@@ -68,13 +77,29 @@ export function GridView({ onEnroll }: { onEnroll: () => void }) {
               <span className="hidden text-ui-sm text-fg-muted md:inline">every live session of every project</span>
               {waiting > 0 && <span className="ml-auto shrink-0 text-ui-sm text-warning">{waiting} waiting on you</span>}
             </button>
-            <ul className={['m-0 grid list-none grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] md:gap-3 p-0', stale ? 'opacity-60' : ''].join(' ')} data-testid="grid">
-              {sorted.map((project) => (
-                <li key={project.id}>
-                  <ProjectCard project={project} onOpen={() => navigate({ view: 'project', project: project.id, channel: { kind: 'group' } })} />
-                </li>
-              ))}
-            </ul>
+            {shown.length === 0 ? (
+              <p className="my-6 text-center text-ui-sm text-fg-muted" data-testid="grid-quiet">
+                No project has a live session.
+              </p>
+            ) : (
+              <ul className={['m-0 grid list-none grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] md:gap-3 p-0', stale ? 'opacity-60' : ''].join(' ')} data-testid="grid">
+                {shown.map((project) => (
+                  <li key={project.id}>
+                    <ProjectCard project={project} onOpen={() => navigate({ view: 'project', project: project.id, channel: { kind: 'group' } })} />
+                  </li>
+                ))}
+              </ul>
+            )}
+            {active.length < sorted.length && (
+              <button
+                type="button"
+                onClick={() => showAll(!all)}
+                className="mx-auto mt-3 block rounded-sm px-3 py-1.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg"
+                data-testid="grid-show"
+              >
+                {all ? 'Show active' : `Show all (${sorted.length})`}
+              </button>
+            )}
           </>
         )}
       </div>

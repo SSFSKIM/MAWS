@@ -91,7 +91,10 @@ export type AuditEntry = { id: number; at: string };
 export type PendingRequest = { machine: string; raised: Raised; terminal_only: boolean };
 
 /** The grid's row for one project. `machines` and `machines_online` count the machines that hold it (a checkout or a
- * session), never those that only follow it (DX2 `hello.follow`). A retired machine project has no row. */
+ * session), never those that only follow it (DX2 `hello.follow`). `live` counts the sessions whose presence names a
+ * process (`record` not null) on those machines, online or offline (a sleeping laptop's sessions are still its), a
+ * revoked machine's never: the web shows a project with `live` or `waiting` by default. A retired machine project has no
+ * row. */
 export type ProjectSummary = {
   id: string;
   name: string;
@@ -100,6 +103,7 @@ export type ProjectSummary = {
   machines_online: number;
   working: number;
   waiting: number;
+  live: number;
 };
 
 /**

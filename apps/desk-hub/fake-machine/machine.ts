@@ -7,8 +7,9 @@
 //   - serves subscriptions (session.ts), and the depth's `rows`, `diff`, and (as DC8's producer) `output`;
 //   - answers RPCs from a script, with a ledger of its own: a nonce is claimed before the effect and its outcome recorded
 //     before the result, and a nonce the ledger knows is never executed again;
-//   - can drop its connection, crash after an RPC's effect and before recording its outcome, end its subscriptions as
-//     the bridge's discontinuity does, refuse a subscribe before its snapshot, and race a snapshot with the replay.
+//   - can drop its connection, end a session's process while it stays connected, crash after an RPC's effect and before
+//     recording its outcome, end its subscriptions as the bridge's discontinuity does, refuse a subscribe before its
+//     snapshot, and race a snapshot with the replay.
 import { randomUUID } from 'node:crypto';
 import { base64urlDecode } from '../src/protocol/base64url';
 import { isTaskId } from '../src/protocol/browser';
@@ -285,6 +286,17 @@ export class FakeMachine {
       await this.flush();
     }
     await this.link.drop();
+  }
+
+  /** A session's process gone, the machine still connected: its presence published as ended (`record: null`), as the
+   * daemon publishes a member whose process it no longer sees. Every session, or the one named. */
+  async end(session?: string): Promise<void> {
+    for (const depth of this.sessions.values()) {
+      if (session !== undefined && depth.id !== session) continue;
+      depth.presence = null;
+      this.sendPresence(depth);
+    }
+    await this.flush();
   }
 
   /**

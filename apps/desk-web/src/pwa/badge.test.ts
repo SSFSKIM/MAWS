@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ProjectSummary } from 'desk-hub/protocol';
 import { orgWaiting, showBadge } from './badge';
 
-const project = (id: string, waiting: number, online = 1): ProjectSummary => ({ id, name: id, kind: 'hub', machines: 1, machines_online: online, working: 0, waiting });
+const project = (id: string, waiting: number, online = 1): ProjectSummary => ({ id, name: id, kind: 'hub', machines: 1, machines_online: online, working: 0, waiting, live: 0 });
 
 describe('orgWaiting', () => {
   it("is the grid's waiting count summed over the org's projects", () => {

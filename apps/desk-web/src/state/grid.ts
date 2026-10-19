@@ -34,6 +34,35 @@ export function sortForGrid(projects: readonly ProjectSummary[]): ProjectSummary
   return [...projects].sort((a, b) => offline(a) - offline(b) || b.waiting - a.waiting || b.working - a.working || a.name.localeCompare(b.name));
 }
 
+/** A project the grid shows by default: one with a session that has a process, or one waiting on you (a stopped seat's
+ * open question is still yours to answer). A Registry still on the version before `live` (a deploy's first minutes)
+ * sends none, and its projects show as every project did then. */
+export const isActive = (project: ProjectSummary): boolean => project.live !== 0 || project.waiting > 0;
+
+export function activeProjects(projects: readonly ProjectSummary[]): ProjectSummary[] {
+  return projects.filter(isActive);
+}
+
+/** Whether this browser's grid shows every project rather than the active ones: a view preference, kept beside
+ * `desk.depth` so it outlives a reload. */
+export const GRID_ALL_KEY = 'desk.grid.all';
+
+export function gridShowsAll(): boolean {
+  try {
+    return localStorage.getItem(GRID_ALL_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function keepGridShowsAll(all: boolean): void {
+  try {
+    localStorage.setItem(GRID_ALL_KEY, String(all));
+  } catch {
+    // Storage refused: the choice holds for this page only.
+  }
+}
+
 /** A project's name as the grid shows it, by its id; a project the grid does not list, by the id's first eight characters. */
 export function useProjectName(): (id: string) => string {
   const projects = useGrid((s) => s.projects);

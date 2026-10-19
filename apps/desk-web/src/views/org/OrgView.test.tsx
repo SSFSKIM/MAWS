@@ -43,7 +43,7 @@ const S = {
   gone: 'e0ad139c-18bc-45bd-9489-be8653145f80', // maws-1e on macbook, MAWS, retired
 };
 const me = { org: { id: 'org', name: 'org', created: '', key_check: null }, member: { id: 'm', email: 'o@example.com', role: 'admin', created: '' } } as unknown as Me;
-const summary = (id: string, name: string, kind: ProjectSummary['kind'], waiting: number, working: number): ProjectSummary => ({ id, name, kind, machines: 1, machines_online: 1, waiting, working });
+const summary = (id: string, name: string, kind: ProjectSummary['kind'], waiting: number, working: number): ProjectSummary => ({ id, name, kind, machines: 1, machines_online: 1, waiting, working, live: 2 });
 
 let key: OrgKey;
 let seq = 0;
