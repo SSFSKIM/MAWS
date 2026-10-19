@@ -735,15 +735,16 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     const usageProjectId = await projectRow(page, USAGE_PROJECT).getAttribute('data-menu').then((menuId) => menuId!.slice('project:'.length));
     await closeProject(page, USAGE_PROJECT); // the 8 s entry left it expanded: the click below is the one that opens it
     await openProject(page, USAGE_PROJECT);
-    // W12: the strip shows that project's tab set (nothing open, under its name); opening a MAWS session from the
-    // palette brings MAWS's set and its split back while the sidebar stays on the project.
+    // W12: the strip shows that project's tab set (nothing open, the title bar's chip naming it: P3-F wave S, F17);
+    // opening a MAWS session from the palette brings MAWS's set and its split back while the sidebar stays on the project.
+    const projectChip = page.getByRole('banner').locator('[data-toolbar-project]');
     await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the clicked project’s empty set' }).toEqual([]);
-    await expect(main.getByRole('button', { name: `Tabs of ${USAGE_PROJECT}` })).toBeVisible();
+    await expect(projectChip).toHaveText(USAGE_PROJECT);
     await openPalette(app, page);
     await page.keyboard.type('charter');
     await page.keyboard.press('Enter');
     await expect.poll(() => tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research · MAWS']);
-    await expect(main.getByRole('button', { name: 'Tabs of MAWS' })).toBeVisible();
+    await expect(projectChip).toHaveText('MAWS');
     await menu(app, 'panel.toggle');
     await expect(panelResizer).toHaveCount(0);
     await expect.poll(async () => (await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0).toBe(0);
