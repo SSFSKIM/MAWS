@@ -3,7 +3,8 @@
 // left and right in the menu) and delete (the tab's ×, or its menu; a tab with content only once the owner confirms, and
 // History's Restore brings it back). Each tab has its own context menu, acting on that tab. A focused tab takes them
 // from the keyboard too (P4, tracker L300; a Mac has no context-menu key and the × is outside the tab order): F2
-// renames, Delete or ⌫ deletes, ⌥⇧← and ⌥⇧→ move it, Shift+F10 opens its menu. Every change writes the tabs map
+// renames, Delete or ⌫ deletes, ⌥⇧← and ⌥⇧→ move it, Shift+F10 opens its menu; the keys and the menu alike leave the
+// focus on the tab acted on, or after a deletion on its neighbour. Every change writes the tabs map
 // (tabs.ts), so the other replicas see it at once; none of it is in a body's undo history.
 import { AlertDialog, ContextMenu } from 'radix-ui';
 import { useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
@@ -39,9 +40,9 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
   const [renaming, setRenaming] = useState<string | null>(null);
   const [asking, setAsking] = useState<TabInfo | null>(null); // the tab with content whose deletion waits for the owner
   const renameFromMenu = useRef(false); // the menu's focus return, which would end the rename it starts
-  // the tab the keyboard acted on (renamed, moved) or the neighbour of one it deleted, focused once it is drawn unless
-  // the focus went elsewhere meanwhile (a rename ended by a click away); after the owner was asked, once the question
-  // has gone (its close)
+  // the tab the keys or its menu acted on (renamed, moved) or the neighbour of one they deleted, focused once it is
+  // drawn unless the focus went elsewhere meanwhile (a rename ended by a click away); after the owner was asked, once
+  // the question has gone (its close)
   const strip = useRef<HTMLDivElement>(null);
   const refocus = useRef<string | null>(null);
   const confirming = useRef(false);
@@ -199,19 +200,42 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
                     disabled={readOnly}
                     onSelect={() => {
                       renameFromMenu.current = true;
+                      refocus.current = tab.id;
                       setRenaming(tab.id);
                     }}
                   >
                     Rename
                   </ContextMenu.Item>
-                  <ContextMenu.Item className="doc-tab-menu-item" disabled={readOnly || index === 0} onSelect={() => move(tab, -1)}>
+                  <ContextMenu.Item
+                    className="doc-tab-menu-item"
+                    disabled={readOnly || index === 0}
+                    onSelect={() => {
+                      refocus.current = tab.id;
+                      move(tab, -1);
+                    }}
+                  >
                     Move left
                   </ContextMenu.Item>
-                  <ContextMenu.Item className="doc-tab-menu-item" disabled={readOnly || index === tabs.length - 1} onSelect={() => move(tab, 1)}>
+                  <ContextMenu.Item
+                    className="doc-tab-menu-item"
+                    disabled={readOnly || index === tabs.length - 1}
+                    onSelect={() => {
+                      refocus.current = tab.id;
+                      move(tab, 1);
+                    }}
+                  >
                     Move right
                   </ContextMenu.Item>
                   <ContextMenu.Separator className="doc-tab-menu-separator" />
-                  <ContextMenu.Item className="doc-tab-menu-item" data-danger disabled={!deletable} onSelect={() => askToRemove(tab)}>
+                  <ContextMenu.Item
+                    className="doc-tab-menu-item"
+                    data-danger
+                    disabled={!deletable}
+                    onSelect={() => {
+                      refocus.current = tab.id; // remove() hands it to the neighbour
+                      askToRemove(tab);
+                    }}
+                  >
                     Delete
                   </ContextMenu.Item>
                 </ContextMenu.Content>

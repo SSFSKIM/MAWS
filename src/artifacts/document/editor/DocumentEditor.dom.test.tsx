@@ -615,6 +615,59 @@ describe('tabs', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(titles()).toEqual(['Beta']);
   });
+
+  // P4 W1-B review (tracker L300): the menu Shift+F10 opens leaves the focus as the keys do; its own focus return goes to
+  // the tab it opened on, which Rename replaces with the title field and Delete takes away
+  it('leave the focus as the keys do after Rename, Move and Delete from the menu the keyboard opened', async () => {
+    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    act(() => {
+      addTab(handle.doc, { title: 'Bravo', id: 'tab00002' });
+      addTab(handle.doc, { title: 'Charlie', id: 'tab00003' });
+    });
+    await until(() => screen.getAllByRole('tab').length === 3, 'three tabs');
+    const titles = () => listTabs(handle.doc).map((t) => t.title);
+    const focused = () => document.activeElement?.getAttribute('aria-label');
+    const fromMenu = async (name: string, item: string) => {
+      const tab = screen.getByRole('tab', { name });
+      act(() => tab.focus());
+      act(() => void fireEvent.keyDown(tab, { key: 'F10', shiftKey: true }));
+      const entry = within(await screen.findByRole('menu')).getByRole('menuitem', { name: item });
+      act(() => entry.focus());
+      act(() => void fireEvent.keyDown(entry, { key: 'Enter' }));
+      await until(() => screen.queryByRole('menu') === null, 'the menu closed');
+      await ticks(3); // the menu's focus return
+    };
+
+    await fromMenu('Bravo', 'Rename');
+    act(() => fireEvent.change(screen.getByLabelText('Tab title'), { target: { value: 'Beta' } }));
+    act(() => fireEvent.keyDown(screen.getByLabelText('Tab title'), { key: 'Enter' }));
+    expect(titles()).toEqual(['Main', 'Beta', 'Charlie']);
+    await until(() => focused() === 'Beta', 'the focus back on the renamed tab');
+
+    await fromMenu('Charlie', 'Move left');
+    expect(titles()).toEqual(['Main', 'Charlie', 'Beta']);
+    await until(() => focused() === 'Charlie', 'the focus on the tab moved left');
+    await fromMenu('Charlie', 'Move right');
+    expect(titles()).toEqual(['Main', 'Beta', 'Charlie']);
+    await until(() => focused() === 'Charlie', 'the focus on the tab moved right');
+
+    await fromMenu('Beta', 'Delete'); // empty: no question
+    await until(() => titles().length === 2, 'Beta deleted');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await until(() => focused() === 'Charlie', 'the focus on its neighbour');
+
+    await fromMenu('Main', 'Delete'); // the tab with content asks first
+    const asked = await screen.findByRole('alertdialog');
+    act(() => fireEvent.click(within(asked).getByRole('button', { name: 'Cancel' })));
+    await until(() => screen.queryByRole('alertdialog') === null && focused() === 'Main', 'the focus back on the tab kept');
+    await fromMenu('Main', 'Delete');
+    const ask = await screen.findByRole('alertdialog');
+    await until(() => document.activeElement === within(ask).getByRole('button', { name: 'Cancel' }), 'the focus in the question');
+    act(() => fireEvent.click(within(ask).getByRole('button', { name: 'Delete tab' })));
+    await until(() => titles().length === 1, 'Main deleted once confirmed');
+    expect(titles()).toEqual(['Charlie']);
+    await until(() => focused() === 'Charlie', 'the focus on the last tab');
+  });
 });
 
 describe('find', () => {
