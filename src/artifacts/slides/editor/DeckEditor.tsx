@@ -103,19 +103,35 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   }, [session, order]);
   const slide = view.slides.find((s) => s.id === state.currentSlide) ?? view.slides[0] ?? null;
 
-  // the fit zoom from the stage's own size
+  // the fit zoom from the stage's own size, observed on the stage's node as it is now: the stage is made anew when a
+  // version's preview gives the editor back, and an observer left on the old node, taken out of the document, read 0 × 0
+  // (Fit at its 5 % floor) and never again (W1, tracker 2026-10-19). A 0 × 0 reading (a detached or hidden stage) keeps
+  // the last size, so Fit draws at the last known scale; a quarter until a size is known.
   const viewport = useRef<HTMLDivElement>(null);
-  const hasSlide = slide !== null;
+  const observed = useRef<{ node: HTMLDivElement; observer: ResizeObserver } | null>(null);
   const [room, setRoom] = useState<{ w: number; h: number } | null>(null);
   useLayoutEffect(() => {
-    const el = viewport.current;
-    if (!el) return;
-    const measure = () => setRoom({ w: el.clientWidth, h: el.clientHeight });
+    const node = viewport.current;
+    if (observed.current?.node === node) return;
+    observed.current?.observer.disconnect();
+    observed.current = null;
+    if (!node) return;
+    const measure = () => {
+      const [w, h] = [node.clientWidth, node.clientHeight];
+      if (w > 0 && h > 0) setRoom((now) => (now?.w === w && now.h === h ? now : { w, h }));
+    };
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasSlide]);
+    observer.observe(node);
+    observed.current = { node, observer };
+  });
+  useEffect(
+    () => () => {
+      observed.current?.observer.disconnect();
+      observed.current = null;
+    },
+    [],
+  );
   const fit = room ? Math.max(0.05, Math.min((room.w - STAGE_GUTTER) / SLIDE_W, (room.h - STAGE_GUTTER) / SLIDE_H)) : 0.25;
   const scale = state.zoom === 'fit' ? fit : state.zoom;
 
@@ -315,7 +331,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
       {preview ? (
         <HistoryBar preview={preview} controller={history!} onBack={() => history!.close()} />
       ) : (
-          <Toolbar session={session} zoom={state.zoom} scale={scale} canUndo={state.canUndo && !readOnly} canRedo={state.canRedo && !readOnly}>
+          <Toolbar session={session} zoom={state.zoom} scale={scale} fit={fit} canUndo={state.canUndo && !readOnly} canRedo={state.canRedo && !readOnly}>
             <ElementBar
               session={session}
               slideId={slide?.id ?? null}
@@ -348,7 +364,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   return <DeckCommentsProvider value={commentsApi}>{editor}</DeckCommentsProvider>;
 }
 
-function Toolbar({ session, zoom, scale, canUndo, canRedo, children }: { session: DeckSession; zoom: Zoom; scale: number; canUndo: boolean; canRedo: boolean; children?: ReactNode }) {
+function Toolbar({ session, zoom, scale, fit, canUndo, canRedo, children }: { session: DeckSession; zoom: Zoom; scale: number; fit: number; canUndo: boolean; canRedo: boolean; children?: ReactNode }) {
   const step = (direction: 1 | -1) => {
     const steps = direction === 1 ? ZOOM_STEPS.filter((s) => s > scale + 0.001) : ZOOM_STEPS.filter((s) => s < scale - 0.001).reverse();
     if (steps[0] !== undefined) session.setZoom(steps[0]);
@@ -373,7 +389,8 @@ function Toolbar({ session, zoom, scale, canUndo, canRedo, children }: { session
         value={zoom === 'fit' ? 'fit' : String(zoom)}
         onChange={(event) => session.setZoom(event.target.value === 'fit' ? 'fit' : Number(event.target.value))}
       >
-        <option value="fit">{zoom === 'fit' ? `${C.fit} (${C.percent(scale)})` : C.fit}</option>
+        {/* the percentage beside Fit whether it is chosen or not: what it draws at, and a label that never changes with the choice */}
+        <option value="fit">{`${C.fit} (${C.percent(fit)})`}</option>
         {ZOOM_STEPS.map((s) => (
           <option key={s} value={String(s)}>
             {C.percent(s)}
