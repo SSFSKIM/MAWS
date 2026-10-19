@@ -145,6 +145,22 @@ describe('document suggestion review', () => {
     mounted.unmount();
     expect(close).toHaveBeenCalledOnce();
   });
+
+  // P3-F panel scalpel-3#1: the review's page reads its ground as the live page does (usePageGround), so code on a dark
+  // ground takes shiki's dark colours there too
+  it('gives the review’s page its ground: dark on a dark page, light again on a light one', async () => {
+    const ground = document.head.appendChild(document.createElement('style'));
+    ground.textContent = '.ds-doc { background-color: rgb(31, 30, 27); }';
+    try {
+      await mount();
+      const page = screen.getByLabelText('Suggested document').closest<HTMLElement>('.ds-doc')!;
+      expect(page.dataset.ground).toBe('dark');
+      ground.remove();
+      await until(() => page.dataset.ground === 'light', 'the light ground');
+    } finally {
+      ground.remove();
+    }
+  });
 });
 
 // M9 addendum fix wave (the scale gate's Korean case): the live editor's composition hold buffers remote updates on the

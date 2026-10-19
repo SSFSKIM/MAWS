@@ -1,6 +1,6 @@
 // D14: a suggestion replica rendered over the base, never edited or accepted locally. The service copies accepted
 // content with the suggester's binding; the editor supplies the binding's item-id ranges, grouped by top-level block.
-import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import type { ArtifactHost, DocumentHandle } from '../../host';
@@ -14,6 +14,7 @@ import { tabBody } from '../tabs';
 import { editorExtensions } from './extensions';
 import { displayedDocument, type ViewEnvironment } from './nodes/views'; // P3-E
 import type { EditorHost } from './host-types';
+import { usePageGround } from './page-ground';
 import { useReadOnly } from './read-only';
 
 /** How long a difference must hold, with the base caught up, before the review replaces the live editor. */
@@ -213,7 +214,9 @@ function Review({ view, artifactId, tabId, host, editorHost, pageScope: Scope, r
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setBusy(false); }
   };
-  const sheet = <div className="ds-doc"><div className="ds-doc-page"><EditorContent editor={editor} /></div></div>;
+  const page = useRef<HTMLDivElement>(null);
+  const ground = usePageGround(page, undefined); // P3-F: its code coloured for its ground, as the live page's
+  const sheet = <div ref={page} className="ds-doc" data-ground={ground}><div className="ds-doc-page"><EditorContent editor={editor} /></div></div>;
   return <section className="doc-tab-editor" aria-label="Suggestion review">
     <div className="doc-toolbar doc-history-bar" role="toolbar" aria-label="Suggestion actions">
       <span className="doc-history-heading">Suggestions</span>

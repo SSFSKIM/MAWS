@@ -25,9 +25,8 @@ import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model'; // P3-E
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { JointHold, TypingPause, type VersionView } from '../collab';
-import { isDarkGround } from '../export/highlight';
 import { isBindingTransaction, type Carry, type Doc } from '../../yjs'; // P3-E: Doc
 import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { coreExtensionOptions } from '../ids';
@@ -49,6 +48,7 @@ import { goToChange, setCarried, setExtra /* P3-E */ } from './history/paint';
 import { ShowEditorsMenu, useShowEditors } from './history/ShowEditors';
 import { useHistoryController, useHistorySnapshot } from './history/use-history';
 import { cssColor, type DocumentHandle, type EditorHost } from './host-types';
+import { usePageGround } from './page-ground';
 import { displayedDocument, type ViewEnvironment } from './nodes/views'; // P3-E: displayedDocument
 import { Tabs } from './Tabs';
 import { useTabs } from './tabs-store';
@@ -579,30 +579,6 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       {editors.open && <ShowEditorsMenu open={editors.open} onShow={editors.show} onClose={editors.close} />}
     </div>
   );
-}
-
-// The page's ground, light or dark, as its computed background reads (the system's `--ds-color-bg`, the app's without
-// a system; Decision Log 22): what the code highlighting keys its colours to. Read again when the app's theme, a
-// stylesheet (a design-system scope's) or the page's own tokens change.
-function usePageGround(page: RefObject<HTMLElement | null>, tokens: CSSProperties | undefined): 'light' | 'dark' {
-  const [ground, setGround] = useState<'light' | 'dark'>('light');
-  useLayoutEffect(() => {
-    const element = page.current;
-    if (!element) return;
-    const read = () => {
-      const background = getComputedStyle(element).backgroundColor;
-      const clear = background === '' || background === 'transparent' || /^rgba\(.*,\s*0\)$/.test(background);
-      setGround(!clear && isDarkGround(background) ? 'dark' : 'light');
-    };
-    read();
-    if (typeof MutationObserver === 'undefined') return;
-    const observer = new MutationObserver(read);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    observer.observe(document.head, { childList: true, subtree: true }); // a stylesheet added, removed or rewritten
-    if (element.parentElement) observer.observe(element.parentElement, { attributes: true });
-    return () => observer.disconnect();
-  }, [page, tokens]);
-  return ground;
 }
 
 const SAFE_ID = /^[\w-]+$/;
