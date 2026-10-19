@@ -296,13 +296,25 @@ describe('a link', () => {
     attrs: { id: 'p1' },
     content: [{ type: 'text', text: 'Read ' }, { type: 'text', text: 'the brief', marks: [{ type: 'link', attrs: { href: 'https://example.com/brief', title: null } }] }, { type: 'text', text: ' first.' }],
   });
-  // a press on `target` as the page gets it, ProseMirror's handlers first (happy-dom has no layout to place a caret)
+  // a press on `target` as the page gets it, ProseMirror's handlers first (happy-dom has no layout to place a caret). The
+  // click is read where it reaches the document and prevented there: an anchor's click left to the page navigates
+  // happy-dom, a live request to the link's host.
   const clickWith = (target: Element, init: MouseEventInit, withPress = true) => {
     const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, ...init });
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init });
-    if (withPress) act(() => void target.dispatchEvent(down));
-    act(() => void target.dispatchEvent(click));
-    return { press: down.defaultPrevented, click: click.defaultPrevented };
+    let clicked: boolean | null = null;
+    const atDocument = (event: Event) => {
+      clicked = event.defaultPrevented;
+      event.preventDefault();
+    };
+    document.addEventListener('click', atDocument);
+    try {
+      if (withPress) act(() => void target.dispatchEvent(down));
+      act(() => void target.dispatchEvent(click));
+    } finally {
+      document.removeEventListener('click', atDocument);
+    }
+    return { press: down.defaultPrevented, click: clicked };
   };
   const anchor = (editor: Editor) => editor.view.dom.querySelector('a[href]')!;
 
