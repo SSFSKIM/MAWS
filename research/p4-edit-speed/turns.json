@@ -1,0 +1,1124 @@
+[
+ {
+  "idx": 1,
+  "start": 1792398099.559,
+  "plen": 358,
+  "ttfo": 4.164000034332275,
+  "ttvis": 4.221999883651733,
+  "wall": 209.26799988746643,
+  "tool": 22.481000423431396,
+  "model": 186.78699946403503,
+  "rt": 35,
+  "reqs": 35,
+  "out": 13656,
+  "think": 6862,
+  "cread": 3060903,
+  "cwrite": 132339,
+  "thinkms": 70.292,
+  "tools": {
+   "ToolSearch": 3,
+   "mcp__maws__artifact_describe_type": 1,
+   "mcp__maws__artifact_list": 2,
+   "mcp__maws__artifact_read": 3,
+   "mcp__maws__artifact_create": 1,
+   "Bash": 16,
+   "mcp__plugin_cua_cua_repl__js": 10,
+   "mcp__plugin_cua_cua_repl__end_task": 1
+  },
+  "tdur": {
+   "ToolSearch": 0.03500032424926758,
+   "mcp__maws__artifact_describe_type": 0.8450000286102295,
+   "mcp__maws__artifact_list": 1.1370000839233398,
+   "mcp__maws__artifact_read": 1.5979998111724854,
+   "mcp__maws__artifact_create": 0.2719998359680176,
+   "Bash": 5.7179999351501465,
+   "mcp__plugin_cua_cua_repl__js": 13.997000217437744,
+   "mcp__plugin_cua_cua_repl__end_task": 0.012000083923339844
+  },
+  "insz": {
+   "ToolSearch": 433,
+   "mcp__maws__artifact_describe_type": 20,
+   "mcp__maws__artifact_list": 18,
+   "mcp__maws__artifact_read": 194,
+   "mcp__maws__artifact_create": 772,
+   "Bash": 4531,
+   "mcp__plugin_cua_cua_repl__js": 1910,
+   "mcp__plugin_cua_cua_repl__end_task": 2
+  },
+  "stoph": 0.233,
+  "err": 0,
+  "enqlag": 0.17600011825561523
+ },
+ {
+  "idx": 2,
+  "start": 1792398974.295,
+  "plen": 548,
+  "ttfo": 4.517999887466431,
+  "ttvis": 4.800999879837036,
+  "wall": 34.56699991226196,
+  "tool": 2.3429999351501465,
+  "model": 32.223999977111816,
+  "rt": 6,
+  "reqs": 6,
+  "out": 2550,
+  "think": 1462,
+  "cread": 816403,
+  "cwrite": 8606,
+  "thinkms": 17.185,
+  "tools": {
+   "mcp__maws__artifact_read": 4,
+   "mcp__maws__artifact_edit": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 1.812000036239624,
+   "mcp__maws__artifact_edit": 0.5309998989105225
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 179,
+   "mcp__maws__artifact_edit": 547
+  },
+  "stoph": 0.245,
+  "err": 0,
+  "enqlag": 0.046000003814697266
+ },
+ {
+  "idx": 3,
+  "start": 1792399035.116,
+  "plen": 244,
+  "ttfo": 2.5490000247955322,
+  "ttvis": 2.9720001220703125,
+  "wall": 21.432000160217285,
+  "tool": 1.821000099182129,
+  "model": 19.611000061035156,
+  "rt": 4,
+  "reqs": 4,
+  "out": 1369,
+  "think": 614,
+  "cread": 569231,
+  "cwrite": 4013,
+  "thinkms": 5.908,
+  "tools": {
+   "mcp__maws__artifact_read": 2,
+   "mcp__maws__artifact_edit": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 1.0889999866485596,
+   "mcp__maws__artifact_edit": 0.7320001125335693
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 96,
+   "mcp__maws__artifact_edit": 333
+  },
+  "stoph": 0.261,
+  "err": 0,
+  "enqlag": 0.023999929428100586
+ },
+ {
+  "idx": 4,
+  "start": 1792399164.156,
+  "plen": 438,
+  "ttfo": 2.8490002155303955,
+  "ttvis": 2.8490002155303955,
+  "wall": 18.917999982833862,
+  "tool": 1.9779999256134033,
+  "model": 16.94000005722046,
+  "rt": 4,
+  "reqs": 4,
+  "out": 1382,
+  "think": 382,
+  "cread": 584450,
+  "cwrite": 4511,
+  "thinkms": 3.252,
+  "tools": {
+   "mcp__maws__artifact_read": 3,
+   "mcp__maws__artifact_edit": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 2.06499981880188,
+   "mcp__maws__artifact_edit": 0.4460000991821289
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 236,
+   "mcp__maws__artifact_edit": 295
+  },
+  "stoph": 0.259,
+  "err": 0,
+  "enqlag": 0.03099989891052246
+ },
+ {
+  "idx": 5,
+  "start": 1792399347.045,
+  "plen": 520,
+  "ttfo": 2.9489998817443848,
+  "ttvis": 2.9489998817443848,
+  "wall": 8.268999814987183,
+  "tool": 0.5750002861022949,
+  "model": 7.693999528884888,
+  "rt": 3,
+  "reqs": 3,
+  "out": 268,
+  "think": 0,
+  "cread": 450493,
+  "cwrite": 987,
+  "thinkms": 0.0,
+  "tools": {
+   "ToolSearch": 1,
+   "mcp__maws__artifact_reply": 1
+  },
+  "tdur": {
+   "ToolSearch": 0.021000146865844727,
+   "mcp__maws__artifact_reply": 0.5540001392364502
+  },
+  "insz": {
+   "ToolSearch": 63,
+   "mcp__maws__artifact_reply": 100
+  },
+  "stoph": 0.218,
+  "err": 0,
+  "enqlag": 0.029000043869018555
+ },
+ {
+  "idx": 6,
+  "start": 1792399399.199,
+  "plen": 295,
+  "ttfo": 2.246000051498413,
+  "ttvis": 2.246000051498413,
+  "wall": 17.68400001525879,
+  "tool": 1.19100022315979,
+  "model": 16.492999792099,
+  "rt": 4,
+  "reqs": 4,
+  "out": 1057,
+  "think": 461,
+  "cread": 607163,
+  "cwrite": 3422,
+  "thinkms": 6.194,
+  "tools": {
+   "mcp__maws__artifact_read": 2,
+   "mcp__maws__artifact_edit": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 0.757000207901001,
+   "mcp__maws__artifact_edit": 0.43400001525878906
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 134,
+   "mcp__maws__artifact_edit": 198
+  },
+  "stoph": 0.318,
+  "err": 0,
+  "enqlag": 0.03399991989135742
+ },
+ {
+  "idx": 7,
+  "start": 1792399716.763,
+  "plen": 179,
+  "ttfo": 3.190999984741211,
+  "ttvis": 3.190999984741211,
+  "wall": 19.671000003814697,
+  "tool": 1.4640002250671387,
+  "model": 18.20699977874756,
+  "rt": 4,
+  "reqs": 4,
+  "out": 1278,
+  "think": 606,
+  "cread": 621417,
+  "cwrite": 3643,
+  "thinkms": 8.289,
+  "tools": {
+   "mcp__maws__artifact_read": 2,
+   "mcp__maws__artifact_edit": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 0.8900001049041748,
+   "mcp__maws__artifact_edit": 0.5740001201629639
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 154,
+   "mcp__maws__artifact_edit": 165
+  },
+  "stoph": 0.436,
+  "err": 0,
+  "enqlag": 0.07299995422363281
+ },
+ {
+  "idx": 8,
+  "start": 1792399759.758,
+  "plen": 136,
+  "ttfo": 2.812000036239624,
+  "ttvis": 2.812000036239624,
+  "wall": 14.529000043869019,
+  "tool": 1.369999885559082,
+  "model": 13.159000158309937,
+  "rt": 4,
+  "reqs": 4,
+  "out": 537,
+  "think": 0,
+  "cread": 636230,
+  "cwrite": 3532,
+  "thinkms": 0.0,
+  "tools": {
+   "mcp__maws__artifact_read": 2,
+   "mcp__maws__artifact_edit": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 0.9140000343322754,
+   "mcp__maws__artifact_edit": 0.45599985122680664
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 154,
+   "mcp__maws__artifact_edit": 178
+  },
+  "stoph": 0.224,
+  "err": 0,
+  "enqlag": 0.051999807357788086
+ },
+ {
+  "idx": 9,
+  "start": 1792399971.986,
+  "plen": 222,
+  "ttfo": 5.32699990272522,
+  "ttvis": 5.585000038146973,
+  "wall": 159.18099999427795,
+  "tool": 4.001999855041504,
+  "model": 155.17900013923645,
+  "rt": 10,
+  "reqs": 16,
+  "out": 12474,
+  "think": 6994,
+  "cread": 1956456,
+  "cwrite": 61651,
+  "thinkms": 69.215,
+  "tools": {
+   "mcp__maws__artifact_describe_type": 1,
+   "mcp__maws__artifact_read": 3,
+   "mcp__maws__artifact_create": 1,
+   "mcp__maws__artifact_export": 1,
+   "Read": 1,
+   "mcp__maws__artifact_list": 1,
+   "mcp__maws__ask": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_describe_type": 0.437999963760376,
+   "mcp__maws__artifact_read": 1.3250000476837158,
+   "mcp__maws__artifact_create": 0.41299986839294434,
+   "mcp__maws__artifact_export": 0.994999885559082,
+   "Read": 0.27900004386901855,
+   "mcp__maws__artifact_list": 0.2239999771118164,
+   "mcp__maws__ask": 0.3280000686645508
+  },
+  "insz": {
+   "mcp__maws__artifact_describe_type": 24,
+   "mcp__maws__artifact_read": 328,
+   "mcp__maws__artifact_create": 7061,
+   "mcp__maws__artifact_export": 48,
+   "Read": 143,
+   "mcp__maws__artifact_list": 67,
+   "mcp__maws__ask": 981
+  },
+  "stoph": 0.253,
+  "err": 6,
+  "enqlag": 0.039999961853027344
+ },
+ {
+  "idx": 10,
+  "start": 1792400359.235,
+  "plen": 785,
+  "ttfo": 3.140000104904175,
+  "ttvis": 3.140000104904175,
+  "wall": 12.698000192642212,
+  "tool": 0.5380001068115234,
+  "model": 12.160000085830688,
+  "rt": 2,
+  "reqs": 2,
+  "out": 722,
+  "think": 306,
+  "cread": 449029,
+  "cwrite": 19105,
+  "thinkms": 4.92,
+  "tools": {
+   "mcp__maws__artifact_list": 1,
+   "mcp__maws__artifact_describe_type": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_list": 0.5350000858306885,
+   "mcp__maws__artifact_describe_type": 0.5090000629425049
+  },
+  "insz": {
+   "mcp__maws__artifact_list": 67,
+   "mcp__maws__artifact_describe_type": 24
+  },
+  "stoph": 0.309,
+  "err": 0,
+  "enqlag": 0.10499978065490723
+ },
+ {
+  "idx": 11,
+  "start": 1792402379.227,
+  "plen": 337,
+  "ttfo": 16.65400004386902,
+  "ttvis": 17.005000114440918,
+  "wall": 76.89800000190735,
+  "tool": 23.57800006866455,
+  "model": 53.3199999332428,
+  "rt": 4,
+  "reqs": 4,
+  "out": 5163,
+  "think": 1297,
+  "cread": 987053,
+  "cwrite": 12613,
+  "thinkms": 16.603,
+  "tools": {
+   "mcp__maws__artifact_read": 2,
+   "mcp__maws__artifact_publish": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 8.196000099182129,
+   "mcp__maws__artifact_publish": 15.381999969482422
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 167,
+   "mcp__maws__artifact_publish": 6788
+  },
+  "stoph": 0.504,
+  "err": 0,
+  "enqlag": 0.11899995803833008
+ },
+ {
+  "idx": 12,
+  "start": 1792402874.104,
+  "plen": 620,
+  "ttfo": 3.6489999294281006,
+  "ttvis": 3.6489999294281006,
+  "wall": 6.335999965667725,
+  "tool": 0.5720000267028809,
+  "model": 5.763999938964844,
+  "rt": 2,
+  "reqs": 2,
+  "out": 212,
+  "think": 0,
+  "cread": 512259,
+  "cwrite": 1345,
+  "thinkms": 0.0,
+  "tools": {
+   "mcp__maws__artifact_reply": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_reply": 0.5720000267028809
+  },
+  "insz": {
+   "mcp__maws__artifact_reply": 176
+  },
+  "stoph": 0.551,
+  "err": 0,
+  "enqlag": 0.08800005912780762
+ },
+ {
+  "idx": 13,
+  "start": 1792402915.568,
+  "plen": 646,
+  "ttfo": 3.301999807357788,
+  "ttvis": 3.301999807357788,
+  "wall": 6.496999979019165,
+  "tool": 0.7470002174377441,
+  "model": 5.749999761581421,
+  "rt": 2,
+  "reqs": 2,
+  "out": 220,
+  "think": 0,
+  "cread": 514303,
+  "cwrite": 685,
+  "thinkms": 0.0,
+  "tools": {
+   "mcp__maws__artifact_reply": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_reply": 0.7470002174377441
+  },
+  "insz": {
+   "mcp__maws__artifact_reply": 155
+  },
+  "stoph": 0.475,
+  "err": 0,
+  "enqlag": 0.11300015449523926
+ },
+ {
+  "idx": 14,
+  "start": 1792403149.839,
+  "plen": 590,
+  "ttfo": 6.150000095367432,
+  "ttvis": 6.677000045776367,
+  "wall": 826.8010001182556,
+  "tool": 45.47800040245056,
+  "model": 781.322999715805,
+  "rt": 30,
+  "reqs": 30,
+  "out": 81447,
+  "think": 39268,
+  "cread": 9968395,
+  "cwrite": 177833,
+  "thinkms": 398.629,
+  "tools": {
+   "ToolSearch": 2,
+   "mcp__maws__artifact_describe_type": 1,
+   "mcp__maws__artifact_read": 3,
+   "Skill": 1,
+   "WebFetch": 5,
+   "mcp__plugin_ptc_ptc__exec": 18,
+   "Bash": 2,
+   "mcp__maws__artifact_create": 1
+  },
+  "tdur": {
+   "ToolSearch": 0.01900005340576172,
+   "mcp__maws__artifact_describe_type": 1.0209999084472656,
+   "mcp__maws__artifact_read": 1.4270000457763672,
+   "Skill": 0.037999868392944336,
+   "WebFetch": 32.93400025367737,
+   "mcp__plugin_ptc_ptc__exec": 15.528000354766846,
+   "Bash": 0.33300018310546875,
+   "mcp__maws__artifact_create": 0.432999849319458
+  },
+  "insz": {
+   "ToolSearch": 109,
+   "mcp__maws__artifact_describe_type": 25,
+   "mcp__maws__artifact_read": 245,
+   "Skill": 446,
+   "WebFetch": 1748,
+   "mcp__plugin_ptc_ptc__exec": 42475,
+   "Bash": 716,
+   "mcp__maws__artifact_create": 41682
+  },
+  "stoph": 0.412,
+  "err": 0,
+  "enqlag": 0.06200003623962402
+ },
+ {
+  "idx": 15,
+  "start": 1792404158.392,
+  "plen": 280,
+  "ttfo": 5.141000032424927,
+  "ttvis": 5.51200008392334,
+  "wall": 33.204999923706055,
+  "tool": 24.253999948501587,
+  "model": 8.950999975204468,
+  "rt": 2,
+  "reqs": 2,
+  "out": 424,
+  "think": 152,
+  "cread": 873787,
+  "cwrite": 3327,
+  "thinkms": 2.137,
+  "tools": {
+   "mcp__maws__ask": 1
+  },
+  "tdur": {
+   "mcp__maws__ask": 24.253999948501587
+  },
+  "insz": {
+   "mcp__maws__ask": 256
+  },
+  "stoph": 0.441,
+  "err": 0,
+  "enqlag": 0.09200000762939453
+ },
+ {
+  "idx": 16,
+  "start": 1792404238.759,
+  "plen": 903,
+  "ttfo": 4.0920000076293945,
+  "ttvis": 4.836999893188477,
+  "wall": 208.2630000114441,
+  "tool": 6.010000467300415,
+  "model": 202.25299954414368,
+  "rt": 12,
+  "reqs": 12,
+  "out": 19517,
+  "think": 7361,
+  "cread": 5673768,
+  "cwrite": 71672,
+  "thinkms": 81.601,
+  "tools": {
+   "ToolSearch": 1,
+   "mcp__maws__artifact_describe_type": 2,
+   "Write": 1,
+   "mcp__maws__artifact_create": 2,
+   "mcp__maws__artifact_dataset": 1,
+   "mcp__maws__artifact_read": 1,
+   "mcp__maws__artifact_export": 2,
+   "Read": 2,
+   "mcp__plugin_ptc_ptc__exec": 1
+  },
+  "tdur": {
+   "ToolSearch": 0.013000011444091797,
+   "mcp__maws__artifact_describe_type": 0.9380002021789551,
+   "Write": 0.5169999599456787,
+   "mcp__maws__artifact_create": 0.9509999752044678,
+   "mcp__maws__artifact_dataset": 0.5039999485015869,
+   "mcp__maws__artifact_read": 0.5540001392364502,
+   "mcp__maws__artifact_export": 1.696000099182129,
+   "Read": 0.34800004959106445,
+   "mcp__plugin_ptc_ptc__exec": 0.8070001602172852
+  },
+  "insz": {
+   "ToolSearch": 130,
+   "mcp__maws__artifact_describe_type": 39,
+   "Write": 364,
+   "mcp__maws__artifact_create": 14746,
+   "mcp__maws__artifact_dataset": 310,
+   "mcp__maws__artifact_read": 36,
+   "mcp__maws__artifact_export": 102,
+   "Read": 307,
+   "mcp__plugin_ptc_ptc__exec": 6322
+  },
+  "stoph": 0.255,
+  "err": 0,
+  "enqlag": 0.03800010681152344
+ },
+ {
+  "idx": 17,
+  "start": 1792404941.976,
+  "plen": 289,
+  "ttfo": 4.363999843597412,
+  "ttvis": 4.363999843597412,
+  "wall": 8.057999849319458,
+  "tool": 0.08800005912780762,
+  "model": 7.96999979019165,
+  "rt": 2,
+  "reqs": 2,
+  "out": 237,
+  "think": 0,
+  "cread": 1022371,
+  "cwrite": 1656,
+  "thinkms": 0.0,
+  "tools": {
+   "Edit": 1
+  },
+  "tdur": {
+   "Edit": 0.08800005912780762
+  },
+  "insz": {
+   "Edit": 268
+  },
+  "stoph": 2.616,
+  "err": 0,
+  "enqlag": 0.057000160217285156
+ },
+ {
+  "idx": 18,
+  "start": 1792405052.708,
+  "plen": 393,
+  "ttfo": 3.864000082015991,
+  "ttvis": 4.088000059127808,
+  "wall": 20.37000012397766,
+  "tool": 1.5749998092651367,
+  "model": 18.795000314712524,
+  "rt": 5,
+  "reqs": 5,
+  "out": 765,
+  "think": 107,
+  "cread": 2564814,
+  "cwrite": 2162,
+  "thinkms": 1.367,
+  "tools": {
+   "mcp__maws__artifact_read": 1,
+   "mcp__maws__artifact_dataset": 1,
+   "mcp__maws__artifact_export": 1,
+   "Read": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 0.6659998893737793,
+   "mcp__maws__artifact_dataset": 0.4369997978210449,
+   "mcp__maws__artifact_export": 0.37199997901916504,
+   "Read": 0.10000014305114746
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 48,
+   "mcp__maws__artifact_dataset": 99,
+   "mcp__maws__artifact_export": 52,
+   "Read": 139
+  },
+  "stoph": 2.483,
+  "err": 0,
+  "enqlag": 0.10299992561340332
+ },
+ {
+  "idx": 19,
+  "start": 1792405252.67,
+  "plen": 520,
+  "ttfo": 4.2209999561309814,
+  "ttvis": 4.2209999561309814,
+  "wall": 7.930999994277954,
+  "tool": 0.434999942779541,
+  "model": 7.496000051498413,
+  "rt": 2,
+  "reqs": 2,
+  "out": 209,
+  "think": 21,
+  "cread": 1029072,
+  "cwrite": 771,
+  "thinkms": 0.552,
+  "tools": {
+   "mcp__maws__artifact_reply": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_reply": 0.434999942779541
+  },
+  "insz": {
+   "mcp__maws__artifact_reply": 100
+  },
+  "stoph": 2.371,
+  "err": 0,
+  "enqlag": 0.10300016403198242
+ },
+ {
+  "idx": 20,
+  "start": 1792405279.766,
+  "plen": 251,
+  "ttfo": 3.3369998931884766,
+  "ttvis": 3.3369998931884766,
+  "wall": 16.007999897003174,
+  "tool": 1.2829999923706055,
+  "model": 14.724999904632568,
+  "rt": 4,
+  "reqs": 4,
+  "out": 521,
+  "think": 0,
+  "cread": 2063930,
+  "cwrite": 3245,
+  "thinkms": 0.0,
+  "tools": {
+   "mcp__maws__artifact_read": 2,
+   "mcp__maws__artifact_edit": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 0.8810000419616699,
+   "mcp__maws__artifact_edit": 0.40199995040893555
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 155,
+   "mcp__maws__artifact_edit": 151
+  },
+  "stoph": 2.425,
+  "err": 0,
+  "enqlag": 0.06800007820129395
+ },
+ {
+  "idx": 21,
+  "start": 1792406004.4,
+  "plen": 681,
+  "ttfo": 34.4229998588562,
+  "ttvis": 34.63800001144409,
+  "wall": 63.94799995422363,
+  "tool": 1.67799973487854,
+  "model": 62.27000021934509,
+  "rt": 4,
+  "reqs": 4,
+  "out": 2429,
+  "think": 656,
+  "cread": 2083214,
+  "cwrite": 7833,
+  "thinkms": 9.461,
+  "tools": {
+   "mcp__maws__artifact_describe_type": 1,
+   "mcp__maws__artifact_create": 1,
+   "mcp__maws__artifact_screenshot": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_describe_type": 0.370999813079834,
+   "mcp__maws__artifact_create": 0.4589998722076416,
+   "mcp__maws__artifact_screenshot": 0.8480000495910645
+  },
+  "insz": {
+   "mcp__maws__artifact_describe_type": 16,
+   "mcp__maws__artifact_create": 2757,
+   "mcp__maws__artifact_screenshot": 57
+  },
+  "stoph": 2.51,
+  "err": 0,
+  "enqlag": 0.15200018882751465
+ },
+ {
+  "idx": 22,
+  "start": 1792410244.751,
+  "plen": 62,
+  "ttfo": 16.44700002670288,
+  "ttvis": 16.44700002670288,
+  "wall": 30.68500018119812,
+  "tool": 1.815999984741211,
+  "model": 28.86900019645691,
+  "rt": 4,
+  "reqs": 4,
+  "out": 637,
+  "think": 136,
+  "cread": 1583537,
+  "cwrite": 530001,
+  "thinkms": 1.279,
+  "tools": {
+   "mcp__maws__artifact_read": 2,
+   "mcp__maws__artifact_edit": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 1.5409998893737793,
+   "mcp__maws__artifact_edit": 0.27500009536743164
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 155,
+   "mcp__maws__artifact_edit": 147
+  },
+  "stoph": 0.219,
+  "err": 0,
+  "enqlag": 0.03600001335144043
+ },
+ {
+  "idx": 23,
+  "start": 1792410285.839,
+  "plen": 21,
+  "ttfo": 5.270999908447266,
+  "ttvis": 5.726000070571899,
+  "wall": 12.430999994277954,
+  "tool": 0.7330000400543213,
+  "model": 11.697999954223633,
+  "rt": 2,
+  "reqs": 2,
+  "out": 520,
+  "think": 186,
+  "cread": 1060125,
+  "cwrite": 546,
+  "thinkms": 2.393,
+  "tools": {
+   "mcp__maws__show_pane": 1
+  },
+  "tdur": {
+   "mcp__maws__show_pane": 0.7330000400543213
+  },
+  "insz": {
+   "mcp__maws__show_pane": 70
+  },
+  "stoph": 0.191,
+  "err": 0,
+  "enqlag": 0.01900005340576172
+ },
+ {
+  "idx": 24,
+  "start": 1792410568.777,
+  "plen": 62,
+  "ttfo": 4.085999965667725,
+  "ttvis": 4.182000160217285,
+  "wall": 10.710999965667725,
+  "tool": 0.4659998416900635,
+  "model": 10.245000123977661,
+  "rt": 2,
+  "reqs": 2,
+  "out": 512,
+  "think": 203,
+  "cread": 1061380,
+  "cwrite": 1728,
+  "thinkms": 4.045,
+  "tools": {
+   "mcp__maws__artifact_read": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 0.4659998416900635
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 82
+  },
+  "stoph": 0.183,
+  "err": 0,
+  "enqlag": 0.05099987983703613
+ },
+ {
+  "idx": 25,
+  "start": 1792410747.261,
+  "plen": 36,
+  "ttfo": 6.91700005531311,
+  "ttvis": 7.479000091552734,
+  "wall": 20.776000022888184,
+  "tool": 1.4690001010894775,
+  "model": 19.306999921798706,
+  "rt": 4,
+  "reqs": 4,
+  "out": 945,
+  "think": 349,
+  "cread": 2133826,
+  "cwrite": 3803,
+  "thinkms": 4.763,
+  "tools": {
+   "mcp__maws__artifact_read": 2,
+   "mcp__maws__artifact_edit": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 1.2060000896453857,
+   "mcp__maws__artifact_edit": 0.2630000114440918
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 164,
+   "mcp__maws__artifact_edit": 148
+  },
+  "stoph": 0.253,
+  "err": 0,
+  "enqlag": 0.037999868392944336
+ },
+ {
+  "idx": 26,
+  "start": 1792411594.21,
+  "plen": 480,
+  "ttfo": 22.17899990081787,
+  "ttvis": 22.639999866485596,
+  "wall": 77.03999996185303,
+  "tool": 29.73099994659424,
+  "model": 47.30900001525879,
+  "rt": 5,
+  "reqs": 5,
+  "out": 2313,
+  "think": 389,
+  "cread": 2694199,
+  "cwrite": 6749,
+  "thinkms": 3.96,
+  "tools": {
+   "mcp__maws__artifact_read": 2,
+   "mcp__maws__artifact_publish": 1,
+   "mcp__maws__artifact_reply": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 3.936000108718872,
+   "mcp__maws__artifact_publish": 14.39299988746643,
+   "mcp__maws__artifact_reply": 11.401999950408936
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 140,
+   "mcp__maws__artifact_publish": 2478,
+   "mcp__maws__artifact_reply": 293
+  },
+  "stoph": 1.583,
+  "err": 0,
+  "enqlag": 0.09500002861022949
+ },
+ {
+  "idx": 27,
+  "start": 1792411717.655,
+  "plen": 24,
+  "ttfo": 3.2829999923706055,
+  "ttvis": 3.2829999923706055,
+  "wall": 6.5320000648498535,
+  "tool": 0.2910001277923584,
+  "model": 6.240999937057495,
+  "rt": 2,
+  "reqs": 2,
+  "out": 163,
+  "think": 0,
+  "cread": 1085922,
+  "cwrite": 500,
+  "thinkms": 0.0,
+  "tools": {
+   "mcp__maws__show_pane": 1
+  },
+  "tdur": {
+   "mcp__maws__show_pane": 0.2910001277923584
+  },
+  "insz": {
+   "mcp__maws__show_pane": 70
+  },
+  "stoph": 0.278,
+  "err": 0,
+  "enqlag": 0.0969998836517334
+ },
+ {
+  "idx": 28,
+  "start": 1792411810.377,
+  "plen": 495,
+  "ttfo": 4.5959999561309814,
+  "ttvis": 4.934999942779541,
+  "wall": 44.61199998855591,
+  "tool": 3.8480000495910645,
+  "model": 40.763999938964844,
+  "rt": 6,
+  "reqs": 6,
+  "out": 3674,
+  "think": 254,
+  "cread": 3282862,
+  "cwrite": 9730,
+  "thinkms": 2.6,
+  "tools": {
+   "mcp__maws__artifact_read": 2,
+   "mcp__plugin_ptc_ptc__exec": 1,
+   "mcp__maws__artifact_publish": 1,
+   "mcp__maws__artifact_reply": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 0.9079999923706055,
+   "mcp__plugin_ptc_ptc__exec": 1.809999942779541,
+   "mcp__maws__artifact_publish": 0.5440001487731934,
+   "mcp__maws__artifact_reply": 0.5859999656677246
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 150,
+   "mcp__plugin_ptc_ptc__exec": 41,
+   "mcp__maws__artifact_publish": 5545,
+   "mcp__maws__artifact_reply": 399
+  },
+  "stoph": 5.281,
+  "err": 0,
+  "enqlag": 0.12199997901916504
+ },
+ {
+  "idx": 29,
+  "start": 1792412028.833,
+  "plen": 36,
+  "ttfo": 5.363000154495239,
+  "ttvis": 6.01200008392334,
+  "wall": 14.124000072479248,
+  "tool": 0.5950000286102295,
+  "model": 13.529000043869019,
+  "rt": 2,
+  "reqs": 2,
+  "out": 692,
+  "think": 419,
+  "cread": 1106385,
+  "cwrite": 1704,
+  "thinkms": 5.947,
+  "tools": {
+   "mcp__maws__artifact_read": 1
+  },
+  "tdur": {
+   "mcp__maws__artifact_read": 0.5950000286102295
+  },
+  "insz": {
+   "mcp__maws__artifact_read": 62
+  },
+  "stoph": 0.437,
+  "err": 0,
+  "enqlag": 0.14800000190734863
+ },
+ {
+  "idx": 30,
+  "start": 1792412363.617,
+  "plen": 22,
+  "ttfo": 5.360999822616577,
+  "ttvis": 5.360999822616577,
+  "wall": 8.791999816894531,
+  "tool": 0.6740000247955322,
+  "model": 8.117999792098999,
+  "rt": 2,
+  "reqs": 2,
+  "out": 145,
+  "think": 0,
+  "cread": 1109929,
+  "cwrite": 643,
+  "thinkms": 0.0,
+  "tools": {
+   "mcp__maws__show_pane": 1
+  },
+  "tdur": {
+   "mcp__maws__show_pane": 0.6740000247955322
+  },
+  "insz": {
+   "mcp__maws__show_pane": 70
+  },
+  "stoph": 0.334,
+  "err": 0,
+  "enqlag": 0.1119999885559082
+ },
+ {
+  "idx": 32,
+  "start": 1792413112.674,
+  "plen": 50,
+  "ttfo": 33.3439998626709,
+  "ttvis": 33.83500003814697,
+  "wall": 39.430999994277954,
+  "tool": 0.3839998245239258,
+  "model": 39.04700016975403,
+  "rt": 2,
+  "reqs": 2,
+  "out": 379,
+  "think": 135,
+  "cread": 1113235,
+  "cwrite": 2795,
+  "thinkms": 1.945,
+  "tools": {
+   "mcp__maws__show_pane": 1
+  },
+  "tdur": {
+   "mcp__maws__show_pane": 0.3839998245239258
+  },
+  "insz": {
+   "mcp__maws__show_pane": 70
+  },
+  "stoph": 2.532,
+  "err": 0,
+  "enqlag": 0.10100007057189941
+ },
+ {
+  "idx": 33,
+  "start": 1792414724.774,
+  "plen": 491,
+  "ttfo": 18.41100001335144,
+  "ttvis": 19.544000148773193,
+  "wall": 61.5460000038147,
+  "tool": 5.818999528884888,
+  "model": 55.72700047492981,
+  "rt": 7,
+  "reqs": 7,
+  "out": 2794,
+  "think": 1241,
+  "cread": 3954227,
+  "cwrite": 11915,
+  "thinkms": 11.822,
+  "tools": {
+   "ToolSearch": 2,
+   "Read": 1,
+   "mcp__notion__notion-create-file-upload": 1,
+   "Bash": 2,
+   "mcp__notion__notion-create-pages": 1,
+   "mcp__notion__notion-fetch": 1
+  },
+  "tdur": {
+   "ToolSearch": 0.07599973678588867,
+   "Read": 0.04199981689453125,
+   "mcp__notion__notion-create-file-upload": 1.066999912261963,
+   "Bash": 3.31600022315979,
+   "mcp__notion__notion-create-pages": 0.747999906539917,
+   "mcp__notion__notion-fetch": 0.5699999332427979
+  },
+  "insz": {
+   "ToolSearch": 210,
+   "Read": 163,
+   "mcp__notion__notion-create-file-upload": 50,
+   "Bash": 725,
+   "mcp__notion__notion-create-pages": 321,
+   "mcp__notion__notion-fetch": 46
+  },
+  "stoph": 0.402,
+  "err": 0,
+  "enqlag": 0.12800002098083496
+ },
+ {
+  "idx": 34,
+  "start": 1792416338.564,
+  "plen": 20,
+  "ttfo": 25.015000104904175,
+  "ttvis": 25.015000104904175,
+  "wall": 29.134999990463257,
+  "tool": 0.9440000057220459,
+  "model": 28.19099998474121,
+  "rt": 2,
+  "reqs": 2,
+  "out": 177,
+  "think": 0,
+  "cread": 570515,
+  "cwrite": 570756,
+  "thinkms": 0.0,
+  "tools": {
+   "mcp__maws__show_pane": 1
+  },
+  "tdur": {
+   "mcp__maws__show_pane": 0.9440000057220459
+  },
+  "insz": {
+   "mcp__maws__show_pane": 70
+  },
+  "stoph": 2.63,
+  "err": 0,
+  "enqlag": 0.07699990272521973
+ }
+]

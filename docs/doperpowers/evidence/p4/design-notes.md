@@ -1,0 +1,40 @@
+# P4 design notes (brainstorming, architect; durable copy goes into the P4 composite spec)
+
+Recorded: charter 6db299a01 (§3 P4 paragraph, §3 P3 sentence -> P5, §19 2026-10-19 line).
+
+Round 1 (owner, 2026-10-19 ~20:0xZ):
+- P4 centre: smoothing. Sharing, simultaneous editing, web MAWS -> P5 (charter amended).
+- Scope: every daily surface (artifact editors + session-supervising surfaces: sidebar, transcript, tabs, panel, notifications).
+- Close: owner declaration + bench targets (same model/effort/idle host: not slower than Claude Desktop; MAWS tool time under bounds set from bench results), PLUS agent-run adversarial UX assessment loop via cua_repl: assessors -> UX assessments with enhancement recommendations -> owner final review and verdict -> enhancement wave -> another assessment pass + owner pass. "we don't have to declare the end of P4 ... UX improvement is a hill climb that is nearly endless" -> P4 ends at "done to what extent", further jobs carried to later waves/phases. (Owner: the sitting's cua-driven agent gave many good UX suggestions; do the same.)
+- Slowness: both total time and time to first visible edit; benchmark directly to decide inference vs tool performance.
+
+Round 2 (owner, 2026-10-19 ~20:1xZ):
+- Host for assessments and bench: decide at the time, wherever compute is free.
+- Cost cap: none. "The key is that the models don't just converse but use every corner of the product in real scenarios, as a live user test."
+- Extent: the named design-item list lands + bench targets met + each surface passes (assessment -> owner verdict -> enhancement wave -> re-assessment pass + owner pass); the rest carried forward.
+- First assessment timing: NOT now. The 80 candidates already hold many current defects. Order: fix the discussed items to a degree; the owner gives responses on the 80 soon; those land; with all known defects addressed, run assessment round 1 at the frontier.
+
+Emerging shape (to present):
+- Stage 1, known items: debt wave (rows disjoint from P4 design surfaces; triage running), the owner's 80 responses -> fixes, the design items as children (margin comments + canvas pin popover; main-area float; click-to-edit state machine + IME; artifact_search + Space on create/list; cross-surface tab drag; per-session launch profile; header direct send (Notion) + gws Drive; agent presence while composing; inline artifact link prompt), the bench (when compute is free) -> edit-speed improvements.
+- Stage 2, the loop per surface: live-user-test assessors via cua (real scenarios, every corner; known items listed so they don't re-report) -> picture page -> owner verdict -> enhancement wave -> fresh re-assessors + owner pass.
+- Owner aid built: docs/doperpowers/evidence/p3-finish/sitting-visual/candidates/status.html (the 80 with wave S status; 23 fixed, 33 P4, 17 no row, 2 keep, 2 pass, 3 env; an "open only" filter).
+
+Research in (2026-10-19 ~20:3xZ):
+- Prior art: research/p4-ux-prior-art.md (margin comments on Liveblocks AnchoredThreads' layout + Docs' surface; Canva click model + three additions + pre-focused editor for Hangul; Codex drag-to-float 320/160 px; VS Code-style tab move; artifact_search shape). Notes: observations §6 stale (Space fields landed in F5); research/SOURCES.md one Codex build behind (chatgpt-26.1013.31256 on this machine).
+- Bench grounding: research/p4-edit-speed-grounding.md (+ research/p4-edit-speed/sitting-table.md, p4-bench-*.py). The 14 s / 11 s were server-side holds after the call was written, NOT MAWS tool time (MAWS execution 0.02-0.19 s) -> tracker row 296's routing ("the deck's publish and reply first on the tool-time side") is wrong; correct it in the P4 spec commit. Doc edits avg 21.6 s: ~4.2 requests/edit (read -> edit -> read-back + closing), 11.0 s first-byte waits, 8.4 s generating (~40% thinking at xhigh). Deck/design avg 66.2 s: whole files as tool input (1.4-3.3K output tokens for tiny edits) + 18 s server hold. Context 527-555K; ~82K duplicated guide text (artifact_describe_type never marks a kind guided, artifact-tools.ts:111). Model/effort from the owner's ~/.claude/settings.json modelSettings (Opus 5.5 xhigh), not MAWS; user-scope Stop hooks 0.2-5.3 s/turn. Desktop: no faster edit path on the same engine; Cowork leaner (no ~/.claude plugins, effort medium, eager tool streaming). Visible only at call completion; partial tool input reaches MAWS unused. Levers: (1) patch publish for decks/designs, (2) 2 requests/edit (drop read-back, fold reply, alwaysLoad), (3) small contexts (guide dup, compact results), (4) show the edit while it streams, (5) allow rule mcp__maws__* (security reading), (6) edit-session profile (effort, hooks), (7) probe the deck hold. Bench: 9 tasks, arms (MAWS as-is, clean profile, clean+medium, Desktop Code, Desktop Cowork, claude.ai chat ref), >=5 reps, ~225 runs, mini under quiet flag ~4 h, then a MacBook confirmation pass.
+
+Owner rulings (2026-10-19 ~20:3xZ, triage OWNER rows):
+- L133 UI language: English throughout (dates, relative ages); Korean UI possible later. -> a wave item (M sweep, ~24 suites' expectations).
+- L156 HWP/HWPX export: drop; close the row.
+- L176 deck Google Fonts: fetch once into the deck's assets (OFL only), offline after -> P4 smoothing item.
+- L177 native PPTX charts + Morph: later, when decks go to PowerPoint regularly.
+- Architect: L32 catalogue-key residue ruled final unless the owner objects (told 20:3xZ). Card corner: bottom right (the owner's obs 4 words). Escape on a non-empty comment draft keeps the draft.
+Asked (async, pending): click model (Canva select-first rec), streaming display of agent edits (rec yes), comment margin reserved when wide (rec), tab drag move-only (rec), live checks in the owner's accounts in a test folder (rec).
+
+Owner answers (2026-10-19 ~20:3xZ): click model = Canva select-first; streaming display of agent edits = yes (amends P3 D11: provisional layer, commit at call completion); comment margin reserved when the window is wide; tab drag move only (drop on an existing view activates it); live checks in the owner's Google/Canva/Figma accounts inside one test folder ("MAWS UX check"), deleted after, no sharing or invites.
+Design presented to the owner ~20:3xZ (four tracks A speed / B design items / C debt waves / L assessment loop over eight surfaces; close = items landed + bench targets + eight surfaces passed + the owner's declaration "to this extent"). Approval pending.
+
+Owner (2026-10-19 20:36Z, verbatim): "걱정한건 툴 자체의 성능이라 툴 자체 성능 이외의 것들로 인해 속도가 느린거라면 그런것들은 괜찮다. effort 조정 이런건 필요없음."
+-> Track A narrowed: no Desktop comparison bench (child or close criterion), no effort decision or effort profile, no deck-hold probe; patch publish and two-requests-per-edit to Deferred (Desktop's server types also publish whole files: parity), pullable by the loop if a surface fails on felt speed. Kept in an "agent experience" child: streaming display (D11 amendment), the launch profile without effort, a tool-time guard in the paid live specs (journal execution time per artifact_* call under a bound). Guide duplication (artifact-tools.ts:111) -> debt wave. Close criterion 2 -> MAWS tool time under the guard's bound. Loop: seven surfaces. Tracker row 296 closes at the spec commit. Charter §3 P4 paragraph to amend in the same commit (its bench sentence). Drafter told by SendMessage.
+
+Owner (2026-10-19 20:41Z): bring the Desktop comparison back: "if Desktop is also long from server round trips and output time we have no problem; if not, there is another problem, so it is worth doing." Architect: agreed, as a parity bench (A1): 4 tasks x MAWS fresh session vs Desktop equivalent artifacts, same model and effort (the owner's usual; no tuning), 3 reps, timed from both engines' records; breakdown per edit (requests, input tokens, first-byte, generation/output tokens, server hold, tool execution); decision rule fixed beforehand: within ~20% with similar requests/tokens = parity, closes; Desktop clearly faster = the breakdown names the cause and the deferred levers return as an edit-protocol child. Host where compute is free. Row 296 closes on the parity result. Drafter told.
