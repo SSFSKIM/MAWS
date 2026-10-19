@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-10-19T06:17:30Z",
+  "recordedAt": "2026-10-19T07:27:41Z",
   "meaning": "after S, at the architect's instruction: origin/master fbc3e13ea merged into the branch while p3f-final ran on S; the landing reading is the Decision Log 57 union",
   "merge": "073d10446a5f43f0ae8f818b2f0d650c710cc66c",
   "mergedMaster": "fbc3e13eabe0187d0881f1b129833d1f2c7b42d9",
@@ -17,5 +17,16 @@
       "unit:darwin": "skipped (not requested; the mini held p3f-final)"
     }
   },
-  "namedGroupGate": "pending: e2e:connectors and e2e:connectors-direct on the merged HEAD under Decision Log 56 (connector-direct-probe.ts is imported only by connectors-direct.spec.ts)"
+  "namedGroupGate": {
+    "run": 39210067429,
+    "attempt": 1,
+    "sha": "073d10446a5f43f0ae8f818b2f0d650c710cc66c",
+    "conclusion": "success",
+    "groups": {
+      "e2e:connectors": "5 passed",
+      "e2e:connectors-direct": "15 passed"
+    },
+    "posture": "@2x remote=none",
+    "rule": "Decision Log 56; e2e:connectors as the architect named it, e2e:connectors-direct the only importer of the merged e2e/support/connector-direct-probe.ts"
+  }
 }

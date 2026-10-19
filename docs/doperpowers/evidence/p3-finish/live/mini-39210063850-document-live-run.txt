@@ -1,0 +1,44 @@
+P3-B M9 document live run (Acceptance 2), 2026-10-19T07:04:46.148Z
+engine: ~/.local/share/claude/versions/2.1.303 (2.1.303), unmodified, through the relay http://127.0.0.1:8641 (GET /api/hello 200); model haiku; default permission mode; cap US$0.2 as the session's maxBudgetUsd
+app: the product build (MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR /private/tmp/maws-document-live-4xy0on/claude-config (settings.json {}, .claude.json trusting /private/tmp/maws-document-live-4xy0on/repo)
+A-15 before the launch: 15 keys, sha1 997efd2e300edad11bd27760ba4fcb47a4fb7c0d
+turn 1: calls ["artifact_create","artifact_read","artifact_edit"]; reply "READY"; permissions allowed for the session through the card: ["mcp__maws__artifact_create","mcp__maws__artifact_read","mcp__maws__artifact_edit"]
+G1: artifact_create → f8b99667-e743-4e23-bd96-c149e535c40b (revision 4); artifact_read returned revision 4 with every given id (18 lines)
+the editor's blocks before the batch: {"h1":"Launch notes","p1":"The launch is planned for Friday. The team meets on Monday.","p2":"The owner writes here.","h2":"Budget","tb1":"ItemCostDesign100Build200","r0":"ItemCost","8eu23its":"Item","ky605scd":"Item","dfsjwkul":"Cost","9gul4e07":"Cost","r1":"Design100","k20tzlot":"Design","ptlu4kzc":"Design","i0llcqds":"100","ry4mc6k0":"100","r2":"Build200","qjz8rqq2":"Build","wpa73ha9":"Build","jr69cd7n":"200","mrofpw81":"200","h3":"Risks","p3":"Nothing is known yet; the review is pending."}
+turn 2: the batch call {"artifact":"f8b99667-e743-4e23-bd96-c149e535c40b","baseRevision":5,"ops":[{"op":"replace_text","block":"p1","old":"The launch is planned for Friday.","new":"The launch moves to the following Tuesday."},{"op":"insert","after":"h2","markdown":"### Approvals\n\nFinance approves the budget by Thursday."},{"op":"set_cell","table":"tb1","row":2,"col":1,"markdown":"250"}]} answered at 2026-10-19T07:05:00.586Z → revision 33, results [{"line":"replaced 1 occurrence(s) in ^p1","target":"p1","newIds":[]},{"line":"inserted 2 block(s) after ^h2: ^an6lp6zg ^0bmire99","target":"h2","newIds":["an6lp6zg","0bmire99"]},{"line":"set cell (2, 1) of ^tb1","target":"jr69cd7n","newIds":[]}]; artifact_edit calls in the turn: 1; reply "DONE"
+G2: composing began 2026-10-19T07:04:58.479Z (after the read's answer), the batch's answer is journaled at 2026-10-19T07:05:00.586Z, composing ended 2026-10-19T07:05:00.787Z after 3 words: " 안녕하세요 한글 입력"
+G3: after the batch: changed [["p1","The launch moves to the following Tuesday. The team meets on Monday."],["p2","The owner writes here. 안녕하세요 한글 입력"],["tb1","ItemCostDesign100Build250"],["r2","Build250"]]; added [["an6lp6zg","Approvals"],["0bmire99","Finance approves the budget by Thursday."]]; removed []; row r2 "Build200" → "Build250"; the batch's new ids ["an6lp6zg","0bmire99"]
+G3b: blocks whose type, attributes or inline marks changed: [["p1","[\"paragraph\",{},[[\"The launch is planned for Friday. The team meets on Monday.\",[]]]]","[\"paragraph\",{},[[\"The launch moves to the following Tuesday. The team meets on Monday.\",[]]]]"],["p2","[\"paragraph\",{},[[\"The owner writes here.\",[]]]]","[\"paragraph\",{},[[\"The owner writes here. 안녕하세요 한글 입력\",[]]]]"]]
+G4: drawn while the batch ran: [{"kind":"editing","block":"p1","name":"Claude","at":1792393500586.8},{"kind":"editing","block":"jr69cd7n","name":"Claude","at":1792393500586.8},{"kind":"editing","block":"an6lp6zg","name":"Claude","at":1792393500785},{"kind":"editing","block":"0bmire99","name":"Claude","at":1792393500785},{"kind":"cursor","block":"p1","name":"Claude","at":1792393500785.1}]
+G5: Show editors over "following Tuesday" in p1: ["Maws artifact Launch notes · Oct 19, 4:05 PM"]; over "안녕하세요" in p2: ["You · Oct 19, 4:04 PM"]
+G5b: the session's displayed title "Maws artifact Launch notes"
+turn 3: artifact_edit calls [{"args":{"artifact":"f8b99667-e743-4e23-bd96-c149e535c40b","baseRevision":33,"ops":[{"op":"insert","after":"h3","markdown":"A second batch paragraph."},{"op":"replace_text","block":"p1","old":"The team meets on Monday.","new":"The team meets on Wednesday."}]},"error":true}]; the answer "artifact_edit: op 1: \"The team meets on Monday.\" not found in ^p1 {\"reason\":\"notFound\",\"opIndex\":1,\"target\":\"The team meets on Monday.\",\"candidates\":[{\"id\":\"p1\",\"text\":\"The launch moves to the following Tuesday. The team meets on Monday again.\"}],\"liveRevision\":41}"; reply "REFUSED: op 1 failed because \"The team meets on Monday.\" was not found in block p1. The live text of p1 is now \"The launch moves to the following Tuesday. The team meets on Monday again.\" The live revision is 41, so the document has changed since my last edit (revision 33). I did not retry or read the document."
+G6: the stale batch refused {"reason":"notFound","opIndex":1,"target":"The team meets on Monday.","candidates":[{"id":"p1","text":"The launch moves to the following Tuesday. The team meets on Monday again."}],"liveRevision":41}; the editor's blocks unchanged across it (24 blocks, no "A second batch paragraph.")
+G7: the next read (revision 41) shows the batch's ids ["an6lp6zg","0bmire99"]; its markdown:
+# Launch notes ^h1
+
+The launch moves to the following Tuesday. The team meets on Monday again. ^p1
+
+The owner writes here. 안녕하세요 한글 입력 ^p2
+
+## Budget ^h2
+
+### Approvals ^an6lp6zg
+
+Finance approves the budget by Thursday. ^0bmire99
+
+| Item   | Cost | <!-- ^r0 -->
+| ------ | ---- |
+| Design | 100  | <!-- ^r1 -->
+| Build  | 250  | <!-- ^r2 -->
+^tb1
+
+## Risks ^h3
+
+Nothing is known yet; the review is pending. ^p3
+
+session 7fdc3772-b377-4633-954d-9fad97b2cfed: stopped {"exited":true,"code":0,"signal":null}; journal kept under /private/tmp/maws-document-live-4xy0on/journals; total_cost_usd 0.0073 (cap US$0.2); permissions allowed for the session: ["mcp__maws__artifact_create","mcp__maws__artifact_read","mcp__maws__artifact_edit"]
+spend: receipts [0.004468965,0.005467695,0.00645806,0.00731912], total_cost_usd 0.0073; accounted exposure US$0.0073 (settled by its receipt); cap US$0.2
+console errors: []
+scratch kept for inspection: /private/tmp/maws-document-live-4xy0on
+A-15 after the run: 15 keys, sha1 997efd2e300edad11bd27760ba4fcb47a4fb7c0d (identical)

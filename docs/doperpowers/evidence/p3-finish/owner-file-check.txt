@@ -1,0 +1,5 @@
+P3-F A-15 owner-file check, recorded 2026-10-19T07:27:41Z.
+MacBook attempt library-1 (library-live.spec.ts, S de71da97a, out/ = the verified p3f-final plain bundle, engine 2.1.303): started 2026-10-19T06:16:38Z, held at the load gate (load1 121 to 123), stopped 06:23:09Z at the architect's GO for the mini route before admission (no P3F_PAID_ENTERED line; no engine ran; charged $0).
+  before: 163 temp-project keys, sha1 975b214711b7574d43a42b61cdaa083768998dbd; after: 163 keys, sha1 975b214711b7574d43a42b61cdaa083768998dbd; added [], removed [] (owner activity between readings is not attributed to F; no engine of F ran).
+Mini route (run 39210063850, the seven live groups): the A-15 check does not apply; the mini holds no owner ~/.claude.json, and each spec ran under its own scratch config home (architect ruling, 2026-10-19).
+Receipts, spend and cleanup: live/mini-39210063850-summary.json, live/mini-39210063850-lines.txt, live/ledger.json.

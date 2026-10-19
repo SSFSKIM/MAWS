@@ -1,0 +1,445 @@
+{
+  "run": "2026-10-19T06:49:07.929Z",
+  "deck": "benchDeckFiles(100): S6’s seven bench shapes cycled, S7b’s 100-slide deck",
+  "loads": {
+    "start": 4.29,
+    "end": 4.92
+  },
+  "agentFirstRead": {
+    "wallMs": 37.76504199998453,
+    "loopMaxMs": 29.317917000007583,
+    "busyMs": 52.37712499999907,
+    "load": 4.22
+  },
+  "memory": {
+    "before": {
+      "renderers": [
+        {
+          "windowId": 1,
+          "pid": 76293,
+          "workingSetMB": 445.5
+        }
+      ],
+      "utility": [
+        {
+          "pid": 76290,
+          "name": "network.mojom.NetworkService",
+          "workingSetMB": 47.2
+        },
+        {
+          "pid": 76296,
+          "name": "node.mojom.NodeService",
+          "workingSetMB": 271.4
+        },
+        {
+          "pid": 76298,
+          "name": "node.mojom.NodeService",
+          "workingSetMB": 89.8
+        }
+      ]
+    },
+    "after": {
+      "renderers": [
+        {
+          "windowId": 1,
+          "pid": 76293,
+          "workingSetMB": 332.1
+        }
+      ],
+      "utility": [
+        {
+          "pid": 76290,
+          "name": "network.mojom.NetworkService",
+          "workingSetMB": 47
+        },
+        {
+          "pid": 76296,
+          "name": "node.mojom.NodeService",
+          "workingSetMB": 271.2
+        },
+        {
+          "pid": 76298,
+          "name": "node.mojom.NodeService",
+          "workingSetMB": 89.6
+        }
+      ]
+    }
+  },
+  "heavyGeneration": {
+    "command": [
+      "/Users/new/actions-runner-maws/_work/_tool/node/22.23.3/arm64/bin/node",
+      "spikes/p3-store/s7/soak/soak.mjs",
+      "--kind",
+      "deck",
+      "--profile",
+      "heavy",
+      "--encoding",
+      "delta",
+      "--months",
+      "3",
+      "--export",
+      "/var/folders/c1/l4z5k02n2779byvnymzxsvth0000gn/T/maws-deck-history-wbWM1d"
+    ],
+    "timeoutMs": 360000,
+    "loadStart": 5.97,
+    "wallMs": 58514,
+    "loadEnd": 4.74,
+    "exitCode": 0,
+    "signal": null,
+    "stdoutTail": "month 1: {\"slides\":79,\"live\":228217,\"file\":2945024,\"versions\":148,\"log\":{\"rows\":5921,\"bytes\":448505},\"prov\":{\"rows\":1416,\"bytes\":266978},\"load\":26.6,\"preview\":154.4,\"restore\":52,\"vc\":\"8/8\",\"se\":\"11/11\"}\nmonth 2: {\"slides\":82,\"live\":247650,\"file\":4521984,\"versions\":159,\"log\":{\"rows\":6031,\"bytes\":383405},\"prov\":{\"rows\":1427,\"bytes\":426991},\"load\":21.6,\"preview\":197.8,\"restore\":57.7,\"vc\":\"7/7\"}\nmonth 3: {\"slides\":81,\"live\":267613,\"file\":5435392,\"versions\":122,\"log\":{\"rows\":5949,\"bytes\":354579},\"prov\":{\"rows\":245,\"bytes\":465847},\"load\":35.8,\"preview\":228.5,\"restore\":62.2,\"vc\":\"8/8\",\"se\":\"6/6\"}\ndone in 58s; updates 79251; counts {\"turns\":1980,\"sessions\":198,\"comments\":132,\"named\":40,\"restores\":6}; maintenance {\"median\":27.7,\"max\":97.8,\"steps\":{\"thin\":69.1,\"compactLog\":1.2,\"bucketProvenance\":30.2,\"gcRefs\":0.5,\"checkpoint\":5.1}}",
+    "stderrTail": "",
+    "ok": true
+  },
+  "heavyExport": {
+    "from": "generated in this job",
+    "ok": true,
+    "meta": {
+      "month": 3,
+      "versionAt": "2026-04-06 17:14",
+      "kind": "named",
+      "enc": "delta",
+      "provenanceRows": 245,
+      "s7aWalk": {
+        "slides": 166,
+        "elements": 0
+      },
+      "ms": {
+        "state": 7.4,
+        "encodeLive": 9.3,
+        "attributions": 89.7,
+        "openDiff": 85.9,
+        "render": 36.1,
+        "walk": 0.1,
+        "total": 228.5
+      },
+      "restores": [
+        {
+          "at": "2026-04-15 15:00",
+          "from": "2026-04-14 14:53",
+          "ms": 133.4,
+          "bytes": 27558
+        },
+        {
+          "at": "2026-04-29 15:00",
+          "from": "2026-04-27 14:59",
+          "ms": 60.2,
+          "bytes": 59303
+        },
+        {
+          "at": "2026-05-13 15:00",
+          "from": "2026-05-12 14:56",
+          "ms": 89.7,
+          "bytes": 25188
+        },
+        {
+          "at": "2026-05-27 15:00",
+          "from": "2026-05-25 14:16",
+          "ms": 100.7,
+          "bytes": 33760
+        },
+        {
+          "at": "2026-06-10 15:00",
+          "from": "2026-06-09 14:59",
+          "ms": 94.7,
+          "bytes": 23850
+        },
+        {
+          "at": "2026-06-24 15:00",
+          "from": "2026-06-23 14:59",
+          "ms": 80.3,
+          "bytes": 20095
+        }
+      ],
+      "soak": {
+        "kind": "deck",
+        "profile": "heavy",
+        "encoding": "delta",
+        "months": 3,
+        "month": 3,
+        "seed": 11
+      },
+      "workload": {
+        "counts": {
+          "turns": 1950,
+          "sessions": 195,
+          "comments": 130,
+          "named": 39,
+          "restores": 6
+        },
+        "updates": 78087,
+        "slides": 81,
+        "versions": 122
+      },
+      "filesView": {
+        "prev": "872a715838d5",
+        "next": "773eaa4d6a16"
+      }
+    },
+    "files": {
+      "prev.bin": {
+        "bytes": 233355,
+        "sha256": "810aa046cd777b1e1e2b345392125a02d85c04c09e08cd11a12be03a506fd3de"
+      },
+      "next.bin": {
+        "bytes": 267613,
+        "sha256": "12b1b2350f9ea33543e57ce777be1618b42f66e4f36aa2faf25acc4d7f4679e9"
+      },
+      "attrs.bin": {
+        "bytes": 485380,
+        "sha256": "0c26275ff50adcb1eb79eb2a11548825e7e921974de3a1d502f5648ff4b0f323"
+      },
+      "meta.json": {
+        "bytes": 995,
+        "sha256": "af593709cc7141d3a0d089be8125bfab8c82e2d44ec7f68bc80d47d387baf120"
+      }
+    }
+  },
+  "marginal": [],
+  "judging": {
+    "marginalMiss": 0.2,
+    "marginalLoad": 10,
+    "rule": "Decision Log 24: marginal under a 20 % miss at load ≥ 10; failed at a 20 % miss or more, any miss below load 10, any miss of a zero bound; a row judged on its best trial (the parent’s Decision Log 54), a per-publish bound on the median of its publishes (judgedBy)"
+  },
+  "rows": [
+    {
+      "row": "1 open cold",
+      "measure": "open cold to interactive: the editor’s createState to the stage and 100 live thumbnails drawn, the host’s copy unloaded first",
+      "bound": "≤ 1,000 ms (S7b 116)",
+      "limit": 1000,
+      "unit": "ms",
+      "value": 96,
+      "judgedBy": "best",
+      "load": 4.22,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 170,
+          "load": 3.38,
+          "note": "synced at 49.2 ms; 100 thumbnails; the window’s first open of a deck"
+        },
+        {
+          "value": 103.9,
+          "load": 4.02,
+          "note": "synced at 47.2 ms; 100 thumbnails"
+        },
+        {
+          "value": 96,
+          "load": 4.22,
+          "note": "synced at 41.9 ms; 100 thumbnails"
+        }
+      ]
+    },
+    {
+      "row": "1 open warm",
+      "measure": "open warm: the same, reopened at once (the host’s copy loaded)",
+      "bound": "≤ 1,000 ms",
+      "limit": 1000,
+      "unit": "ms",
+      "value": 83.3,
+      "judgedBy": "best",
+      "load": 4.22,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 83.3,
+          "load": 4.15,
+          "note": "synced at 33.4 ms"
+        },
+        {
+          "value": 89.3,
+          "load": 4.02,
+          "note": "synced at 35.5 ms"
+        },
+        {
+          "value": 88.9,
+          "load": 4.22,
+          "note": "synced at 39.9 ms"
+        }
+      ]
+    },
+    {
+      "row": "4 publish one slide",
+      "measure": "a one-slide publish through A’s publishDoc on the 100-slide deck (the agent’s session, after its own publish): the host loop’s busy time over the call, median of 7",
+      "bound": "≤ 50 ms",
+      "limit": 50,
+      "unit": "ms",
+      "value": 30.27,
+      "judgedBy": "median",
+      "load": 4.36,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 29.95,
+          "load": 4.22,
+          "note": "loop’s longest stretch 31.0 ms; wall 30.9 ms"
+        },
+        {
+          "value": 30.67,
+          "load": 4.22,
+          "note": "loop’s longest stretch 23.0 ms; wall 32.7 ms"
+        },
+        {
+          "value": 30.61,
+          "load": 4.22,
+          "note": "loop’s longest stretch 21.5 ms; wall 31.5 ms"
+        },
+        {
+          "value": 30.27,
+          "load": 4.22,
+          "note": "loop’s longest stretch 22.9 ms; wall 32.2 ms"
+        },
+        {
+          "value": 30.05,
+          "load": 4.22,
+          "note": "loop’s longest stretch 23.9 ms; wall 32.0 ms"
+        },
+        {
+          "value": 28.96,
+          "load": 4.36,
+          "note": "loop’s longest stretch 23.4 ms; wall 30.9 ms"
+        },
+        {
+          "value": 32.25,
+          "load": 4.36,
+          "note": "loop’s longest stretch 33.2 ms; wall 33.2 ms"
+        }
+      ],
+      "note": "longest stretch p95 33.2 ms"
+    },
+    {
+      "row": "4 publish whole deck",
+      "measure": "a whole-deck publish (100 slide files, each changed) through A’s publishDoc: the host loop’s busy time over the call, median of 5",
+      "bound": "≤ 200 ms",
+      "limit": 200,
+      "unit": "ms",
+      "value": 153.89,
+      "judgedBy": "median",
+      "load": 4.36,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 176.92,
+          "load": 4.36,
+          "note": "loop’s longest stretch 92.2 ms; wall 178.9 ms"
+        },
+        {
+          "value": 152.9,
+          "load": 4.36,
+          "note": "loop’s longest stretch 86.2 ms; wall 154.9 ms"
+        },
+        {
+          "value": 146.22,
+          "load": 4.36,
+          "note": "loop’s longest stretch 82.5 ms; wall 148.2 ms"
+        },
+        {
+          "value": 153.89,
+          "load": 4.36,
+          "note": "loop’s longest stretch 154.9 ms; wall 154.9 ms"
+        },
+        {
+          "value": 157.98,
+          "load": 4.33,
+          "note": "loop’s longest stretch 159.0 ms; wall 159.0 ms"
+        }
+      ],
+      "note": "longest stretch max 159.0 ms"
+    },
+    {
+      "row": "2 drag p95",
+      "measure": "drag move to frame, p95 over 200 pointer moves, while the agent republishes one slide every 0.7 s through publishDoc",
+      "bound": "p95 ≤ 24 ms (host-faithful 18.2 to 20.5 ms on the mini; S7b 8.9 ms in the spike; the stand-in 15.4 ms)",
+      "limit": 24,
+      "unit": "ms",
+      "value": 20,
+      "judgedBy": "best",
+      "load": 4.63,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 20.4,
+          "load": 4.38,
+          "note": "167/200 moves wrote; move → transaction p95 19.7 ms; move → frame p50 11.3, max 22.9 ms; 0 long tasks; the agent published 8 slides (busy p95 39.9 ms)"
+        },
+        {
+          "value": 20.9,
+          "load": 4.63,
+          "note": "169/200 moves wrote; move → transaction p95 19.1 ms; move → frame p50 11.3, max 23.8 ms; 0 long tasks; the agent published 8 slides (busy p95 35.1 ms)"
+        },
+        {
+          "value": 20,
+          "load": 4.63,
+          "note": "167/200 moves wrote; move → transaction p95 18.9 ms; move → frame p50 11.6, max 24.2 ms; 0 long tasks; the agent published 8 slides (busy p95 35.4 ms)"
+        }
+      ]
+    },
+    {
+      "row": "5 preview",
+      "measure": "history preview of a version (the seeded one, against the deck after the run’s publishes and drags): the controller’s request to the slide drawn with its marks",
+      "bound": "≤ 1,000 ms",
+      "limit": 1000,
+      "unit": "ms",
+      "value": 62,
+      "judgedBy": "best",
+      "load": 5.97,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 77.4,
+          "load": 5.97
+        },
+        {
+          "value": 62,
+          "load": 5.97
+        },
+        {
+          "value": 76.9,
+          "load": 5.97
+        }
+      ]
+    },
+    {
+      "row": "3 renderer 1",
+      "measure": "the renderer’s working set (window 1) with the deck open after the drags and the previews, read after a forced collection",
+      "bound": "≤ 500 MB",
+      "limit": 500,
+      "unit": "MB",
+      "value": 332.1,
+      "judgedBy": "best",
+      "load": 5.97,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 332.1,
+          "load": 5.97
+        }
+      ],
+      "note": "445.5 MB before the collection"
+    },
+    {
+      "row": "5 preview heavy",
+      "measure": "history preview of a 3-month-old version of S7a’s heavy deck against today (generated in this job)",
+      "bound": "≤ 1,000 ms (M8’s bound)",
+      "limit": 1000,
+      "unit": "ms",
+      "value": 115.1,
+      "judgedBy": "best",
+      "load": 4.92,
+      "verdict": "met",
+      "trials": [
+        {
+          "value": 125.7,
+          "load": 4.92
+        },
+        {
+          "value": 117.1,
+          "load": 4.92
+        },
+        {
+          "value": 115.1,
+          "load": 4.92
+        }
+      ]
+    }
+  ]
+}

@@ -62,5 +62,6 @@
     "files": 853,
     "verified": "p3f-fetch-bundle.sh: run green, branch ci/p3f-final-de71da97, buildCommit = run head, wrapper parent = S, p3f-inspect-bundle.py passed; p3f-extract-out.py wrote W/out (853 files, every sha256 checked) and p3f-verify-out.py matched it exactly"
   },
-  "log": "/tmp/maws-review/gates/p3f-final-de71da97a-ci.log"
+  "log": "/tmp/maws-review/gates/p3f-final-de71da97a-ci.log",
+  "posture": "the mini read 2560x1440@1x remote=parsec on all 68 posture lines (the owner's Parsec viewer, 04:11Z to 06:21Z); architect ruling: the hand-back gate stands, its groups being functional (the 2026-10-18 Screen Sharing reading: a viewer affects durations and measured results, not a functional pass)"
 }

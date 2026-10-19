@@ -1,0 +1,60 @@
+{
+  "recordedAt": "2026-10-19T07:27:41Z",
+  "route": "mini, at the architect's GO (the MacBook's load1 read 120 to 160, structural; the owner delegated the choice); ruled as on S for the reruns' record (parent Decision Log 110)",
+  "run": 39210063850,
+  "attempt": 1,
+  "conclusion": "success",
+  "carrier": "fce560e3591474cabf4cb0030de054d4b7be4c2b",
+  "carrierChange": ".github/workflows/gate.yml only: the e2e job env sets MAWS_LIVE=1, MAWS_LIBRARY_LIVE=1, MAWS_LIVE_DOCUMENT=1 and the planned caps MAWS_LIVE_MAX_USD=0.15, MAWS_LIBRARY_LIVE_MAX_USD=0.10, MAWS_LIVE_DOCUMENT_MAX_USD=0.20 (design-live's script sets its required 1)",
+  "productTree": "S de71da97afa48f2b19d3caeccf71406544b03e2c (the carrier's only parent; the build is the job's own plain build of that tree)",
+  "engine": "2.1.303, unmodified, through ClaudeUsage's relay 127.0.0.1:8641, Haiku, scratch config",
+  "posture": "every job 2560x1440@2x remote=none at start and end",
+  "groups": {
+    "library-live": {
+      "passed": 1,
+      "skipped": 0,
+      "spendUsd": "0.0035",
+      "capUsd": "0.10"
+    },
+    "document-live": {
+      "passed": 1,
+      "skipped": 0,
+      "spendUsd": "0.0073",
+      "capUsd": "0.20"
+    },
+    "presentations-live": {
+      "passed": 1,
+      "skipped": 0,
+      "spendUsd": "0.0210",
+      "capUsd": "0.15"
+    },
+    "design-systems-live": {
+      "passed": 1,
+      "skipped": 0,
+      "spendUsd": "0.0078",
+      "capUsd": "0.15"
+    },
+    "design-live": {
+      "passed": 1,
+      "skipped": 0,
+      "spendUsd": "0.0796",
+      "capUsd": "1"
+    },
+    "dashboard-live": {
+      "passed": 1,
+      "skipped": 0,
+      "spendUsd": "0.0109",
+      "capUsd": "0.15"
+    },
+    "send-to-live": {
+      "passed": 1,
+      "skipped": 0,
+      "spendUsd": "0.0018",
+      "capUsd": "0.15"
+    }
+  },
+  "totalSpendUsd": "0.1319",
+  "childBudgetUsd": "2.00",
+  "ledger": "live/ledger.json",
+  "A15": "not applicable on the mini (it holds no owner ~/.claude.json); the cancelled MacBook attempt library-1 read A-15 before and after (/tmp/maws-review/p3f-live/library-1/a15-*.json) and never admitted an engine"
+}

@@ -1,6 +1,6 @@
 {
   "spec": "docs/doperpowers/plans/2026-10-18-p3-f-finish.md",
-  "phase": "M4.2: p3f-final green on S; bundle verified and extracted; paid reruns and the measurement gates under way",
+  "phase": "hand-back: S, gates, bundle, live reruns, measurement and live-data complete; owner sitting sheet finalisation (M2) and the architect's landing remain",
   "W-T": {
     "status": "source accepted at2c45e150f by39119260018; L265 full-set count remains0/5",
     "base": "1c007d713",
@@ -42,7 +42,7 @@
   "dragDiscriminator": "complete four jobs; alleged regression closed as confound by architect, no bisect; final absolute/preview/heavy half and parent-bound decision remain",
   "commitLock": "/private/tmp/maws-p3f-commit.lock",
   "helper": "/private/tmp/p3f-commit-row.py",
-  "paidSpendUsd": 0,
+  "paidSpendUsd": "0.1319",
   "preflight": {
     "runId": 39115417793,
     "attempt": 1,
@@ -1421,5 +1421,28 @@
   "postMerge": {
     "merge": "073d10446a5f43f0ae8f818b2f0d650c710cc66c",
     "record": "gates/post-merge.json"
+  },
+  "handBack": {
+    "S": "de71da97afa48f2b19d3caeccf71406544b03e2c",
+    "merge": "073d10446a5f43f0ae8f818b2f0d650c710cc66c",
+    "carrier": "fce560e3591474cabf4cb0030de054d4b7be4c2b",
+    "finalGate": 39202806940,
+    "measure": {
+      "valid": 39210430697,
+      "void": 39208915867
+    },
+    "livedata": 39210066820,
+    "live": 39210063850,
+    "postMerge": {
+      "pool": 39203174607,
+      "connectors": 39210067429
+    },
+    "bundleSha256": "f085148fb51b3a8476e7e78030c1e73cfb19df9c794ffe8c630f98732dce19a3",
+    "closures": [
+      "L216",
+      "L246",
+      "L253"
+    ],
+    "recordedAt": "2026-10-19T07:27:41Z"
   }
 }
