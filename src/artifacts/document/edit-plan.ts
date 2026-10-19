@@ -513,16 +513,29 @@ class Planner {
   }
 
   /**
-   * A container's new children paired with its old ones (S4's `patchChildren`): equal runs by type and text, then in
-   * order by type inside a changed run; paired children are patched, the rest are new (ids fresh unless their own).
+   * A container's new children paired with its old ones (S4's `patchChildren`): a child carrying an old child's id first,
+   * wherever it stands and whatever its type (format.md: a `^id` copied from the read keeps that block; a type change
+   * re-maps its marks); the rest by equal runs of type and text, then in order by type inside a changed run. Paired
+   * children are patched, the rest are new (ids fresh unless their own).
    */
   private alignChildren(old: PMNode[], neu: PMNode[], own: ReadonlySet<string>): PMNode[] {
-    const sig = (node: PMNode): DiffCell => ({ ch: EMBED, key: `${node.type.name}\u0000${node.textContent}` });
-    const hunks = diffCells(old.map(sig), neu.map(sig), { mergeWhitespace: false });
     const pairs = new Map<number, number>();
-    equalMap(old.length, hunks).forEach((n, o) => n !== undefined && pairs.set(n, o));
+    const byId = new Map<unknown, number>();
+    old.forEach((child, o) => typeof child.attrs.id === 'string' && !byId.has(child.attrs.id) && byId.set(child.attrs.id, o));
+    neu.forEach((child, n) => {
+      const o = byId.get(child.attrs.id);
+      if (o === undefined) return;
+      pairs.set(n, o);
+      byId.delete(child.attrs.id);
+    });
+    const taken = new Set(pairs.values());
+    const restOld = old.flatMap((_, o) => (taken.has(o) ? [] : [o]));
+    const restNeu = neu.flatMap((_, n) => (pairs.has(n) ? [] : [n]));
+    const sig = (node: PMNode): DiffCell => ({ ch: EMBED, key: `${node.type.name}\u0000${node.textContent}` });
+    const hunks = diffCells(restOld.map((o) => sig(old[o])), restNeu.map((n) => sig(neu[n])), { mergeWhitespace: false });
+    equalMap(restOld.length, hunks).forEach((n, o) => n !== undefined && pairs.set(restNeu[n], restOld[o]));
     for (const hunk of hunks) {
-      for (let o = hunk.from, n = hunk.nFrom; o < hunk.to && n < hunk.nTo && old[o].type === neu[n].type; o++, n++) pairs.set(n, o);
+      for (let o = hunk.from, n = hunk.nFrom; o < hunk.to && n < hunk.nTo && old[restOld[o]].type === neu[restNeu[n]].type; o++, n++) pairs.set(restNeu[n], restOld[o]);
     }
     return neu.map((child, n) => (pairs.has(n) ? this.patch(old[pairs.get(n)!], child) : this.withFreshIds(child, own)));
   }
