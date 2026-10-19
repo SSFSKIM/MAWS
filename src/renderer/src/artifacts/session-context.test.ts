@@ -163,6 +163,45 @@ describe('the owner’s Start', () => {
     expect(ready.listening('session.setup')).toBe(0);
   });
 
+  // P3-F F4 (c26): the owner's answer to a trust card, given on another surface, travels as the composer's card sends it
+  // (StartOptions.trust) with the start or the resume; nothing here answers it by itself.
+  it('answers a trust card with the folder it asks about, and carries the owner’s decision with the start or the resume', async () => {
+    const created = 'created' as AppSessionId;
+    const trust = { directory: '/work/app', trustKey: '/work/app', keyKind: 'directory', configPath: '/config/.claude.json', trusted: false, source: null, isHome: false, found: [] };
+    const asked = client({ 'session.create': { appSessionId: created, intent: intent(created) }, 'session.start': { status: 'needs_trust', appSessionId: created, trust } });
+    await expect(startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, null, asked.bridge)).resolves.toEqual({ status: 'card', appSessionId: created, words: 'Trust this folder in the session to continue', trust });
+
+    // the decision with the start of the session the first one made; the trust card this surface docked goes as it is answered
+    const decided = client({ 'session.start': { status: 'starting', appSessionId: created } });
+    await expect(startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, created, decided.bridge, 'accepted')).resolves.toMatchObject({ status: 'starting', appSessionId: created });
+    expect(decided.calls).toEqual([['session.start', { appSessionId: created, message: null, options: { requireEmptyMessage: true, trust: 'accepted' } }]]);
+    expect(useSetup.getState().cards.has(created)).toBe(false);
+
+    // with the resume of a record, its card asked again
+    useSessions.setState({ records: new Map([[OWN, { appId: OWN } as never]]) });
+    const resumed = client({ 'session.acquire': { status: 'ready', appSessionId: OWN, launched: true, joined: false } });
+    useSetup.getState().dock(OWN, { kind: 'trust', trust: trust as never, message: null });
+    await expect(startArtifactSession({ kind: 'session', appSessionId: OWN }, null, resumed.bridge, 'declined')).resolves.toEqual({ status: 'ready', appSessionId: OWN });
+    expect(resumed.calls).toEqual([['session.acquire', { appSessionId: OWN, reason: 'read', options: { requireEmptyMessage: true, trust: 'declined' } }]]);
+    expect(useSetup.getState().cards.has(OWN)).toBe(false);
+
+    // review B 2: an intent's card the composer docked with its own message is the composer's: it stays, main refusing the
+    // no-turn start while the intent's message waits
+    const message = { content: 'Draft the summary.', display: 'Draft the summary.' };
+    useSetup.getState().dock(created, { kind: 'trust', trust: trust as never, message });
+    const busy = client({ 'session.start': { status: 'refused', appSessionId: created, reason: 'busy', message: 'A prompt is waiting in this session' } });
+    await startArtifactSession({ kind: 'directory', path: '/work/app', projectId: P1 }, created, busy.bridge, 'accepted');
+    expect(useSetup.getState().cards.get(created)).toMatchObject({ kind: 'trust', message });
+
+    // a record's: its message never left the composer's draft (main keeps nothing for an acquisition), so the start goes
+    // ahead, and once the session is ready with the answer the card asking the same question goes
+    useSetup.getState().dock(OWN, { kind: 'trust', trust: trust as never, message });
+    const ready = client({ 'session.acquire': { status: 'ready', appSessionId: OWN, launched: true, joined: false } });
+    await expect(startArtifactSession({ kind: 'session', appSessionId: OWN }, null, ready.bridge, 'accepted')).resolves.toEqual({ status: 'ready', appSessionId: OWN });
+    expect(ready.calls).toEqual([['session.acquire', { appSessionId: OWN, reason: 'read', options: { requireEmptyMessage: true, trust: 'accepted' } }]]);
+    expect(useSetup.getState().cards.has(OWN), 'the answered question’s card goes; its text is still the composer’s draft').toBe(false);
+  });
+
   it('answers main’s refusal of a session holding a prompt with its words and the session to open', async () => {
     const earlier = 'earlier' as AppSessionId;
     useSetup.setState({ intents: new Map([[earlier, intent(earlier) as never]]) });

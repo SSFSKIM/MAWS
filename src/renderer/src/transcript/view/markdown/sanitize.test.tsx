@@ -1,9 +1,13 @@
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { setHostActions } from '../context';
+import { DEFAULT_ACTIONS } from '../default-actions';
 import { Markdown } from './Markdown';
 import { transcriptUrlTransform } from './sanitize';
 
 afterEach(cleanup);
+
+const ARTIFACT = '0b4f3c1e-6a2d-4c8e-9f1a-2b3c4d5e6f70';
 
 const HOSTILE = [
   'Hello <b>bold</b> and <script>alert(1)</script> and <img src="x" onerror="alert(2)">',
@@ -70,6 +74,20 @@ describe.each([false, true])('markdown sanitisation (live: %s)', (live) => {
     expect([...view().querySelectorAll('[data-chip="path"]')].map((chip) => chip.getAttribute('title'))).toEqual(['src/renderer/x.ts']);
   });
 
+  // P3-F wave S (F14, the owner's obs 2): an artifact link survives every gate as a chip that only calls an action; no
+  // element carries the href, so nothing loads or navigates by it
+  it('keeps a maws-artifact link as an artifact chip, never a navigable link', () => {
+    setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab: () => {} }); // App.tsx's host actions: the chip is drawn where a tab can open (Link.tsx)
+    try {
+      const root = render(<Markdown markdown={`Open [the plan](maws-artifact:${ARTIFACT}) now.`} live={live} />).container;
+      expect([...root.querySelectorAll('[data-chip="artifact"]')].map((chip) => [chip.tagName, chip.getAttribute('data-artifact-id'), chip.textContent])).toEqual([['BUTTON', ARTIFACT, 'the plan']]);
+      expect(root.querySelector('a')).toBeNull();
+      expect(root.innerHTML).not.toContain('maws-artifact:');
+    } finally {
+      setHostActions(DEFAULT_ACTIONS);
+    }
+  });
+
   it('loads no image by URL: a non-data image becomes an image chip, a data image stays', () => {
     const root = view();
     const sources = [...root.querySelectorAll('img')].map((img) => img.getAttribute('src'));
@@ -87,6 +105,7 @@ describe('transcriptUrlTransform', () => {
     ['mailto:x@y.z', 'href', 'mailto:x@y.z'],
     ['maws-path:src/x.ts', 'href', 'maws-path:src/x.ts'],
     ['maws-image:https://a.b/i.png', 'href', 'maws-image:https://a.b/i.png'],
+    ['maws-artifact:0b4f3c1e-6a2d-4c8e-9f1a-2b3c4d5e6f70', 'href', 'maws-artifact:0b4f3c1e-6a2d-4c8e-9f1a-2b3c4d5e6f70'], // P3-F wave S (F14)
     ['JavaScript:alert(1)', 'href', null],
     ['file:///etc/passwd', 'href', null],
     ['data:text/html,x', 'href', null],

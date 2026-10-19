@@ -33,7 +33,7 @@ describe('the Office mapping (Acceptance 3)', () => {
       accent4: 'B86A1A',
       accent5: 'C93B3B',
       accent6: theme.colors.accent6, // oklch(0.86 0.12 90), checked below
-      hlink: 'C9663F',
+      hlink: 'C9663F', // the extension declares its link colour (`{color.accent.$root}`), and keeps it
       folHlink: '6B6A66',
     });
     expect(theme.colors.accent6).toMatch(/^[0-9A-F]{6}$/);
@@ -53,7 +53,7 @@ describe('the Office mapping (Acceptance 3)', () => {
       accent4: 'B86A1A', // warn
       accent5: 'C93B3B', // error
       accent6: 'E3E2DF', // border (#14120e at 0.1) on #faf9f6
-      hlink: 'C9663F',
+      hlink: '1F1E1B', // text: a link is the text's colour unless the system declares its own (P3-F, F18)
       folHlink: '72716E',
     });
     // The fonts: the first face of font.display and of font.body that Office can name (generic families skipped).
@@ -66,7 +66,7 @@ describe('the Office mapping (Acceptance 3)', () => {
     const file = edited(complete, ['$extensions/dev.maws.office', { theme: { accent1: '#123456' }, fonts: { minor: { ea: 'Malgun Gothic' } } }]);
     const theme = officeTheme(set(file));
     expect(theme.colors.accent1).toBe('123456');
-    expect(theme.colors.hlink).toBe('C9663F'); // derived from the accent role, not from the slot
+    expect(theme.colors.hlink).toBe('1F1E1B'); // derived from the text role (P3-F, F18), not from the accent slot
     expect(theme.colors.dk1).toBe('1F1E1B');
     expect(theme.fonts).toEqual({ major: { latin: 'Iowan Old Style' }, minor: { latin: 'Inter', ea: 'Malgun Gothic' } });
   });
@@ -113,7 +113,7 @@ describe('overrides reach Office (Decision Log 25; B’s `dsOverrides`)', () => 
     const base = set(withoutOffice(complete));
     const theme = officeTheme(base, { '--ds-color-accent': '#123456', '--ds-color-text': 'rgb(16, 32, 48)', '--ds-color-status-ok': 'hsl(120 100% 25%)' });
     expect(theme.colors.accent1).toBe('123456');
-    expect(theme.colors.hlink).toBe('123456');
+    expect(theme.colors.hlink).toBe('102030'); // follows the text role's override, not the accent's (P3-F, F18)
     expect(theme.colors.dk1).toBe('102030');
     expect(theme.colors.accent3).toBe('008000');
     expect(theme.colors.accent2).toBe('3B6FD1'); // untouched roles stay
@@ -129,7 +129,7 @@ describe('overrides reach Office (Decision Log 25; B’s `dsOverrides`)', () => 
   it('a dev.maws.office slot aliasing the overridden token follows it; a slot written as a literal stays', () => {
     const theme = officeTheme(set(complete), { '--ds-color-accent': '#123456', '--ds-color-text-muted': '#00ff00', '--ds-color-status-info': '#abcdef', '--ds-color-highlight': '#fedcba' });
     expect(theme.colors.accent1).toBe('123456'); // "{color.accent.$root}"
-    expect(theme.colors.hlink).toBe('123456');
+    expect(theme.colors.hlink).toBe('123456'); // the declared link colour aliases the accent, so it follows that override
     expect(theme.colors.accent2).toBe('ABCDEF'); // "{color.status.info}"
     expect(theme.colors.accent6).toBe('FEDCBA'); // "{color.highlight}", a system's extra token
     expect(theme.colors.dk2).toBe('2C2B28'); // a literal slot

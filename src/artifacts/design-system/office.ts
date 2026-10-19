@@ -120,7 +120,7 @@ export function officeTheme(tokens: TokenSet, overrides?: TokenOverrides): Offic
     accent4: 'color.status.warn',
     accent5: 'color.status.error',
     accent6: 'color.border',
-    hlink: 'color.accent.$root',
+    hlink: 'color.text.$root', // P3-F (F18, the architect's ruling): a link is the text's colour unless the system declares one
     folHlink: 'color.text.muted',
   };
   const slot = (name: OfficeSlot): ColorValue => {

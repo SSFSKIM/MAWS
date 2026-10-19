@@ -303,6 +303,26 @@ describe('X9 artifact tools (E2)', () => {
     expect(MAWS_TOOLS.artifact_create.description).toContain('a document starts empty or from markdown content');
   });
 
+  // P3-F wave S (F14, the owner's obs 2): where the agent learns an artifact's id, it learns to link it for the human
+  it('tells the agent to write an artifact it names as a maws-artifact link, in the create and list descriptions', () => {
+    for (const name of ['artifact_create', 'artifact_list'] as const) expect(MAWS_TOOLS[name].description, name).toContain('[its title](maws-artifact:<artifactId>)');
+  });
+
+  // P3-F wave S (F5, the owner's DL13 change): a create into a Space, and the Space a listed artifact is in
+  it('admits a Space on artifact_create by its id or its name, answers and lists the Space, and says so in the descriptions', () => {
+    expect(parseToolArguments('artifact_create', { kind: 'presentation', title: 'Deck', space: 'P3 sitting' })).toEqual({ ok: true, data: { kind: 'presentation', title: 'Deck', space: 'P3 sitting' } });
+    expect(parseToolArguments('artifact_create', { kind: 'document', title: 'Note', space: UUID }).ok).toBe(true);
+    for (const space of ['', 'x'.repeat(201), 7]) expect(ArtifactCreateInputSchema.safeParse({ kind: 'presentation', title: 'Deck', space }).success, JSON.stringify(space)).toBe(false);
+    expect(mawsToolList().find((t) => t.name === 'artifact_create')!.inputSchema).toMatchObject({ properties: { space: { type: 'string', minLength: 1, maxLength: 200 } } });
+    expect(MAWS_TOOLS.artifact_create.description).toContain('space (a Space\'s id or its name)');
+    expect(MAWS_TOOLS.artifact_list.description).toContain('spaceId and spaceName');
+    const created = { status: 'created', artifactId: UUID, kind: 'presentation', title: 'Deck', revision: 0, spaceId: UUID, spaceName: 'P3 sitting' };
+    expect(ArtifactCreateResultSchema.safeParse(created).success).toBe(true);
+    expect(ArtifactCreateResultSchema.safeParse({ ...created, spaceId: 'not-a-uuid' }).success).toBe(false);
+    const listed = { id: UUID, kind: 'presentation', title: 'Deck', revision: 0, updatedAt: '2026-10-19T00:00:00.000Z', lastEditor: null, spaceId: UUID, spaceName: 'P3 sitting' };
+    expect(ArtifactListResultSchema.safeParse({ status: 'listed', artifacts: [listed] }).success).toBe(true);
+  });
+
   it('parses the results and refuses a stray key; the delivery fields read alike from every answer that registered an X12 version', () => {
     const created = { status: 'created', artifactId: UUID, kind: 'html', title: 'Dashboard', revision: 1, handle: 'dash', id: 'dash', deliverableId: UUID, version: 1, externalReferences: 0 };
     expect(ArtifactCreateResultSchema.safeParse(created).success).toBe(true);

@@ -3,6 +3,8 @@
 // Enter and Esc) is C7's `DockedCardFrame`, docked through `dockCard` by `SetupCard.tsx`.
 // "Trust and start" is the default (§3: sessions load project settings as the terminal does); "Start without trusting"
 // is the quiet secondary (owner's decision, §19).
+// P3-F F4 (fix wave, review B 1): what the card says of the folder is `TrustDetails`, which the comment's trust notice
+// (tools/document/comment-session.tsx) shows too, so an answer given there consents to the same words.
 import { TRUST_GATES, type TrustState } from '@shared/sessions/trust';
 import { PRIMARY, QUIET, SECONDARY } from './ui';
 
@@ -28,6 +30,26 @@ export function TrustCard({
 }) {
   return (
     <div className="flex flex-col gap-2.5 text-ui text-fg">
+      <TrustDetails trust={trust} />
+      <div className="flex items-center gap-2">
+        <button type="button" disabled={busy} onClick={onAccept} className={PRIMARY}>
+          Trust and start
+        </button>
+        <button type="button" disabled={busy} onClick={onStartWithoutTrusting} className={QUIET}>
+          Start without trusting
+        </button>
+        <button type="button" onClick={onDecline} className={`${SECONDARY} ml-auto`}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** What trusting the folder records and turns on: the folder, the config file and the repository key, what it holds. */
+export function TrustDetails({ trust }: { trust: TrustState }) {
+  return (
+    <>
       <p className="m-0 font-mono text-ui-sm break-all text-fg">{trust.directory}</p>
       {trust.isHome ? (
         <p className="m-0 text-fg-muted">{HOME_TRUST_COPY}</p>
@@ -60,17 +82,6 @@ export function TrustCard({
           )}
         </>
       )}
-      <div className="flex items-center gap-2">
-        <button type="button" disabled={busy} onClick={onAccept} className={PRIMARY}>
-          Trust and start
-        </button>
-        <button type="button" disabled={busy} onClick={onStartWithoutTrusting} className={QUIET}>
-          Start without trusting
-        </button>
-        <button type="button" onClick={onDecline} className={`${SECONDARY} ml-auto`}>
-          Cancel
-        </button>
-      </div>
-    </div>
+    </>
   );
 }

@@ -302,3 +302,61 @@ describe('fix wave 1: the text box stays within the slide’s text budget', () =
     expect(text(doc, 'title')[0]!.inline).toEqual([{ text: 'Planb', marks: {} }]);
   });
 });
+
+// P3-F wave S, F9 (docs/doperpowers/plans/2026-10-18-p3-f-finish.md, Wave S triage c43, obs 5a): a key the owner typed
+// on the selected element (the stage hands it over with the edit, `editText(id, { typed })`) is typed into the box once
+// it binds, over the text it opens with selected, as a key typed on a selection replaces it; nothing typed is dropped.
+describe('P3-F F9: the keys typed on the selected element before the box took the focus', () => {
+  const plain = (doc: Doc, id: string) => text(doc, id).map((b) => b.inline.map((r) => ('text' in r ? r.text : '\n')).join('')).join('\n');
+  function canvasOf(doc: Doc): SlideCanvas {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const canvas = new SlideCanvas(doc, 's1', host);
+    canvases.push(canvas);
+    return canvas;
+  }
+
+  it('are typed over the text the box opens with selected, the caret after them, one undo step with the typing after', () => {
+    const doc = deck();
+    const session = new DeckSession(doc, 0);
+    const canvas = canvasOf(doc);
+    act(() => {
+      session.select(['title']);
+      session.editText('title', { typed: 'Q' });
+      session.editText('title', { typed: '3' }); // a second key before the box mounted: kept, in order
+    });
+    render(<Harness session={session} canvas={canvas} />);
+    const root = canvas.node('title')!.querySelector('.deck-textbox') as HTMLElement & { editor: Editor };
+    expect(root.textContent).toBe('Q3');
+    expect(plain(doc, 'title')).toBe('Q3');
+    expect(document.activeElement).toBe(root);
+    expect([root.editor.state.selection.from, root.editor.state.selection.to]).toEqual([3, 3]);
+    act(() => void root.editor.commands.insertContent(' review'));
+    expect(plain(doc, 'title')).toBe('Q3 review');
+    act(() => session.undoStep());
+    expect(plain(doc, 'title')).toBe('Plan now.');
+    expect(session.snapshot().canUndo).toBe(false);
+  });
+
+  it('a key that reaches the stage while the box is already open goes in at its selection, typed once', () => {
+    const { doc, session, editor } = mount('list');
+    act(() => session.editText('list', { typed: 'x' }));
+    expect(plain(doc, 'list')).toBe('x');
+    expect(editor.state.doc.textContent).toBe('x');
+    act(() => session.editText('list', {})); // no key: nothing more typed
+    expect(plain(doc, 'list')).toBe('x');
+  });
+
+  it('keys typed for an edit that ended before its box bound are not typed into a later one', () => {
+    const doc = deck();
+    const session = new DeckSession(doc, 0);
+    act(() => {
+      session.editText('title', { typed: 'Q' });
+      session.editText(null);
+      session.editText('title'); // Enter: the box opens with nothing pending
+    });
+    render(<Harness session={session} canvas={canvasOf(doc)} />);
+    expect(plain(doc, 'title')).toBe('Plan now.');
+    expect(session.takeTyped('title')).toBeNull();
+  });
+});

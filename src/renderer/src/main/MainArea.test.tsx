@@ -679,11 +679,11 @@ describe('⌃Tab follows DOM focus', () => {
   });
 });
 
-// W12 (I3, §5.2 as amended 2026-10-01): each project has its own tab set; the strip shows the current one, its project
-// named at the strip's left edge.
+// W12 (I3, §5.2 as amended 2026-10-01): each project has its own tab set; the strip shows the current one. P3-F wave S
+// (F17, the owner's obs 8): its project is named by the title bar's chip, and the strip carries no project item.
 describe('tab sets per project', () => {
   beforeEach(() => fileTabsByProject());
-  const label = () => within(main()).queryByRole('button', { name: /^Tabs of / });
+  const label = () => document.querySelector<HTMLElement>('[data-toolbar] [data-toolbar-project]');
   // W11: a project row's line, which a click activates (the row toggles and the strip shows the project's set)
   const projectRow = (name: string) =>
     within(document.querySelector<HTMLElement>('[data-region="sidebar"]')!).getByRole('treeitem', { name }).querySelector<HTMLElement>('[data-project-line]')!;
@@ -708,9 +708,11 @@ describe('tab sets per project', () => {
     expect(selected()).toBe('Fix sidebar drag · MAWS');
     await act(async () => runAction('tab.select', 1));
     expect(selected()).toBe('Charter + research · MAWS');
-    // the label reveals its project in the sidebar
+    expect(main().querySelector('[data-strip-project]')).toBeNull(); // the strip names no project
+    // the chip's context menu reveals its project in the sidebar
     act(() => useLayout.getState().setSidebar({ expandedProjects: [] }));
-    await user.click(label()!);
+    fireEvent.contextMenu(label()!);
+    await user.click(await screen.findByRole('menuitem', { name: 'Reveal in sidebar' }));
     expect(useLayout.getState().regions.sidebar.expandedProjects).toEqual(['proj-maws']);
   });
 

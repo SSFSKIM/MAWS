@@ -126,7 +126,9 @@ export default defineConfig({
           environment: 'happy-dom',
           include: [ARTIFACTS_DOM_TESTS],
           setupFiles: HAPPY_DOM_SETUP,
-          css: { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/] },
+          // P3-F F3: the deck and design editors' sheets as text only (`?raw`, the toolbar suite), never injected into
+          // their DOM suites (the plain `import './chrome.css'` stays blank: the pattern is read against the id's query)
+          css: { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/, /\/(slides|design)\/editor\/.+\.css\?raw$/] },
         },
       },
       // P3-B end

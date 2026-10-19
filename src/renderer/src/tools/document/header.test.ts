@@ -21,6 +21,7 @@ const state = (fields: Partial<DocumentHeaderState> = {}): DocumentHeaderState =
   history: true,
   suggestions: false,
   exporting: null,
+  shown: null, // P3-F (F7)
   ...fields,
 });
 
@@ -101,7 +102,16 @@ describe('documentHeader', () => {
     expect(failed.exports!.every((e) => !e.disabled)).toBe(true);
     const long = documentHeader(state({ exporting: { phase: 'failed', format: 'md', message: 'x'.repeat(200) } }), c);
     expect(long.actions![1].label.length).toBeLessThanOrEqual(80);
-    const done = documentHeader(state({ exporting: { phase: 'done', format: 'html', path: '/tmp/a/7-html.html' } }), c);
-    expect(done.actions![1]).toMatchObject({ id: 'export', label: 'Exported 7-html.html' });
+  });
+
+  // P3-F (8.2, F7; c65): an export saved says where in a toast (the tab's), so the header keeps no "Exported …" item that
+  // only dismissed itself; while two versions are compared nothing is exported, as the deck's Export (L233)
+  it('keeps no finished export in the header, and offers no export while two versions are compared', () => {
+    const c = commands();
+    expect(documentHeader(state(), c).actions!.some((a) => a.id === 'export')).toBe(false);
+    const comparing = documentHeader(state({ previewing: true, shown: 'compare' }), c);
+    expect(comparing.exports!.map((e) => e.disabled)).toEqual([true, true, true, true, true, true]);
+    const version = documentHeader(state({ previewing: true, shown: { versionId: 3 } }), c);
+    expect(version.exports!.every((e) => !e.disabled), 'a version shown exports that version').toBe(true);
   });
 });

@@ -3,17 +3,14 @@
 // focused tab and Delete closes it. Overflow scrolls horizontally with the active tab kept in view. Drops: a tab
 // (`application/x-maws-tab`) moves to the pointer's position, computed against the tabs' midpoints, and a sidebar row
 // (`application/x-maws-session`) opens its session there. Under a split the focused pane's strip carries an accent
-// inset. W12 (I3): the strips show the current project's tab set, whose name labels the left one.
+// inset. W12 (I3): the strips show the current project's tab set; P3-F wave S (F17, the owner's obs 8): its name is the
+// title bar's project chip (app/Toolbar.tsx), so the crowded strip carries tabs only.
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { NO_PROJECT } from '@shared/ipc/schema/layout';
-import { FolderIcon } from '../app/IconButton';
 import { createSession, focusedProject, NEW_CHAT, requestCloseTab, useSessionCreatorRegistered } from '../keymap/actions-runtime';
-import { revealProject } from '../sidebar/reveal';
 import { SESSION_DRAG_TYPE } from '../sidebar/SessionRow';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
-import { useSessions } from '../stores/sessions';
 import { Tab, TAB_DRAG_TYPE } from './Tab';
 
 export { TAB_DRAG_TYPE };
@@ -122,7 +119,6 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
 
   return (
     <div className="relative flex h-10 shrink-0 items-stretch border-b border-border">
-      {pane === 0 && <ProjectLabel />}
       <div
         ref={strip}
         role="tablist"
@@ -155,28 +151,6 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
       {/* The focused pane's mark under a split, drawn over the tabs rather than under their backgrounds. */}
       {split && focused && <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-accent" />}
     </div>
-  );
-}
-
-// W12 (§5.2 as amended 2026-10-01): the name of the project whose tab set the strips show, at the left strip's edge, so a
-// strip that changed with a project is never a surprise; a click reveals the project in the sidebar. The no-project set
-// (and a project the index no longer lists) shows none.
-function ProjectLabel() {
-  const current = useLayout((s) => s.main.current);
-  const project = useSessions((s) => (current === NO_PROJECT ? undefined : s.projects.get(current)));
-  if (!project) return null;
-  return (
-    <button
-      type="button"
-      data-strip-project={project.id}
-      aria-label={`Tabs of ${project.name}`}
-      title={project.hidden ? 'Show in sidebar' : `Reveal ${project.name} in the sidebar`}
-      onClick={() => void revealProject(project.id)}
-      className="flex max-w-48 shrink-0 items-center gap-1.5 border-r border-border px-2.5 text-ui-sm text-fg-muted outline-accent select-none hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:-outline-offset-2"
-    >
-      <FolderIcon className="size-[12px] shrink-0" />
-      <span className="truncate">{project.name}</span>
-    </button>
   );
 }
 

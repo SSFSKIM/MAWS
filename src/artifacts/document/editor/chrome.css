@@ -78,19 +78,61 @@
   padding: var(--space) calc(var(--space) * 3);
   white-space: nowrap;
 }
+/* P3-F (the owner's observation 3): a tab holds its title and its ×, Delete, shown on hover and on the selected tab */
+.doc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space);
+  cursor: default;
+  user-select: none;
+}
 .doc-tab:hover {
   background: var(--bg-hover);
+}
+.doc-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .doc-tab[aria-selected="true"] {
   color: var(--fg);
   background: var(--bg-active);
+}
+.doc-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--space) * 4);
+  height: calc(var(--space) * 4);
+  margin-right: calc(var(--space) * -1.5);
+  padding: 0;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  visibility: hidden;
+}
+.doc-tab:hover .doc-tab-close,
+.doc-tab:focus-visible .doc-tab-close,
+.doc-tab[aria-selected="true"] .doc-tab-close {
+  visibility: visible;
+}
+.doc-tab-close:hover {
+  color: var(--fg);
+  background: var(--bg-active);
+}
+.doc-tab-close svg {
+  width: calc(var(--space) * 2.5);
+  height: calc(var(--space) * 2.5);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
 }
 .doc-tab-title {
   color: var(--fg);
   border-color: var(--border-strong);
   background: var(--bg-raised);
 }
-.doc-tab-menu-anchor,
 .doc-menu-anchor {
   position: relative;
   display: inline-flex;
@@ -244,9 +286,99 @@
   box-shadow: var(--shadow-float);
   padding: var(--space);
 }
-.doc-tab-menu-anchor .doc-menu {
-  left: auto;
-  right: 0;
+/* a tab's context menu (Radix, placed at the pointer) and the question before a tab with content is deleted (P3-F) */
+.doc-tab-menu {
+  z-index: 50;
+  min-width: calc(var(--space) * 40);
+  padding: var(--space);
+  color: var(--fg);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+}
+.doc-tab-menu-item {
+  padding: calc(var(--space) * 1.5) calc(var(--space) * 2);
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: default;
+  user-select: none;
+}
+.doc-tab-menu-item[data-highlighted] {
+  background: var(--bg-hover);
+}
+.doc-tab-menu-item[data-danger]:not([data-disabled]) {
+  color: var(--danger);
+}
+.doc-tab-menu-item[data-disabled] {
+  color: var(--fg-faint);
+}
+.doc-tab-menu-separator {
+  height: 1px;
+  margin: var(--space) 0;
+  background: var(--border);
+}
+.doc-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--bg);
+  opacity: 0.6;
+}
+.doc-confirm {
+  position: fixed;
+  top: 24%;
+  left: 50%;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space) * 3);
+  width: min(calc(var(--space) * 110), 90vw);
+  padding: calc(var(--space) * 4);
+  color: var(--fg);
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+  transform: translateX(-50%);
+}
+.doc-confirm-title {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.doc-confirm-description {
+  margin: 0;
+  color: var(--fg-muted);
+}
+.doc-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: calc(var(--space) * 2);
+}
+.doc-confirm-button {
+  font: inherit;
+  padding: calc(var(--space) * 0.5) calc(var(--space) * 2);
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.doc-confirm-button:hover {
+  background: var(--bg-hover);
+}
+.doc-confirm-button[data-danger] {
+  color: var(--bg);
+  background: var(--danger);
+  border-color: transparent;
+}
+.doc-confirm-button[data-danger]:hover {
+  opacity: 0.9;
+  background: var(--danger);
 }
 .doc-menu {
   display: flex;
@@ -809,7 +941,12 @@
   position: absolute;
   z-index: 3;
 }
+/* the list stacks under its header (a popover lays its children in a row, which squeezed the title to a word a line and
+   put the × under the pointer that chose Show editors at the corner; P3-F, sitting candidate 29): the title on one line,
+   the × at the header's far end */
 .doc-editors {
+  flex-direction: column;
+  align-items: stretch;
   min-width: calc(var(--space) * 56);
 }
 .doc-editors-header {
@@ -818,6 +955,9 @@
   justify-content: space-between;
   gap: var(--space);
   font-weight: 600;
+}
+.doc-editors-title {
+  white-space: nowrap;
 }
 .doc-editors-list {
   display: flex;

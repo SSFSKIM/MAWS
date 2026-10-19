@@ -101,6 +101,25 @@ describe('artifact_create of a document', () => {
     expect(json(await call(create, args))).toMatchObject({ status: 'created', handle: 'atomic' });
   });
 
+  // P3-F wave S (F5, the owner's DL13 change; candidate 5's note was a document)
+  it('creates a document into the Space it names, styled by the Space’s default, and refuses an unknown Space by name', async () => {
+    const create = documentCreateTool(deps());
+    const sitting = await world.store.createSpace({ name: 'P3 sitting' });
+    const brand = await world.store.create({ kind: 'design_system', title: 'Brand' }, HUMAN);
+    await world.store.setDefaults({ owner: null, spaces: { [sitting.id]: brand.id } });
+    world.store.registerDesignSystemContext(async (s) => `# DESIGN of ${s.title}`);
+    const note = json<{ artifactId: string }>(await call(create, { kind: 'document', title: 'Sitting note', content: 'Seen at 08:24.', space: 'P3 sitting' }));
+    expect(note).toMatchObject({ spaceId: sitting.id, spaceName: 'P3 sitting', designSystem: '# DESIGN of Brand' });
+    expect(world.store.get(note.artifactId)).toMatchObject({ spaceId: sitting.id });
+    expect(world.store.get(note.artifactId)!.designSystemId).toBeUndefined();
+    const plain = json(await call(create, { kind: 'document', title: 'Plain note', space: sitting.id }));
+    expect(plain).toMatchObject({ spaceId: sitting.id, spaceName: 'P3 sitting' });
+    const unknown = await call(create, { kind: 'document', title: 'Lost', space: 'Elsewhere' });
+    expect(refusalOf(unknown)).toEqual({ reason: 'notFound', space: 'Elsewhere' });
+    expect(textOfResult(unknown)).toContain('no Space "Elsewhere"');
+    expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Lost')).toEqual([]);
+  });
+
   it('hands every other kind to the tool it wraps', async () => {
     const fallback: McpToolDefinition = { name: 'artifact_create', title: 'A', description: 'A', inputSchema: {}, annotations: {}, call: async () => ({ content: [{ type: 'text', text: 'A answered' }] }) };
     expect(textOfResult(await call(documentCreateTool(deps(), fallback), { kind: 'html', title: 'x', content: '<p>x</p>' }))).toBe('A answered');
@@ -353,6 +372,75 @@ describe('artifact_edit', () => {
     const { id, revision } = await readSeed();
     refusalOf(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'replace_text', old: 'no such words', new: 'x' }] }));
     expect(world.service.replica(SELF, id).provider.awareness.getLocalState() ?? {}).not.toHaveProperty('editing');
+  });
+
+  // P3-F wave S (F19, sitting candidate 21): the outline the owner missed at 1.5 s holds 4 s after the last batch commits
+  it('holds the outline 4 s after the last batch commits, a later batch re-arming the hold', async () => {
+    const { id, revision } = await readSeed();
+    const tool = artifactEditTool(deps({ presenceEditingMs: undefined })); // the build's own hold
+    const editing = () => (world.service.replica(SELF, id).provider.awareness.getLocalState() as { editing?: { blocks: string[] } } | null)?.editing?.blocks;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const first = json<{ revision: number }>(await call(tool, { artifact: id, baseRevision: revision, ops: [{ op: 'replace_text', block: 'p2', old: 'scheduled for Friday', new: 'scheduled for Monday' }] }));
+      expect(editing()).toEqual(['p2']);
+      vi.advanceTimersByTime(3_000);
+      expect(editing(), 'still outlined 3 s after the batch').toEqual(['p2']);
+      const second = json<{ results: Array<{ newIds: string[] }> }>(await call(tool, { artifact: id, baseRevision: first.revision, ops: [{ op: 'insert', after: 'h1', markdown: 'Later.' }] }));
+      const inserted = second.results[0].newIds[0];
+      expect(editing()).toEqual([inserted]);
+      vi.advanceTimersByTime(3_999);
+      expect(editing(), 'the first batch’s timer was cleared: the hold runs from the last batch').toEqual([inserted]);
+      vi.advanceTimersByTime(1);
+      expect(editing()).toBeUndefined();
+      expect(world.service.replica(SELF, id).provider.awareness.getLocalState()).toMatchObject({ name: expect.any(String), color: expect.any(String) });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a batch that fails after its frame published releases its outline at once, and its turn’s end clears it', async () => {
+    const { id, revision } = await readSeed();
+    const tool = artifactEditTool(deps({ presenceEditingMs: undefined }));
+    const shown = () => world.service.replica(SELF, id).provider.awareness.getLocalState() as { editing?: { blocks: string[] } } | null;
+    vi.spyOn(world.store, 'link').mockRejectedValueOnce(new Error('the link row failed')); // after the frame published and held
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await expect(call(tool, { artifact: id, baseRevision: revision, ops: [{ op: 'replace_text', block: 'p2', old: 'scheduled for Friday', new: 'scheduled for Monday' }] })).rejects.toThrow('the link row failed');
+      expect(shown(), 'no outline left drawn by the failed batch').not.toHaveProperty('editing');
+      expect(shown()).toMatchObject({ name: expect.any(String), color: expect.any(String) });
+      await world.store.endTurn(SELF);
+      expect(shown(), 'nothing held: the turn’s end clears at once').toBeNull();
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('a turn that ends inside the hold leaves the outline to it, and nothing after; a turn with no held outline clears at once', async () => {
+    const { id, revision } = await readSeed();
+    const tool = artifactEditTool(deps({ presenceEditingMs: undefined }));
+    const shown = () => world.service.replica(SELF, id).provider.awareness.getLocalState() as { editing?: { blocks: string[] } } | null;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const first = json<{ revision: number }>(await call(tool, { artifact: id, baseRevision: revision, ops: [{ op: 'replace_text', block: 'p2', old: 'scheduled for Friday', new: 'scheduled for Monday' }] }));
+      vi.advanceTimersByTime(1_000);
+      await world.store.endTurn(SELF);
+      expect(shown()?.editing?.blocks, 'the turn ended 1 s after the batch: the outline keeps the rest of its hold').toEqual(['p2']);
+      vi.advanceTimersByTime(2_999);
+      expect(shown()?.editing?.blocks).toEqual(['p2']);
+      vi.advanceTimersByTime(1);
+      expect(shown(), 'the hold expired after the turn: no name-only state left behind').toBeNull();
+
+      // the next turn: its batch's hold expires inside the turn (the name stays), then the turn ends and clears at once
+      json(await call(tool, { artifact: id, baseRevision: first.revision, ops: [{ op: 'insert', after: 'h1', markdown: 'Later.' }] }));
+      vi.advanceTimersByTime(4_000);
+      expect(shown()).toMatchObject({ name: expect.any(String), color: expect.any(String) });
+      expect(shown()).not.toHaveProperty('editing');
+      await world.store.endTurn(SELF);
+      expect(shown()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('the turn’s end writes a turn version whose summary is the batch’s lines', async () => {

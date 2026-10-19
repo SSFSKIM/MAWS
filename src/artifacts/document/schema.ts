@@ -6,9 +6,10 @@
 // (node views and the editor live in editor/). Copied and typed from P3-0's spikes (s1/v14/schema.mjs, S3's and S4's
 // additions, S5's comment mark), Tiptap 3.31.3 on `@y/prosemirror` 2.0.0-15; the attribution hardening adapted from
 // upstream's yhub-tiptap-demo/src/schema.js (MIT).
-import { getSchema, Mark, mergeAttributes, Node, type AnyExtension, type Extensions, type RawCommands } from '@tiptap/core';
-import type { Mark as PMMark, Schema, Slice } from '@tiptap/pm/model';
-import { Plugin, type EditorState } from '@tiptap/pm/state';
+import { getSchema, Mark, mergeAttributes, Node, type AnyExtension, type Editor, type Extensions, type KeyboardShortcutCommand, type RawCommands } from '@tiptap/core';
+import type { Mark as PMMark, Node as PMNode, Schema, Slice } from '@tiptap/pm/model';
+import { Plugin, TextSelection, type EditorState } from '@tiptap/pm/state';
+import { isInTable, moveCellForward, selectionCell } from '@tiptap/pm/tables'; // P3-F (c17)
 import type { Step } from '@tiptap/pm/transform'; // F (L170)
 import { Blockquote } from '@tiptap/extension-blockquote';
 import { Bold } from '@tiptap/extension-bold';
@@ -243,6 +244,46 @@ const guarded = <E extends AnyExtension>(ext: E): E =>
     },
   });
 
+// ── Tab and Shift-Tab in a table (P3-F, sitting candidate 17) ──
+// Into the next or the previous cell, Tab from the last cell adding a row first, as Tiptap's keymap does. A cell with no
+// textblock (`block*`: the cells of a row just added, before the editor's cell fill gives them a paragraph; an agent's
+// or an import's empty cell) gets its empty paragraph in the same transaction, since prosemirror-tables' text selection
+// has nowhere to stand in it and falls back into the cell left (the typing then landed after the old cell's date chip).
+// The cell after (`dir` 1) or before the cell at `cellPos` in document order: its row's next (previous) cell, else the
+// first (last) cell of the next (previous) row that has one; null at the table's end. Walked by structure, as
+// prosemirror-tables' own findNextCell does (not exported), never through the table map: a ragged table's empty slots
+// read 0 there and a cell lost to a span collision is missing (the review of c17).
+function adjacentCell(doc: PMNode, cellPos: number, dir: 1 | -1): number | null {
+  const $cell = doc.resolve(cellPos);
+  const [row, table] = [$cell.parent, $cell.node(-1)];
+  if (dir > 0 && $cell.index() < row.childCount - 1) return cellPos + $cell.nodeAfter!.nodeSize;
+  if (dir < 0 && $cell.nodeBefore) return cellPos - $cell.nodeBefore.nodeSize;
+  let edge = dir > 0 ? $cell.after() : $cell.before(); // the far side of the current row
+  for (let at = $cell.index(-1) + dir; at >= 0 && at < table.childCount; at += dir) {
+    const other = table.child(at);
+    if (other.childCount > 0) return dir > 0 ? edge + 1 : edge - 1 - other.lastChild!.nodeSize;
+    edge += dir * other.nodeSize;
+  }
+  return null;
+}
+function enterCell(editor: Editor, dir: 1 | -1): boolean {
+  if (!isInTable(editor.state)) return false;
+  const from = selectionCell(editor.state).pos;
+  const next = adjacentCell(editor.state.doc, from, dir);
+  if (next === null && (dir < 0 || !editor.can().addRowAfter())) return false;
+  const chain = editor.chain();
+  return (next === null ? chain.addRowAfter() : chain)
+    .command(({ tr }) => {
+      const at = next ?? adjacentCell(tr.doc, from, 1);
+      if (at === null) return false;
+      if (tr.doc.nodeAt(at)!.childCount === 0) tr.insert(at + 1, tr.doc.type.schema.nodes.paragraph.create());
+      const $cell = tr.doc.resolve(at);
+      tr.setSelection(TextSelection.between($cell, moveCellForward($cell))).scrollIntoView();
+      return true;
+    })
+    .run();
+}
+
 // ── relaxed `--attributed` variants of the strict containers ──
 // The binding renders a container holding a deleted child under `<name>--attributed` (a looser content expression);
 // the variants carry every canonical attribute, the id included, or rendered attributes stop matching (S1 pitfall 5).
@@ -394,7 +435,15 @@ export const extensions = ({ generateID = (): string => nanoid8() }: { generateI
   // a passage retyped to code keeps its comments (S5 pitfall 5)
   CodeBlock.extend({ marks: `${A} comment` }),
   HorizontalRule,
-  guarded(Table.extend({ marks: A, content: 'tableRow*' })),
+  guarded(
+    Table.extend({
+      marks: A,
+      content: 'tableRow*',
+      addKeyboardShortcuts(this: { parent?: () => Record<string, KeyboardShortcutCommand>; editor: Editor }) {
+        return { ...this.parent?.(), Tab: () => enterCell(this.editor, 1), 'Shift-Tab': () => enterCell(this.editor, -1) }; // P3-F (c17)
+      },
+    }),
+  ),
   TableRow.extend({ marks: A }),
   TableCell.extend({ marks: A, content: 'block*' }),
   TableHeader.extend({ marks: A, content: 'block*' }),

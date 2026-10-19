@@ -26,7 +26,8 @@ import { adoptTerminals, terminalTool } from './tools/terminal';
 import { ComposerAppKeys, connectComposer, connectInlineEdit, WidgetDialogHost } from './composer';
 import { connectRequestCard } from './request-card';
 import { connectStatusLine } from './statusline';
-import { registerTranscriptActions } from './transcript';
+import { DEFAULT_ACTIONS, registerTranscriptActions } from './transcript';
+import { setHostActions } from './transcript/view/context'; // P3-F wave S (F14 review 2)
 // C7 end
 // C8c start
 import { connectCodeEvents } from './ipc/events';
@@ -112,6 +113,7 @@ import { registerTranscriptActions as registerBrowserAgentTranscriptActions } fr
 // E4c end
 // P3-L start
 import { registerArtifactTabs } from './library/ArtifactTab';
+import { openArtifactTab } from './library/actions'; // P3-F wave S (F14)
 import { artifactsTool, openArtifactInPanel } from './tools/artifacts/ArtifactsTool';
 import { registerByteViewers } from './tools/artifacts/viewers/register';
 import { Library } from './library/Library';
@@ -142,6 +144,10 @@ registerSetupIntentHook(useSetupIntent);
 // so it is provided at module load, before any page renders, and fixed for the page's life (C7's rule, as C10's above)
 provideDocumentDesignSystem(DOCUMENT_DESIGN_SYSTEM);
 // P3-D end
+// P3-F wave S (F14 review 2): the actions a Markdown surface outside any Transcript reads (the Side tool's answer, the ask
+// sheet's previews, the Code tool's preview, a plugin surface) open an artifact link's main tab, so its chip works there;
+// at module load, before any surface renders
+setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab });
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
@@ -264,7 +270,7 @@ export function App() {
   useEffect(() => {
     registerPanelTool(artifactsTool);
   }, []);
-  useEffect(() => registerArtifactTranscriptActions({ openArtifact: openArtifactInPanel }), []);
+  useEffect(() => registerArtifactTranscriptActions({ openArtifact: openArtifactInPanel, openArtifactTab }), []); // P3-F wave S (F14): openArtifactTab, an artifact link's ⌘-click
   // E2 end
   // E10 start: the supervisor's update and incompatibility banners and its crash toast, from main's host.status; this
   // connects the hosts store app-wide (Diagnostics and Settings read it too)

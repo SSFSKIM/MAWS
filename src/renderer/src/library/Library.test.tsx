@@ -21,7 +21,7 @@ import { useLibraryDialog } from './dialogs';
 import { resetExportFormats } from './export';
 import { Library } from './Library';
 import { connectLibrary, resetLibrary } from './store';
-import { resetLibraryView } from './view';
+import { resetLibraryView, setLibraryView } from './view';
 
 const id = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
 const WORK = id(0xa1);
@@ -613,6 +613,31 @@ describe('Make something new', () => {
     await waitFor(() => expect(creator).toHaveBeenCalledWith(null));
     expect(useComposerStore.getState().prefills.get(S(7))).toEqual({ text: 'Make a presentation: ' });
     expect(tabIds()).toContain('session:app-s7');
+  });
+
+  // P3-F wave S (F5, the owner's DL13 change): Ask Claude from a Space starts in the Space's folder and names the Space
+  it('Ask Claude from a Space starts in its linked folder’s project, else the focused project, and the prefill names the Space', async () => {
+    const creator = vi.fn(async () => S(8));
+    offs.push(registerSessionCreator(creator));
+    const location = { kind: 'directory', path: '/Users/me/work' };
+    answers['session.projects.addFolder'] = () => ok({ project: { id: 'p-9', name: 'work', directory: '/Users/me/work', order: 3, createdAt: '2026-10-01T00:00:00.000Z' }, location });
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK }));
+    render(<Library />);
+    const section = await screen.findByRole('region', { name: 'Make something new' });
+    const card = (kind: string) => within(section).getByRole('group', { name: kind });
+
+    await user.click(await within(card('Presentation')).findByRole('button', { name: 'Ask Claude to make a presentation in the Space “Work”' }));
+    await waitFor(() => expect(creator).toHaveBeenCalledWith('p-9', location));
+    expect(main.callsOf('session.projects.addFolder')).toEqual([{ directory: '/Users/me/work' }]);
+    expect(useComposerStore.getState().prefills.get(S(8))).toEqual({ text: 'Make a presentation in the Space “Work”: ' });
+
+    act(() => setLibraryView({ spaceId: HOME })); // a Space with no linked folder
+    await user.click(await within(card('Document')).findByRole('button', { name: 'Ask Claude to make a document in the Space “Home”' }));
+    await waitFor(() => expect(creator).toHaveBeenCalledTimes(2));
+    expect(creator).toHaveBeenLastCalledWith(null);
+    expect(main.callsOf('session.projects.addFolder')).toHaveLength(1);
+    expect(useComposerStore.getState().prefills.get(S(8))).toEqual({ text: 'Make a document in the Space “Home”: ' });
   });
 
   it('a kind whose editor lands later gains its New at once', async () => {

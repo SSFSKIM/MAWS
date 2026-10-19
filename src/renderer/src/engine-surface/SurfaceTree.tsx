@@ -8,7 +8,7 @@
 // element requires client JavaScript, deferred in R3: it draws MAWS native instead.
 import { createContext, useContext, useId, useState, type MouseEvent, type ReactNode } from 'react';
 import { SURFACE_VALUE_MAX } from '@shared/engine/surface';
-import { Markdown } from '../transcript';
+import { Markdown, registeredActions } from '../transcript';
 import { input as sendInput, press as sendPress, select as sendSelect, type Site } from './actions';
 import { boxStyle, textStyle } from './style';
 import { firstEngineNode, type SurfaceNode } from './tree';
@@ -289,8 +289,19 @@ function MarkdownNode({ node }: { node: Extract<SurfaceNode, { type: 'Markdown' 
   const { site } = useSurface();
   const { text, dimColor, pressableLinks, key } = node.props;
   // links: the plugin's own when it answers them (a press carrying the href), else the app's link handling; the
-  // transcript's link component is not mounted under a transcript here, so the click is taken before it
+  // transcript's link component is not mounted under a transcript here, so the click is taken before it. P3-F wave S
+  // (F14): an artifact chip is MAWS's own, opened for this surface's session as the transcript opens it (the panel; a
+  // ⌘-click, its main tab)
   const onClickCapture = (event: MouseEvent<HTMLDivElement>) => {
+    const artifactId = (event.target as HTMLElement).closest<HTMLElement>('[data-chip="artifact"]')?.dataset.artifactId;
+    if (artifactId) {
+      event.preventDefault();
+      event.stopPropagation();
+      const actions = registeredActions();
+      if (event.metaKey && actions.openArtifactTab) actions.openArtifactTab(artifactId);
+      else actions.openArtifact(site.appSessionId, artifactId);
+      return;
+    }
     const anchor = (event.target as HTMLElement).closest('a[href]');
     if (!anchor) return;
     event.preventDefault();

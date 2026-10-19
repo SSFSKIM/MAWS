@@ -759,6 +759,38 @@ describe('a rail the caller holds', () => {
     void editor;
   });
 
+  // P3-F (8.2, F7): what the editor shows goes with the preview's report, so the header's Export exports it (the deck's
+  // rule, L233): the version previewed, two compared, then the live document again.
+  it('tells the caller which version a preview shows, that two are compared, and the live document once history is left', async () => {
+    let first = 0;
+    const { history: h } = await setup(async ({ history: hist, agentWrites }) => {
+      await agentWrites(agentAppends(' Before the first.'));
+      first = hist.version('named', HUMAN, { label: 'First' }).id;
+      await agentWrites(agentAppends(' After the first.'));
+      hist.version('named', HUMAN, { label: 'Third' });
+    });
+    cleanup();
+    const handle = openMemoryHandle(host!, { log: () => {}, actor: HUMAN });
+    handles.push(handle);
+    await whenSynced(handle);
+    const told: unknown[][] = [];
+    const mount = (rail: 'history' | null) => (
+      <DocumentEditor artifactId="doc1" handle={handle} host={memoryEditorHost({ actor: HUMAN, name: 'Owner', color: '--author-2' })} history={h} rail={rail} onRailChange={() => {}} onPreviewChange={(...args) => told.push(args)} />
+    );
+    const { rerender } = render(mount('history'));
+    await until(() => screen.queryByRole('complementary', { name: 'Version history' }) !== null && within(rail()).queryAllByRole('button', { name: /^Version / }).length > 0, 'the version list');
+    expect(told.at(-1)).toEqual([false, null]);
+    click(row('First'));
+    await previewing();
+    expect(told.at(-1)).toEqual([true, { versionId: first }]);
+    click(row('Third'), { shiftKey: true });
+    await until(() => within(bar()).queryByText('First → Third') !== null, 'the comparison');
+    expect(told.at(-1)).toEqual([true, 'compare']);
+    rerender(mount(null));
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) === null, 'history left');
+    expect(told.at(-1)).toEqual([false, null]);
+  });
+
   it('asks for Save version from a closed rail: the rail opens on the form', async () => {
     const { history: h } = await setup();
     cleanup();

@@ -1,0 +1,306 @@
+{
+  "recordedAt": "2026-10-19T18:20:20Z",
+  "handbackNote": "handback = the gate on the merge of origin/master 9fd93735e (3d473cc3d): class 1a and the groups importing or exercising master's merged files; master's own gating covers its commits (Decision Log 57)",
+  "label": "P3-F wave S final gate and its relaunch (Decision Log 56 named groups, --class1a pool --runner macos --evidence; red groups relaunched alone under Decision Logs 29 and 59)",
+  "runs": {
+    "final": {
+      "run": 39290322385,
+      "sha": "82c39e75cbbbfb85fd1ece9d1120861d5bd93400",
+      "startedAt": "2026-10-19T16:59:52Z",
+      "conclusion": "failure",
+      "jobs": {
+        "e2e:artifacts": "success",
+        "e2e:browser": "success",
+        "e2e:browser-comment": "success",
+        "e2e:code": "success",
+        "e2e:dashboard": "success",
+        "e2e:default": "failure",
+        "e2e:deliverables": "failure",
+        "e2e:design": "failure",
+        "e2e:design-systems": "success",
+        "e2e:document": "success",
+        "e2e:document-app": "success",
+        "e2e:library": "success",
+        "e2e:panel": "success",
+        "e2e:presentations": "failure",
+        "e2e:side": "success",
+        "e2e:to-human": "success",
+        "e2e:tools": "failure",
+        "e2e:transcript": "success",
+        "e2e:widgets": "success",
+        "packaged": "skipped",
+        "plan": "success",
+        "probes": "success",
+        "static": "success",
+        "unit": "success",
+        "unit:darwin": "success"
+      },
+      "groups": {
+        "unit:darwin": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=1.63/1.87/2.44 computeruse=none",
+          "Test Files": "16 passed (16)",
+          "Tests": "344 passed (344)",
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.32/2.02/2.47 computeruse=none"
+        },
+        "unit": {
+          "Test Files": "1555 passed | 7 skipped (1562)",
+          "Tests": "21071 passed | 78 skipped (21149)"
+        },
+        "static": {
+          "node --test pass": 54,
+          "node --test fail": 0
+        },
+        "e2e:document": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=5.10/3.27/2.84 computeruse=none",
+          "passed": 17,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=10.09/4.73/3.38 computeruse=none"
+        },
+        "e2e:default": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=8.04/5.04/3.58 computeruse=none",
+          "failed": 1,
+          "skipped": 154,
+          "passed": 51,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=4.32/4.15/3.56 computeruse=none"
+        },
+        "e2e:document-app": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.68/2.33/2.49 computeruse=none",
+          "document-presence": {
+            "main": {
+              "drawnMs": -9,
+              "goneMs": 3998,
+              "upMs": 4007
+            },
+            "panel": {
+              "drawnMs": -7,
+              "goneMs": 4001,
+              "upMs": 4008
+            }
+          },
+          "passed": 15,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=5.49/3.28/2.84 computeruse=none"
+        },
+        "e2e:browser": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.36/2.04/2.47 computeruse=none",
+          "passed": 11,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.12/2.14/2.47 computeruse=none"
+        },
+        "e2e:design": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.19/2.15/2.47 computeruse=none",
+          "failed": 3,
+          "passed": 12,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.54/2.29/2.48 computeruse=none"
+        },
+        "e2e:artifacts": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.96/4.08/3.54 computeruse=none",
+          "skipped": 1,
+          "passed": 4,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.92/3.82/3.46 computeruse=none"
+        },
+        "e2e:code": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.09/2.79/2.94 computeruse=none",
+          "passed": 37,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=4.69/3.62/3.26 computeruse=none"
+        },
+        "e2e:dashboard": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=4.26/3.95/3.55 computeruse=none",
+          "passed": 11,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.14/2.98/3.21 computeruse=none"
+        },
+        "e2e:design-systems": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=8.54/4.57/3.34 computeruse=none",
+          "passed": 8,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=8.88/5.09/3.58 computeruse=none"
+        },
+        "e2e:library": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.73/3.59/3.41 computeruse=none",
+          "passed": 5,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=4.85/4.05/3.58 computeruse=none"
+        },
+        "e2e:deliverables": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.41/2.61/2.92 computeruse=none",
+          "failed": 1,
+          "passed": 11,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.22/2.80/2.95 computeruse=none"
+        },
+        "e2e:transcript": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.28/2.98/3.21 computeruse=none",
+          "passed": 35,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=1.90/2.51/2.94 computeruse=none"
+        },
+        "e2e:side": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.92/3.79/3.45 computeruse=none",
+          "passed": 12,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.86/3.65/3.42 computeruse=none"
+        },
+        "e2e:presentations": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=1.84/2.47/2.92 computeruse=none",
+          "failed": 2,
+          "skipped": 2,
+          "passed": 16,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.57/2.65/2.94 computeruse=none"
+        },
+        "e2e:to-human": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=4.35/3.58/3.25 computeruse=none",
+          "passed": 2,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=4.42/3.66/3.29 computeruse=none"
+        },
+        "e2e:panel": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.15/3.50/3.30 computeruse=none",
+          "passed": 26,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=5.15/4.01/3.50 computeruse=none"
+        },
+        "e2e:browser-comment": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=4.06/3.61/3.27 computeruse=none",
+          "passed": 16,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.50/3.51/3.26 computeruse=none"
+        },
+        "e2e:widgets": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.19/3.45/3.24 computeruse=none",
+          "passed": 28,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.63/3.54/3.29 computeruse=none"
+        },
+        "e2e:tools": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.62/3.54/3.29 computeruse=none",
+          "failed": 1,
+          "passed": 12,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.36/3.56/3.31 computeruse=none"
+        }
+      }
+    },
+    "relaunch": {
+      "run": 39297005763,
+      "sha": "7803dd85ab01a90e4bde4fb9d76c695521639544",
+      "startedAt": "2026-10-19T17:46:28Z",
+      "conclusion": "success",
+      "jobs": {
+        "e2e:default": "success",
+        "e2e:deliverables": "success",
+        "e2e:design": "success",
+        "e2e:presentations": "success",
+        "e2e:tools": "success",
+        "packaged": "skipped",
+        "plan": "success",
+        "probes": "skipped",
+        "static": "success",
+        "unit": "skipped",
+        "unit:darwin": "skipped"
+      },
+      "groups": {
+        "static": {
+          "node --test pass": 54,
+          "node --test fail": 0
+        },
+        "e2e:deliverables": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=1.45/2.52/3.07 computeruse=none",
+          "passed": 12,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.51/2.52/2.99 computeruse=none"
+        },
+        "e2e:design": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.57/2.53/2.99 computeruse=none",
+          "passed": 15,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.65/2.81/3.03 computeruse=none"
+        },
+        "e2e:tools": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.39/2.78/3.02 computeruse=none",
+          "passed": 13,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=4.64/3.27/3.18 computeruse=none"
+        },
+        "e2e:presentations": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=4.08/3.19/3.16 computeruse=none",
+          "skipped": 2,
+          "passed": 18,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.69/2.99/3.08 computeruse=none"
+        },
+        "e2e:default": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.67/2.97/3.08 computeruse=none",
+          "document-presence": {
+            "main": {
+              "drawnMs": -10,
+              "goneMs": 3996,
+              "upMs": 4006
+            },
+            "panel": {
+              "drawnMs": -9,
+              "goneMs": 3999,
+              "upMs": 4008
+            }
+          },
+          "skipped": 183,
+          "passed": 109,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.09/3.29/3.25 computeruse=none"
+        }
+      }
+    },
+    "handback": {
+      "run": 39300116340,
+      "sha": "3d473cc3dc3104cc1e9fa7fc76da278ffc622083",
+      "startedAt": "2026-10-19T18:08:57Z",
+      "conclusion": "success",
+      "jobs": {
+        "e2e:desk-web": "success",
+        "e2e:to-human": "success",
+        "e2e:transcript": "success",
+        "packaged": "skipped",
+        "plan": "success",
+        "probes": "success",
+        "static": "success",
+        "unit": "success",
+        "unit:darwin": "skipped"
+      },
+      "groups": {
+        "unit": {
+          "Test Files": "1555 passed | 7 skipped (1562)",
+          "Tests": "21085 passed | 78 skipped (21163)"
+        },
+        "e2e:desk-web": {
+          "passed": 152
+        },
+        "e2e:transcript": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.39/2.62/2.94 computeruse=none",
+          "passed": 35,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.08/2.74/2.93 computeruse=none"
+        },
+        "e2e:to-human": {
+          "posture start": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=2.68/2.67/2.90 computeruse=none",
+          "passed": 2,
+          "posture end": "frontmost=터미널 display=2560x1440@2x remote=screensharing load=3.39/2.84/2.95 computeruse=none"
+        },
+        "static": {
+          "node --test pass": 54,
+          "node --test fail": 0
+        }
+      }
+    }
+  },
+  "union": {
+    "rule": "a job relaunched takes the relaunch's result; every other job keeps the final run's",
+    "jobs": {
+      "e2e:artifacts": "success",
+      "e2e:browser": "success",
+      "e2e:browser-comment": "success",
+      "e2e:code": "success",
+      "e2e:dashboard": "success",
+      "e2e:default": "success",
+      "e2e:deliverables": "success",
+      "e2e:design": "success",
+      "e2e:design-systems": "success",
+      "e2e:document": "success",
+      "e2e:document-app": "success",
+      "e2e:library": "success",
+      "e2e:panel": "success",
+      "e2e:presentations": "success",
+      "e2e:side": "success",
+      "e2e:to-human": "success",
+      "e2e:tools": "success",
+      "e2e:transcript": "success",
+      "e2e:widgets": "success",
+      "packaged": "skipped",
+      "plan": "success",
+      "probes": "success",
+      "static": "success",
+      "unit": "success",
+      "unit:darwin": "success"
+    },
+    "green": true
+  }
+}

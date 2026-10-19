@@ -1,0 +1,36 @@
+I made three commits, all to e2e spec files with no product code. Every failure was a stale expectation after wave S's own product changes; none was a product defect. Nothing here was run locally, by the rules: the relaunch of the default, design, presentations, deliverables and tools groups is what proves the fixes. eslint on the six specs and `tsc --noEmit -p tsconfig.e2e.json` both pass.
+
+**Commits, in order**
+1. `b87315540`, F16. Files: e2e/design.spec.ts, e2e/presentations.spec.ts, e2e/presentations-history.spec.ts, e2e/deliverables.spec.ts.
+2. `ecb73edda`, F14. File: e2e/maws-tools.spec.ts.
+3. `7803dd85a`, F17. File: e2e/shell.spec.ts.
+
+RED is gate run 39290322385 (on 82c39e75c), using your log `/tmp/maws-review/gates/p3f-ws-final-failed.log`:
+
+| group | failed | passed |
+|---|---|---|
+| design | 3 | 12 |
+| presentations | 2 | 16 |
+| deliverables | 1 | 11 |
+| tools | 1 | 12 |
+| default | 1 | 51 |
+
+GREEN is omitted under Decision Log 29, as each commit message says.
+
+**F16: six failing cases in four places**
+- **Cause:** "Open in tab" now calls `openArtifactTab` and then the record's Back (`src/renderer/src/tools/artifacts/RecordView.tsx:27-28`, through `leaveThen` at `ArtifactsTool.tsx:130`). The panel record really does go back to its list; the design failure snapshot shows the pinned Artifacts tab on its All list with the design's row in it.
+- **The product still allows two replicas:**
+  - A list row opens its record through `onOpen` → `state.open` (`ArtifactsTool.tsx:224`, `:166`). That only changes the panel tab's own view and closes no main tab.
+  - Only the main tab's "Show in panel" (`src/renderer/src/main/Tab.tsx:230`) moves an artifact the other way, and nothing on the list path calls it.
+- **Replica cases** (design's `inPanelAndTab`, used at :110, :615 and :728; presentations.spec.ts at the case at :173; presentations-history.spec.ts at the case at :337): after "Open in tab" each now asserts the panel record is gone, opens the artifact again from the pinned tab's list, and waits up to 15 s for the panel editor, as at the first open.
+- **Comment-mode case** (deliverables.spec.ts, case at :935): the Back click at :1042 is replaced by asserting the move. Once the session is shown again, its Artifacts tool is on its list with no viewer, and the case then opens the Notes row as before.
+
+**F14** (maws-tools.spec.ts:601)
+- **Cause:** "Artifact not found" is `goneTitle` (`src/renderer/src/library/copy.ts:31`). The record's Gone view registers it as the header title (`src/renderer/src/library/ArtifactTab.tsx:162-163`), so it is drawn in the panel header (`src/renderer/src/panel/PanelHeader.tsx:93`). The record body draws "This artifact was deleted, or it is not in the library." (`ArtifactTab.tsx:166`). The snapshot confirms both.
+- **Fix:** the case now asserts that sentence inside `[data-artifact-record=GONE]`, and "Artifact not found" as the panel header's `[data-header-title]`.
+
+**F17** (shell.spec.ts:316, failing in Item 7 via :526/:522)
+- **Cause:** the chip is `button[data-toolbar-project]` with the project name in a span (`src/renderer/src/app/Toolbar.tsx:157`, `:172`), and it reads MAWS in this scene. The wordmark itself is `[data-sidebar-wordmark]` (`src/renderer/src/sidebar/Sidebar.tsx:41`).
+- **Fix:** the check now polls the same `getByText('MAWS', { exact: true })` matches, minus any inside `[data-toolbar-project]`, until none are left. A wordmark in the title bar still fails it.
+
+**Other findings:** I searched the other specs, including the live and scale ones not run in this gate, for the same stale patterns. The other "Open in tab" uses (library.spec.ts:461, panel.spec.ts's header action, the browser specs' overflow item) don't depend on the record staying in the panel. Nothing goes to the tech-debt tracker.

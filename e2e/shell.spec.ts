@@ -63,16 +63,17 @@ test('shell: sidebar, overview, hover approve, tabs and split, persistence, them
   }
 });
 
-// W12 (I2, I3; §5.2 as amended 2026-10-01): each project has its own tab set, which the strip shows under the project's
-// name; a project click and an open of another project's session switch it; a click replaces the shown session and
-// ⌘-click keeps a tab of its own; ⌘1–9 count in the set; the label reveals the project in the sidebar. W11's tree: a
-// click on a project's row toggles it in place and shows its set, whether it was expanded or not.
-test('tab sets per project: the strip switches with the project, ⌘1 counts in the set, the label names it', async () => {
+// W12 (I2, I3; §5.2 as amended 2026-10-01): each project has its own tab set, which the strip shows; a project click and
+// an open of another project's session switch it; a click replaces the shown session and ⌘-click keeps a tab of its own;
+// ⌘1–9 count in the set. W11's tree: a click on a project's row toggles it in place and shows its set, whether it was
+// expanded or not. P3-F wave S (F17, the owner's obs 8): the set's project is named by the title bar's chip, not in the
+// strip; a click on the chip is the sidebar's "+" (a New chat in that project) and its context menu reveals the project.
+test('tab sets per project: the strip switches with the project, ⌘1 counts in the set, the title bar’s chip names it', async () => {
   const maws = await launchMaws({ env: SHELL_ENV });
   try {
     const { app, page } = maws;
     const main = page.locator('[data-region="main"]');
-    const label = main.locator('[data-strip-project]');
+    const label = page.getByRole('banner').locator('[data-toolbar-project]');
     const clickProject = async (name: string) => {
       await showProjectList(page);
       await projectLine(projectRow(page, name)).click();
@@ -81,14 +82,15 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
 
     await clickProject('MAWS');
     await expect(label).toHaveText('MAWS');
-    await expect(main.getByRole('button', { name: 'Tabs of MAWS' })).toBeVisible();
+    await expect(page.getByRole('banner').getByRole('button', { name: 'New chat in MAWS' })).toBeVisible();
+    await expect(label).toHaveCSS('-webkit-app-region', 'no-drag');
+    await expect(main.locator('[data-strip-project]'), 'the strip names no project').toHaveCount(0);
     await (await sidebarRow(page, FIX)).click();
     await (await sidebarRow(page, SIP)).click({ modifiers: ['Meta'] });
     await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${FIX} · MAWS`, `${SIP} · MAWS`]);
 
     await clickProject('codex_somersault');
     await expect(label).toHaveText('codex_somersault');
-    await expect(main.getByRole('button', { name: 'Tabs of codex_somersault' })).toBeVisible();
     await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'another project, another (empty) set' }).toEqual([]);
     await (await sidebarRow(page, QUOTA)).click();
     await (await sidebarRow(page, 'Trace stream reconnects')).click(); // a click replaces the shown session
@@ -114,11 +116,20 @@ test('tab sets per project: the strip switches with the project, ⌘1 counts in 
     await expect(label).toHaveText('codex_somersault');
     await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(`${QUOTA} · codex_somersault`);
 
-    // the label reveals its project in the sidebar: its row expanded in place, and focused
+    // the chip's context menu reveals its project in the sidebar: its row expanded in place, and focused
     await closeProject(page, 'codex_somersault');
-    await label.click();
+    await label.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Reveal in sidebar' }).click();
     await expect(projectRow(page, 'codex_somersault')).toHaveAttribute('aria-expanded', 'true');
     await expect(projectRow(page, 'codex_somersault')).toBeFocused();
+
+    // a click on the chip is the sidebar's "+": a New chat in that project, a new unstarted tab in front in its set (the
+    // scenario's creator)
+    const before = await tabLabels(page, 'Open tabs');
+    await label.click();
+    await expect.poll(async () => (await tabLabels(page, 'Open tabs')).length, { message: 'one more tab in the set' }).toBe(before.length + 1);
+    expect(before, 'the new tab is in front').not.toContain(await selectedTab(page, 'Open tabs'));
+    await expect(label).toHaveText('codex_somersault');
 
     // Other sessions is the no-project set: no label
     await clickProject('Other sessions');
@@ -180,6 +191,48 @@ test('a session opens in place of Settings or Diagnostics; a pin keeps its tab; 
     await (await sidebarRow(page, CHARTER_ROW)).click();
     await expect.poll(labels, { message: 'the pinned tab stayed, the session opened after it' }).toEqual(expect.arrayContaining([`${FIX} · MAWS`, `${CHARTER_ROW} · MAWS`]));
     await expect.poll(() => selectedTab(page, strip)).toBe(`${CHARTER_ROW} · MAWS`);
+    expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
+// P3-F wave S (F6, candidate 58; the owner: "a defect, not taste"): the floating card draws the session in front, so with
+// none in front (an artifact, Settings) Float is disabled and says why, the menu action floats nothing, and a float that
+// meets such a tab docks: main and its tab strip never vanish behind a panel with no card.
+test('Float with no session in front: disabled with its reason, the action floats nothing, and Settings over the card docks it', async () => {
+  const maws = await launchMaws({ env: SHELL_ENV });
+  try {
+    const { app, page } = maws;
+    const NO_SESSION = 'Select a session’s tab to float it';
+    const main = page.locator('[data-region="main"]');
+    const panel = page.locator('[data-region="panel"]');
+    const strip = page.getByRole('tablist', { name: 'Open tabs' });
+    const card = panel.getByRole('region', { name: 'Session card' });
+    const mainShown = async (message: string) => {
+      await expect(main, message).toHaveJSProperty('inert', false);
+      await expect.poll(async () => (await main.boundingBox())?.width ?? 0, { message }).toBeGreaterThan(0);
+      await expect(strip, message).toBeVisible();
+    };
+    await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+    await (await sidebarRow(page, NORTH)).click();
+    await menu(app, 'settings.open');
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${NORTH} · MAWS`, 'Settings']);
+
+    await expect(panel.getByRole('button', { name: NO_SESSION })).toBeDisabled();
+    await menu(app, 'panel.float');
+    await expect(page.getByText(NO_SESSION, { exact: true })).toBeVisible(); // the toast says why
+    await mainShown('the action floats nothing with Settings in front');
+    await expect(card).toHaveCount(0);
+
+    await strip.getByRole('tab', { name: `${NORTH} · MAWS` }).click();
+    await panel.getByRole('button', { name: 'Float session over panel' }).click();
+    await expect(card).toBeVisible();
+    await expect(main).toHaveJSProperty('inert', true);
+    await menu(app, 'settings.open'); // Settings comes in front of the floating card
+    await expect(card).toHaveCount(0);
+    await mainShown('a float that meets Settings docks');
+    await expect(panel.getByRole('button', { name: NO_SESSION })).toBeDisabled();
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
@@ -260,7 +313,10 @@ async function assertToolbarPlacement(page: Page): Promise<void> {
   const wordmark = page.locator('[data-sidebar-wordmark]');
   const newChat = page.locator('[data-region="sidebar"]').getByRole('button', { name: 'New chat', exact: true });
   const search = page.locator('[data-region="sidebar"]').getByRole('searchbox');
-  await expect(toolbar.getByText('MAWS', { exact: true })).toHaveCount(0);
+  // the wordmark is the sidebar's: no MAWS in the title bar but the project chip's name (P3-F wave S, F17), which is MAWS
+  // when that project's set is shown
+  const marks = toolbar.getByText('MAWS', { exact: true });
+  await expect.poll(() => marks.evaluateAll((els) => els.filter((el) => !el.closest('[data-toolbar-project]')).length), { message: 'no wordmark in the title bar' }).toBe(0);
   await expect(wordmark).toBeVisible();
   const [markBox, newBox, searchBox] = await Promise.all([wordmark, newChat, search].map((el) => el.boundingBox()));
   expect(newBox!.y).toBe(markBox!.y + markBox!.height);
@@ -682,15 +738,16 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     const usageProjectId = await projectRow(page, USAGE_PROJECT).getAttribute('data-menu').then((menuId) => menuId!.slice('project:'.length));
     await closeProject(page, USAGE_PROJECT); // the 8 s entry left it expanded: the click below is the one that opens it
     await openProject(page, USAGE_PROJECT);
-    // W12: the strip shows that project's tab set (nothing open, under its name); opening a MAWS session from the
-    // palette brings MAWS's set and its split back while the sidebar stays on the project.
+    // W12: the strip shows that project's tab set (nothing open, the title bar's chip naming it: P3-F wave S, F17);
+    // opening a MAWS session from the palette brings MAWS's set and its split back while the sidebar stays on the project.
+    const projectChip = page.getByRole('banner').locator('[data-toolbar-project]');
     await expect.poll(() => tabLabels(page, 'Open tabs'), { message: 'the clicked project’s empty set' }).toEqual([]);
-    await expect(main.getByRole('button', { name: `Tabs of ${USAGE_PROJECT}` })).toBeVisible();
+    await expect(projectChip).toHaveText(USAGE_PROJECT);
     await openPalette(app, page);
     await page.keyboard.type('charter');
     await page.keyboard.press('Enter');
     await expect.poll(() => tabLabels(page, 'Left pane tabs')).toEqual([three[0], 'Charter + research · MAWS']);
-    await expect(main.getByRole('button', { name: 'Tabs of MAWS' })).toBeVisible();
+    await expect(projectChip).toHaveText('MAWS');
     await menu(app, 'panel.toggle');
     await expect(panelResizer).toHaveCount(0);
     await expect.poll(async () => (await page.locator('[data-region="panel"]').boundingBox())?.width ?? 0).toBe(0);

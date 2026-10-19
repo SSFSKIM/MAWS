@@ -1,0 +1,34 @@
+D2 report (the deck and design editors). Both findings are fixed in three commits. No claimed file is left uncommitted. Two things are not done: the e2e cases are written but not run (the Mac gate proves them), and IME typing on a selected element still drops input (residual below).
+
+**Commits, in order**
+1. `e7304de46`, F3 (c37, with c40, obs 9 and R.2:E1). Every deck-family toolbar (the deck's, the deck history bar, the design workbench's, the design history bar) now wraps by whole controls. No control shrinks below its own width, and no button's label wraps inside it.
+   - Files: src/artifacts/slides/editor/chrome.css, src/artifacts/slides/editor/menus/menus.css, src/artifacts/design/editor/workbench.css, src/artifacts/slides/editor/toolbar.dom.test.tsx (new), vitest.config.ts, e2e/support/toolbar-controls.ts (new), e2e/presentations.spec.ts, e2e/design.spec.ts, e2e/document-narrow.spec.ts.
+   - The design workbench's wrap rules now live on `.deck-toolbar` itself, and its design-scoped copies are deleted. Text style's 84 px min-width was losing to `.deck-button`'s 26 px through sheet order; the rule is now `.deck-button.deck-text-style`, which wins in either order.
+   - The document and dashboard toolbars at 280 px already hold: the dashboard renders the document's toolbar, and each control sits in a scrolling strip with nowrap and no shrink. So they get an assertion only, with no document CSS change.
+   - vitest.config.ts (you approved it): artifacts-dom's css.include gains `/\/(slides|design)\/editor\/.+\.css\?raw$/`. vitest matches that against the module id including its query, so only `?raw` imports are processed and the plain `import './chrome.css'` stays blank in the deck and design DOM suites. No earlier `?raw` import of a slides or design editor sheet existed; the commit message says so.
+2. `755c8787f`, F9 (c43, obs 5a). With exactly one text element selected on a slide or a design board, a printable key enters edit and types over the element's text. Keys pressed before the box takes focus all land, in order.
+   - Files: src/artifacts/slides/editor/transform/Overlay.tsx, src/artifacts/slides/editor/session.ts, src/artifacts/slides/editor/TextBox.tsx, src/artifacts/slides/editor/transform/transform.dom.test.tsx, src/artifacts/slides/editor/TextBox.dom.test.tsx, e2e/presentations.spec.ts, e2e/design.spec.ts.
+   - The commit message says the triage row's Backspace clause was not taken, on your ruling: ⌫ and Delete still delete the element, and a new case pins that.
+3. `fa070c0da`, F3 e2e follow-up. File: e2e/document-narrow.spec.ts. The document/dashboard case now opens the document before narrowing the panel to 280 px.
+
+**RED and GREEN logs**
+- F3: RED /tmp/maws-review/p3f-d2-f3-red.log, 5 of 10 failed. Those were the deck toolbar and deck history bar in both sheet orders, plus Text style "expected '26px' to be '84px'". The design toolbars passed before the change and still pass with their scoped copies deleted. GREEN /tmp/maws-review/p3f-d2-f3-green.log, 19 of 19 (with theme.dom.test.tsx).
+- F9: RED /tmp/maws-review/p3f-d2-f9-red.log, 6 of 46 failed, the design-board case among them. GREEN /tmp/maws-review/p3f-d2-f9-green.log, 215 of 215: every artifacts-dom suite under slides/editor and design/editor, 19 files. Also /tmp/maws-review/p3f-d2-f9-green-node.log, 31 of 31 (the artifacts project's slides/editor suites).
+- Both unit projects are in the gate's `pnpm test`. A targeted typecheck and eslint of every touched file came back clean; the full typecheck was not run, per the rules.
+
+**Which e2e group proves each change**
+- e2e:presentations:
+  - F3: a new case, a deck in the panel at 280 px, checked with nothing selected and with a heading selected; it also asserts the row wrapped.
+  - F9: added steps in the inspector case's text-in-place step. A click on the note then typing enters edit, and Escape leaves the note selected. The owner's grouped heading (a group added to the fixture's text slide): the first double-click selects the heading, and typing enters edit.
+- e2e:design:
+  - F3: a new case, a design in the panel at 280 px, with the phone's heading selected.
+  - F9: a click on the desktop board's note then typing enters edit.
+- e2e:document-app: F3's document and dashboard toolbars at 280 px, one row and no control squeezed. If this fails at the gate, the fix is in src/artifacts/document/editor/chrome.css, which is another worker's file.
+- The shared check is `squeezedControls` in e2e/support/toolbar-controls.ts. It reads the text's line boxes, because the triage's "clientHeight ≤ 36" alone would pass at HEAD: deck buttons have a fixed 26 px height. It also flags overlap, scroll overflow, a select under 56 px and any control past the panel's sides.
+
+**Could not make sound inside the bound (residual for S-SLIDE-CLICK-TO-EDIT, the high-priority P4 row)**
+- A key typed through an input method on a selected text element (keydown "Process", or isComposing) still enters nothing. The stage is a non-editable element, so it never engages the IME. The owner's Korean typing on a selected element therefore still needs a double-click or Enter first.
+- Proposed severity: P2 for this owner.
+- Closing condition: a Korean composition started on a selected, not yet editing, text element lands composed in its edit. The e2e would use CDP Input.imeSetComposition on a deck slide and on a design board. It needs the element's editor (or a capture field) to hold focus while the element is selected, which is the state-machine work.
+
+The executor's gate should run the independent review; I did not run one.

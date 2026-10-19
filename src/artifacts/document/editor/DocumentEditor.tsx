@@ -91,8 +91,11 @@ export interface DocumentEditorProps {
   pageScope?: ComponentType<{ children: ReactNode; pinned?: PinnedScope }>;
   /** The page's element as it appears and goes (the shell's Mark-up surface). */
   onPage?(element: HTMLElement | null): void;
-  /** Whether a version is shown in place of the live document (the header says read-only meanwhile). */
-  onPreviewChange?(previewing: boolean): void;
+  /**
+   * Whether a version is shown in place of the live document (the header says read-only meanwhile). P3-F (8.2, F7):
+   * and what is shown, so the header's Export exports it.
+   */
+  onPreviewChange?(previewing: boolean, shown: DocumentShown): void;
   /** Who and what Insert › Mention can name (people, sessions, artifacts); without it, a mention names the owner. */
   mentions?: MentionSource;
   // P3-E start (E2 M3; E's Decision Log 19): a dashboard's charts drawn by E (absent: B's placeholder), and the document
@@ -105,6 +108,12 @@ export interface DocumentEditorProps {
 }
 
 export type DocumentRail = 'comments' | 'history' | null;
+/**
+ * P3-F (8.2, F7; the deck's DeckShown, L233): what the editor shows, for an export of it: one retained version its
+ * history previews, two versions compared, or (null) the live document, its changes since the last view and a
+ * suggestion review included.
+ */
+export type DocumentShown = { versionId: number } | 'compare' | null;
 type Rail = DocumentRail;
 const NO_CARRIES: ReadonlyMap<string, Carry['kind']> = new Map();
 const NO_EXTRAS: readonly ExtraChange[] = []; // P3-E
@@ -148,9 +157,11 @@ export function DocumentEditor(props: DocumentEditorProps) {
   // Leaving the history rail leaves history: the page shows the live document again (whoever closed the rail).
   const { onRailChange, saveVersionRequest, onPreviewChange } = props;
   const previewing = preview !== null || pendingSuggestions;
+  const shownVersionId = preview?.target.kind === 'version' ? preview.target.versionId : null; // P3-F (F7)
+  const comparing = preview?.target.kind === 'compare'; // P3-F (F7)
   useEffect(() => {
-    onPreviewChange?.(previewing);
-  }, [previewing, onPreviewChange]);
+    onPreviewChange?.(previewing, comparing ? 'compare' : shownVersionId !== null ? { versionId: shownVersionId } : null); // P3-F (F7): what is shown
+  }, [previewing, comparing, shownVersionId, onPreviewChange]);
   // P3-E start (E2 M3): the document shown, told as it changes (a preview with no tab to show tells nothing new)
   const [suggestionDoc, setSuggestionDoc] = useState<Doc | null>(null);
   const shownVersion = previewRevision(preview, snapshot?.versions ?? null);

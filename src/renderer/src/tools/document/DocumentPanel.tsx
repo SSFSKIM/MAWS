@@ -5,7 +5,7 @@
 // artifact's own context), the history rail on A's IPC, the page in the governing design system's scope when D's is
 // provided, `onShown` once the document is on screen.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { DocumentEditor, type DocumentRail } from '@artifacts/document/editor/DocumentEditor';
+import { DocumentEditor, type DocumentRail, type DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
 import type { Editor } from '@tiptap/core';
 import type { ArtifactKind } from '@shared/artifacts/entity'; // P3-E
 import type { Doc } from '@artifacts/yjs'; // P3-E
@@ -58,7 +58,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     [state],
   );
   const header = documentHeader(
-    { title, document: snapshot.document, saving: snapshot.saving, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting },
+    { title, document: snapshot.document, saving: snapshot.saving, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting, shown: snapshot.shown /* P3-F (F7) */ },
     commands,
   );
   useEditorHost(scope, additionalActions?.length ? { ...header, actions: [...(header.actions ?? []), ...additionalActions] } : header); // P3-E: a dashboard's actions after B's
@@ -91,7 +91,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     return () => cancelAnimationFrame(frame);
   }, [visible, drawn, state, onShown]);
   const onRailChange = useCallback((rail: DocumentRail) => state.setRail(rail), [state]);
-  const onPreviewChange = useCallback((previewing: boolean) => state.setPreviewing(previewing), [state]);
+  const onPreviewChange = useCallback((previewing: boolean, shown: DocumentShown) => state.setPreviewing(previewing, shown), [state]); // P3-F (F7): shown
 
   if (snapshot.failed !== null) return <Notice>{`This document could not be opened: ${snapshot.failed}`}</Notice>;
   if (!snapshot.ready || !snapshot.handle) return <Notice>Opening the document…</Notice>;

@@ -26,7 +26,7 @@ import { useSessions } from '../../stores/sessions';
 import { shownSession } from '../../panel/host';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer, openCommentComposer } from '../code/anchor/anchor';
-import { useArtifactCommentTarget } from './comment-session';
+import { startCommentSession, useArtifactCommentTarget, usePendingComment } from './comment-session'; // P3-F F4 review B 3: startCommentSession, usePendingComment
 import { useDocumentComments } from './comments';
 
 const SHOWN = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
@@ -79,6 +79,9 @@ const intent = (appSessionId: AppSessionId) => ({
   progress: { engineSessionId: null, worktree: null, trustRecorded: false, bootstrap: null, launch: null, send: null, lastFailure: null },
 });
 const ready = (appSessionId: AppSessionId) => ({ appSessionId, phase: 'ready', detail: null, outcome: { kind: 'ready', engineSessionId: 's', firstTurn: 'none' } });
+// P3-F F4: an untrusted folder's trust state as main answers a start that needs it (TrustStateSchema)
+const TRUST = { directory: '/work/p1', trustKey: '/work/p1', keyKind: 'directory', configPath: '/config/.claude.json', trusted: false, source: null, isHome: false, found: [] } as const;
+const needsTrust = (appSessionId: AppSessionId) => ({ status: 'needs_trust', appSessionId, trust: TRUST });
 const sessionCalls = () => fake.calls.filter((call) => /^invoke session\.(create|start|acquire)$/.test(call));
 
 // ---- the target ----------------------------------------------------------------------------------------------------
@@ -299,6 +302,130 @@ describe('a comment from a document with no chat beside it', () => {
     expect(shownSession(useLayout.getState().main)).toBe(STARTED);
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
+  });
+
+  // P3-F F4 (c26, the owner's E1 mark): a start that meets the trust card asks the owner's decision in the card's place,
+  // the comment's draft kept; the decision travels as the composer's card sends it (StartOptions.trust), never decided
+  // here, and the card then opens on the same passage.
+  it('a directory whose start needs trust: the notice offers Trust and start and Start without trusting, the draft kept, and nothing is decided for the owner', async () => {
+    const { reach, comment } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', needsTrust(STARTED)));
+    expect(notice()!.dataset.commentContext).toBe('trust');
+    expect(notice()!.textContent).toContain(TRUST.directory);
+    expect(screen.getByRole('button', { name: 'Trust and start' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start without trusting' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Open session' }), 'the choices are here, not in another session').toBeNull();
+    expect(card()).toBeNull();
+    expect(reach.discard, 'the comment’s draft is kept').not.toHaveBeenCalled();
+    expect(reach.setActive).toHaveBeenLastCalledWith(passage.threadId);
+    expect(fake.invoked('session.start'), 'no decision sent without the owner’s click').toEqual([{ appSessionId: STARTED, message: null, options: { requireEmptyMessage: true } }]);
+  });
+
+  // P3-F F4 fix wave (review B 1): the consent says what the answer records, as the composer's card says it: a folder in a
+  // repository is trusted as the repository (main's trustKeyOf), and trust turns on what the folder holds
+  it('a folder inside a repository: the notice names the repository trust is recorded for, the config file, and what trust would turn on', async () => {
+    const { comment } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    const nested = { ...TRUST, directory: '/work/p1/docs', trustKey: '/work/p1', keyKind: 'repo', found: [{ file: '.claude/settings.json', summary: '2 hooks' }, { file: '.mcp.json', summary: '1 MCP server' }] };
+    await act(() => fake.reply('session.start', { status: 'needs_trust', appSessionId: STARTED, trust: nested }));
+    const words = notice()!.textContent!;
+    expect(words).toContain('/work/p1/docs');
+    expect(words).toContain('Trust is recorded for the repository at /work/p1');
+    expect(words).toContain(TRUST.configPath);
+    for (const text of ['.claude/settings.json', '2 hooks', '.mcp.json', '1 MCP server']) expect(words).toContain(text);
+    expect(screen.getByRole('button', { name: 'Trust and start' })).toBeTruthy();
+  });
+
+  for (const [choice, trust] of [['Trust and start', 'accepted'], ['Start without trusting', 'declined']] as const) {
+    it(`${choice}: the session it made starts again with the trust ${trust}, and on ready the card opens on the same passage with its draft`, async () => {
+      const { reach, comment } = mount({ context: DIRECTORY });
+      comment();
+      await act(async () => {});
+      await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+      await act(() => fake.reply('session.start', needsTrust(STARTED)));
+      expect(useSetup.getState().cards.get(STARTED)).toMatchObject({ kind: 'trust', message: null });
+      await userEvent.click(screen.getByRole('button', { name: choice }));
+      expect(notice()!.dataset.commentContext).toBe('starting');
+      expect(useSetup.getState().cards.has(STARTED), 'the composer’s card for the same question goes as it is answered').toBe(false);
+      expect(fake.invoked('session.create'), 'the same session, never another').toHaveLength(1);
+      expect(fake.invoked('session.start')).toEqual([
+        { appSessionId: STARTED, message: null, options: { requireEmptyMessage: true } },
+        { appSessionId: STARTED, message: null, options: { requireEmptyMessage: true, trust } },
+      ]);
+      await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+      await act(async () => fake.event('session.setup', ready(STARTED)));
+      expect(notice()).toBeNull();
+      expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED, target: { threadId: passage.threadId } });
+      expect(destination()).toBe('main');
+      expect(reach.discard).not.toHaveBeenCalled();
+    });
+  }
+
+  it('a later comment’s resume that needs trust: the choice goes with the acquisition, and the card opens on ready', async () => {
+    const { reach, comment } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'starting', appSessionId: STARTED }));
+    await act(async () => fake.event('session.setup', ready(STARTED)));
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    const s = useSessions.getState();
+    useSessions.setState({ records: new Map([...s.records, [STARTED, record(STARTED, { projectId: P1 })]]), recordsVersion: s.recordsVersion + 1 });
+    comment(second);
+    await act(async () => {});
+    await act(() => fake.reply('session.acquire', needsTrust(STARTED)));
+    expect(notice()!.dataset.commentContext).toBe('trust');
+    await userEvent.click(screen.getByRole('button', { name: 'Trust and start' }));
+    expect(fake.invoked('session.acquire')).toEqual([
+      { appSessionId: STARTED, reason: 'read', options: { requireEmptyMessage: true } },
+      { appSessionId: STARTED, reason: 'read', options: { requireEmptyMessage: true, trust: 'accepted' } },
+    ]);
+    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: STARTED, launched: true, joined: false }));
+    expect(useCommentCard.getState().open).toMatchObject({ parent: STARTED, target: { threadId: second.threadId } });
+    expect(useSetup.getState().cards.has(STARTED)).toBe(false);
+    expect(reach.discard).not.toHaveBeenCalledWith(second.threadId);
+  });
+
+  // review B 3: the answer a notice holds, given after a later Comment replaced that notice (a press React would no longer
+  // deliver, so the notice's own `decide` is called), starts nothing and says nothing over the later notice
+  it('an answer from a notice a later Comment replaced starts nothing', async () => {
+    let latest: ReturnType<typeof usePendingComment> = null;
+    function Probe({ seen }: { seen(pending: ReturnType<typeof usePendingComment>): void }) {
+      seen(usePendingComment('stale-host'));
+      return null;
+    }
+    render(<Probe seen={(pending) => (latest = pending)} />);
+    const artifactId = crypto.randomUUID();
+    const open = vi.fn();
+    act(() => startCommentSession({ hostId: 'stale-host', artifactId, threadId: passage.threadId, label: 'Q3 plan, Main', context: DIRECTORY, open }));
+    await act(async () => {});
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', needsTrust(STARTED)));
+    const asked = latest!.notice;
+    if (asked.status !== 'trust') throw new Error(`the notice asks no trust: ${asked.status}`);
+    act(() => startCommentSession({ hostId: 'stale-host', artifactId, threadId: second.threadId, label: 'Q3 plan, Main', context: { kind: 'none' }, open }));
+    expect(latest!.threadId).toBe(second.threadId);
+    act(() => asked.decide('accepted'));
+    await act(async () => {});
+    expect(fake.invoked('session.start'), 'the replaced notice’s answer starts nothing').toHaveLength(1);
+    expect(latest!.notice.status, 'the later notice stands').toBe('none');
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('another card a start meets (the relay’s) still says so with Open session, offering no trust choice', async () => {
+    const { comment } = mount({ context: DIRECTORY });
+    comment();
+    await act(async () => {});
+    await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
+    await act(() => fake.reply('session.start', { status: 'relay_unreachable', appSessionId: STARTED, health: { url: 'http://127.0.0.1:1', ok: false, status: null, latencyMs: null, checkedAt: 't', error: 'refused' } }));
+    expect(notice()!.dataset.commentContext).toBe('card');
+    expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Trust and start' })).toBeNull();
   });
 
   it('a start settling after Close opens nothing', async () => {

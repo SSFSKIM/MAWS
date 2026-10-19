@@ -1,0 +1,20 @@
+**Result:** all three findings are closed. There are no blocking or should-fix findings and no regressions, and there is one minor finding on c20.
+
+**e185e9288 (c16, IME Return): closed.** In `src/artifacts/document/editor/nodes/atom.ts:69` the handler now returns early on `event.isComposing`. A composing Return still reaches ProseMirror, but the node view's `stopEvent` (atom.ts:115-118) drops it, because the field's panel contains its target. That matches every other key typed in the field.
+- **Plain Return and Escape:** a key with `isComposing` false goes through the old path unchanged, so both still hand the keyboard back. The `leave` tests (nodes.dom.test.tsx:272 on) cover Return, and the date test at :343 covers Escape. No test sends Escape to a text field, but that code path did not change.
+- **Date field:** its branch comes after the guard and is untouched.
+- **Replay against the owner's capture (events.txt:47-55):** the test sends keydown 229 composing, then compositionend, then keydown 13, each to `document.activeElement`. That is the capture's order. It leaves out the compositionupdate, beforeinput and input events and the keyup 13 that sits between compositionend and the second keydown. None of those passes through the guard, so the gaps don't matter. The capture comes from an xterm textarea, not an `<input>`, so it is good evidence of the event order but not proof of it for an input field.
+
+**35e6a9d33 (F18, link focus ring): closed.**
+- **Ring colour:** `src/artifacts/document/editor/theme.css:75` now reads `outline: 2px solid currentColor`.
+- **The test catches an accent ring:** the widened check (theme.dom.test.tsx:97-98) runs over every `outline*` property of `.ds-doc a`, `.ds-doc a:hover` and `.ds-doc a:focus-visible` and fails on any value naming the accent. The worker's red log shows it failing on the old rule. The ring's presence is still pinned at :105.
+- **The export keeps the ring:** I did not render an export. I checked by reading the code. `themeForFile` (export/html.ts:59-64) removes only comments and `[data-theme|ground]` rules. `resolveDsVars` (design-system/resolve-vars.ts:118-133) rewrites only `var()` references. So `currentColor` reaches the file as written, and the radius resolves to a literal.
+
+**82c39e75c (c20, front-matter `config`): closed, with one minor finding.**
+- **No misfire on the word alone:** the check in `src/artifacts/document/editor/nodes/mermaid.ts:43` matches only a line in the front matter that starts at the front matter's own indent with `config`, optionally quoted, followed by `:`. I traced these by hand and none of them matches: `title: config: x`, `title: "config"`, a nested `  config:`, a `# config:` comment, a `configuration:` key, and an indented block-scalar line. An indented front matter is handled by the same rule, one level in.
+- **Front matter without `config` still gets the palette:** the existing title-plus-init test (mermaid.dom.test.ts:64 on) passes.
+- **Minor, mermaid.ts:43:** the check turns off the page-palette directive for any top-level `config`, including one that sets no colours (for example `config: { layout: elk }` or `look: handDrawn`). Such a diagram has no theme of its own to protect. It loses c20's protection: when its render waits in mermaid's queue behind a transcript diagram, it is drawn in the dark app colours on a light page again. Outside that race it renders correctly. The commit accepts this knowingly ("as before c20"), so this can be logged as debt. A narrower fix is to skip the directive only when the front matter also has an indented `theme` or `themeVariables` key.
+
+**What I ran:** `npx vitest run` on four files: nodes.dom.test.tsx, theme.dom.test.tsx, nodes/mermaid.dom.test.ts and export/html.test.ts. All 47 tests passed. I also used git show on the three commits and read the surrounding code.
+
+**What I did not verify:** I did not reproduce the red runs. I did not run eslint or tsc, rerun the worker's full 7-file green run, test a real IME in Electron, or render an export end to end. I did not run mermaid against the cases I traced by hand. Nothing in the tree was modified.

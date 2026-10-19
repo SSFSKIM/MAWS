@@ -41,16 +41,21 @@ export const remarkTranscriptSources: Plugin = () => (tree) =>
     }
   });
 
+// The chip schemes (Link.tsx draws each as a chip that loads nothing): a path, an image's source, and (P3-F wave S, F14:
+// the owner's obs 2) an artifact the agent names, `maws-artifact:<artifactId>`, whose chip only calls an open action;
+// it is never an element's href, so main's content protocol of the same name is never reached from a transcript.
+const CHIP_SCHEMES = ['maws-path', 'maws-image', 'maws-artifact'];
+
 type Schema = { protocols?: Record<string, string[]> } & Record<string, unknown>;
-const [sanitize, schema] = defaultRehypePlugins.sanitize as [Plugin, Schema]; // Streamdown's rehype-sanitize and schema, extended for the two chip schemes and data images
+const [sanitize, schema] = defaultRehypePlugins.sanitize as [Plugin, Schema]; // Streamdown's rehype-sanitize and schema, extended for the chip schemes and data images
 const protocols = schema.protocols ?? {};
 export const transcriptSchema: Schema = {
   ...schema,
-  protocols: { ...protocols, href: [...(protocols.href ?? []), 'maws-path', 'maws-image'], src: [...(protocols.src ?? []), 'data'] },
+  protocols: { ...protocols, href: [...(protocols.href ?? []), ...CHIP_SCHEMES], src: [...(protocols.src ?? []), 'data'] },
 };
 export const hardenOptions = {
   allowedLinkPrefixes: ['*'],
-  allowedProtocols: ['maws-path:', 'maws-image:'],
+  allowedProtocols: CHIP_SCHEMES.map((scheme) => `${scheme}:`),
   allowedImagePrefixes: [],
   allowDataImages: true,
   linkBlockPolicy: 'text-only',
@@ -66,5 +71,5 @@ export const transcriptUrlTransform: UrlTransform = (url, key) => {
   // the exact gate; Streamdown applies it to every URL attribute after rehype
   const scheme = SCHEME.exec(url)?.[1].toLowerCase() ?? null;
   if (key === 'src') return /^data:image\//i.test(url) ? url : null; // images: inline data only
-  return scheme !== null && ['https', 'http', 'mailto', 'maws-path', 'maws-image'].includes(scheme) ? url : null; // links: https, http, mailto and the chips; javascript:, file:, data:, vbscript: and anything else lose the href
+  return scheme !== null && ['https', 'http', 'mailto', ...CHIP_SCHEMES].includes(scheme) ? url : null; // links: https, http, mailto and the chips; javascript:, file:, data:, vbscript: and anything else lose the href
 };

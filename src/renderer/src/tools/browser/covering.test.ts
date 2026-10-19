@@ -5,6 +5,7 @@ import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { installFakeMain, ok } from '../../test-support/code';
+import { A, mainShowing } from '../../test-support/panel'; // P3-F wave S (F6)
 import { floatPanel } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
 import { useNotices } from '../../stores/notices';
@@ -45,6 +46,7 @@ describe('the window’s cover', () => {
   // owner's ruling for a Browser tab beside the card) and docking finds the Overview as it was, covering again.
   it('the open Overview stops covering while the panel stands in main (floating or maximized)', async () => {
     const pane = coverPane(() => RECT);
+    useLayout.setState({ main: mainShowing(A) }); // a session in front, for the card to draw (P3-F wave S, F6)
     useLayout.getState().setOverviewOpen(true);
     floatPanel();
     expect(useLayout.getState().overviewOpen).toBe(true);

@@ -1,0 +1,45 @@
+The F2 follow-up is done in two commits on worktree-agent-af4cd2993bc56e015. The claim stayed at `src/engine-host/session-start-hooks.ts` and its test. Both commits are green, and eslint and the scoped node typecheck are clean.
+
+## Commits
+1. **7fd2d10b6, items 1 and 2: the MDM plists and the server-managed cache.**
+   - RED `/tmp/maws-review/p3f-c1-f2b-mdm-red.log`: 3 failed of 11.
+   - GREEN `/tmp/maws-review/p3f-c1-f2b-mdm-green.log`: 105 of 105 with `session.test.ts`; nothing skipped on this Mac.
+   - Lint and types: `p3f-c1-f2b-eslint.log`, `p3f-c1-f2b-tsc.log`.
+2. **35bf8a889, items 3 and 4: the cowork switch and the hostile-entry pins.**
+   - RED `/tmp/maws-review/p3f-c1-f2b-cowork-red.log`: 1 failed of 13. The hostile-entry case was already green at HEAD, as a pin should be.
+   - GREEN `/tmp/maws-review/p3f-c1-f2b-cowork-green.log`: 107 of 107.
+   - Lint and types: `p3f-c1-f2b-eslint2.log`, `p3f-c1-f2b-tsc2.log`.
+
+## Engine lines read (~/claude-code-bundle/2.1.302/cli.pretty.js)
+- **Plist paths and order:** BVs at :410976-410985. The user's plist is `/Library/Managed Preferences/${os.userInfo().username}/com.anthropic.claudecode.plist`, included only when a user name is known. The machine's plist `/Library/Managed Preferences/com.anthropic.claudecode.plist` comes after it.
+- **Conversion settings:** :410960 gives `/usr/bin/plutil` with `-convert json -o - --`, a 5000 ms timeout and a 2 MiB cap.
+- **How the plists are read:** d8n at :923829-923864 checks each path with `accessSync(R_OK)` and skips ENOENT and ENOTDIR. It converts through execFile with no shell (d at :923794-923806) and keeps outputs up to the first one that converted (:923858). Then `we` at :78324-78337 parses each output as a settings document and takes the first one with policy content.
+- **The server-managed cache:** the file name `remote-settings.json` is at :821090. T9 at :821379-821381 places it at `<config>/remote-settings.json`, since uE at :821307 gives no override. gE at :821449-821456 reads it with an 8 MiB cap (:821389). iE at :821396-821417 parses it and aE at :821418-821435 checks its signature. nUr at :821102 drops the `$` keys.
+- **The cowork switch:**
+  - Fw at :823565-823570 picks the user file, used by Nz at :823571-823574, and j() at :308782-308789 picks the plugins directory.
+  - The switch is parsed by `H.bool()` (Vs at :235413, :1036245), which goes through Ne at :509607-509614: on only for 1, true, yes or on, in any case.
+- **Fragment filter:** pZs at :823172-823174 admits links.
+
+## What the code does now
+- **The plists:** read only on macOS; the default directory is null on any other platform, so there is no stat and no spawn there. Each path costs one stat. A plist that is not there is skipped with no conversion.
+- **The conversion:** `plutilJson` runs `/usr/bin/plutil` with the engine's arguments, 5 s timeout and 2 MiB cap. It uses asynchronous `execFile` rather than the `execFileSync` the ruling named: the engine host's single event loop serves every session, and a synchronous spawn would stall all of them during each launch. The function was already async, and the arguments, no-shell rule and timeout are unchanged.
+- **Failures:** a malformed plist, a failed conversion or a timeout keeps the 600 s floor.
+- **Test isolation:** the managed-preferences directory and the converter are injectable (`HookSources`), so no test touches /Library.
+- **The cache:** read as JSON with the signature unchecked; it can only lengthen the wait.
+- **`enabledPlugins` precedence:** the managed sources come last, the engine's preferred one last of all.
+
+**A fix beyond the ruling:** the plugins-directory line used to treat any non-empty value of the switch as on, so `CLAUDE_CODE_USE_COWORK_PLUGINS=0` sent it to `cowork_plugins` and missed the user's plugins. Both the user file and the plugins directory now follow the engine's on-words.
+
+## Guarded test for the gate-offload spec's §6 list
+`src/engine-host/session-start-hooks.test.ts`, the case "converts a real managed preferences plist with plutil, and keeps the floor for a malformed one". It is guarded with `skipIf(process.platform !== 'darwin')` because `/usr/bin/plutil` exists only on macOS. `scripts/darwin-unit-files.sh` picks the file up automatically. The other plist cases use an injected converter and run on Linux.
+
+## What L35 still does not read
+A hook from any of these still runs under the 600 s floor:
+- a plugin's hooks module: it is code, with no declared timeout;
+- built-in plugins, seed-directory plugins (`CLAUDE_CODE_PLUGIN_SEED_DIR`), and any plugin the engine finds outside `installed_plugins.json`;
+- install records with a relative `installPath`;
+- server-managed settings that changed after the engine last wrote its cache, because the engine fetches fresh ones at start.
+
+The engine's other cowork trigger (Qgn at :655208) is set only by an embedding SDK host, which MAWS's CLI launch never is, so it does not apply.
+
+The closing condition I proposed earlier still fits: the engine reports each hook's timeout on its `hook_started` event, which today carries only `hook_id`, `hook_name` and `hook_event` (:698758).

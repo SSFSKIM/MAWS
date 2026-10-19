@@ -2,8 +2,9 @@
 // stage's overlay. It sits beside the scaled slide in screen pixels (handles keep their size at any zoom) and draws the
 // selection's outlines, the eight resize handles and the rotation handle, a connector's two ends, the snapping guides,
 // the marquee and a flow child's insertion bar. It takes the stage's pointer presses (click, shift-click, ⌘-click,
-// double-click, marquee, drags), its keys (Escape, Tab, Enter, Delete, arrows, ⌘D, ⌘G, ⇧⌘G, ⌘] and ⌘[, ⌘A) and the
-// clipboard while the stage has focus. Gestures are gestures.ts's; which element a press picks is selection.ts's.
+// double-click, marquee, drags), its keys (Escape, Tab, Enter, Delete, arrows, ⌘D, ⌘G, ⇧⌘G, ⌘] and ⌘[, ⌘A, and P3-F
+// F9's printable key on a selected text element, typed into its edit) and the clipboard while the stage has focus.
+// Gestures are gestures.ts's; which element a press picks is selection.ts's.
 // M7: the comment pins (../comments/Pins.tsx), at each commented element's top-right; a press on a pin is the pin's.
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import type { SlideCanvas } from '../../canvas';
@@ -51,6 +52,10 @@ function keyOf(node: object | undefined): number {
 }
 
 const DRAG_START_PX = 3; // screen px a press moves before it is a drag
+// P3-F F9 review 3: Hangul jamo (U+1100–11FF, U+3130–318F, U+A960–A97F, U+D7B0–D7FF) and syllables (U+AC00–D7A3) are an
+// input method's output. The stage is not editable, so no input method composes there; such a key typed raw over the
+// element would garble the word the box then composes ("ㅎㅏㄴ글" for "한글"), so it enters no edit, as before F9.
+const HANGUL = /[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7a3\ud7b0-\ud7ff]/;
 const HIT_SLACK_PX = 8; // screen px around a connector's line that hit it
 
 interface Pending {
@@ -321,6 +326,12 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
         done();
       } else if (mod && key.toLowerCase() === 'a') {
         session.select(selectAll(tree, sel));
+        done();
+      } else if (!mod && !e.isComposing && [...key].length === 1 && !HANGUL.test(key) && sel.length === 1 && !readOnly && isText(tree.element(sel[0]!)?.tag)) {
+        // P3-F F9 (c43): a printable key on the one selected text element enters its edit carrying the key, which the
+        // text box types over the text it opens with selected (a key typed on a selection replaces it); ⌫ above still
+        // deletes the element, as in Slides and Canva
+        session.editText(sel[0]!, { typed: key });
         done();
       }
     };

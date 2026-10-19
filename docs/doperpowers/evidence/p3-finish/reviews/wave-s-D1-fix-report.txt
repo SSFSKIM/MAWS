@@ -1,0 +1,55 @@
+All three review findings are fixed, one commit each, on worktree-agent-af4cd2993bc56e015, with the Sminos-Session trailer and nothing else. Every file I touched is committed. The remaining working-tree edits, e2e/shell.spec.ts among them, belong to other workers.
+
+**Commits, in order**
+
+1. `1bb9b9f45`: review 1 (F6, should-fix). A divider drag past the maximum with no session in front now floats nothing and puts the drag's start width back.
+   - Files: src/renderer/src/shell/floating.ts, src/renderer/src/shell/floating.test.ts, src/renderer/src/shell/FloatingCard.test.tsx.
+   - Fix: when `floatPanel` refuses, it writes `patch.width` before the toast. Without a width (⌥⌘B), nothing is written.
+   - New case in FloatingCard.test.tsx drives the separator in the real Shell with an artifact tab in front:
+     - 39 px past the maximum, the width is still the maximum.
+     - 40 px past, the panel ends docked at 380, main is not inert, the grid is `300px minmax(0, 1fr) 380px`, and the toast is posted.
+   - The old divider case in floating.test.ts called `floatPanel({width: 520})` directly. It now writes the Resizer's maximum first (`setPanel({width: 640})`), then expands with 444.
+
+2. `a9239ae6b`: review 2 (F16, minor). Show in panel no longer leaves the artifact shown nowhere.
+   - Files: src/renderer/src/main/Tab.tsx, src/renderer/src/main/Tab.test.tsx, src/renderer/src/tools/artifacts/ArtifactsTool.tsx.
+   - New `freePanelFor(session, artifactId)` in ArtifactsTool.tsx:
+     - It finds the Artifacts tab the move would land in, using the same lookup `applyAdd` uses.
+     - If that tab shows a different artifact, it sends it Back through the new `ArtifactsHandle.backAsked()`. That is a Back that reports whether the list shows once the record's guard has answered.
+     - This runs before the main tab closes, so a refusal returns with nothing closed.
+   - `leaveThen` gained a `landed` callback beside `refused`, carried through a superseding move.
+   - After `requestCloseTab`, the destination is checked again: it must still be the panel shown, still able to take the artifact, and still free. If any of that fails, `openArtifactTab` puts the artifact back in a main tab.
+   - In the plain path each guard is still asked once: the second `freePanelFor` finds the list and asks nothing.
+   - One accepted outcome: if the destination lets go and then the tab's own guard refuses, the artifact stays in its main tab and the destination is left on its list. The owner allowed that release.
+   - Regressions in Tab.test.tsx:
+     - The destination's guard refuses: the main tab stays open, that record stays, and the guard is asked once.
+     - The destination's guard allows: it is asked once and the artifact lands.
+     - The pinned Artifacts tab closes while the tab's own guard is answering: the artifact comes back in a main tab.
+   - The existing Back, re-target, supersede and closing cases in artifacts.test.tsx pass unchanged.
+
+3. `3d9ac78fd`: review 3 (F6, minor, test only). The microtask dock is now pinned as written to layout.json.
+   - File: src/renderer/src/shell/floating.test.ts.
+   - The case subscribes `persistLayout` before hydration, as App.tsx does. It hydrates a stored float (width 444) over an artifact tab, then stops persistence to flush. It asserts the last `regions` write carries `floating: false, width: 444`.
+   - RED was shown by swapping `queueMicrotask` for a direct call for one run. floating.ts was restored byte-identical afterwards; `git diff` on it was empty.
+   - With the direct call, `regions` is never written at all, not written as `floating: true` as the review predicted. Zustand 5 hands each listener the live state, so persistence takes the docked state as its hydrated baseline. layout.json keeps the float either way, and the comment at floating.ts:103-105 already says this.
+
+**Logs**
+
+| Run | Log | Result |
+|---|---|---|
+| RED, findings 1 and 2 | /tmp/maws-review/p3f-shell-d1-review-red.log | 4 failed of 67 (2 each) |
+| GREEN, findings 1 and 2 | /tmp/maws-review/p3f-shell-d1-review-green.log | 115 of 115 |
+| RED, finding 3 (direct-call run) | /tmp/maws-review/p3f-shell-d1-review3-red.log | 1 failed of 42 |
+| GREEN, finding 3 | /tmp/maws-review/p3f-shell-d1-review3-green.log | 71 of 71 |
+
+- RED quotes, findings 1 and 2:
+  - "expected { width: 640, collapsed: false, ...(2) } to match object { floating: false, width: 380 }"
+  - "expected 640 to be 444"
+  - "expected false to be true" (the main tab gone)
+  - "back in a main tab: expected false to be true"
+- RED quote, finding 3: "expected undefined to match object { value: { panel: { ...(2) } } }".
+- The 115-test GREEN covers floating, FloatingCard, Tab, artifacts, regions and PanelHeader; the 71-test one covers floating, regions, FloatingCard and Tab.
+- eslint on the changed files is clean.
+
+**E2e groups:** none of the three changes needs one. The divider refusal is proven in the real Shell and Show in panel with the real panel host. e2e:panel's divider-float case still covers the session path, which is unchanged.
+
+Nothing was left unfixed, and there is no new tracker material beyond my earlier report.

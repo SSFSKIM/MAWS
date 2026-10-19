@@ -1,0 +1,60 @@
+C1 is done: F2 (L35) and F5 (the DL13 change) are committed on worktree-agent-af4cd2993bc56e015. Both are green on their named test files, eslint is clean on every touched file, and scoped typechecks pass. Electron e2e was not run: e2e:library is optional and belongs to the hand-back gate.
+
+## Commits, in order
+1. **d33b66306, F2 / R.1:L35.** Files: `src/engine-host/session-start-hooks.ts`, `src/engine-host/session-start-hooks.test.ts`.
+2. **d6bbd386e, F5 / R.2:DL13 with c1, c5, c32, c55 and obs6a.** Files:
+   - `src/shared/maws/tools.ts` and `tools.test.ts`
+   - `src/engine-host/tool-server/artifact-tools.ts` and `artifact-tools.test.ts`
+   - `src/engine-host/tool-server/documents.ts` and `documents.test.ts` (with your leave; only the create path at :675-724 plus the import at :70; the presence code is untouched)
+   - `src/renderer/src/library/MakeSomethingNew.tsx`, `copy.ts` and `Library.test.tsx`
+
+I already sent you the note that the documents.ts commit is in.
+
+## Logs
+- **F2 RED:** `/tmp/maws-review/p3f-c1-f2-red.log`, 4 failed of 8.
+- **F2 GREEN:** `/tmp/maws-review/p3f-c1-f2-green.log`, 102 of 102 (run together with `session.test.ts`).
+- **F5 RED:** `/tmp/maws-review/p3f-c1-f5-red.log`, 6 failed of 150 across tools, artifact-tools, documents and Library tests.
+- **F5 GREEN:** `/tmp/maws-review/p3f-c1-f5-green.log`, 150 of 150.
+- **Neighbouring tool tests:** `/tmp/maws-review/p3f-c1-f5-wide.log`, 17 files, 252 of 252.
+- **Lint and types:** eslint `/tmp/maws-review/p3f-c1-f5-eslint.log`; scoped typechecks `/tmp/maws-review/p3f-c1-tsc-node.log` (also covers F2) and `p3f-c1-tsc-web.log`, all clean.
+
+## F2: what the engine reads and what the host now reads
+- **The pin is not 2.1.302.** The repo's tested version is 2.1.296 (`src/engine-host/engine-compat.ts:14`) and the fixture pin is 2.1.283 (`test/support/engine-pin/index.ts:11`). The installed engine is 2.1.303. There is no 2.1.296 bundle, so I read 2.1.302 and checked that 2.1.283, 2.1.292 and 2.1.300 resolve the same paths. The line citations are in the commit message.
+- **Managed settings:** `managed-settings.json`, then each `managed-settings.d/*.json` (files or links, no dotfiles) in name order. The directory is `/Library/Application Support/ClaudeCode` on macOS and `/etc/claude-code` on Linux. The engine concatenates hook lists from all sources, so the largest timeout is the right bound.
+- **Local settings:** the local file at the canonical git root above cwd; for a linked worktree that is the main checkout.
+- **Plugins:** the SessionStart hooks of every plugin the merged `enabledPlugins` turns on, at every install record in `installed_plugins.json`. That covers `hooks/hooks.json` and the hooks the manifest names, either a file inside the plugin or inline.
+- **Missing or malformed files** keep the 600 s floor.
+- **Tests stay hermetic:** `sessionStartHookMs` takes an optional `{ managedDir }`.
+
+**One departure from the triage wording.** The triage asked for "project files at the git root". The engine reads the project `settings.json` only at cwd, so the host does too, and the regression pins that. Only the local file is read at the git root.
+
+## Residual F2 sources (tracker material)
+**Severity P3.** None of these can be read soundly from files:
+- server-managed settings: the engine fetches and verifies them; a signed cache sits at `<config>/remote-settings.json`;
+- the MDM preferences plist: `/Library/Managed Preferences/[<user>/]com.anthropic.claudecode.plist` is binary and the engine converts it with plutil;
+- a plugin's hooks module: it is code, with no declared timeout;
+- built-in and seed-directory plugins;
+- install records with a relative `installPath`.
+
+A hook from any of these still runs under the 600 s floor.
+
+**Closing condition:** the engine reports a hook's timeout on its `hook_started` event, so the host can hold per hook. Today that event carries only `hook_id`, `hook_name` and `hook_event` (2.1.302 `cli.pretty.js:698758`). Alternatively, a real setup has such a hook past 600 s, and then that source is read.
+
+## F5: what changed
+- **Ask Claude from a narrowed Space with a linked folder** creates the session in that folder's project and location through the existing `session.projects.addFolder` call (New chat's Open folder) rather than `session.projects.add`. With add, a folder inside a repository would become a sidebar project of its own; with addFolder it folds under the repository's project and the session still starts in the folder.
+  - A Space without a linked folder starts in the focused project.
+  - The prefill and the card's label read: Make a <kind> in the Space “<name>”: .
+  - If addFolder fails (the folder is gone), the failure is toasted and no chat starts.
+- **`artifact_create` takes an optional `space`.** It is a Space id or name, matched exactly and then case-insensitively. The same resolver serves A's create and B's document and dashboard create.
+  - An unknown Space is refused as `notFound {space}`, and the message names the Spaces that exist. A name two Spaces share is refused as `invalid` with their ids.
+  - The store's create receives `spaceId`, and the first answer carries the Space's default design system. `designSystemId` stays unset.
+  - The answer carries `spaceId` and `spaceName`.
+- **`artifact_list` entries** carry `spaceId` and `spaceName`.
+- **Both tool descriptions** now mention the fields. No fixture or test pinned the old descriptions; the protocol-probe recordings predate them and were not touched.
+- **Out of bounds, not touched:** no store, preload, IPC or persisted-format change.
+
+## Proposed interface-ledger row (add this exact text)
+| `artifact_create.space?: string` (1 to 200 characters: a Space's id or its name, matched exactly, then in any case; resolved by the host after the replay lookup, for A's create and B's document and dashboard create alike through A's `spaceNamed`), with the create answer's `spaceId?: uuid` and `spaceName?: string`; `artifact_list` entries' `spaceId?: uuid` and `spaceName?: string`, present only for an artifact in a Space; an unknown Space refused `notFound {space}` naming the Spaces there are, a name two Spaces share refused `invalid {space}` with their ids; the create passes `spaceId` to `ArtifactStore.create` and `designSystemContextFor({spaceId})`, `designSystemId` left unset (Decision Log 42) | A (B's create through A's helper) | the engine | built 2026-10-19 in P3-F wave S (F5, the owner's DL13 change, R.2), d6bbd386e; additive and optional; no store, IPC or persisted-format change |
+
+## Small deferred item
+**Severity P4.** If Ask Claude is clicked in a narrowed Space before the Spaces list has loaded, it behaves as before: focused project, no Space words. **Closing condition:** Ask Claude is disabled until the Space is known.

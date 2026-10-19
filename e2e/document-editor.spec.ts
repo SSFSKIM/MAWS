@@ -179,6 +179,48 @@ test.describe('the document editor', () => {
     await expect(content(page, 'b')).toHaveText('The second tab');
     await replica(page, 'a').getByRole('tab', { name: 'Notes' }).click();
     await expect(content(page, 'a')).toContainText('Field notes');
+
+    // P3-F (the owner's observation 3): a tab's own context menu acts on the tab right-clicked, not the active one
+    await replica(page, 'a').getByRole('tab', { name: 'Tab 2' }).click({ button: 'right' });
+    await page.getByRole('menu').getByRole('menuitem', { name: 'Move left' }).click();
+    await expect(replica(page, 'a').getByRole('tab')).toHaveText(['Tab 2', 'Notes']);
+    await expect(replica(page, 'a').getByRole('tab', { selected: true })).toHaveText('Notes');
+    await expect(replica(page, 'b').getByRole('tab')).toHaveText(['Tab 2', 'Notes']);
+    // and its ×: an empty tab goes without asking, the selection moving on
+    await replica(page, 'a').getByRole('button', { name: 'Add tab' }).click();
+    await expect(replica(page, 'a').getByRole('tab', { selected: true })).toHaveText('Tab 3');
+    await replica(page, 'a').getByRole('tab', { name: 'Tab 3' }).getByRole('button', { name: 'Delete Tab 3' }).click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(replica(page, 'a').getByRole('tab')).toHaveText(['Tab 2', 'Notes']);
+    await expect(replica(page, 'b').getByRole('tab')).toHaveText(['Tab 2', 'Notes']);
+  });
+
+  // P3-F (sitting candidate 17): Tab from a table's last cell, ending in a date chip, adds a row, and the next typing lands
+  // in the new row's first cell (it landed after the chip of the row above)
+  test('Tab from a table’s last cell adds a row and the next typing lands in its first cell', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    const insert = async (item: string) => {
+      await bar.getByRole('button', { name: 'Insert', exact: true }).click();
+      await bar.getByRole('menuitem', { name: item, exact: true }).click();
+    };
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+    await insert('Table');
+    const rows = content(page, 'a').locator('table tr');
+    await expect(rows).toHaveCount(3);
+    const last = rows.nth(2).locator('td').last();
+    await last.click();
+    await insert('Date');
+    await page.keyboard.press('Escape');
+    await expect(last.locator('[data-node="date"]')).toHaveCount(1);
+    // the caret after the chip, as the owner's was
+    const box = (await last.locator('p').boundingBox())!;
+    await last.locator('p').click({ position: { x: box.width - 2, y: box.height / 2 } });
+    await page.keyboard.press('Tab');
+    await page.keyboard.type('Reviewer');
+    await expect(rows).toHaveCount(4);
+    await expect(rows.nth(3).locator('td').first()).toHaveText('Reviewer');
+    await expect(rows.nth(2)).not.toContainText('Reviewer');
   });
 
   test('find highlights the matches and steps to the second', async () => {
@@ -342,6 +384,180 @@ test.describe('the document editor', () => {
     await expect.poll(() => blockText(page, 'a', 'para0002')).toBe('The river runs north; the river is cold.');
     await expect.poll(() => blockText(page, 'b', 'para0002')).toBe('The river runs north; the river is cold.');
     await expect(replica(page, 'b').getByRole('status', { name: 'Restored' })).toContainText('Restored from Clean draft');
+  });
+
+  // P3-F (sitting candidate 13): the app's preflight takes every list's markers away; the page gives them back
+  test('bulleted and numbered lists draw their markers, a checklist its boxes alone', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    for (const button of ['Bulleted list', 'Numbered list', 'Checklist']) {
+      await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+      await bar.getByRole('button', { name: button, exact: true }).click();
+      await page.keyboard.type(`${button} item`);
+    }
+    const marker = (selector: string) => content(page, 'a').locator(selector).first().evaluate((el) => getComputedStyle(el).listStyleType);
+    expect(await marker('ul:not([data-type="taskList"])')).toBe('disc');
+    expect(await marker('ol')).toBe('decimal');
+    expect(await marker('ul[data-type="taskList"]')).toBe('none');
+  });
+
+  // P3-F (sitting candidates 14 and 16): an atom inserted while the keyboard is outside the page (here on the toolbar's
+  // Block style) keeps the keyboard in its field, so the next keys write its content, not the paragraph's text
+  test('an atom inserted from the toolbar takes the next keys in its field, wherever the keyboard was', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+    await page.keyboard.type('Euler: ');
+    await bar.getByRole('combobox', { name: 'Block style' }).focus();
+    await bar.getByRole('button', { name: 'Insert', exact: true }).click();
+    await bar.getByRole('menuitem', { name: 'Math', exact: true }).click();
+    await expect(page.locator(':focus')).toHaveAttribute('aria-label', 'LaTeX');
+    await page.keyboard.type('E=mc^2');
+    await page.keyboard.press('Enter');
+    await expect(content(page, 'a').locator('[data-node="math"] .katex').last()).toBeVisible();
+    const shown = await json(page, 'a');
+    expect(shown).toContain('"latex":"E=mc^2"');
+    expect(shown).not.toContain('Euler: E=mc^2');
+  });
+
+  // P3-F (sitting candidate 20): a diagram follows its page's palette. Drawn in the dark app on a page without a system
+  // (a dark page), it is drawn again once a light system's stylesheet arrives, its boxes on the page's light ground
+  test('a diagram is drawn again in its page’s palette when the page’s system arrives after it', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    await page.evaluate(() => void (document.documentElement.dataset.theme = 'dark'));
+    try {
+      await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+      await bar.getByRole('button', { name: 'Insert', exact: true }).click();
+      await bar.getByRole('menuitem', { name: 'Diagram', exact: true }).click();
+      await page.keyboard.press('Escape');
+      const box = content(page, 'a').locator('[data-node="diagram"] svg .node rect').first();
+      await expect(box).toBeVisible({ timeout: 15_000 }); // mermaid, loaded on first use
+      const fill = () => box.evaluate((el) => getComputedStyle(el).fill);
+      const ground = await replica(page, 'a').locator('.ds-doc').evaluate((el) => getComputedStyle(el).backgroundColor);
+      await expect.poll(fill).toBe(ground); // the dark page's own ground
+      await page.evaluate(() => {
+        const system = document.head.appendChild(document.createElement('style'));
+        system.id = 'p3f-light-system';
+        system.textContent = '.ds-doc { --ds-color-bg: rgb(250, 249, 246); --ds-color-text: rgb(31, 30, 27); }';
+      });
+      await expect.poll(fill, { timeout: 15_000 }).toBe('rgb(250, 249, 246)');
+    } finally {
+      await page.evaluate(() => {
+        delete document.documentElement.dataset.theme;
+        document.getElementById('p3f-light-system')?.remove();
+      });
+    }
+  });
+
+  // P3-F (sitting candidate 29): Show editors' list keeps its title on one line, its × at the header's far end, away from
+  // the pointer that chose Show editors at the popover's corner
+  test('Show editors lists the editors under a one-line title, its × away from the pointer', async () => {
+    const { page } = maws;
+    await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', id, text), ['para0002', 'river runs north'] as const);
+    const selection = await page.evaluate(() => {
+      const box = getSelection()!.getRangeAt(0).getBoundingClientRect();
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    });
+    await page.mouse.click(selection.x, selection.y, { button: 'right' });
+    const item = replica(page, 'a').getByRole('menuitem', { name: 'Show editors' });
+    const choice = (await item.boundingBox())!;
+    const pointer = { x: choice.x + choice.width / 2, y: choice.y + choice.height / 2 };
+    await page.mouse.click(pointer.x, pointer.y);
+    const dialog = replica(page, 'a').getByRole('dialog', { name: 'Editors' });
+    await expect(dialog.getByText('Reading the history…')).toHaveCount(0, { timeout: 15_000 });
+    const title = dialog.getByText('Editors of the selection', { exact: true });
+    const line = await title.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.5);
+    const titleBox = (await title.boundingBox())!;
+    expect(titleBox.height).toBeLessThan(line * 1.5); // one line
+    const close = (await dialog.getByRole('button', { name: 'Close editors' }).boundingBox())!;
+    expect(close.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width);
+    const under = pointer.x >= close.x && pointer.x <= close.x + close.width && pointer.y >= close.y && pointer.y <= close.y + close.height;
+    expect(under, 'the × is not under the pointer').toBe(false);
+    await dialog.getByRole('button', { name: 'Close editors' }).click();
+    await expect(dialog).toHaveCount(0);
+  });
+
+  // P3-F (sitting candidate 16): Return in a new date chip's field commits its date and keeps the chip, the line whole,
+  // and the typing after it lands right after the chip
+  test('Return in a new date chip’s field keeps the chip, and the next typing lands after it', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+    await page.keyboard.type('Due ');
+    await bar.getByRole('combobox', { name: 'Block style' }).focus(); // the keyboard off the page, as the owner's was
+    await bar.getByRole('button', { name: 'Insert', exact: true }).click();
+    await bar.getByRole('menuitem', { name: 'Date', exact: true }).click();
+    await expect(page.locator(':focus')).toHaveAttribute('aria-label', 'Date');
+    const lines = await content(page, 'a').locator('p').count();
+    await page.keyboard.press('Enter');
+    await page.keyboard.type(' later');
+    await expect(content(page, 'a').locator('p')).toHaveCount(lines);
+    const line = content(page, 'a').locator('p').last();
+    await expect(line.locator('[data-node="date"]')).toHaveCount(1);
+    await expect(line).toContainText('Due');
+    await expect(line).toContainText('later');
+    expect(await json(page, 'a')).toMatch(/"type":"date","attrs":\{"iso":"\d{4}-\d{2}-\d{2}"\}/);
+  });
+
+  // P3-F (sitting candidate 53): in the dark app a light page draws its native controls in the light scheme (an unticked
+  // checklist box is no solid dark square), and a dark page in the dark one
+  test('a page draws its checklist boxes in its own ground’s colour scheme, not the app’s', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+    await bar.getByRole('button', { name: 'Checklist', exact: true }).click();
+    await page.keyboard.type('Unticked');
+    const sheet = replica(page, 'a').locator('.ds-doc');
+    const box = content(page, 'a').locator('ul[data-type="taskList"] input[type="checkbox"]').last();
+    const scheme = () => box.evaluate((el) => getComputedStyle(el).colorScheme);
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = 'dark';
+      const system = document.head.appendChild(document.createElement('style'));
+      system.id = 'p3f-page-system';
+      system.textContent = '.ds-doc { --ds-color-bg: rgb(250, 249, 246); --ds-color-text: rgb(31, 30, 27); }';
+    });
+    try {
+      await expect(sheet).toHaveAttribute('data-ground', 'light');
+      await expect.poll(scheme).toBe('light');
+      await expect(box).not.toBeChecked();
+      await page.evaluate(() => void (document.getElementById('p3f-page-system')!.textContent = '.ds-doc { --ds-color-bg: rgb(31, 30, 27); --ds-color-text: rgb(250, 249, 246); }'));
+      await expect(sheet).toHaveAttribute('data-ground', 'dark');
+      await expect.poll(scheme).toBe('dark');
+    } finally {
+      await page.evaluate(() => {
+        delete document.documentElement.dataset.theme;
+        document.getElementById('p3f-page-system')?.remove();
+      });
+    }
+  });
+
+  // P3-F (sitting candidate 11, F18, the architect's ruling): a link is the colour of its text with its underline, no
+  // accent, hovered or not; hover thickens the underline
+  test('a link takes its text’s colour, hover thickening its underline', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    const WORDS = 'See the notes';
+    await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+    await page.keyboard.type(WORDS);
+    for (let i = 0; i < WORDS.length; i += 1) await page.keyboard.press('Shift+ArrowLeft');
+    await bar.getByRole('button', { name: 'Link', exact: true }).click();
+    const address = bar.getByRole('textbox', { name: 'Link address' });
+    await address.fill('https://example.com/notes');
+    await address.press('Enter');
+    const link = content(page, 'a').locator('a[href="https://example.com/notes"]');
+    await expect(link).toHaveText(WORDS);
+    const text = await link.evaluate((el) => getComputedStyle(el.closest('p')!).color);
+    const look = () =>
+      link.evaluate((el) => {
+        const style = getComputedStyle(el);
+        return { color: style.color, underline: style.textDecorationColor, line: style.textDecorationLine, thickness: parseFloat(style.textDecorationThickness) || 0 };
+      });
+    const resting = await look();
+    expect(resting).toMatchObject({ color: text, underline: text, line: 'underline' });
+    await link.hover();
+    await expect.poll(async () => (await look()).thickness).toBeGreaterThan(resting.thickness);
+    expect(await look()).toMatchObject({ color: text, underline: text });
   });
 });
 

@@ -9,6 +9,10 @@
 
 .ds-doc {
   container-type: inline-size; /* the page's margin is measured against the column it is shown in */
+  /* the page's native controls (a checklist's boxes, the date field, the selects) draw in its own ground's scheme, not
+     the app root's: a dark app drew them dark on a light page, an unticked box a solid square (P3-F, sitting candidate
+     53); a dark ground takes the dark scheme below */
+  color-scheme: light;
   background: var(--ds-color-bg, var(--bg));
   color: var(--ds-color-text, var(--fg));
   font-family: var(--ds-font-body, var(--font-prose));
@@ -56,9 +60,21 @@
   line-height: var(--ds-type-h3-line, 1.35);
   font-weight: var(--ds-type-h3-weight, 600);
 }
+/* a link is the colour of its text with its underline, in every state (P3-F, sitting candidate 11, the architect's
+   ruling: the bundled systems' law gives the accent to the reader's one action, never to a link). Hover thickens the
+   underline; keyboard focus draws the app's focus ring's shape in the link's own colour, which the HTML export keeps */
 .ds-doc a {
-  color: var(--ds-color-accent, var(--accent));
-  text-decoration: underline;
+  color: inherit;
+  text-decoration-line: underline;
+  text-decoration-thickness: 0.0625em;
+}
+.ds-doc a:hover {
+  text-decoration-thickness: 0.125em;
+}
+.ds-doc a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: var(--ds-radius-sm, var(--radius-sm));
 }
 .ds-doc mark {
   background: var(--ds-color-bg-raised, var(--bg-raised));
@@ -100,12 +116,32 @@
   padding: 0;
   font-size: inherit;
 }
+/* the markers, which the app's preflight takes from every list (P3-F, sitting candidate 13): discs, then circles and
+   squares as bullets nest; numbers, then letters and numerals; a checklist has its boxes instead */
 .ds-doc ul,
 .ds-doc ol {
   padding-left: var(--ds-space-5, calc(var(--space) * 6));
 }
+.ds-doc ul {
+  list-style-type: disc;
+}
+.ds-doc ul ul {
+  list-style-type: circle;
+}
+.ds-doc ul ul ul {
+  list-style-type: square;
+}
+.ds-doc ol {
+  list-style-type: decimal;
+}
+.ds-doc ol ol {
+  list-style-type: lower-alpha;
+}
+.ds-doc ol ol ol {
+  list-style-type: lower-roman;
+}
 .ds-doc ul[data-type="taskList"] {
-  list-style: none;
+  list-style-type: none;
   padding-left: var(--ds-space-1, var(--space));
 }
 .ds-doc ul[data-type="taskList"] li {
@@ -144,8 +180,9 @@
 }
 
 /* the callout's tone (data-callout-tone, the ledger's canon name): note, tip, warn, danger. Styled by the attribute, which
-   the node view's callout and the inert attributed one (a version's, the suggestion review's) both carry, at the
-   specificity of a design system's own callout rules (D's components/document.css), which still come after */
+   the node view's callout and the inert attributed one (a version's, the suggestion review's) both carry. A system's own
+   callout rules (D's components/document.css) style its page frames, where this sheet is never loaded (an app scope
+   takes only that sheet's font faces), so nothing here is ordered against them */
 .ds-doc [data-callout-tone] {
   display: flex;
   flex-direction: column;
@@ -268,4 +305,7 @@
    from the page's computed background: the system's `--ds-color-bg`, the app's without a system), never the app theme */
 .ds-doc[data-ground="dark"] .doc-code-token {
   color: var(--shiki-dark) !important;
+}
+.ds-doc[data-ground="dark"] {
+  color-scheme: dark;
 }

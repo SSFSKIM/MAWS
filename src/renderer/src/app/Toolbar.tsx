@@ -1,19 +1,21 @@
 // The toolbar, which is also the window's title bar (`titleBarStyle: 'hiddenInset'`, §3; mockup 01): a drag region
 // with the traffic lights' 78 px clearance and sidebar/Overview toggles across the sidebar's width,
-// the focused pane's active tab as the title (with the branch chip on a session), the usage slot,
+// the project chip and the focused pane's active tab as the title (with the branch chip on a session), the usage slot,
 // the session actions menu and the panel toggle.
 // Every control is `no-drag`, so clicks reach it rather than moving the window.
-import { DropdownMenu } from 'radix-ui';
+import { useRef } from 'react';
+import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { TabRef } from '@shared/ipc/schema/layout';
-import { runAction, useUnstartedTitle } from '../keymap/actions-runtime';
+import { NO_PROJECT, type TabRef } from '@shared/ipc/schema/layout';
+import { createSession, runAction, useSessionCreatorRegistered, useUnstartedTitle } from '../keymap/actions-runtime';
+import { revealProject } from '../sidebar/reveal';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { useSessions } from '../stores/sessions';
-import { Icon, IconButton, PanelIcon, SidebarIcon } from './IconButton';
+import { FolderIcon, Icon, IconButton, PanelIcon, SidebarIcon } from './IconButton';
 import { sidebarWidth, useWindowWidth } from './regions';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from './session-actions';
 import { useSlot } from './slots';
@@ -109,6 +111,7 @@ export function Toolbar() {
         </div>
       </div>
       <div className="flex min-w-0 items-center gap-3 pl-5">
+        <ProjectChip />
         <span className="truncate font-medium text-fg">{title}</span>
         {branch && (
           <span className="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-ui-sm text-fg-muted">⎇ {branch}</span>
@@ -126,6 +129,70 @@ export function Toolbar() {
         </IconButton>
       </div>
     </header>
+  );
+}
+
+// P3-F wave S (F17, the owner's obs 8; W12's label, which named the set at the strip's left edge until the owner moved it
+// out of the crowded strip): the project whose tab set the strips show, left of the title, so a strip that changed with
+// a project is never a surprise. A click is the sidebar's "+" (a New chat in that project: a new unstarted session tab
+// in its set); the context menu reveals the project in the sidebar, the one way a hidden project's row comes back. The
+// no-project set (and a project the index no longer lists) shows none.
+export const PROJECT_CHIP_COPY = {
+  newChat: (name: string) => `New chat in ${name}`,
+  reveal: 'Reveal in sidebar',
+  show: 'Show in sidebar', // a hidden project's: restored first
+} as const;
+
+function ProjectChip() {
+  const current = useLayout((s) => s.main.current);
+  const project = useSessions((s) => (current === NO_PROJECT ? undefined : s.projects.get(current)));
+  const canCreate = useSessionCreatorRegistered();
+  const revealing = useRef(false); // the reveal focuses the project's row: the closing menu gives the chip no focus back
+  if (!project) return null;
+  return (
+    <ContextMenu.Root modal={false}>
+      <ContextMenu.Trigger asChild>
+        <button
+          type="button"
+          data-toolbar-project={project.id}
+          aria-label={PROJECT_CHIP_COPY.newChat(project.name)}
+          title={canCreate ? PROJECT_CHIP_COPY.newChat(project.name) : 'Not available here'}
+          onClick={() => void createSession(project.id)}
+          onKeyDown={(event) => {
+            // the menu key (as the library's rows take it): a Mac keyboard sends no contextmenu, so the menu opens under
+            // the chip as a right-click there would, and Radix gives its first item the keyboard
+            if (event.key !== 'F10' || !event.shiftKey) return;
+            event.preventDefault();
+            const box = event.currentTarget.getBoundingClientRect();
+            event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
+          }}
+          className="flex h-6 max-w-48 min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
+        >
+          <FolderIcon className="size-[12px] shrink-0" />
+          <span className="truncate">{project.name}</span>
+        </button>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content
+          onCloseAutoFocus={(event) => {
+            if (!revealing.current) return;
+            revealing.current = false;
+            event.preventDefault();
+          }}
+          className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg"
+        >
+          <ContextMenu.Item
+            onSelect={() => {
+              revealing.current = true;
+              revealProject(project.id);
+            }}
+            className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover"
+          >
+            {project.hidden ? PROJECT_CHIP_COPY.show : PROJECT_CHIP_COPY.reveal}
+          </ContextMenu.Item>
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   );
 }
 

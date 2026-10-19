@@ -101,14 +101,63 @@ describe('diagrams', () => {
   });
 
   it('cleared before an earlier drawing answers, stay cleared (the late drawing is dropped)', async () => {
-    let answer!: (svg: string) => void;
-    const e = make(doc({ type: 'diagram', attrs: { id: 'd1', source: 'graph TD; A-->B' } }), () => new Promise((resolve) => (answer = resolve)));
+    const asked: Array<(svg: string) => void> = [];
+    const e = make(doc({ type: 'diagram', attrs: { id: 'd1', source: 'graph TD; A-->B' } }), () => new Promise((resolve) => void asked.push(resolve)));
+    await until(() => asked.length > 0, 'the drawing asked for');
     e.view.dispatch(e.state.tr.setNodeAttribute(atPos(e, 'diagram'), 'source', ''));
     expect(view(e, 'diagram').textContent).toContain('Diagram');
-    answer('<svg data-obsolete=""></svg>');
+    asked[0]('<svg data-obsolete=""></svg>');
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(view(e, 'diagram').querySelector('svg')).toBeNull();
     expect(view(e, 'diagram').textContent).toContain('Diagram');
+  });
+});
+
+// P3-F (sitting candidate 20): a drawing is themed by the page it is shown on (renderDiagram's contract), so it is made
+// once its view is on the page, never while ProseMirror builds the view off the document, and made again when the
+// page's palette changes after it (the page's system arriving as a scope's stylesheet after the page mounts, the app's
+// fallbacks showing until it does; a live system restyling; the app's theme under a page without a system).
+describe('a diagram on its page', () => {
+  it('is drawn once on the page in its palette, and drawn again when the page’s palette changes', async () => {
+    const calls: Array<{ connected: boolean; color: string; ground: string }> = [];
+    const page = document.body.appendChild(Object.assign(document.createElement('div'), { className: 'ds-doc' }));
+    const system = document.head.appendChild(document.createElement('style'));
+    system.textContent = '.ds-doc { color: rgb(240, 240, 240); background-color: rgb(20, 20, 20); }';
+    const other = document.createElement('style');
+    try {
+      editor = new Editor({
+        element: page.appendChild(document.createElement('div')),
+        coreExtensionOptions,
+        extensions: editorExtensions({
+          collaboration: null,
+          env: {
+            artifactId: 'doc1',
+            host,
+            renderDiagram: async (_source, into) => {
+              calls.push({ connected: into.isConnected, color: getComputedStyle(into).color, ground: getComputedStyle(into.closest('.ds-doc') ?? into).backgroundColor });
+              return `<svg data-call="${calls.length}"></svg>`;
+            },
+          },
+        }),
+        content: doc({ type: 'diagram', attrs: { id: 'd1', source: 'graph TD; A-->B' } }),
+      });
+      const e = editor;
+      await until(() => view(e, 'diagram').querySelector('svg[data-call="1"]') !== null, 'the first drawing');
+      expect(calls).toEqual([{ connected: true, color: 'rgb(240, 240, 240)', ground: 'rgb(20, 20, 20)' }]);
+      // the page's own system arrives after the drawing, light where the app's fallbacks were dark
+      system.textContent = '.ds-doc { color: rgb(31, 30, 27); background-color: rgb(250, 249, 246); }';
+      await until(() => view(e, 'diagram').querySelector('svg[data-call="2"]') !== null, 'the drawing in the page’s palette');
+      expect(calls[1]).toEqual({ connected: true, color: 'rgb(31, 30, 27)', ground: 'rgb(250, 249, 246)' });
+      // a stylesheet that leaves the page's palette as it is draws nothing again
+      other.textContent = '.doc-unrelated { margin: 0; }';
+      document.head.append(other);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(calls).toHaveLength(2);
+    } finally {
+      system.remove();
+      other.remove();
+      page.remove();
+    }
   });
 });
 
@@ -243,11 +292,84 @@ describe('leaving an atom’s field', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  // P3-F (wave S review of c16): macOS Korean input confirms a composing syllable with Return as two keydowns about 1 ms
+  // apart, the first composing (keyCode 229) and followed by compositionend, the second not (the owner's capture,
+  // docs/doperpowers/evidence/p2-finish/owner-ime-capture-2026-10-12-events.txt:47-55). Only the second leaves the field,
+  // so it never reaches the page as a Return of its own that splits the line after the atom.
+  it('leaves on the Return that ends a composition, not the composing one, the line kept whole', () => {
+    const e = make(doc({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Ask ' }, { type: 'mention', attrs: { kind: 'person', ref: 'u1', label: '' } }, { type: 'text', text: ' now' }] }));
+    select(e, 'mention');
+    const field = view(e, 'mention').querySelector<HTMLInputElement>('[aria-label="Name"]')!;
+    field.focus();
+    typeInto(field, '홍길동');
+    // each keydown goes where the keyboard is, as the browser sends it
+    const enter = (init: KeyboardEventInit) => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true, ...init }));
+    enter({ keyCode: 229, isComposing: true });
+    field.dispatchEvent(new CompositionEvent('compositionend', { data: '동', bubbles: true }));
+    enter({ keyCode: 13, isComposing: false });
+    expect(e.state.doc.childCount).toBe(1);
+    expect(e.state.doc.child(0).textContent).toBe('Ask  now');
+    expect(attrsOf(e, 'mention').label).toBe('홍길동');
+    expect(document.activeElement).toBe(e.view.dom);
+    expect(e.state.selection.empty && e.state.selection.from).toBe(atPos(e, 'mention') + 1);
+  });
+
   it('puts the caret right after an inline atom', () => {
     const e = make(doc({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Due ' }, { type: 'math', attrs: { latex: 'x' } }, { type: 'text', text: ' now' }] }));
     leave(e, 'math', 'LaTeX');
     expect(e.state.selection.empty).toBe(true);
     expect(e.state.selection.from).toBe(atPos(e, 'math') + 1);
+  });
+});
+
+// P3-F (sitting candidate 16): a date chip's field keeps the chip. A date the field cannot read (a segment cleared)
+// writes nothing, so the chip keeps its last date; Return commits what the field shows and Escape shows the chip's date
+// again, each handing the caret back right after the chip, the key kept from the page (no split line) and from any
+// surface around it
+describe('a date chip’s field', () => {
+  const dated = () => doc({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Due ' }, { type: 'date', attrs: { iso: '2026-10-13' } }, { type: 'text', text: ' now' }] });
+  const press = (field: HTMLElement, key: string) => {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    field.dispatchEvent(event);
+    return event;
+  };
+  const open = (e: Editor) => {
+    select(e, 'date');
+    const field = view(e, 'date').querySelector<HTMLInputElement>('[aria-label="Date"]')!;
+    field.focus();
+    return field;
+  };
+
+  it('keeps its last date through an entry it cannot read, and Escape shows that date again', () => {
+    const e = make(dated());
+    const around = vi.fn();
+    document.body.addEventListener('keydown', around);
+    try {
+      const field = open(e);
+      typeInto(field, '2026-11-02');
+      typeInto(field, ''); // a segment cleared: the field reads no date
+      expect(attrsOf(e, 'date').iso).toBe('2026-11-02');
+      expect(view(e, 'date').querySelector('.doc-chip')!.textContent).toBe('Nov 2, 2026');
+      expect(press(field, 'Escape').defaultPrevented).toBe(true);
+      expect(field.value).toBe('2026-11-02');
+      expect(attrsOf(e, 'date').iso).toBe('2026-11-02');
+      expect(e.state.doc.childCount).toBe(1);
+      expect(e.state.selection.empty && e.state.selection.from).toBe(atPos(e, 'date') + 1);
+      expect(around).not.toHaveBeenCalled();
+    } finally {
+      document.body.removeEventListener('keydown', around);
+    }
+  });
+
+  it('commits the date the field shows on Return, the chip kept and the line whole', () => {
+    const e = make(dated());
+    const field = open(e);
+    field.value = '2026-12-24'; // shown, its input event not yet delivered
+    expect(press(field, 'Enter').defaultPrevented).toBe(true);
+    expect(attrsOf(e, 'date').iso).toBe('2026-12-24');
+    expect(e.state.doc.childCount).toBe(1);
+    expect(e.state.doc.child(0).textContent).toBe('Due  now');
+    expect(e.state.selection.empty && e.state.selection.from).toBe(atPos(e, 'date') + 1);
   });
 });
 

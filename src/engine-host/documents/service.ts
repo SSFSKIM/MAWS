@@ -72,7 +72,7 @@ import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { StoreTooNewError } from './errors';
 import { fromNodePort, type HostPort } from './ports';
-import { AgentReplica } from './replica';
+import { AgentReplica, type Presence } from './replica';
 
 export const HEAD_TAIL_ROWS = 2_000; // the head is rewritten once the log tail behind it passes this many rows …
 export const HEAD_TAIL_BYTES = 1024 * 1024; // … or this many bytes (Decision Log 8)
@@ -201,6 +201,7 @@ export class DocumentService {
   private readonly beforeCommitListeners = new Set<(artifactIds: string[]) => void>();
   private readonly unloadListeners = new Set<(artifactId: string) => void>();
   private readonly agentReplicas = new Map<string, AgentReplica>(); // by `${appSessionId}\0${artifactId}`
+  private readonly heldPresence = new WeakMap<AgentReplica, { turnEnded: boolean }>(); // P3-F (F19): outlines inside their hold
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private flushScheduled = false;
   private nextConnId = 1;
@@ -460,9 +461,29 @@ export class DocumentService {
     this.flush();
   }
 
-  // Clears the presence of every replica the session holds (its turn ended, Decision Log 23d).
+  // Clears the presence of every replica the session holds (its turn ended, Decision Log 23d). P3-F (F19): an outline
+  // still inside its hold is left to it, and its release then clears it.
   clearPresence(appSessionId: AppSessionId): void {
-    for (const [key, replica] of this.agentReplicas) if (key.startsWith(`${appSessionId}\u0000`)) replica.setPresence(null);
+    for (const [key, replica] of this.agentReplicas) {
+      if (!key.startsWith(`${appSessionId}\u0000`)) continue;
+      const held = this.heldPresence.get(replica);
+      if (held) held.turnEnded = true;
+      else replica.setPresence(null);
+    }
+  }
+
+  // P3-F (F19): a batch's outline, just published on `replica`, is held until `releasePresence` (the tool's hold after
+  // the commit); a later batch holds it afresh, in a turn of its own.
+  holdPresence(replica: AgentReplica): void {
+    this.heldPresence.set(replica, { turnEnded: false });
+  }
+
+  // The hold ended: the replica shows `idle` (the agent's name, no outline), or nothing if the session's turn ended
+  // meanwhile.
+  releasePresence(replica: AgentReplica, idle: Presence): void {
+    const held = this.heldPresence.get(replica);
+    this.heldPresence.delete(replica);
+    replica.setPresence(held?.turnEnded ? null : idle);
   }
 
   // A restore's announcement (Decision Log 16; M3 calls it once the restore's rows committed): `restored` goes to every

@@ -571,8 +571,9 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     // the agent's cursor and its editing blocks, drawn while the batch ran
     const drawn = await presence(page);
     note(`G4: drawn while the batch ran: ${JSON.stringify(drawn)}`);
-    // within the batch: from its request to its answer, and the 1.5 s the outline stays after (D11), with 0.5 s for the
-    // frame to reach the page
+    // within the batch: from its request to 2 s after its answer. The outline is drawn with the commit, before the answer,
+    // and stays 4 s after it (D11; P3-F F19, was 1.5 s), so the window holds every appearance with time for the frame
+    // to reach the page
     const from = Date.parse(batch.requestedAt!);
     const to = Date.parse(batch.at!) + 2_000;
     const inBatch = drawn.filter((d) => d.at >= from && d.at <= to);

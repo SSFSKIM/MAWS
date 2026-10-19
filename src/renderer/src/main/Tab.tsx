@@ -1,8 +1,8 @@
 // One tab of a pane's strip (§5.2; mockup 01 `.tab`; residue *Tab strip*): the status glyph of a session, the title,
 // the project as `small`, and a close control revealed on hover and focus. It is a `div role="tab"` rather than a
 // button because it holds that inner button and native drag attributes. A middle-click closes it; its context menu
-// pins it, moves it to the other pane and closes it or the others. (The Overview is no tab since W5: it floats over the
-// main area.)
+// pins it, moves it to the other pane (an artifact's also into the panel, P3-F wave S) and closes it or the others. (The
+// Overview is no tab since W5: it floats over the main area.)
 import { ContextMenu } from 'radix-ui';
 import type { KeyboardEvent, MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -13,7 +13,7 @@ import { glyphFor, type Glyph } from '../attention/glyph';
 import { requestCloseTab, useUnstartedTitle } from '../keymap/actions-runtime';
 import { selectEndedWithErrorOf, selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { currentSet } from '../stores/layout-model';
+import { activeTab, allTabs, closeTab, currentSet, sessionOfTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { displayTitle } from '../sessions/title';
 // E5 start
@@ -26,6 +26,11 @@ import { useViewer } from '../tools/code/viewer/viewer-store';
 import { LIBRARY_COPY } from '../library/copy';
 import { useArtifactTitle } from '../library/store';
 // P3-L end
+// P3-F wave S (F16) start
+import { usePanelHost } from '../panel/host';
+import { openArtifactTab } from '../library/actions';
+import { ARTIFACTS_TOOL_ID, canShowArtifactInPanel, freePanelFor, openArtifactInPanel } from '../tools/artifacts/ArtifactsTool';
+// P3-F wave S (F16) end
 // E4a start
 import { BROWSER_COPY } from '../tools/browser/copy';
 import { useBrowserTitle } from '../tools/browser/store';
@@ -178,6 +183,7 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
             <TabMenuItem onSelect={() => useLayout.getState().togglePinned(tab.id)}>{tab.pinned ? 'Unpin tab' : 'Pin tab'}</TabMenuItem>
           )}
           <TabMenuItem onSelect={() => moveToOtherPane(tab.id, pane)}>Move to other pane</TabMenuItem>
+          {tab.kind === 'artifact' && <ShowInPanelItem tab={tab} />}
           <ContextMenu.Separator className="my-1 h-px bg-border" />
           <TabMenuItem onSelect={() => void requestCloseTab(tab.id)}>Close tab</TabMenuItem>
           <TabMenuItem onSelect={() => void closeOthers(tab.id, pane)}>Close other tabs</TabMenuItem>
@@ -187,15 +193,47 @@ export function Tab({ tab, pane, domId, active, stop, onKeyDown }: TabProps) {
   );
 }
 
-function TabMenuItem({ children, onSelect }: { children: string; onSelect(): void }) {
+function TabMenuItem({ children, onSelect, disabled = false, reason }: { children: string; onSelect(): void; disabled?: boolean; reason?: string }) {
   return (
     <ContextMenu.Item
       onSelect={onSelect}
+      disabled={disabled}
+      title={disabled ? reason : undefined}
       className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-disabled:text-fg-faint data-highlighted:bg-bg-hover"
     >
       {children}
     </ContextMenu.Item>
   );
+}
+
+// P3-F wave S (F16, the owner's obs 7): an artifact tab moves into the panel, the mirror of the panel record's Open in
+// tab. The panel it lands in is the one shown once the tab is gone: the session the focused pane shows next (the close's
+// own rule, `closeTab`), else the pinned Artifacts tab the no-session panel lists. Each side's guard is asked once, and
+// the artifact is never shown nowhere: the Artifacts tab there lets go of another artifact it shows first (its guard
+// keeping it refuses the move), then the tab closes through its own guard, and the panel opens only once it has (opened
+// first, the tool would switch main to its session while the tab is still in front). A panel that changed while the
+// tab's guard answered is checked again, and if it can no longer take the artifact, the artifact goes back to a main tab.
+export const SHOW_IN_PANEL_COPY = { label: 'Show in panel', noPanel: 'No session’s panel to show it in' };
+
+function ShowInPanelItem({ tab }: { tab: Extract<TabRef, { kind: 'artifact' }> }) {
+  const session = useLayout((s) => sessionOfTab(activeTab(closeTab(s.main, tab.id))));
+  const pinned = useLayout((s) => s.panelPinned);
+  const registered = usePanelHost((s) => s.tools.has(ARTIFACTS_TOOL_ID));
+  const can = canShowArtifactInPanel(session, pinned, registered);
+  return (
+    <TabMenuItem disabled={!can} reason={SHOW_IN_PANEL_COPY.noPanel} onSelect={() => void showInPanel(tab.id, tab.artifactId, session)}>
+      {SHOW_IN_PANEL_COPY.label}
+    </TabMenuItem>
+  );
+}
+
+async function showInPanel(id: string, artifactId: string, session: AppSessionId | null) {
+  if (!(await freePanelFor(session, artifactId))) return; // the panel's own record kept its place
+  await requestCloseTab(id);
+  if (allTabs(useLayout.getState().main).some((t) => t.id === id)) return; // its close guard kept it
+  const still = sessionOfTab(activeTab(useLayout.getState().main)) === session && canShowArtifactInPanel(session) && (await freePanelFor(session, artifactId));
+  if (still) openArtifactInPanel(session, artifactId);
+  else openArtifactTab(artifactId);
 }
 
 function moveToOtherPane(id: string, pane: 0 | 1) {

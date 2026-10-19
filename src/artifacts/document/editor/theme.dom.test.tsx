@@ -2,6 +2,7 @@
 // colour in the editor's stylesheets; the page reads only the design system's names, each falling back to an app
 // token; with no `--ds-*` defined every computed colour of a rendered document is an app token's, and a design
 // system's value, once defined, wins over it.
+import type { JSONContent } from '@tiptap/core';
 import { DOMSerializer } from '@tiptap/pm/model';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -83,6 +84,28 @@ describe('the stylesheets', () => {
   });
 });
 
+// P3-F (sitting candidate 11, F18, the architect's ruling: the bundled systems' law gives the accent to the reader's one
+// action, never to a link): a link keeps its text's colour in every state, hover thickening its underline and keyboard
+// focus drawing a focus ring (hover and focus cannot be put on an element here; the e2e hovers one)
+describe('a link', () => {
+  const states = declarations(themeCss).filter((d) => /^\.ds-doc a(?::[\w-]+)?$/.test(d.selector));
+  const rule = (selector: string) => Object.fromEntries(states.filter((d) => d.selector === selector).map((d) => [d.property, d.value]));
+
+  it('takes no colour of its own in any state', () => {
+    expect(rule('.ds-doc a').color).toBe('inherit');
+    for (const { selector, property, value } of states) {
+      // the focus ring included (wave S review of F18): an accent ring is the accent on a link
+      if (/color/.test(property) || property === 'text-decoration' || property.startsWith('outline')) expect(value, `${selector} { ${property}: ${value} }`).not.toMatch(/accent/);
+    }
+  });
+
+  it('thickens its underline on hover and draws a focus ring on keyboard focus', () => {
+    expect(rule('.ds-doc a')['text-decoration-line']).toBe('underline');
+    expect(parseFloat(rule('.ds-doc a:hover')['text-decoration-thickness'])).toBeGreaterThan(parseFloat(rule('.ds-doc a')['text-decoration-thickness']));
+    expect(rule('.ds-doc a:focus-visible').outline).toMatch(/^2px solid /);
+  });
+});
+
 describe('the author colours', () => {
   it('are app tokens defined for both themes, one per AUTHOR_COLORS entry', () => {
     const [light, dark] = tokensCss.split('[data-theme="dark"]');
@@ -107,8 +130,18 @@ describe('the rendered page without a design system', () => {
     world?.destroy();
   });
 
-  async function mountEveryKind(): Promise<HTMLElement> {
-    world = new World(
+  async function mountPage(content: JSONContent, ready: string): Promise<HTMLElement> {
+    world = new World(content);
+    handle = openMemoryHandle(world.host, { log: () => {} });
+    await whenSynced(handle);
+    const host = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-1' });
+    const { container } = render(<DocumentEditor artifactId="doc1" handle={handle} host={host} renderDiagram={async () => '<svg></svg>'} />);
+    await until(() => container.querySelector(ready) !== null, 'the page');
+    return container;
+  }
+
+  function mountEveryKind(): Promise<HTMLElement> {
+    return mountPage(
       doc(
         { type: 'heading', attrs: { id: 'h1', level: 1 }, content: [{ type: 'text', text: 'Title' }] },
         { type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'link', marks: [{ type: 'link', attrs: { href: 'https://example.com' } }] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'code', marks: [{ type: 'code' }] }, { type: 'date', attrs: { iso: '2026-10-13' } }] },
@@ -119,14 +152,58 @@ describe('the rendered page without a design system', () => {
         { type: 'horizontalRule', attrs: { id: 'hr' } },
         { type: 'pending', attrs: { id: 'pe', intent: 'Next' } },
       ),
+      '.ds-doc table',
     );
-    handle = openMemoryHandle(world.host, { log: () => {} });
-    await whenSynced(handle);
-    const host = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-1' });
-    const { container } = render(<DocumentEditor artifactId="doc1" handle={handle} host={host} renderDiagram={async () => '<svg></svg>'} />);
-    await until(() => container.querySelector('.ds-doc table') !== null, 'the page');
-    return container;
   }
+
+  // P3-F (sitting candidate 13): the app's preflight takes every list's markers away, as Tailwind's does, and the page
+  // gives them back: discs, then circles and squares as bullets nest; numbers, then letters and numerals; a checklist
+  // keeps its boxes alone
+  it('draws list markers under the app’s preflight, a checklist without them', async () => {
+    const preflight = document.head.appendChild(document.createElement('style'));
+    preflight.textContent = 'ol, ul, menu { list-style: none; }';
+    try {
+      const item = (id: string, text: string, ...nested: JSONContent[]): JSONContent => ({ type: 'listItem', attrs: { id }, content: [para(`p${id}`, text), ...nested] });
+      const list = (type: 'bulletList' | 'orderedList', id: string, nested?: JSONContent): JSONContent => ({ type, attrs: { id }, content: [nested ? item(`i${id}`, id, nested) : item(`i${id}`, id)] });
+      const container = await mountPage(
+        doc(
+          list('bulletList', 'b1', list('bulletList', 'b2', list('bulletList', 'b3'))),
+          list('orderedList', 'o1', list('orderedList', 'o2', list('orderedList', 'o3'))),
+          { type: 'taskList', attrs: { id: 'k1' }, content: [{ type: 'taskItem', attrs: { id: 'ik1', checked: false }, content: [para('pk1', 'Task')] }] },
+        ),
+        '.ds-doc ul[data-type="taskList"]',
+      );
+      const markers = (selector: string) => [...container.querySelectorAll<HTMLElement>(selector)].map((el) => getComputedStyle(el).listStyleType);
+      expect(markers('.ds-doc ul:not([data-type="taskList"])')).toEqual(['disc', 'circle', 'square']);
+      expect(markers('.ds-doc ol')).toEqual(['decimal', 'lower-alpha', 'lower-roman']);
+      expect(markers('.ds-doc ul[data-type="taskList"]')).toEqual(['none']);
+    } finally {
+      preflight.remove();
+    }
+  });
+
+  // P3-F (sitting candidate 53): the app's root takes `color-scheme: dark` in the dark theme, and the page declared none,
+  // so its native controls (a checklist's boxes, the date field, the selects) drew dark on a light page, an unticked box a
+  // solid dark square; the page takes the scheme of its own ground (`data-ground`, read from its computed background)
+  it('takes the colour scheme of its own ground, not the app’s theme', async () => {
+    const container = await mountPage(doc({ type: 'taskList', attrs: { id: 'k1' }, content: [{ type: 'taskItem', attrs: { id: 'ik1', checked: false }, content: [para('pk1', 'Task')] }] }), '.ds-doc ul[data-type="taskList"]');
+    const page = container.querySelector<HTMLElement>('.ds-doc')!;
+    const scheme = () => getComputedStyle(page).getPropertyValue('color-scheme');
+    const system = document.head.appendChild(document.createElement('style'));
+    document.documentElement.dataset.theme = 'dark';
+    try {
+      system.textContent = '.ds-doc { --ds-color-bg: #ffffff; }'; // a light system in the dark app
+      await ticks(3);
+      expect(page.dataset.ground).toBe('light');
+      expect(scheme()).toBe('light');
+      system.textContent = '.ds-doc { --ds-color-bg: #1f1e1b; }'; // a dark one
+      await until(() => page.dataset.ground === 'dark', 'the dark ground read');
+      expect(scheme()).toBe('dark');
+    } finally {
+      system.remove();
+      delete document.documentElement.dataset.theme;
+    }
+  });
 
   // Each app colour token as this engine computes it.
   function tokenColours(): Set<string> {
@@ -167,7 +244,8 @@ describe('the rendered page without a design system', () => {
     scope.textContent = '.ds-doc { --ds-color-text: #123456; --ds-color-accent: #654321; }';
     expect(getComputedStyle(page).color).toBe('#123456');
     expect(getComputedStyle(container.querySelector('.ds-doc h1')!).color).toBe('#123456');
-    expect(getComputedStyle(container.querySelector('.ds-doc a')!).color).toBe('#654321');
+    // P3-F (sitting candidate 11, F18, the architect's ruling): a link is the colour of its text, never the accent
+    expect(getComputedStyle(container.querySelector('.ds-doc a')!).color).toBe('#123456');
     scope.remove();
   });
 

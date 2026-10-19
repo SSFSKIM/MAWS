@@ -16,11 +16,16 @@
 // prompt there for the owner. A trust or relay card the attempt meets docks in that session's composer, unanswered:
 // nothing here accepts trust or sends a message, so no model turn runs. A start's setup runs on after its answer; its
 // end (ready, failed, the relay's card, held) settles the Start, even one main announced before the answer.
+// P3-F F4 (c26): a trust card's answer names the folder it asks about, so a surface can ask the owner in place; the
+// owner's own click there (`trust`, the composer card's two answers) goes with the next Start as StartOptions.trust,
+// the one way the composer's card sends it, and the card this window docked for that question goes as it is answered.
 import { useMemo } from 'react';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import type { TrustDecision } from '@shared/sessions/intent'; // P3-F F4
 import type { SetupEvent, StartOutcome } from '@shared/sessions/setup';
+import type { TrustState } from '@shared/sessions/trust'; // P3-F F4
 import { START } from '../gateway/copy';
 import { startRefusal } from '../gateway/session-start';
 import { ipc } from '../ipc/client';
@@ -67,7 +72,7 @@ export function artifactSessionContext(artifact: ArtifactContextOf, facts: Artif
 // (ready, a card docked in its composer, or a refusal in words), `cancel` stops listening for it.
 export type ArtifactSessionEnd =
   | { status: 'ready'; appSessionId: AppSessionId }
-  | { status: 'card'; appSessionId: AppSessionId; words: string } // a trust or relay card docked in its composer
+  | { status: 'card'; appSessionId: AppSessionId; words: string; trust?: TrustState } // a trust or relay card docked in its composer; P3-F F4: `trust`, the folder a trust card asks about
   | { status: 'refused'; appSessionId: AppSessionId | null; words: string }; // with a session id: the owner may open it
 export type ArtifactSessionStart = ArtifactSessionEnd | { status: 'starting'; appSessionId: AppSessionId; settled: Promise<ArtifactSessionEnd>; cancel(): void };
 
@@ -77,15 +82,34 @@ const NOT_STARTED = 'The session did not start';
 // P3-H (Decision Log 88): every start here runs no model turn: main refuses it while a prompt waits in the session
 const NO_TURN = { requireEmptyMessage: true } as const;
 
-async function resume(appSessionId: AppSessionId, client: MawsBridge): Promise<ArtifactSessionEnd> {
+/** P3-F F4: the owner's answer to a trust card, given by the owner's click on the surface that asked. */
+export type StartTrust = Exclude<TrustDecision, 'unanswered'>;
+
+// P3-F F4: the options of a Start, the owner's trust answer with them; answering it, the trust card this window docked
+// for the session goes. A card the composer docked with its own message is the composer's and stays here: for an intent,
+// main refuses the no-turn start while the intent's message waits (the refusal is the Start's answer); for a record the
+// message never left the composer's draft, so the start goes ahead and `resume` lets the card go once it is ready.
+function startOptions(appSessionId: AppSessionId, trust: StartTrust | undefined) {
+  if (trust === undefined) return NO_TURN;
+  const docked = useSetup.getState().cards.get(appSessionId);
+  if (docked?.kind === 'trust' && docked.message === null) useSetup.getState().undock(appSessionId);
+  return { ...NO_TURN, trust };
+}
+
+async function resume(appSessionId: AppSessionId, client: MawsBridge, trust?: StartTrust): Promise<ArtifactSessionEnd> {
   let outcome;
   try {
-    outcome = await acquireSession(appSessionId, 'read', NO_TURN, client); // docks a card it meets; answers at the end
+    outcome = await acquireSession(appSessionId, 'read', startOptions(appSessionId, trust), client); // docks a card it meets; answers at the end
   } catch (error) {
     return { status: 'refused', appSessionId, words: error instanceof Error ? error.message : String(error) };
   }
-  if (outcome.status === 'ready') return { status: 'ready', appSessionId };
-  if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') return { status: 'card', appSessionId, words: cardWords(outcome) };
+  if (outcome.status === 'ready') {
+    // P3-F F4 (review B 2): the owner answered the question a record's trust card asks, and the session runs: the card goes,
+    // its text, if any, still the composer's draft (a record's card only undocks, as its Cancel does)
+    if (trust !== undefined && useSetup.getState().cards.get(appSessionId)?.kind === 'trust') useSetup.getState().undock(appSessionId);
+    return { status: 'ready', appSessionId };
+  }
+  if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') return { status: 'card', appSessionId, words: cardWords(outcome), ...(outcome.status === 'needs_trust' && { trust: outcome.trust }) /* P3-F F4 */ };
   return { status: 'refused', appSessionId, words: acquisitionWords(outcome) ?? outcome.status };
 }
 
@@ -99,7 +123,7 @@ function endOf(appSessionId: AppSessionId, event: SetupEvent): ArtifactSessionEn
 }
 
 // An intent's start. Its setup's end is listened for from before the command, since main may announce it first.
-async function start(appSessionId: AppSessionId, client: MawsBridge): Promise<ArtifactSessionStart> {
+async function start(appSessionId: AppSessionId, client: MawsBridge, trust?: StartTrust): Promise<ArtifactSessionStart> {
   let ended: ArtifactSessionEnd | null = null;
   let settle: ((end: ArtifactSessionEnd) => void) | null = null;
   const stop = client.on('session.setup', (event) => {
@@ -114,7 +138,7 @@ async function start(appSessionId: AppSessionId, client: MawsBridge): Promise<Ar
   };
   let result;
   try {
-    result = await client.invoke('session.start', { appSessionId, message: null, options: NO_TURN });
+    result = await client.invoke('session.start', { appSessionId, message: null, options: startOptions(appSessionId, trust) });
   } catch (error) {
     return answered({ status: 'refused', appSessionId, words: error instanceof Error ? error.message : String(error) });
   }
@@ -122,7 +146,7 @@ async function start(appSessionId: AppSessionId, client: MawsBridge): Promise<Ar
   const outcome: StartOutcome = result.value;
   dockFor(appSessionId, outcome, null);
   if (outcome.status === 'already_live') return answered({ status: 'ready', appSessionId });
-  if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') return answered({ status: 'card', appSessionId, words: cardWords(outcome) });
+  if (outcome.status === 'needs_trust' || outcome.status === 'relay_unreachable') return answered({ status: 'card', appSessionId, words: cardWords(outcome), ...(outcome.status === 'needs_trust' && { trust: outcome.trust }) /* P3-F F4 */ });
   if (outcome.status !== 'starting') return answered({ status: 'refused', appSessionId, words: startRefusal(outcome) ?? outcome.status });
   const settled = new Promise<ArtifactSessionEnd>((resolve) => {
     if (ended !== null) resolve(ended);
@@ -131,17 +155,18 @@ async function start(appSessionId: AppSessionId, client: MawsBridge): Promise<Ar
   return { status: 'starting', appSessionId, settled, cancel: stop };
 }
 
-// `previous`: the session an earlier Start of this surface created, if any.
-export async function startArtifactSession(context: ArtifactSessionContext, previous: AppSessionId | null, client: MawsBridge = ipc): Promise<ArtifactSessionStart> {
+// `previous`: the session an earlier Start of this surface created, if any. P3-F F4: `trust`, the owner's answer to the
+// trust card that Start met, from the owner's click on the surface that asked.
+export async function startArtifactSession(context: ArtifactSessionContext, previous: AppSessionId | null, client: MawsBridge = ipc, trust?: StartTrust): Promise<ArtifactSessionStart> {
   if (context.kind === 'none') return { status: 'refused', appSessionId: null, words: NO_SESSION_CONTEXT };
-  if (context.kind === 'session') return resume(context.appSessionId, client);
+  if (context.kind === 'session') return resume(context.appSessionId, client, trust);
   if (previous !== null) {
-    if (useSessions.getState().records.has(previous)) return resume(previous, client);
-    if (useSetup.getState().intents.has(previous)) return start(previous, client);
+    if (useSessions.getState().records.has(previous)) return resume(previous, client, trust);
+    if (useSetup.getState().intents.has(previous)) return start(previous, client, trust);
   }
   const created = await createUnstartedSession(context.projectId, client, { kind: 'directory', path: context.path });
   if (created === null) return { status: 'refused', appSessionId: null, words: COULD_NOT_CREATE };
-  return start(created, client);
+  return start(created, client, trust);
 }
 
 // The context of an artifact as the window knows it now (its index records, projects and the library's Spaces).

@@ -1,0 +1,18 @@
+{
+  "recordedAt": "2026-10-19T16:41:53Z",
+  "rule": "rows closed by P3-F wave S fixes, removed from the tracker as M1-record and M4 removed closed rows; their text is kept here verbatim",
+  "rows": {
+    "L142": {
+      "closedBy": "P3-F wave S F10 on the owner's ruling (\"fix it\"): 4bce76e3f (an APFS clone for a File artifact over the cap), 542a69459 and eb1f90cbf (a flagged source refuses the clone, read through a link); residual S-MIRROR-COPY-CAP",
+      "row": "| 2026-10-14 | P3-L (landing) | Files over 64 MiB are mirrored as nothing (the executor's cap). | L's final hand-back; `library/mirror`. | The owner's call on the cap or a streamed copy; a dated line. Owner: P3-F. |"
+    },
+    "S-DOC-TAB-DRAG-SOURCE": {
+      "closedBy": "P3-F wave S F15 (obs 3): 6b0f66f73, the drag records {doc, id} and a drop is taken only from the same document, and the theme.css comment is corrected; reviewed correct (the A2 review)",
+      "row": "| 2026-10-19 | P4 document editor tabs (a tab drag names no source document) | After P3-F's document-editor fix (89a722814) a tab drop is refused only when this document lacks the dragged id (`src/artifacts/document/editor/Tabs.tsx:46-51`); a copy made through Duplicate or Make a copy (`store.duplicate`/`copyOf` applies the source's whole Y state, src/engine-host/documents/store.ts:483-497) has every tab id of its source, so with a document and its copy both showing tab strips (main and panel), a drag from one strip onto the other reorders the same-id tab in the document not dragged from, and that write saves and syncs. Not a regression (the same drop moved it before). Also theme.css:146-148's comment describes a cascade with D's document.css that never occurs (theme.css and D's sheet are never loaded together). | Document-editor wave medium review (opus), P3 and a comment nit. | Closes when the drag records its source document at onDragStart (a module-level {doc, id} or a per-strip token in the drag data) and drop compares it, with a regression dragging a tab between a document and its copy; and the comment is corrected. Owner: the document editor's next change (P4). |"
+    },
+    "S-DOC-EXPORT-PREVIEW": {
+      "closedBy": "P3-F wave S F7 (8.2, c65, c66): 9d65b2de2, the header Export exports the previewed version and is disabled while two versions are compared, as the deck and the design do; reviewed correct (the B review)",
+      "row": "| 2026-10-19 | P4 document and dashboard export (header Export during a version preview) | While Version history previews a version, the document's and the dashboard's header Export export the live state (`src/renderer/src/tools/document/tab-state.ts:262-266` passes no version id), where the deck (L233) and the design (P3-E Decision Log 31) export what is shown and disable Export while comparing. | P3-F M2 sitting-sheet recheck at 073d10446 (the M4.2 worker); the owner records each export's content at the sitting's step 8.2. | Closes when `DocumentTabState.export` passes the previewed version's id and is disabled while two versions are compared, as the deck's is, with a regression; or when the owner rules the live-state export kept at 8.2. Owner: the document tab's next change (P4). |"
+    }
+  }
+}

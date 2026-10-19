@@ -8,18 +8,17 @@
 // menu, drawn after the actions), Save version, Comments (the id the header's open-thread count stands for), Agent edits
 // as suggestions. The menu exports the four formats; Word and PDF on Letter, or on A4 by their own entries (the owner's
 // Decision Log 43).
+// P3-F (8.2, F7; c65, c66): it exports what the editor shows (the tab's `export`), so while two versions are compared
+// none is offered, as the deck's (L233); a saved export says where in a toast, so the header keeps no finished export.
 import type { DocumentState } from '@artifacts/host';
-import type { DocumentRail } from '@artifacts/document/editor/DocumentEditor';
+import type { DocumentRail, DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
 import type { PageSize } from '@artifacts/document/export/design-system';
 import type { EditorHostAction, EditorHostExport, EditorHostRegistration, SavedState } from '../../panel/editor-host';
 import { CommentsIcon, HistoryIcon, SaveVersionIcon, SuggestIcon } from './icons';
 
 export type DocumentExportFormat = 'md' | 'html' | 'docx' | 'pdf';
 
-export type ExportStatus =
-  | { phase: 'running'; format: DocumentExportFormat }
-  | { phase: 'failed'; format: DocumentExportFormat; message: string }
-  | { phase: 'done'; format: DocumentExportFormat; path: string };
+export type ExportStatus = { phase: 'running'; format: DocumentExportFormat } | { phase: 'failed'; format: DocumentExportFormat; message: string }; // P3-F (F7): no 'done'
 
 export interface DocumentHeaderState {
   title: string;
@@ -31,6 +30,7 @@ export interface DocumentHeaderState {
   history: boolean; // version history is offered
   suggestions: boolean | null; // the artifact's `agentEditsAsSuggestions`, null until its row is read
   exporting: ExportStatus | null;
+  shown: DocumentShown; // P3-F (F7): what the editor shows, which Export exports
 }
 
 export interface DocumentHeaderCommands {
@@ -61,7 +61,6 @@ export function savedOf(document: DocumentState | null, previewing: boolean, sav
 }
 
 const clip = (text: string): string => (text.length <= LABEL_MAX ? text : `${text.slice(0, LABEL_MAX - 1)}…`);
-const fileName = (path: string): string => path.split(/[\\/]/).pop() ?? path;
 
 function exportAction(status: ExportStatus, commands: DocumentHeaderCommands): EditorHostAction {
   const name = FORMAT_NAMES[status.format];
@@ -70,8 +69,6 @@ function exportAction(status: ExportStatus, commands: DocumentHeaderCommands): E
       return { id: 'export', label: `Exporting ${name}…`, disabled: true, onSelect: () => {} };
     case 'failed':
       return { id: 'export', label: clip(`${name} export failed: ${status.message}`), onSelect: () => commands.dismissExport() };
-    case 'done':
-      return { id: 'export', label: clip(`Exported ${fileName(status.path)}`), onSelect: () => commands.dismissExport() };
   }
 }
 
@@ -89,7 +86,7 @@ export function documentHeader(state: DocumentHeaderState, commands: DocumentHea
     disabled: state.suggestions === null,
     onSelect: () => state.suggestions !== null && commands.setSuggestions(!state.suggestions),
   });
-  const running = state.exporting?.phase === 'running';
-  const exports: EditorHostExport[] = EXPORTS.map(({ format, pageSize, label }) => ({ id: `${format}-${pageSize}`, label, disabled: running, onSelect: () => commands.export(format, pageSize) }));
+  const held = state.exporting?.phase === 'running' || state.shown === 'compare'; // P3-F (F7): comparing, nothing to export
+  const exports: EditorHostExport[] = EXPORTS.map(({ format, pageSize, label }) => ({ id: `${format}-${pageSize}`, label, disabled: held, onSelect: () => commands.export(format, pageSize) }));
   return { title: state.title, saved: savedOf(state.document, state.previewing, state.saving), unresolved: state.unresolved, actions, exports, closeGuard: commands.closeGuard };
 }

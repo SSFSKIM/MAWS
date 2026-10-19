@@ -265,6 +265,9 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       };
     },
     identity: () => ({ actor: HUMAN, ...actorDisplay(HUMAN) }),
+    // P3-F (F1): an editor's link, through main's one scheme-checked opener (src/main/open-external.ts); a URL it refuses
+    // is logged here, never thrown into the editor
+    openExternal: (url) => void call('layout.openExternal', { url }).catch((error: unknown) => log(`a link was not opened: ${error instanceof Error ? error.message : String(error)}`)),
     ...createConnectorHost(ipc), // P3-H H4: a page's connector surface and the owner's grants
   };
 }

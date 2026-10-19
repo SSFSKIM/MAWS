@@ -5,10 +5,11 @@ import userEvent from '@testing-library/user-event';
 import { useEffect, useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, tabId } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerShellActions } from '../app/shell-actions';
+import { runAction } from '../keymap/actions-runtime'; // P3-F wave S (F6)
 import { Shell } from '../app/Shell';
 import { registerSlot, resetSlots } from '../app/slots';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
@@ -18,7 +19,7 @@ import { useNotices } from '../stores/notices'; // P3-F (F-shell)
 import { useSessions } from '../stores/sessions';
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
-import { dockPanel, floatPanel, useColumnWidth, useFloatingCard } from './floating';
+import { dockPanel, FLOAT_COPY, floatPanel, useColumnWidth, useFloatingCard } from './floating';
 import { ChromePill } from './FloatingPill'; // P3-F (F-shell)
 import { MARKUP_COPY, resetMarkup, useMarkup } from '../markup/session'; // P3-G (M4)
 import { resetMarkupSurfaces, useRegionMarkupSurface } from '../markup/surface'; // P3-G (M4)
@@ -181,12 +182,37 @@ describe('the floating card in the Shell', () => {
     expect(focused).toEqual([A]);
   });
 
-  it('with no shown session, there is no card and no pill', () => {
+  // P3-F wave S (F6, candidate 58): with no shown session there is nothing for the card to draw, so the panel never takes
+  // main's place: a float that meets none docks, and main keeps its tab strip
+  it('with no shown session, there is no card and no pill, and main is shown', async () => {
     useLayout.setState({ main: LAYOUT_DEFAULTS.main });
     useLayout.getState().setPanel({ floating: true });
     render(<Shell />);
+    await act(async () => {});
     expect(card()).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show session card' })).toBeNull();
+    expect(region('main').inert).toBe(false);
+    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
+  });
+
+  // The owner's case (P3 sitting, 09:58Z): an artifact tab in front. Float is disabled and says why; ⌥⌘B (the menu
+  // action) floats nothing and says why in a toast; main and its tab strip stay on screen.
+  it('with an artifact tab in front, the header’s Float is disabled with its reason and ⌥⌘B leaves main and its tab strip shown', async () => {
+    installFakeMain(() => fail('not answered here'));
+    const artifact = { id: tabId({ kind: 'artifact', artifactId: 'deck-1' }), kind: 'artifact', artifactId: 'deck-1', pinned: false } as const;
+    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [artifact], activeTabId: artifact.id }] } } } });
+    render(<Shell />);
+    const header = region('panel').querySelector<HTMLElement>('[data-editor-header]')!;
+    const float = within(header).getByRole('button', { name: FLOAT_COPY.noSession }) as HTMLButtonElement;
+    expect(float.disabled).toBe(true);
+    expect(within(header).queryByRole('button', { name: 'Float session over panel' })).toBeNull();
+    act(() => runAction('panel.float'));
+    await act(async () => {});
+    expect(useLayout.getState().regions.panel.floating).toBe(false);
+    expect(region('main').inert).toBe(false);
+    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
+    expect(within(region('main')).getByRole('tablist')).toBeTruthy();
+    expect(useNotices.getState().notices.map((n) => n.text)).toContain(FLOAT_COPY.noSession);
   });
 
   it('a drag of the divider 40 px past the maximum floats the panel, the drag’s start kept as its width', () => {
@@ -199,6 +225,27 @@ describe('the floating card in the Shell', () => {
     act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - 380) - 40 }));
     expect(useLayout.getState().regions.panel).toMatchObject({ floating: true, width: 380 });
     expect(card()).not.toBeNull();
+  });
+
+  // P3-F wave S (F6 review): the Resizer writes the width on every move, so the stored width is the maximum by the time
+  // the drag passes it; a float refused there puts the drag's start back, as a float does, rather than keeping the
+  // maximum (main pushed to its floor, and saved)
+  it('a drag of the divider past the maximum with an artifact tab in front floats nothing and keeps the drag’s start as its width', async () => {
+    installFakeMain(() => fail('not answered here'));
+    const artifact = { id: tabId({ kind: 'artifact', artifactId: 'deck-1' }), kind: 'artifact', artifactId: 'deck-1', pinned: false } as const;
+    useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [artifact], activeTabId: artifact.id }] } } } });
+    render(<Shell />);
+    const divider = within(region('panel')).getByRole('separator', { name: 'Resize right panel' });
+    const max = Number(divider.getAttribute('aria-valuemax'));
+    act(() => void fireEvent.pointerDown(divider, { pointerId: 1, button: 0, clientX: 1000 }));
+    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - 380) - 39 }));
+    expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, width: max });
+    act(() => void fireEvent.pointerMove(divider, { pointerId: 1, clientX: 1000 - (max - 380) - 40 }));
+    await act(async () => {});
+    expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, width: 380 });
+    expect(region('main').inert).toBe(false);
+    expect(region('main').parentElement!.style.gridTemplateColumns).toBe('300px minmax(0, 1fr) 380px');
+    expect(useNotices.getState().notices.map((n) => n.text)).toContain(FLOAT_COPY.noSession);
   });
 
   // M1 review: the card never covers the header or the tool strip (§D1.4). The layer starts where the host's tool body

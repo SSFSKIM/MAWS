@@ -1,0 +1,30 @@
+All three fixes from batch B's review are committed, one commit each. Each was written test-first, and its RED and GREEN logs are below. Item 4 needed no work.
+
+**Commits, in order**
+1. `949d4c435`, review B 1 (F4, should-fix). The comment's trust notice now shows what the composer's trust card shows, using the card's own rendering rather than a second wording:
+   - the folder, and the config file trust is recorded in;
+   - "Trust is recorded for the repository at <trustKey>" whenever that key is not the folder itself;
+   - the `found` list (hooks, MCP servers, settings), or the generic list when nothing is found;
+   - the home-folder wording for the home folder.
+   - I moved TrustCard's information part into an exported `TrustDetails` (sessions/TrustCard.tsx). TrustCard draws it above its three buttons, with the same DOM as before, and the notice draws it above its two. The notice's own one-line summary is gone.
+   - Files: src/renderer/src/sessions/TrustCard.tsx (the claim extension you allowed for reuse), src/renderer/src/tools/document/comment-session.tsx, src/renderer/src/tools/document/comment-session.test.tsx.
+   - Regression: for a folder at /work/p1/docs keyed by /work/p1, with two found files, the notice shows the folder, the repository line, the config path and both files with their summaries.
+2. `d399c9e2a`, review B 2 (F4, minor). Comment corrected in session-context.ts:
+   - For an intent, a composer card carrying the composer's message stays, because main refuses the no-turn start while that message waits.
+   - For a record, the message never left the composer's draft, so the start goes ahead.
+   - The fix: when a resume with the owner's answer ends ready, `resume` undocks that session's trust card. A record's card only undocks, as its own Cancel does, so the typed text stays in the composer's draft and nothing is lost.
+   - Files: src/renderer/src/artifacts/session-context.ts, src/renderer/src/artifacts/session-context.test.ts.
+   - Regression: an intent's message-carrying card stays when its start is refused as busy; a record's message-carrying card is undocked once its resume with 'accepted' is ready. I replaced the old record-refused-busy step, since main never gives a record that answer.
+3. `37c31c732`, review B 3 (F4, minor, test only). The vacuous stale-press case is replaced: it starts a comment directly with `startCommentSession`, reads the trust notice's `decide` through `usePendingComment`, and replaces the notice with a later Comment on the same host. Calling the stored `decide('accepted')` then sends no second `session.start`, the later notice stands, and no card opens.
+   - File: src/renderer/src/tools/document/comment-session.test.tsx.
+   - For RED, I removed the `if (!mine()) return;` guard for one run and restored comment-session.tsx from a copy. `cmp` confirms it is byte-identical, and git shows the source unchanged.
+
+**RED and GREEN logs**
+- Fix 1: RED /tmp/maws-review/p3f-b-fix1-red.log (the case alone: 1 failed, 30 skipped of 31; "expected 'Q3 plan, MainTrust this folder to sta…' to contain 'Trust is recorded for the repository …'"). GREEN /tmp/maws-review/p3f-b-fix1-green.log (186 of 186 in 4 files: comment-session and cards.test.tsx, which includes TrustCard, under renderer and renderer-compiled).
+- Fix 2: RED /tmp/maws-review/p3f-b-fix2-red.log (1 failed, 10 passed of 11; "the answered question’s card goes; its text is still the composer’s draft: expected true to be false"). GREEN /tmp/maws-review/p3f-b-fix2-green.log (73 of 73 in 3 files).
+- Fix 3: RED /tmp/maws-review/p3f-b-fix3-red.log (without the guard: 1 failed, 30 passed of 31; "expected [ { …(3) }, { …(3) } ] to have a length of 1 but got 2"). GREEN /tmp/maws-review/p3f-b-fix3-green.log (62 of 62, guard in place).
+- eslint on every touched file is clean. A narrow tsc over them is clean apart from one error in src/artifacts/document/threads.ts, a file none of these commits touch; it comes from the narrow config.
+
+**What proves it, and what is left**
+- No e2e changes. The two trust cases in e2e/document-standalone.spec.ts (e2e:document-app) still hold, because `TrustDetails` draws the folder first.
+- Nothing I could not fix inside the claim, and no new tracker material. Item 4 stays the row you already logged, S-EXPORT-SAVE-CACHE-NAME.

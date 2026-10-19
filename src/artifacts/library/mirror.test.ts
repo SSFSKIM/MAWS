@@ -33,9 +33,9 @@ describe('the built-in writers', () => {
     expect(mirrorWriterFor('html')!({ artifact: artifact(), bytes: page, name: 'index.html' })).toEqual({ files: { 'Launch-plan-1a2b3c4d.html': page } });
   });
 
-  it('writes a file artifact as a copy under its own name prefixed by the slug', () => {
-    const bytes = new Uint8Array([1, 2, 3]);
-    expect(mirrorWriterFor('file')!({ artifact: artifact({ kind: 'file', title: 'Q3 report' }), bytes, name: 'report.pdf' })).toEqual({ files: { 'Q3-report-1a2b3c4d-report.pdf': bytes } });
+  // P3-F (F10): the file in place, which the host copies into the mirror through the file system, never through the writer
+  it('writes a file artifact as a copy of its file in place, under its own name prefixed by the slug', () => {
+    expect(mirrorWriterFor('file')!({ artifact: artifact({ kind: 'file', title: 'Q3 report' }), path: '/Users/me/Q3/report.pdf', name: 'report.pdf' })).toEqual({ files: { 'Q3-report-1a2b3c4d-report.pdf': { copyFrom: '/Users/me/Q3/report.pdf' } } });
   });
 
   it('writes nothing for a byte artifact whose content it was not given', () => {

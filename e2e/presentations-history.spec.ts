@@ -352,7 +352,8 @@ test('a live editor and a version’s preview of one deck in one window each dra
   const monoRef = await upload('lab-mono.woff2', 'KaTeX_Typewriter-Regular.woff2');
   await seam(page, 'seed', id, faceDeck(serifRef));
 
-  // the deck in the panel's Artifacts tool beside a chat, pinned, then opened in a main tab too
+  // the deck in the panel's Artifacts tool beside a chat, pinned, then moved to a main tab (Open in tab, P3-F wave S,
+  // F16) and opened from the pinned tab's list again: two replicas (the parent's Decision Log 8)
   const project = await ok<{ name: string }>(page, 'session.projects.add', { directory: repo.root });
   await openProject(page, project.name);
   await newChatIn(page, project.name);
@@ -368,7 +369,9 @@ test('a live editor and a version’s preview of one deck in one window each dra
   const inMain = page.locator(`[data-region="main"] [data-deck-artifact="${id}"]`);
   await expect(inMain.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   await panel.getByRole('tab', { name: 'Artifacts' }).click();
-  await expect(inPanel.locator('[data-deck-editor]')).toBeVisible();
+  await expect(inPanel).toHaveCount(0);
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
 
   // fix wave 3: the Theme's Body face set to the uploaded family, so text reading the body token asks for it too
   await headerAction(page, 'Theme');

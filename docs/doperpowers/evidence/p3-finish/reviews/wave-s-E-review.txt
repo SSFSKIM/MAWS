@@ -1,0 +1,25 @@
+## Findings
+- [P1] (blocking) Update shell e2e Item 6, which still asserts the removed strip label — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/e2e/shell.spec.ts:741-746
+  d41994576 deletes TabStrip's `ProjectLabel` (accessible name "Tabs of <project>"). It updates the tab-sets test, but the main `shell: sidebar, overview, hover approve, tabs and split, persistence, …` test (via `firstInstance`) still expects `` main.getByRole('button', { name: `Tabs of ${USAGE_PROJECT}` }) `` and `main.getByRole('button', { name: 'Tabs of MAWS' })` to be visible. Those buttons no longer exist anywhere, so both `toBeVisible` waits time out. The flagship shell test then fails before the layout write-back and relaunch-persistence checks. This is the default e2e group the commit relies on as proof. Fix: assert the title bar's chip instead, e.g. `page.getByRole('banner').locator('[data-toolbar-project]')` `toHaveText(USAGE_PROJECT)`, then `'MAWS'`.
+- [P2] (should-fix) Render an artifact link as text wherever nothing can open it — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/renderer/src/transcript/view/markdown/Link.tsx:44-52
+  - **The desk: confirmed.** `DESK_ACTIONS` and `BROWSER_ACTIONS` supply neither a real `openArtifact` (the `NO_ACTIONS` noop stays) nor `openArtifactTab`.
+    - Inside the desk's Transcript (DepthColumn, SessionView), a click calls the noop.
+    - In StreamView's `Prose` (no store key, so no session), it reaches `actions.openArtifactTab?.(id)`, which is undefined.
+    - Before this change, rehype-sanitize stripped the href and the link was its text.
+  - **MAWS itself:** the same dead chip shows on every Markdown surface mounted outside a Transcript: the Side tool's /btw answer (BtwView), the ask sheet's option previews (Choice.tsx under AskSheetTool) and the Code tool's Markdown preview. These read the host actions (`DEFAULT_ACTIONS`), which App.tsx's `registerTranscriptActions` never reaches. The "outside any session opens the main tab" case in links.test.tsx passes only because it supplies `openArtifactTab` itself.
+  - **Effect:** the chip's tooltip promises "Open in the panel · ⌘-click opens it in a tab", and the new descriptions and guides tell agents to write these links, so this will show up often.
+  - **Smallest sound fix, two parts that must land together:**
+    1. Draw the chip only when `actions.openArtifactTab` is defined, else `<span>{children}</span>`.
+    2. Have App.tsx install `openArtifactTab` into the host actions, e.g. `setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab })`.
+  - **Result:** MAWS's standalone surfaces get a working chip that opens the main tab. So does SurfaceTree, whose `TranscriptLink` also reads the host actions and would lose its chip under the gate alone. The desk never supplies the action, so it gets text again.
+- [P3] (minor) Keep "Reveal in sidebar" / "Show in sidebar" reachable from the keyboard — /Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-af4cd2993bc56e015/src/renderer/src/app/Toolbar.tsx:154-185
+  - **What changed:** the strip label this replaces revealed the project on Enter, and restored it first if it was hidden. Now the only path is a Radix context menu opened by a `contextmenu` event, which a Mac keyboard does not produce outside VoiceOver.
+  - **Why only minor:** the ⌘K palette reveals visible projects but leaves out hidden ones, and the Hidden projects dialog still restores those. So the loss is a shortcut, not a capability.
+  - **Precedent:** library/Rows.tsx:119 handles Shift+F10 itself to open a row's menu; the same would fit here.
+  - **Focus:** on the paths that work it is handled. A reveal leaves focus on the revealed row, and Escape returns it to the chip.
+
+## Verdict
+incorrect — The removed "Tabs of …" label still has two assertions in the main shell e2e, which will fail. Otherwise:
+- **Scheme security:** sound. rehype-sanitize keeps only the exact lowercase scheme, so case variants, percent-encoding, leading whitespace and `maws-artifact:javascript:` forms end up as text; Link.tsx puts no href on any element and passes on only a UUID it has checked; a non-data image never becomes an `img`. A plugin surface can only open an artifact by UUID on the owner's click, and `artifact_list` scope "all" already exposes the whole library.
+- **F17 chip:** it is the only no-drag element added, so the window stays draggable elsewhere. It names `main.current`'s project (none for the no-project set; "Show in sidebar" for a hidden project) and creates the new session in that project's set.
+- **Guides, descriptions, tests:** all seven guides still end under "Before you finish", and the description text is accurate. I ran links, sanitize, Toolbar, SurfaceTree and presentations/tools: all green. I checked the new e2e cases by reading only, as you asked.

@@ -18,14 +18,16 @@ export interface MirrorAsset {
 }
 
 // What the host read for one artifact: a document kind's doc (a fresh replica of the committed state, destroyed after
-// the writer returns), a byte kind's content and its file name. `bytes` is absent when the host did not read the
-// content (a file too large to mirror). M6b (Decision Log 35, 37b): the artifact's assets, listed, and `readAsset`,
-// which reads one asset's bytes by its ref when the writer asks (a design system's fonts land in its directory; an
-// asset the writer does not need is never read); it throws for a ref the artifact does not hold.
+// the writer returns), an html page's bytes, or (P3-F F10) a File artifact's `path`, its file in place, whose bytes the
+// host copies through the file system and the writer never holds; and the content's file name. M6b (Decision Log 35,
+// 37b): the artifact's assets, listed, and `readAsset`, which reads one asset's bytes by its ref when the writer asks (a
+// design system's fonts land in its directory; an asset the writer does not need is never read); it throws for a ref
+// the artifact does not hold.
 export interface MirrorInput {
   artifact: Artifact;
   doc?: Doc;
   bytes?: Uint8Array;
+  path?: string; // P3-F (F10)
   name?: string;
   assets?: MirrorAsset[];
   readAsset?(ref: string): Uint8Array;
@@ -34,8 +36,16 @@ export interface MirrorInput {
 // Paths relative to `<linkedDir>/artifacts/`, `/`-separated (a deck is a folder); each one named by the artifact's
 // `mirrorSlug`, so two artifacts never claim one file.
 export interface MirrorOutput {
-  files: Record<string, string | Uint8Array | MirrorCopy>;
+  files: Record<string, string | Uint8Array | MirrorCopy | MirrorCopyFrom>;
 }
+
+// P3-F (F10, tracker L142): a file copied from `copyFrom`, a File artifact's file in place, by the host: through memory
+// within its in-memory cap, cloned by the file system over it (no buffer, no time, no space), and mirrored as nothing
+// only when an oversized file's clone fails.
+export interface MirrorCopyFrom {
+  copyFrom: string;
+}
+export const isMirrorCopyFrom = (data: unknown): data is MirrorCopyFrom => typeof data === 'object' && data !== null && typeof (data as MirrorCopyFrom).copyFrom === 'string';
 
 // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 37 (1); the final review's A14): a copy, a
 // file whose bytes never change under its name (a content-addressed asset: a ref names one content for good). The host
@@ -76,7 +86,7 @@ export function mirrorSlug(artifact: Pick<Artifact, 'id' | 'title'>): string {
 
 const htmlWriter: MirrorWriter = ({ artifact, bytes }) => ({ files: bytes ? { [`${mirrorSlug(artifact)}.html`]: bytes } : {} });
 
-const fileWriter: MirrorWriter = ({ artifact, bytes, name }) => ({ files: bytes ? { [`${mirrorSlug(artifact)}-${segment(name ?? '') || 'file'}`]: bytes } : {} });
+const fileWriter: MirrorWriter = ({ artifact, path, name }) => ({ files: path ? { [`${mirrorSlug(artifact)}-${segment(name ?? '') || 'file'}`]: { copyFrom: path } } : {} }); // P3-F (F10)
 
 // Per kind, its registrations in order, each its own object (one function registered twice is two registrations);
 // the last one is the writer. The built-ins sit at the bottom of their kind's.

@@ -1,0 +1,44 @@
+Batch E is done in two commits on worktree-agent-af4cd2993bc56e015. F17 and F14 both landed; the always-on system-prompt paragraph stayed out by your ruling, and launch-mapping.ts was never edited, so there was nothing to revert. No e2e was run here; the gate's groups prove them.
+
+## Commits, in order
+1. **d41994576, F17 (obs 8).** Project chip in the title bar.
+   - Files: src/renderer/src/app/Toolbar.tsx, src/renderer/src/app/Toolbar.test.tsx (new), src/renderer/src/main/TabStrip.tsx, src/renderer/src/main/MainArea.test.tsx, src/renderer/src/sidebar/Sidebar.test.tsx, e2e/shell.spec.ts.
+   - The strip's project label is gone. The chip sits left of the title in a no-drag region and names the current set's project; the no-project set shows none.
+   - A click calls `createSession(project.id)`, the sidebar "+" effect: a new unstarted tab in front in that project's set.
+   - Right-click opens a context menu: "Reveal in sidebar", or "Show in sidebar" for a hidden project. It calls `revealProject`, and the closing menu does not take focus back, so the revealed row keeps it.
+2. **e69227c34, F14 (obs 2).** Artifact links.
+   - Files: sanitize.ts, sanitize.test.tsx, Link.tsx, links.test.tsx, transcript/view/context.tsx, App.tsx (the import and the registration line), engine-surface/SurfaceTree.tsx and its test, shared/maws/tools.ts and its test, artifacts/types/guides.ts and its test, e2e/maws-tools.spec.ts.
+   - `maws-artifact` is a third chip scheme in all three gates. The chip is a button carrying the id, never an element with the href.
+   - Only a UUID id makes a chip. The content form `maws-artifact://id/rev/path` and any fragment reduce to the id, opened at its latest; a handle or a path renders as text.
+   - Click: `openArtifact(rowSession, id)`, which opens the panel's Artifacts tool. ⌘-click: the new action `openArtifactTab(id)`, a main tab. With no row session, the chip opens the main tab.
+   - Plugin surfaces: SurfaceTree's capture handler opens the chip for the site's session; no plugin press is sent.
+   - The instruction is in the artifact_create and artifact_list descriptions, and in one paragraph added under "Before you finish" in every kind's guide.
+
+## Deviations from what you approved
+- **`openArtifactTab` is optional, with no noop in NO_ACTIONS.** rows/test-support.tsx (`spyActions`) and harness/Harness.tsx build full TranscriptActions objects and are outside the claim. A mount without the action opens the panel on ⌘-click.
+- **Sidebar.test.tsx:13**, outside the approved lines 106-129: the import changed from TabStrip to Toolbar, which the rewritten case needs.
+
+## Logs and counts
+- RED, batch: /tmp/maws-review/p3f-batchE-red-renderer.log (17 failed, 95 passed of 112: 12 for F14, 5 for F17) and p3f-batchE-red-node.log (2 failed, 29 passed of 31).
+- GREEN: /tmp/maws-review/p3f-batchE-green-renderer.log (346 of 346 in 12 files, renderer and renderer-compiled) and p3f-batchE-green-node.log (31 of 31).
+- Suites outside the claim that read the changed code, all passing: p3f-batchE-green2-cross-renderer.log (127 of 127: Shell, Sidebar, ArtifactTab, Artifact row) and p3f-batchE-green2-cross-node.log (83 of 83: designs/tools, documents-wired, artifact-tools, server, document and dashboard format).
+- The first cross run, p3f-batchE-green-cross-renderer.log, shows the old Sidebar case failing ("Tabs of MAWS" not found) before its rewrite.
+- eslint on the touched files is clean. A narrow tsc over them (web, node, e2e) is clean: /tmp/maws-review/p3f-batchE-tsc-{web,node,e2e}.log.
+
+## Which e2e group proves each change (written, not run)
+- **F17: the default group, e2e/shell.spec.ts, the tab-sets case.** The chip names the project and is no-drag; the strip has no project item; the context menu reveals and focuses the row; a click adds a new tab in front; Other sessions shows no chip.
+- **F14: e2e:tools, e2e/maws-tools.spec.ts, the new case.** The show_pane recording replays with its closing reply rewritten by a new helper, `replyFixture`, to link two artifacts: a document made through `artifacts.create`, and an id no record answers to.
+  - A click opens the record in the panel.
+  - The unknown id shows "Artifact not found".
+  - ⌘-click opens and selects the artifact's main tab.
+  - The not-found text is a literal: tsconfig.e2e.json does not list renderer/library/copy.ts, so importing it would fail the composite typecheck.
+
+## Residuals (tracker material)
+- **S-ARTIFACT-LINK-PROMPT (medium-low).** The always-on paragraph telling the agent to link artifacts is out of wave S. A session that never loads artifact_create or artifact_list in its own context, such as one that only names an artifact it opened earlier, is never told the link form. Closing condition: the paragraph lands either way, with a wire check showing it in session.init's prompt.
+  - Through withOwnerChannel, contract first so prompt-state's header classification holds. The tests that pin the bare append must be updated with it: main/owner/launch.test.ts, main/sessions/service.test.ts, e2e/to-human.spec.ts:188, and the byte-for-byte checks in e2e/to-human-live.spec.ts.
+  - Or through the maws server's MCP `instructions` (server.ts:113), once a probe shows the pinned engine renders an SDK server's instructions.
+- **S-ARTIFACT-LINK-FRAGMENT (low).** The plan's optional `#v<version>` is parsed away, so every link opens the latest version. Closing condition: a fragment grammar (version, tab, block) is defined and the chip passes it to `openArtifact`'s `at`. This relates to the 2026-10-14 P3-B row: show_pane cannot open a document at a tab or block.
+- **S-DESK-ARTIFACT-CHIP (low).** In the desk web app, Link renders the chip, but the desk registers no `openArtifact`, so a click does nothing; before this change the link rendered as text. Closing condition: the desk supplies the action, or the chip renders as text where no artifact action is registered.
+- **Charter docs/charter.md:183 (the W12 line):** the dated §19 amendment for F17 is the architect's at the landing.
+
+Not done: the plan's optional kind icon and title from the library store. Link.tsx is shared with the desk, so the chip shows the title the agent wrote. I ran no independent code review; that is left to your wave review.

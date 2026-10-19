@@ -1,0 +1,40 @@
+## A1 fix wave: all three review findings fixed and committed
+
+All three review defects in A1's seven commits are fixed, test-first, one commit each, under the same claim and rules. Each fix was red at the previous HEAD and is green now. Nothing is left unfixed.
+
+### Commits, in order
+
+**1. `e185e9288` — c16 review 1 (should-fix, the Korean input line split)**
+- Files: `src/artifacts/document/editor/nodes/atom.ts`, `src/artifacts/document/editor/nodes.dom.test.tsx`.
+- Fix: the atom field's keydown handler now returns first on `event.isComposing`, the repo's convention. The plain Return that follows `compositionend` is the one that hands the caret back.
+- Regression: it replays the owner's capture on a mention's Name field holding 홍길동: Enter (229, composing), then `compositionend`, then Enter (13), each keydown sent where the keyboard is. It checks:
+  - there is one paragraph, still reading `'Ask  now'`;
+  - the label is 홍길동;
+  - the keyboard is on the editor's view, with the caret right after the mention.
+- Red at HEAD: `'expected 2 to be 1'`, the split.
+
+**2. `35e6a9d33` — F18 review 2 (should-fix, the accent focus ring)**
+- Files: `src/artifacts/document/editor/theme.css`, `src/artifacts/document/editor/theme.dom.test.tsx`.
+- Fix: `.ds-doc a:focus-visible` is now `outline: 2px solid currentColor`, with the same offset and radius. The CSS comment is corrected.
+- Regression: the test `'takes no colour of its own in any state'` now covers the `outline` properties too.
+- Red at HEAD: `'… outline: 2px solid var(--ds-color-accent, var(--accent)) … not to match /accent/'`.
+
+**3. `82c39e75c` — c20 review 3 (minor, front matter config overridden)**
+- Files: `src/artifacts/document/editor/nodes/mermaid.ts`, `src/artifacts/document/editor/nodes/mermaid.dom.test.ts`.
+- Fix: when the front matter has a top-level `config` key, `withPalette` leaves the source as written. The author's settings then win over the configured palette, as they did before c20. A front matter without `config` (a title only) still gets the directive. The code comment is corrected.
+- I skipped the injection rather than merging the palette underneath the author's config, because merging needs a YAML parser. This layer has none, and mermaid's own is internal.
+- Regression: a front matter setting `theme: forest` and `primaryColor: "#ffeeaa"` still parses to forest and `#ffeeaa`.
+- Red at HEAD: `'expected 'base' to be 'forest''`.
+
+### Logs (`/tmp/maws-review/`)
+- RED: `p3f-document-a1-review-red.log` — 3 failed and 33 passed in 3 files, exactly the three regressions.
+- GREEN: `p3f-document-a1-review-green.log` — 105 of 105 in 7 files: nodes, theme, mermaid, Toolbar, DocumentEditor, collab and suggestions.
+
+eslint on the touched files is clean. A narrow `tsc` over the web files is clean for every touched file; its two remaining errors are in `collab.ts` and `threads.ts`, which I did not touch, and come from declarations outside the narrow include.
+
+### e2e
+No new e2e case. Each fix is pinned by the unit replay or a rule check, and the existing `e2e:document` cases cover the surrounding behaviour.
+
+### Tracker material
+- **Minor:** a diagram whose front matter sets `config` gets no palette directive, so only for those diagrams the race from before c20 is back. If the transcript configured mermaid last, the colours the author's config leaves unset can take the transcript's palette.
+  - Closing condition: the palette sits underneath the author's front matter config (a YAML-aware merge) without overriding it, with a test that combines `theme: forest` and the transcript's configuration.

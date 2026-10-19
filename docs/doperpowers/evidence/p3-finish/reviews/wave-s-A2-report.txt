@@ -1,0 +1,37 @@
+A2 is done: all three fixes are committed with test-first regressions, and the unit tests are green. The e2e cases are written but not run; the Mac gate proves them.
+
+**Commits, in order**
+1. `a8cd41caa` — F1 (N.3, c75): ⌘-click or Ctrl-click on a link opens it through main's existing `layout.openExternal`. Main's scheme check is unchanged, so a scheme it refuses stays refused. The press is consumed, so the caret doesn't move and nothing gets node-selected. A plain click only places the caret. It works in every document editor (live, history preview, suggestion review, dashboard) and in read-only documents. No app window gets a separate path: main builds every window from `window.ts`, and each runs the same renderer host.
+   - Files: `src/artifacts/document/editor/link-click.ts` (new), `editor/extensions.ts` (registration), `editor/host-types.ts` (the one line you approved), `src/artifacts/host.ts` (optional `openExternal`), `src/renderer/src/artifacts/host.ts` and `host.test.ts`, `editor/DocumentEditor.dom.test.tsx`, `e2e/document.spec.ts`.
+2. `6b0f66f73` — F15 (obs 3) plus tracker row S-DOC-TAB-DRAG-SOURCE:
+   - Each tab has a Radix context menu (Rename, Move left, Move right, Delete) that acts on the right-clicked tab.
+   - Each tab has an inline × labelled "Delete <title>", shown on hover, on focus and on the selected tab. The ⋯ button is gone.
+   - The last tab has no × and its Delete is disabled. A tab with content goes only after an AlertDialog confirmation; an empty tab goes at once.
+   - The drag records `{doc, id}` when it starts, and a drop is taken only from a drag that began in the same document.
+   - The theme.css:146-148 comment is fixed in this same commit, as you asked.
+   - Files: `editor/Tabs.tsx`, `editor/chrome.css`, `editor/theme.css`, `DocumentEditor.dom.test.tsx`, `e2e/document.spec.ts`, `e2e/document-editor.spec.ts`.
+3. `3763a59e0` — c17: Tab from a table's last cell adds a row and the caret lands in the new row's first cell, where typing lands.
+   - Cause: the new row's cells are empty (`block*`), so prosemirror-tables' text selection fell back into the old cell, and the cell fill adds its paragraph too late.
+   - Fix: Tab and Shift-Tab in `schema.ts` give an empty target cell its paragraph in the same transaction. This also covers an agent's existing empty cell. The schema itself and its fingerprint are unchanged.
+   - Files: `src/artifacts/document/schema.ts`, `DocumentEditor.dom.test.tsx`, `e2e/document-editor.spec.ts`.
+
+**Logs**
+- RED batch: `/tmp/maws-review/p3f-a2-red.log` — 11 failed, 32 passed of 43. That is F1: 3, F15: 6, c17: 2.
+- c17 RED with the fix held back and Tab sent as a real keydown: `/tmp/maws-review/p3f-a2-red-c17.log` — 2 failed. It shows the owner's exact symptom ("Due Reviewer").
+- GREEN: `/tmp/maws-review/p3f-a2-green.log` — 151 of 151 across 14 files (artifacts-dom, renderer, renderer-compiled, artifacts).
+- eslint on the touched files is clean (`/tmp/maws-review/p3f-a2-eslint.log`).
+- A narrow tsc over the touched files and the two e2e specs is clean. It reports two errors in `collab.ts` and `threads.ts`, which I didn't touch; I think they come from my narrow config, but the pool gate's typecheck decides.
+- In the c17 test, Tab is sent as a keydown on the view. Tiptap's `keyboardShortcut` command would have hidden the fix: it replays only the steps of what the key dispatched and drops the selection.
+
+**Which e2e group proves each regression**
+- F1: e2e:document-app. The new case in `e2e/document.spec.ts` does a ⌘-click in a main tab and in the panel, checks the `openExternal <url>` line in the e2e open log, that the selection is unchanged and no node is selected, and that a plain click opens nothing.
+- F15: e2e:document-app (the restore case now deletes Tab 2 through its × and the confirmation) and e2e:document (in the tab case, a right-click on the inactive tab and Move left, then an empty tab's × with no question).
+- c17: e2e:document (new case: real Tab after a date chip in the last cell, then "Reviewer" lands in the new row).
+- Tracker row 260: the unit gate only (artifacts-dom, the tab dragged from a copy of the document).
+
+**Material for the tracker (I didn't edit it)**
+- To close S-DOC-TAB-DRAG-SOURCE: closed by `6b0f66f73`. The drag records `{doc, id}` at onDragStart and the drop compares both. The regression is "refuse a tab dragged from a copy of the document, whose tab ids are the same, and move one dragged within it" in `DocumentEditor.dom.test.tsx`. The theme.css comment now says a system's `components/document.css` styles only its page frames.
+- New residual, P4, low: the tab row's keyboard path got thinner. The old ⋯ button could be reached with the keyboard. Now the × is not in the tab order (tabIndex -1), as on the main-area tabs, and a Mac has no context-menu key, so a keyboard-only user can select and add tabs but not rename, move or delete one. It closes when a focused tab offers those actions from the keyboard (for example F2 to rename and Delete/⌫ to delete with the same confirmation, or a key that opens the tab's menu), with a DOM regression.
+- A design note, not debt: two strips showing one artifact (main and panel) hold two separate replicas, so a tab dragged between them is now refused. Dragging within a strip works as before.
+
+Nothing in the claim was left unfixed.

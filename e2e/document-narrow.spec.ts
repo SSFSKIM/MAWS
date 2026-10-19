@@ -6,10 +6,13 @@
 // drawer. With the panel maximized the rail sits beside the page at its old width. Captures: `narrow-insert-menu`,
 // `narrow-rail-drawer`, `maximized-rail-beside`. Every launch's userData is its own directory under /tmp; windows are
 // never shown (the e2e quiet mode).
+// P3-F wave S F3: a document's and a dashboard's toolbar (the dashboard's is the document's, DashboardPanel.tsx) in the
+// panel at its 280 px minimum: still one scrolling row, no control squeezed. Capture: `panel-280-toolbars`.
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
+import { squeezedControls } from './support/toolbar-controls';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -299,4 +302,35 @@ test('in a 600 px panel the comments rail is a drawer over the page, the toolbar
     expect(await wrappedLabels(toolbar), 'every label one line maximized, with the table’s controls').toEqual([]);
     await test.info().attach('maximized-rail-beside', { body: await page.screenshot(), contentType: 'image/png' });
   });
+});
+
+// P3-F wave S, F3 (docs/doperpowers/plans/2026-10-18-p3-f-finish.md, Wave S triage c37, obs 9): the document's toolbar
+// is one scrolling strip (P3-F1), not the deck family's wrapping row; at the panel's 280 px minimum it stays one row
+// and squeezes no control, for a document and for a dashboard, whose toolbar is the document's. Controls scrolled out
+// of the strip's view are not past the panel: the strip scrolls them, so no panel bound is read here.
+test('at the panel’s 280 px minimum a document’s and a dashboard’s toolbar stay one scrolling row, no control squeezed', async () => {
+  test.setTimeout(120_000);
+  const page = await start();
+  await pinArtifactsTool(page);
+  const panel = page.locator('[data-region="panel"]');
+  const shots: Buffer[] = [];
+  for (const kind of ['document', 'dashboard'] as const) {
+    const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind, title: `Narrowest ${kind}` });
+    // openInPanel's steps, with a dashboard's several editors allowed (its views' captions)
+    await panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /^Artifacts/ }).click();
+    await panel.getByRole('button', { name: 'All', exact: true }).click();
+    await panel.locator(`[data-artifact-row][data-artifact-id="${artifact.id}"]`).click({ timeout: 15_000 });
+    const record = panel.locator(`[data-artifact-record="${artifact.id}"]`);
+    await expect(record.locator('.ds-doc .ProseMirror').first()).toBeVisible({ timeout: 15_000 });
+    if (kind === 'document') await resizePanel(page, 280); // opened at the panel's width, as the case above; the dashboard at 280
+    const toolbar = record.getByRole('toolbar', { name: 'Formatting' });
+    await expect(toolbar).toBeVisible();
+    shots.push(await panel.screenshot());
+    expect(await oneRow(toolbar), `${kind}: one row`).toBe(true);
+    expect((await box(toolbar)).height, `${kind}: one row's height`).toBeLessThan(44);
+    expect(await wrappedLabels(toolbar), `${kind}: every label one line inside its button`).toEqual([]);
+    expect(await squeezedControls(toolbar), `${kind}: no control squeezed`).toEqual([]);
+    await record.getByRole('button', { name: 'Back', exact: true }).click();
+  }
+  for (const body of shots) await test.info().attach('panel-280-toolbars', { body, contentType: 'image/png' });
 });

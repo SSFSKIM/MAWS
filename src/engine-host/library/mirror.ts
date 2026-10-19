@@ -7,6 +7,9 @@
 //   coalesces a document's commits to one per 250 ms), and no later than MIRROR_MAX_WAIT_MS after the first one of an
 //   unbroken run. A Space change reconciles every linked directory at once.
 // - Each file is written atomically (a temp file in the same directory, made 0444, renamed over the target).
+// - P3-F (F10, tracker L142): a File artifact's file is copied through memory within MIRROR_FILE_MAX_BYTES, as before;
+//   one over it is cloned into the temp by the file system (`cloneFile`: no buffer, no time, no space), and mirrored as
+//   nothing (logged) only when that clone fails, so the cap bounds the in-memory path, not what is mirrored.
 // - The manifest `<linkedDir>/artifacts/.maws-mirror.json` names every file the mirror wrote, per artifact, with the
 //   revision and slug it wrote them at. A rename, a move out of the Space, a delete or an unlink removes exactly those
 //   files; a file at a target name that the manifest does not own is left alone (logged), never overwritten. An
@@ -28,10 +31,11 @@
 //
 // Reads go through P3-A's public store methods behind the commit barrier (the mirror never writes a row its batch may
 // yet take back); the only durable state is the manifest in the linked directory (ruling 18(a)).
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { isMirrorCopy, mirrorSlug, mirrorWriterFor, type MirrorOutput } from '@artifacts/library/mirror';
+import { isMirrorCopy, isMirrorCopyFrom, mirrorSlug, mirrorWriterFor, type MirrorOutput } from '@artifacts/library/mirror';
 import { applyV2, newDoc } from '@artifacts/yjs';
 import { isDocKind, type Artifact, type Space } from '@shared/artifacts/entity';
 import { byteContentOf, fileBytes, type LibraryDocuments } from './reads';
@@ -39,7 +43,11 @@ import { datasetRefsOf } from '../documents/retention'; // E3
 
 export const MIRROR_SETTLE_MS = 1_000;
 export const MIRROR_MAX_WAIT_MS = 10_000;
-export const MIRROR_FILE_MAX_BYTES = 64 * 1024 * 1024; // a File artifact larger than this is mirrored as nothing
+export const MIRROR_FILE_MAX_BYTES = 64 * 1024 * 1024; // P3-F (F10): a File artifact larger than this is cloned, not read
+// P3-F (F10): a clone takes milliseconds whatever the size (2 GiB in under 10 ms on this Mac's APFS, a spawn of cp or of
+// stat about 3 ms); each spawn of one that hangs (a file system that stalls) holds the host no longer than this, and is a
+// failed clone
+export const MIRROR_CLONE_TIMEOUT_MS = 2_000;
 export const MIRROR_MANIFEST = '.maws-mirror.json';
 const MIRROR_DIR = 'artifacts';
 
@@ -59,6 +67,7 @@ export interface MirrorOptions {
   settleMs?: number;
   maxWaitMs?: number;
   maxFileBytes?: number;
+  cloneFile?: (from: string, to: string) => void; // P3-F (F10): `cloneFile` below unless a test stands in for it
 }
 
 // One artifact's content as read inside the barrier; the writer runs after it.
@@ -73,6 +82,7 @@ export class LibraryMirror {
   private readonly settleMs: number;
   private readonly maxWaitMs: number;
   private readonly maxFileBytes: number;
+  private readonly cloneFile: (from: string, to: string) => void;
   private readonly timers = new Map<string, { timer: ReturnType<typeof setTimeout>; since: number }>();
   private readonly manifests = new Map<string, Manifest>(); // by the linked directory's key (`keyOf`), as loaded or written
   private readonly realDirs = new Map<string, string>(); // per resolved linked directory, its real path when last found
@@ -92,6 +102,7 @@ export class LibraryMirror {
     this.settleMs = options.settleMs ?? MIRROR_SETTLE_MS;
     this.maxWaitMs = options.maxWaitMs ?? MIRROR_MAX_WAIT_MS;
     this.maxFileBytes = options.maxFileBytes ?? MIRROR_FILE_MAX_BYTES;
+    this.cloneFile = options.cloneFile ?? cloneFile;
   }
 
   // Follows the store's changes and reconciles every linked directory; resolves when that reconciliation is done.
@@ -392,7 +403,9 @@ export class LibraryMirror {
           continue;
         }
         if (sameAs !== undefined) renameSync(join(root, sameAs), target); // the entry takes the new name's case first
-        writeReadOnly(root, file, isMirrorCopy(data) ? data.read() : data);
+        if (isMirrorCopyFrom(data)) {
+          if (!this.copyFrom(root, file, data.copyFrom, artifactId)) continue; // mirrored as nothing: what it had there goes as a leftover
+        } else writeReadOnly(root, file, isMirrorCopy(data) ? data.read() : data);
       } catch (error) {
         failure ??= { error };
         break;
@@ -437,17 +450,39 @@ export class LibraryMirror {
       },
     };
     if ('bytes' in content) return writer({ artifact, bytes: content.bytes, name: content.name, ...assets }).files;
-    if ('path' in content) {
-      const bytes = fileBytes(content.path, this.maxFileBytes);
-      if (!bytes) this.log(`${artifact.id}: ${content.path} is too large to mirror (over ${this.maxFileBytes} bytes) or cannot be read; mirrored as nothing`);
-      return writer({ artifact, name: content.name, ...(bytes ? { bytes } : {}), ...assets }).files;
-    }
+    if ('path' in content) return writer({ artifact, path: content.path, name: content.name, ...assets }).files; // P3-F (F10): `copyFrom` copies it
     const doc = newDoc();
     try {
       applyV2(doc, content.state);
       return writer({ artifact, doc, ...assets }).files;
     } finally {
       doc.destroy();
+    }
+  }
+
+  // P3-F (F10, tracker L142): a File artifact's file copied in as `file`: within the cap through memory, as before (a small
+  // file never spawns a clone); over it cloned into the temp. False, logged, when it is mirrored as nothing: over the cap
+  // (or unreadable) and its clone failed, its temp and any folder made for it removed (one that cannot be is named in the
+  // line). A failure after the clone throws, as any write's does.
+  private copyFrom(root: string, file: string, from: string, artifactId: string): boolean {
+    const bytes = fileBytes(from, this.maxFileBytes);
+    if (bytes) {
+      writeReadOnly(root, file, bytes);
+      return true;
+    }
+    const step = { cloning: false };
+    try {
+      writeReadOnly(root, file, (temp) => {
+        step.cloning = true;
+        this.cloneFile(from, temp);
+        step.cloning = false;
+      });
+      return true;
+    } catch (error) {
+      if (!step.cloning) throw error; // its chmod or its rename: a failed write, the entry at -1
+      this.log(`${artifactId}: ${from} is over ${this.maxFileBytes} bytes or cannot be read, and its clone failed (${reasonOf(error)}); mirrored as nothing`);
+      removeEmpty(root, dirname(join(root, file))); // the folders made for its temp
+      return false;
     }
   }
 
@@ -623,26 +658,61 @@ function ensureRoot(root: string): void {
   if (!existsSync(root)) mkdirSync(root);
 }
 
-function writeReadOnly(root: string, file: string, data: string | Uint8Array): void {
+// `data` written at a temp beside the target (P3-F F10: or put there by `data` itself, a clone), made 0444 and renamed
+// over it. A failure removes the temp and throws; a temp that cannot be removed is named in what is thrown, beside the
+// failure, never in its place.
+function writeReadOnly(root: string, file: string, data: string | Uint8Array | ((temp: string) => void)): void {
   const target = join(root, file);
   ensureRoot(root);
   mkdirSync(dirname(target), { recursive: true }); // a writer's folders, under `artifacts/`
   const temp = join(dirname(target), `.mirror-${randomUUID().slice(0, 8)}.tmp`);
   try {
-    writeFileSync(temp, data);
+    if (typeof data === 'function') data(temp);
+    else writeFileSync(temp, data);
     chmodSync(temp, 0o444);
     renameSync(temp, target); // over a read-only file too: replacing a name needs the directory's permission only
   } catch (error) {
-    rmSync(temp, { force: true });
+    try {
+      rmSync(temp, { force: true });
+    } catch (cleanup) {
+      throw new Error(`${reasonOf(error)}; and its temp ${temp} could not be removed: ${reasonOf(cleanup)}`, { cause: cleanup });
+    }
     throw error;
   }
+}
+
+let apfs: number | undefined; // P3-F (F10): the file system type of `/`, read once
+
+/**
+ * P3-F (F10, tracker L142): clones the regular file `from` as the new file `to`, sharing its blocks (no buffer, no time,
+ * no space), or throws. On macOS by APFS's clonefile(2) through `/bin/cp -c`, since Node's COPYFILE_FICLONE_FORCE answers
+ * ENOSYS there (Node 22 and Electron 44's Node 24); `cp -c` falls back to a byte copy where the clone fails, so it runs
+ * only where the clone cannot: `from` on the volume of `to`'s folder, an APFS one (the file system of `/`, APFS on every
+ * macOS MAWS runs on), and carrying no BSD file flag. clonefile copies the flags, so a locked (`uchg`) or append-only
+ * source would clone as a temp that neither chmod nor rm can touch; Node reads no flags, so `stat -L -f %f` does (of
+ * the file a link names, which `cp` follows too), one spawn of about 3 ms. Elsewhere a reflink (COPYFILE_FICLONE_FORCE), refused where the file system has none.
+ */
+export function cloneFile(from: string, to: string): void {
+  const [source, folder] = [statSync(from), dirname(to)];
+  if (!source.isFile()) throw new Error(`${from} is not a regular file`);
+  if (process.platform !== 'darwin') return copyFileSync(from, to, constants.COPYFILE_FICLONE_FORCE);
+  if (source.dev !== statSync(folder).dev) throw new Error(`${from} is on another volume than ${folder}`);
+  if (statfsSync(folder).type !== (apfs ??= statfsSync('/').type)) throw new Error(`${folder} is on a volume that cannot clone (not APFS)`);
+  const flags = execFileSync('/usr/bin/stat', ['-L', '-f', '%f', '--', from], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: MIRROR_CLONE_TIMEOUT_MS }).trim();
+  if (flags !== '0') throw new Error(`${from} carries file flags (${flags}: locked or append-only, perhaps), which its clone would copy`);
+  execFileSync('/bin/cp', ['-c', '--', from, to], { stdio: ['ignore', 'ignore', 'pipe'], timeout: MIRROR_CLONE_TIMEOUT_MS });
 }
 
 // Removes one file, then each parent folder it leaves empty, up to (and including) `artifacts/` itself.
 function removeFile(root: string, file: string): void {
   if (!realDirsUnder(root, file)) return;
   rmSync(join(root, file), { force: true });
-  for (let dir = dirname(join(root, file)); dir.startsWith(root); dir = dirname(dir)) {
+  removeEmpty(root, dirname(join(root, file)));
+}
+
+// Removes `dir` and each parent it leaves empty, up to (and including) `artifacts/` itself.
+function removeEmpty(root: string, dir: string): void {
+  for (; dir.startsWith(root); dir = dirname(dir)) {
     try {
       rmdirSync(dir);
     } catch {

@@ -10,6 +10,7 @@ import type { FloatingCardSize, LayoutRegions } from '@shared/ipc/schema/layout'
 import { markFocusOnMount } from '../stores/composer';
 import { SUMMARY_CARD_KEY, useLayout, type LayoutState } from '../stores/layout';
 import { activeTab, sessionOfTab } from '../stores/layout-model';
+import { toast } from '../stores/notices'; // P3-F wave S (F6)
 
 // The element a pane reserves as the card's column (the browser pane's spacer, §D3).
 export interface ColumnReservation {
@@ -86,6 +87,28 @@ useLayout.subscribe((state, before) => {
 type Layout = Pick<LayoutState, 'main' | 'regions'>;
 const isFloating = (regions: LayoutRegions) => regions.panel.floating && !regions.panel.collapsed;
 
+// P3-F wave S (F6, candidate 58): the card draws the shown session, so with none (an artifact, Settings or an empty pane
+// in front) a floating panel took main's place with nothing over it: main at 0 px, its tab strip gone until Dock. Float
+// therefore refuses with no shown session (the header's button disabled, the action and the divider saying why), and a
+// float that meets none docks: one restored over such a tab, or one such a tab came in front of (⌘, opens Settings over
+// the card). Refused, not kept docked while `floating` stays stored: every reader of the panel's place reads `regions`
+// alone (`panelInMain`), and a stored float would come back unasked the next time a session's tab is in front.
+export const FLOAT_COPY = { noSession: 'Select a session’s tab to float it' };
+
+// The dock runs in a microtask, still before a paint: written inside this listener, it would reach the later listeners
+// before the change that caused it, and persistence would take a restored float's dock for the hydrated baseline and
+// never write it. Before hydration nothing docks, since a dock queued then replays over the stored regions.
+const floatsWithNoSession = (state: Pick<LayoutState, 'main' | 'regions' | 'hydrated'>) => state.hydrated && isFloating(state.regions) && sessionOfTab(activeTab(state.main)) === null;
+let docking = false;
+useLayout.subscribe((state) => {
+  if (docking || !floatsWithNoSession(state)) return;
+  docking = true;
+  queueMicrotask(() => {
+    docking = false;
+    if (floatsWithNoSession(useLayout.getState())) useLayout.getState().setPanel({ floating: false });
+  });
+});
+
 // The session the card (or its pill) draws: the shown session (the focused pane's active tab's, as the panel follows)
 // while the panel floats; null otherwise, and with no shown session (no card and no pill then, §D1.4).
 export const cardSession = ({ main, regions }: Layout): AppSessionId | null => (isFloating(regions) ? sessionOfTab(activeTab(main)) : null);
@@ -138,10 +161,17 @@ const layout = () => useLayout.getState();
 const shown = () => sessionOfTab(activeTab(layout().main));
 
 // Floats the panel from any state; the card's composer takes the keyboard when it mounts. `width` is the divider drag's
-// restore value (§D1.6); nothing else writes the width, so docking brings the column back as it was.
+// restore value (§D1.6); nothing else writes the width, so docking brings the column back as it was. With no shown
+// session it floats nothing and says why (P3-F wave S, F6): the action and the divider have no button to disable. A
+// refused drag still puts its start back: the divider wrote its maximum on the way past it.
 export function floatPanel(patch: { width?: number } = {}): void {
   const session = shown();
-  if (session !== null) markFocusOnMount(session);
+  if (session === null) {
+    if (patch.width !== undefined) layout().setPanel({ width: patch.width });
+    toast({ id: 'panel-float-no-session', level: 'info', text: FLOAT_COPY.noSession, actions: [], dismissible: true });
+    return;
+  }
+  markFocusOnMount(session);
   layout().setPanel({ ...patch, floating: true });
 }
 
@@ -164,8 +194,8 @@ export function openCard(): void {
   useFloatingCard.getState().setClosed(false);
 }
 
-// `panel.float` (⌥⌘B, the header's Float): floats a panel that is not floating; on a floating one, brings a closed card
-// back, else docks (and docks when there is no session to show).
+// `panel.float` (⌥⌘B, the header's Float): floats a panel that is not floating (refused with no session to show); on a
+// floating one, brings a closed card back, else docks (and docks when there is no session to show).
 export function togglePanelFloat(): void {
   if (!isFloating(layout().regions)) floatPanel();
   else if (useFloatingCard.getState().closed && shown() !== null) openCard();

@@ -364,6 +364,7 @@ describe('the address field', () => {
       return top;
     };
     registerSlot('panelHost', () => <Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[tab()]} owns />);
+    useLayout.setState({ main: mainShowing(A) }); // a session in front, for the card to draw (P3-F wave S, F6)
     useLayout.getState().setPanel({ floating: true });
     render(<PanelRegion />);
     const region = document.querySelector('[data-region="panel"]')!;

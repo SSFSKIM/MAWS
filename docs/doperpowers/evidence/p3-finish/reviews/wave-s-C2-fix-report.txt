@@ -1,0 +1,31 @@
+C2 fix wave is done: the must-fix (a locked file leaving an undeletable temp) and the minor (pinning the real guard's refusals) are both fixed, test-first, in one commit inside the claim.
+
+**Commit**
+- `542a69459` (F10 review, L142). Files: `src/engine-host/library/mirror.ts`, `src/engine-host/library/mirror.test.ts`.
+
+**1. Must-fix: a locked source left an undeletable temp**
+- **Reproduced on this Mac:** `stat -f %f` prints 2 for a `uchg` file, its `cp -c` clone carries the 2, and both chmod and rm of the clone fail with EPERM.
+- **Fix:**
+  - `cloneFile` now reads the source's flags before spawning cp, with `execFileSync('/usr/bin/stat', ['-f', '%f', '--', src])`: no shell, the same 2 s timeout.
+  - Any non-zero flag refuses the clone, so the file is mirrored as nothing and the flags appear in the log line. That covers `uchg`, `uappnd` and `schg`.
+- **Cleanup no longer masks the original error:** when removing the temp fails, the error thrown names both the original failure and the temp that could not be removed. The existing log lines carry it, so both are logged.
+- **Restructure:** the write helper (`writeReadOnly`) lost its "nothing to write" return form. The copy path (`copyFrom`) now tells a failed clone (mirrored as nothing, its empty folders removed) from a failed chmod or rename after the clone (a failed write, entry at -1) by the step it failed in.
+- **Stat-spawn timing:** 2.2 to 6.6 ms, median 2.5 ms, over 20 runs under Electron 44's Node. It spawns only for an oversized file that has already passed the regular-file, device and APFS checks.
+- **Flags in practice:** all 297 files over 1 MiB in ~/Downloads, ~/Documents and ~/Desktop have flags 0, so refusing on any flag costs nothing in practice.
+- **Regressions:**
+  - A `uchg` source over an injected 16-byte cap, through the real clone, leaves no temp and no folder and logs the flags. It is macOS-only and skipped elsewhere with its reason; a `finally` runs `chflags -R nouchg` over both test folders. The RED run left nothing behind in $TMPDIR.
+  - A temp that rm cannot remove is logged together with the clone's own failure. This one runs on every platform: the injected clone leaves a non-empty folder at the temp path and throws.
+
+**2. Minor: the real guard's refusals are pinned**
+- A folder as the source throws "not a regular file" and creates nothing. This runs on every platform, because the regular-file check now runs before the non-macOS reflink branch.
+- A target inside `/dev` (devfs, a different device) throws "another volume" before any copy. macOS-only.
+- The not-APFS check on a single device can't be made deterministic in a unit test: it needs a non-APFS volume holding both ends, which means mounting a disk image on the runner. It was verified by hand on an HFS+ image for 4bce76e3f.
+
+**Logs (/tmp/maws-review/)**
+- RED at the parent: `p3f-mirror-flags-red.log`, 2 failed and the 2 pins passed. The lock test failed at `existsSync(out())` because the immutable temp was left; the cleanup test failed because the rm error had masked the clone's failure.
+- GREEN: `p3f-mirror-flags-green.log`, 95 passed across the mirror suite, mirror-holds and the five sibling suites that run the mirror.
+- eslint is clean on both files. To satisfy its `preserve-caught-error` rule, the combined error's `cause` is the cleanup failure; the message names both errors.
+
+**Accepted residual:** if the owner locks the file in the few milliseconds between the flags check and cp, an immutable temp could still be left. The robust cleanup then logs it rather than hiding it. I left this alone as too narrow to be worth more code.
+
+S-MIRROR-COPY-CAP's material from my first report is unchanged. A flagged oversized file now joins its "cannot be cloned, so mirrored as nothing" set.

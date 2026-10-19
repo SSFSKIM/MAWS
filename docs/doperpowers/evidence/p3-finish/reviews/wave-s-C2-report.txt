@@ -1,0 +1,57 @@
+C2 (library mirror) is done: F10 and F11 are fixed in two commits on worktree-agent-af4cd2993bc56e015, both inside the claim. `src/engine-host/library/reads.ts` is untouched; `fileBytes` stays for the in-memory path and for the text index.
+
+**Clone check on this Mac (what F10 rests on)**
+- **One volume:** the store's directory (~/Library/Application Support/MAWS, checked by stat only, nothing written there), ~/Downloads, ~/Developer, /private/tmp and $TMPDIR are all on one APFS volume (disk3s5, dev 16777231).
+- **The brief's primitive does not clone on macOS:** `copyFileSync(src, dst, COPYFILE_FICLONE_FORCE)` throws ENOSYS under Node 22.23.2 (libuv 1.51) and under Electron 44.4.5's Node 24.21 (libuv 1.52.1), which the engine host runs. COPYFILE_FICLONE silently does a full byte copy (256 MiB took 256 MiB of disk, about 250 ms).
+- **`/bin/cp -c` does clone:** 256 MiB in 11 ms, 2 GiB in 2 to 9 ms, 0 MiB of disk taken; a spawn costs about 3 ms. But onto another volume (a test HFS+ image) it silently falls back to a full copy (256 MiB taken, 305 ms).
+- **Route (you approved it with conditions, all applied):**
+  - Files within the cap keep today's in-memory path and never spawn anything.
+  - A file over the cap goes through `cloneFile`. It spawns `execFileSync('/bin/cp', ['-c', '--', src, temp])` with no shell and a 2 s timeout (`MIRROR_CLONE_TIMEOUT_MS`).
+  - It spawns only after its guard passes: the source is a regular file, on the same device as the temp's own folder, and that folder is on APFS (its statfs type equals the type of `/`). Otherwise it refuses without copying. That is one stat of the source plus one stat and one statfs of the folder per oversized file; `/`'s type is read once.
+  - Off macOS it uses COPYFILE_FICLONE_FORCE, a real reflink where the file system has one.
+- **Real `cloneFile` under Electron's Node:**
+  - 128 MiB cloned on the Data volume in 10 ms, 0 MiB taken.
+  - Refused onto the HFS+ image in 0.4 ms, nothing copied.
+  - Refused within the one HFS+ volume ("not APFS").
+  - Refused for a folder as the source.
+- The test image is detached and deleted.
+
+**Commits, in order**
+1. `4bce76e3f` (F10, L142)
+   - Files: `src/engine-host/library/mirror.ts`, `src/engine-host/library/mirror.test.ts`, `src/artifacts/library/mirror.ts`, `src/artifacts/library/mirror.test.ts`.
+   - The File writer now returns a `{ copyFrom: path }` entry.
+   - A clone that fails (refused, not spawned, or timed out) removes its temp and any folder made for it. It logs the reason and mirrors the file as nothing; an earlier copy goes by the leftover rule.
+   - A failure after the clone (the chmod or the rename) is a failed write: no temp, entry at revision -1.
+   - 0o444, temp-then-rename and the never-through-a-link rule are unchanged, and no manifest key changed.
+   - The message carries the ENOSYS finding and the cp -c timings, as you asked.
+2. `5818b943d` (F11, c18)
+   - Files: `src/artifacts/document/mirror.ts`, `src/artifacts/document/mirror.test.ts`, `src/engine-host/library/mirror.test.ts`.
+   - Each asset image the document names is written as a lazy copy at `<slug>/assets/<name>`. The mirrored src is rewritten to that path, on the export's own tree, so the document itself is untouched.
+   - Images that are not assets (https, or an asset the artifact no longer holds) are written as stored. A document naming no asset writes no assets folder, and a dropped image goes by the leftover rule.
+
+**RED and GREEN logs (all under /tmp/maws-review/)**
+- **RED, batch, at the parent:**
+  - `p3f-mirror-red-node.log`: 6 failed, 37 passed, 1 skipped. The 65 MiB test skipped there because `cloneFile` was not yet exported.
+  - `p3f-mirror-red-artifacts.log`: 2 failed, 8 passed.
+- **GREEN:**
+  - `p3f-mirror-green-node-f10.log`: 43 passed, with the 65 MiB real clone run on this Mac, not skipped.
+  - `p3f-mirror-green-artifacts.log`: 10 passed.
+  - `p3f-mirror-green-node-f11.log`: 53 passed, with the document kind's suite.
+  - `p3f-mirror-green-artifacts-f11.log`: 13 passed, with the Markdown export's suite.
+  - Sibling mirror suites: `p3f-mirror-green-siblings-node.log` (46 passed) and `p3f-mirror-green-siblings-artifacts.log` (26 passed).
+- eslint is clean on the six touched files. I did not run the full typecheck locally, per the rules.
+- On a Linux unit runner the 65 MiB real-clone test skips with its reason. The tests using the injected clone run everywhere.
+
+**Your slug question (F11)**
+A deck's `<slug>/` and a document's `<slug>/assets/` meet only if both slugs are equal. `mirrorSlug` is the sanitized title plus the first 8 hex characters of a random UUID, so it takes the same title and the same 32-bit id prefix: 1 in 2^32 per same-titled pair. Even then, the only shared path is `<slug>/assets/<name>` with the same asset name. The manifest's ownership rule refuses the second artifact's write of a file another entry owns ("is not the mirror's file; not written", logged), and removal only prunes empty folders. So neither can overwrite or delete the other's files; at worst one image is missing. Two decks with one slug behave the same way today, so this is the existing guarantee, not a new gap.
+
+**Tracker material: P4 row S-MIRROR-COPY-CAP (yours to log)**
+- **Severity:** P4, the residual of F10. The owner's words: "something in real use might have something bigger, so I would say fix it … production-level product for general use".
+- **What remains:** a File artifact over 64 MiB that cannot be cloned into the linked directory is still mirrored as nothing (logged). That covers another volume, a non-APFS disk (exFAT, HFS+, SMB), or a failed or timed-out clone.
+- **Closing condition:**
+  - Such a file is mirrored whole by an async or chunked copy that runs outside the store barrier and never blocks the engine host's loop.
+  - It keeps temp-then-rename, 0o444, the never-through-a-link rule, and the failure contract (no temp, entry at revision -1).
+  - A test with a forced clone refusal shows a file over the cap mirrored whole.
+- **Constraint:** the mirror's synchronous write path must not hold an unbounded buffer in the engine host, nor block it for an unbounded copy.
+
+No finding was left unsound, and nothing needed a file outside the claim.

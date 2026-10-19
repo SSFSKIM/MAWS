@@ -143,6 +143,14 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
     const size = editor.state.doc.content.size;
     editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 1, Math.max(1, size - 1))));
     editor.view.focus();
+    // P3-F F9: the keys the owner typed on the selected element before this box took the focus, typed over that
+    // selection as a typed key replaces it; and any that reach the stage while the box is open, at its selection
+    const typeIn = () => {
+      const typed = session.takeTyped(elementId);
+      if (typed !== null && !editor.isDestroyed && editor.isEditable) editor.view.dispatch(editor.state.tr.insertText(typed).scrollIntoView());
+    };
+    typeIn();
+    const stopTyped = session.subscribe(typeIn);
 
     let holding = false;
     const hold = (on: boolean) => {
@@ -179,6 +187,7 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
     setMounted({ editor, node });
 
     return () => {
+      stopTyped();
       clearTimeout(settle);
       resize?.disconnect();
       document.removeEventListener('pointerdown', onPointerDown, true);

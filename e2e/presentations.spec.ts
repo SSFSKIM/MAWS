@@ -19,6 +19,10 @@
 //   a picture copied across decks drawn from the second deck's own store.
 // - M5, the scale gate's drag (Acceptance 7): a drag's move-to-frame p95 on the 100-slide deck while an agent
 //   republishes, measured through the seam, the 1-minute load average beside it.
+// - P3-F wave S F3: the deck in the panel at its 280 px minimum, its toolbar wrapped by whole controls (the owner's
+//   obs 9: labels one letter a line over the canvas).
+// - P3-F wave S F9: words typed on a selected text element, and on a grouped heading after the first double-click, enter
+//   its edit typed over its text (c43: they were dropped).
 import { loadavg } from 'node:os';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
@@ -27,6 +31,7 @@ import { traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { withNativeClipboard } from './support/clipboard';
 import { newChatIn, openProject } from './support/sidebar';
+import { resizePanel, squeezedControls } from './support/toolbar-controls';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -189,8 +194,12 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await panel.getByRole('button', { name: 'Open in tab' }).click();
   const inMain = page.locator(`[data-region="main"] [data-deck-artifact="${id}"]`);
   await expect(inMain.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
-  await panel.getByRole('tab', { name: 'Artifacts' }).click(); // with no session shown, the pinned tab is picked again
-  await expect(inPanel.locator('[data-deck-editor]')).toBeVisible();
+  // Open in tab moves the deck (P3-F wave S, F16): with no session shown, the pinned tab is picked again, back on its
+  // list. Opened from it again, it is the panel's replica beside the main tab's (the parent's Decision Log 8).
+  await panel.getByRole('tab', { name: 'Artifacts' }).click();
+  await expect(inPanel).toHaveCount(0);
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('[data-region="main"] [data-editor-header] [data-header-title]')).toHaveText('Q3 review');
   await expect(page.locator('[data-region="main"] [data-editor-header] [data-header-saved]')).toHaveText('All changes saved');
   // the owner's view recorded once a slide is on screen (L's onShown)
@@ -323,6 +332,42 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
+// P3-F wave S, F3 (docs/doperpowers/plans/2026-10-18-p3-f-finish.md, Wave S triage c37, c40, obs 9): in the narrowest
+// panel the toolbar wraps onto more rows by whole controls: no button narrower than its label, none wrapping it a letter
+// a line, none over another, the zoom select whole, every control inside the panel; with nothing selected (the owner's
+// view: Text style, Comments) and with a heading selected (its role in Text style).
+test('a deck in the panel at its 280 px minimum: the toolbar wraps by whole controls, none squeezed, wrapped inside or overlapping', async () => {
+  test.setTimeout(120_000);
+  repo = await ScratchRepo.create({ sentinels: false });
+  const page = await ready();
+  const id = await createDeck(page, 'Q3 review', FILES);
+  const project = await ok<{ name: string }>(page, 'session.projects.add', { directory: repo.root });
+  await openProject(page, project.name);
+  await newChatIn(page, project.name);
+  const panel = page.locator('[data-region="panel"]');
+  await panel.getByRole('button', { name: 'Add a tool' }).click();
+  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  const inPanel = panel.locator(`[data-deck-artifact="${id}"]`);
+  await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
+  await resizePanel(page, 280);
+  const toolbar = inPanel.getByRole('toolbar', { name: 'Deck' });
+  await expect(toolbar.getByRole('button', { name: 'Text style', exact: true })).toBeVisible();
+
+  await test.info().attach('deck-panel-280', { body: await panel.screenshot(), contentType: 'image/png' });
+  expect(await squeezedControls(toolbar, { within: panel }), 'nothing selected').toEqual([]);
+  expect((await toolbar.boundingBox())!.height, 'the row wrapped').toBeGreaterThan(36);
+
+  const title = (await inPanel.locator('[data-stage-slide="cover"] [data-eid="title"]').boundingBox())!;
+  await page.mouse.click(title.x + title.width / 2, title.y + title.height / 2);
+  await expect(inPanel.locator('[data-overlay] [data-selected="title"]')).toHaveCount(1);
+  await test.info().attach('deck-panel-280-selected', { body: await panel.screenshot(), contentType: 'image/png' });
+  expect(await squeezedControls(toolbar, { within: panel }), 'a heading selected').toEqual([]);
+
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
 test('the scale gate’s open: a 100-slide deck cold in a main tab, stage and 100 live thumbnails drawn within 1,000 ms', async () => {
   test.setTimeout(120_000);
   const page = await ready();
@@ -355,7 +400,8 @@ const LAB: Record<string, string> = {
 <div id="b" style="position:absolute; left:700px; top:500px; width:200px; height:120px; background:#00aa00"></div>
 <x-shape id="c" kind="ellipse" style="position:absolute; left:1300px; top:640px; width:200px; height:200px; background:#0000ff"></x-shape>
 </section>`,
-  'project/slides/text.html': `<section id="text" style="background:#ffffff; padding:128px"><p id="note" style="position:absolute; left:300px; top:300px; width:1000px; font-size:48px">Edit me</p></section>`,
+  // P3-F F9: a heading inside a group (c43: the owner's head group)
+  'project/slides/text.html': `<section id="text" style="background:#ffffff; padding:128px"><p id="note" style="position:absolute; left:300px; top:300px; width:1000px; font-size:48px">Edit me</p><div id="hg" data-group="" style="position:absolute; left:300px; top:600px; width:1000px; height:200px"><h2 id="gh" style="position:absolute; left:0px; top:0px; width:1000px; font-size:64px">Grouped heading</h2></div></section>`,
   // fix wave 1: an element drawn scaled, and a group drawn turned (its children measured as drawn)
   'project/slides/xf.html': `<section id="xf" style="background:#ffffff">
 <div id="sc" style="position:absolute; left:300px; top:300px; width:200px; height:100px; transform:scale(2); background:#ff00ff"></div>
@@ -508,6 +554,16 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
   const tkRot = (await tab.locator('[data-overlay] [data-handle="rotate"]').boundingBox())!;
   await drag(page, { x: tkRot.x + tkRot.width / 2, y: tkRot.y + tkRot.height / 2 }, { x: tkRot.x + 120, y: tkRot.y + 80 });
   await expect(tab.locator('[data-deck-notice]')).toContainText('design-system token');
+  // P3-F F3 review 4: the notice takes the row's free space beside the spacer, not half of it, and is never narrower
+  // than its readable floor (12rem, or the row's width when that is less), so a refusal never reads as an ellipsis
+  const split = await tab.getByRole('toolbar', { name: 'Deck' }).evaluate((bar) => {
+    const width = (sel: string) => bar.querySelector(`:scope > ${sel}`)!.getBoundingClientRect().width;
+    const style = getComputedStyle(bar);
+    const inner = bar.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+    return { notice: width('.deck-notice'), spacer: width('.deck-toolbar-spacer'), floor: Math.min(12 * Number.parseFloat(getComputedStyle(document.documentElement).fontSize), inner) };
+  });
+  expect(split.spacer, `the spacer leaves the row's free space to the notice (${JSON.stringify(split)})`).toBeLessThanOrEqual(2);
+  expect(split.notice, `the notice at its readable floor or wider (${JSON.stringify(split)})`).toBeGreaterThanOrEqual(split.floor - 1);
   expect((await elementOf(page, id, 'xf', 'tk'))?.style.transform).toBe('var(--ds-pose, scale(1.5))');
   // another replica's selection, outlined in its colour with its name
   await page.evaluate(([a]) => (window as unknown as Seam).__maws_presentations.presence.show(a!, 'xf', ['sc']), [id] as const);
@@ -648,8 +704,17 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   // text in place: typed, a word made bold, then a Korean composition while another replica edits the same box
   await tab.locator('[data-slide-thumb="text"] .deck-thumb-button').click();
   const note = (await tab.locator('[data-stage-slide="text"] [data-eid="note"]').boundingBox())!;
-  await page.mouse.dblclick(note.x + 40, note.y + note.height / 2);
   const box = tab.locator('.deck-textbox');
+  // P3-F F9 (c43, obs 5a): words typed on the selected element enter its edit, typed over its text (they were dropped)
+  await page.mouse.click(note.x + 40, note.y + note.height / 2);
+  await expect(tab.locator('[data-overlay] [data-selected="note"]')).toHaveCount(1);
+  await page.keyboard.type('Hi there');
+  await expect(box).toBeFocused();
+  await expect.poll(async () => plain(await element('note', 'text'))).toBe('Hi there');
+  await page.keyboard.press('Escape');
+  await expect(box).toHaveCount(0);
+  await expect(tab.locator('[data-overlay] [data-selected="note"]')).toHaveCount(1); // back to the element selected
+  await page.mouse.dblclick(note.x + 40, note.y + note.height / 2);
   await expect(box).toBeFocused();
   await page.keyboard.type('Hello world');
   // the word picked by a double-click on it (the text box's own: the stage leaves it alone)
@@ -697,6 +762,17 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   await page.keyboard.press('Escape');
   await expect(box).toHaveCount(0);
   await expect(tab.locator('[data-stage-slide="text"] [data-eid="note"]')).toHaveText('Remote Hello world한글');
+
+  // P3-F F9 (c43): the owner's grouped heading: the first double-click goes into the group and selects the heading, and
+  // the words typed then enter its edit (the first double-click plus typing dropped them)
+  const grouped = (await tab.locator('[data-stage-slide="text"] [data-eid="gh"]').boundingBox())!;
+  await page.mouse.dblclick(grouped.x + 40, grouped.y + grouped.height / 2);
+  await expect(tab.locator('[data-overlay] [data-selected="gh"]')).toHaveCount(1);
+  await page.keyboard.type('Owners first');
+  await expect(box).toBeFocused();
+  await expect.poll(async () => plain(await element('gh', 'text'))).toBe('Owners first');
+  await page.keyboard.press('Escape');
+  await expect(box).toHaveCount(0);
 
   // copy in one deck, paste into another: the dialect on the Mac's pasteboard, loaded on the way in
   await tab.locator('[data-slide-thumb="lab"] .deck-thumb-button').click();
