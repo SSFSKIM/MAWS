@@ -681,6 +681,11 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   await compose('하');
   await compose('한');
   await editDeck(page, id, { op: 'prependText', slideId: 'text', elementId: 'note', text: 'Remote ' }); // lands while composing
+  // P3-F (editor-proof scalpel-1#4), a known gap: nothing here proves the tab's replica has received the remote update
+  // before the check below. editDeck answers once the host holds the edit; the tab's held frame waits in its provider,
+  // which no seam reaches (__maws_presentations answers an open tab's timings only), so the wait stays a fixed 300 ms.
+  // A hold that regressed and a broadcast later than that both pass it, and the merged text checked after the
+  // composition proves the merge, not the hold. It closes when the seam answers the tab replica's held frames.
   await page.waitForTimeout(300);
   await expect(box).not.toContainText('Remote'); // held by the replica until the composition ends (the hold)
   await compose('한ㄱ');
