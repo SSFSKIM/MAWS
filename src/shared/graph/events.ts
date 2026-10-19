@@ -163,6 +163,10 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('assistant.block.delta', {
     apiMessageId: ApiMessageIdSchema.nullable(), blockIndex: z.number(), blockType: z.string(),
     textDelta: nullableString(), thinkingDelta: nullableString(), inputJsonDelta: nullableString(), userMessageUuid: MessageUuidSchema.nullable(),
+    // P4-A2 (the X1 amendment through the P4 interface ledger; X35): a tool_use block's id and name as its
+    // `content_block_start` announced them, so the host joins the block's deltas to the `tools/call` that follows and
+    // reads an artifact call as it streams; null on every other block, absent on an event built before the amendment
+    toolUseId: ToolUseIdSchema.nullable().optional(), toolName: nullableString().optional(),
   }),
   event('assistant.block.complete', {
     messageUuid: MessageUuidSchema, apiMessageId: ApiMessageIdSchema, blockIndex: z.number(), block: ContentBlockSchema, model: z.string(),
