@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P3-F sitting: your 24 ballot lines, with pictures</title>
+<style>
+:root{--fg:#1d1d1f;--muted:#5f6368;--line:#e3e3e6;--bg:#fff;--soft:#f6f6f8;--acc:#b4432c;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Helvetica Neue","Apple SD Gothic Neo",sans-serif}
+main{max-width:960px;margin:0 auto;padding:28px 22px 80px}
+h1{font-size:26px;line-height:1.25;margin:0 0 6px}
+h2{font-size:20px;margin:44px 0 6px;padding-top:8px;border-top:2px solid var(--fg)}
+.sub{color:var(--muted);margin:0 0 16px}
+.how{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0}
+.how p{margin:0 0 8px}.how p:last-child{margin:0}
+.bar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;margin:10px 0 0}
+button{font:inherit;font-size:15px;padding:6px 14px;border-radius:8px;border:1px solid #b9b9bf;background:#fff;cursor:pointer}
+button.primary{background:var(--fg);color:#fff;border-color:var(--fg)}
+.status{color:var(--muted);font-size:14px}
+nav.toc{font-size:14px;color:var(--muted);margin:12px 0 0}
+nav.toc a{color:var(--fg);text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:1px 7px;margin:0 4px 6px 0;display:inline-block;white-space:nowrap}
+nav.toc a.done{background:#eef6ee;border-color:#b9d8b9}
+section{border:1px solid var(--line);border-radius:12px;padding:18px 20px 16px;margin:18px 0}
+.handle{display:inline-block;font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.02em;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:4px 7px;margin-bottom:8px}
+h3{font-size:19px;line-height:1.3;margin:0 0 8px}
+p{margin:0 0 10px}
+code{font:13.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft);padding:1px 4px;border-radius:4px}
+dl.opts{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:10px 0 12px}
+dl.opts dt{font-weight:600}
+dl.opts dd{margin:0}
+blockquote{margin:10px 0 14px;padding:8px 14px;border-left:3px solid var(--acc);background:#fbf4f2;border-radius:0 8px 8px 0}
+blockquote .lab{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--acc);margin-bottom:2px}
+.novis{color:#3c3c40;background:var(--soft);border-radius:8px;padding:10px 14px}
+figure{margin:14px 0}
+figure img{display:block;max-width:100%;height:auto;border:1px solid var(--line);border-radius:6px}
+figcaption{font-size:14.5px;color:#3c3c40;margin-top:6px}
+figcaption .n{font-weight:700;color:var(--acc);margin-right:4px}
+.answer{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;border-top:1px dashed var(--line);margin-top:14px;padding-top:12px}
+.answer .q{font-weight:600}
+.answer label{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.answer input[type=text]{flex:1 1 260px;font:inherit;font-size:15px;padding:5px 9px;border:1px solid #c9c9cf;border-radius:7px}
+.answer .clear{font-size:13px;padding:3px 9px}
+.recmark{font-size:12px;color:var(--muted)}
+textarea#out{width:100%;min-height:150px;font:13.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px}
+footer{color:var(--muted);font-size:14px;margin-top:30px}
+</style></head><body><main>
+<h1>P3-F sitting: your 24 ballot lines, with pictures</h1>
+<p class="sub">Sitting of 19 October 2026, build d9ef1e5b. One section per ballot line (16 rulings, then 8 taste items), in the ballot's order.</p>
+<div class="how">
+<p><b>How to answer:</b> reply "all as recommended", or name the handles where you differ.</p>
+<p>Or tick your answers here: turn on <i>Pre-fill from my recommendations</i>, change only what you disagree with, then press <i>Copy my answers</i> and paste the text back. Answers are kept in this browser if you reload.</p>
+<div class="bar"><label><input type="checkbox" class="prefill"> Pre-fill from my recommendations</label>
+<button class="primary copy">Copy my answers</button><span class="status"></span></div>
+</div>
+<p class="sub">Pictures marked <i>sitting</i> were taken during this morning's sitting; <i>now</i> means taken at 13:48–13:50Z for this page, by looking only (menus opened and closed, nothing sent or changed). Times are UTC. MAWS ran in its dark theme; documents render light.</p>
+<nav class="toc">
+<div>Rulings: <a href="#L32" data-for="L32">L32</a> <a href="#L35" data-for="L35">L35</a> <a href="#L81" data-for="L81">L81</a> <a href="#L140" data-for="L140">L140</a> <a href="#L142" data-for="L142">L142</a> <a href="#L175" data-for="L175">L175</a> <a href="#L180" data-for="L180">L180</a> <a href="#L183" data-for="L183">L183</a> <a href="#L202" data-for="L202">L202</a> <a href="#L213" data-for="L213">L213</a> <a href="#L267" data-for="L267">L267</a> <a href="#S-NATIVE-OAUTH" data-for="S-NATIVE-OAUTH">S-NATIVE-OAUTH</a> <a href="#S-REAL-SEND" data-for="S-REAL-SEND">S-REAL-SEND</a> <a href="#S-HEADER-SEND" data-for="S-HEADER-SEND">S-HEADER-SEND</a> <a href="#S-DESIGN-TOOLBAR" data-for="S-DESIGN-TOOLBAR">S-DESIGN-TOOLBAR</a> <a href="#S-REPEATED-BARS" data-for="S-REPEATED-BARS">S-REPEATED-BARS</a></div>
+<div>Taste: <a href="#DL8" data-for="DL8">DL8</a> <a href="#DL13" data-for="DL13">DL13</a> <a href="#G" data-for="G">G</a> <a href="#C" data-for="C">C</a> <a href="#E1" data-for="E1">E1</a> <a href="#E2" data-for="E2">E2</a> <a href="#HD" data-for="HD">HD</a> <a href="#H" data-for="H">H</a></div>
+</nav>
+<h2>R.1 Rulings</h2><p class="sub">Answer keep, fix now, or P4 (defer to the next phase).</p>
+<section id="L32" data-handle="L32" data-group="R1" data-rec="keep" data-recnote="">
+<span class="handle">L32 catalogue</span>
+<h3>How MAWS works out which models a project can use</h3>
+<p>MAWS shows a model picker for each project. To fill it, MAWS reads the same settings files the Claude Code engine reads, so the list matches what the engine would offer. Two rare cases are not copied: company-managed (policy) settings, and a project reached through a network mount. In those cases the picker could fetch a list it didn't need, or show a stale one until the next relaunch.</p>
+<dl class="opts"><dt>Keep</dt><dd>Leave it as built; the two gaps stay written down.</dd><dt>Alternative</dt><dd>Fix now or P4: also read policy settings and network-mounted projects the way the engine does.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b> (nothing in the sitting touched it)</blockquote>
+<p class="novis">Nothing to see. This is about which settings files MAWS reads behind the model picker; the picker looked and behaved normally, and neither rare case (a policy-managed Mac, a project on a network mount) exists on your machines.</p>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L32" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="L32" value="fix now"> fix now</label>
+<label><input type="radio" name="L32" value="P4"> P4</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L32"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="L35" data-handle="L35" data-group="R1" data-rec="keep" data-recnote="">
+<span class="handle">L35 SessionStart floor</span>
+<h3>Slow start-up hooks from managed settings or plugins</h3>
+<p>Claude Code can run "SessionStart" hooks when a session starts, and MAWS waits for them. MAWS learns how long to wait from your user, project and local settings files. A hook that comes from managed settings or a plugin isn't read, so MAWS waits for it at most 600 seconds (10 minutes); a hook that ran longer would make the session fail to start.</p>
+<dl class="opts"><dt>Keep</dt><dd>Keep the 10-minute floor; revisit only if you ever add such a hook.</dd><dt>Alternative</dt><dd>Fix now or P4: teach MAWS to read hook timeouts from managed settings and plugins too.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b> (your setup has no such hook)</blockquote>
+<p class="novis">Nothing to see. Your setup has no hook of that kind, so no session ever waits on one; the only visible effect would be a session failing to start after 10 minutes.</p>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L35" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="L35" value="fix now"> fix now</label>
+<label><input type="radio" name="L35" value="P4"> P4</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L35"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="L81" data-handle="L81" data-group="R1" data-rec="keep" data-recnote="">
+<span class="handle">L81 Terminal Korean</span>
+<h3>Korean Backspace in a terminal tab (the old symptom)</h3>
+<p>At an earlier sitting, typing Korean in a MAWS terminal tab and pressing Backspace deleted some characters and then stopped. Today (about 13:00Z) you launched MAWS with its keystroke recorder on, typed a Korean sample in a terminal tab and saw no symptom: "I don't think it's symptomatic". The recorder's log (<code>~/Library/Logs/MAWS/ime-trace.log</code>, 80,980 bytes) holds raw keystrokes, so it stays with you and no agent has read it.</p>
+<dl class="opts"><dt>Keep</dt><dd>Record "no symptom this time", keep the log, and leave the issue open in case it comes back.</dd><dt>Alternative</dt><dd>Fix now or P4: have an agent study the trace (you would share the log) and keep investigating.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b>: T.1 ran, no symptom, the trace is yours to keep</blockquote>
+<p class="novis">No picture. This was your own hands-on test, outside the captured steps, and the symptom is about what Backspace does while composing Korean, which a still picture can&#x27;t show. Nothing looked wrong to you.</p>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L81" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="L81" value="fix now"> fix now</label>
+<label><input type="radio" name="L81" value="P4"> P4</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L81"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="L140" data-handle="L140" data-group="R1" data-rec="P4" data-recnote="">
+<span class="handle">L140 locale</span>
+<h3>English screens with Korean-format times and dates mixed in</h3>
+<p>MAWS's words are English, but some times follow your Mac's Korean region setting: the Library says "Edited 2분 전 by You", the sidebar says "1분", "3일". Other places are fixed English: a date chip reads "Oct 19, 2026" while its own date picker shows "2026. 10. 19.", and version history says "1:45 AM".</p>
+<dl class="opts"><dt>Keep</dt><dd>The mix stays as it is.</dd><dt>Alternative</dt><dd>P4, one locale per surface: each surface uses one language for words, dates and times, for example "Edited 2 min ago" throughout, or a fully Korean line.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>P4: one locale per surface</b>. The mix showed up all through the sitting (candidates 4, 7, 15, 27)</blockquote>
+<figure><img src="img/l140-library-relative-times.jpg" alt="Library list (sitting, 08:14Z). Boxed: &quot;Edited 2분 전 by You&quot; and &quot;Edited 1주 전 by …&quot;: an English sentence with a Korean age inside. (These built-in design systems also say &quot;by You&quot; though you never edited them; that is a separate defect.)" loading="lazy"><figcaption><span class="n">1.</span>Library list (sitting, 08:14Z). Boxed: "Edited 2분 전 by You" and "Edited 1주 전 by …": an English sentence with a Korean age inside. (These built-in design systems also say "by You" though you never edited them; that is a separate defect.)</figcaption></figure>
+<figure><img src="img/l140-date-chip-vs-picker.jpg" alt="Inserting a date in the note (sitting, 08:33Z). Left box: the chip says &quot;Oct 19, 2026&quot;, in English. Right box: the picker for the same date says &quot;2026. 10. 19.&quot;, in Korean format." loading="lazy"><figcaption><span class="n">2.</span>Inserting a date in the note (sitting, 08:33Z). Left box: the chip says "Oct 19, 2026", in English. Right box: the picker for the same date says "2026. 10. 19.", in Korean format.</figcaption></figure>
+<figure><img src="img/l140-history-times.jpg" alt="Version history (sitting, 08:45Z): English 12-hour times, &quot;1:45 AM&quot;, while the Library and sidebar use Korean ages." loading="lazy"><figcaption><span class="n">3.</span>Version history (sitting, 08:45Z): English 12-hour times, "1:45 AM", while the Library and sidebar use Korean ages.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L140" value="keep"> keep</label>
+<label><input type="radio" name="L140" value="fix now"> fix now</label>
+<label><input type="radio" name="L140" value="P4"> P4 <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L140"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="L142" data-handle="L142" data-group="R1" data-rec="keep" data-recnote="">
+<span class="handle">L142 mirror cap</span>
+<h3>Files over 64 MB aren&#x27;t copied into a Space&#x27;s folder</h3>
+<p>A Space can be linked to a folder; MAWS then keeps a read-only copy of every artifact in it (here <code>/private/tmp/p3-sitting-project/artifacts</code>) so agents and other tools can read them. A file larger than 64 MiB is not copied.</p>
+<dl class="opts"><dt>Keep</dt><dd>Keep the 64 MiB limit.</dd><dt>Alternative</dt><dd>Fix now or P4: raise or remove the limit, at the cost of larger copies on disk.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b></blockquote>
+<p class="novis">Nothing to see. Nothing in the sitting came near 64 MiB, and a skipped copy would only be a missing file in the folder.</p>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L142" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="L142" value="fix now"> fix now</label>
+<label><input type="radio" name="L142" value="P4"> P4</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L142"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="L175" data-handle="L175" data-group="R1" data-rec="P4" data-recnote="">
+<span class="handle">L175 HWP/HWPX</span>
+<h3>No export to Hangul (HWP/HWPX)</h3>
+<p>Documents export to Markdown, web page, Word (Letter or A4) and PDF (Letter or A4). Hangul's HWP/HWPX, which Korean schools and public offices often ask for, isn't offered.</p>
+<dl class="opts"><dt>Keep</dt><dd>No HWP export.</dd><dt>Alternative</dt><dd>P4: add HWP/HWPX export in the next phase (or fix now: build it in this one).</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>P4</b>, worth keeping if you'll send documents to Korean schools or offices</blockquote>
+<figure><img src="img/doc-header-export-menu.jpg" alt="A document&#x27;s Export menu (now, 13:48Z): six choices, none of them HWP or HWPX." loading="lazy"><figcaption>A document's Export menu (now, 13:48Z): six choices, none of them HWP or HWPX.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L175" value="keep"> keep</label>
+<label><input type="radio" name="L175" value="fix now"> fix now</label>
+<label><input type="radio" name="L175" value="P4"> P4 <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L175"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="L180" data-handle="L180" data-group="R1" data-rec="acknowledged" data-recnote="">
+<span class="handle">L180 (acknowledge only)</span>
+<h3>Exporting an old version of a design system &quot;for Claude&quot; includes today&#x27;s files</h3>
+<p>A design system can carry uploaded files such as logos or fonts. If you export an older version of it in the "for Claude" format, the package holds every file the system has now, including ones added after that version. Nothing the old version needs is missing; there may be extra files. The repair is already scheduled for P4, so you are asked only to acknowledge it.</p>
+<dl class="opts"><dt>Acknowledge</dt><dd>Acknowledge: you know about the extra files; P4 repairs it.</dd><dt>Alternative</dt><dd>No vote is asked. If it matters more to you, say so in the note.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>acknowledge</b></blockquote>
+<p class="novis">Nothing to see. The difference lives inside an exported zip and appears only when files were uploaded to a design system after the version you export; the sitting didn&#x27;t export an old design-system version.</p>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L180" value="acknowledged"> acknowledged <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L180"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="L183" data-handle="L183" data-group="R1" data-rec="P4" data-recnote="">
+<span class="handle">L183 DOCX fonts</span>
+<h3>Word exports don&#x27;t carry their fonts</h3>
+<p>A Word (.docx) export names its fonts but doesn't include them, so Word uses its own copy of each font, or a substitute when one is missing. In the sitting, the note exported to Word opened correctly.</p>
+<dl class="opts"><dt>Keep</dt><dd>No fonts inside Word files, for good.</dd><dt>Alternative</dt><dd>P4: include the fonts next phase, so the file looks the same on any computer (files get larger). Fix now: do it in this phase.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>P4</b>: Word showed the note correctly (X.2)</blockquote>
+<figure><img src="img/l183-word-docx.jpg" alt="The note&#x27;s .docx in Word for Mac (sitting, 10:27Z; read-only because Word isn&#x27;t licensed here, hence the yellow bar). The link, the highlighted sentence, the heading, the checkboxes, the table and your comment with Claude&#x27;s reply all came through." loading="lazy"><figcaption>The note's .docx in Word for Mac (sitting, 10:27Z; read-only because Word isn't licensed here, hence the yellow bar). The link, the highlighted sentence, the heading, the checkboxes, the table and your comment with Claude's reply all came through.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L183" value="keep"> keep</label>
+<label><input type="radio" name="L183" value="fix now"> fix now</label>
+<label><input type="radio" name="L183" value="P4"> P4 <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L183"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="L202" data-handle="L202" data-group="R1" data-rec="P4" data-recnote="">
+<span class="handle">L202 embedded PPTX</span>
+<h3>No PowerPoint export with the fonts packed inside</h3>
+<p>A deck exports to PowerPoint three ways: "fonts by name" (editable; refers to the deck's fonts, here Apple's SF Pro, without including them), "basic fonts" (editable; uses Arial, which every computer has) and "slides as pictures" (each slide is one image: exact, but not editable). There is no fourth choice that packs the fonts into the file.</p>
+<dl class="opts"><dt>Keep</dt><dd>The three choices are the whole menu; no embedded-fonts choice is planned.</dd><dt>Alternative</dt><dd>P4: add an embedded-fonts choice next phase (or fix now).</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>P4</b>: PowerPoint read "fonts by name" fine; Keynote said fonts were missing, and "basic fonts" was the one that edits cleanly there</blockquote>
+<figure><img src="img/deck-export-menu.jpg" alt="The deck&#x27;s Export menu (now, 13:48Z). Boxed: the three PowerPoint choices; an embedded-fonts choice would be a fourth line." loading="lazy"><figcaption><span class="n">1.</span>The deck's Export menu (now, 13:48Z). Boxed: the three PowerPoint choices; an embedded-fonts choice would be a fourth line.</figcaption></figure>
+<figure><img src="img/powerpoint-fonts-by-name.jpg" alt="&quot;fonts by name&quot; in PowerPoint for Mac (sitting, 10:26Z): title and subtitle look as they do in MAWS. (Read-only, hence the yellow bar.)" loading="lazy"><figcaption><span class="n">2.</span>"fonts by name" in PowerPoint for Mac (sitting, 10:26Z): title and subtitle look as they do in MAWS. (Read-only, hence the yellow bar.)</figcaption></figure>
+<figure><img src="img/keynote-fonts-by-name-vs-basic.jpg" alt="Slide 2 in Keynote: A is the &quot;fonts by name&quot; file, B the &quot;basic fonts&quot; file (sitting, 10:23–10:24Z). They look alike; B&#x27;s headings are Arial (compare the &quot;W&quot; and &quot;a&quot;). The difference that matters is not in the picture: on opening A, Keynote reported &quot;이 프레젠테이션에는 유실된 서체가 있습니다&quot; (this presentation has missing fonts), because the Apple SF Pro names in the file don&#x27;t match fonts Keynote can use. B opened with no warning." loading="lazy"><figcaption><span class="n">3.</span>Slide 2 in Keynote: A is the "fonts by name" file, B the "basic fonts" file (sitting, 10:23–10:24Z). They look alike; B's headings are Arial (compare the "W" and "a"). The difference that matters is not in the picture: on opening A, Keynote reported "이 프레젠테이션에는 유실된 서체가 있습니다" (this presentation has missing fonts), because the Apple SF Pro names in the file don't match fonts Keynote can use. B opened with no warning.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L202" value="keep"> keep</label>
+<label><input type="radio" name="L202" value="fix now"> fix now</label>
+<label><input type="radio" name="L202" value="P4"> P4 <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L202"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="L213" data-handle="L213" data-group="R1" data-rec="keep" data-recnote="P4: a note in the Export menu that Keynote needs &quot;basic fonts&quot;">
+<span class="handle">L213 presenter/fonts/SVG</span>
+<h3>Presenting on two displays, and how PowerPoint and Keynote read the fonts</h3>
+<p>Two checks only your hands could do. The presenter: you connected a second display and pressed Present; the show ran, the hidden slide 3 was skipped, fonts matched the editor and the keys worked. The font choices in PowerPoint and Keynote: PowerPoint showed "fonts by name" correctly, Keynote reported missing fonts for it, and "basic fonts" opened cleanly (see L202). Pictures drawn as SVG, the third part, didn't come up: this deck has none.</p>
+<dl class="opts"><dt>Keep</dt><dd>The presenter as built.</dd><dt>Alternative</dt><dd>P4: add a short hint in the Export menu that Keynote users should pick "basic fonts". Fix now: add it in this phase.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b> the presenter (P.1 passed); <b>P4</b> a note in the export menu that Keynote needs "basic fonts" (candidate 72)</blockquote>
+<figure><img src="img/deck-header-present.jpg" alt="The deck&#x27;s header (now, 13:48Z). Boxed: the Present button. The show itself isn&#x27;t pictured: it ran on your two displays, and I didn&#x27;t start a show for a picture." loading="lazy"><figcaption><span class="n">1.</span>The deck's header (now, 13:48Z). Boxed: the Present button. The show itself isn't pictured: it ran on your two displays, and I didn't start a show for a picture.</figcaption></figure>
+<figure><img src="img/deck-export-menu.jpg" alt="Where the proposed hint would go: with the three PowerPoint choices (boxed)." loading="lazy"><figcaption><span class="n">2.</span>Where the proposed hint would go: with the three PowerPoint choices (boxed).</figcaption></figure>
+<figure><img src="img/keynote-fonts-by-name-vs-basic.jpg" alt="Slide 2 in Keynote: A is the &quot;fonts by name&quot; file, B the &quot;basic fonts&quot; file (sitting, 10:23–10:24Z). They look alike; B&#x27;s headings are Arial (compare the &quot;W&quot; and &quot;a&quot;). The difference that matters is not in the picture: on opening A, Keynote reported &quot;이 프레젠테이션에는 유실된 서체가 있습니다&quot; (this presentation has missing fonts), because the Apple SF Pro names in the file don&#x27;t match fonts Keynote can use. B opened with no warning." loading="lazy"><figcaption><span class="n">3.</span>Slide 2 in Keynote: A is the "fonts by name" file, B the "basic fonts" file (sitting, 10:23–10:24Z). They look alike; B's headings are Arial (compare the "W" and "a"). The difference that matters is not in the picture: on opening A, Keynote reported "이 프레젠테이션에는 유실된 서체가 있습니다" (this presentation has missing fonts), because the Apple SF Pro names in the file don't match fonts Keynote can use. B opened with no warning.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L213" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="L213" value="fix now"> fix now</label>
+<label><input type="radio" name="L213" value="P4"> P4</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L213"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="L267" data-handle="L267" data-group="R1" data-rec="" data-recnote="">
+<span class="handle">L267 mini polling</span>
+<h3>ClaudeUsage on the Mac mini keeps reading the keychain</h3>
+<p>ClaudeUsage.app on the Mac mini reads a keychain password every few seconds. When macOS's keychain service crashed, the keychain locked again and the next read raised an unlock prompt that held the mini's screen until someone typed the password; the mini's test lane stalled meanwhile (on 10-16 and 10-17). It is your app and your credentials, so no agent touches it.</p>
+<dl class="opts"><dt>Leave as is</dt><dd>Leave it as it is and accept the occasional stall.</dd><dt>Alternatives</dt><dd>Slow it to every few minutes, or retire it from the mini while the mini runs tests.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span>your call: retire or slow the polling on the mini when convenient; no agent touches it</blockquote>
+<p class="novis">Nothing to see in MAWS: ClaudeUsage is a separate app on the Mac mini, and the sitting didn&#x27;t involve it.</p>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="L267" value="leave as is"> leave as is</label>
+<label><input type="radio" name="L267" value="slow it"> slow it</label>
+<label><input type="radio" name="L267" value="retire it"> retire it</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for L267"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="S-NATIVE-OAUTH" data-handle="S-NATIVE-OAUTH" data-group="R1" data-rec="keep" data-recnote="P4: a way to see or choose MAWS&#x27;s own route (candidate 76)">
+<span class="handle">S-NATIVE-OAUTH</span>
+<h3>MAWS&#x27;s own sign-in to a connector (Notion)</h3>
+<p>Besides the connectors your Claude sessions use, MAWS can hold its own connection to a connector server, for HTML pages that read data (here the test page "Notion route check"). You connected Notion through MAWS with a browser sign-in; it survived a quit and relaunch without a second sign-in, and Disconnect worked. What never showed is MAWS's own connection in use: while a Claude session with Notion runs in the same folder, MAWS sends the page's requests through that session first, and the note's session was running all along.</p>
+<dl class="opts"><dt>Keep</dt><dd>Accept the sign-in as built.</dd><dt>Alternative</dt><dd>P4 (with keep): add a way to see, or choose, which connection a page's requests use.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep the build</b>: sign-in, keeping it across a relaunch, and Disconnect all worked. <b>P4</b> a way to see or choose MAWS's own route, which never showed while the note's session was running (candidate 76)</blockquote>
+<figure><img src="img/connectors-sheet-owner.jpg" alt="Your own screenshot of the Connectors sheet after the first Connect (12:34Z). Boxed: Notion &quot;Connected through MAWS · Connected · 65 tools listed&quot;. Above it, the page&#x27;s permission &quot;notion-get-self, Allowed to read&quot;. Nothing on the sheet says which connection the page&#x27;s requests actually went through." loading="lazy"><figcaption>Your own screenshot of the Connectors sheet after the first Connect (12:34Z). Boxed: Notion "Connected through MAWS · Connected · 65 tools listed". Above it, the page's permission "notion-get-self, Allowed to read". Nothing on the sheet says which connection the page's requests actually went through.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="S-NATIVE-OAUTH" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="S-NATIVE-OAUTH" value="fix now"> fix now</label>
+<label><input type="radio" name="S-NATIVE-OAUTH" value="P4"> P4</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for S-NATIVE-OAUTH"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="S-REAL-SEND" data-handle="S-REAL-SEND" data-group="R1" data-rec="keep" data-recnote="Drive through the gws CLI in P4, as already chosen">
+<span class="handle">S-REAL-SEND</span>
+<h3>Sending an artifact to Notion or Google Drive</h3>
+<p>In the Library, an artifact's ⋯ menu &gt; Export ends with "Send to Google Drive…" and "Send to Notion…"; a Claude session then exports the file and uploads it with your connector, in a normal model turn. You sent the note to Notion and it arrived once, as a new private page with the Markdown file attached: <a href="https://app.notion.com/p/3fee344c8b158155ab4ac07889bb73b3">P3 sitting note (MAWS export, revision 1844)</a>. Drive wasn't tried, since no connector here can write files to Drive; you already chose the gws command-line tool for that, in P4.</p>
+<dl class="opts"><dt>Keep</dt><dd>Delivery passes as built; Drive stays with the gws P4 you chose.</dd><dt>Alternative</dt><dd>Fix now or P4: change how delivery works (see H and S-HEADER-SEND for the proposed changes).</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b> (Notion delivered once); Drive goes through the gws CLI P4 you already chose</blockquote>
+<figure><img src="img/library-row-export-submenu.jpg" alt="The note&#x27;s ⋯ menu in the Library (boxed, top) &amp;gt; Export (now, 13:48Z). Boxed below: the two Send to lines, after the file formats." loading="lazy"><figcaption><span class="n">1.</span>The note's ⋯ menu in the Library (boxed, top) &gt; Export (now, 13:48Z). Boxed below: the two Send to lines, after the file formats.</figcaption></figure>
+<figure><img src="img/send-to-notion-sheet.jpg" alt="The Send to Notion sheet (now, 13:49Z; I opened it and pressed Cancel, nothing was sent). Boxed: Claude sends the file from the note&#x27;s session, and &quot;You approve the connector in the session&quot;. In the sitting no approval card appeared: the session runs in Auto mode, which approved the upload itself (candidate 80)." loading="lazy"><figcaption><span class="n">2.</span>The Send to Notion sheet (now, 13:49Z; I opened it and pressed Cancel, nothing was sent). Boxed: Claude sends the file from the note's session, and "You approve the connector in the session". In the sitting no approval card appeared: the session runs in Auto mode, which approved the upload itself (candidate 80).</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="S-REAL-SEND" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="S-REAL-SEND" value="fix now"> fix now</label>
+<label><input type="radio" name="S-REAL-SEND" value="P4"> P4</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for S-REAL-SEND"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="S-HEADER-SEND" data-handle="S-HEADER-SEND" data-group="R1" data-rec="P4" data-recnote="">
+<span class="handle">S-HEADER-SEND</span>
+<h3>&quot;Send to&quot; exists only in the Library, not in the editor</h3>
+<p>While you're in a document, its header Export menu has only file formats; to send it to Notion or Drive you go to the Library and use the artifact's ⋯ menu. Sending also needs a Claude session turn, which you questioned: "do we really have to open a session to export to Notion?" MAWS already holds its own Notion connection (S-NATIVE-OAUTH), so a direct send is within reach.</p>
+<dl class="opts"><dt>Keep</dt><dd>Send to stays in the Library only.</dd><dt>Alternative</dt><dd>Fix now: add Send to the editor's header in this phase. P4: next phase, as a direct send from the editor through MAWS's own connection, with no Claude turn.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>P4</b>, following your words: send straight from the editor through MAWS's own connection, with no Claude turn (candidate 78)</blockquote>
+<figure><img src="img/doc-header-export-menu.jpg" alt="Inside a document: the header&#x27;s Export menu (now, 13:48Z) lists formats only, no Send to." loading="lazy"><figcaption><span class="n">1.</span>Inside a document: the header's Export menu (now, 13:48Z) lists formats only, no Send to.</figcaption></figure>
+<figure><img src="img/library-row-export-submenu.jpg" alt="In the Library: an artifact&#x27;s ⋯ &amp;gt; Export (here the note&#x27;s), the only place with Send to (boxed)." loading="lazy"><figcaption><span class="n">2.</span>In the Library: an artifact's ⋯ &gt; Export (here the note's), the only place with Send to (boxed).</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="S-HEADER-SEND" value="keep"> keep</label>
+<label><input type="radio" name="S-HEADER-SEND" value="fix now"> fix now</label>
+<label><input type="radio" name="S-HEADER-SEND" value="P4"> P4 <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for S-HEADER-SEND"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="S-DESIGN-TOOLBAR" data-handle="S-DESIGN-TOOLBAR" data-group="R1" data-rec="keep" data-recnote="">
+<span class="handle">S-DESIGN-TOOLBAR</span>
+<h3>The design editor&#x27;s toolbar when space is tight</h3>
+<p>The design editor (boards for desktop, phone and a square card) has one toolbar. When the area is narrow, for example with the sidebar and the right panel both open, the toolbar wraps: Text style, Comment, Comments and the zoom move to a second row, with their labels intact. The question is whether that wrapping is fine or the controls should be regrouped.</p>
+<dl class="opts"><dt>Keep</dt><dd>Wrapping onto a second row, as built.</dd><dt>Alternative</dt><dd>Fix now or P4: regroup, for example fold less-used buttons into a menu so the toolbar stays one row.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b> (the toolbar problems seen were the deck's and panel's, candidates 37 and 40, logged as defects)</blockquote>
+<figure><img src="img/design-toolbar-wide.jpg" alt="The design toolbar with room to spare (now, 13:50Z): one row." loading="lazy"><figcaption><span class="n">1.</span>The design toolbar with room to spare (now, 13:50Z): one row.</figcaption></figure>
+<figure><img src="img/design-toolbar-narrow.jpg" alt="The same toolbar with the sidebar and right panel open (now, 13:50Z). Boxed: the second row. Labels stay whole." loading="lazy"><figcaption><span class="n">2.</span>The same toolbar with the sidebar and right panel open (now, 13:50Z). Boxed: the second row. Labels stay whole.</figcaption></figure>
+<figure><img src="img/deck-toolbar-narrow-main.jpg" alt="For contrast, not part of this ruling: the deck editor at a similar width (sitting, 09:00Z). &quot;Text style&quot; breaks over two lines, &quot;Comment&quot; and &quot;Comments&quot; overlap, the zoom reads &quot;Fi&quot;, and the slide shrinks to a thumbnail (boxed). That is logged as a defect and comes up again under E1." loading="lazy"><figcaption><span class="n">3.</span>For contrast, not part of this ruling: the deck editor at a similar width (sitting, 09:00Z). "Text style" breaks over two lines, "Comment" and "Comments" overlap, the zoom reads "Fi", and the slide shrinks to a thumbnail (boxed). That is logged as a defect and comes up again under E1.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="S-DESIGN-TOOLBAR" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="S-DESIGN-TOOLBAR" value="fix now"> fix now</label>
+<label><input type="radio" name="S-DESIGN-TOOLBAR" value="P4"> P4</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for S-DESIGN-TOOLBAR"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="S-REPEATED-BARS" data-handle="S-REPEATED-BARS" data-group="R1" data-rec="P4" data-recnote="">
+<span class="handle">S-REPEATED-BARS</span>
+<h3>Bar charts where a category appears twice</h3>
+<p>A dashboard bar chart draws one bar per data row. When a category repeats (the Note taker owns two tasks, 1.5 h and 0.5 h), MAWS draws both bars in the same place, one over the other, and puts a warning under the chart. The warning names an internal setting ("Set agg …") instead of saying what to do, and the bars are near-black rather than a design-system colour.</p>
+<dl class="opts"><dt>Keep</dt><dd>Overlapping bars plus the warning, as built.</dd><dt>Alternative</dt><dd>P4 (or fix now): draw repeated rows side by side within their category, each bar with its own label.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>P4 side-by-side</b>: the overlap stacked labels and drew near-black bars, and the warning shows a field name, "Set agg" (candidate 68)</blockquote>
+<figure><img src="img/dashboard-overlapping-bars.jpg" alt="The dashboard&#x27;s chart (now, 13:50Z). Left box: the Note taker column holds two bars on top of each other, 1.5 (label above it) and 0.5 (its label sits inside the taller bar). Bottom box: the warning &quot;owner repeats Note taker; bars overlap. Set agg to combine repeated categories.&quot;" loading="lazy"><figcaption><span class="n">1.</span>The dashboard's chart (now, 13:50Z). Left box: the Note taker column holds two bars on top of each other, 1.5 (label above it) and 0.5 (its label sits inside the taller bar). Bottom box: the warning "owner repeats Note taker; bars overlap. Set agg to combine repeated categories."</figcaption></figure>
+<figure><img src="img/dashboard-task-rows.jpg" alt="The data behind it (now, 13:49Z): two Note taker rows (boxed). Side by side would show two bars next to each other under &quot;Note taker&quot;." loading="lazy"><figcaption><span class="n">2.</span>The data behind it (now, 13:49Z): two Note taker rows (boxed). Side by side would show two bars next to each other under "Note taker".</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="S-REPEATED-BARS" value="keep"> keep</label>
+<label><input type="radio" name="S-REPEATED-BARS" value="fix now"> fix now</label>
+<label><input type="radio" name="S-REPEATED-BARS" value="P4"> P4 <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for S-REPEATED-BARS"><button class="clear" type="button">clear</button></div>
+</section>
+<h2>R.2 Taste</h2><p class="sub">Keep the built result, or change it.</p>
+<section id="DL8" data-handle="DL8" data-group="R2" data-rec="keep" data-recnote="">
+<span class="handle">L DL8 panel model</span>
+<h3>The right-hand panel: tools per session, artifacts in the panel or as tabs</h3>
+<p>The right panel belongs to the session in the main area; its tools (Session overview, Browser, Artifacts, Side threads, Questions) are tabs inside it. A pinned tool stays as you switch main tabs. An artifact can open inside the panel's Artifacts tool, with Back and "Open in tab", or as a full main tab, and both show the same live document.</p>
+<dl class="opts"><dt>Keep</dt><dd>The panel as built.</dd><dt>Alternative</dt><dd>Change: say what you'd want different in the note.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b></blockquote>
+<figure><img src="img/dl8-panel-pinned-tools.jpg" alt="The right panel (sitting, 09:56Z). Top box: its tool tabs, Browser and Artifacts pinned. Right box: &quot;Open in tab&quot; moves the artifact shown here into a main tab; &quot;Back&quot; returns to the list." loading="lazy"><figcaption><span class="n">1.</span>The right panel (sitting, 09:56Z). Top box: its tool tabs, Browser and Artifacts pinned. Right box: "Open in tab" moves the artifact shown here into a main tab; "Back" returns to the list.</figcaption></figure>
+<figure><img src="img/dl8-same-note-tab-and-panel.jpg" alt="The same note twice (sitting, 09:54Z): (1) a main tab previewing an older version, with the orange link; (2) the panel showing the live note, with the blue link and four tasks." loading="lazy"><figcaption><span class="n">2.</span>The same note twice (sitting, 09:54Z): (1) a main tab previewing an older version, with the orange link; (2) the panel showing the live note, with the blue link and four tasks.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="DL8" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="DL8" value="change"> change</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for DL8"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="DL13" data-handle="DL13" data-group="R2" data-rec="change" data-recnote="">
+<span class="handle">L DL13 creation cards</span>
+<h3>&quot;Make something new&quot;: Blank, Ask Claude, Add a file</h3>
+<p>The cards at the top of the Library make a new artifact of each kind: New (blank), Ask Claude (a chat with "Make a document: " typed in) and, for files, Add a file…. The same cards appear on a Space's page, but there Ask Claude still opens the chat in whichever project was focused (doperpowers here), and Claude's tools can't put the result in a Space, so each result had to be moved by hand.</p>
+<dl class="opts"><dt>Keep</dt><dd>As built: Ask Claude from a Space behaves as it does from the Library; you move results into the Space yourself.</dd><dt>Alternative</dt><dd>Change: inside a Space, Ask Claude starts in the Space's linked folder and the result lands in that Space, with the Space's design system.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>change</b>: Ask Claude from inside a Space should start in the Space's folder and put the result in the Space (candidates 1, 5, 32, 55)</blockquote>
+<figure><img src="img/dl13-space-make-something-new.jpg" alt="Step 1. Inside the P3 sitting Space (top box: it is linked to /private/tmp/p3-sitting-project). Boxed: Ask Claude under Document. (Captured at 09:56Z; the same cards you clicked at 08:20Z.)" loading="lazy"><figcaption><span class="n">1.</span>Step 1. Inside the P3 sitting Space (top box: it is linked to /private/tmp/p3-sitting-project). Boxed: Ask Claude under Document. (Captured at 09:56Z; the same cards you clicked at 08:20Z.)</figcaption></figure>
+<figure><img src="img/dl13-ask-claude-opens-doperpowers.jpg" alt="Step 2 (sitting, 08:20Z). What Ask Claude opened: &quot;New chat in doperpowers&quot; (boxed), the project that happened to be focused, not the Space&#x27;s folder." loading="lazy"><figcaption><span class="n">2.</span>Step 2 (sitting, 08:20Z). What Ask Claude opened: "New chat in doperpowers" (boxed), the project that happened to be focused, not the Space's folder.</figcaption></figure>
+<figure><img src="img/dl13-agent-asks-to-move.jpg" alt="Step 3 (sitting, 08:58Z). Asked for a deck &quot;in the P3 sitting Space&quot;, the agent built it but couldn&#x27;t place it, and had to ask you to move it." loading="lazy"><figcaption><span class="n">3.</span>Step 3 (sitting, 08:58Z). Asked for a deck "in the P3 sitting Space", the agent built it but couldn't place it, and had to ask you to move it.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="DL13" value="keep"> keep</label>
+<label><input type="radio" name="DL13" value="change"> change <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for DL13"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="G" data-handle="G" data-group="R2" data-rec="keep" data-recnote="">
+<span class="handle">G pill/tab-row and below-chrome column</span>
+<h3>The floating session card: where it goes when closed, and how it sits over a web page</h3>
+<p>You can float the session as a card over the right panel (⌘⌥B). Closing the card turns it into a pill in the window's bottom-left corner (the sheet had proposed the tab row). Over a loaded Browser page the card doesn't cover the page: it becomes a full-height column on the left, under the browser's address bar, and the page fits beside it.</p>
+<dl class="opts"><dt>Keep</dt><dd>Both as built: the pill at the bottom left, the column over web pages.</dd><dt>Alternative</dt><dd>Change: for example the pill in the tab row, or the card floating over web pages as it does elsewhere.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b>; the float-hides-everything case (58) is a defect, not taste</blockquote>
+<figure><img src="img/g-card-and-pill.jpg" alt="Left: the floating card (sitting, 09:59Z). Right: after its ×, the pill (boxed) at the bottom left; clicking it reopens the card (10:00Z)." loading="lazy"><figcaption><span class="n">1.</span>Left: the floating card (sitting, 09:59Z). Right: after its ×, the pill (boxed) at the bottom left; clicking it reopens the card (10:00Z).</figcaption></figure>
+<figure><img src="img/g-browser-column.jpg" alt="Over example.com (sitting, 10:00Z): the card is a column (boxed) beside the page, not on top of it." loading="lazy"><figcaption><span class="n">2.</span>Over example.com (sitting, 10:00Z): the card is a column (boxed) beside the page, not on top of it.</figcaption></figure>
+<figure><img src="img/g-float-hides-tabs.jpg" alt="Not part of this choice, shown so you can tell it apart (sitting, 09:57–09:59Z): with an artifact tab active, Float hid the whole tab strip and showed no card. The box marks the same band before and after. Logged as a defect." loading="lazy"><figcaption><span class="n">3.</span>Not part of this choice, shown so you can tell it apart (sitting, 09:57–09:59Z): with an artifact tab active, Float hid the whole tab strip and showed no card. The box marks the same band before and after. Logged as a defect.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="G" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="G" value="change"> change</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for G"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="C" data-handle="C" data-group="R2" data-rec="change" data-recnote="keep the presenter; relabel the PowerPoint choices">
+<span class="handle">C presenter and font variants</span>
+<h3>The presenter, and the names of the three PowerPoint choices</h3>
+<p>The presenter passed on your two displays. The PowerPoint export offers "fonts by name", "basic fonts" and "slides as pictures". In Keynote, "fonts by name" reported missing fonts and "basic fonts" was the clean, editable one, but nothing in the names tells you so.</p>
+<dl class="opts"><dt>Keep</dt><dd>The presenter and the three labels as they are.</dd><dt>Alternative</dt><dd>Change: keep the presenter, and relabel the choices so the one that suits Keynote (and any computer) is obvious.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b> the presenter; <b>change</b> the font variants' labels so the one that suits Keynote is clear (72)</blockquote>
+<figure><img src="img/deck-export-menu.jpg" alt="The deck&#x27;s Export menu (now, 13:48Z). Boxed: the three PowerPoint choices." loading="lazy"><figcaption><span class="n">1.</span>The deck's Export menu (now, 13:48Z). Boxed: the three PowerPoint choices.</figcaption></figure>
+<figure><img src="img/keynote-fonts-by-name-vs-basic.jpg" alt="Slide 2 in Keynote: A is the &quot;fonts by name&quot; file, B the &quot;basic fonts&quot; file (sitting, 10:23–10:24Z). They look alike; B&#x27;s headings are Arial (compare the &quot;W&quot; and &quot;a&quot;). The difference that matters is not in the picture: on opening A, Keynote reported &quot;이 프레젠테이션에는 유실된 서체가 있습니다&quot; (this presentation has missing fonts), because the Apple SF Pro names in the file don&#x27;t match fonts Keynote can use. B opened with no warning." loading="lazy"><figcaption><span class="n">2.</span>Slide 2 in Keynote: A is the "fonts by name" file, B the "basic fonts" file (sitting, 10:23–10:24Z). They look alike; B's headings are Arial (compare the "W" and "a"). The difference that matters is not in the picture: on opening A, Keynote reported "이 프레젠테이션에는 유실된 서체가 있습니다" (this presentation has missing fonts), because the Apple SF Pro names in the file don't match fonts Keynote can use. B opened with no warning.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="C" value="keep"> keep</label>
+<label><input type="radio" name="C" value="change"> change <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for C"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="E1" data-handle="E1" data-group="R2" data-rec="change" data-recnote="">
+<span class="handle">E1 narrow toolbar and standalone comment destination</span>
+<h3>Toolbars squeezed letter by letter, and a comment with nowhere to go</h3>
+<p>Two things. In narrow spaces the deck toolbar breaks words: in the panel "Insert" becomes "Inse / rt" and "Text style" runs down the edge one letter per line; in a narrow main tab "Comment" and "Comments" overlap and the zoom reads "Fi". And commenting on a document that has no chat of its own (made with New) in a folder you haven't trusted: the card says only "Trust this folder in the session to continue" with Open session, and there is no field to write the comment.</p>
+<dl class="opts"><dt>Keep</dt><dd>Both as built.</dd><dt>Alternative</dt><dd>Change: toolbars fold cleanly (for example into a More menu) instead of breaking words; the comment card always offers a field and a way to start or pick a session.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>change</b> both (26, 37, 40)</blockquote>
+<figure><img src="img/deck-toolbar-narrow-panel.jpg" alt="The deck open in the right panel (sitting, 09:05Z): &quot;Inse / rt&quot; and &quot;Text style&quot; one letter per line (boxed)." loading="lazy"><figcaption><span class="n">1.</span>The deck open in the right panel (sitting, 09:05Z): "Inse / rt" and "Text style" one letter per line (boxed).</figcaption></figure>
+<figure><img src="img/deck-toolbar-narrow-main.jpg" alt="The deck in a main tab with the sidebar and panel open (sitting, 09:00Z): &quot;Text style&quot; on two lines, &quot;Comment&quot; and &quot;Comments&quot; overlapping, zoom &quot;Fi&quot; (boxed); the slide fits at 9%." loading="lazy"><figcaption><span class="n">2.</span>The deck in a main tab with the sidebar and panel open (sitting, 09:00Z): "Text style" on two lines, "Comment" and "Comments" overlapping, zoom "Fi" (boxed); the slide fits at 9%.</figcaption></figure>
+<figure><img src="img/e1-comment-card-compare.jpg" alt="Left (08:40Z): a comment on the note, which has a session: a field to write in, Side thread or Send to main. Right (08:44Z): the same action on a blank document with no session: only the trust message (boxed) and Open session." loading="lazy"><figcaption><span class="n">3.</span>Left (08:40Z): a comment on the note, which has a session: a field to write in, Side thread or Send to main. Right (08:44Z): the same action on a blank document with no session: only the trust message (boxed) and Open session.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="E1" value="keep"> keep</label>
+<label><input type="radio" name="E1" value="change"> change <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for E1"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="E2" data-handle="E2" data-group="R2" data-rec="change" data-recnote="">
+<span class="handle">E2 repeated-bar layout</span>
+<h3>Repeated bars: overlapping or side by side (the look)</h3>
+<p>The same chart as S-REPEATED-BARS; here the question is only how it should look. Today the Note taker's two tasks (1.5 h and 0.5 h) are drawn on top of each other in one column, with a warning under the chart.</p>
+<dl class="opts"><dt>Keep</dt><dd>Overlap in one column, with the warning.</dd><dt>Alternative</dt><dd>Change: side by side, two bars next to each other under "Note taker", each with its own label.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>change</b> (side by side)</blockquote>
+<figure><img src="img/dashboard-overlapping-bars.jpg" alt="The dashboard&#x27;s chart (now, 13:50Z). Boxed: the Note taker column with the 0.5 bar drawn inside the 1.5 bar, and the warning under the chart." loading="lazy"><figcaption>The dashboard's chart (now, 13:50Z). Boxed: the Note taker column with the 0.5 bar drawn inside the 1.5 bar, and the warning under the chart.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="E2" value="keep"> keep</label>
+<label><input type="radio" name="E2" value="change"> change <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for E2"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="HD" data-handle="HD" data-group="R2" data-rec="keep" data-recnote="">
+<span class="handle">HD native custody</span>
+<h3>Connecting through your browser, and staying signed in</h3>
+<p>MAWS's own Connect sends you to your browser (Chrome) to sign in. MAWS then keeps the sign-in itself, encrypted with your Mac's keychain, so after you quit and relaunched it was still connected without asking again. Disconnect forgets it, and the next Connect asks you to sign in again.</p>
+<dl class="opts"><dt>Keep</dt><dd>As built.</dd><dt>Alternative</dt><dd>Change: for example sign in inside a MAWS window instead of the browser, or be asked again after each relaunch.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>keep</b></blockquote>
+<figure><img src="img/connectors-sheet-owner.jpg" alt="Your own screenshot (12:34Z), after the first Connect: &quot;Connected through MAWS&quot; (boxed), with Reconnect and Disconnect beside it. It was still connected after the 12:50Z relaunch, with no second sign-in." loading="lazy"><figcaption>Your own screenshot (12:34Z), after the first Connect: "Connected through MAWS" (boxed), with Reconnect and Disconnect beside it. It was still connected after the 12:50Z relaunch, with no second sign-in.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="HD" value="keep"> keep <span class="recmark">(rec.)</span></label>
+<label><input type="radio" name="HD" value="change"> change</label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for HD"><button class="clear" type="button">clear</button></div>
+</section>
+<section id="H" data-handle="H" data-group="R2" data-rec="change" data-recnote="">
+<span class="handle">H actual delivery and editor-header Send-to</span>
+<h3>How the note arrived in Notion, and sending from the editor</h3>
+<p>Send to Notion ran a 62-second Claude turn in the note's session, which created a new private page, <a href="https://app.notion.com/p/3fee344c8b158155ab4ac07889bb73b3">P3 sitting note (MAWS export, revision 1844)</a>, with the note attached as a Markdown file (Notion renamed it <code>P3_sitting_note_(revision_1844).md</code>). The note's text isn't on the page itself; you open the attachment to read it. And there is no Send to in the editor's header (S-HEADER-SEND).</p>
+<dl class="opts"><dt>Keep</dt><dd>Delivery as an attached file through a Claude turn; Send to only in the Library.</dd><dt>Alternative</dt><dd>Change: send directly from the editor with no Claude turn and, if you prefer, have the note arrive as a readable Notion page instead of an attachment.</dd></dl>
+<blockquote><span class="lab">Recommendation, from the ballot</span><b>change</b>: direct send, and as a readable page rather than an attachment if you prefer (77, 78)</blockquote>
+<figure><img src="img/send-to-notion-sheet.jpg" alt="The Send to Notion sheet (now, 13:49Z; opened and cancelled): the send goes through the note&#x27;s Claude session. The Notion page itself isn&#x27;t pictured; I didn&#x27;t open your Notion. The link above opens it." loading="lazy"><figcaption><span class="n">1.</span>The Send to Notion sheet (now, 13:49Z; opened and cancelled): the send goes through the note's Claude session. The Notion page itself isn't pictured; I didn't open your Notion. The link above opens it.</figcaption></figure>
+<figure><img src="img/doc-header-export-menu.jpg" alt="The editor header&#x27;s Export menu (now, 13:48Z): no Send to." loading="lazy"><figcaption><span class="n">2.</span>The editor header's Export menu (now, 13:48Z): no Send to.</figcaption></figure>
+<div class="answer"><span class="q">Your answer:</span>
+<label><input type="radio" name="H" value="keep"> keep</label>
+<label><input type="radio" name="H" value="change"> change <span class="recmark">(rec.)</span></label>
+<input type="text" class="note" placeholder="note (optional)" aria-label="Note for H"><button class="clear" type="button">clear</button></div>
+</section>
+<h2>Send your answers</h2>
+<div class="how"><p>Reply "all as recommended", name the handles where you differ, or paste the text this button copies.</p>
+<div class="bar"><label><input type="checkbox" class="prefill"> Pre-fill from my recommendations</label>
+<button class="primary copy">Copy my answers</button><span class="status"></span></div>
+<textarea id="out" readonly placeholder="Your answers appear here when you press Copy my answers."></textarea></div>
+<footer>Sources: owner-ballot.md, sitting-findings.md (the numbered candidates), sitting-notes.md. No remote resources are loaded; the Notion links are plain links.</footer>
+</main>
+<script>
+(function(){
+var KEY='maws-p3f-ballot-v1';
+var secs=[].slice.call(document.querySelectorAll('section[data-handle]'));
+function get(s){var r=s.querySelector('input[type=radio]:checked');return {choice:r?r.value:'',note:s.querySelector('.note').value.trim()};}
+function set(s,choice,note){[].forEach.call(s.querySelectorAll('input[type=radio]'),function(r){r.checked=(r.value===choice);});s.querySelector('.note').value=note||'';}
+function save(){var st={};secs.forEach(function(s){st[s.dataset.handle]=get(s);});st._prefill=document.querySelector('.prefill').checked;try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){}marks();}
+function marks(){secs.forEach(function(s){var a=document.querySelector('nav.toc a[data-for="'+s.dataset.handle+'"]');if(a)a.classList.toggle('done',!!get(s).choice);});}
+function prefill(on){secs.forEach(function(s){var rec=s.dataset.rec,rn=s.dataset.recnote,cur=get(s);if(!rec)return;
+ if(on){if(!cur.choice){set(s,rec,cur.note||rn);}}
+ else{if(cur.choice===rec&&(cur.note===rn||cur.note==='')){set(s,'','');}}});
+ [].forEach.call(document.querySelectorAll('.prefill'),function(c){c.checked=on;});save();}
+function text(){var lines=[],n=0,diff=[],open=[],cur='';
+ secs.forEach(function(s){var g=s.dataset.group==='R1'?'R.1':'R.2';var a=get(s);
+  if(g!==cur){lines.push(g);cur=g;}
+  if(!a.choice&&!a.note){open.push(s.dataset.handle);return;}
+  n++;var l=s.dataset.handle+' '+(a.choice||'(no choice)');if(a.note)l+=' \u2014 '+a.note;lines.push(l);
+  if(s.dataset.rec&&a.choice&&a.choice!==s.dataset.rec)diff.push(s.dataset.handle);});
+ lines.unshift('P3-F ballot answers ('+n+' of '+secs.length+' answered)');
+ lines.push('Differs from recommendation: '+(diff.length?diff.join(', '):'none'));
+ if(open.length)lines.push('Unanswered: '+open.join(', '));
+ return lines.join('\n');}
+function status(msg){[].forEach.call(document.querySelectorAll('.status'),function(e){e.textContent=msg;});}
+function copy(){var t=text(),ta=document.getElementById('out');ta.value=t;
+ function fallback(){ta.focus();ta.select();var ok=false;try{ok=document.execCommand('copy');}catch(e){}
+  status(ok?'Copied. Paste it back to the session.':'Copy was blocked: select the text in the box at the bottom and copy it.');if(!ok)ta.scrollIntoView({block:'center'});}
+ if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){status('Copied. Paste it back to the session.');},fallback);}else fallback();}
+secs.forEach(function(s){s.addEventListener('change',save);s.querySelector('.note').addEventListener('input',save);
+ s.querySelector('.clear').addEventListener('click',function(){set(s,'','');save();});});
+[].forEach.call(document.querySelectorAll('.prefill'),function(c){c.addEventListener('change',function(){prefill(c.checked);});});
+[].forEach.call(document.querySelectorAll('.copy'),function(b){b.addEventListener('click',copy);});
+try{var st=JSON.parse(localStorage.getItem(KEY)||'null');if(st){secs.forEach(function(s){var a=st[s.dataset.handle];if(a)set(s,a.choice,a.note);});
+ [].forEach.call(document.querySelectorAll('.prefill'),function(c){c.checked=!!st._prefill;});}}catch(e){}
+marks();
+})();
+</script>
+</body></html>

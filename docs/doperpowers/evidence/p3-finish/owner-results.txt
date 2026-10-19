@@ -1,163 +1,172 @@
-P3-F owner results — blank template, no sitting step has been run
+P3-F owner results — sitting of 2026-10-19 (moved forward by the owner from 2026-10-20 evening KST)
 Script: docs/doperpowers/evidence/p3-finish/owner-script.txt (finalised at M4.2 against the final source 073d10446; this template follows its steps)
 Owner appointment: 2026-10-20 evening KST, one approximately three-hour sitting (170 minutes plus 10 minutes slack). Rest marks, not appointments.
 Every value below is entered by the owner at the sitting. A blank is not a pass, and a note or skipped step is not a pass. 'owner: not run' needs its precise reason in 'what was seen'.
+Provenance of this sitting (read first): at the owner's instruction ("cua_repl로 GUI 조작이 가능하므로 너가 진행 가능한 부분은 전부 하고 그렇지 못한 부분에 대해 나를 프롬프트하도록"), the sitting session (sitting-fork, a fork of the architect session) operated the owner's MAWS window through cua for every step an agent's hands could do, logged each observation as it happened, and prompted the owner for the rest. Rows marked [agent-operated] are those observations; the owner did not review them row by row: they gave their own rows and the R/M answers, and at 14:27Z chose to send this file without a line-by-line review (the architect's ruling below makes [agent-operated] rows functional evidence). Rows marked [owner] were done by the owner's own hands. Taste, rulings, accounts and the measure are the owner's words only. The step log is sitting-notes.md beside this file; the UX candidates for the owner's hands-on review, each with the sitting session's one-word reading, are sitting-findings.md. Times are UTC and approximate to a few minutes; the host was busy (1-minute load averages below), so felt latency is not judged here.
+Architect's ruling on line 4 (GUI AI agent workspace charter, 2026-10-19 10:4xZ): the owner's instruction of the sitting's mode is recorded as their decision; an [agent-operated] row is functional evidence taken on the owner's machine, build and data through the real GUI, and counts as the sitting's pass or finding for that step, while every row whose point is the owner's judgment (feel, latency as felt, visual quality, the accept or reject of a route) stays in the owner block and takes only an [owner] mark; the landing reads this file by that provenance.
 
 Sitting
-Date/start/end:
-Locale / displays (widths) / theme order:
-Selected project and app version:
+Date/start/end: 2026-10-19; build 07:54:32Z–08:02:56Z; app opened 08:11:28Z (17:11 KST; pid 19656); agent-operated steps 08:11:28Z–10:27Z (X.2 last), then the A.1 declaring page prepared through the in-MAWS agent 10:28Z–10:35:37Z; owner block handed over 10:36:41Z, owner steps 11:44Z–13:02Z (N.1, N.3, mark-up, A.1, A.2, T.1), P.1 13:2xZ–13:3xZ, M.1 words 13:4xZ, R.1/R.2 ballot answered 14:2xZ, M.1 tick 14:27Z; owner block ended 14:27Z; sitting ended 14:28Z (the end message to the architect); the owner's marks on the 80 candidates follow as an addendum
+Host load (1-minute / 5 / 15, from uptime): 07:52:48Z 108.05/117.71/143.30 (build); 08:03:15Z 120.46/125.80/137.67; 08:12:52Z 144.61/113.12/121.54; 08:13:49Z 141.49/117.75/122.75; 08:24:24Z 54.45/71.23/97.38; 08:28:19Z 26.15/49.27/81.59; 08:52:26Z 28.69/41.37/48.88; 09:31:23Z 81.22/61.75/58.29; 09:42:41Z 50.68/93.59/81.15; 10:19:34Z 117.98/90.03/64.75; 10:42:26Z 117.54/126.58/116.34 (owner block; at 10:44Z, 107/121/116, the top CPU was the mabl-game-72 session's MABL-Game voice pipeline (python, ~65% for 32 min), a desk-lane claude process (~65%), nProtect Online Security (~47%) and a transient tsc, per the architect session; it asked mabl-game-72 to pause the pipeline until the sitting ends); readings in the step log at 1.2 (~140), 6.1 (80+) and 6.3 (~83)
+Old-build incident: at 08:23:38Z the in-MAWS agent's cua getApp("MAWS") started the OLD build /Users/new/Developer/GitHub/MAWS-old/dist/mac-arm64/MAWS.app (pid 67457, commit a37d35f10 of 2026-09-29, which has no single-instance lock; the sitting build holds one, src/main/files/profile-lock.ts:23) on the same --user-data-dir ~/Library/Application Support/MAWS; it showed "No projects yet". It was still running at 08:27:19Z; the owner quit it and reported so at 08:28:11Z; gone at 08:28:19Z. Rows taken while it was up: the second half of 2.1 only (mirror read 08:24:24–08:24:50Z; the panel's Artifacts tool added and pinned, the note opened in the panel and the named version "Original accent" saved 08:25:06–08:25:42Z; the note's main tab 08:26:08Z), all through cua bound to the sitting build's path; the in-MAWS agent's own Move to Space of the note (about 08:24Z) went through its cua and may have been made in either window, its result read in the sitting build. Every row after 08:28:19Z was operated on the sitting build only: pid 19656 until N.2's keep-quit (10:21:45Z), then pid 42501 from the same path (relaunched 10:22:11Z).
+Locale / displays (widths) / theme order: ko_KR (ko-KR); one display, built-in 3024x1964 Retina (window zoomed; 3024x1800 captures); Dark throughout (the owner's setting), light pages inside
+Selected project and app version: p3-sitting-project (/private/tmp/p3-sitting-project, temporary: README.md, sample-image.png, later data/tasks.csv); MAWS 0.0.0
 
 Build identity (PRE.1)
-Architect's landed master commit:
-Package version / Diagnostics 8-hex build HEAD / build time (the Diagnostics MAWS build row; it has no engine version and no dirty-tree marker):
-8-hex matches the first 8 of the master commit: [ ] yes [ ] no
-Checkout clean (git status) before the build: [ ] yes [ ] no   MAWS_SIGN_IDENTITY nonempty: [ ] yes [ ] no
-codesign Identifier:
-codesign Authority:
-codesign TeamIdentifier:
-Older MAWS quit before opening the new build: [ ] yes [ ] no
-Installed engine version (Settings > Engine > Binary):
-Session engine version per session used (Session info > Engine > Version / Binary; name the session):
-Final-source agent run summary (owner-script PRE.2, inserted at M4.2) read: [ ] yes   its live-reruns line as read:
+Architect's landed master commit: d9ef1e5b3 (origin/master at the build: P3-F merge fc8d0cc4f plus records, MAWS #67 9c355b7fc and the DL 75 amendments; app source identical to H b09e96a1e, only gate scripts and apps/desk-hub/test/org-directory.test.ts differ). Sitting moved by the owner from 2026-10-20 evening KST to 2026-10-19 (starting about 17:05 KST, 08:05Z); build made by the sitting session in a clean detached worktree /private/tmp/maws-sitting, 07:54:32Z to 08:02:56Z, exit 0.
+Package version / Diagnostics 8-hex build HEAD / build time (the Diagnostics MAWS build row; it has no engine version and no dirty-tree marker): "MAWS 0.0.0 · build d9ef1e5b · built 10월 19일 오전 12:54"; supervisor row "detached · pid 23101 · build matches · 0 sessions held · idle exit 10 min"
+8-hex matches the first 8 of the master commit: [x] yes [ ] no
+Checkout clean (git status) before the build: [x] yes [ ] no   MAWS_SIGN_IDENTITY nonempty: [x] yes [ ] no   (worktree HEAD d9ef1e5b, git status empty before and after the build; identity "Apple Development: supremekim17@icloud.com (WV3H5Z2Y7V)")
+codesign Identifier: dev.maws.app
+codesign Authority: Apple Development: supremekim17@icloud.com (WV3H5Z2Y7V), then Apple Worldwide Developer Relations Certification Authority, Apple Root CA; codesign --verify --deep --strict ok; not notarized (dev build)
+codesign TeamIdentifier: PTNH3LJP22 (the owner confirmed it is their team, 2026-10-19 13:1xZ; the parenthetical WV3H5Z2Y7V in the identity name is the certificate user id, not the team)
+Older MAWS quit before opening the new build: [x] yes [ ] no   (none running at 08:03Z; at 08:23:38Z the in-MAWS agent's cua getApp("MAWS") started the OLD build /Users/new/Developer/GitHub/MAWS-old/dist/mac-arm64/MAWS.app on the same user-data dir; the owner quit it by 08:28:11Z; that old build has no profile lock; Sitting block above)
+Installed engine version (Settings > Engine > Binary): ~/.local/share/claude/versions/2.1.303, version 2.1.303 ("MAWS was verified against Claude Code 2.1.296"); gateway ClaudeUsage relay 127.0.0.1:8641, reachable
+Session engine version per session used (Session info > Engine > Version / Binary; name the session): not read from Session info; ps at 10:22Z shows the engines of "P3 sitting note document" and its side thread "P3 sitting note, P3 sitting note" running ~/.local/share/claude/versions/2.1.303
+Final-source agent run summary (owner-script PRE.2, inserted at M4.2) read: [x] yes   its live-reruns line as read: "the seven paid groups (library, document, presentations, design systems, design, dashboard, send-to), each 1 passed, on the mini (run 39210063850 …), engine 2.1.303 through ClaudeUsage's relay, US$0.1319 of the US$2.00 child budget"
 Recorder (MAWS_IME_TRACE), per M4.2: present in the final source 073d10446 (owner-script T.1, an agent record); whether the owner's build traced is T.1's field below
 
 Preparation (no secrets)
-Project, OAuth server and harmless read tool:
-Declaring HTML artifact (id/title) and the route label it shows:
-Server source eligible (literal user/local scope, no ${…}, normal directory, DCR and S256 sign-in): [ ] yes [ ] no, reason:
-Write-capable Drive connector and destination:
-Write-capable Notion connector and destination:
-Disposable design-system copy (name) assigned as the P3 sitting Space's default before 2.1 and 5.1 (Settings > Artifacts > By Space > 'Design system for P3 sitting'): [ ] yes [ ] no
-Settings > Artifacts values as found (owner 'Default design system' / the Space's), to put back after 6.3:
-Named document version saved before the recolour: [ ] yes [ ] no   Accent link and marked passage in the sample: [ ] yes [ ] no
-6.2b: recoloured system was the disposable copy [ ] yes [ ] no; panel's Artifacts tool pinned before Open in tab [ ] yes [ ] no; main tab (old version) showed the old accent [ ] yes [ ] no; panel (live) showed the new accent [ ] yes [ ] no; any crossing or switch-away loss:
+Project, OAuth server and harmless read tool: p3-sitting-project (/private/tmp/p3-sitting-project); notion, Notion's hosted MCP https://mcp.notion.com/mcp over HTTP, user config /Users/new/.claude.json (added by the owner: claude mcp add --transport http --scope user notion …); read tool notion-get-self
+Declaring HTML artifact (id/title) and the route label it shows: "Notion route check" (c9718061-b0e2-411f-b385-147cfbe5e78d, made by the session "P3 sitting note document" at 10:3xZ; declares notion · notion-get-self, a Refresh button, and shows Status, Value, Route (via.route) and Time); the label read engine at every refresh
+Server source eligible (literal user/local scope, no ${…}, normal directory, DCR and S256 sign-in): [x] yes [ ] no, reason: literal user scope in ~/.claude.json, plain /private/tmp directory, and MAWS's own Connect completed a browser sign-in (Servers: "Connected through MAWS · Connected · 65 tools listed")
+Write-capable Drive connector and destination: none — Drive is owner: not run; the shipped Send-to prompt forbids reaching Drive another way (src/renderer/src/library/send-to.ts:61–62); delivery through the gws CLI is an R.3 ruling below
+Write-capable Notion connector and destination: the Notion MCP above (notion-create-file-upload, notion-create-pages); destination a new private page in the owner's workspace, which the session chose because the sheet has no destination field
+Disposable design-system copy (name) assigned as the P3 sitting Space's default before 2.1 and 5.1 (Settings > Artifacts > By Space > 'Design system for P3 sitting'): [x] yes [ ] no   "P3 sitting DS" (Duplicate of MAWS, renamed)
+Settings > Artifacts values as found (owner 'Default design system' / the Space's), to put back after 6.3: at PRE.2 House system / no Spaces; at 6.3 House system / P3 sitting DS; after 6.3 House system / P3 sitting DS (kept)
+Named document version saved before the recolour: [x] yes [ ] no   Accent link and marked passage in the sample: [x] yes [ ] no   ("Original accent")
+6.2b: recoloured system was the disposable copy [x] yes [ ] no; panel's Artifacts tool pinned before Open in tab [x] yes [ ] no; main tab (old version) showed the old accent [x] yes [ ] no; panel (live) showed the new accent [x] yes [ ] no; any crossing or switch-away loss: none (#c9663f -> #2f6f9f)
 
 step | surface/clause | pass | fail | note | owner: not run | what was seen | screenshot
-PRE.1 | all items: development-signed landed build | [ ] | [ ] | [ ] | [ ] | | |
-PRE.2 | all items: evidence provenance | [ ] | [ ] | [ ] | [ ] | | |
-1.1 | item 1: organiser and search | [ ] | [ ] | [ ] | [ ] | | |
-1.2 | item 1: Space and creation | [ ] | [ ] | [ ] | [ ] | | |
-1.3 | item 1: row actions | [ ] | [ ] | [ ] | [ ] | | |
-1.4 | item 1: detached persistence | [ ] | [ ] | [ ] | [ ] | | |
-2.1 | item 2: create and open | [ ] | [ ] | [ ] | [ ] | | |
-2.2 | item 2: editor coverage | [ ] | [ ] | [ ] | [ ] | | |
-2.3 | item 2: concurrent targeted edit and awareness | [ ] | [ ] | [ ] | [ ] | | |
-2.4 | item 2: one state | [ ] | [ ] | [ ] | [ ] | | |
-3.1 | item 3: passage and route | [ ] | [ ] | [ ] | [ ] | | |
-3.2 | item 3: anchor survival | [ ] | [ ] | [ ] | [ ] | | |
-3.3 | item 3: statuses and standalone context | [ ] | [ ] | [ ] | [ ] | | |
-3.4 | item 3: object anchor | [ ] | [ ] | [ ] | [ ] | | |
-4.1 | item 4: versions | [ ] | [ ] | [ ] | [ ] | | |
-4.2 | item 4: read-only diff and appearance | [ ] | [ ] | [ ] | [ ] | | |
-4.3 | item 4: artifact-wide restore | [ ] | [ ] | [ ] | [ ] | | |
-4.4 | item 4: new-change comparison and attribution | [ ] | [ ] | [ ] | [ ] | | |
-5.1 | item 5: dialect and editor | [ ] | [ ] | [ ] | [ ] | | |
-5.1b | item 5: speaker-notes limit, not-saved state and Save notes (panel plus main tab, the panel's Artifacts tool pinned; prepared from source a5359afa8, rechecked at M4.2 against 073d10446; not executed) | [ ] | [ ] | [ ] | [ ] | | |
-5.2 | item 5: stale conflict and atomic publish | [ ] | [ ] | [ ] | [ ] | | |
-5.3 | item 5: history and comments | [ ] | [ ] | [ ] | [ ] | | |
-5.4 | item 5: export choices | [ ] | [ ] | [ ] | [ ] | | |
-6.1 | item 6: defaults and authoring | [ ] | [ ] | [ ] | [ ] | | |
-6.2 | item 6: live restyle | [ ] | [ ] | [ ] | [ ] | | |
-6.2b | item 6/4: old preview in a main tab beside the restyled live panel (source-derived procedure, rechecked at M4.2 against 073d10446; not executed) | [ ] | [ ] | [ ] | [ ] | | |
-6.3 | item 6: default authority and ask | [ ] | [ ] | [ ] | [ ] | | |
-7.1 | item 7: artboards | [ ] | [ ] | [ ] | [ ] | | |
-7.2 | item 7: file-backed data | [ ] | [ ] | [ ] | [ ] | | |
-7.3 | item 7: chart taste | [ ] | [ ] | [ ] | [ ] | | |
-7.4 | item 7: granted connector data | [ ] | [ ] | [ ] | [ ] | | |
-8.1 | item 8: floating session | [ ] | [ ] | [ ] | [ ] | | |
-8.2 | item 8: meaningful header | [ ] | [ ] | [ ] | [ ] | | |
-8.3 | item 8: Mark-up | [ ] | [ ] | [ ] | [ ] | | |
-N.1-document | item 2: Korean composition in the document editor | [ ] | [ ] | [ ] | [ ] | | |
-N.1-slide | item 5: Korean composition in the slide text editor | [ ] | [ ] | [ ] | [ ] | | |
-N.1-design | item 7: Korean composition in the design workbench | [ ] | [ ] | [ ] | [ ] | | |
-N.2 | item 1 last clause; item 3 restart | [ ] | [ ] | [ ] | [ ] | | |
-N.3 | native platform | [ ] | [ ] | [ ] | [ ] | | |
-X.1 | item 5: PPTX fidelity | [ ] | [ ] | [ ] | [ ] | | |
-X.2 | item 2; item 6: document export | [ ] | [ ] | [ ] | [ ] | | |
-X.3 | item 7: design/dashboard exports | [ ] | [ ] | [ ] | [ ] | | |
-P.1 | item 5: native presentation | [ ] | [ ] | [ ] | [ ] | | |
-A.1 | item 7; route D native custody | [ ] | [ ] | [ ] | [ ] | | |
-A.2 | item 1 Export; H Send-to | [ ] | [ ] | [ ] | [ ] | | |
-T.1 | L81: terminal-only Korean trace sample (inside the slack; not N.1) | [ ] | [ ] | [ ] | [ ] | | |
-R.1 | Rulings by frozen handle and supplement: one row each in the Rulings table below | [ ] | [ ] | [ ] | [ ] | | |
-R.2 | Explicit taste checklist: L DL8 panel model and DL13 creation cards; G pill/tab-row and below-chrome column; C presenter and font variants; E1 narrow toolbar and standalone comment destination; E2 repeated-bar layout; HD native custody; H actual delivery and editor-header Send-to (one answer each in the Taste table below) | [ ] | [ ] | [ ] | [ ] | | |
-R.3 | Irritations in the owner's own words, each with one route (wave S, tracker, P4, dismissed against a binding design, or architect ruling): the Irritations table below | [ ] | [ ] | [ ] | [ ] | | |
-M.1 | Measure: what artifact work still sends you to Claude Desktop or a terminal (the concrete task and why), and whether the co-work layer is fit for the week's daily use: the Measure lines below | [ ] | [ ] | [ ] | [ ] | | |
+PRE.1 | all items: development-signed landed build | [x] | [ ] | [ ] | [ ] | [agent-operated] clean detached worktree at master d9ef1e5b3, development-signed, codesign verify ok, build row matches; an older build was started later by the in-MAWS agent and quit by the owner (Sitting block above) |  |
+PRE.2 | all items: evidence provenance | [ ] | [ ] | [x] | [ ] | [agent-operated] provenance above; Space "P3 sitting" linked to the temporary project (mirror /private/tmp/p3-sitting-project/artifacts) with P3 sitting DS as its default before 2.1; run summary read |  |
+1.1 | item 1: organiser and search | [ ] | [ ] | [x] | [ ] | [agent-operated] All / Pinned / By Space, type counts, Today and October groups with the pre-P3 imports; built-in systems show "Edited by You" though never edited (finding 4); no Yesterday/Older data here, so the agents' evidence stands for those groups |  |
+1.2 | item 1: Space and creation | [ ] | [ ] | [x] | [ ] | [agent-operated] Space created, linked, renamed; Blank, Ask Claude and Add a file… used; Ask Claude from inside a Space starts in the focused project and ignores the Space (finding 1); panel list-and-record next to main tabs seen |  |
+1.3 | item 1: row actions | [ ] | [ ] | [x] | [ ] | [agent-operated] partial: Duplicate (independent copy), Rename and Move to Space done; mirror read in the file system, not Finder; pin/unpin, row Export and deleting a disposable copy not done |  |
+1.4 | item 1: detached persistence | [ ] | [ ] | [x] | [ ] | [agent-operated] the native keep-quit and relaunch is N.2 (pass); the agents' detached/host-restart evidence was not re-read during the sitting |  |
+2.1 | item 2: create and open | [ ] | [ ] | [x] | [ ] | [agent-operated] note 12af8463-ddbb-4444-9bfc-7c0ec00ab9d2 made by session "P3 sitting note document", opened in the panel and a main tab, named version saved; the agent could not create into the Space and moved the note by driving the MAWS GUI with cua (findings 5, 6) |  |
+2.2 | item 2: editor coverage | [ ] | [ ] | [x] | [ ] | [agent-operated] heading, lists, task, code with language, image, divider, math, mermaid diagram, date and mention chips, table cell, document tab and Find all worked; rough edges in findings 8–17 and 20 |  |
+2.3 | item 2: concurrent targeted edit and awareness | [x] | [ ] | [ ] | [ ] | [agent-operated] two targeted-edit requests landed within 20–40 s while separate paragraphs were typed, the typed text intact; no agent presence marker seen during the edits (finding 21) |  |
+2.4 | item 2: one state | [x] | [ ] | [ ] | [ ] | [agent-operated] panel and main tab one state; a panel click put the caret in a code block and panel undo could not revert the typing (finding 22); the agent repaired it |  |
+3.1 | item 3: passage and route | [x] | [ ] | [ ] | [ ] | [agent-operated] passage comment as a side thread (it asked for folder trust again, finding 23) and as Send to main; replies arrived in the thread, document unchanged |  |
+3.2 | item 3: anchor survival | [x] | [ ] | [ ] | [ ] | [agent-operated] the tint stayed on the rewritten sentence through owner typing, an agent rewrite and a block-type change |  |
+3.3 | item 3: statuses and standalone context | [x] | [ ] | [ ] | [ ] | [agent-operated] Resolve/Reopen with correct counts; a standalone artifact with no chat shows only "Trust this folder in the session to continue" (finding 26); the narrow-panel drawer overlays the page |  |
+3.4 | item 3: object anchor | [x] | [ ] | [ ] | [ ] | [agent-operated] deck object comment: the pin followed the moved title; the deleted copy's thread stayed, marked "The commented element was deleted." (findings 48, 49) |  |
+4.1 | item 4: versions | [x] | [ ] | [ ] | [ ] | [agent-operated] history with authors, Named only and folded runs; entries show internal ids and English 12-hour times (finding 27) |  |
+4.2 | item 4: read-only diff and appearance | [x] | [ ] | [ ] | [ ] | [agent-operated] read-only preview with struck/inserted text, change bars and counter; typing into the preview changes nothing; Shift-click compare cannot be done through cua |  |
+4.3 | item 4: artifact-wide restore | [x] | [ ] | [ ] | [ ] | [agent-operated] restore of "Original accent" as a new version: content and document tabs back, threads kept (one orphaned and labelled) |  |
+4.4 | item 4: new-change comparison and attribution | [x] | [ ] | [ ] | [ ] | [agent-operated] "Changes since you last looked" and the editors popover work; the pill did not show after the first away-edit (finding 28) |  |
+5.1 | item 5: dialect and editor | [ ] | [ ] | [x] | [ ] | [agent-operated] deck built from the note (again outside the Space, moved by me, finding 32); filmstrip, 16:9 stage, inspector, in-place text, detach/move/resize, centre snap, z-order, marquee group, slide add/keyboard reorder/delete, and Tab leaving the stage as the P4 row says; findings 33–38 |  |
+5.1b | item 5: speaker-notes limit, not-saved state and Save notes (panel plus main tab, the panel's Artifacts tool pinned; prepared from source a5359afa8, rechecked at M4.2 against 073d10446; not executed) | [x] | [ ] | [ ] | [ ] | [agent-operated] a–e exactly as prepared (record below) | /tmp/maws-review/screens/5.1b-d-not-saved.jpg |
+5.2 | item 5: stale conflict and atomic publish | [ ] | [ ] | [x] | [ ] | [agent-operated] race run: while the agent's one-publish heading-font change was in flight, the owner side moved slide 1's title and retitled slide 3; the publish was accepted on the first try with every edit kept, so no stale-slide refusal arose (finding 42) and the refusal/re-read stays the agents' evidence; no partial alteration seen |  |
+5.3 | item 5: history and comments | [x] | [ ] | [ ] | [ ] | [agent-operated] per-slide history: filmstrip marker, element outline, notes diff (struck ZZ, inserted new notes); the open history list does not add versions live (finding 46); zoom Fit can blank the stage (finding 44) |  |
+5.4 | item 5: export choices | [x] | [ ] | [ ] | [ ] | [agent-operated] all six exports plus an unlisted PNG (cover slide); fonts by name names SF Pro Text/Display without embedding, basic uses Arial, pictures is one PNG per slide; PDF 3 pages; HTML self-contained; For Claude zip holds deck.json + slides; no embedded-font variant exists |  |
+6.1 | item 6: defaults and authoring | [ ] | [ ] | [x] | [ ] | [agent-operated] base Official; the agent derived "GOV.UK sample" from www.gov.uk (curl GETs for HTML and CSS because WebFetch drops <link>): palette, type, spacing, components, fonts (Arial; GDS Transport not licensed for others), logo guidance without any crown; Check against law, run by me, reports one 1:1 contrast violation in warning-text (finding 60) |  |
+6.2 | item 6: live restyle | [x] | [ ] | [ ] | [ ] | [agent-operated] P3 sitting DS accent #c9663f -> #2f6f9f: contrast chips update; the note's link and highlight and the deck's disc restyle live; an old deck version keeps terracotta; Check against law: "The canon keeps every checked rule (8)." plus rules to judge by hand |  |
+6.2b | item 6/4: old preview in a main tab beside the restyled live panel (source-derived procedure, rechecked at M4.2 against 073d10446; not executed) | [x] | [ ] | [ ] | [ ] | [agent-operated] the main tab's preview of "Original accent" kept terracotta beside the live blue panel; no crossing | /tmp/maws-review/screens/6.2b-old-main-live-panel.jpg |
+6.3 | item 6: default authority and ask | [x] | [ ] | [ ] | [ ] | [agent-operated] owner default Classroom with the Space default P3 sitting DS: a new in-Space document took P3 sitting DS, an outside-Space one took Classroom; values put back; the ask sheet listed all five systems with swatches and returned name + designSystemId; the artifact's-own-system case not exercised (no GUI for it) |  |
+7.1 | item 7: artboards | [ ] | [ ] | [x] | [ ] | [agent-operated] three mixed-size boards (1440x900, 390x844, 1080x1080), zoom/pan, in-place text edit, PNG (selected board) and PDF (all boards, per-board page sizes); element move/resize/restyle, the narrow-panel toolbar and design comments/history not done |  |
+7.2 | item 7: file-backed data | [ ] | [ ] | [x] | [ ] | [agent-operated] each view names its source; an edit to the file alone did not change the dashboard (a bound file is a stored copy, finding 67); after the agent re-bound it, marks/table and "updated 10:17 UTC" changed; the earlier version keeps 2.25 and 10:05 UTC |  |
+7.3 | item 7: chart taste | [ ] | [ ] | [x] | [ ] | [agent-operated] same-side repeats (Note taker 1.5 and 0.5) overlap in one column with the warning "owner repeats Note taker; bars overlap. Set agg to combine repeated categories." (finding 68); data not aggregated; keep / fix now / P4 is the owner's at R.1 |  |
+7.4 | item 7: granted connector data | [ ] | [ ] | [ ] | [x] | owner: not run as a native step by design (fixture evidence at US$0 is the agents' final-source run); the owner reads it at R |  |
+8.1 | item 8: floating session | [ ] | [ ] | [x] | [ ] | [agent-operated] float by header button and ⌘⌥B both ways; card with transcript, composer, dock and close; closes to a pill at the bottom-left (not in the tab row); reopens at the same size; over a loaded Browser page it becomes a reserved live column; with an artifact tab active, float hides the main area and tab strip and shows no card (finding 58); divider beyond maximum not tried |  |
+8.2 | item 8: meaningful header | [x] | [ ] | [ ] | [ ] | [agent-operated] headers seen for document, deck, design and dashboard; during a preview the deck's Export held the previewed version and the document's and dashboard's held the live state, as the script says; document/dashboard exports go silently to MAWS's own exports folder (finding 65); close guard not exercised (record below) |  |
+8.3 | item 8: Mark-up | [ ] | [ ] | [x] | [ ] | [agent-operated] Mark up from the panel pen: a text mark and Add to chat (attachment "mark-up.png" and a caption in the composer, not sent) worked; pen, box and arrow drew nothing under cua's instant drags. [owner] pen strokes drawn over the note, Add to chat attached "mark-up.png" with the caption "Mark-up of “P3 sitting note”", × removes it: "8.3 looks pretty solid. I can do 'x' and all"; the mark-up was sent at 12:29Z and the session changed nothing ("an image of red strokes over the page, with no instruction"); Cancel, Escape and Tab containment not reported | owner's screenshot (composer with mark-up.png) |
+N.1-document | item 2: Korean composition in the document editor | [x] | [ ] | [ ] | [ ] | [owner] "동시편집 작동함": Korean typed in the note while the session added the sixth task (11:44Z) and the seventh ("Check the Japanese price.", 11:52Z); every typed syllable kept (record below); "Korean typing in general feels very natural. Latency is not there for my edit" |  |
+N.1-slide | item 5: Korean composition in the slide text editor | [x] | [ ] | [ ] | [ ] | [owner] "동시편집 작동": Korean typed on slide 2 of P3 sitting deck while the session changed the Session lead's date on the same slide (12:06Z); nothing typed was lost (record below) |  |
+N.1-design | item 7: Korean composition in the design workbench | [x] | [ ] | [ ] | [ ] | [owner] "Design도 마찬가지로 동시편집 작동": Korean typed in the third task on the desktop board of P3 sitting design while the session made the to-do line Korean on the same board (12:10Z); kept (record below) |  |
+N.2 | item 1 last clause; item 3 restart | [x] | [ ] | [ ] | [ ] | [agent-operated] Quit and keep sessions running: the supervisor and two engine processes stayed; relaunch restored the tabs, the agent's fifth task, the fresh comment's anchor and thread; the edit landed just before the quit click; ordinary quit not run (findings 70, 71) |  |
+N.3 | native platform | [ ] | [x] | [ ] | [ ] | [owner] "링크는 안열리고 cmd+click에도 컴포넌트가 선택됨": Command-click on the note's example.com link opened nothing and selected the whole paragraph block (outlined); the date chip and an editor selection path were not reported (candidate 75) | owner's screenshot (paragraph block outlined after Command-click) |
+X.1 | item 5: PPTX fidelity | [ ] | [ ] | [x] | [ ] | [agent-operated, owner to judge] Keynote opened the three variants: fonts by name reports missing fonts (finding 72), basic editable, pictures flattened; PowerPoint (read-only) renders fonts by name as in MAWS | /tmp/maws-review/screens/X1-*.jpg |
+X.2 | item 2; item 6: document export | [ ] | [ ] | [x] | [ ] | [agent-operated, owner to judge] DOCX in Word: link, highlight, heading, checkbox list, table, one anchored comment with its reply (author "Owner"; orphaned/resolved threads not exported, finding 73); HTML opened in Safari; the PDF checked by text extraction only; Pages not tried | /tmp/maws-review/screens/X2-word-note-docx.jpg |
+X.3 | item 7: design/dashboard exports | [ ] | [ ] | [x] | [ ] | [agent-operated, owner to judge] design PNG 390x844 and 3-page PDF (command-line checks); the dashboard HTML in Safari shows captured rows and source notes with no script or remote resource | /tmp/maws-review/screens/X3-safari-dashboard-html.jpg |
+P.1 | item 5: native presentation | [x] | [ ] | [ ] | [ ] | [owner] second display connected by the owner (13:2xZ); Present opened the show; slide 3, hidden first through Slide options > Hide slide, was skipped; "the font looks same" as the editor; "The key binding worked correctly". Not reported: which screen took which view, notes and timer, the bar-button focus checks, exit and reopen; the deck has no builds or transitions to advance |  |
+A.1 | item 7; route D native custody | [ ] | [ ] | [x] | [ ] | [owner] MAWS's own connection works and survives a relaunch, but route D was never shown: Allow, then Servers > Connect opened Chrome for the Notion sign-in, "Connected through MAWS · Connected · 65 tools listed"; Refresh ok by engine at 12:40:03Z, still engine after archiving the disposable session (12:43:08Z) and after quit and relaunch (12:50:44Z), with no second sign-in. The note's own working session "P3 sitting note document" stayed live in the same folder with Notion connected, and route E takes the artifact's own session first (src/main/connectors/eligibility.ts); the script forbids archiving a working session to force D; Disconnect, then connecting again, asked for a fresh browser sign-in, as a Disconnect requires (fields below; candidate 76) | owner's screenshot (Connectors sheet: Allowed to read; notion Connected through MAWS) |
+A.2 | item 1 Export; H Send-to | [x] | [ ] | [ ] | [x] | [owner] Notion: pass. Library > P3 sitting note > Export > Send to Notion… > resumed session "P3 sitting note document" (12:58Z); it uploaded the Markdown export unchanged to a new private page and the link opened it; one page (fields below). Drive: owner: not run (no file-capable Drive connector; send-to.ts:61–62 forbids another way; gws ruling under R.3). Owner: "do we really have to open a session to export to Notion? … why can't we just let the user directly export to Notion?" (R.3, S-HEADER-SEND) |  |
+T.1 | L81: terminal-only Korean trace sample (inside the slack; not N.1) | [x] | [ ] | [ ] | [ ] | [owner] launched with MAWS_IME_TRACE=1 from a terminal, Korean sample in a MAWS terminal tab: "I don't think it's symptomatic"; ime-trace.log exists (80,980 bytes, last written 13:01:37Z; contents not read here); claims no P2 closure |  |
+R.1 | Rulings by frozen handle and supplement: one row each in the Rulings table below | [ ] | [ ] | [x] | [ ] | [owner] ballot page, 14:2xZ: keep 8 (L32, L81, L175, L213, L267, S-NATIVE-OAUTH, S-REAL-SEND, S-DESIGN-TOOLBAR), fix now 1 (L35), P4 6 (L140, L142, L183, L202, S-HEADER-SEND, S-REPEATED-BARS), L180 acknowledged; L35, L142 and L175 differ from the sitting session's recommendation (table below) | |
+R.2 | Explicit taste checklist: L DL8 panel model and DL13 creation cards; G pill/tab-row and below-chrome column; C presenter and font variants; E1 narrow toolbar and standalone comment destination; E2 repeated-bar layout; HD native custody; H actual delivery and editor-header Send-to (one answer each in the Taste table below) | [ ] | [ ] | [x] | [ ] | [owner] ballot page, 14:2xZ: keep DL8, G, C, HD; change DL13, E1, E2, H (lines below); C differs from the sitting session's recommendation | |
+R.3 | Irritations in the owner's own words, each with one route (wave S, tracker, P4, dismissed against a binding design, or architect ruling): the Irritations table below | [ ] | [ ] | [x] | [ ] | [owner] four irritations in the owner's words (Drive via the gws CLI, agent edit speed, direct Notion send, the plugin leak into MAWS sessions); Drive's route was agreed by the owner before 1.1 and the direct send follows their S-HEADER-SEND P4; the other routes are proposals for the architect; the owner's marks on the 80 candidates follow as an addendum | |
+M.1 | Measure: what artifact work still sends you to Claude Desktop or a terminal (the concrete task and why), and whether the co-work layer is fit for the week's daily use: the Measure lines below | [ ] | [ ] | [x] | [ ] | [owner] not yet: "I would say the structure is very solid. We need some Improvements on aesthetics of UI/UX and some Consideration into user experience, but the structure is there, the capability is there. We just have to smooth things out."; no task named that still needs Claude Desktop or a terminal; the R.3 call for a speed benchmark against Claude Desktop stands beside it | |
 
 5.1b record (notes field and alert as seen at each step)
-Panel's Artifacts tool pinned before Open in tab: [ ] yes [ ] no
-a paste of 4,000 characters accepted, panel same:
-b ZZ appended in main: 4,002 alert, panel still 4,000:
-c panel cleared:
-d main shows ZZ, 'not saved yet' alert, Save notes shown, field not invalid, panel empty:
-e Save notes clicked once: alert gone, panel shows ZZ, still ZZ after switching slide and back:
+Panel's Artifacts tool pinned before Open in tab: [x] yes [ ] no
+a paste of 4,000 characters accepted, panel same: yes, no alert; the panel showed the same text; the mirror's plan.html held 4,000 characters (09:05Z)
+b ZZ appended in main: 4,002 alert, panel still 4,000: yes — "Speaker notes hold at most 4,000 characters; these have 4,002. Shorten them to save." with a red outline; the panel still ended "…sitting samp"; mirror unchanged (the screen locked 09:06–09:31Z with tab and slide untouched; state intact on return)
+c panel cleared: yes, Cmd-A + Delete in the panel field (09:31Z); the mirror then held no notes
+d main shows ZZ, 'not saved yet' alert, Save notes shown, field not invalid, panel empty: yes — "These speaker notes are not saved yet: they were too long until the notes changed elsewhere." + Save notes; no invalid outline; panel empty
+e Save notes clicked once: alert gone, panel shows ZZ, still ZZ after switching slide and back: yes (09:32Z); the mirror held ZZ
 
 8.2 record (header Export while a version is previewed: the state each export actually held, live or the version shown)
-document:
-deck:
-design:
-dashboard:
+document: during the "Original accent" preview, Markdown export held the LIVE note (four tasks, Space owner 2026-10-27), written as 868-md.md into MAWS's own exports folder
+deck: during the 1:55 AM preview, PDF export held the PREVIEWED version (old title, to-do line without "Tell the Space owner first.")
+design: not tried during a preview
+dashboard: during the 3:07 AM preview, Markdown export held the LIVE data (5.75, Session lead 3, updated 10:17 UTC), 1240-md.md
 
 N.1 record, one editor at a time (partial syllables, candidate commit, caret, retained text; while the agent updated another block/element)
-document:
-slide text editor:
-design workbench:
+document: [owner] while the session added the sixth task (11:44Z, 31 s) and the seventh, "Check the Japanese price." (11:52Z, 21 s); the session's own reply: "nothing you typed was lost. The Korean text after the second task is intact … it ended in \"동시편집동시편집 하이유\". The \"ㅇ\" after the fourth task is also still there"; owner: "동시편집 작동함", typing "feels very natural", no latency on the owner's own typing
+slide text editor: [owner] slide 2 of P3 sitting deck, while the session (via a comment on the date element) set the Session lead's date to Thursday, October 22, 2026 (12:06Z, 77 s; its publish took 14 s); kept: the Space owner cell ("동시편집 테스트 한국어 안ㄴ", composition in progress), a longer to-do line and a new speaker note; owner: "동시편집 작동"
+design workbench: [owner] desktop board of P3 sitting design, while the session (via a comment) made the to-do line Korean ("할 일 일정이 겹치면 마감일 전에 알려 주세요.", 12:10Z, 45 s); kept: the third task's text "Book the follow-up 한국어 인간 인간 ㅇㅁㄴㄹㅇㅁ."; owner: "Design도 마찬가지로 동시편집 작동"
 
 A.1 fields (no tokens, no credentials)
-Native prompt(s) seen and the process each named (MAWS or a claude/engine process):
-Order actually followed (preparation (e)); step 1a observation done each time before Connect and before each Archive (manual refresh with the session ready, route resolved, chosen server visible in Connectors > Servers) [ ] yes [ ] no, first refresh outcome: disposable observing session used (project, archived [ ] yes [ ] no, unarchived after relaunch [ ] yes [ ] no [ ] n/a); the owner declined archiving [ ] yes [ ] no:
-via.route shown at each refresh (direct = D MAWS's own connection / engine = E connected session / none) and whether an eligible session was connected:
-Authorisations asked: first connect / after relaunch (a second one is a finding unless the owner chose Reconnect):
-Reconnect / Disconnect result:
-If not run: precise reason (no eligible server, unsupported route, no declaring page, other):
+Native prompt(s) seen and the process each named (MAWS or a claude/engine process): Servers > Connect opened the Notion sign-in in Chrome (the owner's browser), started by MAWS; no Keychain or other native prompt reported
+Order actually followed (preparation (e)); step 1a observation done each time before Connect and before each Archive (manual refresh with the session ready, route resolved, chosen server visible in Connectors > Servers) [ ] yes [x] no, first refresh outcome: ok by engine; disposable observing session used ("Observer session greeting", p3-sitting-project, archived [x] yes [ ] no, unarchived after relaunch [ ] yes [ ] no [x] n/a, not reported); the owner declined archiving [ ] yes [x] no: the owner went Allow, then Connect (Chrome sign-in), then Refresh, rather than observe-first; the route never reached a D-only state because the working session "P3 sitting note document" (the note's creator, live in the same folder, Notion connected; its 12:58Z A.2 turn used Notion tools) is route E's first choice, and it was not archived, as the script requires
+via.route shown at each refresh (direct = D MAWS's own connection / engine = E connected session / none) and whether an eligible session was connected: 12:40:03Z engine; 12:43:08Z (disposable session archived) engine; 12:50:44Z (after quit and relaunch) engine; each answer ok with the owner's workspace and user; an eligible connected session ("P3 sitting note document") was live every time
+Authorisations asked: first connect / after relaunch (a second one is a finding unless the owner chose Reconnect): one browser sign-in at the first Connect / none after the relaunch (owner: "no second sign in")
+Reconnect / Disconnect result: the owner pressed Disconnect, then connected again: "it made me log in again" (expected after a Disconnect, whose row reads "Disconnected from MAWS: Connect to sign in again")
+If not run: precise reason (no eligible server, unsupported route, no declaring page, other): run; route D not observed because a working session in the artifact's folder holds route E (see the A.1 row)
 
 A.2 fields (no credentials)
-Drive: sending session and connector/tool named in its approval; account and destination as the approval/result showed them; remote link; content arrived once [ ] yes [ ] no; retried [ ] no [ ] yes (remote checked before retry: [ ] yes)
-Notion: sending session and connector/tool named in its approval; account and destination as the approval/result showed them; remote link; content arrived once [ ] yes [ ] no; retried [ ] no [ ] yes (remote checked before retry: [ ] yes)
-Editor-header Send-to: [ ] present [ ] absent; acceptable: [ ] yes [ ] no; routed by S-HEADER-SEND below
+Drive: owner: not run, no file-capable Drive connector in the session (Google's Drive MCP needs a GCP OAuth client and its Developer Preview; send-to.ts:61–62 forbids reaching Drive another way); proposed route under R.3 (gws CLI)
+Notion: sending session "P3 sitting note document" (the note's own, resumed by the sheet's "Resume session and send", 12:58Z; turn 62 s); tools notion-create-file-upload and notion-create-pages, then notion-fetch to check; approval card: none appeared for either Notion tool (owner; the session runs in Auto mode, so the sheet's "You approve the connector in the session, as for any tool." did not hold, candidate 80); account: the owner's Notion workspace; destination: a new private page "P3 sitting note (MAWS export, revision 1844)" holding the export as the attached file P3_sitting_note_(revision_1844).md (Notion turned spaces and brackets into underscores); remote link https://app.notion.com/p/3fee344c8b158155ab4ac07889bb73b3; content arrived once [x] yes [ ] no (one result for a Notion search at 13:0xZ); retried [x] no [ ] yes
+Editor-header Send-to: [ ] present [x] absent (the document header's Export menu lists only Markdown, Web page, Word, Word A4, PDF and PDF A4; seen at 8.2); acceptable: [ ] yes [ ] no, not answered; the owner questions the session hop itself (R.3); routed by S-HEADER-SEND below
 
 T.1 fields (the trace itself stays with the owner and is not pasted here)
-Recorder present in the owner's build (the final source has it, per M4.2; a log after the sample shows the build does): [ ] yes [ ] no (then owner: not run)
-Launched from Terminal.app with MAWS_IME_TRACE=1 on a fresh process, no older instance: [ ] yes [ ] no
-Symptom recurred in the terminal tab: [ ] yes [ ] no [ ] unclear; what was seen:
-~/Library/Logs/MAWS/ime-trace.log exists after the sample: [ ] yes [ ] no
-Relaunched normally afterwards: [ ] yes [ ] no
+Recorder present in the owner's build (the final source has it, per M4.2; a log after the sample shows the build does): [x] yes [ ] no (then owner: not run)
+Launched from Terminal.app with MAWS_IME_TRACE=1 on a fresh process, no older instance: [x] yes [ ] no (owner's run; the log was written at 13:01:37Z)
+Symptom recurred in the terminal tab: [ ] yes [x] no [ ] unclear; what was seen: owner: "I don't think it's symptomatic"
+~/Library/Logs/MAWS/ime-trace.log exists after the sample: [x] yes [ ] no (80,980 bytes, modified 13:01:37Z; existence and size checked, contents not read)
+Relaunched normally afterwards: [x] yes [ ] no (a first relaunch at 13:02:04Z from a shell still carried MAWS_IME_TRACE; the owner quit it and opened MAWS normally at 13:17:38Z, pid 47716, launched by launchd with no trace variable; the log unchanged since 13:01:37Z)
 
 Rulings (R.1): one row per frozen handle or supplement; proposal per the script, rechecked at M4.2 against final code and the final tracker at 073d10446
 handle | proposal | keep | fix now | P4 | owner words | route after sitting
-L32 catalogue | keep final recorded residue | [ ] | [ ] | [ ] | |
-L35 SessionStart floor | keep | [ ] | [ ] | [ ] | |
-L81 Terminal Korean | T.1 trace (recorder present in the final source, M4.2); owner: not run only if the build leaves no trace; P2 stays open | [ ] | [ ] | [ ] | |
-L140 locale | keep shipped locale behaviour unless one locale per surface is chosen | [ ] | [ ] | [ ] | |
-L142 mirror cap | keep 64 MiB (the mirror's new P4 rows concern relinked folders, not the cap) | [ ] | [ ] | [ ] | |
-L175 HWP/HWPX | P4 | [ ] | [ ] | [ ] | |
-L183 DOCX embedding | P4, with the native reader observation | [ ] | [ ] | [ ] | |
-L202 embedded PPTX variant | P4 if the three shipped variants serve the task | [ ] | [ ] | [ ] | |
-L213 presenter/fonts/SVG | native pass/fail, then keep / fix now / P4 for any gap; P4 rows S-PRESENT-EMBED-FOCUS, S-PPTX-SKEW and S-PPTX-TABLE-OUTLINE bear on it | [ ] | [ ] | [ ] | |
-L267 mini ClaudeUsage polling | owner decides; F never operates its credentials | [ ] | [ ] | [ ] | |
-S-NATIVE-OAUTH | HD acceptance 4: A.1 | [ ] | [ ] | [ ] | |
-S-REAL-SEND | P3 DL95/97: A.2 | [ ] | [ ] | [ ] | |
-S-HEADER-SEND | DL95/97/105: currently library-only; keep library-only / fix now / P4 | [ ] | [ ] | [ ] | |
-S-DESIGN-TOOLBAR | keep E1's shipped wrap/density unless regrouping is requested | [ ] | [ ] | [ ] | |
-S-REPEATED-BARS | keep the shipped warning and overlapping layout after the deterministic warning fix (same-side repeats only, bf42822f4), or fix now / P4 the side-by-side layout | [ ] | [ ] | [ ] | |
-L180 retained-version design-system export | informed deferral, not a decision and not a vote: the export carries every current asset (extra files only); P4 owns the versioned-assets repair (DL106; S-DS-VERSION-ASSETS) | acknowledged [ ] | | | |
+L32 catalogue | keep final recorded residue | [x] | [ ] | [ ] | (mark only) | none: the final recorded residue stands |
+L35 SessionStart floor | keep | [ ] | [x] | [ ] | "Fix now because a lot of cloud environments or other environment is going to use a managed settings. Again, this is not just for me, it's also for general use of other people." | wave S (fix now; the architect scopes the fix from the L35 row) |
+L81 Terminal Korean | T.1 trace (recorder present in the final source, M4.2); owner: not run only if the build leaves no trace; P2 stays open | [x] | [ ] | [ ] | (mark only) | as proposed: P2 stays open; T.1 showed no symptom ("I don't think it's symptomatic"); the trace stays on the owner's Mac, unread |
+L140 locale | keep shipped locale behaviour unless one locale per surface is chosen | [ ] | [ ] | [x] | "Yes, fix them all." | P4: one locale per surface, every mixed case (candidates 4, 7, 15, 27) |
+L142 mirror cap | keep 64 MiB (the mirror's new P4 rows concern relinked folders, not the cap) | [ ] | [ ] | [x] | "Yes, nothing in the sitting come near 64 megabytes, but something in real use might have something bigger, so I would say fix it. Again, these are not just for internal personal use. It has to be a production-level product for general use." | P4: lift or remove the 64 MiB mirror cap for production use (the words say "fix it"; the ballot mark is P4) |
+L175 HWP/HWPX | P4 | [x] | [ ] | [ ] | "We don't care about hangul export." | none: no HWP/HWPX export and no P4 row (the proposal's P4 declined) |
+L183 DOCX embedding | P4, with the native reader observation | [ ] | [ ] | [x] | (mark only) | P4 as proposed; Word showed the note correctly (X.2) |
+L202 embedded PPTX variant | P4 if the three shipped variants serve the task | [ ] | [ ] | [x] | (mark only) | P4 as proposed |
+L213 presenter/fonts/SVG | native pass/fail, then keep / fix now / P4 for any gap; P4 rows S-PRESENT-EMBED-FOCUS, S-PPTX-SKEW and S-PPTX-TABLE-OUTLINE bear on it | [x] | [ ] | [ ] | (mark only) | none: the presenter is kept (P.1 pass); the existing P4 rows stay as they are; no Keynote note in the export menu (offered on the ballot, not taken) |
+L267 mini ClaudeUsage polling | owner decides; F never operates its credentials | [x] | [ ] | [ ] | "leave as is" — "CloudUsage is the gateway for claude code inference. So it can't be closed. And it should be fine." | none: the mini's ClaudeUsage polling stays as it is |
+S-NATIVE-OAUTH | HD acceptance 4: A.1 | [x] | [ ] | [ ] | (mark only) | none: the build is kept; a view of MAWS's own route (offered on the ballot as a P4) not taken; candidate 76 waits for the owner's candidate review |
+S-REAL-SEND | P3 DL95/97: A.2 | [x] | [ ] | [ ] | (mark only) | none: Notion delivered once; Drive through the gws CLI is the P4 under R.3 |
+S-HEADER-SEND | DL95/97/105: currently library-only; keep library-only / fix now / P4 | [ ] | [ ] | [x] | (mark only) | P4: send straight from the editor through MAWS's own connection, with no Claude turn (with the R.3 direct-send row) |
+S-DESIGN-TOOLBAR | keep E1's shipped wrap/density unless regrouping is requested | [x] | [ ] | [ ] | (mark only) | none: E1's shipped wrap and density stay |
+S-REPEATED-BARS | keep the shipped warning and overlapping layout after the deterministic warning fix (same-side repeats only, bf42822f4), or fix now / P4 the side-by-side layout | [ ] | [ ] | [x] | (mark only) | P4: side-by-side layout for repeated bars |
+L180 retained-version design-system export | informed deferral, not a decision and not a vote: the export carries every current asset (extra files only); P4 owns the versioned-assets repair (DL106; S-DS-VERSION-ASSETS) | acknowledged [x] | | | (mark only) | none: P4 owns the versioned-assets repair (DL106; S-DS-VERSION-ASSETS) |
 
 Taste checklist (R.2): [ ] keep / [ ] change, owner words; where DL97 or E DL41 already settled a proposal, keep confirms the built result
-L DL8 panel model:
-L DL13 creation cards:
-G pill/tab-row and below-chrome column:
-C presenter and font variants:
-E1 narrow toolbar and standalone comment destination:
-E2 repeated-bar layout:
-HD native custody:
-H actual delivery and editor-header Send-to:
+L DL8 panel model: [x] keep [ ] change; (mark only)
+L DL13 creation cards: [ ] keep [x] change; (mark only); the change is the ballot's recommendation the owner took: Ask Claude from inside a Space starts in the Space's folder and puts the result in the Space (candidates 1, 5, 32, 55)
+G pill/tab-row and below-chrome column: [x] keep [ ] change; (mark only); the float-hides-everything case (candidate 58) is a defect, not taste
+C presenter and font variants: [x] keep [ ] change; (mark only); the ballot's recommended relabel of the PowerPoint font variants (Keynote, candidate 72) not taken
+E1 narrow toolbar and standalone comment destination: [ ] keep [x] change; (mark only); the change is the ballot's recommendation the owner took: both the letter-by-letter toolbar wrap and the standalone comment that dead-ends at "trust this folder" (candidates 26, 37, 40)
+E2 repeated-bar layout: [ ] keep [x] change; (mark only); side by side, as S-REPEATED-BARS P4
+HD native custody: [x] keep [ ] change; (mark only)
+H actual delivery and editor-header Send-to: [ ] keep [x] change; (mark only); the change is the ballot's recommendation the owner took: direct send through MAWS's own connection (S-HEADER-SEND P4; candidate 78); a readable page instead of an attached .md was offered as optional and not answered separately (candidate 77)
 
 Irritations (R.3): observation | owner words | screenshot | route (wave S / tracker / P4 / dismissed against a binding design / architect ruling)
+Google Drive delivery has no write-capable route here: Send-to forbids reaching Drive other than through a connector, and Google's Drive MCP (drivemcp.googleapis.com) needs a GCP OAuth client and the Developer Preview | "우선 google 관련 -- gws cli셋업을 두는건 어떤가? 셋업은 번거롭지만 성능은 낫고 셋업부분은 우리가 streamline가능하다 나중에" … "그렇게 동의한다" (2026-10-19, before 1.1) | | proposed P4: Drive delivery through the gws CLI (gws drive +upload) with a streamlined setup; A.2 Drive stays owner: not run
+Agent edits feel very slow. Measured from the note session's transcript (Opus 5.5 at xhigh effort, host load 108–126 during the owner block): N.1's edit turns took 21–77 s from send to last output, first output after 5–22 s; MAWS tool time per turn was 0–4 s except the deck turn (artifact_publish 14 s, artifact_reply 11 s); the rest is model time | "the speed of editing is extremely slow, so we need some kind of benchmark or a parity verification with original Claude Desktop's tool. I don't know if it's supposed to be slow, but it feels very extremely slow for now in MAWS. 성능 벤치마크와 속도/기능성/성능 향상 분석 필요" … "Latency is not there for my edit, but the edit speed of model, edit speed of agent feels very slow" | | proposed P4 (first in line): a benchmark of the same edit tasks in MAWS and Claude Desktop (same model and effort, idle host), split into model time and tool time, then the improvements it points to
+Sending to Notion needs a Claude session and a model turn | "do we really have to open a session to export to Notion? Like why can't we just let the user directly export to Notion?" | | P4, by the owner's S-HEADER-SEND ruling: MAWS already holds its own Notion connection (A.1, route D: "Connected through MAWS · 65 tools listed"), so a direct send with no model turn is within reach
+The in-MAWS agent calls the owner's global plugins (ptc: a bare print("ok") at 12:10Z during the design edit; cua earlier, candidate 6) | "also it used ptc:ptc tool for some reason" | | with candidates 6 and 31: whether MAWS sessions inherit the owner's user-scope plugins and output style
+Owner hands-on UX review of the sitting's candidates (sitting-findings.md) | pending: the owner reviews the 80 candidates on the picture page (candidates-visual/index.html); their marks follow as an addendum to the architect | | each candidate routed after the review
 
 Measure (M.1)
-Concrete artifact work still requiring Claude Desktop or a terminal, and the reason:
-Is the co-work layer fit for the week's daily use: [ ] yes [ ] no [ ] not yet, why:
+Concrete artifact work still requiring Claude Desktop or a terminal, and the reason: no task named in the M.1 answer (13:4xZ); the owner's R.3 note on agent edit speed and a comparison with Claude Desktop stands beside it
+Is the co-work layer fit for the week's daily use: [ ] yes [ ] no [x] not yet (owner, 14:27Z), why: "I would say the structure is very solid. We need some Improvements on aesthetics of UI/UX and some Consideration into user experience, but the structure is there, the capability is there. We just have to smooth things out."
 Daily-use declaration: pending; a positive sitting is not the week-later declaration.
 
-Provenance: only owner-entered observations count as owner results. Agent evidence is named separately.
+Provenance: only owner-entered observations count as owner results. Agent evidence is named separately. (Read with the architect's ruling under the provenance paragraph at the top.)
