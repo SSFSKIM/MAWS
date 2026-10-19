@@ -12,10 +12,10 @@ const sha = '512107c14abcdef0512107c14abcdef0512107c1';
 
 // The summary line for a run's jobs ("conclusion<TAB>name", sorted by name as ci-gate.sh sorts them) and failed log,
 // under ci-gate.sh's flags.
-function refusals(jobs, log, { gates = '', runner = 'macos', class1a = 'pool', default_beside = '', label = 'f1-landing' } = {}) {
+function refusals(jobs, log, { gates = '', runner = 'macos', class1a = 'pool', live = '', default_beside = '', label = 'f1-landing' } = {}) {
   return execFileSync('bash', ['-c', 'set -uo pipefail; source "$0"; refusals "$1" "$2"', join(root, 'scripts/ci-gate-refusals.sh'), jobs.join('\n'), log.join('\n')], {
     encoding: 'utf8',
-    env: { ...process.env, sha, gates, runner, class1a, default_beside, label },
+    env: { ...process.env, sha, gates, runner, class1a, live, default_beside, label },
   });
 }
 
@@ -82,4 +82,11 @@ test('a refused plan relaunches the whole run with its own flags; a run nothing 
   );
   assert.equal(refusals(planRefused, [refusal('plan')], { runner: '', class1a: '' }), `ci-gate: the mini refused the plan job, so nothing ran; relaunch the run: scripts/ci-gate.sh ${sha} --label f1-landing --evidence\n`);
   assert.equal(refusals(run(), [red('e2e:library')]), '');
+});
+
+test('a live run relaunches live, its refused groups and a refused plan alike', () => {
+  const liveRun = ['failure\te2e:library-live', 'success\te2e:send-to-live', 'success\tplan'];
+  assert.match(refusals(liveRun, [refusal('e2e:library-live')], { live: 'yes', class1a: '' }), / scripts\/ci-gate\.sh \w+ --runner macos --live --gates e2e:library-live --label /);
+  const planRefused = ['failure\tplan', 'skipped\te2e:library-live'];
+  assert.match(refusals(planRefused, [refusal('plan')], { live: 'yes', gates: 'e2e:library-live' }), / --class1a pool --live --gates e2e:library-live --label /);
 });

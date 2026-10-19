@@ -16,6 +16,13 @@
 // `DefaultBeside:` (a push only): e2e groups that `default` treats as if they ran beside it, so a relaunch of part of a
 // set narrows `default` to the specs the whole set's `default` ran (Decision Log 66). Passed through unchecked: a name
 // the derivation cannot use makes `default` the bare set, never smaller (e2e-default-specs.mjs).
+// `live`: the `live` input or a `Live: yes` trailer (ci-gate.sh --live), a paid run asked for on purpose. The e2e job
+// then runs with MAWS_LIVE, MAWS_LIBRARY_LIVE and MAWS_LIVE_DOCUMENT at `1`, the flags the LIVE_E2E groups' specs skip
+// without, and each spec caps its own spend. The plan refuses it unless every gate asked for is a LIVE_E2E group:
+// `default`'s bare `pnpm e2e` collects every live spec and would run them all under those flags, and that no other
+// group's spec reads them is only today's convention, MAWS_LIVE being the name a new live case most likely gates on.
+// It refuses a LIVE_E2E group in a run that is not live too: design-live and dashboard-live set MAWS_LIVE in their own
+// scripts and would spend, the others would build and skip (Decision Log 75).
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -58,6 +65,7 @@ const lane = ((dispatched ? env.INPUT_RUNNER : trailer('Runner')) || env.GATE_E2
 if (lane !== 'linux' && lane !== 'macos') refuse(`no such runner: ${lane} (linux or macos; the pool takes class 1a and the POOL_E2E groups, through Class1a: pool)`);
 
 const evidence = dispatched ? env.INPUT_EVIDENCE === 'true' : trailer('Evidence')?.toLowerCase() === 'yes';
+const live = dispatched ? env.INPUT_LIVE === 'true' : trailer('Live')?.toLowerCase() === 'yes';
 const asked = dispatched ? env.INPUT_GATES : trailer('Gates');
 const defaults = ['static', 'unit', 'probes', ...(lane === 'macos' ? ['unit:darwin', ...words(env.CLASS1_E2E).filter((group) => scriptOf(group) in scripts).map((group) => `e2e:${group}`)] : [])];
 const gates = new Set(words(asked).length > 0 ? words(asked) : defaults);
@@ -67,6 +75,14 @@ if (unknown.length > 0) refuse(`no such gate: ${unknown.join(', ')} (static, uni
 // The packaged app's e2e scripts read dist/, which only the packaged job builds.
 const packagedOnly = [...gates].filter((gate) => gate.startsWith('e2e:') && /(^|:)packaged$/.test(gate.slice(4)));
 if (packagedOnly.length > 0) refuse(`${packagedOnly.join(', ')} run inside the packaged gate, after its build: ask with Gates: packaged`);
+
+// A live run takes the live groups and nothing else: beside them `default` would run every live spec its bare set
+// collects. A live group runs only in a live run: two of them spend under their own scripts' flag (Decision Log 75).
+const liveGroups = words(env.LIVE_E2E).map((group) => `e2e:${group}`);
+const notLive = live ? [...gates].filter((gate) => !liveGroups.includes(gate)) : [];
+if (notLive.length > 0) refuse(`a live run takes only the live e2e groups (${liveGroups.join(', ')}), not ${words(asked).length > 0 ? notLive.join(', ') : 'the default set'}: ask with Gates: naming those alone (ci-gate.sh --live --gates e2e:<group>,…)`);
+const paid = live ? [] : [...gates].filter((gate) => liveGroups.includes(gate));
+if (paid.length > 0) refuse(`${paid.join(', ')} run only in a live run, a paid one: ask with Live: yes (ci-gate.sh --live)`);
 
 // A Linux lane runs only the groups §3.1's table found green there; the rest are macOS work, refused here rather than
 // scheduled to fail.
@@ -98,11 +114,11 @@ appendFileSync(
   `static=${has('static')}\nunit=${has('unit')}\nunit_darwin=${has('unit:darwin')}\nprobes=${has('probes')}\ne2e=${JSON.stringify(e2e)}\n` +
     `static_runner=${JSON.stringify(runners.static)}\nunit_runner=${JSON.stringify(runners.unit)}\nprobes_runner=${JSON.stringify(runners.probes)}\npool=${pool}\n`,
 );
-appendFileSync(env.GITHUB_OUTPUT, `packaged=${has('packaged')}\nevidence=${evidence}\ndefault_beside=${JSON.stringify(defaultBeside)}\n`);
+appendFileSync(env.GITHUB_OUTPUT, `packaged=${has('packaged')}\nevidence=${evidence}\nlive=${live}\ndefault_beside=${JSON.stringify(defaultBeside)}\n`);
 const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
 const beside = defaultBeside.length > 0 ? ` Default beside: ${defaultBeside.join(', ')}.` : '';
 // The groups placed off the lane's runner: on the pool, or on the hosted Linux runner beside a macOS lane.
 const moved = e2e.filter((entry) => offMac.has(entry.group) && entry.runner !== JSON.stringify(RUNNERS[lane])).map((entry) => entry.group);
 const pooledNote = moved.length > 0 ? ` (${class1a === 'pool' ? 'on the pool' : 'on the hosted Linux runner'}: ${moved.join(', ')})` : '';
-appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${beside}\n`);
-process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}`);
+appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1).' : ''}${beside}\n`);
+process.stdout.write(`${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}`);
