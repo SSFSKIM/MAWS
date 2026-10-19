@@ -16,6 +16,7 @@ import { resetExportFormats } from '../../../library/export';
 import { connectLibrary, resetLibrary } from '../../../library/store';
 import { editorHostOf, resetEditorHosts, type EditorHostScope } from '../../../panel/editor-host';
 import { openComment } from '../../../side/register';
+import type { CardFrame } from '../../../side/card/CardHost';
 import { openCard, useCommentCard } from '../../../side/card/store';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, installFakeMain, ok } from '../../../test-support/code';
@@ -24,6 +25,19 @@ import { useViewer } from '../../code/viewer/viewer-store';
 import { byteViewer, type ByteViewerState } from './ByteViewer';
 import { resetArtifactConsole } from './console';
 import { requestArtifactVersion, resetVersionRequests } from './requests';
+
+// The frame the viewer last handed its card host, so a case can call what a card thread's artifact row calls
+// (`showVersion`); the host itself is the real one.
+const cardFrames = vi.hoisted(() => [] as CardFrame[]);
+vi.mock('../../../side/card/CardHost', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../side/card/CardHost')>();
+  const { createElement } = await import('react');
+  const CommentCardHost: typeof actual.CommentCardHost = (props) => {
+    cardFrames.push(props.frame);
+    return createElement(actual.CommentCardHost, props);
+  };
+  return { ...actual, CommentCardHost };
+});
 
 const ID = '00000000-0000-4000-8000-0000000000a1';
 const P = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
@@ -66,6 +80,7 @@ beforeEach(() => {
   resetArtifactEditors();
   resetArtifactConsole();
   resetVersionRequests();
+  cardFrames.length = 0;
   useViewer.getState().reset();
   useCommentCard.setState({ open: null });
   useSessions.setState({ records: new Map([[P, sessionRecord(P, { directory: '/repo' })]]) });
@@ -305,6 +320,53 @@ describe('a version asked for from outside', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html'));
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Version' }).value).toBe('1');
+  });
+
+  // review scalpel-1#1: a publish moves the row, which reads the versions again; until that read answers, the versions
+  // read before stand, so the version shown keeps its frame (no fresh load, no second `onShown`) and an Open from a card
+  // thread's artifact row meanwhile lands
+  describe('while a publish reads the versions again', () => {
+    async function shownAt9() {
+      requestArtifactVersion(ID, { revision: 9 }, 'panel');
+      const mounted = mount('html');
+      await waitFor(() => expect(main.callsOf('artifacts.versions')).toHaveLength(2)); // before the row is read, and after
+      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+      const reread = deferred<ReturnType<typeof ok>>();
+      const publish = async () => {
+        versionsAnswer = () => reread.promise;
+        row = { ...row, revision: 20 };
+        await act(async () => main.emit('library.changed', { revision: 2 }));
+        await waitFor(() => expect(main.callsOf('artifacts.versions')).toHaveLength(3));
+      };
+      const answer = async () => {
+        versions = [...versions, version(4, 20)];
+        names[20] = 'index.html';
+        await act(async () => reread.resolve(ok({ versions })));
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      };
+      return { ...mounted, publish, answer };
+    }
+
+    it('keeps the pinned version’s iframe, the same element throughout, said shown once', async () => {
+      const { onShown, publish, answer } = await shownAt9();
+      const shown = frame('html')!;
+      load(shown);
+      expect(onShown).toHaveBeenCalledTimes(1);
+      await publish();
+      expect(frame('html'), 'the frame stays while the versions are read').toBe(shown);
+      await answer();
+      expect(frame('html'), 'and once they are').toBe(shown);
+      expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Version' }).value).toBe('2');
+      expect(onShown).toHaveBeenCalledTimes(1);
+    });
+
+    it('lands a card row’s Open asked meanwhile', async () => {
+      const { publish, answer } = await shownAt9();
+      await publish();
+      act(() => cardFrames.at(-1)!.showVersion!({ revision: 4 }));
+      await answer();
+      await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    });
   });
 
   it('keeps the picker’s choice by its revision when an earlier version thins', async () => {
