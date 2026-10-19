@@ -16,12 +16,13 @@
 // the inserted blocks' ids are in the next read, the agent's characters credited to the session and the human's to the
 // human, the agent's cursor and editing outline drawn while the batch ran, the stale batch atomic.
 // Spends money within MAWS_LIVE_DOCUMENT_MAX_USD (US$1.00 when unset; the session launches with it as its
-// --max-budget-usd); the model is MAWS_LIVE_DOCUMENT_MODEL (haiku when unset). Run on purpose only:
+// --max-budget-usd, and the journal's receipts are held to it, a prompted turn with none at the whole cap); the model is
+// MAWS_LIVE_DOCUMENT_MODEL (haiku when unset). Run on purpose only:
 //   MAWS_LIVE_DOCUMENT=1 pnpm e2e:document-live
 // Evidence: test-results/document-live/live-run.txt (plain text; the scratch root is kept for inspection).
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type CDPSession, type Locator, type Page } from '@playwright/test';
@@ -38,6 +39,7 @@ import { journal, processCost } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { keystrokes, type Step } from './support/hangul';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { liveSpend } from './support/live-lifecycle'; // P3-F (editor-proof scalpel-3#1)
 import { eventsOf, mcpCalls, mcpResultOf, ofKind, recordEvents, resultText, seedTranscripts, type McpResult } from './support/maws-tools';
 import { sidebarRow } from './support/sidebar';
 
@@ -140,6 +142,7 @@ interface Live {
   panel: Locator;
   journalPath: string;
   allowed: string[];
+  prompted: boolean; // a paid turn was asked for: from here an absent receipt is spend at the whole cap (P3-F)
   events(): Promise<SessionEvent[]>;
   rows(): JournalRow[];
 }
@@ -193,6 +196,7 @@ async function ask(s: Live, prompt: string): Promise<number> {
   const message = s.pane.getByRole('textbox', { name: 'Message', exact: true });
   await message.click();
   await s.page.keyboard.insertText(prompt);
+  s.prompted = true;
   await s.page.keyboard.press('Meta+Enter'); // `composer.send`: a multi-line prompt's plain Enter breaks the line
   await expect.poll(() => sentPrompts(s), { timeout: 15_000, message: 'the prompt reached the engine' }).toBeGreaterThan(sent);
   return ended;
@@ -434,6 +438,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
 
   const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config } });
   let live: Live | null = null;
+  let completed = false; // every step ran (P3-F: a passing run has a receipt for each turn)
   try {
     const { page } = maws;
     await recordEvents(page);
@@ -457,7 +462,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     const spec = { ...launchDefaults(id as AppSessionId, sc.repo), model: MODEL, permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: CAP_USD };
     expect(value(await invoke(page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
     const journalPath = (await statusOf(page, id)).journalPath;
-    const s: Live = (live = { maws, page, id, pane, panel, journalPath, allowed: [], events: () => eventsOf(page, id), rows: () => journal(journalPath) });
+    const s: Live = (live = { maws, page, id, pane, panel, journalPath, allowed: [], prompted: false, events: () => eventsOf(page, id), rows: () => journal(journalPath) });
     await expect.poll(async () => (await statusOf(page, id)).process, { timeout: 120_000 }).toBe('ready');
 
     // 1: create, read, a warm-up edit (its card answered for the session)
@@ -624,6 +629,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     const markdown2 = json(read2!.result!).markdown as string;
     for (const newId of newIds) expect(markdown2, `the next read shows ^${newId}`).toContain(`^${newId}`);
     note(`G7: the next read (revision ${String(json(read2!.result!).revision)}) shows the batch's ids ${JSON.stringify(newIds)}; its markdown:\n${markdown2}`);
+    completed = true;
   } finally {
     if (live) {
       const s = live as Live;
@@ -637,9 +643,20 @@ test('the live run: the agent creates, reads and edits a document in one batch w
         note(`the session could not be stopped or booked: ${String(error)}`);
       }
     }
+    // P3-F (editor-proof scalpel-3#1): the spend held against the cap, as presentations-live and send-to-live hold theirs:
+    // the journal's receipts, or once a prompt was sent and its turn has no receipt, the whole cap. Read before the
+    // cleanup removes the profile; asserted softly, so a failure of the run itself is still the one reported beside it.
+    const ran = live as Live | null;
+    const spend = liveSpend(ran !== null && existsSync(ran.journalPath) ? journal(ran.journalPath) : [], CAP_USD, ran?.prompted ?? false);
+    note(`spend: receipts ${spend.receipts.length > 0 ? `${JSON.stringify(spend.receipts)}, total_cost_usd ${spend.receipted.toFixed(4)}` : 'none'}; accounted exposure US$${spend.accounted.toFixed(4)} (${spend.basis}); cap US$${CAP_USD}`);
     note(`console errors: ${JSON.stringify(maws.consoleErrors())}`);
     await maws.cleanup();
     note(`scratch kept for inspection: ${sc.root}`);
+    expect.soft(spend.accounted, 'within the cap').toBeLessThanOrEqual(CAP_USD);
+    if (completed) {
+      expect.soft(spend.receipts.length, 'a passing run has the engine’s receipt for each of its four turns').toBeGreaterThanOrEqual(4);
+      expect.soft(spend.settled, 'the last receipt came after the last prompt').toBe(true);
+    }
   }
   checkA15('after the run', before, [sc.root, maws.userData]);
 });
