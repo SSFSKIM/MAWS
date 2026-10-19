@@ -419,6 +419,36 @@ test.describe('the document editor', () => {
     expect(shown).toContain('"latex":"E=mc^2"');
     expect(shown).not.toContain('Euler: E=mc^2');
   });
+
+  // P3-F (sitting candidate 20): a diagram follows its page's palette. Drawn in the dark app on a page without a system
+  // (a dark page), it is drawn again once a light system's stylesheet arrives, its boxes on the page's light ground
+  test('a diagram is drawn again in its page’s palette when the page’s system arrives after it', async () => {
+    const { page } = maws;
+    const bar = toolbar(page, 'a');
+    await page.evaluate(() => void (document.documentElement.dataset.theme = 'dark'));
+    try {
+      await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.newLineAtEnd('a'));
+      await bar.getByRole('button', { name: 'Insert', exact: true }).click();
+      await bar.getByRole('menuitem', { name: 'Diagram', exact: true }).click();
+      await page.keyboard.press('Escape');
+      const box = content(page, 'a').locator('[data-node="diagram"] svg .node rect').first();
+      await expect(box).toBeVisible({ timeout: 15_000 }); // mermaid, loaded on first use
+      const fill = () => box.evaluate((el) => getComputedStyle(el).fill);
+      const ground = await replica(page, 'a').locator('.ds-doc').evaluate((el) => getComputedStyle(el).backgroundColor);
+      await expect.poll(fill).toBe(ground); // the dark page's own ground
+      await page.evaluate(() => {
+        const system = document.head.appendChild(document.createElement('style'));
+        system.id = 'p3f-light-system';
+        system.textContent = '.ds-doc { --ds-color-bg: rgb(250, 249, 246); --ds-color-text: rgb(31, 30, 27); }';
+      });
+      await expect.poll(fill, { timeout: 15_000 }).toBe('rgb(250, 249, 246)');
+    } finally {
+      await page.evaluate(() => {
+        delete document.documentElement.dataset.theme;
+        document.getElementById('p3f-light-system')?.remove();
+      });
+    }
+  });
 });
 
 // One step of S4's 2-set model, as S7b's ime scenario sends it (spikes/p3-store/s7/electron/main.ts, `imeStep`).

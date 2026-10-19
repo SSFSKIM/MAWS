@@ -90,30 +90,75 @@ export function formatDate(iso: unknown): string {
   return Number.isNaN(at) ? text || 'Date' : DATE.format(at);
 }
 
+// What a drawing is themed by (renderDiagram's contract; mermaid.ts reads the same): the text colour and face where it is
+// drawn and the ground of its page.
+function paletteOf(into: HTMLElement): string {
+  const own = getComputedStyle(into);
+  return [own.color, own.fontFamily, getComputedStyle(into.closest('.ds-doc') ?? into).backgroundColor].join('|');
+}
+
+// P3-F (sitting candidate 20): `paint` runs once the drawing's element is on the page (its view is built off the
+// document, where it has no computed style), then again on each change that can restyle the page, the triggers
+// page-ground.ts follows: the app's theme, a stylesheet (a design-system scope's, which arrives after the page mounts
+// with the app's fallbacks showing until then, or a live system's restyle), the page's own tokens and its scope.
+function followPage(into: HTMLElement, paint: () => void): () => void {
+  let frame = 0;
+  let observer: MutationObserver | null = null;
+  const start = () => {
+    if (!into.isConnected) {
+      frame = requestAnimationFrame(start);
+      return;
+    }
+    paint();
+    const page = into.closest('.ds-doc');
+    observer = new MutationObserver(() => {
+      if (into.isConnected) paint();
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    observer.observe(document.head, { childList: true, subtree: true });
+    if (page) observer.observe(page, { attributes: true });
+    if (page?.parentElement) observer.observe(page.parentElement, { attributes: true });
+  };
+  start();
+  return () => {
+    cancelAnimationFrame(frame);
+    observer?.disconnect();
+  };
+}
+
+// A diagram is drawn on its page in the page's palette, and drawn again when that palette changes (P3-F, sitting
+// candidate 20: a drawing made while the page still showed the dark app's fallbacks stayed dark on the light page).
 function diagramView(env: ViewEnvironment): NodeViewRenderer {
   return (props) => {
-    let drawn = 0; // the latest draw, an empty source's included; an older one that answers late is dropped
+    let drawn = 0; // the latest draw or redraw, an empty source's included; an older one that answers late is dropped
     return atomView({
       inline: false,
       field: { attr: 'source', label: 'Diagram source', kind: 'textarea' },
       draw(into, node) {
         drawn += 1;
-        const mine = drawn;
         const source = String(node.attrs.source ?? '');
         const pre = element('pre', 'doc-diagram-source', source || 'Diagram');
         into.append(pre);
         if (!source) return;
-        env.renderDiagram(source, into).then(
-          (svg) => {
-            if (mine !== drawn || !into.isConnected) return;
-            const figure = element('div', 'doc-diagram-drawing');
-            figure.innerHTML = svg;
-            into.replaceChildren(figure);
-          },
-          () => {
-            if (mine === drawn) pre.classList.add('doc-diagram-error'); // the source stays, marked as not drawn
-          },
-        );
+        let painted: string | null = null;
+        return followPage(into, () => {
+          const palette = paletteOf(into);
+          if (palette === painted) return;
+          painted = palette;
+          drawn += 1;
+          const mine = drawn;
+          env.renderDiagram(source, into).then(
+            (svg) => {
+              if (mine !== drawn || !into.isConnected) return;
+              const figure = element('div', 'doc-diagram-drawing');
+              figure.innerHTML = svg;
+              into.replaceChildren(figure);
+            },
+            () => {
+              if (mine === drawn) pre.classList.add('doc-diagram-error'); // the source stays, marked as not drawn
+            },
+          );
+        });
       },
     })(props);
   };

@@ -101,14 +101,63 @@ describe('diagrams', () => {
   });
 
   it('cleared before an earlier drawing answers, stay cleared (the late drawing is dropped)', async () => {
-    let answer!: (svg: string) => void;
-    const e = make(doc({ type: 'diagram', attrs: { id: 'd1', source: 'graph TD; A-->B' } }), () => new Promise((resolve) => (answer = resolve)));
+    const asked: Array<(svg: string) => void> = [];
+    const e = make(doc({ type: 'diagram', attrs: { id: 'd1', source: 'graph TD; A-->B' } }), () => new Promise((resolve) => void asked.push(resolve)));
+    await until(() => asked.length > 0, 'the drawing asked for');
     e.view.dispatch(e.state.tr.setNodeAttribute(atPos(e, 'diagram'), 'source', ''));
     expect(view(e, 'diagram').textContent).toContain('Diagram');
-    answer('<svg data-obsolete=""></svg>');
+    asked[0]('<svg data-obsolete=""></svg>');
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(view(e, 'diagram').querySelector('svg')).toBeNull();
     expect(view(e, 'diagram').textContent).toContain('Diagram');
+  });
+});
+
+// P3-F (sitting candidate 20): a drawing is themed by the page it is shown on (renderDiagram's contract), so it is made
+// once its view is on the page, never while ProseMirror builds the view off the document, and made again when the
+// page's palette changes after it (the page's system arriving as a scope's stylesheet after the page mounts, the app's
+// fallbacks showing until it does; a live system restyling; the app's theme under a page without a system).
+describe('a diagram on its page', () => {
+  it('is drawn once on the page in its palette, and drawn again when the page’s palette changes', async () => {
+    const calls: Array<{ connected: boolean; color: string; ground: string }> = [];
+    const page = document.body.appendChild(Object.assign(document.createElement('div'), { className: 'ds-doc' }));
+    const system = document.head.appendChild(document.createElement('style'));
+    system.textContent = '.ds-doc { color: rgb(240, 240, 240); background-color: rgb(20, 20, 20); }';
+    const other = document.createElement('style');
+    try {
+      editor = new Editor({
+        element: page.appendChild(document.createElement('div')),
+        coreExtensionOptions,
+        extensions: editorExtensions({
+          collaboration: null,
+          env: {
+            artifactId: 'doc1',
+            host,
+            renderDiagram: async (_source, into) => {
+              calls.push({ connected: into.isConnected, color: getComputedStyle(into).color, ground: getComputedStyle(into.closest('.ds-doc') ?? into).backgroundColor });
+              return `<svg data-call="${calls.length}"></svg>`;
+            },
+          },
+        }),
+        content: doc({ type: 'diagram', attrs: { id: 'd1', source: 'graph TD; A-->B' } }),
+      });
+      const e = editor;
+      await until(() => view(e, 'diagram').querySelector('svg[data-call="1"]') !== null, 'the first drawing');
+      expect(calls).toEqual([{ connected: true, color: 'rgb(240, 240, 240)', ground: 'rgb(20, 20, 20)' }]);
+      // the page's own system arrives after the drawing, light where the app's fallbacks were dark
+      system.textContent = '.ds-doc { color: rgb(31, 30, 27); background-color: rgb(250, 249, 246); }';
+      await until(() => view(e, 'diagram').querySelector('svg[data-call="2"]') !== null, 'the drawing in the page’s palette');
+      expect(calls[1]).toEqual({ connected: true, color: 'rgb(31, 30, 27)', ground: 'rgb(250, 249, 246)' });
+      // a stylesheet that leaves the page's palette as it is draws nothing again
+      other.textContent = '.doc-unrelated { margin: 0; }';
+      document.head.append(other);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(calls).toHaveLength(2);
+    } finally {
+      system.remove();
+      other.remove();
+      page.remove();
+    }
   });
 });
 
