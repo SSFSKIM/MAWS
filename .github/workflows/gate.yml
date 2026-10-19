@@ -65,7 +65,8 @@ env:
   # The paid live groups, each one spec that skips itself unless its run flag is `1` (MAWS_LIBRARY_LIVE for library-live,
   # MAWS_LIVE_DOCUMENT for document-live, MAWS_LIVE for the rest; design-live and dashboard-live set theirs in their
   # package scripts) and caps its own spend. A `Live: yes` run sets the three flags on the e2e job and takes these groups
-  # alone, since `default`'s bare `pnpm e2e` collects every one of their specs (Decision Log 75).
+  # alone, since `default`'s bare `pnpm e2e` collects every one of their specs; any other run refuses them, since
+  # design-live and dashboard-live would spend under their scripts' own flag (Decision Log 75).
   LIVE_E2E: library-live document-live presentations-live design-systems-live send-to-live design-live dashboard-live
 
 defaults:
@@ -244,7 +245,7 @@ jobs:
       MAWS_E2E_QUIET: '1'
       SHELL: /bin/zsh # the Mac's login shell, which the app's terminals and its login-shell capture start (setup installs it)
       # The live groups' run flags, `1` only when the plan says live, which it says only for a set of LIVE_E2E groups;
-      # empty otherwise, which every spec reads as off (`!== '1'`).
+      # empty otherwise, which every spec reads as off (`!== '1'`), in a run the plan admits no live group to.
       MAWS_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
       MAWS_LIBRARY_LIVE: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}
       MAWS_LIVE_DOCUMENT: ${{ needs.plan.outputs.live == 'true' && '1' || '' }}

@@ -144,17 +144,15 @@ test('the Live: yes trailer, or the live input on a dispatch, turns live on for 
   assert.deepEqual(JSON.parse(on.outputs.e2e).map((entry) => entry.group), ['library-live', 'send-to-live']);
   assert.match(on.summary, /Live: yes \(MAWS_LIVE, MAWS_LIBRARY_LIVE, MAWS_LIVE_DOCUMENT at 1\)\./);
 
-  const off = plan({ ...live, HEAD_MESSAGE: livePush('e2e:library-live', '') });
+  const off = plan({ ...live, HEAD_MESSAGE: livePush('static,e2e:default', '') });
   assert.equal(off.outputs.live, 'false');
   assert.doesNotMatch(off.summary, /Live/);
-  assert.equal(plan({ ...live, HEAD_MESSAGE: livePush('e2e:library-live', '\nLive: no') }).outputs.live, 'false');
-  // Neither a trailer's opt-out nor no trailer at all needs a live set.
   assert.equal(plan({ ...live, HEAD_MESSAGE: livePush('static,e2e:default', '\nLive: no') }).outputs.live, 'false');
 
-  const dispatch = { ...live, EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:library-live', INPUT_RUNNER: 'macos' };
-  assert.equal(plan({ ...dispatch, INPUT_LIVE: 'true' }).outputs.live, 'true');
-  assert.equal(plan({ ...dispatch, INPUT_LIVE: 'false', HEAD_MESSAGE: 'Live: yes' }).outputs.live, 'false');
-  assert.equal(plan({ ...dispatch, HEAD_MESSAGE: 'Live: yes' }).outputs.live, 'false');
+  const dispatch = { ...live, EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos' };
+  assert.equal(plan({ ...dispatch, INPUT_GATES: 'e2e:library-live', INPUT_LIVE: 'true' }).outputs.live, 'true');
+  assert.equal(plan({ ...dispatch, INPUT_GATES: 'e2e:library', INPUT_LIVE: 'false', HEAD_MESSAGE: 'Live: yes' }).outputs.live, 'false');
+  assert.equal(plan({ ...dispatch, INPUT_GATES: 'e2e:library', HEAD_MESSAGE: 'Live: yes' }).outputs.live, 'false');
 });
 
 test('a live run refuses any gate that is not a live group: e2e:default, a fake group, class 1a, the default set', () => {
@@ -174,6 +172,19 @@ test('a live run refuses any gate that is not a live group: e2e:default, a fake 
   const dispatched = refusal({ ...live, EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:library-live,e2e:default', INPUT_RUNNER: 'macos', INPUT_LIVE: 'true' });
   assert.equal(dispatched.status, 1);
   assert.match(dispatched.stderr, /not e2e:default:/);
+});
+
+// design-live and dashboard-live set MAWS_LIVE=1 in their own scripts, so outside a live run they would spend.
+test('a run that is not live refuses a live group, whether a trailer or a dispatch asks for it', () => {
+  for (const scenario of [
+    { HEAD_MESSAGE: livePush('static,e2e:library-live,e2e:send-to-live', '') },
+    { HEAD_MESSAGE: livePush('static,e2e:library-live,e2e:send-to-live', '\nLive: no') },
+    { EVENT: 'workflow_dispatch', INPUT_GATES: 'static,e2e:library-live,e2e:send-to-live', INPUT_RUNNER: 'macos', HEAD_MESSAGE: 'Live: yes' },
+  ]) {
+    const { status, stderr } = refusal({ ...live, ...scenario });
+    assert.equal(status, 1, JSON.stringify(scenario));
+    assert.equal(stderr, 'gate-plan: e2e:library-live, e2e:send-to-live run only in a live run, a paid one: ask with Live: yes (ci-gate.sh --live)\n');
+  }
 });
 
 // The flags the e2e job sets under live are the ones the LIVE_E2E groups' specs skip without; a group whose spec gates

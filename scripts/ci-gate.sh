@@ -32,7 +32,7 @@
 #   --live             a paid run on purpose: the live e2e groups (gate.yml's LIVE_E2E: library-live, document-live, …)
 #                      run rather than skip, the e2e job with MAWS_LIVE, MAWS_LIBRARY_LIVE and MAWS_LIVE_DOCUMENT at 1,
 #                      each spec within its own cap. --gates names live groups alone, the plan refusing any other gate
-#                      beside them, Decision Log 75 (default: off, the live specs skip)
+#                      beside them, and without --live any live group, Decision Log 75 (default: off)
 #   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
 #   --keep             leave the ci/ ref in place
 #

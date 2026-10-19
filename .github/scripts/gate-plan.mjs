@@ -20,8 +20,9 @@
 // then runs with MAWS_LIVE, MAWS_LIBRARY_LIVE and MAWS_LIVE_DOCUMENT at `1`, the flags the LIVE_E2E groups' specs skip
 // without, and each spec caps its own spend. The plan refuses it unless every gate asked for is a LIVE_E2E group:
 // `default`'s bare `pnpm e2e` collects every live spec and would run them all under those flags, and that no other
-// group's spec reads them is only today's convention, MAWS_LIVE being the name a new live case most likely gates on
-// (Decision Log 75).
+// group's spec reads them is only today's convention, MAWS_LIVE being the name a new live case most likely gates on.
+// It refuses a LIVE_E2E group in a run that is not live too: design-live and dashboard-live set MAWS_LIVE in their own
+// scripts and would spend, the others would build and skip (Decision Log 75).
 // Writes the switches, the runners and the e2e matrix to the job's outputs and the set to its summary. Run from the
 // checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
@@ -76,10 +77,12 @@ const packagedOnly = [...gates].filter((gate) => gate.startsWith('e2e:') && /(^|
 if (packagedOnly.length > 0) refuse(`${packagedOnly.join(', ')} run inside the packaged gate, after its build: ask with Gates: packaged`);
 
 // A live run takes the live groups and nothing else: beside them `default` would run every live spec its bare set
-// collects (Decision Log 75).
+// collects. A live group runs only in a live run: two of them spend under their own scripts' flag (Decision Log 75).
 const liveGroups = words(env.LIVE_E2E).map((group) => `e2e:${group}`);
 const notLive = live ? [...gates].filter((gate) => !liveGroups.includes(gate)) : [];
 if (notLive.length > 0) refuse(`a live run takes only the live e2e groups (${liveGroups.join(', ')}), not ${words(asked).length > 0 ? notLive.join(', ') : 'the default set'}: ask with Gates: naming those alone (ci-gate.sh --live --gates e2e:<group>,…)`);
+const paid = live ? [] : [...gates].filter((gate) => liveGroups.includes(gate));
+if (paid.length > 0) refuse(`${paid.join(', ')} run only in a live run, a paid one: ask with Live: yes (ci-gate.sh --live)`);
 
 // A Linux lane runs only the groups §3.1's table found green there; the rest are macOS work, refused here rather than
 // scheduled to fail.
