@@ -199,5 +199,6 @@ export const AGENTS_SUMMARY_COPY = {
       .filter(Boolean)
       .join(' · ') || 'Nothing running',
   runsOnDisk: (n: number) => `${plural(n, 'workflow run')} on disk`,
+  starting: 'Starting…', // the runs line while the session starts (P4)
   open: 'Open',
 } as const;
