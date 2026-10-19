@@ -1311,6 +1311,25 @@ describe("the grid's live count", () => {
     await gridReached(grid, fresh, from, { working: 1, live: 0 }, "the older report of a project with no counts yet");
     grid.close();
   });
+
+  it('is sent again after a registry on the version before it took a report without it, though the counts are the same', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const grid = await GridClient.open(hub, ADMIN);
+    await gridReached(grid, project, 0, { machines_online: 1, live: 0 }, 'the machine online, no session yet');
+    // During a deploy, the Registry still on the previous version takes the report's counts but not `live`, and answers nothing.
+    await hub.nextSummaryAsPrevious();
+    const running = { t: 'session', message: envelope(m, project, 'presence', presence('busy')) } as const;
+    let from = grid.frames.length;
+    await m.postOk([running]);
+    await gridReached(grid, project, from, { working: 1, live: 0 }, 'the counts taken without live');
+    // The same presence again: no count changes, and the unacknowledged report goes out again.
+    from = grid.frames.length;
+    await m.postOk([running]);
+    await gridReached(grid, project, from, { working: 1, live: 1 }, 'the counts sent again, live with them');
+    grid.close();
+    await m.close();
+  });
 });
 
 describe('the grid, past the frame bound', () => {

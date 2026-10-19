@@ -6155,16 +6155,21 @@ a hub that connects into machines (§2).
   NULL before the conflict: the design's `COALESCE(excluded.live,
   summaries.live)` refuses an older report's first insert (proved on
   workerd: `NOT NULL constraint failed: summaries.live`). After the deploy
-  a project's `live` reads 0 until its `Project` reports again; every
-  connected machine's next stream brings that report within minutes of a
-  deploy, so only a project whose every machine is offline then waits
-  behind Show all until one comes back. The filter is the web's, a view
-  preference kept in `localStorage` (`desk.grid.all`); the `grid` frame
-  is unchanged. Rejected: the hub filtering the `grid` frame (Show all
-  would need a second frame); the grid acquiring every project's socket
-  and grouping sessions from the logs (the grid is the home and the
-  phone, drawn before any log loads). Not built: the design's optional
-  cut of the org view's sockets to active projects.
+  a project's `live` reads 0 until its `Project` reports again. In the
+  deploy's overlap a `Project` already on this version can report to the
+  Registry still on the previous one, which keeps the counts but not
+  `live` and answers nothing. The new `Registry.summary` answers `true`; a
+  report not so acknowledged leaves the `Project` no copy of it, so the
+  `Project` sends its counts again at its next change of any kind, though
+  they are the same. A project whose last such change landed on the old
+  Registry, or whose every machine is offline at the deploy, still reads
+  0, behind Show all, until its next change. The filter is the web's, a
+  view preference kept in `localStorage` (`desk.grid.all`); the `grid`
+  frame is unchanged. Rejected: the hub filtering the `grid` frame (Show
+  all would need a second frame); the grid acquiring every project's
+  socket and grouping sessions from the logs (the grid is the home and the
+  phone, drawn before any log loads). Not built: the design's optional cut
+  of the org view's sockets to active projects.
   Date/Author: 2026-10-19, the remote identity design's MAWS milestone
   (branch `desk-grid-active`).
 

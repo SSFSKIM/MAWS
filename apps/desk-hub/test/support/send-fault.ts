@@ -62,3 +62,6 @@ export const REPORT_PATH = '/__test/report';
 /** Where the suites' `Registry` drops `live` from its `summaries`, as a registry stored before that column had it; its
  * next construction adds the column again. */
 export const SUMMARIES_BEFORE_LIVE_PATH = '/__test/summaries-before-live';
+/** Where the suites' `Registry` is armed to take its next summary report as the version before `live` took it: the
+ * counts stored without `live`, nothing answered. */
+export const SUMMARY_AS_PREVIOUS_PATH = '/__test/summary-as-previous';

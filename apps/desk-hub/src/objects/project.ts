@@ -901,12 +901,17 @@ export class Project extends DurableObject<Env> {
     const text = JSON.stringify(summary);
     if (this.ctx.storage.kv.get('summary') === text) return;
     this.ctx.storage.kv.put('summary', text);
-    // Reports travel asynchronously: the Registry takes one only when it is newer than the last it took.
+    // Reports travel asynchronously: the Registry takes one only when it is newer than the last it took. One it does not
+    // acknowledge (the call failed, or a Registry still on the previous version dropped `live`) leaves no copy, so the
+    // next report goes out though its counts are the same.
     const seq = (this.ctx.storage.kv.get<number>('summary-seq') ?? 0) + 1;
     this.ctx.storage.kv.put('summary-seq', seq);
     void this.registry()
       .summary(this.projectId, { ...summary, seq })
-      .catch(() => this.ctx.storage.kv.delete('summary'));
+      .catch(() => undefined)
+      .then((kept) => {
+        if (kept !== true) this.ctx.storage.kv.delete('summary');
+      });
   }
 
   /**

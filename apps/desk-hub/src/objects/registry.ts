@@ -457,8 +457,12 @@ export class Registry extends DurableObject<Env> {
    * without `seq` (a `Project` on the previous version) still sets the counts but leaves the leases as they were; one
    * without `live` leaves that count as it was (0 for a project first reported so). A retired project's are kept and
    * drawn on no grid.
+   *
+   * It answers `true`, which tells a `Project` its report's every count was kept, or superseded by a later report of its
+   * own, which has its own answer. A Registry on the version before `live` answers nothing, having kept no `live`, and
+   * the `Project` sends its counts again at its next change, though they are the same.
    */
-  summary(project: string, report: SummaryReport): void {
+  summary(project: string, report: SummaryReport): true {
     const seq = Number.isSafeInteger(report.seq) ? (report.seq as number) : null;
     const live = Number.isSafeInteger(report.live) && (report.live as number) >= 0 ? (report.live as number) : null;
     const taken = this.ctx.storage.transactionSync(() => {
@@ -485,10 +489,11 @@ export class Registry extends DurableObject<Env> {
       }
       return true;
     });
-    if (!taken) return;
+    if (!taken) return true;
     const record = this.project(project);
     if (record && !record.retired) this.toGrid({ t: 'summary', project: this.summaryOf(record) });
     this.refreshOnline();
+    return true;
   }
 
   private summaryOf(project: ProjectRecord): ProjectSummary {

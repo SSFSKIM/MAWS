@@ -40,6 +40,7 @@ import {
   SEND_RELEASE_PATH,
   REPORT_PATH,
   SUMMARIES_BEFORE_LIVE_PATH,
+  SUMMARY_AS_PREVIOUS_PATH,
   TIMING_PATH,
   UNREGISTER_PATH,
 } from './send-fault';
@@ -322,6 +323,11 @@ export async function startLocalHub() {
      * construction adds the column again. */
     async summariesBeforeLive() {
       await seam('REGISTRY', ORG, SUMMARIES_BEFORE_LIVE_PATH);
+    },
+    /** Has the Registry take its next summary report as the version before `live` did: stored without it, answered with
+     * nothing. */
+    async nextSummaryAsPrevious() {
+      await seam('REGISTRY', ORG, SUMMARY_AS_PREVIOUS_PATH);
     },
     /** Puts `count` projects straight into the Registry, with long names. */
     async addProjects(count: number, prefix: string) {
