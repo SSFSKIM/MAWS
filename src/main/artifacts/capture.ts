@@ -124,8 +124,11 @@ export async function loadSettled(win: BrowserWindow, url: string): Promise<void
   await settled(win);
 }
 
-// The window's next paint, or CAPTURE_SETTLE_MS.
+// The window's next paint, or CAPTURE_SETTLE_MS. P3-F (exports-capture scalpel-4#1): the contents are read once, before
+// the wait, since an export's deadline or a capture's guard may destroy the window meanwhile, and a destroyed window
+// throws on every read but `isDestroyed` (from a bare timer, main's error dialog).
 export function settled(win: BrowserWindow): Promise<void> {
+  const contents = win.webContents;
   return new Promise<void>((resolve) => {
     const painted = () => {
       clearTimeout(timer);
@@ -133,10 +136,10 @@ export function settled(win: BrowserWindow): Promise<void> {
     };
     // P3-E (E2 M5 correction): a timeout removes the paint callback it no longer waits for
     const timer = setTimeout(() => {
-      win.webContents.off('paint', painted);
+      contents.off('paint', painted);
       resolve();
     }, CAPTURE_SETTLE_MS);
-    win.webContents.once('paint', painted);
+    contents.once('paint', painted);
   });
 }
 

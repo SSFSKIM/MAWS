@@ -72,4 +72,23 @@ describe('the capture window’s load helpers on a reused window', () => {
     await quiet;
     expect(contents.listenerCount('paint')).toBe(0);
   });
+
+  // exports-capture scalpel-4#1: an export's deadline or a capture's guard destroys the window while it settles, and a
+  // destroyed window answers nothing but `isDestroyed` (Electron's `Object has been destroyed`)
+  it('settled on a window destroyed while it waits: the timeout resolves it, never reading the window again', async () => {
+    const contents = new EventEmitter();
+    let destroyed = false;
+    const win = {
+      get webContents() {
+        if (destroyed) throw new TypeError('Object has been destroyed');
+        return contents;
+      },
+    } as never;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const waiting = settled(win);
+    destroyed = true;
+    await vi.advanceTimersByTimeAsync(600);
+    await waiting;
+    expect(contents.listenerCount('paint')).toBe(0);
+  });
 });
