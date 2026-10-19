@@ -49,14 +49,36 @@ export async function restoreArtifact(store: ArtifactStore, row: EntityRow, vers
     }
   }
   const update = revertUpdate(old, stateV2(live), keep);
+  // P3-F (store-versions scalpel-3#1): the artifact and the version are read again inside the write, as the byte path
+  // does, so one deleted or dropped meanwhile is refused with nothing written (the doc stays loaded), the refusal
+  // released once the batch it read has committed
+  let current = row;
+  let refused: { error: unknown } | null = null;
   let restoreId = 0;
-  const revision = await service.writeAs(row.id, actor, (doc) => applyV2(doc, update), {
-    afterWrite: adapter?.afterRestore ? (doc) => adapter.afterRestore!(doc, { artifactId: row.id, versionId: version.id }) : undefined,
-    inFrame: (reached) => {
-      restoreId = store.versionInFrame(row, { kind: 'restore', actor: actorKey(actor), label }) ?? 0;
-      inFrame?.({ revision: reached, versionId: restoreId });
+  const revision = await service.writeAs(
+    row.id,
+    actor,
+    (doc) => {
+      if (!refused) applyV2(doc, update);
     },
-  });
+    {
+      prepare: () => {
+        try {
+          current = store.requireLive(row.id);
+          store.requireVersion(row.id, version.id);
+        } catch (error) {
+          refused = { error };
+        }
+      },
+      afterWrite: adapter?.afterRestore ? (doc) => (refused ? undefined : adapter.afterRestore!(doc, { artifactId: row.id, versionId: version.id })) : undefined,
+      inFrame: (reached) => {
+        if (refused) return;
+        restoreId = store.versionInFrame(current, { kind: 'restore', actor: actorKey(actor), label }) ?? 0;
+        inFrame?.({ revision: reached, versionId: restoreId });
+      },
+    },
+  );
+  if (refused) throw (refused as { error: unknown }).error;
   service.announceRestored(row.id, { revision, versionId: restoreId });
   return { revision, versionId: restoreId };
 }

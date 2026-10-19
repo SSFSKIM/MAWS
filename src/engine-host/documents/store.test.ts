@@ -9,6 +9,7 @@ import { applyV1, applyV2, canonicalV2, contentIdsOf, decodeMap, diffV1, idAt, i
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ArtifactStoreError } from './errors';
+import { restoreArtifact } from './restore';
 import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
 import { ArtifactStore, AUTO_EVERY_MS, AUTO_IDLE_MS, type ArtifactChanged } from './store';
@@ -813,6 +814,33 @@ describe('ArtifactStore: restore (Decision Log 16)', () => {
     expect(live.get('threads').getAttr('t1')).toBe('a posted message');
     expect(live.get('meta').getAttr('restoredFrom')).toBe(at);
     expect(committed('SELECT threadId FROM artifact_threads WHERE artifactId = ?', doc.id)).toEqual([{ threadId: 't1' }]);
+  });
+
+  // P3-F (store-versions scalpel-3#1): the restore reads the artifact and the version again where it writes, as a byte
+  // kind's does
+  it('never writes a restore on an artifact deleted before its write: one asked with a delete lands first or not at all', async () => {
+    const doc = await schemaAgnostic();
+    const at = (await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    await write(doc.id, agent, (d) => d.get('root').setAttr('title', 'Agent title'));
+    let wroteOnDeleted: boolean | null = null;
+    const restoring = store.restore(doc.id, at, human, () => (wroteOnDeleted = store.get(doc.id) === null));
+    const [restored, deleted] = await Promise.allSettled([restoring, store.delete(doc.id)]);
+    expect(deleted.status).toBe('fulfilled');
+    if (restored.status === 'rejected') expect(restored.reason).toMatchObject({ code: 'notFound' });
+    expect(wroteOnDeleted).not.toBe(true); // its write saw the artifact live, or never ran
+
+    // a caller holding the rows it read before an await: refused where it writes, with nothing written
+    const later = await schemaAgnostic();
+    const v1 = (await store.createVersion(later.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    await write(later.id, agent, (d) => d.get('root').setAttr('title', 'Agent title'));
+    const row = store.entity(later.id)!;
+    const version = store.requireVersion(later.id, v1);
+    await store.delete(later.id);
+    const rows = () => [committed('SELECT COUNT(*) AS n FROM artifact_updates WHERE artifactId = ?', later.id), committed('SELECT COUNT(*) AS n FROM artifact_versions WHERE artifactId = ?', later.id)];
+    const before = rows();
+    await expect(restoreArtifact(store, row, version, human)).rejects.toMatchObject({ code: 'notFound' });
+    expect(rows()).toEqual(before);
+    expect(service.loaded(later.id)).not.toBeNull(); // refused before anything was written: the doc was not reset
   });
 });
 
