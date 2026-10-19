@@ -150,8 +150,10 @@ function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: b
   if (inCell) out = out.replace(/\|/g, `${ESC}|`);
   if (lineStart) {
     out = out
-      // a heading, an item, a line of dashes (a thematic break; `*` and `_` are escaped already), a block, a marker
-      .replace(/^(\s*)(#{1,6}(?=\s|$)|[-+](?=\s)|-(?=(?:[ \t]*-){2,}[ \t]*$)|:::|\^)/, `$1${ESC}$2`)
+      // a heading, an item (an empty one too: `-` or `+` alone), a line of dashes (a thematic break; `*` and `_` are
+      // escaped already), a line of only `-` or of a lone `=` (a heading's underline after a hardBreak; `==` is escaped
+      // already), a block, a marker
+      .replace(/^(\s*)(#{1,6}(?=\s|$)|[-+](?=\s|$)|-(?=(?:[ \t]*-){2,}[ \t]*$|-+[ \t]*$)|=(?=[ \t]*$)|:::|\^)/, `$1${ESC}$2`)
       .replace(/^(\s*\d+)([.)])(?=\s|$)/, `$1${ESC}$2`)
       // a letter or roman marker with two spaces after it would read as an item (Decision Log 19)
       .replace(LETTERED_MARKER, `$1${ESC}$2`);

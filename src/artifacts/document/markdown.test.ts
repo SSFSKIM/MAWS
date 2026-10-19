@@ -296,6 +296,17 @@ describe('every stored state, one at a time', () => {
     textDashes: p(t('---')),
     itemDashes: { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('first')), p(t('---'))] }] },
     breakDashes: p(t('a'), { type: 'hardBreak' }, t('- - -')),
+    // P4 W1-B (tracker L225): list punctuation alone on its line is text, not an empty item, and after a hardBreak not a
+    // heading's underline either (a line of only `-` or of only `=` under a line of text)
+    textDash: p(t('-')),
+    textPlus: p(t('+')),
+    textDashSpace: p(t('-  ')),
+    itemDash: { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('+'))] }] },
+    quoteDash: { type: 'blockquote', content: [p(t('-'))] },
+    breakDash: p(t('foo'), { type: 'hardBreak' }, t('-')),
+    breakPlus: p(t('foo'), { type: 'hardBreak' }, t('+')),
+    breakTwoDashes: p(t('foo'), { type: 'hardBreak' }, t('--')),
+    breakEquals: p(t('foo'), { type: 'hardBreak' }, t('=')),
     // the whole-branch review's P6: the serializer's private-use sentinels are distinct from the same characters as text
     ...Object.fromEntries(
       SENTINEL_ALPHABET.map((char) => [
