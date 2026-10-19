@@ -521,5 +521,14 @@ describe('Show editors inside formatted text', () => {
     agent.transact(() => block(agent, 'p1').format(0, 3, markFormat({ type: 'bold' })));
     expect(editors(hub, 7, 10), "'ghi', after the bold 'abc'").toEqual([`${HUMAN}:ins`]);
   });
+
+  // P3-F document-model review (fable): a comment is not formatting (parent Decision Log 29), so who commented a passage
+  // is not named for a selection inside it, nor for one holding the comment's start; the thread shows who commented.
+  it('does not name who commented the passage, inside it or over it', () => {
+    const { hub, agent } = seeded();
+    agent.transact(() => block(agent, 'p1').format(0, 10, markFormat({ type: 'comment', attrs: { threadId: 't1' } })));
+    expect(editors(hub, 4, 7), "'def' inside the commented passage").toEqual([`${HUMAN}:ins`]);
+    expect(editors(hub, 1, 11), 'the whole passage').toEqual([`${HUMAN}:ins`]);
+  });
 });
 

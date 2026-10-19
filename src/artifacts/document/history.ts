@@ -374,8 +374,10 @@ export function showEditors({ doc, from, to, liveRoot, provenance }: { doc: PMNo
       if (item.deleted) {
         if (start > a && start < b) add(provenance.deletes.slice(client, clock, item.length), 'delete', 'del');
       } else if (!item.countable) {
-        // a format marker inside the selection, or one whose formatted text reaches into it from before
-        if (start <= b && (start >= a || formattedUntil(item, start) > a)) add(provenance.inserts.slice(client, clock, item.length), 'insert', 'fmt');
+        // a format marker inside the selection, or one whose formatted text reaches into it from before; a comment's
+        // marker is not formatting (parent Decision Log 29, as `counted` reads it)
+        const comment = 'key' in item.content && typeof item.content.key === 'string' && isCommentKey(item.content.key);
+        if (!comment && start <= b && (start >= a || formattedUntil(item, start) > a)) add(provenance.inserts.slice(client, clock, item.length), 'insert', 'fmt');
       } else if (end > a && start < b) {
         const s = Math.max(a, start) - start;
         const e = Math.min(b, end) - start;
