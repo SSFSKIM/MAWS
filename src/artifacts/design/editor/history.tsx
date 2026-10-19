@@ -401,7 +401,7 @@ export function HistoryWorld({ controller, preview, projected, boards, focus, vi
 
   const frames = useMemo(() => new Map(boards.map((b) => [b.board.id, b.board.frame])), [boards]);
   const focused = focus?.part === 'element' ? `${focus.boardId}\u0000${focus.elementId}` : null;
-  const focusedBoard = focus?.part === 'board' ? focus.boardId : null;
+  const focusedBoard = focus?.part === 'board' || focus?.part === 'notes' ? focus.boardId : null; // notes have no surface here: their board's
   const layerStyle = { transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${zoom})`, '--design-inv-zoom': String(1 / zoom), '--design-zoom': String(zoom) } as CSSProperties;
   return (
     <div ref={surface} className="design-world" role="region" aria-label={C.historyWorld} data-design-world data-history-world={preview.target.kind}>
