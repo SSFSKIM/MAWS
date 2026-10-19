@@ -216,6 +216,42 @@ describe('artifact_create', () => {
     expect(jsonOf(await create({ content: '<p/>', title: 'Page' })).designSystem).toBeUndefined();
   });
 
+  // P3-F wave S (F5, the owner's DL13 change): an agent asked to make something in a Space makes it there
+  it('creates into the Space it names by id or name: there by reference, styled by the Space’s default, the answer naming the Space', async () => {
+    const house = await w.store.create({ kind: 'design_system', title: 'House' }, HUMAN);
+    const brand = await w.store.create({ kind: 'design_system', title: 'Brand' }, HUMAN);
+    const sitting = await w.store.createSpace({ name: 'P3 sitting' });
+    const plain = await w.store.createSpace({ name: 'Plain' });
+    await w.store.setDefaults({ owner: house.id, spaces: { [sitting.id]: brand.id } });
+    w.store.registerDesignSystemContext(async (s) => `# DESIGN of ${s.title}`);
+
+    const deck = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'presentation', title: 'Deck', space: 'P3 sitting' })));
+    expect(deck).toMatchObject({ spaceId: sitting.id, spaceName: 'P3 sitting', designSystem: '# DESIGN of Brand' });
+    expect(w.store.get(deck.artifactId)).toMatchObject({ spaceId: sitting.id });
+    expect(w.store.get(deck.artifactId)!.designSystemId).toBeUndefined(); // the Space's default governs by reference (Decision Log 42)
+    const design = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'design', title: 'Site', space: 'plain' }))); // a name in another case
+    expect(design).toMatchObject({ spaceId: plain.id, spaceName: 'Plain', designSystem: '# DESIGN of House' }); // a Space with no default: the owner's
+    const page = ArtifactCreateResultSchema.parse(jsonOf(await create({ content: '<p/>', title: 'Page', space: plain.id })));
+    expect(page).toMatchObject({ spaceId: plain.id, spaceName: 'Plain' });
+    expect(w.store.list({ spaceId: plain.id }).map((a) => a.title).sort()).toEqual(['Page', 'Site']);
+    const loose = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'presentation', title: 'Loose' })));
+    expect(loose).not.toHaveProperty('spaceId');
+    expect(loose.designSystem).toBe('# DESIGN of House');
+  });
+
+  it('refuses a Space it cannot find, naming it and the Spaces there are, and a name two Spaces share, writing nothing', async () => {
+    await w.store.createSpace({ name: 'Work' });
+    const missing = textOf(await create({ kind: 'presentation', title: 'Deck', space: 'P3 sitting' }));
+    expect(missing).toContain('no Space "P3 sitting"');
+    expect(missing).toContain('"Work"');
+    expect(artifactRefusalOf(missing)).toEqual({ reason: 'notFound', space: 'P3 sitting' });
+    const twin = await w.store.createSpace({ name: 'Work' });
+    const shared = textOf(await create({ content: '<p/>', title: 'Page', space: 'Work' }));
+    expect(artifactRefusalOf(shared)).toEqual({ reason: 'invalid', space: 'Work' });
+    expect(shared).toContain(twin.id);
+    expect(rows('SELECT id FROM artifacts')).toEqual([]);
+  });
+
   it('refuses a document’s markdown content, which P3-B’s document create serves, writing nothing', async () => {
     const result = await create({ kind: 'document', title: 'Notes', content: '# Notes' });
     expect(artifactRefusalOf(textOf(result))).toMatchObject({ reason: 'invalid', kind: 'document' });
@@ -249,6 +285,16 @@ describe('artifact_list', () => {
     expect(all.artifacts.find((a) => a.id === stranger.artifactId)).not.toHaveProperty('handle');
     expect(ArtifactListResultSchema.parse(jsonOf(await list({ scope: 'all', kind: 'design' }))).artifacts.map((a) => a.title)).toEqual(['Human']);
     expect(ArtifactListResultSchema.parse(jsonOf(await list({ scope: 'all', query: 'the' }))).artifacts.map((a) => a.title)).toEqual(['Theirs']);
+  });
+
+  it('names the Space each listed artifact is in (F5, obs 6)', async () => {
+    const sitting = await w.store.createSpace({ name: 'P3 sitting' });
+    const inSpace = jsonOf(await create({ kind: 'presentation', title: 'Deck', space: sitting.id }));
+    const loose = jsonOf(await create({ content: '<p/>', title: 'Page' }));
+    const listed = ArtifactListResultSchema.parse(jsonOf(await list())).artifacts;
+    expect(listed.find((a) => a.id === inSpace.artifactId)).toMatchObject({ spaceId: sitting.id, spaceName: 'P3 sitting' });
+    expect(listed.find((a) => a.id === loose.artifactId)).not.toHaveProperty('spaceId');
+    expect(ArtifactListResultSchema.parse(jsonOf(await list({ scope: 'all', spaceId: sitting.id }))).artifacts.map((a) => a.title)).toEqual(['Deck']);
   });
 
   it('takes E2’s empty call', async () => {

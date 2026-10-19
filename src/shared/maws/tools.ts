@@ -165,7 +165,8 @@ const FileTextSchema = z.string().max(ARTIFACT_MAX_BYTES); // characters; the st
 // P3-A (M6): `kind` defaults to `html`; an `html` page comes from `path` (an `.html` file) or `content` (its text), a
 // `file` artifact from `path` (in place), a `document` from nothing or markdown `content` (P3-B's create, ledger X25),
 // another Y kind from nothing or `files`. E2's `id` and `html_path` are accepted as
-// `handle` and `path`, so the call skills already make keeps working.
+// `handle` and `path`, so the call skills already make keeps working. P3-F wave S (F5, the owner's DL13 change): `space`
+// names the Space the artifact is made in, by its id or its name, resolved by the host.
 export const ArtifactCreateInputSchema = z
   .strictObject({
     kind: ArtifactKindSchema.optional(),
@@ -174,6 +175,7 @@ export const ArtifactCreateInputSchema = z
     path: PathSchema.optional(),
     files: z.record(FilePathSchema, FileTextSchema).optional(),
     content: FileTextSchema.optional(),
+    space: z.string().min(1).max(200).optional(), // F5: a Space's id or its name
     id: ArtifactIdSchema.optional(), // E2's name for `handle`
     html_path: PathSchema.optional(), // E2's name for `path`
   })
@@ -348,6 +350,7 @@ export const ArtifactCreateResultSchema = z.strictObject({
   designSystem: z.string().optional(), // the governing design system's DESIGN.md (Decision Log 22d)
   // P3-C (M3 fix wave 1): a file kind created from files answers what its loader said of them, as a publish does
   warnings: z.array(FileWarningSchema).optional(), notes: z.number().int().min(1).optional(), held: z.array(HeldFileSchema).optional(),
+  spaceId: z.uuid().optional(), spaceName: z.string().optional(), // F5: the Space it was made in
 });
 export type ArtifactCreateResult = z.infer<typeof ArtifactCreateResultSchema>;
 // Who wrote an artifact last: the user, the calling session, or another session (named).
@@ -356,6 +359,7 @@ export type ArtifactEditor = z.infer<typeof ArtifactEditorSchema>;
 export const ListedArtifactSchema = z.strictObject({
   id: z.uuid(), handle: z.string().optional(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0), updatedAt: IsoTimeSchema,
   lastEditor: ArtifactEditorSchema.nullable(),
+  spaceId: z.uuid().optional(), spaceName: z.string().optional(), // F5 (obs 6): the Space it is in
 });
 export type ListedArtifact = z.infer<typeof ListedArtifactSchema>;
 export const ArtifactListResultSchema = z.strictObject({ status: z.literal('listed'), artifacts: z.array(ListedArtifactSchema) });
@@ -450,14 +454,14 @@ export const MAWS_TOOLS = {
   artifact_create: {
     title: 'Create artifact',
     description:
-      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Returns the artifact's id and revision, and the first time this session creates a kind, that kind's guide and format reference.",
+      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference.",
     input: ArtifactCreateInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
   artifact_list: {
     title: 'List artifacts',
     description:
-      'List MAWS artifacts with their ids, handles, kinds, titles, revisions and who edited them last; without this tool, keep your own list of what you made. By default the artifacts this session and the sessions it was opened from created, edited or viewed; scope "all" lists the whole library. Filter by kind, Space or a title substring (query).',
+      'List MAWS artifacts with their ids, handles, kinds, titles, revisions and who edited them last; without this tool, keep your own list of what you made. An artifact in a Space also carries its spaceId and spaceName. By default the artifacts this session and the sessions it was opened from created, edited or viewed; scope "all" lists the whole library. Filter by kind, Space (spaceId) or a title substring (query).',
     input: ArtifactListInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },

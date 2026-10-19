@@ -67,6 +67,7 @@ import { chartSpecsBefore, normalizeChartSpecs, viewWarnings, type ViewWarning }
 import { changesSince, DocumentViews, onSessionReplica, warmInSlices } from '../documents/kinds/document-host';
 import type { AgentReplica } from '../documents/replica';
 import type { ArtifactStore } from '../documents/store';
+import { spaceFields, spaceNamed } from './artifact-tools'; // P3-F wave S (F5)
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
 
 const PRESENCE_EDITING_MS = 1_500; // D11: the agent's editing blocks stay outlined this long after its batch commits
@@ -674,6 +675,7 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
           deps.session.guided.add(kind); // P3-E
           return toolText(replayed.result);
         }
+        const space = await spaceNamed(store, input.space, (refusal, sentence) => refuse(TOOL, refusal, sentence)); // P3-F wave S (F5)
         let body: ReturnType<typeof importMarkdown>;
         try {
           body = importMarkdown(input.content ?? '');
@@ -684,9 +686,10 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
           throw refuse(TOOL, { reason: 'invalid', blocks: body.childCount }, `the content holds ${body.childCount} top-level blocks; a tab takes at most ${DOCUMENT_LIMITS.blocksPerTab}: create the document with less and insert the rest elsewhere, or split it`);
         }
         // the answer's context, settled before the write so the recorded answer is the whole first answer: the guide when
-        // this session has not had it, the governing system's guide (a new document has no system or Space of its own)
+        // this session has not had it, the governing system's guide (a new document has no system of its own, and the
+        // Space it is made in, if any)
         const guide = deps.session.guided.has(kind) ? undefined : KIND_GUIDES[kind]; // P3-E: by kind
-        const designSystem = await store.designSystemContextFor({});
+        const designSystem = await store.designSystemContextFor(space ? { spaceId: space.id } : {});
         const created = await store.writeCommitted(() =>
           store.withOp(
             opIdOf(ctx),
@@ -704,7 +707,7 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
               // its content and its op row or not at all (P3-F, artifact-protocol finding 2)
               await store.create(
                 {
-                  kind /* P3-E */, title: input.title, ...(handle !== undefined && { handle }),
+                  kind /* P3-E */, title: input.title, ...(handle !== undefined && { handle }), ...(space && { spaceId: space.id }) /* F5 */,
                   initial: (doc) => {
                     made.doc = doc;
                     createDocument(doc, { title: input.title, body });
@@ -718,6 +721,7 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
                     status: 'created', kind /* P3-E */, artifactId: artifact.id, title: artifact.title, revision, ...(handle !== undefined && { handle }),
                     ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
                     ...(made.viewWarnings?.length && { viewWarnings: made.viewWarnings }), // P3-E (E2 M3)
+                    ...spaceFields(space), // F5
                   };
                   if (made.doc) deps.session.views.record(made.doc, revision);
                   op.record(made.answer);

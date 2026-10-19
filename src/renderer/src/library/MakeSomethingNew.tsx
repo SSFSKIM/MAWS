@@ -2,10 +2,16 @@
 // kind with a registered editor makes `Untitled <kind>` in the Space the view is narrowed to and opens it in a main tab;
 // the File card adds a file from the Mac (the native picker, then `artifacts.create` with its path, the file in place);
 // the HTML card has no blank page to offer. Every card can ask Claude instead, the route Claude's own cards take: a new
-// chat in the focused project with the composer's opening words ("Make a <kind>: "). A kind whose editor has not
-// landed shows only Ask Claude, and gains New the moment its editor registers.
+// chat with the composer's opening words ("Make a <kind>: "). A kind whose editor has not landed shows only Ask
+// Claude, and gains New the moment its editor registers.
+// P3-F wave S (F5, the owner's change to Decision Log 13): from a Space, Ask Claude starts the chat in the Space's
+// linked folder, in that folder's project by the index's membership rule (New chat's Open folder,
+// `session.projects.addFolder`), else in the focused project, and its words name the Space ("Make a <kind> in the Space
+// “<name>”: "), which the agent's `artifact_create` takes as its `space`.
+import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
+import type { LibrarySpace } from '@shared/ipc/schema/library';
 import { artifactEditorFor, useArtifactEditor } from '../artifacts/registry';
 import { ipc } from '../ipc/client';
 import { createSession, focusedProject, useSessionCreatorRegistered } from '../keymap/actions-runtime';
@@ -14,6 +20,7 @@ import { createArtifact, openArtifactTab } from './actions';
 import { askClaudePrefill, KIND_BLURBS, KIND_LABELS, LIBRARY_PAGE as P, untitledTitle } from './copy';
 import { toastFailure } from './dialogs';
 import { KindIcon } from './icons';
+import { useLibrarySpaces } from './store';
 
 const BUTTON = 'rounded-sm px-2 py-0.5 text-left text-ui-sm outline-accent focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 
@@ -32,15 +39,23 @@ async function addFile(spaceId: string | null): Promise<void> {
   await make({ kind: 'file', title: file.name, content: { path: file.path }, ...(spaceId !== null && { spaceId }) });
 }
 
-async function askClaude(kind: ArtifactKind): Promise<void> {
-  const appSessionId = await createSession(focusedProject());
-  if (appSessionId !== null) prefillComposer(appSessionId, { text: askClaudePrefill(kind) });
+async function askClaude(kind: ArtifactKind, space: LibrarySpace | undefined): Promise<void> {
+  let appSessionId: AppSessionId | null;
+  if (space?.linkedDir !== undefined) {
+    const added = await ipc.invoke('session.projects.addFolder', { directory: space.linkedDir });
+    if (!added.ok) return toastFailure(added.error.message);
+    appSessionId = await createSession(added.value.project.id, { location: added.value.location });
+  } else {
+    appSessionId = await createSession(focusedProject());
+  }
+  if (appSessionId !== null) prefillComposer(appSessionId, { text: askClaudePrefill(kind, space?.name) });
 }
 
-function KindCard({ kind, spaceId }: { kind: ArtifactKind; spaceId: string | null }) {
+function KindCard({ kind, spaceId, space }: { kind: ArtifactKind; spaceId: string | null; space: LibrarySpace | undefined }) {
   const editor = useArtifactEditor(kind);
   const canAsk = useSessionCreatorRegistered();
   const label = KIND_LABELS[kind];
+  const asking = askClaudePrefill(kind, space?.name);
   const primary =
     kind === 'file' ? (
       <button type="button" onClick={() => void addFile(spaceId)} className={`${BUTTON} text-fg hover:bg-bg-hover`}>
@@ -69,8 +84,8 @@ function KindCard({ kind, spaceId }: { kind: ArtifactKind; spaceId: string | nul
         <button
           type="button"
           disabled={!canAsk}
-          aria-label={`${P.askClaude} to make ${askClaudePrefill(kind).slice('Make '.length, -2)}`}
-          onClick={() => void askClaude(kind)}
+          aria-label={`${P.askClaude} to make ${asking.slice('Make '.length, -2)}`}
+          onClick={() => void askClaude(kind, space)}
           className={`${BUTTON} text-fg-muted hover:bg-bg-hover hover:text-fg`}
         >
           {P.askClaude}
@@ -81,6 +96,8 @@ function KindCard({ kind, spaceId }: { kind: ArtifactKind; spaceId: string | nul
 }
 
 export function MakeSomethingNew({ spaceId }: { spaceId: string | null }) {
+  const spaces = useLibrarySpaces().value;
+  const space = spaceId === null ? undefined : spaces?.find((s) => s.id === spaceId);
   return (
     <section aria-labelledby="library-make" className="flex flex-col gap-2 pb-4">
       <h2 id="library-make" className="m-0 px-2 text-ui-sm font-semibold text-fg-muted">
@@ -88,7 +105,7 @@ export function MakeSomethingNew({ spaceId }: { spaceId: string | null }) {
       </h2>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2">
         {ARTIFACT_KINDS.map((kind) => (
-          <KindCard key={kind} kind={kind} spaceId={spaceId} />
+          <KindCard key={kind} kind={kind} spaceId={spaceId} space={space} />
         ))}
       </div>
     </section>

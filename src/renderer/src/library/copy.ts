@@ -69,7 +69,9 @@ const KIND_NOUNS: Record<ArtifactKind, string> = {
   html: 'HTML page',
   file: 'file',
 };
-export const askClaudePrefill = (kind: ArtifactKind): string => `Make ${kind === 'html' ? 'an' : 'a'} ${KIND_NOUNS[kind]}: `;
+// P3-F wave S (F5): from a Space, the words name it, so the agent makes the artifact there (`artifact_create`'s `space`)
+export const askClaudePrefill = (kind: ArtifactKind, spaceName?: string): string =>
+  `Make ${kind === 'html' ? 'an' : 'a'} ${KIND_NOUNS[kind]}${spaceName === undefined ? '' : ` in the Space “${spaceName}”`}: `;
 export const untitledTitle = (kind: ArtifactKind): string => `Untitled ${KIND_NOUNS[kind]}`;
 
 export const GROUP_COPY = {

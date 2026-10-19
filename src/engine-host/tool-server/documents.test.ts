@@ -101,6 +101,25 @@ describe('artifact_create of a document', () => {
     expect(json(await call(create, args))).toMatchObject({ status: 'created', handle: 'atomic' });
   });
 
+  // P3-F wave S (F5, the owner's DL13 change; candidate 5's note was a document)
+  it('creates a document into the Space it names, styled by the Space’s default, and refuses an unknown Space by name', async () => {
+    const create = documentCreateTool(deps());
+    const sitting = await world.store.createSpace({ name: 'P3 sitting' });
+    const brand = await world.store.create({ kind: 'design_system', title: 'Brand' }, HUMAN);
+    await world.store.setDefaults({ owner: null, spaces: { [sitting.id]: brand.id } });
+    world.store.registerDesignSystemContext(async (s) => `# DESIGN of ${s.title}`);
+    const note = json<{ artifactId: string }>(await call(create, { kind: 'document', title: 'Sitting note', content: 'Seen at 08:24.', space: 'P3 sitting' }));
+    expect(note).toMatchObject({ spaceId: sitting.id, spaceName: 'P3 sitting', designSystem: '# DESIGN of Brand' });
+    expect(world.store.get(note.artifactId)).toMatchObject({ spaceId: sitting.id });
+    expect(world.store.get(note.artifactId)!.designSystemId).toBeUndefined();
+    const plain = json(await call(create, { kind: 'document', title: 'Plain note', space: sitting.id }));
+    expect(plain).toMatchObject({ spaceId: sitting.id, spaceName: 'P3 sitting' });
+    const unknown = await call(create, { kind: 'document', title: 'Lost', space: 'Elsewhere' });
+    expect(refusalOf(unknown)).toEqual({ reason: 'notFound', space: 'Elsewhere' });
+    expect(textOfResult(unknown)).toContain('no Space "Elsewhere"');
+    expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Lost')).toEqual([]);
+  });
+
   it('hands every other kind to the tool it wraps', async () => {
     const fallback: McpToolDefinition = { name: 'artifact_create', title: 'A', description: 'A', inputSchema: {}, annotations: {}, call: async () => ({ content: [{ type: 'text', text: 'A answered' }] }) };
     expect(textOfResult(await call(documentCreateTool(deps(), fallback), { kind: 'html', title: 'x', content: '<p>x</p>' }))).toBe('A answered');

@@ -15,7 +15,7 @@ import { readRoots } from '@artifacts/files';
 import { assetWarnings, heldSlides } from '@artifacts/slides/answer'; // P3-C
 import { boardAssetWarnings, heldBoards } from '@artifacts/design/answer'; // P3-E
 import { KIND_GUIDES } from '@artifacts/types/guides';
-import { isDocKind, type Artifact, type ArtifactKind } from '@shared/artifacts/entity';
+import { isDocKind, type Artifact, type ArtifactKind, type Space } from '@shared/artifacts/entity';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import {
@@ -41,6 +41,7 @@ import {
   opIdOf,
   publisherOf,
   readSourceFile,
+  refuse,
   resolveArtifact,
   storeOf,
   ToolRefusal,
@@ -57,6 +58,28 @@ const DESIGN_CONTEXT_KINDS: readonly ArtifactKind[] = ['document', 'presentation
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
+// P3-F wave S (F5, the owner's DL13 change): the Space a create names, by its id, else its name (exactly, then in any
+// case), read once the batch it was read in committed. An unknown name is refused with the Spaces there are, a name two
+// Spaces share with their ids (`refused` makes the calling tool's refusal; P3-B's create has its own); a Space deleted
+// after this read is refused by the store's own check at the create.
+export type SpaceRefused = (refusal: { reason: 'notFound' | 'invalid'; space: string }, sentence: string) => Error;
+
+export async function spaceNamed(store: ArtifactStore, ref: string | undefined, refused: SpaceRefused): Promise<Space | undefined> {
+  if (ref === undefined) return undefined;
+  const spaces = await store.readCommitted(() => store.listSpaces());
+  const byId = spaces.find((space) => space.id === ref);
+  if (byId) return byId;
+  const exact = spaces.filter((space) => space.name === ref);
+  const named = exact.length > 0 ? exact : spaces.filter((space) => space.name.trim().toLowerCase() === ref.trim().toLowerCase());
+  if (named.length === 1) return named[0];
+  if (named.length > 1) throw refused({ reason: 'invalid', space: ref }, `${named.length} Spaces are named "${ref}"; name the one you mean by its id: ${named.map((space) => space.id).join(', ')}`);
+  const there = spaces.length === 0 ? 'the library has no Spaces' : `the Spaces are ${spaces.map((space) => JSON.stringify(space.name)).join(', ')}`;
+  throw refused({ reason: 'notFound', space: ref }, `no Space "${ref}"; ${there}`);
+}
+
+// What a create's answer says of the Space it was made in.
+export const spaceFields = (space: Space | undefined): { spaceId?: string; spaceName?: string } => (space ? { spaceId: space.id, spaceName: space.name } : {});
+
 export function artifactListTool(deps: ArtifactToolDeps): McpToolDefinition {
   return defineMawsTool('artifact_list', (args, ctx) =>
     answering('artifact_list', async () => {
@@ -68,11 +91,13 @@ export function artifactListTool(deps: ArtifactToolDeps): McpToolDefinition {
       const artifacts = await store.readCommitted(() => {
         const filter = { kind, spaceId, query };
         const found = scope === 'all' ? store.list(filter) : dedupe(lineage.flatMap((appSessionId) => store.list({ ...filter, appSessionId })));
+        const spaceNames = new Map(store.listSpaces().map((space) => [space.id, space.name])); // F5 (obs 6)
         return found
           .sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1))
           .map((artifact): ListedArtifact => ({
             id: artifact.id, ...(artifact.handle !== undefined && { handle: artifact.handle }), kind: artifact.kind, title: artifact.title,
             revision: store.revision(artifact.id), updatedAt: iso(artifact.updatedAt), lastEditor: editorOf(store.lastWrite(artifact.id), ctx.appSessionId),
+            ...(artifact.spaceId !== undefined && { spaceId: artifact.spaceId, spaceName: spaceNames.get(artifact.spaceId) }),
           }));
       });
       const result: ArtifactListResult = { status: 'listed', artifacts };
@@ -113,6 +138,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
         deps.session.guided.add(answer.kind);
         return toolText(answer);
       }
+      const space = await spaceNamed(store, input.space, (refusal, sentence) => refuse('artifact_create', refusal, sentence)); // F5
 
       // What the artifact starts from, read and checked before anything is written
       let content: ByteContent | undefined;
@@ -154,10 +180,10 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
 
       // The first answer's decorations, settled before the write so the recorded answer is the whole first answer: the
       // kind's guide when this session has not had it, the governing design system's guide as the registered chain names
-      // it (Decision Log 22d, 42; a new artifact has no system or Space of its own; `{builtin}` attaches nothing, and the
-      // artifact's `designSystemId` stays unset, so the chain keeps deciding by reference)
+      // it (Decision Log 22d, 42; a new artifact has no system of its own, and the Space it is made in, if any; `{builtin}`
+      // attaches nothing, and the artifact's `designSystemId` stays unset, so the chain keeps deciding by reference)
       const guide = deps.session.guided.has(kind) ? undefined : KIND_GUIDES[kind];
-      const designSystem = DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor({}) : null;
+      const designSystem = DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor(space ? { spaceId: space.id } : {}) : null;
       const files = isDocKind(kind) ? input.files : undefined;
       let base: { revision: number; state: Uint8Array } | null = null;
       const recorded = await store.writeCommitted(() =>
@@ -175,12 +201,13 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
                 status: 'created', artifactId: artifact.id, kind, title: artifact.title, revision, ...(handle !== undefined && { handle }),
                 ...(page !== null && { id: handle ?? artifact.id, deliverableId: artifact.id, version: 1 as const, externalReferences: externalReferenceCount(page.bytes.toString('utf8')) }),
                 ...(guide && { guide }), ...(designSystem !== null && { designSystem }), ...loaded, // P3-C: recorded with the op, so a replay says it too
+                ...spaceFields(space), // F5
               };
               if (isDocKind(kind)) base = { revision, state: store.service.readState(artifact.id).state };
               op.record(answer);
             };
             await store.create(
-              { kind, title: input.title, ...(handle !== undefined && { handle }), ...(content && { content }), ...(files && { initial: (doc: Doc) => void publisherOf(store, kind)(doc, {}, files, false) }) },
+              { kind, title: input.title, ...(handle !== undefined && { handle }), ...(space && { spaceId: space.id }), ...(content && { content }), ...(files && { initial: (doc: Doc) => void publisherOf(store, kind)(doc, {}, files, false) }) },
               actor,
               complete,
             );
