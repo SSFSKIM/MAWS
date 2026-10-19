@@ -207,6 +207,14 @@
       "owner": "P4 / presenter window",
       "row": "| 2026-10-19 | P4 presenter window (focus left in an embed after a bar click) | Since P3-F's slide-editor fixes (b916bb78e, cc8a315a8) the presenter bar cancels mousedown and blurs only focus inside the bar (`src/artifacts/slides/editor/present/Presentation.tsx:261-265`); if the presenter clicked into a sandboxed embed in the current pane (src/artifacts/slides/canvas/elements.ts:115-120), a later bar click no longer moves focus out of the iframe, so Space and Enter go to the embed instead of the show keys. Unverified whether an embed in the presenter's pane takes pointer events at all. | Slide-editor follow-up low recheck (opus), backlog note. | Closes when a bar mousedown also clears focus held by an embed (or the presenter's embeds take no focus), with a regression that Space after clicking an embed and then the bar advances the show. Owner: the presenter's next change (P4). |",
       "source": "slide-editor follow-up recheck, 2026-10-19"
+    },
+    {
+      "id": "S-DOC-EXPORT-PREVIEW",
+      "logged": "2026-10-19T07:28:20Z",
+      "bin": "defer",
+      "owner": "P4 / document and dashboard export",
+      "row": "| 2026-10-19 | P4 document and dashboard export (header Export during a version preview) | While Version history previews a version, the document's and the dashboard's header Export export the live state (`src/renderer/src/tools/document/tab-state.ts:262-266` passes no version id), where the deck (L233) and the design (P3-E Decision Log 31) export what is shown and disable Export while comparing. | P3-F M2 sitting-sheet recheck at 073d10446 (the M4.2 worker); the owner records each export's content at the sitting's step 8.2. | Closes when `DocumentTabState.export` passes the previewed version's id and is disabled while two versions are compared, as the deck's is, with a regression; or when the owner rules the live-state export kept at 8.2. Owner: the document tab's next change (P4). |",
+      "source": "M2 sitting-sheet recheck, 2026-10-19"
     }
   ]
 }

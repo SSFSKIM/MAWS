@@ -1,4 +1,4 @@
-P3-F owner sitting — finalised at M4.2 against the final source 073d10446 (live reruns pending); not an instruction for an agent to operate the app
+P3-F owner sitting — finalised at M4.2 against the final source 073d10446 (live reruns complete); not an instruction for an agent to operate the app
 Execution document: docs/doperpowers/plans/2026-10-18-p3-f-finish.md
 Authority: P3 §2 items 1–8, Decision Logs 104–105. Owner: Tuesday 2026-10-20 evening KST.
 One sitting, about three hours (170 minutes plus 10 minutes slack). Item boundaries are rest marks, not separate appointments. The one extra scene, T.1 (Terminal Korean trace sample), is planned inside the slack.
@@ -45,7 +45,7 @@ PRE.2 [all items: evidence provenance] Record start time, locale, display widths
   - p3f-measure on S: run 39210430697, display @2x, no remote viewer; every measured row met or recorded. Run 39208915867 is void: posture @1x with a viewer.
   - p3f-livedata on S: run 39210066820, 2 cases passed, US$0.
   - Post-merge pool gate on 073d10446: run 39203174607 (static, unit, probes).
-  - Live reruns: pending (seven groups on the mini, carrier fce560e35 on S).
+  - Live reruns: the seven paid groups (library, document, presentations, design systems, design, dashboard, send-to), each 1 passed, on the mini (run 39210063850; carrier fce560e35 = S plus gate.yml env only, ruled as on S), engine 2.1.303 through ClaudeUsage's relay, US$0.1319 of the US$2.00 child budget (E/live). They ran in scratch profiles: their artifacts and ids do not exist in your MAWS, so a step that asks for an example uses one of your own.
   Create a temporary 'P3 sitting' Space and use harmless sample content, not irreplaceable documents. Before any document or deck is created (2.1, 5.1), make a disposable copy of the chosen design-system default and make it the P3 sitting Space's default. Exact route: in the library, the design system's row Actions > Duplicate. The store copies a design system like any document kind, as a new artifact titled 'Copy of <title>' with its own state and history and the assets that state needs (store.ts:459–520); the built-in systems (Classroom, MAWS, Official) are library rows too. Then on the copy's row Actions > Rename… to a name plainly the sitting's (the settings list shows systems by title). Open Settings (the gear in the sidebar), section Artifacts, block By Space; in the combobox 'Design system for P3 sitting' (the Space's name) choose the copy. The Space must already exist (the block reads 'No Spaces yet.' otherwise). Leave the owner's 'Default design system' alone here. Never edit a working design system: every restyle in 6.2 is to this copy.
 
 1. Library — 10 minutes; rest mark after 1.4
