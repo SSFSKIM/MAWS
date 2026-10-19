@@ -218,7 +218,11 @@
       "bin": "defer",
       "owner": "P4 / document and dashboard export",
       "row": "| 2026-10-19 | P4 document and dashboard export (header Export during a version preview) | While Version history previews a version, the document's and the dashboard's header Export export the live state (`src/renderer/src/tools/document/tab-state.ts:262-266` passes no version id), where the deck (L233) and the design (P3-E Decision Log 31) export what is shown and disable Export while comparing. | P3-F M2 sitting-sheet recheck at 073d10446 (the M4.2 worker); the owner records each export's content at the sitting's step 8.2. | Closes when `DocumentTabState.export` passes the previewed version's id and is disabled while two versions are compared, as the deck's is, with a regression; or when the owner rules the live-state export kept at 8.2. Owner: the document tab's next change (P4). |",
-      "source": "M2 sitting-sheet recheck, 2026-10-19"
+      "source": "M2 sitting-sheet recheck, 2026-10-19",
+      "closed": {
+        "at": "2026-10-19T16:41:53Z",
+        "by": "P3-F wave S F7 (8.2, c65, c66): 9d65b2de2, the header Export exports the previewed version and is disabled while two versions are compared, as the deck and the design do; reviewed correct (the B review)"
+      }
     },
     {
       "id": "S-SESSION-SCOPE",
