@@ -9,37 +9,49 @@
 //                (lays the pristine doc.md and deck.html in the arm's folder and prints the exact prompt)
 //   2. cua_repl: this file's text once per kernel (it defines globalThis.bench), then
 //                await bench.rep({ surface: 'code', folder: '<printed folder>', prompt: '<printed prompt>' })
+//                (its result's permissionsAnswered counts the permission cards it had to answer)
 //   3. Bash:     python3 -I spikes/p4-parity-bench/desktop-prep.py after <task> <rep> --out <run>
-//                (finds the session's records, copies the edited file, runs the checker, writes the manifest)
+//                  --permissions-answered <step 2's permissionsAnswered> [--seed-transcript <a Cowork deck's seed transcript>]
+//                (finds the session's records, copies or rebuilds the edited artifact, runs the checker, writes the
+//                manifest and prints whether the attempt is valid)
 // Interleave with the MAWS arm per findings.txt's order; never run two repetitions at once.
 //
 // Every step observes, acts, then verifies; a step whose verification fails throws with the AX lines it saw, and the
-// repetition is redone from step 1 (an aborted turn's records are excluded by desktop-prep's `startedAt` and by the
-// checker). The labels are Desktop 2.42304's, read from its readable source (`~/claude-desktop-re/readable/
+// repetition is redone from step 1 (desktop-prep closes the stopped attempt as aborted and opens the next; the aborted
+// turn's records are excluded by `startedAt`). The labels are Desktop 2.42304's, read from its readable source (`~/claude-desktop-re/readable/
 // app-2.42304.0/`, web/i18n/static/ko-KR.json for the Korean the owner's Desktop shows, `config.json` locale ko-KR);
 // the first step of the hold checks each one against the live AX tree (`bench.probe()`) before any timed repetition,
 // and amends LABELS here if Desktop has moved.
 
+// `\b` is ASCII-only in JavaScript, so it never sits beside a Hangul word: a Korean label is its own pattern, bounded by
+// Unicode-aware lookarounds ((?<!\p{L}) and (?!\p{L}) under the u flag) where a longer word must not match.
 const LABELS = {
   // The Code tab and a new session in a folder
-  codeTab: [/^\s*\d+\s+.*\b(tab|button|radio button)\b.*\b(Code|코드)\b/i],
+  codeTab: [/^\s*\d+\s+.*\b(tab|button|radio button)\b.*\bCode\b/i, /^\s*\d+\s+.*\b(tab|button|radio button)\b.*(?<!\p{L})코드(?!\p{L})/iu],
   newSession: [/\b(New session|New Code session)\b/, /새 세션|새 Code 세션/],
   chooseFolder: [/Choose folder/, /폴더 선택/],
   // the composer's model pill (data-testid epitaxy-cds-model-selector) and its Effort submenu
   modelPill: [/\b(Opus|Sonnet|Haiku|Fable)\b.*\b\d/, /model selector|모델/i],
   modelOption: (model) => [new RegExp(model.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')],
   effortMenu: [/\bEffort\b/, /노력/],
-  effortOption: { xhigh: [/Extra high/, /매우 높음/], high: [/\bHigh\b/, /^\s*\d+\s+.*\b높음\b/], medium: [/\bMedium\b/, /중간/], low: [/\bLow\b/, /낮음/], max: [/\bMax\b/, /최대/] },
+  effortOption: {
+    xhigh: [/Extra high/i, /매우 높음/],
+    high: [/(?<!Extra\s)\bHigh\b/, /^\s*\d+\s+.*(?<!매우\s*)(?<!\p{L})높음(?!\p{L})/u],
+    medium: [/\bMedium\b/, /중간/],
+    low: [/\bLow\b/, /낮음/],
+    max: [/\bMax\b/, /최대/],
+  },
   permissionMode: [/Permission mode/, /권한 모드/],
-  autoMode: [/^\s*\d+\s+.*\b(Auto)\b(?!.*accept)/, /^\s*\d+\s+.*\b자동\b/],
+  // Auto, not "Auto-accept permissions" (권한 자동 수락)
+  autoMode: [/^\s*\d+\s+.*\bAuto\b(?!.*accept)/,/^\s*\d+\s+.*(?<!\p{L})자동(?!\p{L})(?!.*수락)/u],
   // the prompt (data-testid code-prompt-input), Send (code-prompt-send, "Send"/"보내기"), Stop (code-prompt-stop, "Stop"/"중지")
   input: [/text (area|entry area|field)/i],
-  send: [/\bbutton\b.*\b(Send|보내기)\b/],
-  stop: [/\bbutton\b.*\b(Stop|중지)\b/],
+  send: [/\bbutton\b.*\bSend\b/, /\bbutton\b.*(?<!\p{L})보내기(?!\p{L})/u],
+  stop: [/\bbutton\b.*\bStop\b/, /\bbutton\b.*(?<!\p{L})중지(?!\p{L})/u],
   // a permission card that still appears in auto mode
   alwaysAllow: [/Always allow/, /항상 허용/],
   // the folder panel (NSOpenPanel)
-  open: [/\bbutton\b.*\b(Open|열기|Choose|선택)\b/],
+  open: [/\bbutton\b.*\b(Open|Choose)\b/, /\bbutton\b.*(?<!\p{L})(열기|선택)(?!\p{L})/u],
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -82,6 +94,12 @@ async function clickAndVerify(app, name, patterns, until, ms = 10_000) {
 
 const has = (patterns) => (state) => find(state, patterns) !== null;
 const lacks = (patterns) => (state) => find(state, patterns) === null;
+// The permission-mode control names the mode in force. (The records are the authority: parse.py excludes a turn whose
+// permissionMode is not auto; this only stops a repetition that would be excluded.)
+const showsAuto = (state) => {
+  const control = find(state, LABELS.permissionMode);
+  return control !== null && LABELS.autoMode.some((pattern) => pattern.test(control.line));
+};
 
 async function app() {
   return cua.getApp('com.anthropic.claudefordesktop');
@@ -108,7 +126,7 @@ async function newCodeSession(a, folder, { model = 'Opus 5.5', effort = 'xhigh' 
   await clickAndVerify(a, `effort ${effort}`, LABELS.effortOption[effort], null);
   // Auto mode, set on every session (the saved landing default is acceptEdits).
   await clickAndVerify(a, 'Permission mode', LABELS.permissionMode, has(LABELS.autoMode));
-  await clickAndVerify(a, 'Auto', LABELS.autoMode, null);
+  await clickAndVerify(a, 'Auto', LABELS.autoMode, showsAuto);
 }
 
 // Type the prompt verbatim and send; verified by Stop appearing (the turn running).
@@ -128,8 +146,9 @@ async function send(a, prompt) {
   }
 }
 
-// Wait for the turn to end: Stop gone for 3 s running. A permission card is answered Always allow and recorded,
-// since the repetition then measured a human stop and desktop-prep marks it.
+// Wait for the turn to end: Stop gone for 3 s running. A permission card is answered Always allow so the turn can end,
+// and counted: the repetition then measured a human stop, and `desktop-prep.py after --permissions-answered <count>`
+// marks it invalid (desktop-prep's next `before` clears what "always" saved in the folder).
 async function waitTurn(a, ms = 600_000) {
   const deadline = Date.now() + ms;
   let goneSince = null;
@@ -142,7 +161,7 @@ async function waitTurn(a, ms = 600_000) {
       await a.click(allow.index);
     }
     goneSince = has(LABELS.stop)(state) ? null : (goneSince ?? Date.now());
-    if (goneSince !== null && Date.now() - goneSince > 3_000) return { permissionsAnswered: answered };
+    if (goneSince !== null && Date.now() - goneSince > 3_000) return { permissionsAnswered: answered.length, permissionCards: answered };
     if (Date.now() > deadline) throw new Error('the turn did not end within 10 minutes');
     await sleep(500);
   }
@@ -156,6 +175,7 @@ globalThis.bench = {
     const state = await fresh(a);
     const report = {};
     for (const [key, patterns] of Object.entries(LABELS)) if (Array.isArray(patterns)) report[key] = find(state, patterns)?.line ?? null;
+    report.permissionModeShowsAuto = showsAuto(state); // read on a session already set to Auto: the Auto click's check
     nodeRepl.write(JSON.stringify(report, null, 2));
     return report;
   },
@@ -171,7 +191,8 @@ globalThis.bench = {
     nodeRepl.write(JSON.stringify({ surface, sentAt, endedAt: new Date().toISOString(), ...result }));
     return result;
   },
-  // The untimed follow-up of a Cowork deck repetition: the deck's files written to the folder for the checker.
+  // The untimed follow-up of a Cowork deck repetition, the last resort only: the deck's files written to the folder by
+  // the model, for when desktop-prep cannot rebuild the deck from the records.
   async writeDeckFiles(title) {
     const a = await app();
     await send(a, `Write the current files of the slide deck "${title}" into the folder bench-after/ exactly as they are now (project/deck.json and project/slides/<id>.html). Change nothing in the deck.`);
