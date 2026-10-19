@@ -582,6 +582,42 @@ describe('the owner’s actions', () => {
       errors.mockRestore();
     }
   });
+
+  // The history-anchors review (scalpel-5#2): the control clicked takes the keyboard and then goes (the menu's item as
+  // the list replaces it, × as the list closes), so closing gives it back to the page; an Escape a comment card already
+  // took is the card's, and the list stays.
+  it('gives the keyboard back to the page when the editors list closes by Escape or ×, and leaves an Escape a card took', async () => {
+    const { editor } = await setup(async ({ agentWrites }) => {
+      await agentWrites(agentAppends(' The agent adds this.'));
+    });
+    const page = editor().view.dom;
+    const dialog = () => screen.queryByRole('dialog', { name: 'Editors' });
+    const showEditors = async () => {
+      act(() => void editor().commands.setTextSelection({ from: 1, to: endOf(editor(), 'p2') }));
+      act(() => page.focus());
+      expect(document.activeElement, 'the page holds the keyboard').toBe(page);
+      act(() => void fireEvent.contextMenu(page));
+      const item = screen.getByRole('menuitem', { name: 'Show editors' });
+      act(() => item.focus()); // a click focuses what it lands on
+      click(item);
+      await until(() => (dialog()?.querySelectorAll('li').length ?? 0) > 0, 'the editors');
+    };
+    await showEditors();
+    const card = document.body.appendChild(document.createElement('div'));
+    card.addEventListener('keydown', (event) => event.preventDefault()); // a card's Escape, its own
+    act(() => void fireEvent.keyDown(card, { key: 'Escape' }));
+    card.remove();
+    expect(dialog(), 'an Escape a card took leaves the list').not.toBeNull();
+    act(() => void fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' }));
+    expect(dialog()).toBeNull();
+    expect(document.activeElement, 'Escape: the page has the keyboard again').toBe(page);
+    await showEditors();
+    const close = screen.getByRole('button', { name: 'Close editors' });
+    act(() => close.focus());
+    click(close);
+    expect(dialog()).toBeNull();
+    expect(document.activeElement, '×: the page has the keyboard again').toBe(page);
+  });
 });
 
 // M5's fix wave 1: what the review found missing, through the rail.
