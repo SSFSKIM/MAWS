@@ -432,6 +432,26 @@ function tableObject(el: MeasuredElement, variant: PptxFontVariant): PptxObject[
   return [{ kind: 'table', name: el.id, rows: tableRows, options: { ...at(el.box), objectName: el.id, colW: columns, rowH: rows.map((r) => inches(r.box.h)), autoPage: false } }];
 }
 
+const NO_BORDERS: MeasuredPaint['borders'] = [null, null, null, null];
+
+/**
+ * A native table's own paint (P3-F, exports-capture scalpel-5#2), which the cells' fills and borders do not carry: its
+ * fill and shadow under the table (or, for a gradient, the window's picture of the table without its cells), its outline
+ * over it, where the canvas draws a collapsed border over the cells' fills.
+ */
+function tablePaint(el: MeasuredElement, picture: string | undefined): { under: PptxObject[]; over: PptxObject[] } {
+  const fill = `${el.id}:fill`;
+  const under: PptxObject[] = [];
+  if (el.paint.image && picture) under.push(...pictureObject({ ...el, id: fill }, picture).map((o) => ({ ...o, name: fill })));
+  else if (el.paint.fill !== null || el.paint.shadow !== null) {
+    const { options, shape } = paintObjects({ ...el, paint: { ...el.paint, borders: NO_BORDERS } }, true);
+    under.push({ kind: 'shape', name: fill, shape, options: { ...options, objectName: fill } });
+  }
+  const { options, shape, sides } = paintObjects({ ...el, paint: { ...el.paint, shadow: null } }, false);
+  const outline: PptxObject[] = options.line ? [{ kind: 'shape', name: `${el.id}:border`, shape, options: { ...options, objectName: `${el.id}:border` } }] : [];
+  return { under, over: [...outline, ...sides] };
+}
+
 /**
  * An element's metrics at the size it is drawn (fix wave 1): its own CSS px times the scale its transforms and its
  * ancestors' draw it at. Sizes along a line scale across (`sx`), line heights and vertical insets down (`sy`), a font
@@ -476,8 +496,11 @@ function elementObjects(drawn: MeasuredElement, ir: ElementIR | undefined, pictu
       return connectorObject(el);
     case 'hr':
       return hrObject(el);
-    case 'table':
-      return el.rotate !== 0 && picture ? pictureObject(el, picture) : tableObject(el, options.variant);
+    case 'table': {
+      if (el.rotate !== 0 && picture) return pictureObject(el, picture);
+      const { under, over } = tablePaint(el, picture);
+      return [...under, ...tableObject(el, options.variant), ...over];
+    }
     case 'div': {
       if (el.paint.image && picture) return pictureObject(el, picture);
       if (!painted(el.paint)) return [];

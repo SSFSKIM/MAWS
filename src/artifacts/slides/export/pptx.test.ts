@@ -288,5 +288,34 @@ describe('the PPTX mapping: the exports-capture panel', () => {
     // the border its own bar, inside the box
     expect(named(objects, 'quote:border-left').options).toMatchObject({ x: inches(200), w: inches(6) });
   });
+  // scalpel-5#2: a table's own background, border and shadow, which the canvas draws (its border collapsed over its
+  // cells' fills)
+  it('scalpel-5#2: draws a dark table’s fill under the native table and its outline over it; a gradient table’s picture under it', () => {
+    const grid = body.elements.find((e) => e.id === 'grid')!;
+    const edge = { width: 2, style: 'solid', color: 'rgb(204, 204, 204)' };
+    const whiteText = grid.rows!.map((row) => ({ ...row, fill: null, cells: row.cells.map((cell) => ({ ...cell, text: { ...cell.text, paragraphs: cell.text.paragraphs.map((p) => ({ ...p, runs: p.runs.map((r) => ({ ...r, color: 'rgb(255, 255, 255)' })) })) } })) }));
+    const dark: MeasuredElement = { ...grid, paint: { ...NO_PAINT, fill: 'rgb(31, 41, 55)', borders: [edge, edge, edge, edge], shadow: { x: 0, y: 4, blur: 12, color: 'rgba(0, 0, 0, 0.25)' } }, rows: whiteText };
+    const out = onBody(dark);
+    expect(out.map((o) => [o.kind, o.name])).toEqual([['shape', 'grid:fill'], ['table', 'grid'], ['shape', 'grid:border']]);
+    // the fill and the shadow under the table, over its whole box
+    expect(out[0]).toMatchObject({ shape: 'rect', options: { objectName: 'grid:fill', x: inches(128), y: inches(229), w: inches(400), h: inches(120), fill: { color: '1F2937', transparency: 0 }, shadow: { type: 'outer', color: '000000' } } });
+    expect(out[0]!.options).not.toHaveProperty('line');
+    // the cells' white text on it
+    const table = out[1]!;
+    if (table.kind !== 'table') throw new Error('a table');
+    expect(table.rows.flat().map((cell) => (cell.text as { options?: { color?: string } }[])[0]!.options?.color)).toEqual(['FFFFFF', 'FFFFFF', 'FFFFFF', 'FFFFFF']);
+    // the outline over it, unfilled, unshadowed, its stroke inside the box
+    expect(out[2]).toMatchObject({ options: { objectName: 'grid:border', fill: { type: 'none' }, line: { color: 'CCCCCC', width: 1 }, x: inches(129), y: inches(230), w: inches(398), h: inches(118) } });
+    expect(out[2]!.options).not.toHaveProperty('shadow');
+
+    // a gradient: the window's picture of the table's own paint (its cells hidden) under the native table
+    const gradient: MeasuredElement = { ...grid, paint: { ...NO_PAINT, image: true } };
+    expect(pictureJobs({ slides: [{ ...body, elements: [gradient] }] }, 'named').map((j) => [j.key, j.mode])).toEqual([['body/grid', 'self']]);
+    const pictured = onBody(gradient, new Map([[pictureKey('body', 'grid'), PNG]]));
+    expect(pictured.map((o) => [o.kind, o.name])).toEqual([['image', 'grid:fill'], ['table', 'grid']]);
+    expect(pictured[0]).toMatchObject({ options: { data: PNG, objectName: 'grid:fill', x: inches(128), y: inches(229), w: inches(400), h: inches(120) } });
+    // an unpainted table: the native table alone, as before
+    expect(onBody(grid).map((o) => o.name)).toEqual(['grid']);
+  });
   // (the exports-capture regressions end)
 });
