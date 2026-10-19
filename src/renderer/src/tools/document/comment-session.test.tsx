@@ -26,7 +26,7 @@ import { useSessions } from '../../stores/sessions';
 import { shownSession } from '../../panel/host';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { registerCommentComposer, openCommentComposer } from '../code/anchor/anchor';
-import { useArtifactCommentTarget } from './comment-session';
+import { startCommentSession, useArtifactCommentTarget, usePendingComment } from './comment-session'; // P3-F F4 review B 3: startCommentSession, usePendingComment
 import { useDocumentComments } from './comments';
 
 const SHOWN = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
@@ -391,17 +391,30 @@ describe('a comment from a document with no chat beside it', () => {
     expect(reach.discard).not.toHaveBeenCalledWith(second.threadId);
   });
 
-  it('a choice made after the comment was closed starts nothing', async () => {
-    const { reach, comment } = mount({ context: DIRECTORY });
-    comment();
+  // review B 3: the answer a notice holds, given after a later Comment replaced that notice (a press React would no longer
+  // deliver, so the notice's own `decide` is called), starts nothing and says nothing over the later notice
+  it('an answer from a notice a later Comment replaced starts nothing', async () => {
+    let latest: ReturnType<typeof usePendingComment> = null;
+    function Probe({ seen }: { seen(pending: ReturnType<typeof usePendingComment>): void }) {
+      seen(usePendingComment('stale-host'));
+      return null;
+    }
+    render(<Probe seen={(pending) => (latest = pending)} />);
+    const artifactId = crypto.randomUUID();
+    const open = vi.fn();
+    act(() => startCommentSession({ hostId: 'stale-host', artifactId, threadId: passage.threadId, label: 'Q3 plan, Main', context: DIRECTORY, open }));
     await act(async () => {});
     await act(() => fake.reply('session.create', { appSessionId: STARTED, intent: intent(STARTED) }));
     await act(() => fake.reply('session.start', needsTrust(STARTED)));
-    const trustAndStart = screen.getByRole('button', { name: 'Trust and start' });
-    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
-    act(() => trustAndStart.click()); // a stale press on the notice that went
-    expect(fake.invoked('session.start')).toHaveLength(1);
+    const asked = latest!.notice;
+    if (asked.status !== 'trust') throw new Error(`the notice asks no trust: ${asked.status}`);
+    act(() => startCommentSession({ hostId: 'stale-host', artifactId, threadId: second.threadId, label: 'Q3 plan, Main', context: { kind: 'none' }, open }));
+    expect(latest!.threadId).toBe(second.threadId);
+    act(() => asked.decide('accepted'));
+    await act(async () => {});
+    expect(fake.invoked('session.start'), 'the replaced notice’s answer starts nothing').toHaveLength(1);
+    expect(latest!.notice.status, 'the later notice stands').toBe('none');
+    expect(open).not.toHaveBeenCalled();
   });
 
   it('another card a start meets (the relay’s) still says so with Open session, offering no trust choice', async () => {
