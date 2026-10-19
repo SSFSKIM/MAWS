@@ -40,6 +40,14 @@ export function DeckMain(props: DeckEditorBodyProps) {
 }
 
 const NO_SESSION = () => () => {};
+/**
+ * M8: a version preview's time, kept in its session's timings (the e2e seam's). Outside the component, where the React
+ * Compiler refuses `??=` and a write to a hook's value (L255); the timings are the session's own record, read by no
+ * render.
+ */
+function recordPreview(session: DeckSession, ms: number): void {
+  (session.timings.previewMs ??= []).push(ms);
+}
 const NO_TARGET = { context: { kind: 'none' } } as const; // P3-F1: unused while the target is unread (no comments offered)
 /** M6: the panel open beside the stage (the header shows it pressed); null before the deck opens. */
 function useRail(session: DeckSession | null) {
@@ -119,7 +127,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   // M8: the deck's history over the tab's replica and history api
   const handle = snapshot.handle;
   const history = useMemo(() => (state.history && handle ? { api: state.history, handle } : undefined), [state.history, handle]);
-  const onPreviewDrawn = useCallback((ms: number) => session && (session.timings.previewMs ??= []).push(ms), [session]);
+  const onPreviewDrawn = useCallback((ms: number) => session && recordPreview(session, ms), [session]);
   const onThumbnailsDrawn = useCallback((thumbnails: number) => session?.markDrawn(thumbnails), [session]);
 
   if (snapshot.failed !== null) return <Notice>{`This presentation could not be opened: ${snapshot.failed}`}</Notice>;
