@@ -231,6 +231,23 @@ describe('a comment from a document with no chat beside it', () => {
     expect(reach.discard).toHaveBeenCalledWith(passage.threadId);
   });
 
+  // The history-anchors review (scalpel-5#1): a second Comment on the same editor replaces the notice in its place; the
+  // new one takes the keyboard as the first did, so its Escape is heard.
+  it('no context: a second Comment on the same editor gives its notice the keyboard, and Escape withdraws it', async () => {
+    const { reach, comment } = mount({ context: { kind: 'none' } });
+    comment();
+    await act(async () => {});
+    expect(notice()).toBe(document.activeElement);
+    act(() => notice()!.blur()); // the second Comment is a click on the page's own control
+    comment(second);
+    await act(async () => {});
+    expect(reach.setActive).toHaveBeenLastCalledWith(second.threadId);
+    expect(notice(), 'the replacing notice has the keyboard').toBe(document.activeElement);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(notice()).toBeNull();
+    expect(reach.discard).toHaveBeenCalledWith(second.threadId);
+  });
+
   it('a directory: nothing on mount; Comment starts a session there, then opens the card on it with Send to main chosen', async () => {
     const { reach, comment } = mount({ context: DIRECTORY });
     await act(async () => {});
