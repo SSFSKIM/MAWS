@@ -3,7 +3,8 @@
 // through the one writer, from the panel's reproducers.
 import { describe, expect, it } from 'vitest';
 import { applyEdit } from './patch-writer';
-import { coveredIn, ids, liveThreads, nodeOf, pmOf, seedDoc, textOf } from './writer.fixture';
+import { addThread } from './threads';
+import { TAB, coveredIn, ids, liveThreads, nodeOf, now, pmOf, seedDoc, textOf } from './writer.fixture';
 
 // scalpel-1#2 and scalpel-3#1's copied-id case: a `^id` copied from the read keeps that block wherever the agent writes
 // it and whatever type it gives it (format.md), so its comments and its authorship stay with it.
@@ -37,5 +38,16 @@ describe('literal milestone text in a raw source', () => {
     expect(pmOf(doc, 'd1').attrs.source).toBe('graph TD\n  A["<c:label>"] --> C');
     applyEdit(doc, [{ op: 'replace_block', id: 'd1', markdown: ':::diagram\ngraph TD\n  A["<c:label>"] --> D\n:::\n^d1' }]);
     expect(pmOf(doc, 'd1').attrs.source).toBe('graph TD\n  A["<c:label>"] --> D');
+  });
+});
+
+// scalpel-3#3: a block thread (a chart's; it carries no mark) whose block the batch deletes is reported orphaned too
+describe('the orphans a batch reports', () => {
+  it('names a block thread whose block the batch deleted, and not one whose block it kept', () => {
+    const chart = { type: 'chart', attrs: { id: 'c1', source: 'sales', spec: { view: 'bar', x: 'region', y: 'total', title: 'Sales by region' } } };
+    const doc = seedDoc({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Intro' }] }, chart, { type: 'paragraph', attrs: { id: 'p2' }, content: [{ type: 'text', text: 'Notes' }] }] }, {});
+    addThread(doc, { threadId: 'tb', tabId: TAB, blockId: 'c1', quote: 'chart: Sales by region', anchor: { kind: 'block' }, by: { kind: 'human' }, at: now(), body: 'On the chart.' });
+    expect(applyEdit(doc, [{ op: 'delete', id: 'p1' }]).orphaned).toEqual([]);
+    expect(applyEdit(doc, [{ op: 'delete', id: 'c1' }]).orphaned).toEqual(['tb']);
   });
 });

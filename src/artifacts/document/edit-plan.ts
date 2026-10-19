@@ -20,7 +20,7 @@ import { EditError, type ApplyOptions, type EditRefusal, type Op, type OpResult 
 import { diffCells, EMBED, equalMap, type DiffCell, type Hunk } from './inline-diff';
 import { docMarkdown, stripMilestones } from './markdown';
 import { nanoid8, schemaFor } from './schema';
-import { getThread } from './threads';
+import { blockThreads, getThread } from './threads';
 
 // ── cells of ProseMirror textblocks ──
 export interface PMCell extends DiffCell {
@@ -898,8 +898,20 @@ class Planner {
     }
   }
 
-  /** Open threads whose last text the batch removed (derived; checked against the blocks the batch did not touch). */
+  /** Open threads whose last text, or whose block (a block thread carries no mark), the batch removed (derived). */
   orphans(): string[] {
+    const out = this.passageOrphans();
+    for (const [threadId, blockId] of blockThreads(this.doc)) {
+      // a block in a top-level block the batch did not touch is still there
+      const found = this.index.find(blockId);
+      if (!found || !this.tops.has(this.keyOf(found.top)) || this.locate(blockId) || out.includes(threadId)) continue;
+      if (getThread(this.doc, threadId)?.status === 'open') out.push(threadId);
+    }
+    return out;
+  }
+
+  /** Open threads whose last text the batch removed (checked against the blocks the batch did not touch). */
+  private passageOrphans(): string[] {
     const before = new Set<string>();
     const after = new Set<string>();
     for (const state of this.tops.values()) {
