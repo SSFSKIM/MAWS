@@ -18,10 +18,13 @@
 //   rail and card, the history comparison and the Export sheet, wide (the design's main tab; the card in the panel
 //   maximized beside the chat, where a comment goes) and narrow (the panel), each screenshotted and measured before its
 //   bounds are read.
+// - P3-F wave S F3: the design in the panel at its 280 px minimum, its toolbar wrapped by whole controls (C's
+//   `.deck-toolbar` rules, no longer the workbench's own).
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject } from './support/sidebar';
+import { resizePanel, squeezedControls } from './support/toolbar-controls';
 import {
   armFrameProbe,
   boardAt,
@@ -266,6 +269,46 @@ test('a design in the panel and a main tab: two replicas, every board mounted th
   expect(phoneBox.x + phoneBox.width).toBeLessThanOrEqual(worldBox.x + worldBox.width + 1);
   expect(phoneBox.y + phoneBox.height).toBeLessThanOrEqual(worldBox.y + worldBox.height + 1);
   expect(geometry.outside, 'the editor’s chrome outside the editor').toEqual([]);
+
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// P3-F wave S, F3 (docs/doperpowers/plans/2026-10-18-p3-f-finish.md, Wave S triage c37, obs 9, 7.1): the workbench's
+// toolbar is C's `.deck-toolbar`, whose wrap rules are now that class's own (the workbench's scoped copies deleted). In
+// the narrowest panel it wraps by whole controls, none squeezed, wrapped inside or overlapping, every control inside
+// the panel: with nothing selected, and with the phone's heading selected (its role in Text style).
+test('a design in the panel at its 280 px minimum: the toolbar wraps by whole controls, none squeezed, wrapped inside or overlapping', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const id = await createDesign(page, 'Launch screens', DESIGN_FILES);
+  repo = await ScratchRepo.create({ sentinels: false });
+  const project = await ok<{ name: string }>(page, 'session.projects.add', { directory: repo.root });
+  await openProject(page, project.name);
+  await newChatIn(page, project.name);
+  const panel = page.locator('[data-region="panel"]');
+  await panel.getByRole('button', { name: 'Add a tool' }).click();
+  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  const inPanel = panel.locator(`[data-design-artifact="${id}"]`);
+  await expect(inPanel.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
+  await resizePanel(page, 280);
+  const toolbar = inPanel.getByRole('toolbar', { name: 'Design' });
+  await expect(toolbar.getByRole('button', { name: 'Text style', exact: true })).toBeVisible();
+
+  await test.info().attach('design-panel-280', { body: await panel.screenshot(), contentType: 'image/png' });
+  expect(await squeezedControls(toolbar, { within: panel }), 'nothing selected').toEqual([]);
+  expect((await toolbar.boundingBox())!.height, 'the row wrapped').toBeGreaterThan(36);
+
+  await inPanel.getByRole('button', { name: 'Boards', exact: true }).click();
+  await inPanel.getByRole('button', { name: /^Phone, / }).click();
+  await expect(inPanel.locator('[data-design-rail="boards"]')).toHaveCount(0);
+  await inPanel.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-selection');
+  const heading = (await inPanel.locator('[data-board-id="phone"] [data-eid="title"]').boundingBox())!;
+  await page.mouse.click(heading.x + heading.width / 2, heading.y + heading.height / 2);
+  await expect.poll(async () => (await viewOf(page, id, 'panel')).selection).toEqual(['title']);
+  await test.info().attach('design-panel-280-selected', { body: await panel.screenshot(), contentType: 'image/png' });
+  expect(await squeezedControls(toolbar, { within: panel }), 'the phone’s heading selected').toEqual([]);
 
   expect(launch!.consoleErrors()).toEqual([]);
 });

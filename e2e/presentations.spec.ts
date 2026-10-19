@@ -19,6 +19,8 @@
 //   a picture copied across decks drawn from the second deck's own store.
 // - M5, the scale gate's drag (Acceptance 7): a drag's move-to-frame p95 on the 100-slide deck while an agent
 //   republishes, measured through the seam, the 1-minute load average beside it.
+// - P3-F wave S F3: the deck in the panel at its 280 px minimum, its toolbar wrapped by whole controls (the owner's
+//   obs 9: labels one letter a line over the canvas).
 import { loadavg } from 'node:os';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
@@ -27,6 +29,7 @@ import { traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { withNativeClipboard } from './support/clipboard';
 import { newChatIn, openProject } from './support/sidebar';
+import { resizePanel, squeezedControls } from './support/toolbar-controls';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -319,6 +322,42 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await expect.poll(() => fitted.evaluate((n) => getComputedStyle(n).fontSize)).toBe('24px'); // fits at the role's new size
   await editDeck(page, id, { op: 'setOverride', name: '--ds-line', value: null });
   await expect(ring).toHaveCSS('stroke-width', '4px');
+
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// P3-F wave S, F3 (docs/doperpowers/plans/2026-10-18-p3-f-finish.md, Wave S triage c37, c40, obs 9): in the narrowest
+// panel the toolbar wraps onto more rows by whole controls: no button narrower than its label, none wrapping it a letter
+// a line, none over another, the zoom select whole, every control inside the panel; with nothing selected (the owner's
+// view: Text style, Comments) and with a heading selected (its role in Text style).
+test('a deck in the panel at its 280 px minimum: the toolbar wraps by whole controls, none squeezed, wrapped inside or overlapping', async () => {
+  test.setTimeout(120_000);
+  repo = await ScratchRepo.create({ sentinels: false });
+  const page = await ready();
+  const id = await createDeck(page, 'Q3 review', FILES);
+  const project = await ok<{ name: string }>(page, 'session.projects.add', { directory: repo.root });
+  await openProject(page, project.name);
+  await newChatIn(page, project.name);
+  const panel = page.locator('[data-region="panel"]');
+  await panel.getByRole('button', { name: 'Add a tool' }).click();
+  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  const inPanel = panel.locator(`[data-deck-artifact="${id}"]`);
+  await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
+  await resizePanel(page, 280);
+  const toolbar = inPanel.getByRole('toolbar', { name: 'Deck' });
+  await expect(toolbar.getByRole('button', { name: 'Text style', exact: true })).toBeVisible();
+
+  await test.info().attach('deck-panel-280', { body: await panel.screenshot(), contentType: 'image/png' });
+  expect(await squeezedControls(toolbar, { within: panel }), 'nothing selected').toEqual([]);
+  expect((await toolbar.boundingBox())!.height, 'the row wrapped').toBeGreaterThan(36);
+
+  const title = (await inPanel.locator('[data-stage-slide="cover"] [data-eid="title"]').boundingBox())!;
+  await page.mouse.click(title.x + title.width / 2, title.y + title.height / 2);
+  await expect(inPanel.locator('[data-overlay] [data-selected="title"]')).toHaveCount(1);
+  await test.info().attach('deck-panel-280-selected', { body: await panel.screenshot(), contentType: 'image/png' });
+  expect(await squeezedControls(toolbar, { within: panel }), 'a heading selected').toEqual([]);
 
   expect(launch!.consoleErrors()).toEqual([]);
 });

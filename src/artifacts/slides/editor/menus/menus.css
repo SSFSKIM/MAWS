@@ -13,8 +13,8 @@
   margin: 0;
 }
 
-/* Text style */
-.deck-text-style {
+/* Text style: over `.deck-button`'s 26 px whichever sheet loads first (this one comes before chrome.css in the app) */
+.deck-button.deck-text-style {
   min-width: 84px;
   justify-content: flex-start;
 }

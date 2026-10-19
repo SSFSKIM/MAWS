@@ -46,16 +46,35 @@
   }
 }
 
-/* toolbar */
+/* toolbar: one row when it fits; in a narrow editor (the panel's 280 px included) it wraps onto more rows by whole
+   controls, never inside one (P3-F F3, the owner's obs 9: a shrunk button's label stood one letter a line over the
+   canvas). Every toolbar of the family is this class: the deck's and its history bar, the design workbench's and its. */
 .deck-toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  height: 36px;
+  gap: 2px 4px;
+  min-height: 36px;
   flex-shrink: 0;
-  padding: 0 8px;
+  padding: 4px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-raised);
+}
+/* each item at its own width; the notice ellipsizes and the spacer takes what is left */
+.deck-toolbar > :not(.deck-notice):not(.deck-toolbar-spacer):not(.deck-element-bar),
+.deck-element-bar > * {
+  flex-shrink: 0;
+}
+/* the element bar is a group of controls, not one: it may be narrower than all of them in a row (its own controls never
+   shrink, they wrap within it), else its one-row width overflows a narrow editor */
+.deck-toolbar > .deck-element-bar {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+.deck-toolbar button,
+.deck-toolbar select {
+  white-space: nowrap;
 }
 .deck-toolbar-spacer {
   flex: 1;
@@ -421,6 +440,7 @@
 /* M5: the toolbar's element controls */
 .deck-element-bar {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
 }
