@@ -6,6 +6,7 @@ import { flatten, rgbToHex, type ColorValue, type Rgb } from './color';
 import { parseCssColor, parseFontStack } from './css-read';
 import { OFFICE_FACES, OFFICE_KEY, OFFICE_SLOTS, type OfficeSlot } from './extensions';
 import { resolveTokens, resolveValueAgainst, type ResolvedToken } from './resolve';
+import { safeOverrides } from './resolve-vars';
 import { byIdentity, cssNamesOf, tokenIdentity } from './roles';
 import type { TokenSet } from './tokens';
 import { aliasPath, isAlias, isPointer, pointerAsAlias } from './values';
@@ -46,18 +47,16 @@ function officeFace(family: string | readonly string[]): string {
 
 const WHITE: Rgb = { r: 1, g: 1, b: 1, alpha: 1 };
 
-const OVERRIDE_NAME = /^--ds-[A-Za-z0-9_-]+$/;
-
 /**
- * The overrides the theme can take, by `--ds-*` name: a value that reads as a colour (a hex, a named colour, `rgb()`,
- * `hsl()` and the other colour functions with plain arguments), or as a font stack of plain names. Anything else (a
- * `var()`, a gradient, a `color-mix()`) is left to the CSS a consumer renders with.
+ * The overrides the theme can take, of those a scope and an export take (`safeOverrides`: a priority such as
+ * `!important`, or anything unsafe, is dropped here too), by `--ds-*` name: a value that reads as a colour (a hex, a
+ * named colour, `rgb()`, `hsl()` and the other colour functions with plain arguments), or as a font stack of plain
+ * names. Anything else (a `var()`, a gradient, a `color-mix()`) is left to the CSS a consumer renders with.
  */
 function themeOverrides(overrides: TokenOverrides | undefined): { colors: Map<string, ColorValue>; fonts: Map<string, string[]> } {
   const colors = new Map<string, ColorValue>();
   const fonts = new Map<string, string[]>();
-  for (const [name, value] of Object.entries(overrides ?? {})) {
-    if (!OVERRIDE_NAME.test(name) || typeof value !== 'string') continue;
+  for (const [name, value] of safeOverrides(overrides)) {
     const color = parseCssColor(value);
     if (color) colors.set(name, color);
     const stack = parseFontStack(value.trim());
