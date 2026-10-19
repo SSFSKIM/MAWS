@@ -197,6 +197,34 @@ describe('the toolbar', () => {
     expect(two.marks).toEqual([{ type: 'code' }]);
     expect(three.marks).toEqual([{ type: 'link', attrs: { href: 'https://example.com/a', title: null } }]);
   });
+
+  // P3-F panel scalpel-3#4: the Insert menu closes on Escape (the keyboard back on Insert when it was in the menu) and on
+  // a press outside it, not only on an item or on Insert again
+  it('closes the Insert menu on Escape and on a press outside it, inserting nothing', async () => {
+    const { editor } = await mount(doc(para('p1', 'Start')));
+    const before = JSON.stringify(editor().getJSON());
+    const menu = () => screen.queryByRole('menu');
+    const insertButton = () => within(toolbar()).getByRole('button', { name: 'Insert' });
+    // opened by a click, the caret stays in the page (the toolbar keeps the selection): Escape there closes it
+    press('Insert');
+    expect(menu()).not.toBeNull();
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'Escape' }));
+    expect(menu(), 'the menu after Escape in the page').toBeNull();
+    // the keyboard inside the menu: Escape closes it and puts the keyboard back on Insert
+    press('Insert');
+    const item = screen.getByRole('menuitem', { name: 'Table' });
+    act(() => item.focus());
+    act(() => void fireEvent.keyDown(item, { key: 'Escape' }));
+    expect(menu(), 'the menu after Escape in the menu').toBeNull();
+    expect(document.activeElement).toBe(insertButton());
+    // a press on Insert itself leaves the toggle to its click; a press in the page closes the menu
+    press('Insert');
+    act(() => void fireEvent.pointerDown(insertButton()));
+    expect(menu()).not.toBeNull();
+    act(() => void fireEvent.pointerDown(editor().view.dom));
+    expect(menu(), 'the menu after a press in the page').toBeNull();
+    expect(JSON.stringify(editor().getJSON())).toBe(before);
+  });
 });
 
 describe('tabs', () => {

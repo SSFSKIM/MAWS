@@ -9,7 +9,7 @@
 import type { Editor, JSONContent } from '@tiptap/core';
 import { NodeSelection, Selection } from '@tiptap/pm/state';
 import { useEditorState } from '@tiptap/react';
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type MouseEvent, type ReactNode, type Ref } from 'react';
 import { actorKey } from '@shared/artifacts/actor';
 import { nanoid8 } from '../schema';
 import type { EditorHost } from './host-types';
@@ -138,6 +138,30 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
   useEffect(() => {
     if (!state.editable) setMenu(null);
   }, [state.editable]);
+  // P3-F: the Insert menu also goes on Escape in the toolbar or the page (the keyboard back on Insert when it was in the
+  // menu; a click leaves it in the page) and on a press anywhere outside the menu and its button
+  const insertButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (menu !== 'insert') return;
+    const within = (element: Element | null, target: EventTarget | null) => target instanceof Node && Boolean(element?.contains(target));
+    const onPointerDown = (event: PointerEvent) => {
+      if (!within(insertAnchor.current, event.target)) setMenu(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      const inMenu = within(insertAnchor.current, event.target);
+      if (!inMenu && !within(bar.current, event.target) && !within(editor.isDestroyed ? null : editor.view.dom, event.target)) return;
+      event.preventDefault();
+      setMenu(null);
+      if (inMenu) insertButton.current?.focus();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menu, editor]);
 
   const setStyle = (value: string) => {
     if (!writable(editor)) return;
@@ -272,7 +296,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
         )}
         <span className="doc-toolbar-separator" />
         <span ref={insertAnchor} className="doc-menu-anchor">
-          <Tool label="Insert" disabled={disabled} expanded={menu === 'insert'} onClick={() => setMenu(menu === 'insert' ? null : 'insert')}>
+          <Tool ref={insertButton} label="Insert" disabled={disabled} expanded={menu === 'insert'} onClick={() => setMenu(menu === 'insert' ? null : 'insert')}>
             Insert ▾
           </Tool>
           {menu === 'insert' && (
@@ -352,9 +376,10 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
 // A toolbar button keeps the editor's selection: the mousedown that would move focus off the page is cancelled.
 const keepSelection = (event: MouseEvent) => event.preventDefault();
 
-function Tool({ label, active, disabled, expanded, onClick, children }: { label: string; active?: boolean; disabled?: boolean; expanded?: boolean; onClick(): unknown; children: ReactNode }) {
+function Tool({ label, active, disabled, expanded, onClick, children, ref }: { label: string; active?: boolean; disabled?: boolean; expanded?: boolean; onClick(): unknown; children: ReactNode; ref?: Ref<HTMLButtonElement> }) {
   return (
     <button
+      ref={ref}
       type="button"
       className="doc-tool"
       aria-label={label}
