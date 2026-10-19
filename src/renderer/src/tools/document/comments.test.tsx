@@ -73,6 +73,17 @@ describe('the artifact-comment anchor', () => {
     expect(long.locator.endsWith('…')).toBe(true);
   });
 
+  // P4 W1-B (tracker L275): a default tab carries the document's title, and "P3 sitting note, P3 sitting note" said it twice
+  it('names the tab only when it adds something to the title', () => {
+    const label = (title: string, tabTitle: string) => artifactCommentAnchor({ artifactId: ARTIFACT, title, ...passage, tabTitle }).label;
+    expect(label('P3 sitting note', 'P3 sitting note')).toBe('P3 sitting note');
+    expect(label('P3 sitting note', ' p3  Sitting note ')).toBe('P3 sitting note');
+    expect(label('P3 sitting note', '')).toBe('P3 sitting note');
+    expect(label('P3 sitting note', 'Appendix')).toBe('P3 sitting note, Appendix');
+    expect(label('T'.repeat(300), 'T'.repeat(300))).toHaveLength(200); // LABEL_MAX still caps
+    expect(label('T'.repeat(300), 'Appendix')).toHaveLength(200);
+  });
+
   it('goes to the agent by both routes unchanged, its tag round-tripping', async () => {
     const anchor = artifactCommentAnchor({ artifactId: ARTIFACT, title: 'Q3 plan', ...passage });
     await expect(sendComment('main', { parent: PARENT, anchor, text: 'Should this be monthly?', screenshot: null })).resolves.toEqual({ ok: true, disposition: 'sent' });
