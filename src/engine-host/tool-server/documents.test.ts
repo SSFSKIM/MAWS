@@ -398,6 +398,24 @@ describe('artifact_edit', () => {
     }
   });
 
+  it('a batch that fails after its frame published releases its outline at once, and its turn’s end clears it', async () => {
+    const { id, revision } = await readSeed();
+    const tool = artifactEditTool(deps({ presenceEditingMs: undefined }));
+    const shown = () => world.service.replica(SELF, id).provider.awareness.getLocalState() as { editing?: { blocks: string[] } } | null;
+    vi.spyOn(world.store, 'link').mockRejectedValueOnce(new Error('the link row failed')); // after the frame published and held
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await expect(call(tool, { artifact: id, baseRevision: revision, ops: [{ op: 'replace_text', block: 'p2', old: 'scheduled for Friday', new: 'scheduled for Monday' }] })).rejects.toThrow('the link row failed');
+      expect(shown(), 'no outline left drawn by the failed batch').not.toHaveProperty('editing');
+      expect(shown()).toMatchObject({ name: expect.any(String), color: expect.any(String) });
+      await world.store.endTurn(SELF);
+      expect(shown(), 'nothing held: the turn’s end clears at once').toBeNull();
+    } finally {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    }
+  });
+
   it('a turn that ends inside the hold leaves the outline to it, and nothing after; a turn with no held outline clears at once', async () => {
     const { id, revision } = await readSeed();
     const tool = artifactEditTool(deps({ presenceEditingMs: undefined }));
