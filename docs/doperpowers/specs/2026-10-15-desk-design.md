@@ -6172,6 +6172,29 @@ a hub that connects into machines (§2).
   of the org view's sockets to active projects.
   Date/Author: 2026-10-19, the remote identity design's MAWS milestone
   (branch `desk-grid-active`).
+- Decision: MAWS itself, ported to the web as fully as possible, is #52's yardstick for features. On the evening of
+  2026-10-19 the owner refined the protocol phase's target, as recorded by the RC research session on #52 (its
+  comment of 21:51Z, as edited):
+  - **Features:** MAWS. Claude Desktop's SSH mode is the reference design for remoting only. In it, a daemon on the
+    machine owns the session processes and re-adopts them after a disconnect, the same split as MAWS's E10
+    supervisor.
+  - **Reach and performance:** still benchmarked against the Claude Code binary's Remote Control and claude.ai's RC
+    client.
+
+  The research for the phase is on #52 (comment 6279243598) and in MAWS PR #79 (`research/desk-remote/`).
+  - It leaves three first-order decisions to the phase's design and the owner:
+    - whether to reverse the desk's "bridge, not SDK host" call (§2), since web MAWS hosts sessions;
+    - the trust design for carrying MAWS's X2 surface over the hub, which the machine does not trust;
+    - the hub's storage.
+  - It recommends:
+    - keeping the 60 s freshness window for discrete actions, re-sealing an answer or decision while its request is
+      pending (the 20:15Z diagnosis's rule);
+    - application-level pings between browser and hub;
+    - cursors keyed by session, launch epoch and seq.
+
+  Rejected then: Remote Control's feature range as the yardstick. RC is the narrowest of Desktop's session kinds,
+  because the client is a guest on a CLI it does not own, and the desk is meant to reach past it.
+  Date/Author: 2026-10-19, the owner (through the RC research session); folded by the design session.
 
 ## Outcomes & Retrospective
 
@@ -6231,7 +6254,12 @@ the Tracking Map and the Decision Log:
   - the desk benchmarks the Claude Code binary's Remote Control and claude.ai's RC surfaces;
   - the destination is one web workspace where a single client controls agents on every machine and project.
 
-  The evidence gathered for it so far is on #52: the baseline table, and the diagnosed failures of 2026-10-19.
+  Later that evening the owner set MAWS itself, ported to the web, as the feature yardstick, with Claude Desktop's
+  SSH mode as the reference design for remoting (the Decision Log's last 2026-10-19 entry). The evidence is on #52:
+  the baseline table and the diagnosed failures of 2026-10-19. The research is in MAWS PR #79. The platform direction
+  of 2026-10-19 is on #52 too: a machine as the unit of connection, the org as the unit of access, IAM the machine
+  verifies, and accounts in several orgs. Its first step, repositories becoming projects by their remote, is being
+  built.
 - Its likely prerequisites: MAWS #36 (sign-in and hosting), #37 (machine join tokens) and #38 (the org key's split).
 - Phase 1 residue: MAWS #43, #44 and #45, and doperpowers #94, #95 and #96.
 - The sminos org directory (doperpowers #93) is specced and being built.
