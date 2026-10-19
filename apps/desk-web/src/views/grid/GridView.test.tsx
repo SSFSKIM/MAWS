@@ -68,6 +68,13 @@ it('drops a project behind Show all once its last session ends, and offers no to
   expect(toggle().textContent).toBe('Show all (2)');
 });
 
+it("shows a project whose summary carries no live count, as a Registry on the version before it sends", () => {
+  const older = { ...summary('arkho'), live: undefined } as unknown as ProjectSummary;
+  useGrid.setState({ projects: [older, summary('scratch')] });
+  render(<GridView onEnroll={() => {}} />);
+  expect(tiles()).toEqual(['arkho']);
+});
+
 it('says no project has a live session when none is active, with every project one tap away', () => {
   useGrid.setState({ projects: [summary('MAWS'), summary('mini', { kind: 'machine' })] });
   render(<GridView onEnroll={() => {}} />);

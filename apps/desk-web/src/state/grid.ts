@@ -35,8 +35,9 @@ export function sortForGrid(projects: readonly ProjectSummary[]): ProjectSummary
 }
 
 /** A project the grid shows by default: one with a session that has a process, or one waiting on you (a stopped seat's
- * open question is still yours to answer). */
-export const isActive = (project: ProjectSummary): boolean => project.live > 0 || project.waiting > 0;
+ * open question is still yours to answer). A Registry still on the version before `live` (a deploy's first minutes)
+ * sends none, and its projects show as every project did then. */
+export const isActive = (project: ProjectSummary): boolean => project.live !== 0 || project.waiting > 0;
 
 export function activeProjects(projects: readonly ProjectSummary[]): ProjectSummary[] {
   return projects.filter(isActive);
