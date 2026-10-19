@@ -30,11 +30,12 @@ const miniOffline = (hub: HubDouble) =>
     { machine: 'mini', online: false, policy: { read_only: false, ceiling: 'default' }, checkouts: [] },
     { machine: 'SK.local', online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [] },
   ]);
-/** A session's subscription answered with an empty transcript, as a machine whose session has written nothing yet. */
-async function emptyTranscript(hub: HubDouble, session: string) {
+/** A session's subscription answered with its transcript: one prompt, from before anything a test sends it. */
+async function shortTranscript(hub: HubDouble, session: string) {
   await expect.poll(() => hub.subscriptions(PROJECT).some((s) => s.session === session)).toBe(true);
   const { sub } = hub.subscriptions(PROJECT).find((s) => s.session === session)!;
-  hub.sendSub(PROJECT, sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: false }, streaming: [] });
+  const prompt = { type: 'user', uuid: 'row-first', parentUuid: null, isSidechain: false, timestamp: '2026-10-15T08:00:00.000Z', sessionId: session, message: { role: 'user', content: 'Look at the browser tool.' } };
+  hub.sendSub(PROJECT, sub, 'snapshot', { rows: [prompt], more: false, subagents: [], presence: { record: null, bridge: false }, streaming: [] });
 }
 
 /** The web `human`s the browser sent, as it sealed them. */
@@ -257,8 +258,13 @@ test('a retired session ends with who retired it and no Resume; an ended one off
   presence(hub, 'mini', S.rests, null);
   await nav(page).locator(`[data-session="${S.rests}"]`).click();
   await expect(page.getByTestId('composer-note')).toHaveText('recorded, not delivered: a closed terminal session is reopened only by Resume');
-  await expect(center(page).getByTestId('end-marker').getByRole('button', { name: 'Resume' })).toBeEnabled();
-  await emptyTranscript(hub, S.rests); // its transcript is in: what it was sent and never saw waits at its tail
+  // Resume waits until mini is known to serve the session's transcript: resuming one it holds none of starts it empty.
+  const markerResume = center(page).getByTestId('end-marker').getByRole('button', { name: 'Resume' });
+  await expect(markerResume).toBeDisabled();
+  await expect(markerResume).toHaveAttribute('title', "offered once mini serves cua_repl's transcript");
+  await expect(header.getByRole('button', { name: 'Resume' })).toBeDisabled();
+  await shortTranscript(hub, S.rests); // its transcript is in: what it was sent and never saw waits at its tail
+  await expect(markerResume).toBeEnabled();
   const box = page.getByRole('textbox', { name: 'Message cua_repl' });
   await box.fill('a note for when you are back');
   await box.press('Enter');

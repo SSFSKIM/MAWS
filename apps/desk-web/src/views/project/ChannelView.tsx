@@ -24,7 +24,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent } from 'desk-hub/protocol';
 import { buildStream, byWhom, placedRequest, type PlacedRequest } from '../../conversation/stream';
-import { capabilities, kindOf, retiredBy } from '../../conversation/capabilities';
+import { kindOf, retiredBy } from '../../conversation/capabilities';
 import { eventLanding, landedItem, landingReady, landingStatus, type EventLanding } from '../../conversation/landing';
 import { refused } from '../../log/project-log';
 import { sessionName } from '../../log/projection';
@@ -34,7 +34,7 @@ import type { Channel } from '../../shell/layout';
 import type { DeskSession } from '../../shell/sessions';
 import { useProjectName } from '../../state/grid';
 import { GroupComposer, SessionComposer } from '../composer/Composer';
-import { useConnected, useDesk } from '../conversation/desk-context';
+import { useCapabilities, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
 import { StreamView } from '../conversation/StreamView';
 import { SessionLabel } from '../../shell/SessionLabel';
@@ -237,7 +237,7 @@ const retiredText = (by: string, member: string) => (by ? `Retired by ${byWhom(b
 function ResumeBar({ session }: { session: DeskSession }) {
   const { connection, member } = useDesk();
   const [rpc, setRpc] = useState<string | null>(null);
-  const can = capabilities(session, useConnected()).resume;
+  const can = useCapabilities(session).resume;
   const retired = retiredBy(session);
   if (retired !== null)
     return (
@@ -268,7 +268,7 @@ function SessionActions({ session, phone, status }: { session: DeskSession; phon
   const [rpc, setRpc] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [opened, setOpened] = useState(false);
-  const can = capabilities(session, useConnected());
+  const can = useCapabilities(session);
   const ended = session.group === 'ended';
   const retired = retiredBy(session);
   // On a phone the status word stays in view beside ⋯; Resume (or who retired it) replaces an ended session's composer.

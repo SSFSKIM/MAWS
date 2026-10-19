@@ -10,12 +10,12 @@ import { useRef, useState, type KeyboardEvent } from 'react';
 import { useStore } from 'zustand';
 import { address } from '../../conversation/address';
 import { complete, completionAt, insertTag, type Completion } from '../../conversation/completion';
-import { capabilities, turnRunning, type Capability } from '../../conversation/capabilities';
+import { turnRunning, type Capability } from '../../conversation/capabilities';
 import { sessionName } from '../../log/projection';
 import { useNarrow } from '../../shell/viewport';
 import type { DeskSession } from '../../shell/sessions';
 import { useProjectModels } from '../../state/models';
-import { useConnected, useDesk } from '../conversation/desk-context';
+import { useCapabilities, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
 
 const BOX = 'w-full resize-none rounded-md border border-border-strong bg-bg px-3 py-2 text-ui text-fg outline-accent focus-visible:outline-2';
@@ -136,7 +136,7 @@ export function SessionComposer({ session }: { session: DeskSession }) {
   const [modelOpen, setModelOpen] = useState(false);
   const narrow = useNarrow();
   const [more, setMore] = useState(false);
-  const can = capabilities(session, useConnected());
+  const can = useCapabilities(session);
   const running = turnRunning(session) && session.machineOnline !== false;
   const target = { session: session.session, alias: session.alias };
   const issue = async (promise: Promise<string>) => setRpc(await promise);

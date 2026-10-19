@@ -11,6 +11,7 @@ import { memoryLogRecord } from '../../log/record';
 import { ProjectConnection } from '../../project/connection';
 import { useLanding } from '../../pwa/service-worker';
 import type { DeskSession } from '../../shell/sessions';
+import { learnServed } from '../../shell/transcript-served';
 import { DeskContext } from '../conversation/desk-context';
 import { ChannelView } from './ChannelView';
 
@@ -94,6 +95,28 @@ it('draws every control that issues an RPC disabled while the project socket is 
     expect(button.title, name).toBe('not connected to the hub');
   }
   expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("offers an ended session's Resume only once its machine is known to serve its transcript, saying why until then", async () => {
+  const ended: DeskSession = { ...session(A, 'acc-ask71'), group: 'ended', member: false, ended: { by: '', reason: 'ended' }, presence: { record: null, bridge: false } };
+  const sessions = new Map([[A, ended]]);
+  render(
+    <DeskContext.Provider value={{ connection, member: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', sessions }}>
+      <ChannelView name="MAWS" channel={{ kind: 'session', session: A }} session={ended} events={[]} />
+    </DeskContext.Provider>,
+  );
+  const resume = () => screen.getByRole('button', { name: 'Resume' }) as HTMLButtonElement;
+  expect([resume().disabled, resume().title]).toEqual([true, "offered once mini serves acc-ask71's transcript"]);
+  const owner = {}; // the session's owner, as the session view's subscription would tell it
+  const where = { project: PROJECT, machine: 'mini', session: A };
+  act(() => learnServed(where, owner, 'none'));
+  expect([resume().disabled, resume().title]).toEqual([true, 'mini serves no transcript of acc-ask71 to resume']);
+  act(() => learnServed(where, owner, 'served'));
+  expect(resume().disabled).toBe(false);
+  fireEvent.click(resume());
+  await waitFor(() => expect(Object.values(connection.conversation.store.getState().rpcs).map((r) => [r.rpc.rpc, r.rpc.args])).toEqual([['resume', { session: A }]]));
+  act(() => learnServed(where, owner, null)); // the view let go: not known again
+  expect(resume().disabled).toBe(true);
 });
 
 it("draws a direct channel's session view on a desktop while its machine is online, its status word beside the actions; the log-built stream once it is offline", async () => {

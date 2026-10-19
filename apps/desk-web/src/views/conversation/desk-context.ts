@@ -2,8 +2,10 @@
 // what the web sends), and the project's sessions as the shell knows them.
 import { createContext, useContext } from 'react';
 import { useStore } from 'zustand';
+import { capabilities, type Capability, type Verb } from '../../conversation/capabilities';
 import type { ProjectConnection } from '../../project/connection';
 import type { DeskSession } from '../../shell/sessions';
+import { useTranscriptServed } from '../../shell/transcript-served';
 
 export type DeskContextValue = { connection: ProjectConnection; member: string; sessions: Map<string, DeskSession> };
 
@@ -18,4 +20,11 @@ export function useDesk(): DeskContextValue {
 /** Whether the project socket is welcomed: while it is not, no control that issues an RPC acts (`capabilities`). */
 export function useConnected(): boolean {
   return useStore(useDesk().connection.live, (s) => s.connected);
+}
+
+/** What `session` can do from here now (`capabilities`), with the socket's state and whether its machine serves its transcript. */
+export function useCapabilities(session: DeskSession): Record<Verb, Capability> {
+  const connected = useConnected();
+  const transcript = useTranscriptServed(session);
+  return capabilities({ ...session, transcript }, connected);
 }

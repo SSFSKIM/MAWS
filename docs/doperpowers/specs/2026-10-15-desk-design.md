@@ -625,6 +625,16 @@ button is pressed; the acceptance timings cite it]**
 | Retire | `--bg`: `claude stop`; terminal: `retired` recorded, the process stays the human's | `claude stop` | `retired` recorded, the process stays the human's | fails at once |
 | Resume (ended) | Resume RPC | Resume RPC | Resume RPC | fails at once |
 
+**[2026-10-19]** The web offers Resume only once the session's machine is
+known to serve its transcript (rows on the session's subscription; an empty
+snapshot says nothing, since the plane sends one for a running session whose
+transcript it cannot find): until then it is drawn disabled, and where the
+machine answers that it holds none (`end {session-ended}` at n 0) it is not
+offered, since
+`claude --bg --resume` of a session with no transcript starts an empty one
+(the owner's desk: a `--bg` copy that had taken a seat's name was resumed into
+nothing).
+
 Spawn is a machine RPC, not a session's; it fails at once for a machine
 that is offline.
 

@@ -357,8 +357,8 @@ export class HubDouble {
     this.broadcast(project, frame);
   }
 
-  /** A refusal of the hub's own, entered in the project's audit record and sent to its browsers. */
-  refuse(project: string, refusal: Refusal & { nonce?: string; machine?: string; member?: string }): void {
+  /** A refusal of the hub's own, entered in the project's audit record and sent to its browsers; `at` sets when it was recorded. */
+  refuse(project: string, refusal: Refusal & { nonce?: string; machine?: string; member?: string; at?: string }): void {
     this.record(project, { t: 'refused', refusal: { ...this.audit(), ...refusal } });
   }
 

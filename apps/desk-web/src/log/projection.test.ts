@@ -2,7 +2,7 @@
 // / ended), read from presence while the machine is online and from the last `state` event while it is not.
 import { describe, expect, it } from 'vitest';
 import type { LogEvent } from 'desk-hub/protocol';
-import { groupOf, groupSessions, openQuestions, projectSessions, sessionName, type ProjectedSession } from './projection';
+import { groupOf, groupSessions, namesakes, openQuestions, projectSessions, sessionName, type ProjectedSession } from './projection';
 
 const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
 const S2 = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a';
@@ -171,6 +171,27 @@ describe('groupSessions', () => {
     }));
     expect(groups.waiting.map((s) => s.alias)).toEqual(['raiser', 'asker']);
     expect(groups.working).toEqual([]);
+  });
+});
+
+describe('namesakes', () => {
+  const S3 = 'a5b99a8b-0ebe-4f5f-b6c0-b8bc32c64e0b';
+  it("finds the sessions another session of the project goes by the same name as: the name shown, or the alias it is addressed by", () => {
+    // The owner's desk, 2026-10-19: a titled seat, and a `--bg` copy the daemon renamed to its alias, retired as ended.
+    const seat = ev(`macbook/${S1}`, 'joined', { session: S1, alias: 'acc-ask71', name_source: 'seat', machine: 'macbook', cwd: '/w', worktree: '', role: '', seat: S1, by: '' });
+    const sessions = projectSessions([
+      seat,
+      ev(`macbook/${S1}`, 'titled', { session: S1, title: 'acc-ask71' }),
+      joined(S2, 'a5b99a8b', 'macbook'),
+      ev(`macbook/${S2}`, 'renamed', { session: S2, alias: 'acc-ask71', name_source: 'user' }),
+      ev(`macbook/${S2}`, 'retired', { session: S2, by: '', reason: 'ended' }),
+      joined(S3, 'maws-45', 'mini'),
+    ]);
+    expect(namesakes(sessions.values())).toEqual(new Set([S1, S2]));
+    // A title one session shows that is another's alias.
+    expect(namesakes([{ session: S1, title: 'maws-45', alias: 'acc-ask71' }, { session: S3, title: null, alias: 'maws-45' }])).toEqual(new Set([S1, S3]));
+    // A session whose title is its own alias is no namesake of itself.
+    expect(namesakes([{ session: S1, title: 'acc-ask71', alias: 'acc-ask71' }, { session: S3, title: null, alias: 'maws-45' }])).toEqual(new Set());
   });
 });
 

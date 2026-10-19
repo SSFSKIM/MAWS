@@ -51,6 +51,22 @@ export function sessionName(session: { title?: string | null; alias: string }): 
   return session.title || session.alias;
 }
 
+/**
+ * The sessions of a project that another of its sessions shares a name with — the name the desk shows (`sessionName`)
+ * or the alias it is addressed by — which a view tells apart by their ids (the owner's desk, 2026-10-19: a seat and a
+ * `--bg` copy that took its name both read acc-ask71 under Ended, and Resume went to the copy).
+ */
+export function namesakes(sessions: Iterable<{ session: string; title?: string | null; alias: string }>): Set<string> {
+  const byName = new Map<string, Set<string>>();
+  for (const s of sessions) {
+    for (const name of [sessionName(s), s.alias]) {
+      const ids = byName.get(name) ?? new Set<string>();
+      byName.set(name, ids.add(s.session));
+    }
+  }
+  return new Set([...byName.values()].filter((ids) => ids.size > 1).flatMap((ids) => [...ids]));
+}
+
 type Draft = ProjectedSession & { chargeTs: string; statusTs: string };
 
 const str = (value: unknown): string | null => (typeof value === 'string' ? value : null);

@@ -5,7 +5,7 @@ import { useMemo } from 'react';
 import { useStore } from 'zustand';
 import type { SessionPresence } from 'desk-hub/protocol';
 import { drawable } from '../log/project-log';
-import { groupOf, groupSessions, openQuestions, projectSessions, type Liveness, type OpenQuestion, type ProjectedSession, type SessionGroup } from '../log/projection';
+import { groupOf, groupSessions, namesakes, openQuestions, projectSessions, type Liveness, type OpenQuestion, type ProjectedSession, type SessionGroup } from '../log/projection';
 import type { LiveState, ProjectConnection } from '../project/connection';
 import { requestKey, type ConversationState } from '../project/conversation';
 
@@ -18,6 +18,8 @@ export type DeskSession = ProjectedSession & {
   machineOnline: boolean | null;
   /** The machine's owner set it read-only (its DX4 `machine` presence's policy): it runs nothing sent from outside it. */
   machineReadOnly?: boolean;
+  /** Another session of the project goes by its name or its alias (`namesakes`): its label then carries its id. */
+  namesake?: boolean;
 };
 
 /**
@@ -36,10 +38,10 @@ export function livenessOf(live: LiveState, requests: ConversationState['request
   };
 }
 
-function view(project: string, live: LiveState, session: ProjectedSession, liveness: Liveness): DeskSession {
+function view(project: string, live: LiveState, session: ProjectedSession, liveness: Liveness, namesake: boolean): DeskSession {
   const machineOnline = liveness.machineOnline ?? null;
   const machineReadOnly = live.machines[session.machine]?.policy?.read_only === true;
-  return { ...session, project, group: groupOf(session, liveness), presence: machineOnline === false ? null : (liveness.presence ?? null), machineOnline, machineReadOnly };
+  return { ...session, project, group: groupOf(session, liveness), presence: machineOnline === false ? null : (liveness.presence ?? null), machineOnline, machineReadOnly, namesake };
 }
 
 /** Every session the project's log names, grouped for the sidebar (each group newest member first). */
@@ -53,8 +55,9 @@ export function useDeskSessions(connection: ProjectConnection): { sessions: Map<
     const asking = openQuestions(entries);
     const liveOf = (s: ProjectedSession) => livenessOf(live, requests, asking, s);
     const groups = groupSessions(projected, liveOf);
+    const shared = namesakes(projected.values());
     const sessions = new Map<string, DeskSession>();
-    for (const s of projected.values()) sessions.set(s.session, view(connection.project, live, s, liveOf(s)));
+    for (const s of projected.values()) sessions.set(s.session, view(connection.project, live, s, liveOf(s), shared.has(s.session)));
     const viewOf = (s: ProjectedSession) => sessions.get(s.session)!;
     return {
       sessions,

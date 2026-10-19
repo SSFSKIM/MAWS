@@ -12,11 +12,12 @@
 // its delivery state in its bubble's foot; then the session's pending requests as the channel's cards, answered in
 // place, with an "N waiting ↓" pill while none of them is in view; then an ended or retired session's end marker. The ask
 // mod's async question rows carry the log's question and answer, or say the question was withdrawn unanswered. A
-// session whose machine serves no transcript for it (its subscription ended at n 0) draws the channel built from the
-// log instead, saying why (`fallback`). A tapped notification lands on its request's card at the tail, brought into the
-// virtualized list wherever the reader was, or on its `<message>`'s row in the transcript, or, for an async question
-// with no request waiting (MAWS's own ask), on its call's row. A send's row draws without
-// its delivery frame line, a peer's send labelled with who sent it (`conversation/delivery-frame.ts`).
+// session whose machine serves no transcript for it (its subscription ended at n 0, `shell/transcript-served.ts`)
+// draws the channel built from the log instead, saying why, and that an ended one is not offered Resume (`fallback`).
+// A tapped notification lands on its request's card at the tail, brought into the virtualized list wherever the reader
+// was, or on its `<message>`'s row in the transcript, or, for an async question with no request waiting (MAWS's own
+// ask), on its call's row. A send's row draws without its delivery frame line, a peer's send labelled with who sent it
+// (`conversation/delivery-frame.ts`).
 //
 // Two decorations of MAWS's view are the desk's own (`styles/app.css`, under `data-session-view`): a gutter that keeps
 // every row, breakouts included, clear of MAWS's floating "Jump to latest"; and, while the session is at rest, that
@@ -41,6 +42,7 @@ import { useLanding } from '../../pwa/service-worker';
 import { useDeskLayout } from '../../shell/layout';
 import type { SessionPlane } from '../../shell/session-plane';
 import type { DeskSession } from '../../shell/sessions';
+import { useTranscriptServed } from '../../shell/transcript-served';
 import { useNarrow } from '../../shell/viewport';
 import { useDesk } from '../conversation/desk-context';
 import { useLandOnCard } from './land-on-card';
@@ -139,14 +141,17 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
     [session.session, events, known, heldCount, oldest, owner],
   );
 
-  const unavailable = useNoTranscript(state, heldCount);
+  // The machine serves no transcript for it, as the session's owner learned from its subscription.
+  const unavailable = useTranscriptServed(session) === 'none';
   const landedCard = requests.find((r) => r.request === landedRequest) ?? null;
   useLandOnCard(root, list, rowIndex, landedCard && { request: landedCard.request, row: requestRowId(landedCard.key) });
   const landedOn = landedMessage === null && landedQuestion !== null ? 'question' : 'message';
   const landing = useLandOnMessage(root, owner.main, state, landedMessage ?? landedQuestion, landedOn);
 
   if (unavailable && fallback)
-    return fallback(`${session.machine} serves no transcript for this session: its daemon predates the session view, or a /clear left the history under another id. What it sent and was sent stays here, from the project's log.`);
+    return fallback(
+      `${session.machine} serves no transcript for this session: it never wrote one there, its daemon predates the session view, or a /clear left the history under another id. ${ended && retiredBy(session) === null ? 'Resume is not offered: it needs that transcript. ' : ''}What it sent and was sent stays here, from the project's log.`,
+    );
   return (
     <section
       ref={setRoot}
@@ -176,17 +181,6 @@ export default function SessionView({ project, session, plane, events = NO_EVENT
       <WaitingPill list={list} count={requests.length} />
     </section>
   );
-}
-
-/**
- * Whether the session's machine serves no transcript for it: its subscription ended at n 0 (`session-ended` before any
- * snapshot, DX4's one remaining meaning of it), held until a snapshot comes, so a retry under way does not flicker back.
- */
-function useNoTranscript(state: { phase: string; ended: { reason: string } | null }, held: number): boolean {
-  const [none, setNone] = useState(false);
-  if (!none && state.phase === 'ended' && state.ended?.reason === 'session-ended' && held === 0) setNone(true);
-  if (none && state.phase === 'live') setNone(false);
-  return none;
 }
 
 /**
