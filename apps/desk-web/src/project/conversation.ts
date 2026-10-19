@@ -7,6 +7,13 @@
 // A request is known by what the hub keys it by — its machine, its session, and its id — since an id is minted per
 // bridge (a synthetic `request-…`) and two sessions may raise the same one. A request raised live is timed until the
 // pass that draws it (`latency/latency.ts`), from its arrival and from its call's row when a transcript holds it.
+//
+// A request may be raised again under its id after its settlement (a resumed session's bridge raises its still-open
+// ask under its call's id, which the first process's end settled): it is pending again until a settlement of that
+// raise. The order of a raise and a settlement is the socket's, as the hub sends them (DX3): a settlement comes before
+// the pending set without its request, so a pending set that holds a request was sent after every settlement of it this
+// tab took; and a decision the hub replays after `caught-up` was recorded before the connection's own pending set, or
+// was sent to this socket live after its `settled` (MAWS #71).
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { verify, type Decision, type Delivery, type OrgKey, type PendingRequest, type Raised, type Recipient, type Rpc, type RpcOutcome, type SessionBodies, type Settled } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';
@@ -27,17 +34,20 @@ export type RequestRecord = {
   raised: Raised;
   /** The offset of the last log entry the browser held when it first saw the request: where the stream places it. */
   at: number;
-  /** In the hub's pending set now. */
+  /** In the hub's pending set now, and not settled since. */
   pending: boolean;
   /** The hub's `terminal_only`: only the terminal can answer it. */
   terminalOnly: boolean;
-  /** Its verified settlement, once one came. */
+  /** Its verified settlement, once one came: the latest, unless the request was raised again since. */
   settled: Settled | null;
 };
 
 /** `not-connected`: refused in the browser, the project socket being down; nothing was sent. */
 export type RpcEntryState = 'sending' | RpcOutcome['state'] | 'forwarded' | 'uncertain' | 'not-connected';
-/** `request`: the key of the request an answer or a decision is on. */
+/**
+ * `request`: the key of the request an answer or a decision is on; dropped once a raise again after the request's
+ * settlement starts it over (the RPC was on the raise that settlement ended).
+ */
 export type RpcEntry = { nonce: string; rpc: Rpc; state: RpcEntryState; outcome?: RpcOutcome; request?: string };
 
 export type OutboxItem = { nonce: string; to: '*' | Recipient[]; text: string; wake: boolean; state: 'sending' | 'refused'; reason?: string };
@@ -139,7 +149,10 @@ export class Conversation {
     this.pendingReceived = true;
     this.store.setState({ checked: false });
     this.pending = requests;
-    for (const { machine, raised } of requests) this.see(machine, raised);
+    for (const { machine, raised } of requests) {
+      this.see(machine, raised);
+      this.raisedAfter(requestKey({ machine, session: raised.session, request: raised.request }));
+    }
     this.recompute();
   }
 
@@ -148,6 +161,7 @@ export class Conversation {
     if (!this.raisedIn.has(key) && !this.store.getState().requests[key]) this.raisedIn.set(key, { at: performance.now(), call: raised.toolUseId ?? raised.request });
     while (this.raisedIn.size > 64) this.raisedIn.delete(this.raisedIn.keys().next().value!);
     this.see(machine, raised);
+    this.raisedAfter(key);
     this.recompute();
   }
 
@@ -160,15 +174,14 @@ export class Conversation {
    * A decision from the project's audit record (DX3 `decided`): the `raised` it settled (verbatim, or null when the hub
    * no longer held it) is seen as any request is — at `at` when this tab never saw it — and its `settled` taken as the
    * request's settlement. Both are verified before anything of them is drawn. So a card settled before the tab
-   * connected (a reload, another device) is drawn settled.
+   * connected (a reload, another device) is drawn settled. A decision on a request the hub holds pending is passed over:
+   * it settled an earlier raise under the request's id, or it is the `settled` this tab has just taken live.
    */
   decided(decision: Decision, at: number): void {
+    const key = requestKey({ machine: decision.machine, session: decision.session, request: decision.settled.request });
+    if (this.pending.some((p) => requestKey({ machine: p.machine, session: p.raised.session, request: p.raised.request }) === key)) return;
     if (decision.raised) this.see(decision.machine, decision.raised, at);
-    this.settlements.set(requestKey({ machine: decision.machine, session: decision.session, request: decision.settled.request }), {
-      machine: decision.machine,
-      session: decision.session,
-      settled: decision.settled,
-    });
+    this.settlements.set(key, { machine: decision.machine, session: decision.session, settled: decision.settled });
     this.recompute();
   }
 
@@ -234,6 +247,25 @@ export class Conversation {
     // The same content again (a republished pending set) keeps its object, and so its verdict, and becomes the newest.
     const same = known.payloads.find((p) => sameRaised(p, raised));
     known.payloads = [...known.payloads.filter((p) => p !== same), same ?? raised];
+  }
+
+  /**
+   * A request raised, live or in a pending set: a settlement this tab holds for it settled an earlier raise under its
+   * id, so neither that settlement nor this tab's decisions on that raise draw it any more.
+   */
+  private raisedAfter(key: string): void {
+    if (!this.settlements.delete(key)) return;
+    this.store.setState((s) => {
+      const ended = Object.values(s.rpcs).filter((entry) => entry.request === key);
+      if (ended.length === 0) return s;
+      const rpcs = { ...s.rpcs };
+      for (const entry of ended) {
+        const kept = { ...entry };
+        delete kept.request;
+        rpcs[entry.nonce] = kept;
+      }
+      return { rpcs };
+    });
   }
 
   private async check(kind: 'raised' | 'settled' | 'delivery', shape: object): Promise<boolean> {

@@ -1,11 +1,12 @@
 // The conversation's live state against the DX3 double: requests drawn only once their code verifies, held through
-// their settlement; deliveries per event and recipient, verified, kept by the hub across a reload; RPCs sealed with the
+// their settlement, and pending again when raised again after it, live or across the audit record's replay; deliveries per event and recipient, verified, kept by the hub across a reload; RPCs sealed with the
 // org key and followed through every DX6 state, an `uncertain` one retried with its own nonce; a web `human` sealed,
 // sent, and followed until the log holds it or the hub refuses it; a session's compaction.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importOrgKey, inputSha256, seal, verify, verifyRpc, type Delivery, type OrgKey, type Raised } from 'desk-hub/protocol';
 import { DOUBLE_MEMBER, HubDouble } from '../../test/double/hub-double';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
+import { cardState } from '../conversation/card-state';
 import { memoryLogRecord } from '../log/record';
 import { ProjectConnection } from './connection';
 import { Conversation, requestKey } from './conversation';
@@ -138,6 +139,113 @@ describe("decisions the tab did not see (DX3's `decided`, replayed after caught-
     expect(conv(c).requests[k('toolu_2')]).toBeUndefined();
     expect(conv(c).requests[k('toolu_3')]).toBeUndefined();
     expect(conv(c).unverified).toEqual([{ what: 'request', machine: 'mini', session: S1, id: 'toolu_2' }]);
+  });
+});
+
+// A resumed session's bridge raises its still-open ask again under its call's id, which the first process's end settled
+// (withdrawn). The raise outranks that settlement wherever this tab took it from: live, or the audit record's replay.
+describe('a request raised again after its settlement (MAWS #71)', () => {
+  const ID = 'toolu_plugin_resumed';
+  const ask: Omit<Raised, 'mac'> = {
+    request: ID,
+    session: S1,
+    tool: 'mcp__doperpowers__AskUserQuestion',
+    input: { questions: [{ question: 'Ship it tonight?', header: 'Ship', options: [{ label: 'yes' }, { label: 'no' }], multiSelect: false }] },
+    async: true,
+  };
+  const can = { can: true, reason: null };
+  const withdraw = () => hub.settle(PROJECT, 'mini', S1, { request: ID, winner: 'other', outcome: 'withdrawn', by: 'bridge' });
+  const answer = () => hub.settle(PROJECT, 'mini', S1, { request: ID, winner: 'web', outcome: 'answered', by: M });
+  const asked = (c: ProjectConnection) => conv(c).requests[k(ID)];
+  let markers = 0;
+  /** Every frame sent before it is drawn: a request raised after them is. */
+  async function marker(c: ProjectConnection) {
+    const request = `toolu_marker_${++markers}`;
+    await hub.raise(PROJECT, 'mini', { ...bash, request });
+    await until(() => conv(c).requests[k(request)] !== undefined);
+  }
+  async function reconnect(c: ProjectConnection) {
+    const resumes = hub.resumes(PROJECT).length;
+    hub.dropConnections();
+    await until(() => hub.resumes(PROJECT).length > resumes && c.live.getState().caughtUp);
+  }
+
+  it('is pending again with its answer control, live, and its answer settles it', async () => {
+    const c = await connect();
+    await hub.raise(PROJECT, 'mini', ask);
+    await until(() => asked(c)?.pending === true);
+    await withdraw();
+    await until(() => asked(c).settled !== null);
+    expect(asked(c)).toMatchObject({ pending: false, settled: { outcome: 'withdrawn' } });
+    await hub.raise(PROJECT, 'mini', ask);
+    await until(() => asked(c).pending);
+    expect(asked(c).settled).toBeNull();
+    expect(cardState(asked(c), null, can)).toEqual({ kind: 'open', window: false });
+    await c.answer(M, asked(c), { 'Ship it tonight?': 'yes' });
+    await answer();
+    await until(() => asked(c).settled !== null);
+    expect(asked(c)).toMatchObject({ pending: false, settled: { winner: 'web', outcome: 'answered', by: M } });
+  });
+
+  it('stays pending in a tab that saw the withdrawal live when a reconnect replays it, and its answer settles it', async () => {
+    const c = await connect();
+    await hub.raise(PROJECT, 'mini', ask);
+    await withdraw();
+    await until(() => asked(c)?.settled != null);
+    await hub.raise(PROJECT, 'mini', ask);
+    await until(() => asked(c).pending);
+    await reconnect(c);
+    await marker(c);
+    expect(asked(c)).toMatchObject({ pending: true, settled: null });
+    await answer();
+    await until(() => asked(c).settled !== null);
+    expect(asked(c)).toMatchObject({ pending: false, settled: { outcome: 'answered' } });
+  });
+
+  it('is pending in a tab opened after the withdrawal, which takes the withdrawal from the replay, and its answer settles it', async () => {
+    await hub.raise(PROJECT, 'mini', ask);
+    await withdraw();
+    await hub.raise(PROJECT, 'mini', ask);
+    const c = await connect();
+    await marker(c);
+    expect(asked(c)).toMatchObject({ pending: true, settled: null });
+    expect(cardState(asked(c), null, can)).toEqual({ kind: 'open', window: false });
+    await answer();
+    await until(() => asked(c).settled !== null);
+    expect(asked(c)).toMatchObject({ pending: false, settled: { outcome: 'answered' } });
+  });
+
+  it('takes the settlement of the raise again from the replay when it came while the tab was away', async () => {
+    const c = await connect();
+    await hub.raise(PROJECT, 'mini', ask);
+    await withdraw();
+    await until(() => asked(c)?.settled != null);
+    await hub.raise(PROJECT, 'mini', ask);
+    await until(() => asked(c).pending);
+    hub.dropConnections();
+    await answer();
+    await until(() => asked(c).settled?.outcome === 'answered');
+    expect(asked(c).pending).toBe(false);
+    const fresh = await connect();
+    await marker(fresh);
+    expect(asked(fresh)).toMatchObject({ pending: false, settled: { outcome: 'answered' } });
+  });
+
+  it("leaves behind this tab's decision on the raise the settlement ended: its late refusal no longer draws the card", async () => {
+    const c = await connect();
+    await hub.raise(PROJECT, 'mini', ask);
+    await until(() => asked(c)?.pending === true);
+    const nonce = await c.answer(M, asked(c), { 'Ship it tonight?': 'yes' });
+    await until(() => conv(c).rpcs[nonce]?.state === 'forwarded');
+    hub.answerRpc(PROJECT, nonce, { state: 'failed', error: { code: 'not-pending', message: 'withdrawn', winner: 'other', by: 'bridge' } });
+    await until(() => conv(c).rpcs[nonce]?.state === 'failed');
+    expect(conv(c).rpcs[nonce].request).toBe(k(ID));
+    await withdraw();
+    await until(() => asked(c).settled !== null);
+    await hub.raise(PROJECT, 'mini', ask);
+    await until(() => asked(c).pending);
+    expect(conv(c).rpcs[nonce]).toMatchObject({ state: 'failed' });
+    expect(conv(c).rpcs[nonce].request).toBeUndefined();
   });
 });
 
