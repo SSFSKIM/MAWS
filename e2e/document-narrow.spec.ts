@@ -81,8 +81,38 @@ async function resizePanel(page: Page, width: number): Promise<void> {
   await expect.poll(async () => Number(await divider.getAttribute('aria-valuenow'))).toBe(width);
 }
 
+// The editor element's Tiptap editor (as document.spec.ts's `selectIn` reads it): its document, its selection and its
+// edits not yet acknowledged.
+type EditorRoot = HTMLElement & {
+  editor?: {
+    state: { doc: { descendants(f: (node: { type: { name: string }; textContent: string }) => boolean | void): void; textBetween(from: number, to: number, separator: string): string }; selection: { from: number; to: number } };
+    extensionManager: { extensions: Array<{ name: string; options: { hold?: { base: { state(): { unsaved: number } } } } }> };
+  };
+};
+
 // Selects `quote` inside the editor's paragraph `index` (a DOM selection the editor reads, as a person's drag would set).
+// P3-F (editor-proof scalpel-1#3; document.spec.ts's `selectIn`, L277, and document-standalone's, row 231): the range is
+// written only once the editor's own document holds the paragraph the page shows and the host has acknowledged every
+// edit, so neither the last typed key's flush nor the binding's answer to it lands between the range and the editor's
+// read of it and puts the caret back; then the editor's selection, not only the page's, holds the quote (Comment reads
+// the editor's).
 async function selectIn(text: Locator, index: number, quote: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        text.evaluate((root, at) => {
+          const editor = (root as EditorRoot).editor;
+          if (!editor) return 'no editor on the element';
+          const paragraphs: string[] = [];
+          editor.state.doc.descendants((node) => {
+            if (node.type.name === 'paragraph') paragraphs.push(node.textContent);
+          });
+          const unsaved = editor.extensionManager.extensions.find((extension) => extension.name === 'collaboration')?.options.hold?.base.state().unsaved ?? 0;
+          return paragraphs[at] === root.querySelectorAll('p')[at]?.textContent && unsaved === 0 ? 'settled' : `paragraph "${paragraphs[at]}", ${unsaved} unacknowledged`;
+        }, index),
+      { timeout: 10_000, message: 'the editor holds the paragraph shown and the host has acknowledged every edit' },
+    )
+    .toBe('settled');
   await text.evaluate(
     (root, [at, q]) => {
       const p = root.querySelectorAll('p')[at as number]!;
@@ -98,7 +128,15 @@ async function selectIn(text: Locator, index: number, quote: string): Promise<vo
     },
     [index, quote] as const,
   );
-  await expect.poll(() => text.evaluate(() => getSelection()?.toString() ?? '')).toBe(quote);
+  await expect
+    .poll(() =>
+      text.evaluate((root) => {
+        const editor = (root as EditorRoot).editor!;
+        const { from, to } = editor.state.selection;
+        return { page: getSelection()?.toString() ?? '', editor: editor.state.doc.textBetween(from, to, '\n') };
+      }),
+    )
+    .toEqual({ page: quote, editor: quote });
 }
 
 const box = async (locator: Locator) => (await locator.boundingBox())!;
