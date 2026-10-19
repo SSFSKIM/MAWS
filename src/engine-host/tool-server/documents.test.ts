@@ -374,6 +374,57 @@ describe('artifact_edit', () => {
     expect(world.service.replica(SELF, id).provider.awareness.getLocalState() ?? {}).not.toHaveProperty('editing');
   });
 
+  // P3-F wave S (F19, sitting candidate 21): the outline the owner missed at 1.5 s holds 4 s after the last batch commits
+  it('holds the outline 4 s after the last batch commits, a later batch re-arming the hold', async () => {
+    const { id, revision } = await readSeed();
+    const tool = artifactEditTool(deps({ presenceEditingMs: undefined })); // the build's own hold
+    const editing = () => (world.service.replica(SELF, id).provider.awareness.getLocalState() as { editing?: { blocks: string[] } } | null)?.editing?.blocks;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const first = json<{ revision: number }>(await call(tool, { artifact: id, baseRevision: revision, ops: [{ op: 'replace_text', block: 'p2', old: 'scheduled for Friday', new: 'scheduled for Monday' }] }));
+      expect(editing()).toEqual(['p2']);
+      vi.advanceTimersByTime(3_000);
+      expect(editing(), 'still outlined 3 s after the batch').toEqual(['p2']);
+      const second = json<{ results: Array<{ newIds: string[] }> }>(await call(tool, { artifact: id, baseRevision: first.revision, ops: [{ op: 'insert', after: 'h1', markdown: 'Later.' }] }));
+      const inserted = second.results[0].newIds[0];
+      expect(editing()).toEqual([inserted]);
+      vi.advanceTimersByTime(3_999);
+      expect(editing(), 'the first batch’s timer was cleared: the hold runs from the last batch').toEqual([inserted]);
+      vi.advanceTimersByTime(1);
+      expect(editing()).toBeUndefined();
+      expect(world.service.replica(SELF, id).provider.awareness.getLocalState()).toMatchObject({ name: expect.any(String), color: expect.any(String) });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a turn that ends inside the hold leaves the outline to it, and nothing after; a turn with no held outline clears at once', async () => {
+    const { id, revision } = await readSeed();
+    const tool = artifactEditTool(deps({ presenceEditingMs: undefined }));
+    const shown = () => world.service.replica(SELF, id).provider.awareness.getLocalState() as { editing?: { blocks: string[] } } | null;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const first = json<{ revision: number }>(await call(tool, { artifact: id, baseRevision: revision, ops: [{ op: 'replace_text', block: 'p2', old: 'scheduled for Friday', new: 'scheduled for Monday' }] }));
+      vi.advanceTimersByTime(1_000);
+      await world.store.endTurn(SELF);
+      expect(shown()?.editing?.blocks, 'the turn ended 1 s after the batch: the outline keeps the rest of its hold').toEqual(['p2']);
+      vi.advanceTimersByTime(2_999);
+      expect(shown()?.editing?.blocks).toEqual(['p2']);
+      vi.advanceTimersByTime(1);
+      expect(shown(), 'the hold expired after the turn: no name-only state left behind').toBeNull();
+
+      // the next turn: its batch's hold expires inside the turn (the name stays), then the turn ends and clears at once
+      json(await call(tool, { artifact: id, baseRevision: first.revision, ops: [{ op: 'insert', after: 'h1', markdown: 'Later.' }] }));
+      vi.advanceTimersByTime(4_000);
+      expect(shown()).toMatchObject({ name: expect.any(String), color: expect.any(String) });
+      expect(shown()).not.toHaveProperty('editing');
+      await world.store.endTurn(SELF);
+      expect(shown()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('the turn’s end writes a turn version whose summary is the batch’s lines', async () => {
     const { id, revision } = await readSeed();
     const answer = json<{ results: Array<{ line: string }> }>(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'delete', id: 'p4' }, { op: 'insert', after: 'h1', markdown: 'Lead.' }] }));

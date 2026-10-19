@@ -7,7 +7,7 @@
 //                      transaction, so a refusal writes nothing; the writer's carries go to the adapter's registry in
 //                      the same transaction, before A's service runs the adapter's hooks; `answering` posts the result
 //                      lines into the thread in the same transaction; the session's presence names the blocks while
-//                      the batch lands and drops them 1.5 s after (D11).
+//                      the batch lands and drops them 4 s after (D11; P3-F wave S F19, was 1.5 s).
 //   artifact_comments  the threads, open (orphans included), resolved or all, with their messages.
 //   artifact_reply     a message into a thread as the session.
 //   artifact_resolve   resolve or reopen a thread as the session.
@@ -70,7 +70,9 @@ import type { ArtifactStore } from '../documents/store';
 import { spaceFields, spaceNamed } from './artifact-tools'; // P3-F wave S (F5)
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
 
-const PRESENCE_EDITING_MS = 1_500; // D11: the agent's editing blocks stay outlined this long after its batch commits
+// D11: the agent's editing blocks stay outlined this long after its batch commits. P3-F wave S (F19, sitting candidate
+// 21): 4 s, was 1.5 s, which the owner missed in two passes; a turn that ends sooner leaves the outline to this hold.
+const PRESENCE_EDITING_MS = 4_000;
 
 // What one session's document tools remember between calls: its views of each replica, the kinds whose guide it was
 // given (A's `ArtifactSession.guided` once A's tools are here), its presence timers.
@@ -269,7 +271,7 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
       const presence = actorDisplay(actor);
       const shown: { agent?: AgentReplica; id?: string } = {}; // the replica whose presence the batch published, and its artifact
       // Everything that reads the store's current state runs inside the operation, after its replay lookup.
-      const result = await store.writeCommitted(() =>
+      const written = store.writeCommitted(() =>
         store.withOp(
           opIdOf(ctx),
           TOOL,
@@ -349,6 +351,7 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
                   const cursor = cursorAt(outcome.doc, blocks[0]);
                   clearTimeout(deps.session.presence.get(writeId));
                   agent.setPresence({ ...presence, ...(cursor && { cursor }), editing: { blocks } });
+                  store.service.holdPresence(agent); // P3-F (F19): a turn end leaves it to the hold
                   shown.agent = agent;
                   shown.id = writeId;
                 },
@@ -361,11 +364,15 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
           { actor },
         ),
       );
+      const result = await written.catch((error: unknown) => {
+        if (shown.agent) store.service.releasePresence(shown.agent, presence); // P3-F (F19): published in a frame that did not commit; nothing to hold
+        throw error;
+      });
       const { agent, id } = shown;
       if (agent && id) {
         const timer = setTimeout(() => {
           deps.session.presence.delete(id);
-          agent.setPresence(presence);
+          store.service.releasePresence(agent, presence); // nothing at all once the session's turn ended
         }, deps.presenceEditingMs ?? PRESENCE_EDITING_MS);
         timer.unref?.();
         deps.session.presence.set(id, timer);
