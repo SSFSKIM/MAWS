@@ -51,6 +51,16 @@ describe('a document diagram', () => {
     });
   });
 
+  // P3-F (wave S review of c20): mermaid applies an init directive over a front matter's `config`, so a palette directive
+  // would replace the author's theme there; a front matter that configures the diagram keeps it, as before c20
+  it('leaves a front matter’s own theme configuration to win', async () => {
+    const source = await rendered('---\nconfig:\n  theme: forest\n  themeVariables:\n    primaryColor: "#ffeeaa"\n---\ngraph TD\n  A --> B');
+    expect(await mermaid.parse(source)).toMatchObject({ diagramType: 'flowchart-v2' });
+    const config = mermaid.mermaidAPI.getConfig();
+    expect(config.theme).toBe('forest');
+    expect(config.themeVariables).toMatchObject({ primaryColor: '#ffeeaa' });
+  });
+
   it('keeps a front matter first and lets the source’s own init directive win', async () => {
     const source = await rendered('---\ntitle: Flow\n---\n%%{init: {"themeVariables": {"primaryColor": "#ffeeaa"}}}%%\ngraph TD\n  A --> B');
     expect(source.startsWith('---\ntitle: Flow\n---\n')).toBe(true);
