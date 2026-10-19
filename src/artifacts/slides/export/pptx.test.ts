@@ -317,5 +317,30 @@ describe('the PPTX mapping: the exports-capture panel', () => {
     // an unpainted table: the native table alone, as before
     expect(onBody(grid).map((o) => o.name)).toEqual(['grid']);
   });
+  // scalpel-5#3: an image's own paint (the presentation guide's `border-radius:16px`, a border, a background) is no
+  // native picture's: the window's picture of it, which draws them; a shadow PowerPoint casts itself
+  it('scalpel-5#3: takes a rounded or framed image as the window draws it, and casts an image’s shadow natively', () => {
+    const logo = cover.elements.find((e) => e.id === 'logo')!;
+    const onCover = on(cover);
+    const jobsOf = (el: MeasuredElement) => pictureJobs({ slides: [{ ...cover, elements: [el] }] }, 'named').map((j) => [j.key, j.mode]);
+    const picture = new Map([[pictureKey('cover', 'logo'), PNG]]);
+    const rounded: MeasuredElement = { ...logo, paint: { ...NO_PAINT, radius: 16 } };
+    expect(jobsOf(rounded)).toEqual([['cover/logo', 'self']]);
+    expect(onCover(rounded, picture)).toEqual([{ kind: 'image', name: 'logo', options: { data: PNG, objectName: 'logo', altText: 'Logo', x: inches(1600), y: inches(64), w: inches(200), h: inches(100) } }]);
+    const framed: MeasuredElement = { ...logo, paint: { ...NO_PAINT, borders: Array(4).fill({ width: 4, style: 'solid', color: 'rgb(0, 0, 0)' }) as MeasuredElement['paint']['borders'] } };
+    expect(jobsOf(framed)).toEqual([['cover/logo', 'self']]);
+    expect(onCover(framed, picture)).toMatchObject([{ kind: 'image', options: { data: PNG } }]);
+    // no picture taken (the window failed): the native picture, as before
+    expect(onCover(rounded)).toMatchObject([{ kind: 'image', options: { data: LOGO } }]);
+    // a shadow alone: the native picture keeps its resolution, PowerPoint casting the shadow; a rounded one's picture casts it too
+    const shadow = { x: 0, y: 8, blur: 24, color: 'rgba(0, 0, 0, 0.25)' };
+    const cast = { type: 'outer', blur: 12, offset: 4, angle: 90, color: '000000', opacity: 0.25 };
+    const shadowed: MeasuredElement = { ...logo, paint: { ...NO_PAINT, shadow } };
+    expect(jobsOf(shadowed)).toEqual([]);
+    expect(onCover(shadowed)).toMatchObject([{ kind: 'image', options: { data: LOGO, shadow: cast } }]);
+    expect(onCover({ ...rounded, paint: { ...rounded.paint, shadow } }, picture)).toMatchObject([{ kind: 'image', options: { data: PNG, shadow: cast } }]);
+    // a placeholder keeps its flat stand-in, whatever its paint
+    expect(jobsOf({ ...rounded, image: { ...rounded.image!, placeholder: true } })).toEqual([]);
+  });
   // (the exports-capture regressions end)
 });

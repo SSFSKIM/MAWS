@@ -91,11 +91,17 @@ export function pictureJobs(measured: MeasuredDeck, variant: PptxFontVariant): P
       const job = (mode: PictureJob['mode']) => jobs.push({ key: pictureKey(slide.id, el.id), slideId: slide.id, elementId: el.id, mode, box: el.box });
       // a turned table has no native form (a PowerPoint table does not turn): the window's picture of it (A11)
       if (el.tag === 'x-embed' || el.tag === 'svg' || el.tag === 'x-icon' || (el.tag === 'table' && el.rotate !== 0)) job('tree');
-      else if (el.paint.image && el.tag !== 'img' && el.tag !== 'x-shape' && el.tag !== 'x-connector' && el.tag !== 'hr') job('self');
+      else if (el.tag === 'img' ? decoratedImage(el) : el.paint.image && el.tag !== 'x-shape' && el.tag !== 'x-connector' && el.tag !== 'hr') job('self');
     }
   }
   return jobs;
 }
+
+/**
+ * An image with paint of its own no native picture carries (P3-F, exports-capture scalpel-5#3): a corner radius, a
+ * border, a background under it. A placeholder keeps its flat stand-in; a shadow alone PowerPoint casts itself.
+ */
+const decoratedImage = (el: MeasuredElement): boolean => !el.image?.placeholder && (el.paint.radius > 0.5 || el.paint.borders.some((b) => b !== null) || el.paint.fill !== null || el.paint.image);
 
 export interface PptxMapOptions {
   variant: PptxFontVariant;
@@ -284,7 +290,7 @@ function placeImage(el: MeasuredElement, natural: { w: number; h: number }): { b
   return { box, crop: view.w === natural.w && view.h === natural.h ? null : view };
 }
 
-function imageObject(el: MeasuredElement, ir: ElementIR | undefined, options: PptxMapOptions): PptxObject[] {
+function imageObject(el: MeasuredElement, ir: ElementIR | undefined, picture: string | undefined, options: PptxMapOptions): PptxObject[] {
   const src = ir?.attrs.src;
   const data = src?.startsWith('assets/') ? options.asset(src) : null;
   const natural = el.image?.natural;
@@ -292,9 +298,14 @@ function imageObject(el: MeasuredElement, ir: ElementIR | undefined, options: Pp
     // a placeholder (no picture, or one MAWS cannot draw): its place, filled as the canvas fills it
     return [{ kind: 'shape', name: el.id, shape: 'rect', options: { ...at(el.box), objectName: el.id, fill: { color: 'E3E6E4' }, line: { type: 'none' }, ...(el.rotate && { rotate: el.rotate }) } }];
   }
-  const placed = placeImage(el, natural);
-  const base: PptxGenJS.ImageProps = { data, objectName: el.id, altText: ir?.attrs.alt ?? '', ...(el.rotate && { rotate: el.rotate }) };
+  const shadow = shadowOf(el.paint);
   const transparency = transparencyOf(1, el.paint.opacity);
+  // its own paint (P3-F, exports-capture scalpel-5#3): the window's picture of it, unturned at its box, which draws them
+  if (picture && decoratedImage(el)) {
+    return [{ kind: 'image', name: el.id, options: { data: picture, ...at(el.box), objectName: el.id, altText: ir?.attrs.alt ?? '', ...(el.rotate && { rotate: el.rotate }), ...(transparency > 0 && { transparency }), ...(shadow && { shadow }) } }];
+  }
+  const placed = placeImage(el, natural);
+  const base: PptxGenJS.ImageProps = { data, objectName: el.id, altText: ir?.attrs.alt ?? '', ...(el.rotate && { rotate: el.rotate }), ...(shadow && { shadow }) };
   if (transparency > 0) base.transparency = transparency;
   if (!placed.crop) return [{ kind: 'image', name: el.id, options: { ...base, ...at(placed.box) } }];
   // pptxgenjs's crop: `w`/`h` the whole picture and `sizing` the window in the same units, so the window lands at the box;
@@ -484,7 +495,7 @@ function elementObjects(drawn: MeasuredElement, ir: ElementIR | undefined, pictu
   const el = atDrawnSize(drawn);
   switch (el.tag) {
     case 'img':
-      return imageObject(el, ir, options);
+      return imageObject(el, ir, picture, options);
     case 'svg':
     case 'x-icon':
       return svgObject(el, picture, ir);
