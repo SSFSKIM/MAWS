@@ -16,14 +16,18 @@ import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } fr
 import type { MentionSource, MentionTarget } from './MentionPicker';
 import type { CommentOverlayProps, DocumentComments } from './comments/surface';
 import { getThread, liveThreadIds } from '../threads';
+import { MemoryHistory } from './history/memory-history';
 import { TAB, World, doc, endOf, para, readOnlySwitch, until } from './test-world';
 
 let world: World | null = null;
 let handles: DocumentHandle[] = [];
+let history: MemoryHistory | null = null;
 afterEach(() => {
   cleanup();
   for (const handle of handles) handle.close();
   handles = [];
+  history?.destroy();
+  history = null;
   world?.destroy();
   world = null;
 });
@@ -258,6 +262,41 @@ describe('find', () => {
     act(() => fireEvent.keyDown(input, { key: 'Escape' }));
     expect(screen.queryByRole('searchbox')).toBeNull();
     expect(editor().view.dom.querySelectorAll('.find-match')).toHaveLength(0);
+  });
+
+  const findCount = () => within(screen.getByRole('search')).getByRole('status').textContent;
+
+  // P3-F panel sweep#1: the bar's query goes with it to the editor shown, a version opened from History and the live
+  // document again, matched there at once (the preview has its own editor, M9)
+  it('keeps finding its query in the editor shown: a version from History, then the live document', async () => {
+    world = new World(doc(para('p1', 'alpha beta'), para('p2', 'beta gamma')));
+    history = new MemoryHistory(world.host);
+    history.version('named', { kind: 'human' }, { label: 'Before' });
+    const handle = openMemoryHandle(world.host, { log: () => {} });
+    handles.push(handle);
+    await whenSynced(handle);
+    let current: Editor | null = null;
+    render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} history={history} onEditor={(e) => (current = e)} />);
+    await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
+    const live = current!;
+    act(() => void live.commands.setTextSelection(1));
+    act(() => void fireEvent.keyDown(live.view.dom, { key: 'f', metaKey: true }));
+    act(() => fireEvent.change(screen.getByRole('searchbox', { name: 'Find in document' }), { target: { value: 'beta' } }));
+    expect(findCount()).toBe('1 of 2');
+
+    act(() => void fireEvent.click(within(toolbar()).getByRole('button', { name: 'Version history' })));
+    const rail = () => screen.getByRole('complementary', { name: 'Version history' });
+    await until(() => screen.queryByRole('complementary', { name: 'Version history' }) !== null && within(rail()).queryAllByRole('button', { name: /^Version Before/ }).length > 0, 'the version list');
+    act(() => void fireEvent.click(within(rail()).getByRole('button', { name: /^Version Before/ })));
+    const preview = () => (document.querySelector('.ProseMirror[data-editor="preview"]') as unknown as { editor?: Editor } | null)?.editor ?? null;
+    await until(() => screen.queryByRole('toolbar', { name: 'Version preview' }) !== null && preview() !== null && preview()!.getText().includes('gamma'), 'the version shown');
+    expect(findCount(), 'the count in the version').toBe('1 of 2');
+    expect(preview()!.view.dom.querySelectorAll('.find-match')).toHaveLength(2);
+
+    act(() => void fireEvent.click(within(screen.getByRole('toolbar', { name: 'Version preview' })).getByRole('button', { name: 'Back to document' })));
+    await until(() => screen.queryByRole('toolbar', { name: 'Formatting' }) !== null && preview() === null, 'the live document');
+    expect(findCount(), 'the count in the live document again').toBe('1 of 2');
+    expect(live.view.dom.querySelectorAll('.find-match')).toHaveLength(2);
   });
 });
 

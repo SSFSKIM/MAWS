@@ -9,12 +9,10 @@ export function FindBar({ editor, onClose }: { editor: Editor; onClose(): void }
   const [query, setQuery] = useState('');
   const { count, current } = useEditorState({ editor, selector: ({ editor: e }) => findState(e.state) });
 
+  // P3-F: the query is the bar's, found in whichever editor it is given (the live one, a version's preview, M9)
+  useEffect(() => void (editor.isDestroyed || editor.commands.setFindQuery(query)), [editor, query]);
   useEffect(() => () => void (editor.isDestroyed || editor.commands.clearFind()), [editor]);
 
-  const search = (value: string) => {
-    setQuery(value);
-    editor.commands.setFindQuery(value);
-  };
   const close = () => {
     editor.commands.clearFind();
     onClose();
@@ -33,7 +31,7 @@ export function FindBar({ editor, onClose }: { editor: Editor; onClose(): void }
 
   return (
     <div className="doc-find" role="search">
-      <input type="search" aria-label="Find in document" placeholder="Find" autoFocus value={query} onChange={(event) => search(event.target.value)} onKeyDown={onKeyDown} />
+      <input type="search" aria-label="Find in document" placeholder="Find" autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} />
       <span className="doc-find-count" role="status">
         {query ? (count === 0 ? 'No results' : `${current + 1} of ${count}`) : ''}
       </span>
