@@ -13,15 +13,22 @@
 // - flag: the `--settings` JSON;
 // - managed: the machine's `managed-settings.json`, then each `managed-settings.d/*.json` fragment (files or links, no
 //   dotfiles) in name order, under `/Library/Application Support/ClaudeCode` (macOS), `/etc/claude-code` (Linux);
+//   on macOS the MDM preferences, the user's `/Library/Managed Preferences/<user>/com.anthropic.claudecode.plist` then
+//   the machine's `/Library/Managed Preferences/com.anthropic.claudecode.plist`, each converted as the engine converts
+//   it (plutil to JSON); and the server-managed settings' copy the engine keeps at `<config>/remote-settings.json`, read
+//   without its signature check: the host only waits longer on it;
 // - plugins: each plugin the merged `enabledPlugins` turns on (true, or a list of version constraints), at every install
 //   record `installed_plugins.json` holds for it: its `hooks/hooks.json` and the hooks its `.claude-plugin/plugin.json`
 //   names (a file inside the plugin, or inline).
-// A file the engine would refuse (its ownership checks, a higher managed source winning, a plugin install it does not
-// vouch for) only makes the hold longer. Not read: server-managed settings and the MDM preferences plist (neither is a
-// settings file the host can read soundly), a plugin's hooks module (code, no declared timeout), and plugins the
-// engine finds outside `installed_plugins.json` (built-in, seed directories); a hook from those runs under 600 s.
+// A file the engine would refuse (its ownership and signature checks, a higher managed source winning, a plugin install
+// it does not vouch for) only makes the hold longer. Not read: a plugin's hooks module (code, no declared timeout),
+// plugins the engine finds outside `installed_plugins.json` (built-in, seed directories) or at a relative install
+// path, and server-managed settings changed since the engine last cached them; a hook from those runs under 600 s.
+import { execFile } from 'node:child_process';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { promisify } from 'node:util';
 import type { LaunchPlan } from './launch';
 
 export const SESSION_START_HOOK_MS = 600_000;
@@ -35,15 +42,36 @@ export function managedSettingsDir(platform: NodeJS.Platform = process.platform)
   return '/etc/claude-code';
 }
 
-export async function sessionStartHookMs(plan: Pick<LaunchPlan, 'env' | 'cwd' | 'flagSettings'>, opts: { managedDir?: string } = {}): Promise<number> {
+// The managed-preferences directory the engine reads its MDM plists from: macOS only.
+const MANAGED_PREFERENCES_DIR = process.platform === 'darwin' ? '/Library/Managed Preferences' : null;
+const MDM_PLIST = 'com.anthropic.claudecode.plist';
+
+// The engine's conversion of a managed preferences plist: plutil to JSON on stdout, no shell, bounded by the engine's
+// own 5 s and 2 MiB. Asynchronous, so the host's loop never waits on it.
+const run = promisify(execFile);
+export async function plutilJson(file: string): Promise<string> {
+  return (await run('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '--', file], { encoding: 'utf8', timeout: 5_000, maxBuffer: 2 * 1024 * 1024 })).stdout;
+}
+
+export interface HookSources {
+  managedDir?: string; // the managed-settings directory (the platform's by default)
+  managedPreferencesDir?: string | null; // the MDM plists' directory (macOS's by default, none elsewhere)
+  convertPlist?: (file: string) => Promise<string>; // a plist as JSON text (plutil by default)
+}
+
+export async function sessionStartHookMs(plan: Pick<LaunchPlan, 'env' | 'cwd' | 'flagSettings'>, opts: HookSources = {}): Promise<number> {
   const configDir = plan.env.CLAUDE_CONFIG_DIR || (plan.env.HOME ? join(plan.env.HOME, '.claude') : null);
   const root = await canonicalGitRoot(plan.cwd);
   const localFiles = [...new Set([join(plan.cwd, '.claude', 'settings.local.json'), ...(root === null ? [] : [join(root, '.claude', 'settings.local.json')])])];
-  // in the engine's precedence, user < project < local < flag < managed, which decides `enabledPlugins` per plugin
+  const preferences = await managedPreferences(opts.managedPreferencesDir === undefined ? MANAGED_PREFERENCES_DIR : opts.managedPreferencesDir, opts.convertPlist ?? plutilJson);
+  // in the engine's precedence, user < project < local < flag < managed, which decides `enabledPlugins` per plugin (the
+  // managed sources last, the one the engine prefers last of all: server-managed, then the MDM plists, then the file)
   const settings = [
     ...(await Promise.all([...(configDir === null ? [] : [join(configDir, 'settings.json')]), join(plan.cwd, '.claude', 'settings.json'), ...localFiles].map(readJson))),
     plan.flagSettings,
     ...(await managedSettings(opts.managedDir ?? managedSettingsDir())),
+    ...preferences.reverse(),
+    ...(configDir === null ? [] : [await readJson(join(configDir, 'remote-settings.json'))]),
   ];
   const plugins = configDir === null ? [] : await pluginHooks(plan.env.CLAUDE_CODE_PLUGIN_CACHE_DIR || join(configDir, plan.env.CLAUDE_CODE_USE_COWORK_PLUGINS ? 'cowork_plugins' : 'plugins'), settings);
   let longest = SESSION_START_HOOK_MS;
@@ -59,6 +87,24 @@ async function managedSettings(dir: string): Promise<unknown[]> {
     () => [],
   );
   return Promise.all([join(dir, 'managed-settings.json'), ...names.map((name) => join(fragments, name))].map(readJson));
+}
+
+// The user's MDM plist, then the machine's, in the engine's order; a plist that is not there costs one stat and no
+// conversion, one that does not convert (malformed, a failure, the time bound) configures nothing.
+async function managedPreferences(dir: string | null, convert: (file: string) => Promise<string>): Promise<unknown[]> {
+  if (dir === null) return [];
+  let user = '';
+  try {
+    user = userInfo().username;
+  } catch {
+    // no user name: the machine's plist alone, as the engine reads it then
+  }
+  const read: unknown[] = [];
+  for (const file of [...(user ? [join(dir, user, MDM_PLIST)] : []), join(dir, MDM_PLIST)]) {
+    if (!(await stat(file).catch(() => null))?.isFile()) continue;
+    read.push(await convert(file).then((text) => JSON.parse(text) as unknown).catch(() => null));
+  }
+  return read;
 }
 
 // The settings shape (`{ hooks: { SessionStart } }`) of each enabled plugin's hooks, from every install record of it.

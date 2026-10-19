@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
+import { plutilJson, SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
 
 const sessionStart = (...timeouts: (number | undefined)[]) => ({
   hooks: { SessionStart: [{ matcher: 'startup', hooks: timeouts.map((timeout) => ({ type: 'command', command: 'true', ...(timeout === undefined ? {} : { timeout }) })) }] },
@@ -13,17 +13,29 @@ describe('the SessionStart hook bound a launch runs with', () => {
   let home: string;
   let project: string;
   let managed: string; // the machine's managed-settings directory, here a scratch one so no test reads the real machine's
+  let prefs: string; // the managed-preferences directory (the MDM plists), scratch as well
+  // the plist conversion: in these cases the "plist" is JSON already and the conversion reads it (each call counted);
+  // the case with plutil itself is macOS's, below
+  let converted: string[];
+  const convertPlist = async (file: string) => {
+    converted.push(file);
+    return readFileSync(file, 'utf8');
+  };
   const write = (file: string, content: unknown) => {
     mkdirSync(join(file, '..'), { recursive: true });
     writeFileSync(file, typeof content === 'string' ? content : JSON.stringify(content));
   };
   const plan = (over: { env?: Record<string, string>; flagSettings?: Record<string, unknown>; cwd?: string } = {}) => ({ env: over.env ?? { HOME: home }, cwd: over.cwd ?? project, flagSettings: over.flagSettings ?? {} });
-  const bound = (over: Parameters<typeof plan>[0] = {}) => sessionStartHookMs(plan(over), { managedDir: managed });
+  const bound = (over: Parameters<typeof plan>[0] = {}, convert: (file: string) => Promise<string> = convertPlist) =>
+    sessionStartHookMs(plan(over), { managedDir: managed, managedPreferencesDir: prefs, convertPlist: convert });
+  const PLIST = 'com.anthropic.claudecode.plist';
   beforeEach(() => {
     base = mkdtempSync(join(tmpdir(), 'maws-hook-bound-'));
     home = join(base, 'home');
     project = join(base, 'project');
     managed = join(base, 'managed');
+    prefs = join(base, 'Managed Preferences');
+    converted = [];
     mkdirSync(project, { recursive: true });
   });
   afterEach(() => rmSync(base, { recursive: true, force: true }));
@@ -122,5 +134,43 @@ describe('the SessionStart hook bound a launch runs with', () => {
     // the project's settings may turn a plugin off that the user's turn on (later sources win per plugin)
     write(join(project, '.claude', 'settings.json'), { enabledPlugins: { 'pinned@market': false } });
     expect(await bound()).toBe(1_700_000);
+  });
+
+  // L35 follow-up (P3-F wave S, the architect's ruling): the MDM preferences and the server-managed settings' cache
+  it('reads the user\'s managed preferences plist and the machine\'s, converting only the files there are', async () => {
+    expect(await bound()).toBe(SESSION_START_HOOK_MS);
+    expect(converted).toEqual([]); // an unmanaged Mac: nothing converted
+    write(join(prefs, PLIST), sessionStart(2000));
+    expect(await bound()).toBe(2_000_000);
+    write(join(prefs, userInfo().username, PLIST), sessionStart(2100));
+    converted = [];
+    expect(await bound()).toBe(2_100_000);
+    expect(converted).toEqual([join(prefs, userInfo().username, PLIST), join(prefs, PLIST)]); // the user's first, as the engine reads them
+    write(join(prefs, userInfo().username, PLIST), 'not a plist');
+    expect(await bound()).toBe(2_000_000); // a plist that does not convert configures nothing
+    const failing = async () => Promise.reject(new Error('plutil timed out'));
+    expect(await bound({}, failing)).toBe(SESSION_START_HOOK_MS); // a conversion that fails or times out keeps the floor
+  });
+
+  // macOS: the conversion is /usr/bin/plutil's, as the engine's is
+  it.skipIf(process.platform !== 'darwin')('converts a real managed preferences plist with plutil, and keeps the floor for a malformed one', async () => {
+    const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>hooks</key><dict><key>SessionStart</key><array><dict><key>hooks</key><array>
+<dict><key>type</key><string>command</string><key>command</key><string>true</string><key>timeout</key><integer>2500</integer></dict>
+</array></dict></array></dict></dict></plist>`;
+    write(join(prefs, PLIST), plist);
+    expect(await bound({}, plutilJson)).toBe(2_500_000);
+    write(join(prefs, PLIST), '<plist><dict><key>broken');
+    expect(await bound({}, plutilJson)).toBe(SESSION_START_HOOK_MS);
+  });
+
+  it('reads the server-managed settings\' cached copy under the config directory, unverified, as a bound only', async () => {
+    write(join(home, '.claude', 'remote-settings.json'), { $signature: 'sig', ...sessionStart(2600) });
+    expect(await bound()).toBe(2_600_000);
+    write(join(base, 'scratch', 'remote-settings.json'), sessionStart(2700));
+    expect(await bound({ env: { HOME: home, CLAUDE_CONFIG_DIR: join(base, 'scratch') } })).toBe(2_700_000);
+    write(join(home, '.claude', 'remote-settings.json'), '{ not json');
+    expect(await bound()).toBe(SESSION_START_HOOK_MS);
   });
 });
