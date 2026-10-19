@@ -194,8 +194,8 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
     const following = read.following;
     body = (
       <div className="present-presenter" data-present-view="presenter">
-        {/* P3-F: a pointer press never focuses a bar button and lets go of the focus one took from the keyboard, so the
-            show's Enter and Space follow a click on a button */}
+        {/* P3-F: a pointer press never focuses a bar button and lets go of any focus held (a button's from the keyboard,
+            L259: an embed's frame from a click), so the show's Enter and Space follow a click on the bar */}
         <header className="present-bar" onMouseDown={dropBarFocus}>
           <Elapsed since={startedAt} />
           <span className="present-count" data-present-count>
@@ -258,11 +258,14 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
   );
 }
 
-/** A press on the presenter bar: no focus moves to a button, and a button holding focus (a Tab onto the bar) lets it go. */
+/**
+ * A press on the presenter bar: no focus moves to a button, and whatever holds focus lets it go: a button a Tab put it on,
+ * or (L259) an embed's frame in the current pane, whose page would take every key typed after.
+ */
 function dropBarFocus(event: ReactMouseEvent<HTMLElement>): void {
   event.preventDefault();
   const focused = event.currentTarget.ownerDocument.activeElement;
-  if (focused instanceof HTMLElement && event.currentTarget.contains(focused)) focused.blur();
+  if (focused instanceof HTMLElement) focused.blur();
 }
 
 /** One view of the show, fitted to its box. Its ShowStage plays each move it is given (see stage.ts). */
