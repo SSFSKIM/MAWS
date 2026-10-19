@@ -158,6 +158,14 @@ function ProjectChip() {
           aria-label={PROJECT_CHIP_COPY.newChat(project.name)}
           title={canCreate ? PROJECT_CHIP_COPY.newChat(project.name) : 'Not available here'}
           onClick={() => void createSession(project.id)}
+          onKeyDown={(event) => {
+            // the menu key (as the library's rows take it): a Mac keyboard sends no contextmenu, so the menu opens under
+            // the chip as a right-click there would, and Radix gives its first item the keyboard
+            if (event.key !== 'F10' || !event.shiftKey) return;
+            event.preventDefault();
+            const box = event.currentTarget.getBoundingClientRect();
+            event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
+          }}
           className="flex h-6 max-w-48 min-w-0 items-center gap-1.5 rounded-sm px-1.5 text-ui-sm text-fg-muted outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
         >
           <FolderIcon className="size-[12px] shrink-0" />

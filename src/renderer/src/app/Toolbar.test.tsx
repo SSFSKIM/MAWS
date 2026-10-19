@@ -1,7 +1,7 @@
 // The title bar's project chip (P3-F wave S, F17; the owner's obs 8): the project whose tab set the strips show, named
 // left of the title, out of the crowded strip. A click is the sidebar's "+" (a new unstarted session tab in that
 // project); its context menu reveals the project in the sidebar.
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -73,5 +73,20 @@ describe('the title bar’s project chip', () => {
     expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, expandedProjects: [MAWS] });
     expect(projectReveal.getState().pending).toBe(MAWS); // no sidebar mounted here: the reveal waits for its body
     expect(useSessions.getState().unstarted.size).toBe(0); // the menu opened no tab
+  });
+
+  // P3-F wave S (F17 review 3): the keyboard reaches the reveal, as Enter on the strip's label did, by the menu key
+  it('Shift+F10 on the focused chip opens its menu, and Enter on Reveal in sidebar reveals the project', async () => {
+    const user = userEvent.setup();
+    act(() => useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] }));
+    render(<Toolbar />);
+    act(() => useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' }));
+    act(() => chip()!.focus());
+    await user.keyboard('{Shift>}{F10}{/Shift}');
+    const reveal = await screen.findByRole('menuitem', { name: PROJECT_CHIP_COPY.reveal });
+    await waitFor(() => expect(document.activeElement).toBe(reveal)); // opened from the keyboard: its item holds the keyboard
+    await user.keyboard('{Enter}');
+    expect(useLayout.getState().regions.sidebar).toMatchObject({ collapsed: false, expandedProjects: [MAWS] });
+    expect(useSessions.getState().unstarted.size).toBe(0); // the key opened no tab
   });
 });
