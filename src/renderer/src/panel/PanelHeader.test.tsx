@@ -12,6 +12,9 @@ import { resetMarkup } from '../markup/session';
 import { registerMarkupSurface } from '../markup/surface';
 import { registerSlot, resetSlots } from '../app/slots';
 import { queryClient } from '../ipc/query';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout'; // P3-F wave S (F6)
+import { FLOAT_COPY } from '../shell/floating'; // P3-F wave S (F6)
+import { useLayout } from '../stores/layout'; // P3-F wave S (F6)
 import { A, probeTool, resetPanelStores, type ProbeState } from '../test-support/panel';
 import { installResizeObserver } from '../test-support/resize';
 import { editorHostOf, focusEditorHostAction, registerEditorHost, resetEditorHosts, SAVED_COPY, useEditorHost, useEditorHostScope, type EditorHostAction, type EditorHostRegistration, type SavedState } from './editor-host';
@@ -65,6 +68,15 @@ describe('the panel header', () => {
     mount();
     expect(title().textContent).toBe('Session overview');
     expect(buttons()).toEqual(['Float session over panel', 'Maximize right panel', 'Hide right panel']);
+  });
+
+  // P3-F wave S (F6, candidate 58): the card draws the session in front; with none, Float is disabled and names why
+  it('with no session in front, Float is disabled and reads its reason; Maximize and Hide stay', () => {
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    mount();
+    expect(buttons()).toEqual([FLOAT_COPY.noSession, 'Maximize right panel', 'Hide right panel']);
+    expect((within(header()).getByRole('button', { name: FLOAT_COPY.noSession }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(header()).getByRole('button', { name: 'Maximize right panel' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('shows an unregistered tool’s strip label, its setTitle suffix following in the header and the strip alike', () => {

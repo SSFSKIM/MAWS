@@ -186,6 +186,48 @@ test('a session opens in place of Settings or Diagnostics; a pin keeps its tab; 
   }
 });
 
+// P3-F wave S (F6, candidate 58; the owner: "a defect, not taste"): the floating card draws the session in front, so with
+// none in front (an artifact, Settings) Float is disabled and says why, the menu action floats nothing, and a float that
+// meets such a tab docks: main and its tab strip never vanish behind a panel with no card.
+test('Float with no session in front: disabled with its reason, the action floats nothing, and Settings over the card docks it', async () => {
+  const maws = await launchMaws({ env: SHELL_ENV });
+  try {
+    const { app, page } = maws;
+    const NO_SESSION = 'Select a session’s tab to float it';
+    const main = page.locator('[data-region="main"]');
+    const panel = page.locator('[data-region="panel"]');
+    const strip = page.getByRole('tablist', { name: 'Open tabs' });
+    const card = panel.getByRole('region', { name: 'Session card' });
+    const mainShown = async (message: string) => {
+      await expect(main, message).toHaveJSProperty('inert', false);
+      await expect.poll(async () => (await main.boundingBox())?.width ?? 0, { message }).toBeGreaterThan(0);
+      await expect(strip, message).toBeVisible();
+    };
+    await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+    await (await sidebarRow(page, NORTH)).click();
+    await menu(app, 'settings.open');
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([`${NORTH} · MAWS`, 'Settings']);
+
+    await expect(panel.getByRole('button', { name: NO_SESSION })).toBeDisabled();
+    await menu(app, 'panel.float');
+    await expect(page.getByText(NO_SESSION, { exact: true })).toBeVisible(); // the toast says why
+    await mainShown('the action floats nothing with Settings in front');
+    await expect(card).toHaveCount(0);
+
+    await strip.getByRole('tab', { name: `${NORTH} · MAWS` }).click();
+    await panel.getByRole('button', { name: 'Float session over panel' }).click();
+    await expect(card).toBeVisible();
+    await expect(main).toHaveJSProperty('inert', true);
+    await menu(app, 'settings.open'); // Settings comes in front of the floating card
+    await expect(card).toHaveCount(0);
+    await mainShown('a float that meets Settings docks');
+    await expect(panel.getByRole('button', { name: NO_SESSION })).toBeDisabled();
+    expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    await maws.cleanup();
+  }
+});
+
 // E11 F2b (plan 2.1): a started session's composer, docked at the pane's foot, in a window too short for the palette's
 // 384px cap above it: the palette opens above the editor, capped by the room there, and moves nothing
 // (support/palette-geometry.ts; sessions.spec.ts runs the same over an unstarted New chat's centred composer).
