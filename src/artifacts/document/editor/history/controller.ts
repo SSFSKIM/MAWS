@@ -127,15 +127,19 @@ export class HistoryController {
   words = (): SummaryWords => documentWords(this.handle.doc);
 
   /**
-   * The editor opened: follow restores (the banner) and new versions; the first time, read the list and the last view,
-   * offer "See N new changes" when an agent changed the document since, then mark it viewed. Returns the detach, which
-   * also drops any preview and its docs (an attach after it starts from the live document).
+   * The editor opened: follow restores (the banner), new versions and the owner's returns; the first time, and at each
+   * return, a look (`look`). Returns the detach, which also drops any preview and its docs (an attach after it starts
+   * from the live document).
    */
   attach(): () => void {
-    const stops = [this.handle.onRestored(({ versionId }) => void this.restored(versionId)), this.api.onVersions?.(() => void this.refresh()) ?? (() => {})];
+    const stops = [
+      this.handle.onRestored(({ versionId }) => void this.restored(versionId)),
+      this.api.onVersions?.(() => void this.refresh()) ?? (() => {}),
+      this.api.onReturn?.(() => void this.look()) ?? (() => {}), // P4 (tracker L274)
+    ];
     if (!this.begun) {
       this.begun = true;
-      void this.begin();
+      void this.look();
     }
     return () => {
       for (const stop of stops) stop();
@@ -147,12 +151,18 @@ export class HistoryController {
     };
   }
 
-  private async begin(): Promise<void> {
+  // A look, the editor's first showing or a return to it (P4, tracker L274; amends L's Decision Log 15 for this rail, a
+  // look per return rather than per showing): read the list and the last view, offer "See N new changes" when an agent
+  // changed the document since (an offer not yet taken counts again from its own view, which it covers), then mark it
+  // viewed.
+  private async look(): Promise<void> {
     try {
       const [versions, lastViewedAt] = await Promise.all([this.api.versions(), this.api.lastViewedAt()]);
-      this.set({ versions });
-      const base = newChangesBase(versions, lastViewedAt);
-      if (base) {
+      this.set({ versions, ...this.headingFrom(versions) });
+      const offered = this.snapshot.pill;
+      const base = offered ? null : newChangesBase(versions, lastViewedAt);
+      if (offered) void this.count(offered.since);
+      else if (base) {
         this.set({ pill: { since: base.since, count: null, failed: null } });
         void this.count(base.since);
       }

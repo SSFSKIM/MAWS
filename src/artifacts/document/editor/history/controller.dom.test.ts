@@ -6,8 +6,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { attributedRuns, renderDiff } from '../../history';
+import { applyEdit } from '../../patch-writer';
 import { schemaFor } from '../../schema';
-import { addTab, createDocument, deleteTab } from '../../tabs';
+import { addTab, createDocument, deleteTab, tabBody } from '../../tabs';
+import { ynodeToPmnode } from '../../../yjs/prosemirror';
 import type { DocumentHandle } from '../host-types';
 import { MemoryDocumentHost, openMemoryHandle, whenSynced } from '../memory-host';
 import { until } from '../test-world';
@@ -112,5 +114,41 @@ describe('Name this version', () => {
     expect(await controller.name('Before legal')).toBe(true);
     expect(controller.getSnapshot().versions!.find((v) => v.id === turn.id)!.label).toBe('Before legal');
     expect(controller.getSnapshot().preview!.title).toBe(`Before legal · ${formatWhen(turn.at)}`);
+  });
+});
+
+// P4 W1-B (tracker L274; sitting candidate 28): the document stayed open while the owner was away (a panel closed and
+// reopened, the main region behind the panel and shown again), so its editor and this controller stayed too. Each
+// return is a look, as the first showing is: the agent's changes since the last look raise the pill, and the look is
+// recorded, so a second away-edit is counted from the first return, not from the first showing.
+describe('a return to the document', () => {
+  it('raises the pill for each away-edit and records each look', async () => {
+    let now = Date.now() - 60 * 60_000;
+    const host = new MemoryDocumentHost();
+    const history = new MemoryHistory(host, { now: () => now });
+    host.write((doc) => createDocument(doc, { id: 'main', title: 'Main', body: body('p1', 'First') }));
+    history.version('auto');
+    const handle = openMemoryHandle(host, { log: () => {} });
+    await whenSynced(handle);
+    cleanups.push(() => host.destroy(), () => history.destroy(), () => handle.close());
+    const controller = attach(handle, history);
+    await until(() => history.viewedAt !== null, 'the first look');
+    expect(controller.getSnapshot().pill).toBeNull();
+    const looks = [history.viewedAt!];
+
+    for (const id of ['p2', 'p3']) {
+      now += 60_000; // away: an agent's edit and its turn's version
+      host.write((doc) => void applyEdit(doc, [{ op: 'insert', after: 'p1', markdown: `Added as ${id}. ^${id}` }]), AGENT);
+      await until(() => ynodeToPmnode(tabBody(handle.doc, 'main')!, schemaFor()).textContent.includes(`Added as ${id}.`), `the edit adding ${id} at the replica`);
+      history.version('turn', AGENT, { summary: `Added ${id}` });
+      now += 60_000;
+      history.returned();
+      await until(() => controller.getSnapshot().pill?.count != null, `the pill after adding ${id}`);
+      expect(controller.getSnapshot().pill?.count).toBe(1); // this away-edit alone: counted from the last look
+      await until(() => history.viewedAt === now, 'this look recorded');
+      looks.push(history.viewedAt!);
+      controller.dismissPill();
+    }
+    expect(looks).toHaveLength(3);
   });
 });

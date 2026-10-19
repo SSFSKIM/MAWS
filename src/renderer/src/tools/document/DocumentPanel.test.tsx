@@ -37,6 +37,7 @@ beforeEach(() => {
   window.maws = fakeClient({ 'session.intent.get': null }).client;
   sent = [];
   noContentMs = undefined;
+  versions = [];
   memory = new MemoryDocumentHost();
   memory.write((doc) => createDocument(doc, { title: 'Launch plan' })); // the host's first tab (kinds/document.ts)
 });
@@ -59,10 +60,11 @@ const until = async (check: () => boolean, what: string) => {
 // The commands the tab sent, by name.
 let sent: string[] = [];
 let noContentMs: number | undefined;
+let versions: unknown[] = []; // what `artifacts.versions` answers
 
 function deps(): DocumentTabDeps {
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
-    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, spaceId: SPACE, revision: 1 } } : name === 'artifacts.versions' ? { versions: [] } : undefined })) as MawsBridge['invoke'],
+    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, spaceId: SPACE, revision: 1 } } : name === 'artifacts.versions' ? { versions } : undefined })) as MawsBridge['invoke'],
     on: (() => () => {}) as MawsBridge['on'],
   };
   const editor = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
@@ -136,6 +138,32 @@ describe('the document editor in L’s registry', () => {
     first.remount(true);
     await shown();
     await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
+    expect(first.onShown).toHaveBeenCalledOnce();
+  });
+
+  // P4 W1-B (tracker L274; sitting candidate 28): the body stays mounted while it is hidden (the panel closed, the main
+  // region behind the panel), so each return to it is a look of the rail's: an agent's version since the last look
+  // raises the pill, and the view is recorded, as at the first showing; `onShown`, the surface's view, stays once
+  it('looks again at each return to a body that stayed mounted: the pill for each away-edit, the view recorded', async () => {
+    const looks = () => sent.filter((name) => name === 'artifacts.markViewed').length;
+    const pause = () => act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+    const first = mount();
+    await shown();
+    await until(() => looks() === 1, 'the first look');
+    for (const n of [1, 2]) {
+      first.setVisible(false);
+      await pause();
+      versions = [...versions, { id: n, seq: n, at: Date.now(), actor: { kind: 'session', appSessionId: SESSION }, kind: 'turn', assetRefs: [], summary: `Edit ${n}` }];
+      await pause();
+      first.setVisible(true);
+      await until(() => screen.queryByRole('button', { name: 'Dismiss new changes' }) !== null, `the pill at return ${n}`);
+      await until(() => looks() === n + 1, `the look at return ${n}`);
+      act(() => screen.getByRole('button', { name: 'Dismiss new changes' }).click());
+    }
+    first.setVisible(false);
+    first.setVisible(true); // nothing new: no pill, the look recorded
+    await until(() => looks() === 4, 'the third look');
+    expect(screen.queryByRole('button', { name: 'Dismiss new changes' })).toBeNull();
     expect(first.onShown).toHaveBeenCalledOnce();
   });
 

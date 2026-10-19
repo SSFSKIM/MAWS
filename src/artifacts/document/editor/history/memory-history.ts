@@ -37,6 +37,7 @@ export class MemoryHistory implements HistoryApi {
   private readonly rows: Array<{ fromSeq: number; toSeq: number; map: ContentMap }> = [];
   private readonly stored: Stored[] = [];
   private readonly listeners = new Set<() => void>();
+  private readonly returns = new Set<() => void>();
   private readonly offLanded: () => void;
   /** The option's clock, else the wall clock; also the rail's (`HistoryApi.now`). */
   readonly now: () => number;
@@ -75,9 +76,15 @@ export class MemoryHistory implements HistoryApi {
     this.rows.splice(this.rows.indexOf(inside[0]), inside.length, merged);
   }
 
+  /** The owner came back to the document while its editor stayed open (`HistoryApi.onReturn`). */
+  returned(): void {
+    for (const listener of [...this.returns]) listener();
+  }
+
   destroy(): void {
     this.offLanded();
     this.listeners.clear();
+    this.returns.clear();
   }
 
   // ── HistoryApi ──
@@ -145,6 +152,11 @@ export class MemoryHistory implements HistoryApi {
   onVersions(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  onReturn(listener: () => void): () => void {
+    this.returns.add(listener);
+    return () => this.returns.delete(listener);
   }
 
   private autoVersion(): void {
