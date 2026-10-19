@@ -38,7 +38,6 @@ import {
   keystrokeMeasures,
   load1,
   openResult,
-  paintedInB,
   PerfSeam,
   processMemory,
   readAll,
@@ -53,6 +52,7 @@ import {
   watchRemote,
   type CallAnswer,
   type ReadResult,
+  type TypingReport,
 } from './support/document-scale';
 
 test.skip(process.env.MAWS_DOCUMENT_PERF !== '1', 'the scale gate runs only under MAWS_DOCUMENT_PERF=1');
@@ -179,6 +179,51 @@ async function type(page: Page, text: string, count: number, gap = () => 60 + Ma
 
 const TYPED = 'the owner keeps typing while agents edit elsewhere ';
 
+// ---- rows 3 and 4 over every keystroke (P3-F, editor-proof scalpel-1#1) -------------------------------------------------
+// After the typing, the acknowledgements and window B's frames are drained: until every keystroke has both, no later
+// than 10 s, and no sooner than the fixed 1.5 s the run waited before, so the host-loop figures read over the run (rows
+// 5) keep the window their readings were taken over. Rows 3 and 4 then count every keystroke: one still without its ack
+// or its frame in B when the drain stopped is a miss, counted at the time it had waited by then (10 s or more, far past
+// either bound) and named in the row's note, never dropped. Acks arrive in send order, so dropping the unacknowledged
+// keys dropped the slowest ones.
+const DRAIN_FLOOR_MS = 1_500;
+const DRAIN_MS = 10_000;
+type Seen = Array<{ clock: number; at: number; raf?: number }>;
+
+/** Each typed keystroke's ack and frame in B, timed as keystrokeMeasures and paintedInB (support/document-scale.ts) time them; `end` is A's clock when the drain stopped. */
+function everyKeystroke(report: Pick<TypingReport, 'origin' | 'keys' | 'acks'>, seen: Seen, end: number) {
+  const typed = report.keys.filter((k) => !('ime' in k && (k as { ime?: boolean }).ime));
+  const acks = typed.map((k) => (k.local === undefined ? undefined : report.acks[k.local - 1]));
+  const frames = typed.map((k) => (k.clock === undefined ? undefined : seen.find((s) => s.clock >= k.clock! && s.raf !== undefined)?.raf));
+  return {
+    keystrokes: typed.length,
+    acked: acks.filter((t) => t !== undefined).length,
+    painted: frames.filter((t) => t !== undefined).length,
+    ack: stats(typed.map((k, i) => (acks[i] ?? end) - k.tIn)),
+    inB: stats(typed.map((k, i) => (frames[i] ?? report.origin + end) - (report.origin + k.tIn))),
+  };
+}
+
+/** Waits for every typed keystroke's ack in A and frame in B, within DRAIN_FLOOR_MS and DRAIN_MS; answers A's clock when it stopped and how long it took. */
+async function drain(page: Page, pageB: Page): Promise<{ end: number; waitedMs: number }> {
+  const started = Date.now();
+  for (;;) {
+    const [a, seen] = await Promise.all([
+      page.evaluate(() => {
+        const S = (window as unknown as { __scale: Pick<TypingReport, 'keys' | 'acks'> }).__scale;
+        return { origin: performance.timeOrigin, keys: S.keys, acks: S.acks, now: performance.now() };
+      }),
+      remoteSeen(pageB),
+    ]);
+    const counted = everyKeystroke(a, seen, a.now);
+    const waitedMs = Date.now() - started;
+    const whole = counted.acked === counted.keystrokes && counted.painted === counted.keystrokes;
+    if ((whole && waitedMs >= DRAIN_FLOOR_MS) || waitedMs >= DRAIN_MS) return { end: a.now, waitedMs };
+    await sleep(100);
+  }
+}
+const missed = (n: number, of: number, what: string) => (n < of ? `; ${of - n} ${what} when the drain stopped, each a miss at the time it had waited` : '');
+
 // The run passes when no row failed (Decision Log 44's reading of the parent's Decision Log 54): a marginal row is listed
 // for P3-F's re-measure, in the output and in the results' `marginal`, and does not fail the run.
 function judged(rows: Rows, key: 'marginal' | 'marginalSigkill'): void {
@@ -267,18 +312,19 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     const reads: Array<{ session: string; answer: CallAnswer<ReadResult> }> = [];
     const typing = type(page, TYPED, 300);
     const [typed] = await Promise.all([typing, agentsRun(seam, agents, id, typing, 12_000, reads)]);
-    await sleep(1_500); // the last keystrokes acknowledged, B's last frames
+    const drained = await drain(page, pageB); // the last keystrokes acknowledged, B's last frames (P3-F)
     const loop = await ok<{ p50: number; p99: number; max: number }>(page, 'artifacts.testLoopDelay', {});
     loads.steadyEnd = load1();
     const report = await typingReport(page);
     const keys = keystrokeMeasures(report);
-    const painted = stats(paintedInB(report, await remoteSeen(pageB)));
+    const counted = everyKeystroke(report, await remoteSeen(pageB), drained.end);
+    const painted = counted.inB;
     const note = `${keys.keystrokes} keystrokes (${keys.noTransaction} without a transaction); agents: ${agents.map((a) => `${a.session} ${a.applied.length} batches, ${a.refused.length} refused`).join('; ')}`;
     rows.add('1 p95', 'keystroke → frame in A, p95 (200 pages, 2 windows, 2 agents)', keys.frame.p95, 'ms', 20, 'p95 ≤ 20 ms (mini 16.8 and 17.2; MacBook target 16)', note);
     rows.add('1 max', 'keystroke → frame in A, max', keys.frame.max, 'ms', 50, 'max ≤ 50 ms', `p50 ${keys.frame.p50}`);
     rows.add('2 p95', 'keystroke → presented (Event Timing; a keystroke under its 16 ms threshold counted at 16)', keys.presented.p95, 'ms', 50, 'p95 ≤ 50 ms', `${keys.presentedReported} keydowns reported at ≥ 16 ms; max ${keys.presented.max}`);
-    rows.add('3 p95', 'keystroke → durable ack, p95', keys.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${keys.acked} acked; p50 ${keys.ack.p50}, max ${keys.ack.max}`);
-    rows.add('4 p95', 'keystroke painted in window B, p95', painted.p95, 'ms', 100, 'p95 ≤ 100 ms', `n ${painted.n}; p50 ${painted.p50}, max ${painted.max}`);
+    rows.add('3 p95', 'keystroke → durable ack, p95 (every keystroke counted)', counted.ack.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.acked} of ${counted.keystrokes} acked${missed(counted.acked, counted.keystrokes, 'unacknowledged')}; drained ${drained.waitedMs} ms; p50 ${counted.ack.p50}, max ${counted.ack.max}`);
+    rows.add('4 p95', 'keystroke painted in window B, p95 (every keystroke counted)', painted.p95, 'ms', 100, 'p95 ≤ 100 ms', `${counted.painted} of ${counted.keystrokes} painted${missed(counted.painted, counted.keystrokes, 'not painted in B')}; p50 ${painted.p50}, max ${painted.max}`);
     rows.add('5 p99', 'host event-loop delay over the run (A’s testLoopDelay: the whole gaps of its own 10 ms timer), p99, documents live with the writer’s batches', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
     rows.add('5 max', 'host event-loop delay over the run, max', loop.max, 'ms', 100, 'max ≤ 100 ms');
     const all = agents.flatMap((a, k) => a.applied.slice(steadyFrom[k]));
@@ -286,7 +332,7 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     const seamLoop = await seam.send<{ loop: { max: number; p99: number } }>({ cmd: 'loop' });
     rows.add('5 max (gaps)', 'host loop over the run measured by the seam’s 1 ms tick gaps (beside A’s 10 ms testLoopDelay), max', seamLoop.loop.max, 'ms', 100, 'max ≤ 100 ms', `p99 ${seamLoop.loop.p99.toFixed(1)} ms`);
     for (const [k, r] of reads.entries()) rows.add(`read load ${k + 1}`, `the 200-block read under load (${r.session}, typing and the other agent running), host loop max over the call`, r.answer.loop.max, 'ms', 100, 'held to row 5’s max ≤ 100 ms', `wall ${r.answer.wallMs.toFixed(1)} ms`);
-    rows.write({ steady: { loads, typing: keys, painted, loop, agents: agents.map((a) => ({ session: a.session, applied: a.applied.length, refused: a.refused })) } });
+    rows.write({ steady: { loads, typing: { ...keys, ack: counted.ack, acked: counted.acked }, painted, paintedKeys: counted.painted, drain: drained, loop, agents: agents.map((a) => ({ session: a.session, applied: a.applied.length, refused: a.refused })) } });
     expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);
     const landed = (await blockText(page, id, `s${TYPING_SECTION}p2`)) ?? '';
     expect(landed.endsWith(typed), `the typed text landed whole: …${landed.slice(-80)}`).toBe(true);
