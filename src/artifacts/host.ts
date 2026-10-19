@@ -121,6 +121,9 @@ export interface KindAdapter {
   // A new document's first content (Decision Log 44c, parent 48), written by the host when the creator gives none, in
   // the create's commit and credited to the creator, so two replicas never each seed a first tab of their own.
   initial?(doc: Doc, info: { title: string }): void;
+  // P4 (W1, L277): a duplicate's kind after-effects, written in the copy's own write over the source's state (live or a
+  // version's) and credited to the duplicator; `title` is the source's title as the copy is made.
+  copied?(doc: Doc, info: { title: string }): void;
   readFiles?(doc: Doc): Record<string, string>; // M6
   publish?(live: Doc, base: Record<string, string>, sent: Record<string, string | null>, force: boolean): { changed: string[]; conflicts: { path: string; detail?: string }[] }; // M6
   // P3-C (the parent's Decision Log 58): the paths `readFiles` would answer, in its order, without their text; a publish

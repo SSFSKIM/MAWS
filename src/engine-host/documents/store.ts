@@ -495,9 +495,13 @@ export class ArtifactStore {
       if (actor.kind === 'session') this.linkInFrame(id, actor.appSessionId, 'created', at);
       this.copyAssetsInFrame(artifactId, id, assets);
     };
+    const copied = state ? this.service.adapterFor(source.kind)?.copied : undefined; // P4 (W1, L277): the kind's copy hook
     try {
       if (state) {
-        await this.service.writeAs(id, actor, (doc) => applyV2(doc, state), {
+        await this.service.writeAs(id, actor, (doc) => {
+          applyV2(doc, state);
+          copied?.(doc, { title: source.title });
+        }, {
           prepare: entity,
           inFrame: () => {
             this.versionInFrame(this.entity(id)!, { kind: 'import', actor });
