@@ -11,7 +11,7 @@ import { HtmlFrame, LOCATE_TIMEOUT_MS, type FrameHandle } from './HtmlFrame';
 const RECT: CardRect = { x: 0, y: 0, width: 640, height: 101 };
 const MOVED: CardRect = { x: 40, y: 200, width: 300, height: 50 };
 
-// happy-dom knows no `maws-deliverable:` scheme: child-frame navigation is off, so a frame only takes its URL; the load
+// happy-dom knows no `maws-artifact:` scheme: child-frame navigation is off, so a frame only takes its URL; the load
 // happy-dom then fires on its own is held back, so each case says when the frame loads
 beforeAll(() => {
   (window as unknown as { happyDOM: { settings: { navigation: { disableChildFrameNavigation: boolean } } } }).happyDOM.settings.navigation.disableChildFrameNavigation = true;
@@ -24,7 +24,7 @@ afterEach(() => {
 function mount(picking = false) {
   let handle: FrameHandle | null = null;
   const onFrame = vi.fn((h: FrameHandle | null) => void (handle = h));
-  const view = render(<HtmlFrame url="maws-deliverable://x/v1.html" title="Dashboard" picking={picking} onFrame={onFrame} />);
+  const view = render(<HtmlFrame url="maws-artifact://a/1/index.html" title="Dashboard" picking={picking} onFrame={onFrame} />);
   const frame = document.querySelector('iframe')!;
   const dispatch = frame.dispatchEvent.bind(frame);
   frame.dispatchEvent = (event: Event) => (event.type === 'load' && !loading ? true : dispatch(event));
