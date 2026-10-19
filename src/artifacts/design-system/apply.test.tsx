@@ -21,6 +21,7 @@ import {
   type DesignSystemView,
   type HouseDesignSystem,
 } from './apply';
+import { authoredFontStack } from './assets';
 import complete from './fixtures/complete.tokens.json';
 import { setToken, writeSystem } from './model';
 import { holdScopeStyle, scopeIdOf } from './scope-style';
@@ -506,6 +507,19 @@ describe('a scope’s overrides and the export’s', () => {
       style.textContent = scope(overrides);
       expect.soft(getComputedStyle(host.firstElementChild!).color, value).toBe(resolveDsVars('var(--ds-color-accent)', tokens, 'document', overrides));
     }
+  });
+
+  // the wave's review: a literal under a name the system does not set still names the face by its private name
+  // (the bundled Official's own case, `var(--ds-font-body)` and its Noto Serif KR, needs its document.css, which this
+  // project reads as empty; the fixture's face stands in for it)
+  it('draws the bundled face for an override-only name that refers to a system font stack, as the export does', () => {
+    const faced: SystemSnapshot = { ...snapshot, files: { 'components/document.css': FACE } };
+    const overrides = { '--ds-font-note': 'var(--ds-font-display)' };
+    const css = snapshotCss(faced, (ref) => `maws-artifact://sys/3/${ref}`, '.s', 'document', overrides);
+    const note = declared(css, '--ds-font-note')!;
+    expect(note).toMatch(/^ds-face-[0-9a-z]+, "Iowan Old Style", Georgia, serif$/);
+    expect(note).toBe(declared(css, '--ds-font-display'));
+    expect(authoredFontStack(note)).toBe(resolveDsVars('var(--ds-font-note)', tokens, 'document', overrides)); // the export's stack, by its authored names
   });
 });
 
