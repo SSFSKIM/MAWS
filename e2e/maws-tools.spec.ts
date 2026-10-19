@@ -1,6 +1,11 @@
 // E1's `tools` group (docs/doperpowers/plans/2026-10-05-e1-tool-server.md, M5; P1 spec §9 E1, gates G1 to G7): the
-// `maws` tool server end to end in the product app, over the four fixtures M2 recorded live through MAWS's own host
-// (`pass3/p1-maws-*`) and E0a's `p1-sdk-mcp-roundtrip`, replayed through C3's replay transport (MAWS_ENGINE_REPLAY=1).
+// `maws` tool server end to end in the product app, replayed through C3's replay transport (MAWS_ENGINE_REPLAY=1). Three
+// of M2's recordings, made live through MAWS's own host, replay as recorded (`pass3/p1-maws-send-file`, `-ask-blocking`,
+// `-ask-async`), and so does E0a's `p1-sdk-mcp-roundtrip`. The other cases replay copies derived from a recording:
+// show_pane a checked-in copy of `pass3/p1-maws-show-pane` with its retired `deliverable` pane renamed `artifact`
+// (`e2e/fixtures/derived/`, its provenance in its first row), the previews and notes cases an ask with its arguments
+// rewritten (`askFixture`), and the document cases E2's `pass3/p1-maws-artifacts` with its calls made a document's
+// (`asDocumentReplay`).
 // The host's tool server runs for real against the replay: it answers the engine's handshake and calls, writes the X12
 // records, holds a blocking ask until the sheet submits, sends an async ask's steer, and bridges `show_pane` to the
 // renderer, which opens the pane and answers. The replay matches a `control_response` by request id and behaviour only
