@@ -245,6 +245,32 @@ describe('tabs', () => {
     act(() => fireEvent.click(screen.getByRole('button', { name: 'Add tab' })));
     await until(() => listTabs(handle.doc).length === 50, 'the tab added below the limit');
   });
+
+  // P3-F panel scalpel-2#2: a tab dragged from another document's strip (or deleted mid-drag) is no tab of this one; its
+  // drop is not accepted and throws nothing, and a drop of one of this document's tabs still moves it
+  it('ignore a dropped tab that is not one of this document’s, and move one that is', async () => {
+    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    act(() => void addTab(handle.doc, { title: 'Second', id: 'tab00002' }));
+    await until(() => screen.getAllByRole('tab').length === 2, 'two tabs');
+    const carrying = (id: string) => ({ dataTransfer: { getData: (type: string) => (type === 'application/x-maws-document-tab' ? id : '') } });
+    const errors: unknown[] = [];
+    const onError = (event: ErrorEvent) => {
+      event.preventDefault();
+      errors.push(event.error);
+    };
+    window.addEventListener('error', onError);
+    try {
+      let accepted = false;
+      act(() => void (accepted = !fireEvent.drop(screen.getByRole('tab', { name: 'Main' }), carrying('elsewhere'))));
+      expect(accepted, 'a foreign tab’s drop accepted').toBe(false);
+      expect(errors).toEqual([]);
+      expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Main', 'Second']);
+      act(() => void fireEvent.drop(screen.getByRole('tab', { name: 'Main' }), carrying('tab00002')));
+      expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Second', 'Main']);
+    } finally {
+      window.removeEventListener('error', onError);
+    }
+  });
 });
 
 describe('find', () => {

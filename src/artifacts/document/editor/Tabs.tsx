@@ -40,11 +40,13 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
     onSelect(next.id);
     setMenu(false);
   };
+  // P3-F: a dragged id that is no tab of this document (one from another document's strip, one deleted mid-drag) is
+  // not this strip's drop
   const drop = (event: DragEvent, target: TabInfo) => {
     const dragged = event.dataTransfer.getData(DRAG_TYPE);
-    if (!dragged || dragged === target.id) return;
-    event.preventDefault();
     const from = tabs.findIndex((tab) => tab.id === dragged);
+    if (from < 0 || dragged === target.id) return;
+    event.preventDefault();
     const to = tabs.findIndex((tab) => tab.id === target.id);
     moveTab(doc, dragged, from < to ? { after: target.id } : { before: target.id });
   };
