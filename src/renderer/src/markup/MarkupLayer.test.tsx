@@ -21,8 +21,10 @@ const TAB = 'browser:1';
 const still: CapturedImage = { mediaType: 'image/png', data: 'c3RpbGw=', width: 1600, height: 1000 };
 let end: Mock<() => void>;
 
-async function open(): Promise<void> {
+// `live`: what the surface holds under the still (the DOM route's body, an editor in it)
+async function open(live?: (element: HTMLElement) => void): Promise<void> {
   const element = document.body.appendChild(document.createElement('div'));
+  live?.(element);
   vi.spyOn(element, 'getBoundingClientRect').mockReturnValue({ left: 300, top: 120, width: 800, height: 500, x: 300, y: 120, right: 1100, bottom: 620, toJSON: () => ({}) } as DOMRect);
   end = vi.fn<() => void>();
   registerMarkupSurface({ surface: 'panel', tabId: TAB }, { element: () => element, label: () => 'Page A', begin: async () => still, end });
@@ -175,6 +177,26 @@ describe('MarkupLayer', () => {
     await user.keyboard('{Escape}');
     expect(useMarkup.getState().session).toBeNull();
     expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  // P3-F (F-shell, scalpel-4#2): the live surface is under the still; the keyboard never reaches it from the overlay
+  it('Tab and Shift+Tab stay inside the overlay, never reaching an editor under the still', async () => {
+    const user = userEvent.setup();
+    await open((element) => {
+      const editor = element.appendChild(document.createElement('div'));
+      editor.contentEditable = 'true';
+      editor.setAttribute('aria-label', 'Live editor');
+    });
+    const layer = screen.getByRole('region', { name: 'Mark-up' });
+    const add = screen.getByRole('button', { name: 'Add to chat' });
+    expect(document.activeElement).toBe(layer);
+    await user.tab({ shift: true });
+    expect(document.activeElement, 'from the overlay itself, to its last control').toBe(add);
+    await user.tab();
+    expect(document.activeElement, 'from the last control, round to the first').toBe(screen.getByRole('radio', { name: 'Pen' }));
+    await user.tab({ shift: true });
+    expect(document.activeElement, 'from the first control, round to the last').toBe(add);
+    expect(layer.contains(document.activeElement)).toBe(true);
   });
 
   // P3-F (F-shell, scalpel-4#4): no composer mounted (the card closed to its pill), the picture is queued and the

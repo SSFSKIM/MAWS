@@ -3,7 +3,7 @@
 // lays the still, the drawing (an SVG in the surface's CSS px as measured when the still was taken, stretched with the
 // rect if the surface resizes meanwhile) and, 10 px above the bottom edge, the toolbar: the tool and the ink (two radio
 // groups), Undo, Clear, Cancel and Add to chat (Claude's annotate toolbar). Escape outside a text field discards, unless
-// a menu or dialog open over the shell answers it.
+// a menu or dialog open over the shell answers it; Tab and Shift+Tab go round the overlay's controls.
 import { RadioGroup } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Icon, PenIcon } from '../app/IconButton';
@@ -188,6 +188,19 @@ function MarkupOverlay({ session }: { session: MarkupSession }) {
       root.current?.focus({ preventScroll: true });
     }
   };
+  // The live surface is under the still: Tab and Shift+Tab go round the overlay's controls and never out to it, where
+  // an editor would take keys the person cannot see (P3-F, F-shell). A stop may be a roving group (the radio groups):
+  // the key leaves the first or last stop from anywhere inside it.
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
+    const stops = [...event.currentTarget.querySelectorAll<HTMLElement>('button, input, [tabindex]')].filter((el) => el.tabIndex >= 0 && !el.hasAttribute('disabled'));
+    const [first, last] = [stops[0], stops.at(-1)];
+    if (!first || !last) return;
+    const at = event.target as Node;
+    if (event.shiftKey ? at !== event.currentTarget && !first.contains(at) : !last.contains(at)) return;
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus({ preventScroll: true });
+  };
   const add = async () => {
     setAdding(true);
     await addMarkupToChat(drawing.marks);
@@ -201,6 +214,7 @@ function MarkupOverlay({ session }: { session: MarkupSession }) {
       aria-label={MARKUP_COPY.layer}
       tabIndex={-1}
       data-markup-layer=""
+      onKeyDown={onKeyDown}
       className="fixed z-30 overflow-hidden outline-none select-none"
       style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
     >
