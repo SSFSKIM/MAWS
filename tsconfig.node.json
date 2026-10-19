@@ -48,6 +48,7 @@
     "e2e/support/live-lifecycle.ts",
     "e2e/support/design-final-reporter.ts", // P3-E1 M6; P3-F: test/support/final-bundle.test.ts drives it at its boundary
     "e2e/support/design-geometry.ts", // P3-E1 M6: test/support/design-geometry.test.ts runs the evidence probe's hidden-node rule
+    "e2e/support/toolbar-judge.ts", // P3-F F3: test/support/toolbar-controls.test.ts runs the toolbar judgement
     // P3-E1 M6: test/support/design-frames.test.ts runs the design scale gate's frame readings
     "e2e/support/design-frames.ts",
     // P3-H: test/support/final-bundle.test.ts runs the final run's build bundle and its reporter (gate-offload Decision Log 50)
