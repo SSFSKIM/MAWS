@@ -106,7 +106,7 @@ it("offers an ended session's Resume only once its machine is known to serve its
     </DeskContext.Provider>,
   );
   const resume = () => screen.getByRole('button', { name: 'Resume' }) as HTMLButtonElement;
-  expect([resume().disabled, resume().title]).toEqual([true, "waiting for mini to serve acc-ask71's transcript"]);
+  expect([resume().disabled, resume().title]).toEqual([true, "offered once mini serves acc-ask71's transcript"]);
   const owner = {}; // the session's owner, as the session view's subscription would tell it
   const where = { project: PROJECT, machine: 'mini', session: A };
   act(() => learnServed(where, owner, 'none'));

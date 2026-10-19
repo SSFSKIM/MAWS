@@ -100,12 +100,13 @@ function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
         return { send: yes(), steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no('retired: a retired session is not resumed'), stop: stopped };
       }
       // Resume only once the machine is known to serve the transcript, and a send says so where it cannot bring it back.
+      // Not known is a condition, not a promise: the machine may never answer (an early end, a session gone while open).
       if (s.transcript === 'none') {
         const send = yes(`recorded, not delivered: ${s.machine} serves no transcript of it to resume`);
         return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no(`${s.machine} serves no transcript of ${name} to resume`), stop: stopped };
       }
       const send = yes(s.seat ? 'resumes the seat to read it' : 'recorded, not delivered: a closed terminal session is reopened only by Resume');
-      const resume = s.transcript === 'served' ? yes() : no(`waiting for ${s.machine} to serve ${name}'s transcript`);
+      const resume = s.transcript === 'served' ? yes() : no(`offered once ${s.machine} serves ${name}'s transcript`);
       return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume, stop: stopped };
     }
     case 'unknown': {

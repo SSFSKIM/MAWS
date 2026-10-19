@@ -57,15 +57,18 @@ export class SessionOwner {
   }
 
   /**
-   * Whether the machine serves the transcript: served once a snapshot came; none once the subscription ended at n 0
-   * with `session-ended` (DX4's one remaining meaning of it), held until a snapshot comes, so a retry under way does not
-   * flicker back; unknown until either.
+   * Whether the machine serves the transcript: served once the subscription is live and holds a row; none once it ended
+   * at n 0 with `session-ended` (DX4's one remaining meaning of it), held until rows come, so a retry under way does not
+   * flicker back; unknown until either. An empty snapshot says neither: the plane answers a running session whose
+   * transcript it cannot find with one, and sends no `end` when that session's process goes, and a transcript of no
+   * rows resumes into an empty session all the same.
    */
   private readServed(): void {
     const { phase, ended } = this.main.state.getState();
+    const rows = this.main.heldRows().length;
     let served = this.served;
-    if (phase === 'live') served = 'served';
-    else if (phase === 'ended' && ended?.reason === 'session-ended' && this.main.heldRows().length === 0) served = 'none';
+    if (phase === 'live' && rows > 0) served = 'served';
+    else if (phase === 'ended' && ended?.reason === 'session-ended' && rows === 0) served = 'none';
     if (served === this.served) return;
     this.served = served;
     learnServed(this.where, this, served);

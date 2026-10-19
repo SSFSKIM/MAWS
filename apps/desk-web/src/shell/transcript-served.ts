@@ -1,5 +1,5 @@
-// Whether a session's machine serves its transcript, as the session's own subscription told the desk (DX4): a snapshot
-// says it does; an `end {session-ended}` before any snapshot says it holds none. Resume is offered only once it is known
+// Whether a session's machine serves its transcript, as the session's own subscription told the desk (DX4): rows say it
+// does; an `end {session-ended}` before any snapshot says it holds none. Resume is offered only once it is known
 // to (`conversation/capabilities.ts`): `claude --bg --resume` of a session its machine holds no transcript of starts an
 // empty session (the owner's desk, 2026-10-19: a `--bg` copy that took a seat's name was resumed into nothing). It is
 // known while a view holds the session's owner, which learns it and forgets it at its last release
@@ -8,7 +8,7 @@
 import { useStore } from 'zustand';
 import { createStore } from 'zustand/vanilla';
 
-/** `served`: a snapshot came; `none`: the machine answered that it holds no transcript of the session. */
+/** `served`: the subscription holds rows of it; `none`: the machine answered that it holds no transcript of the session. */
 export type TranscriptServed = 'served' | 'none';
 
 type Session = { project: string; machine: string; session: string };

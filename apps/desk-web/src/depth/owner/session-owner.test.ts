@@ -124,7 +124,7 @@ describe('the per-session owner', () => {
 describe('whether the machine serves the transcript (what Resume waits on)', () => {
   const where = { project: 'proj', machine: 'mini', session: 'sess-1' };
 
-  it('is not known until the subscription says; a snapshot says it is served, through a later disruption, until the last release', async () => {
+  it('is not known until the subscription says; a snapshot of rows says it is served, through a later disruption, until the last release', async () => {
     const plane = new FakePlane('proj', metas);
     const owner = sessionOwner({ ...where, plane, store: createTranscriptStore() });
     const release = holdOwner(owner);
@@ -149,6 +149,23 @@ describe('whether the machine serves the transcript (what Resume waits on)', () 
     expect(transcriptServed(where)).toBe('none'); // a retry under way does not flicker back to not known
     plane.snapshot(script, 6);
     expect(transcriptServed(where)).toBe('served');
+    release();
+    await settle();
+  });
+
+  it('an empty snapshot says neither: the plane sends one for a running session whose transcript it cannot find; rows that follow it say served', async () => {
+    const plane = new FakePlane('proj', metas);
+    const store = createTranscriptStore();
+    const owner = sessionOwner({ ...where, plane, store });
+    const release = holdOwner(owner);
+    const unmount = mount(owner.main, store);
+    plane.snapshot(script, 0);
+    expect(owner.main.state.getState().phase).toBe('live');
+    expect(transcriptServed(where)).toBeNull(); // so a session that ends with its view open is still not offered Resume
+    plane.play(script.slice(0, script.findIndex((item) => item.kind === 'row') + 1));
+    await settle();
+    expect(transcriptServed(where)).toBe('served');
+    unmount();
     release();
     await settle();
   });

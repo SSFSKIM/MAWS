@@ -372,11 +372,19 @@ test('two ended sessions under one name: each row carries its id and the seat sa
   await expect(header.getByRole('button', { name: 'Resume' })).toHaveAttribute('title', 'mini serves no transcript of acc-ask71 to resume');
   await expect(page.getByTestId('composer-note')).toHaveText('recorded, not delivered: mini serves no transcript of it to resume');
 
-  // The seat: its transcript is served, and its Resume sends the seat's own id.
+  // The seat. An empty snapshot says nothing yet (the machine sends one for a session whose transcript it has not
+  // found); its first row says its transcript is served, and its Resume sends the seat's own id.
   await ended.locator(`[data-session="${SEAT}"]`).click();
   await expect.poll(() => hub.subscriptions(PROJECT).filter((s) => s.session === SEAT).length).toBe(1);
-  hub.sendSub(PROJECT, hub.subscriptions(PROJECT).find((s) => s.session === SEAT)!.sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: false }, streaming: [] });
+  const seatSub = hub.subscriptions(PROJECT).find((s) => s.session === SEAT)!.sub;
+  hub.sendSub(PROJECT, seatSub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: false }, streaming: [] });
   await expect(header.getByTestId('seat-mark')).toHaveText('seat');
+  await expect(page.getByTestId('session-view')).toBeVisible();
+  await expect(header.getByRole('button', { name: 'Resume' })).toBeDisabled();
+  await expect(header.getByRole('button', { name: 'Resume' })).toHaveAttribute('title', "offered once mini serves acc-ask71's transcript");
+  const prompt = { type: 'user', uuid: 'row-seat-1', parentUuid: null, isSidechain: false, timestamp: '2026-10-19T12:47:00.000Z', sessionId: SEAT, message: { role: 'user', content: 'Ask me one question and wait.' } };
+  hub.sendSub(PROJECT, seatSub, 'row', { row: prompt, agentId: null });
+  await expect(header.getByRole('button', { name: 'Resume' })).toBeEnabled();
   await header.getByRole('button', { name: 'Resume' }).click();
   await expect.poll(() => hub.rpcs(PROJECT).map((r) => [r.rpc, r.args])).toEqual([['resume', { session: SEAT }]]);
 });
