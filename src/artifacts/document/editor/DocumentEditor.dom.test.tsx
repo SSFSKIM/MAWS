@@ -8,6 +8,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DOCUMENT_LIMITS } from '@shared/maws/document-tools';
 import { ynodeToPmnode } from '../../yjs/prosemirror';
+import { importMarkdown } from '../import/markdown';
 import { schemaFor } from '../schema';
 import { addTab, createDocument, listTabs, tabBody } from '../tabs';
 import { DocumentEditor } from './DocumentEditor';
@@ -823,6 +824,38 @@ describe('the mention picker', () => {
 
 // M8 fix wave 1: a new document's first tab is the host's; two editors open on the empty document wait for it, both bind
 // that one body, and what each types lands in it.
+// P4 W1-B (tracker L286; sitting candidate 8): an agent's note, made from markdown, is shown and stored from its first
+// sentence: an editor bound to it, before its create or after, writes no block before it. The trailing node (an empty
+// paragraph after a closing table, the mirror's last `&#160;`) is the editor's and stays.
+describe('a document made from markdown', () => {
+  const NOTE = 'This note follows the P3 sitting.\n\n## Next steps\n\n- [ ] Book the room\n\n| Owner | Due date |\n| --- | --- |\n| Kim | Friday |';
+  it.each(['made, then opened', 'opened, then made'])('starts with its content, %s', async (order) => {
+    const host = new MemoryDocumentHost();
+    const made = () => host.write((d) => void createDocument(d, { title: 'P3 sitting note', id: 'tab00001', body: importMarkdown(NOTE) }), { kind: 'session', appSessionId: '00000000-0000-4000-8000-0000000000a1' as never });
+    try {
+      if (order === 'made, then opened') made();
+      const handle = openMemoryHandle(host, { log: () => {} });
+      handles.push(handle);
+      await whenSynced(handle);
+      let editor: Editor | null = null;
+      render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} onEditor={(e) => (editor = e)} />);
+      if (order === 'opened, then made') made();
+      await until(() => editor !== null && editor.getText().length > 0, 'the editor bound');
+      const stored = () => {
+        const out: string[] = [];
+        ynodeToPmnode(tabBody(host.doc, 'tab00001')!, schemaFor()).forEach((block) => out.push(`${block.type.name}:${block.textContent}`));
+        return out;
+      };
+      await until(() => stored().length === 5, 'the trailing node at the host');
+      expect(stored()).toEqual(['paragraph:This note follows the P3 sitting.', 'heading:Next steps', 'taskList:Book the room', 'table:OwnerDue dateKimFriday', 'paragraph:']);
+      expect(editor!.state.doc.firstChild!.textContent).toBe('This note follows the P3 sitting.');
+    } finally {
+      cleanup();
+      host.destroy();
+    }
+  });
+});
+
 describe('an empty document', () => {
   it('shows Loading… in every editor until the host’s first tab, then both bind it and both typings land', async () => {
     const host = new MemoryDocumentHost();
