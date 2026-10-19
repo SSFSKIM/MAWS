@@ -10,8 +10,8 @@
 // third. The whole path is under test: the agent replica's awareness, the host's relay, each renderer replica's
 // awareness, the editor's Presence and cursor plugins and the product CSS. A page-side recorder notes what each editor
 // draws as it changes, so the outline is seen however briefly it holds; the case asserts what was drawn while it was
-// up, then that it goes, and annotates the timeline (ms after the batch's answer). No engine runs; the profile is the
-// case's own directory under /tmp.
+// up, that it goes, and that it was up for most of its 4 s hold (F19: the owner missed the 1.5 s one), and annotates the
+// timeline (ms after the batch's answer). No engine runs; the profile is the case's own directory under /tmp.
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -240,5 +240,12 @@ test('the agent’s cursor and the blocks its batch edits are drawn in a main ta
   );
   test.info().annotations.push({ type: 'presence timeline (ms after the batch answered)', description: JSON.stringify(timeline) });
   console.log(`[document-presence] ${JSON.stringify(timeline)}`);
+  // The outline holds 4 s after the batch commits (D11; F19). It is published in the batch's frame, just before the
+  // commit, and both of its edges reach the page by the same relay, so its time on the page is the hold, give or take
+  // how much later the page drew the first edge than the last. 3 s leaves a loaded machine a second of that and still
+  // fails the 1.5 s hold. A region that never drew, or never stopped, reads -1.
+  for (const region of ['main', 'panel'] as const) {
+    expect(timeline[region]?.upMs ?? -1, `${region}: the agent's presence stays up for most of its 4 s hold; the timeline ${JSON.stringify(timeline)}`).toBeGreaterThanOrEqual(3_000);
+  }
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
