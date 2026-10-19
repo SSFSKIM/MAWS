@@ -174,6 +174,11 @@ export class SessionStore {
     return !known;
   }
 
+  /** Whether a settlement of the request is kept (for a month: `SETTLED_MS`). */
+  isSettled(machine: string, session: string, request: string): boolean {
+    return this.sql.exec('SELECT 1 FROM settled WHERE machine = ? AND session = ? AND request = ?', machine, session, request).toArray().length > 0;
+  }
+
   /** Marks a question pushed for the ask `ask` of a session; false when it already was, so the ask's other report (its
    * `raised` or its log `question`, whichever came second) pushes nothing. */
   markAsked(machine: string, session: string, ask: string, now: number): boolean {

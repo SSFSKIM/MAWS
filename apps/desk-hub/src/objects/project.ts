@@ -21,7 +21,7 @@ import { isBase64urlOf } from '../protocol/base64url';
 import { isOutputTail, isTaskId, OUTPUT_TAIL_MAX, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice } from '../protocol/browser';
 import { canonicalize } from '../protocol/canonical';
 import { isMemberId, type ProjectRecord } from '../protocol/identity';
-import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
+import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, questionEffect, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import type { DownFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
 import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
@@ -379,6 +379,8 @@ export class Project extends DurableObject<Env> {
       }
     }
     this.fanOut(accepted, ctx.machine);
+    // An async question opened, answered, or ended with its session: the grid's `waiting` may move (owner, 2026-10-18).
+    if (accepted.some(({ event }) => questionEffect(event) !== null)) this.reportSummary();
     const now = Date.now();
     for (const { event } of accepted) {
       if ((event.kind !== 'message' && event.kind !== 'question') || !(now - Date.parse(event.ts) <= PUSH_FRESH_MS)) continue;
@@ -386,11 +388,8 @@ export class Project extends DurableObject<Env> {
       // An async ask (2026-10-18): its `question` event is the one signal of an ask nothing raises (MAWS's own), and a
       // second report of one a bridge raised as well (`src` its call's id), which pushes once, whichever came first.
       if (event.kind === 'question' && typeof event.src === 'string' && !this.plane.markAsked(ctx.machine, session, event.src, now)) continue;
-      // The badge counts the session a question waits on, as `pushRaised` does: its presence need not say so yet, and
-      // an async ask's never does (its engine works on), so the count would leave out the question it announces.
-      const waiting = this.waitingSessions();
-      if (event.kind === 'question') waiting.add(`${ctx.machine}/${session}`);
-      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, waiting.size);
+      // The count holds the question this push announces while it is open: it is stored above (`waitingSessions`).
+      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size);
     }
   }
 
@@ -512,6 +511,8 @@ export class Project extends DurableObject<Env> {
     this.broadcast({ t: 'session', message });
     this.broadcast(this.audited(this.log.record('decided', { machine: ctx.machine, session: message.session, settled, raised: raised ?? null })));
     if (raised) this.pendingChanged();
+    // A settlement of a request this hub did not hold still settles the log's question for it.
+    else this.reportSummary();
   }
 
   /** A delivery outcome: the latest per event and recipient kept, and sent to every browser. */
@@ -857,8 +858,10 @@ export class Project extends DurableObject<Env> {
     return { t: 'pending', requests };
   }
 
+  /** The pending set moved: every browser is sent it, and the grid's `waiting` may move with an async question. */
   private pendingChanged(): void {
     this.broadcast(this.pendingFrame());
+    this.reportSummary();
   }
 
   /**
@@ -896,12 +899,29 @@ export class Project extends DurableObject<Env> {
       .catch(() => this.ctx.storage.kv.delete('summary'));
   }
 
-  /** The sessions of online machines holding the project whose presence says waiting, as `machine/session`: the grid's
-   * `waiting`. */
+  /**
+   * The sessions of online machines holding the project that wait on a human, as `machine/session`: the grid's
+   * `waiting`. A session waits when its presence says so, and (owner, 2026-10-18) while it holds an open async question,
+   * though its presence says busy, as it does: its engine works on. A question is open while a bridge holds it raised
+   * (`async`), and while the log holds it open (`questionEffect`) unless the plane settled it (a bridge's ask is its
+   * call's request); one ask the hub learned both ways is still its one session. A log question counts only while its
+   * session's process lives, not while the session's kept presence says no process is (`record: null`: a stopped seat
+   * never retires), as a bridge's ask is withdrawn when its process ends; it counts again once the session runs. A
+   * session with no kept presence still counts.
+   */
   private waitingSessions(): Set<string> {
     const waiting = new Set<string>();
+    const stopped = new Set<string>();
     for (const { machine, message } of this.plane.presence()) {
+      if (message.body.record === null) stopped.add(`${machine}/${message.session}`);
       if (this.holds(machine) && message.body.record?.status === 'waiting') waiting.add(`${machine}/${message.session}`);
+    }
+    for (const { machine, raised } of this.plane.pending()) {
+      if (raised.async === true && this.holds(machine)) waiting.add(`${machine}/${raised.session}`);
+    }
+    for (const { machine, session, ask } of this.log.openQuestions()) {
+      const key = `${machine}/${session}`;
+      if (this.holds(machine) && !stopped.has(key) && !this.plane.isSettled(machine, session, ask)) waiting.add(key);
     }
     return waiting;
   }
