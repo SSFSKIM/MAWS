@@ -545,6 +545,10 @@ export class ArtifactStore {
     const latest = input.versions[input.versions.length - 1].content;
     try {
       await this.service.inBatch(() => {
+        // P4 (W1, L130): no row names this id here (checked above, in the same synchronous turn), so whatever its
+        // directory holds is an attempt taken back: one whose catch, run after this frame, will find these rows and keep
+        // its files. Swept before anything is placed, the directory holds only what this import writes.
+        this.files.removeAll(id);
         this.storage.actorInBatch(input.createdBy, input.createdAt);
         this.storage.db
           .prepare('INSERT INTO artifacts (id, kind, title, handle, projectId, createdBy, createdAt, updatedAt, pinned, linkedPath) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')
@@ -557,8 +561,8 @@ export class ArtifactStore {
       });
     } catch (error) {
       // The rows went back (the savepoint, or the whole batch when its commit failed); the files the versions placed go
-      // too, unless a retry of the same id has rows again by now (open or committed): a retry writes synchronously inside
-      // one frame and reuses the seqs taken back, so the directory then holds only what that retry placed.
+      // too, unless a retry of the same id has rows again by now (open or committed): that retry swept the directory at
+      // its frame's start, so it then holds only what the retry placed.
       if (!this.entity(id)) this.files.removeAll(id);
       throw error;
     }
