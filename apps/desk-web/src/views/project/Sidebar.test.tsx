@@ -70,3 +70,22 @@ it('names a titled row by its title, its machine and whether that is online, the
   expect([ended.name?.textContent, ended.text('liveness'), ended.text('alias')]).toEqual(['cua_repl', 'offline', 'maws-e3']);
   expect(parts('0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59').button.textContent).toBe('maws-old@macbookoffline');
 });
+
+it('tells two rows that go by one name apart: each carries its id, and the seat says so', () => {
+  // The owner's desk, 2026-10-19: the seat a6dee14b, titled, and a `--bg` copy a5b99a8b that took its name, both ended.
+  const seat = { ...row('a6dee14b-4df3-47aa-93ff-4565c2f76077', 'acc-ask71', 'acc-ask71', 'ended'), seat: 'a6dee14b-4df3-47aa-93ff-4565c2f76077', namesake: true };
+  const copy = { ...row('a5b99a8b-0ebe-4f5f-b6c0-b8bc32c64e0b', 'acc-ask71', null, 'ended'), namesake: true };
+  const groups: Record<SessionGroup, DeskSession[]> = { waiting: [], working: [row(S3, 'maws-45', null, 'working')], idle: [], ended: [copy, seat] };
+  render(<Sidebar name="MAWS" channel={{ kind: 'group' }} groups={groups} locked={false} onSelect={() => {}} />);
+  const button = (session: string) => document.querySelector(`[data-session="${session}"]`) as HTMLElement;
+  const part = (session: string, id: string) => button(session).querySelector(`[data-testid="${id}"]`)?.textContent ?? null;
+
+  expect(button(copy.session).textContent).toBe('acc-ask71#a5b99a8b@macbook');
+  expect(part(copy.session, 'seat-mark')).toBeNull();
+  expect(part(seat.session, 'session-short')).toBe('#a6dee14b');
+  expect(part(seat.session, 'seat-mark')).toBe('seat');
+  // Under a title they sit beside the alias, on its line: the title's line keeps its machine and word.
+  expect(button(seat.session).querySelector('[data-testid="alias"]')?.parentElement?.textContent).toBe('acc-ask71#a6dee14bseat');
+  // A row no other shares its name with carries neither.
+  expect(button(S3).textContent).toBe('maws-45@macbook');
+});

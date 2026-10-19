@@ -2,10 +2,12 @@
 // cannot do, and why, instead of failing when a button is pressed. The kind comes from presence (whether a process is
 // live and whether its bridge is attached), the seat its `joined` names (a `--bg` seat, against a terminal session),
 // and the machine's lease. A machine its owner set read-only (§6, its policy in DX4's `machine` presence) executes no
-// RPC and delivers nothing sent from outside it, whatever the kind. `note` says how an action that can be taken will
-// land.
+// RPC and delivers nothing sent from outside it, whatever the kind. An ended session is resumed only once its machine
+// is known to serve its transcript (`shell/transcript-served.ts`): resuming one it holds none of starts an empty
+// session. `note` says how an action that can be taken will land.
 import type { SessionPresence } from 'desk-hub/protocol';
 import { sessionName, type SessionGroup } from '../log/projection';
+import type { TranscriptServed } from '../shell/transcript-served';
 
 export type CapabilityInput = {
   alias: string;
@@ -22,6 +24,8 @@ export type CapabilityInput = {
   presence: SessionPresence | null;
   /** The log's latest `retired`, while it stands (DX8's `DeskSession.ended`). */
   ended?: { by: string; reason: string } | null;
+  /** Whether its machine serves its transcript, as its subscription said (`useTranscriptServed`); absent or null until it does. */
+  transcript?: TranscriptServed | null;
 };
 
 /**
@@ -95,8 +99,14 @@ function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
       if (retiredBy(s) !== null) {
         return { send: yes(), steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no('retired: a retired session is not resumed'), stop: stopped };
       }
+      // Resume only once the machine is known to serve the transcript, and a send says so where it cannot bring it back.
+      if (s.transcript === 'none') {
+        const send = yes(`recorded, not delivered: ${s.machine} serves no transcript of it to resume`);
+        return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no(`${s.machine} serves no transcript of ${name} to resume`), stop: stopped };
+      }
       const send = yes(s.seat ? 'resumes the seat to read it' : 'recorded, not delivered: a closed terminal session is reopened only by Resume');
-      return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: yes(), stop: stopped };
+      const resume = s.transcript === 'served' ? yes() : no(`waiting for ${s.machine} to serve ${name}'s transcript`);
+      return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume, stop: stopped };
     }
     case 'unknown': {
       const waiting = no(`waiting for ${name}'s presence`);

@@ -6,14 +6,17 @@
 // remounting, React's strict effects) keeps the subscription it has.
 //
 // What the views share rides on it besides the transcript: the session's liveness, told once for every view
-// (`keeper.ts`: the store's `setLive`, the subscription taken up again after an end), and the open-agent request — an
-// `Agent` row in the center names its agent, and the column, which takes the request, opens its Subagents tab on it.
+// (`keeper.ts`: the store's `setLive`, the subscription taken up again after an end); whether the machine serves the
+// transcript at all, told to the desk (`shell/transcript-served.ts`), which offers Resume only once it does; and the
+// open-agent request — an `Agent` row in the center names its agent, and the column, which takes the request, opens its
+// Subagents tab on it.
 import { useEffect, useState } from 'react';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { SubagentRef } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { SessionPlane } from '../../shell/session-plane';
 import type { DeskSession } from '../../shell/sessions';
+import { learnServed, type TranscriptServed } from '../../shell/transcript-served';
 import { DeskTranscript, type TranscriptStoreApi } from '../source/desk-transcript';
 import { reachOf, TranscriptKeeper } from '../source/keeper';
 
@@ -26,11 +29,46 @@ export class SessionOwner {
   readonly keeper: TranscriptKeeper;
   /** The open-agent request, until the column takes it. */
   readonly agentRequest: StoreApi<{ request: AgentRequest | null }> = createStore(() => ({ request: null as AgentRequest | null }));
+  private readonly where: { project: string; machine: string; session: string };
+  private served: TranscriptServed | null = null;
+  private offServed: (() => void) | null = null;
 
   constructor(options: { project: string; machine: string; session: string; plane: SessionPlane; store: TranscriptStoreApi }) {
     this.plane = options.plane;
+    this.where = { project: options.project, machine: options.machine, session: options.session };
     this.main = new DeskTranscript({ plane: options.plane, project: options.project, target: { machine: options.machine, session: options.session, agentId: null }, store: options.store });
     this.keeper = new TranscriptKeeper(this.main, options.store);
+  }
+
+  /** The first hold: the subscription opens, and what it says of the machine's transcript is told to the desk. */
+  start(): void {
+    this.keeper.start();
+    this.offServed ??= this.main.state.subscribe(() => this.readServed());
+    this.readServed();
+  }
+
+  /** The last release: the subscription closes, and what it said of the transcript is forgotten with it. */
+  stop(): void {
+    this.offServed?.();
+    this.offServed = null;
+    this.served = null;
+    learnServed(this.where, this, null);
+    this.keeper.stop();
+  }
+
+  /**
+   * Whether the machine serves the transcript: served once a snapshot came; none once the subscription ended at n 0
+   * with `session-ended` (DX4's one remaining meaning of it), held until a snapshot comes, so a retry under way does not
+   * flicker back; unknown until either.
+   */
+  private readServed(): void {
+    const { phase, ended } = this.main.state.getState();
+    let served = this.served;
+    if (phase === 'live') served = 'served';
+    else if (phase === 'ended' && ended?.reason === 'session-ended' && this.main.heldRows().length === 0) served = 'none';
+    if (served === this.served) return;
+    this.served = served;
+    learnServed(this.where, this, served);
   }
 
   /**
@@ -84,7 +122,7 @@ export function holdOwner(owner: SessionOwner): () => void {
   }
   const mine = held;
   mine.holds += 1;
-  if (mine.holds === 1) owner.keeper.start();
+  if (mine.holds === 1) owner.start();
   let released = false;
   return () => {
     if (released) return;
@@ -97,7 +135,7 @@ export function holdOwner(owner: SessionOwner): () => void {
 function letGo(key: string, held: Held): void {
   if (held.holds > 0) return;
   if (owners.get(key) === held) owners.delete(key);
-  held.owner.keeper.stop();
+  held.owner.stop();
 }
 
 /** A view's hold on its session's owner while it is mounted, with the session's liveness told to it. */

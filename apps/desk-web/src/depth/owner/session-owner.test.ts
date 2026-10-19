@@ -10,6 +10,7 @@ import type { SubagentRef } from '../../../../../src/renderer/src/transcript/mod
 import { FakePlane, mount, settle } from '../../../test/double/fake-plane';
 import { readRecording, scriptOf } from '../../../test/double/session-stream';
 import type { DeskSession } from '../../shell/sessions';
+import { learnServed, transcriptServed } from '../../shell/transcript-served';
 import { holdOwner, sessionOwner, useSessionOwner } from './session-owner';
 
 const recording = readRecording();
@@ -117,6 +118,50 @@ describe('the per-session owner', () => {
     await act(settle);
     expect(plane.current.closed).toBe(true);
     expect(key in useTranscriptStore.getState().live).toBe(false);
+  });
+});
+
+describe('whether the machine serves the transcript (what Resume waits on)', () => {
+  const where = { project: 'proj', machine: 'mini', session: 'sess-1' };
+
+  it('is not known until the subscription says; a snapshot says it is served, through a later disruption, until the last release', async () => {
+    const plane = new FakePlane('proj', metas);
+    const owner = sessionOwner({ ...where, plane, store: createTranscriptStore() });
+    const release = holdOwner(owner);
+    expect(transcriptServed(where)).toBeNull(); // subscribed, nothing answered yet
+    plane.snapshot(script, 6);
+    expect(transcriptServed(where)).toBe('served');
+    plane.current.listener.end({ reason: 'machine-offline' });
+    expect(transcriptServed(where)).toBe('served'); // the machine went away; the transcript it served did not
+    release();
+    await settle();
+    expect(transcriptServed(where)).toBeNull(); // forgotten with the subscription: a later view learns it anew
+  });
+
+  it("is none once the machine ends the subscription at n 0 with session-ended, held through a retry until a snapshot comes", async () => {
+    const plane = new FakePlane('proj', metas);
+    const owner = sessionOwner({ ...where, plane, store: createTranscriptStore() });
+    const release = holdOwner(owner);
+    plane.current.listener.end({ reason: 'session-ended' });
+    expect(transcriptServed(where)).toBe('none');
+    owner.main.resubscribe();
+    expect(owner.main.state.getState().phase).toBe('loading');
+    expect(transcriptServed(where)).toBe('none'); // a retry under way does not flicker back to not known
+    plane.snapshot(script, 6);
+    expect(transcriptServed(where)).toBe('served');
+    release();
+    await settle();
+  });
+
+  it("an owner living out its holds never erases what the session's current owner told", () => {
+    const older = {};
+    const current = {};
+    learnServed(where, older, 'served');
+    learnServed(where, current, 'none');
+    learnServed(where, older, null);
+    expect(transcriptServed(where)).toBe('none');
+    learnServed(where, current, null);
+    expect(transcriptServed(where)).toBeNull();
   });
 });
 

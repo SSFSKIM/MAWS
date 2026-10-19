@@ -69,16 +69,31 @@ describe('capabilities', () => {
     expect(at({ machineReadOnly: true, machineOnline: false }).steer).toEqual({ can: false, reason: 'mini is offline' });
   });
 
-  it('an ended session: Resume, and a send that is only recorded unless a seat resumes to read it', () => {
-    const terminal = at({ group: 'ended', presence: { record: null, bridge: false } });
+  it('an ended session its machine serves the transcript of: Resume, and a send that is only recorded unless a seat resumes to read it', () => {
+    const terminal = at({ group: 'ended', presence: { record: null, bridge: false }, transcript: 'served' });
     expect(terminal.resume).toEqual({ can: true, reason: null });
     expect(terminal.send.note).toBe('recorded, not delivered: a closed terminal session is reopened only by Resume');
     expect(terminal.steer).toEqual({ can: false, reason: 'maws-45 is not running' });
-    const seat = at({ group: 'ended', seat: 'maws-45', presence: { record: null, bridge: false } });
+    const seat = at({ group: 'ended', seat: 'maws-45', presence: { record: null, bridge: false }, transcript: 'served' });
     expect(seat.send.note).toBe('resumes the seat to read it');
     // A session whose end sminos recorded (`retired` with reason `ended`) is ended, not retired: Resume stands.
-    const recordedEnd = at({ group: 'ended', member: false, presence: null, ended: { by: '', reason: 'ended' } });
+    const recordedEnd = at({ group: 'ended', member: false, presence: null, ended: { by: '', reason: 'ended' }, transcript: 'served' });
     expect(recordedEnd.resume.can).toBe(true);
+  });
+
+  it('an ended session its machine serves no transcript of is not offered Resume, which would start it empty; one not known yet waits', () => {
+    // The owner's desk, 2026-10-19: a transcript-less `--bg` copy, its end recorded as `ended`, under a seat's name.
+    const copy = { group: 'ended' as const, member: false, presence: null, ended: { by: '', reason: 'ended' }, alias: 'acc-ask71', machine: 'macbook' };
+    const none = at({ ...copy, transcript: 'none' });
+    expect(none.resume).toEqual({ can: false, reason: 'macbook serves no transcript of acc-ask71 to resume' });
+    expect(none.send).toEqual({ can: true, reason: null, note: 'recorded, not delivered: macbook serves no transcript of it to resume' });
+    expect(at({ ...copy, seat: 'acc-ask71', transcript: 'none' }).send.note).toBe('recorded, not delivered: macbook serves no transcript of it to resume');
+    for (const transcript of [undefined, null]) expect(at({ ...copy, transcript }).resume).toEqual({ can: false, reason: "waiting for macbook to serve acc-ask71's transcript" });
+    // Retired, offline, running, disconnected: each says its own reason, whatever is known of the transcript.
+    expect(at({ ...copy, ended: { by: 'human', reason: 'retire' }, transcript: 'served' }).resume.reason).toBe('retired: a retired session is not resumed');
+    expect(at({ ...copy, machineOnline: false, transcript: 'served' }).resume.reason).toBe('macbook is offline');
+    expect(at({ transcript: 'none' }).resume.reason).toBe('maws-45 is running');
+    expect(capabilities({ ...base, ...copy, transcript: 'served' }, false).resume.reason).toBe('not connected to the hub');
   });
 
   it('a retired session: its history stays, and Resume is not offered (the machine refuses it), retired by whom it says', () => {

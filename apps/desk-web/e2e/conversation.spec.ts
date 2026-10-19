@@ -257,8 +257,13 @@ test('a retired session ends with who retired it and no Resume; an ended one off
   presence(hub, 'mini', S.rests, null);
   await nav(page).locator(`[data-session="${S.rests}"]`).click();
   await expect(page.getByTestId('composer-note')).toHaveText('recorded, not delivered: a closed terminal session is reopened only by Resume');
-  await expect(center(page).getByTestId('end-marker').getByRole('button', { name: 'Resume' })).toBeEnabled();
+  // Resume waits until mini is known to serve the session's transcript: resuming one it holds none of starts it empty.
+  const markerResume = center(page).getByTestId('end-marker').getByRole('button', { name: 'Resume' });
+  await expect(markerResume).toBeDisabled();
+  await expect(markerResume).toHaveAttribute('title', "waiting for mini to serve cua_repl's transcript");
+  await expect(header.getByRole('button', { name: 'Resume' })).toBeDisabled();
   await emptyTranscript(hub, S.rests); // its transcript is in: what it was sent and never saw waits at its tail
+  await expect(markerResume).toBeEnabled();
   const box = page.getByRole('textbox', { name: 'Message cua_repl' });
   await box.fill('a note for when you are back');
   await box.press('Enter');

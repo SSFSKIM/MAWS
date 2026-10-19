@@ -6,7 +6,8 @@
 // away; the ask mod's async question row carries the log's question and answer, and a question its resumed session
 // raises again after its withdrawal waits on its card again, after a reload too; an ended session ends with its marker
 // and Resume, a send it never received ahead of it. Where the session view cannot draw — a machine offline, a machine
-// that serves no transcript for the session — the channel is the one built from the log, its working record a label.
+// that serves no transcript for the session — the channel is the one built from the log, its working record a label;
+// an ended session there is not offered Resume, and two sessions under one name are told apart by their ids.
 //
 // With DESK_SHOTS set to a directory, the tail's surfaces are saved there at desktop width for the owner.
 import type { Locator, Page } from '@playwright/test';
@@ -333,6 +334,51 @@ test("where the session view cannot draw, the channel is the log's, its working 
   await expect(page.getByTestId('machine-offline')).toBeVisible();
   await expect(center.getByTestId('working-record').first()).toHaveText('Working record · mini is offline');
   await expect(center).toContainText('the store is split');
+});
+
+test('two ended sessions under one name: each row carries its id and the seat says so; Resume is offered only where the machine serves the transcript', async ({ page, hub }) => {
+  // The owner's desk, 2026-10-19: the seat, titled, and a transcript-less `--bg` copy the daemon renamed after it,
+  // its end recorded as `ended`. The copy joined later, so it is listed first under Ended.
+  const SEAT = 'a6dee14b-4df3-47aa-93ff-4565c2f76077';
+  const COPY = 'a5b99a8b-0ebe-4f5f-b6c0-b8bc32c64e0b';
+  await stageProject(hub);
+  const joined = { kind: 'joined', name_source: 'user', machine: 'mini', cwd: '/tmp/scratch', worktree: '', role: '', by: '' };
+  await hub.append(PROJECT, { ...joined, writer: `mini/${SEAT}`, session: SEAT, alias: 'acc-ask71', name_source: 'seat', seat: SEAT });
+  await hub.append(PROJECT, { writer: `mini/${SEAT}`, kind: 'titled', session: SEAT, title: 'acc-ask71' });
+  await hub.append(PROJECT, { ...joined, writer: `mini/${COPY}`, session: COPY, alias: 'a5b99a8b', name_source: 'derived', seat: '' });
+  await hub.append(PROJECT, { writer: `mini/${COPY}`, kind: 'renamed', session: COPY, alias: 'acc-ask71', name_source: 'user' });
+  await hub.append(PROJECT, { writer: `mini/${COPY}`, kind: 'retired', session: COPY, by: '', reason: 'ended' });
+  for (const session of [SEAT, COPY]) hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session, kind: 'presence', sub: null, n: null, body: { record: null, bridge: false } });
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${COPY}`);
+
+  const ended = page.getByRole('navigation', { name: 'Channels' }).locator('[data-group="ended"]');
+  await expect(ended.locator('[data-session]')).toHaveCount(3); // the two, and the retired doperpowers-1e
+  await expect(ended.locator(`[data-session="${COPY}"]`)).toHaveText('acc-ask71#a5b99a8b@mini');
+  await expect(ended.locator(`[data-session="${SEAT}"] [data-testid="session-short"]`)).toHaveText('#a6dee14b');
+  await expect(ended.locator(`[data-session="${SEAT}"] [data-testid="seat-mark"]`)).toHaveText('seat');
+  await expect(ended.locator(`[data-session="${COPY}"] [data-testid="seat-mark"]`)).toHaveCount(0);
+  await expect(ended.locator(`[data-session="${S.gone}"] [data-testid="session-short"]`)).toHaveCount(0); // a name no other shares
+
+  // The copy: mini answers its subscription at n 0 with `session-ended`, holding no transcript of it.
+  const header = page.getByTestId('channel-header');
+  await expect(header.getByTestId('session-short')).toHaveText('#a5b99a8b');
+  await expect(header.getByRole('button', { name: 'Resume' })).toBeDisabled(); // not known yet
+  await expect.poll(() => hub.subscriptions(PROJECT).filter((s) => s.session === COPY).length).toBe(1);
+  hub.sendSub(PROJECT, hub.subscriptions(PROJECT).find((s) => s.session === COPY)!.sub, 'end', { reason: 'session-ended' });
+  await expect(page.getByTestId('no-transcript')).toContainText('mini serves no transcript for this session');
+  await expect(page.getByTestId('no-transcript')).toContainText('Resume is not offered: it needs that transcript.');
+  await expect(header.getByRole('button', { name: 'Resume' })).toBeDisabled();
+  await expect(header.getByRole('button', { name: 'Resume' })).toHaveAttribute('title', 'mini serves no transcript of acc-ask71 to resume');
+  await expect(page.getByTestId('composer-note')).toHaveText('recorded, not delivered: mini serves no transcript of it to resume');
+
+  // The seat: its transcript is served, and its Resume sends the seat's own id.
+  await ended.locator(`[data-session="${SEAT}"]`).click();
+  await expect.poll(() => hub.subscriptions(PROJECT).filter((s) => s.session === SEAT).length).toBe(1);
+  hub.sendSub(PROJECT, hub.subscriptions(PROJECT).find((s) => s.session === SEAT)!.sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: false }, streaming: [] });
+  await expect(header.getByTestId('seat-mark')).toHaveText('seat');
+  await header.getByRole('button', { name: 'Resume' }).click();
+  await expect.poll(() => hub.rpcs(PROJECT).map((r) => [r.rpc, r.args])).toEqual([['resume', { session: SEAT }]]);
 });
 
 test("a notification's landing on a request opens the session view at its card, marked", async ({ page, hub }) => {
