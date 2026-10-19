@@ -5,12 +5,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { coreExtensionOptions } from '../ids';
 import { extensions } from '../schema';
 import { Find, findState } from './find-plugin';
-import { doc, para } from './test-world';
+import { World, doc, para, until } from './test-world';
 
 let editor: Editor | null = null;
+let world: World | null = null;
 afterEach(() => {
   editor?.destroy();
   editor = null;
+  world?.destroy();
+  world = null;
 });
 
 const make = (content: JSONContent) => {
@@ -106,6 +109,30 @@ describe('find', () => {
     e.commands.clearFind();
     expect(findState(e.state)).toMatchObject({ query: '', count: 0 });
     expect(decorated(e, 'find-match')).toEqual([]);
+  });
+
+  // P3-F panel scalpel-1#3: the current match is the text it is on, not an index; another replica's occurrence written
+  // before it leaves the same text current and selected, and Next goes on from there
+  it('keeps the current match on its text when another replica writes an occurrence before it', async () => {
+    world = new World(doc(...[1, 2, 3, 4, 5].map((n) => para(`p${n}`, `apple ${n}`))));
+    const mine = await world.replica('mine', () => [Find]);
+    const theirs = await world.replica('theirs');
+    const e = mine.editor;
+    e.commands.setTextSelection(1);
+    e.commands.setFindQuery('apple');
+    e.commands.findNext();
+    e.commands.findNext();
+    expect(findState(e.state)).toMatchObject({ count: 5, current: 2 });
+    const block = (ed: Editor) => ed.state.doc.resolve(ed.state.selection.from).parent.attrs.id;
+    expect(block(e)).toBe('p3');
+    theirs.editor.commands.insertContentAt(theirs.editor.state.doc.child(0).nodeSize + 1, 'apple '); // at p2's start
+    await until(() => findState(e.state).count === 6, 'the other replica’s occurrence');
+    expect(block(e)).toBe('p3');
+    expect(findState(e.state).current, 'the current match').toBe(3);
+    const current = e.view.dom.querySelector('.find-match-current');
+    expect(current?.closest('p')?.textContent).toBe('apple 3');
+    e.commands.findNext();
+    expect(block(e), 'the match after the current one').toBe('p4');
   });
 
   it('never matches across a block boundary or an inline chip', () => {
