@@ -650,8 +650,11 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   const { versionId } = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'Two tabs' });
 
   // after the version: the second tab deleted, a reply on the older thread, new text with a thread of its own
-  await record.getByRole('button', { name: 'Tab options' }).click();
-  await record.getByRole('menuitem', { name: 'Delete' }).click();
+  // P3-F (the owner's observation 3): the tab's own ×, and a tab with content goes once the owner confirms
+  await tabs.getByRole('tab', { name: 'Tab 2' }).getByRole('button', { name: 'Delete Tab 2' }).click();
+  const ask = page.getByRole('alertdialog', { name: 'Delete “Tab 2”?' });
+  await ask.getByRole('button', { name: 'Delete tab' }).click();
+  await expect(ask).toHaveCount(0);
   await expect(tabs.getByRole('tab')).toHaveText(['Restore notes']);
   await expect(text.locator('p')).toHaveText(['The budget review is on Friday.']);
   let rail = await railOf(record);

@@ -179,6 +179,20 @@ test.describe('the document editor', () => {
     await expect(content(page, 'b')).toHaveText('The second tab');
     await replica(page, 'a').getByRole('tab', { name: 'Notes' }).click();
     await expect(content(page, 'a')).toContainText('Field notes');
+
+    // P3-F (the owner's observation 3): a tab's own context menu acts on the tab right-clicked, not the active one
+    await replica(page, 'a').getByRole('tab', { name: 'Tab 2' }).click({ button: 'right' });
+    await page.getByRole('menu').getByRole('menuitem', { name: 'Move left' }).click();
+    await expect(replica(page, 'a').getByRole('tab')).toHaveText(['Tab 2', 'Notes']);
+    await expect(replica(page, 'a').getByRole('tab', { selected: true })).toHaveText('Notes');
+    await expect(replica(page, 'b').getByRole('tab')).toHaveText(['Tab 2', 'Notes']);
+    // and its ×: an empty tab goes without asking, the selection moving on
+    await replica(page, 'a').getByRole('button', { name: 'Add tab' }).click();
+    await expect(replica(page, 'a').getByRole('tab', { selected: true })).toHaveText('Tab 3');
+    await replica(page, 'a').getByRole('tab', { name: 'Tab 3' }).getByRole('button', { name: 'Delete Tab 3' }).click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(replica(page, 'a').getByRole('tab')).toHaveText(['Tab 2', 'Notes']);
+    await expect(replica(page, 'b').getByRole('tab')).toHaveText(['Tab 2', 'Notes']);
   });
 
   test('find highlights the matches and steps to the second', async () => {

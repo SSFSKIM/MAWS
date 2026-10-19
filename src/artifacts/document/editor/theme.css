@@ -144,8 +144,9 @@
 }
 
 /* the callout's tone (data-callout-tone, the ledger's canon name): note, tip, warn, danger. Styled by the attribute, which
-   the node view's callout and the inert attributed one (a version's, the suggestion review's) both carry, at the
-   specificity of a design system's own callout rules (D's components/document.css), which still come after */
+   the node view's callout and the inert attributed one (a version's, the suggestion review's) both carry. A system's own
+   callout rules (D's components/document.css) style its page frames, where this sheet is never loaded (an app scope
+   takes only that sheet's font faces), so nothing here is ordered against them */
 .ds-doc [data-callout-tone] {
   display: flex;
   flex-direction: column;

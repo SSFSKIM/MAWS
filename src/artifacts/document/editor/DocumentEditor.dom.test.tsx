@@ -17,7 +17,7 @@ import type { MentionSource, MentionTarget } from './MentionPicker';
 import type { CommentOverlayProps, DocumentComments } from './comments/surface';
 import { getThread, liveThreadIds } from '../threads';
 import { MemoryHistory } from './history/memory-history';
-import { TAB, World, doc, endOf, para, readOnlySwitch, until } from './test-world';
+import { TAB, World, doc, endOf, para, readOnlySwitch, ticks, until } from './test-world';
 
 let world: World | null = null;
 let handles: DocumentHandle[] = [];
@@ -66,6 +66,23 @@ const types = (editor: Editor) => {
   editor.state.doc.forEach((node) => out.push(node.type.name));
   return out;
 };
+// A tab's own context menu opened by a right-click on it, and one of its items chosen.
+async function fromTabMenu(tab: string, item: string): Promise<void> {
+  act(() => void fireEvent.contextMenu(screen.getByRole('tab', { name: tab })));
+  const entry = await screen.findByRole('menuitem', { name: item });
+  act(() => void fireEvent.click(entry));
+}
+// A tab dragged onto another as a person drags one, a single DataTransfer from dragstart to dragend; answers whether the
+// drop was accepted.
+function drag(from: Element, to: Element): boolean {
+  const carried = new Map<string, string>();
+  const dataTransfer = { setData: (format: string, value: string) => void carried.set(format, value), getData: (format: string) => carried.get(format) ?? '', effectAllowed: 'uninitialized', dropEffect: 'none' };
+  fireEvent.dragStart(from, { dataTransfer });
+  fireEvent.dragOver(to, { dataTransfer });
+  const accepted = !fireEvent.drop(to, { dataTransfer });
+  fireEvent.dragEnd(from, { dataTransfer });
+  return accepted;
+}
 // the field shown, the selected atom's (each atom of a kind has one, hidden until it is selected)
 const field = (label: string) => screen.getAllByLabelText(label).find((el) => !el.closest('[hidden]')) as HTMLInputElement | HTMLTextAreaElement;
 // through the native value setter, as typing sets it (React tracks a value assigned directly as its own)
@@ -299,8 +316,7 @@ describe('tabs', () => {
     act(() => fireEvent.keyDown(screen.getByLabelText('Tab title'), { key: 'Enter' }));
     expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Main', 'Appendix']);
 
-    act(() => fireEvent.click(screen.getByRole('button', { name: 'Tab options' })));
-    act(() => fireEvent.click(screen.getByRole('menuitem', { name: 'Move left' })));
+    await fromTabMenu('Appendix', 'Move left');
     expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Appendix', 'Main']);
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Appendix', 'Main']);
 
@@ -322,8 +338,7 @@ describe('tabs', () => {
     act(() => fireEvent.click(add));
     expect(listTabs(handle.doc)).toHaveLength(50);
 
-    act(() => fireEvent.click(screen.getByRole('button', { name: 'Tab options' })));
-    act(() => fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' })));
+    act(() => fireEvent.click(screen.getByLabelText('Delete Tab 50') /* shown on hover */));
     await until(() => screen.getAllByRole('tab').length === 49, 'a tab deleted');
     expect(screen.getByRole('button', { name: 'Add tab' })).toHaveProperty('disabled', false);
     expect(screen.getByRole('button', { name: 'Add tab' }).getAttribute('title')).toBeNull();
@@ -350,11 +365,101 @@ describe('tabs', () => {
       expect(accepted, 'a foreign tab’s drop accepted').toBe(false);
       expect(errors).toEqual([]);
       expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Main', 'Second']);
-      act(() => void fireEvent.drop(screen.getByRole('tab', { name: 'Main' }), carrying('tab00002')));
+      drag(screen.getByRole('tab', { name: 'Second' }), screen.getByRole('tab', { name: 'Main' }));
       expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Second', 'Main']);
     } finally {
       window.removeEventListener('error', onError);
     }
+  });
+
+  // P3-F (tracker S-DOC-TAB-DRAG-SOURCE): a copy (Duplicate, Make a copy) holds every tab id of its source, so a drop
+  // that only looked the dragged id up in its own tabs reordered the copy's same-id tab. The drag names its document.
+  it('refuse a tab dragged from a copy of the document, whose tab ids are the same, and move one dragged within it', async () => {
+    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    const copy = new World(doc(para('p1', 'First tab text')));
+    const copied = openMemoryHandle(copy.host, { log: () => {} });
+    try {
+      await whenSynced(copied);
+      for (const d of [handle.doc, copied.doc]) act(() => void addTab(d, { title: 'Second', id: 'tab00002' }));
+      render(<DocumentEditor artifactId="doc2" handle={copied} host={owner} />);
+      await until(() => screen.getAllByRole('tab').length === 4, 'both strips with two tabs');
+      const [source, target] = screen.getAllByRole('tablist', { name: 'Tabs' }) as [HTMLElement, HTMLElement];
+      let accepted = true;
+      act(() => void (accepted = drag(within(source).getByRole('tab', { name: 'Second' }), within(target).getByRole('tab', { name: 'Main' }))));
+      expect(accepted, 'the drop from the source document accepted').toBe(false);
+      expect(listTabs(copied.doc).map((t) => t.title)).toEqual(['Main', 'Second']);
+      expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Main', 'Second']);
+      drag(within(target).getByRole('tab', { name: 'Second' }), within(target).getByRole('tab', { name: 'Main' }));
+      expect(listTabs(copied.doc).map((t) => t.title)).toEqual(['Second', 'Main']);
+      expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Main', 'Second']);
+    } finally {
+      cleanup();
+      copied.close();
+      copy.destroy();
+    }
+  });
+
+  // P3-F (the owner's observation 3, the architect's ruling (a)): the browser's pattern. Each tab has its own context
+  // menu, acting on the tab right-clicked (the menu's actions used to act on the active tab), and an inline ×, Delete;
+  // the last tab has none and its menu's Delete is off; a tab with content is deleted only once the owner confirms.
+  it('act on the right-clicked tab, not the active one: Move left, Rename and Delete from its menu', async () => {
+    const { handle } = await mount(doc(para('p1', 'First tab text')));
+    act(() => {
+      addTab(handle.doc, { title: 'Bravo', id: 'tab00002' });
+      addTab(handle.doc, { title: 'Charlie', id: 'tab00003' });
+    });
+    await until(() => screen.getAllByRole('tab').length === 3, 'three tabs');
+    const selected = () => screen.getByRole('tab', { selected: true }).getAttribute('aria-label');
+    expect(selected()).toBe('Main');
+
+    await fromTabMenu('Charlie', 'Move left');
+    expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Main', 'Charlie', 'Bravo']);
+    expect(selected()).toBe('Main');
+
+    await fromTabMenu('Bravo', 'Rename');
+    await ticks(3); // the menu's focus return, which must not end the rename it started
+    act(() => fireEvent.change(screen.getByLabelText('Tab title'), { target: { value: 'Beta' } }));
+    act(() => fireEvent.keyDown(screen.getByLabelText('Tab title'), { key: 'Enter' }));
+    expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Main', 'Charlie', 'Beta']);
+
+    await fromTabMenu('Charlie', 'Delete');
+    await until(() => listTabs(handle.doc).length === 2, 'Charlie deleted');
+    expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Main', 'Beta']);
+    expect(selected()).toBe('Main');
+    expect(screen.queryByRole('alertdialog')).toBeNull(); // an empty tab goes without asking
+  });
+
+  it('delete with ×, which the last tab lacks, asking first when the tab has content', async () => {
+    const { editor, handle } = await mount(doc(para('p1', 'First tab text')));
+    expect(screen.queryByLabelText('Delete Main'), 'a × on the last tab').toBeNull();
+    act(() => void fireEvent.contextMenu(screen.getByRole('tab', { name: 'Main' })));
+    expect((await screen.findByRole('menuitem', { name: 'Delete' })).hasAttribute('data-disabled')).toBe(true);
+    act(() => void fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' }));
+    await until(() => screen.queryByRole('menu') === null, 'the menu closed');
+
+    act(() => void addTab(handle.doc, { title: 'Empty', id: 'tab00002' }));
+    await until(() => screen.getAllByRole('tab').length === 2, 'two tabs');
+    act(() => fireEvent.click(screen.getByLabelText('Delete Empty') /* shown on hover */));
+    await until(() => listTabs(handle.doc).length === 1, 'the empty tab deleted');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe('Main');
+
+    act(() => void addTab(handle.doc, { title: 'Second', id: 'tab00003' }));
+    await until(() => screen.getAllByRole('tab').length === 2, 'two tabs again');
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Delete Main' })));
+    const ask = await screen.findByRole('alertdialog');
+    expect(ask.textContent).toContain('Main');
+    act(() => fireEvent.click(within(ask).getByRole('button', { name: 'Cancel' })));
+    await until(() => screen.queryByRole('alertdialog') === null, 'the question gone');
+    expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Main', 'Second']);
+
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Delete Main' })));
+    act(() => fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete tab' })));
+    await until(() => listTabs(handle.doc).length === 1, 'Main deleted once confirmed');
+    expect(listTabs(handle.doc).map((t) => t.title)).toEqual(['Second']);
+    expect(screen.getByRole('tab', { selected: true }).getAttribute('aria-label')).toBe('Second');
+    await until(() => editor().getText() === '', 'the remaining tab’s body shown');
+    expect(screen.queryByLabelText('Delete Second'), 'a × on the last tab').toBeNull();
   });
 });
 
@@ -621,9 +726,12 @@ describe('a read-only document', () => {
     expect(screen.getByRole('button', { name: 'Add tab' })).toHaveProperty('disabled', true);
     act(() => fireEvent.doubleClick(screen.getByRole('tab', { selected: true })));
     expect(screen.queryByLabelText('Tab title')).toBeNull();
-    act(() => fireEvent.click(screen.getByRole('button', { name: 'Tab options' })));
-    for (const item of screen.getAllByRole('menuitem')) expect(item).toHaveProperty('disabled', true);
-    act(() => fireEvent.click(screen.getByRole('button', { name: 'Tab options' })));
+    act(() => void fireEvent.contextMenu(screen.getByRole('tab', { selected: true })));
+    const items = within(await screen.findByRole('menu')).getAllByRole('menuitem');
+    expect(items.map((item) => item.textContent)).toEqual(['Rename', 'Move left', 'Move right', 'Delete']);
+    for (const item of items) expect(item.hasAttribute('data-disabled'), item.textContent ?? '').toBe(true);
+    act(() => void fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' }));
+    await until(() => screen.queryByRole('menu') === null, 'the menu closed');
     const rail = screen.getByRole('complementary', { name: 'Comments' });
     expect(within(rail).getByRole('button', { name: 'Resolve' })).toHaveProperty('disabled', true);
     expect(within(rail).queryByLabelText('Reply')).toBeNull();
