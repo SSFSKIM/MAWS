@@ -127,18 +127,30 @@ describe('P3-F F3: the deck family’s toolbars wrap by whole controls', () => {
       expect(getComputedStyle(trigger).minWidth).toBe('84px');
     });
 
-    // P3-F F3 review 2: a wrapping row places each item at its flex basis, so a notice at its text's width ("A deck holds
-    // at most 100 slides: delete one to add another.") would take a row of its own for as long as it shows, the zoom
-    // with it, and the stage would jump. With a zero basis it never breaks the row: it takes what the row has left
-    // beside the spacer and ellipsizes there, as before the row wrapped.
+    // P3-F F3 reviews 2 and 4: a wrapping row places each item at its flex basis, so a notice at its text's width ("A deck
+    // holds at most 100 slides: delete one to add another.") would take a row of its own whenever it shows, the zoom with
+    // it, and the stage would jump: its basis is zero. Beside the spacer (grow 1) it takes nearly all the row's free
+    // space (grow 1000), not half, so a notice that fits shows whole. A notice shown is never narrower than a readable
+    // floor, min(12rem, 100%): with less room left on its row it moves to the next row whole rather than reading as an
+    // ellipsis. An empty notice has no floor, so it never breaks the row. The split itself is the browser's layout (the
+    // e2e reads it, e2e:presentations); a model of flex line-breaking here would restate these same values.
     for (const which of ['the deck’s toolbar', 'the design workbench’s toolbar']) {
-      it(`${which}’s notice never takes a row of its own, ellipsized in what is left, sheets in the order ${order.join(', ')}`, () => {
+      it(`${which}’s notice takes the row’s free space beside the spacer, readable or on its own row, never forcing one while empty, sheets in the order ${order.join(', ')}`, () => {
         sheets(order);
         const { container } = render(TOOLBARS[which]!());
         const notice = container.querySelector<HTMLElement>('.deck-toolbar > .deck-notice')!;
+        const spacer = container.querySelector<HTMLElement>('.deck-toolbar > .deck-toolbar-spacer')!;
+        expect(notice.nextElementSibling, 'the spacer beside the notice').toBe(spacer);
         const s = getComputedStyle(notice);
-        expect({ basis: ['0', '0px', '0%'].includes(s.flexBasis) ? 'zero' : s.flexBasis || 'auto (unset)', grow: s.flexGrow, minWidth: s.minWidth }).toEqual({ basis: 'zero', grow: '1', minWidth: '0' });
+        expect(['0', '0px', '0%'].includes(s.flexBasis) ? 'zero' : s.flexBasis || 'auto (unset)').toBe('zero');
+        expect(Number(s.flexGrow), 'the notice’s grow against the spacer’s').toBeGreaterThanOrEqual(100 * Number(getComputedStyle(spacer).flexGrow || 1));
         expect([s.overflow, s.textOverflow, s.whiteSpace]).toEqual(['hidden', 'ellipsis', 'nowrap']);
+        expect(notice.textContent).toBe('');
+        expect(s.minWidth, 'an empty notice: no floor').toBe('0');
+        // the floor for a notice shown, read from the sheet: happy-dom 20's `:empty` also matches an element holding
+        // text, so its cascade never applies `:not(:empty)` (the e2e reads the floor as Chromium lays it out)
+        const floor = Array.from(style!.sheet!.cssRules).find((rule): rule is CSSStyleRule => rule instanceof CSSStyleRule && rule.selectorText === '.deck-notice:not(:empty)');
+        expect(floor?.style.getPropertyValue('min-width'), 'a notice shown: the readable floor').toBe('min(12rem, 100%)');
       });
     }
   }

@@ -450,17 +450,22 @@
   margin: 0 4px;
   background: var(--border);
 }
-/* a zero basis (P3-F F3 review): the row wraps by each item's basis, and a notice at its text's width would take a row of
-   its own while it shows, the zoom and the stage moving with it; it takes what the row leaves beside the spacer and
-   ellipsizes there */
+/* the toolbar's notice (P3-F F3 reviews): the row wraps by each item's basis, so its basis is zero (at its text's width
+   it would take a row of its own whenever it shows, the zoom and the stage moving with it); beside the spacer's grow of
+   1 it takes nearly all the row's free space, so a notice that fits shows whole, and ellipsizes past that. A notice
+   shown is never narrower than a readable floor: with less room left on its row it moves to the next row whole. Empty,
+   it has no floor and never breaks the row. */
 .deck-notice {
-  flex: 1 1 0;
+  flex: 1000 1 0;
   min-width: 0;
   overflow: hidden;
   color: var(--fg-muted);
   font-size: var(--text-ui-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.deck-notice:not(:empty) {
+  min-width: min(12rem, 100%);
 }
 .deck-icon-grid {
   display: grid;

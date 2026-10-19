@@ -550,6 +550,16 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
   const tkRot = (await tab.locator('[data-overlay] [data-handle="rotate"]').boundingBox())!;
   await drag(page, { x: tkRot.x + tkRot.width / 2, y: tkRot.y + tkRot.height / 2 }, { x: tkRot.x + 120, y: tkRot.y + 80 });
   await expect(tab.locator('[data-deck-notice]')).toContainText('design-system token');
+  // P3-F F3 review 4: the notice takes the row's free space beside the spacer, not half of it, and is never narrower
+  // than its readable floor (12rem, or the row's width when that is less), so a refusal never reads as an ellipsis
+  const split = await tab.getByRole('toolbar', { name: 'Deck' }).evaluate((bar) => {
+    const width = (sel: string) => bar.querySelector(`:scope > ${sel}`)!.getBoundingClientRect().width;
+    const style = getComputedStyle(bar);
+    const inner = bar.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+    return { notice: width('.deck-notice'), spacer: width('.deck-toolbar-spacer'), floor: Math.min(12 * Number.parseFloat(getComputedStyle(document.documentElement).fontSize), inner) };
+  });
+  expect(split.spacer, `the spacer leaves the row's free space to the notice (${JSON.stringify(split)})`).toBeLessThanOrEqual(2);
+  expect(split.notice, `the notice at its readable floor or wider (${JSON.stringify(split)})`).toBeGreaterThanOrEqual(split.floor - 1);
   expect((await elementOf(page, id, 'xf', 'tk'))?.style.transform).toBe('var(--ds-pose, scale(1.5))');
   // another replica's selection, outlined in its colour with its name
   await page.evaluate(([a]) => (window as unknown as Seam).__maws_presentations.presence.show(a!, 'xf', ['sc']), [id] as const);
