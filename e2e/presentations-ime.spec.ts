@@ -435,6 +435,12 @@ test('⌘ keys while ARMED: a key the page cancels never reaches the menu, the r
     note({ type: 'Edit › Undo while armed', description: signature(undone).join(' | ') || '(no event)' });
     expect(undone.filter((e) => e.type === 'beforeinput')).toEqual([]);
     expect(await l.count()).toBe(6);
+    // the live L8's way back to a from the armed copy, which covers it (a pinned paste is keyed over every sibling, so
+    // Shift+Tab would reach the last other element): Escape to nothing selected, then Tab to the slide's first element
+    await l.ime.rawKey({ key: 'Escape', code: 'Escape', keyCode: 27 });
+    await expect.poll(() => l.focus()).toBe('stage');
+    await l.ime.rawKey({ key: 'Tab', code: 'Tab', keyCode: 9 });
+    await expect.poll(() => l.focus()).toBe('textbox:a');
     await l.ime.command('z'); // the keyboard's ⌘Z is the box's: the paste undone
     await expect.poll(() => l.count()).toBe(5);
     expect(await l.text('a')).toBe('Hello');

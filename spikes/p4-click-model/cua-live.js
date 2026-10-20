@@ -149,9 +149,10 @@ await app.pressKey('super+z'); // the box's own, cancelled: one step undone (201
 await app.pressKey('super+v'); // left to the menu: the element pasted, not its text into a
 await wait(500);
 await app.getAXState(); // find the menu bar's Edit item
-// Then with the mouse, by the AX indices of the state above: Edit › Undo; then app.pressKey('shift+Tab') (back from the
-// pasted copy, now armed, to a: the copy covers a's text and a press on it would edit the copy); Edit › Copy; Edit ›
-// Paste; Edit › Undo. Observe after each with getAXState or a screenshot.
+// Then with the mouse, by the AX indices of the state above: Edit › Undo; then app.pressKey('Escape'), wait 200 ms,
+// app.pressKey('Tab') (back from the pasted copy, now armed, to a, the slide's first element: the copy covers a's text,
+// a press on it would edit the copy, and Shift+Tab would reach s, since a pinned paste is keyed over every sibling);
+// Edit › Copy; Edit › Paste; Edit › Undo. Observe after each with getAXState or a screenshot.
 // result: a keeps Hello; left 201px; facts.menu is copy, paste, undo, copy, paste, undo (no undo after the ⌘Z); the two
 // pastes at 224px and 225px (copies of a at 200 and at 201); both Edit › Undo clicks do nothing to the deck (finding 1's
 // gap: 5 elements, historyUndo 0).

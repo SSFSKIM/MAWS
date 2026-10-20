@@ -73,7 +73,7 @@ const STEPS: Record<string, string> = {
   L5: 'Click `a`; wait 300 ms; press g k; click `b`; wait 300 ms; press k; wait 300 ms; click `empty`.',
   L6: 'Click `a`; wait 300 ms; press g k s, BackSpace, Left, Right, g k, Return; wait 300 ms; press Escape twice.',
   L7: 'Click `a`; wait 300 ms; press g k s, then alt+Return; wait 800 ms; screenshot (the Hanja window should open at `a`); Escape; click `empty`. Write the verdict into the done file.',
-  L8: 'Click `a`; wait 300 ms; screenshot (a selected: the mapping holds); then cmd+c; Right; wait 1200 ms; Right; wait 300 ms; cmd+z; cmd+v; wait 500 ms; then the Edit menu with the mouse: Undo; shift+Tab (back from the pasted copy to `a`, which a press could not reach: the copy covers it); Copy; Paste; Undo. The spec puts a probe Edit menu in place for the case: the same five items, each noting itself and then doing what the role item does.',
+  L8: 'Click `a`; wait 300 ms; screenshot (a selected: the mapping holds); then cmd+c; Right; wait 1200 ms; Right; wait 300 ms; cmd+z; cmd+v; wait 500 ms; then the Edit menu with the mouse: Undo; Escape, then Tab (back from the pasted copy to `a`, the first element of the slide, which a press could not reach: the copy covers it); Copy; Paste; Undo. The spec puts a probe Edit menu in place for the case: the same five items, each noting itself and then doing what the role item does.',
 };
 
 let launch: MawsLaunch | null = null;
@@ -246,8 +246,8 @@ test.describe('the real Mac’s input method on the ARMED prototype (L0 to L8)',
       facts.clipboard = events.filter((e) => e.type === 'copy' || e.type === 'paste' || e.type === 'cut').map((e) => `${e.type} ${e.target} prevented=${e.defaultPrevented}`);
       checks['a keeps Hello'] = [a, 'Hello'];
       checks['⌘Z undid one nudge, in the box'] = [facts.left, '201px'];
-      // the keyboard's paste copied a at 200 (⌘C came before the nudges), the mouse's a at 201, each pasted 24 px on; a
-      // second paste at 248 would mean the mouse's Copy took the first copy, not a
+      // the keyboard's paste copied a at 200 (⌘C came before the nudges), the mouse's a at 201, each pasted 24 px on;
+      // another left means the mouse's Copy took another element than a (the reselect missed)
       facts.pasted = (await slide()).children.filter((c) => !['a', 'b', 's'].includes(c.id)).map((c) => c.style.left).sort();
       checks['the pastes are copies of a, at 200 and at 201'] = [facts.pasted, ['224px', '225px']];
       // ⌘C and ⌘V left to the menu reach it; the ⌘Z the box cancelled does not; then the mouse's Undo, Copy, Paste, Undo
