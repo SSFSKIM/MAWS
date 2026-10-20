@@ -337,6 +337,39 @@ describe('session.acquire: joins and races', () => {
     expect(launchesOf(record.appId)).toHaveLength(1);
   });
 
+  // W2-A (tracker 2026-10-09, the P2-A whole-branch review's residue): an acquisition that joins a record's start (C11's
+  // route switch, the same options) is answered from that run's end in its reply, so the rest of the run streams tagged as
+  // its own run's would; the phases before the join went out untagged, and a join never follows the run's end
+  it.each([
+    ['fails', { ready: false }, { status: 'failed' }, 'failed'],
+    ['reaches ready', 'gated', { status: 'ready', launched: true, joined: true }, 'ready'],
+  ] as const)('an acquisition joining a record’s start that then %s has the rest of that run stream tagged', async (_, script, answer, end) => {
+    const record = recordAt();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    h.host.script = () => (script === 'gated' ? { onReady: () => gate } : script);
+    expect(await h.service.startSession(record.appId, { message: null, options: { gateway: 'direct' } })).toEqual({ status: 'starting', appSessionId: record.appId });
+    await h.until(() => h.host.table.get(record.appId)?.process === 'initializing');
+    const joined = h.service.acquire(record.appId, 'send', { gateway: 'direct' });
+    if (end === 'failed') h.host.exitNow(record.appId);
+    release();
+    expect(await joined).toMatchObject(answer);
+    expect(launchesOf(record.appId)).toHaveLength(1);
+    expect(h.setupEvents(record.appId).map((e) => [e.phase, e.acquisition])).toEqual([['launching', undefined], [end, true]]);
+  });
+
+  it('a record’s start no acquisition joined streams untagged to its end; an intent’s setup an acquisition joined does too (C10’s card docks from it with the intent’s message)', async () => {
+    const record = recordAt();
+    await h.service.startSession(record.appId, { message: null, options: {} });
+    await h.service.startSession(record.appId, { message: null, options: {} }); // a second record start joins, untagged
+    await h.settled(record.appId);
+    expect(h.setupEvents(record.appId).every((e) => e.acquisition === undefined)).toBe(true);
+    const { appSessionId } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+    const [, acquired] = await Promise.all([h.service.startSession(appSessionId, { message: OK_MESSAGE, options: {} }), h.service.acquire(appSessionId, 'read')]);
+    expect(acquired).toMatchObject({ status: 'ready', joined: true });
+    expect(h.setupEvents(appSessionId).every((e) => e.acquisition === undefined)).toBe(true);
+  });
+
   it('an intent’s provisional record (a failed or interrupted setup keeps both) is never acquired: refused, nothing launched', async () => {
     const { appSessionId } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
     h.index.sessions.createForLaunch({ appSessionId, directory: h.work, additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null }, firstPrompt: 'first', lineage: null });

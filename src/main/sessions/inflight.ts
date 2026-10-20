@@ -17,12 +17,21 @@ export interface Inflight {
   readonly options: string; // canonical JSON of the run's start options (`{}` for none): equal options join
   readonly guarded: Promise<StartOutcome>;
   readonly done: Promise<AcquireOutcome>;
+  // An acquisition joins the run: it is answered from the run's end in its reply, so a record's start streams the rest
+  // of its phases tagged, as an acquisition's own run does (W2-A, tracker 2026-10-09). An intent's setup stays untagged:
+  // C10's cards dock from its events with the intent's message, whichever order they and a joiner's reply arrive in.
+  joinedByAcquisition(): void;
 }
 
 // What the run that opened an entry settles it with. `guard` is idempotent; `end` resolves `guarded` too when the run
 // ended before its guards answered (a refusal in the run's words), removes the entry, then settles `done`.
 export interface Registration {
   readonly entry: Inflight;
+  // Whether the run's phases stream tagged now (`SetupEvent.acquisition`): from its start for an acquisition's own run,
+  // from the first acquisition that joined it for a record's start. A join never follows the run's end: the end's event
+  // and the entry's removal are microtasks apart, and an acquisition arrives on an IPC task of its own (or, waiting on
+  // an earlier entry, once that entry went, before this one existed).
+  readonly tagged: () => boolean;
   guard(outcome: StartOutcome): void;
   end(result: { outcome: AcquireOutcome } | { error: unknown }): void;
 }
@@ -44,12 +53,22 @@ export class InflightRegistry {
   open(appSessionId: AppSessionId, kind: InflightKind, options: StartOptions = {}): Registration {
     const guarded = settleable<StartOutcome>();
     const done = settleable<AcquireOutcome>();
-    const entry: Inflight = { kind, options: canonicalOptions(options), guarded: guarded.promise, done: done.promise };
+    let tagged = kind === 'acquire';
+    const entry: Inflight = {
+      kind,
+      options: canonicalOptions(options),
+      guarded: guarded.promise,
+      done: done.promise,
+      joinedByAcquisition: () => {
+        if (kind === 'record-start') tagged = true;
+      },
+    };
     this.entries.set(appSessionId, entry);
     this.changed(appSessionId);
     let ended = false;
     return {
       entry,
+      tagged: () => tagged,
       guard: guarded.resolve,
       end: (result) => {
         if (ended) return;
@@ -115,10 +134,10 @@ export function acquireOutcomeOfGuard(outcome: StartOutcome): AcquireOutcome {
 }
 
 // The setup with its `emit` wrapped to keep the id's last end (`ready` or `failed`) as it streams (the take-over's pattern).
-// `acquisition`: the run is an acquisition's own, so its phases of the id stream tagged (`SetupEvent.acquisition`): its
-// end reaches the callers in the reply, on another transport than the events, and the renderer docks and tells nothing
-// from a tagged event whatever order the two arrive in.
-export function capturingSetup(s: Setup, appSessionId: AppSessionId, acquisition = false): { setup: Setup; outcome(): SetupEvent['outcome'] } {
+// `tagged`: the run's end reaches an acquisition in its reply (its own run, or one it joined: `Registration.tagged`), so
+// its phases of the id stream tagged (`SetupEvent.acquisition`) while it answers true: the reply travels on another
+// transport than the events, and the renderer docks and tells nothing from a tagged event whatever order the two arrive in.
+export function capturingSetup(s: Setup, appSessionId: AppSessionId, tagged: () => boolean): { setup: Setup; outcome(): SetupEvent['outcome'] } {
   let last: SetupEvent['outcome'] = null;
   const setup: Setup = {
     ...s,
@@ -126,7 +145,7 @@ export function capturingSetup(s: Setup, appSessionId: AppSessionId, acquisition
       if (name === 'session.setup') {
         const event = payload as SetupEvent;
         if (event.appSessionId === appSessionId && (event.phase === 'ready' || event.phase === 'failed')) last = event.outcome;
-        if (acquisition && event.appSessionId === appSessionId) return s.emit('session.setup', { ...event, acquisition: true });
+        if (event.appSessionId === appSessionId && tagged()) return s.emit('session.setup', { ...event, acquisition: true });
       }
       return s.emit(name, payload);
     },

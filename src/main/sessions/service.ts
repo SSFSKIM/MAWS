@@ -634,7 +634,7 @@ export class SessionService {
     this.starting.add(appSessionId);
     if (this.unrecovered !== null) this.startedSince.add(appSessionId); // E10: a deferred recovery's re-run leaves it
     const registration = early ?? this.inflight.open(appSessionId, this.deps.intents.get(appSessionId) !== null ? 'setup' : 'record-start', args.options); // P2-A
-    const captured = capturingSetup(this.s, appSessionId);
+    const captured = capturingSetup(this.s, appSessionId, registration.tagged); // W2-A: tagged once an acquisition joins a record's start
     const claim = this.claimWorktreeName(this.deps.intents.get(appSessionId));
     let release: (() => void) | null = null;
     let handedOff = false;
@@ -754,7 +754,10 @@ export class SessionService {
     const entry = this.inflight.get(appSessionId);
     if (entry === undefined) return this.acquirable(appSessionId) ? this.acquireOnce(appSessionId, options) : this.refuseUnknown(appSessionId);
     const own = canonicalOptions(options);
-    if (entry.kind !== 'take-over' && (own === '{}' || own === entry.options)) return entry.done.then((outcome) => (outcome.status === 'ready' ? { ...outcome, joined: true } : outcome));
+    if (entry.kind !== 'take-over' && (own === '{}' || own === entry.options)) {
+      entry.joinedByAcquisition(); // W2-A: the rest of a record start's phases stream tagged; this reply tells its end
+      return entry.done.then((outcome) => (outcome.status === 'ready' ? { ...outcome, joined: true } : outcome));
+    }
     const settled = () => this.acquireOrJoin(appSessionId, options);
     return entry.done.then(settled, settled);
   }
@@ -830,7 +833,7 @@ export class SessionService {
     try {
       const record = this.deps.index.sessions.get(appSessionId);
       if (record === null || this.deps.intents.get(appSessionId) !== null) return this.refusal(appSessionId);
-      const captured = capturingSetup(this.s, appSessionId, true); // its phases stream tagged: the reply tells its end
+      const captured = capturingSetup(this.s, appSessionId, registration.tagged); // its phases stream tagged: the reply tells its end
       const [guard, run] = await guardResumeStart(captured.setup, record, { message: null, options }, this.resumeMessages);
       registration.guard(guard);
       if (run === null) return acquireOutcomeOfGuard(guard);
