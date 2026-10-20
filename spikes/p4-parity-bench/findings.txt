@@ -198,7 +198,8 @@ one repetition per task; smoke-2026-10-19/ holds the run's log and the parser's 
 
 These are not record-run numbers (one repetition, the mirror scope's 13.5K-token context against the owner scope's
 larger one; the smoke's mirror also dropped CLAUDE_CODE_MAX_CONTEXT_TOKENS with the secrets, since fixed). Spend in this
-phase: US$0.955 (the smoke US$0.862 with its Haiku seed; an earlier shakedown on B1 pinned to sonnet:low US$0.093).
+phase: US$1.153 (the smoke US$0.862 with its Haiku seed; a shakedown on B1 pinned to sonnet:low before it, US$0.093;
+one on B1 and B5 pinned to sonnet:low after the review's fixes, both checks passing, US$0.198).
 
 
 ## 6. The Desktop arm
