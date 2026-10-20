@@ -481,12 +481,15 @@
 }
 
 /* ── comments (M4): the open threads' passages, the active one, and the threads rail ── */
+/* P4-B1: a pale tint for every open passage and a strong one for the active thread's, as Docs draws them (LC-1 item 2,
+   docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md): with the active card no longer shifted, the passage carries
+   more of which thread is active */
 .ds-doc .comment {
-  background: color-mix(in oklab, var(--warning) 18%, transparent);
-  border-bottom: 2px solid color-mix(in oklab, var(--warning) 60%, transparent);
+  background: color-mix(in oklab, var(--warning) 14%, transparent);
+  border-bottom: 2px solid color-mix(in oklab, var(--warning) 50%, transparent);
 }
 .ds-doc .comment.comment-active {
-  background: color-mix(in oklab, var(--warning) 36%, transparent);
+  background: color-mix(in oklab, var(--warning) 45%, transparent);
   border-bottom-color: var(--warning);
 }
 /* P3-E (E2 M4): a block commented whole (a dashboard's view) is outlined rather than tinted, its content kept legible */
@@ -500,6 +503,14 @@
 .ds-doc .doc-atom.comment.comment-active {
   background: none;
   outline-color: var(--warning);
+}
+/* P4-B1: View › Comments › Hide draws the passages plain, as Docs' Hide does (LC-1 item 7); Minimize keeps them. The
+   view is the tab editor's (`data-comments-view`, DocumentEditor.tsx); only colours change, so no line moves */
+[data-comments-view='hide'] .ds-doc .comment,
+[data-comments-view='hide'] .ds-doc .comment.comment-active {
+  background: none;
+  border-bottom-color: transparent;
+  outline-color: transparent;
 }
 .doc-rail {
   display: flex;
@@ -1014,17 +1025,22 @@
 
 /* ── the margin (P4-B1, the P4 spec §4.3; MarginThreads.tsx): the shown tab's open threads as cards beside the page,
    inside the page's scroll box as the page's flex sibling (theme.css's row), so they scroll with the text and never
-   re-lay on a scroll. The column reserves the tier's width only while a thread or a compose card is open on the tab
-   (`--doc-margin-reserve`, else 0 and the page is centred alone). Entries are absolutely positioned at the top the pure
-   layout gave them (margin-layout.ts), moved by `transform`; a move caused by an activation, an add or a resolve
-   animates (`data-animate`, 200 ms), one caused by an edit never, and none under reduced motion. The active entry is
-   shifted left by the shift token and raised. App chrome inside the page's scope, so it names the app's own type and
-   colour tokens again (the page's `--ds-*` would reach it otherwise). ── */
+   re-lay on a scroll. The geometry is Google Docs' as LC-1 measured it (docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md,
+   items 2, 6 and 7). The column reserves the unit centred with the page (`--doc-margin-reserve`: the page gutter and the
+   least card) only while a thread or a compose card is open on the tab, else 0 and the page is centred alone; each entry
+   sits a page gutter (26 px) from the page at the drawn card's width (`--doc-margin-card`), which may run past the
+   reserve into the free space on its right, so the column never clips. Entries are absolutely positioned at the top the
+   pure layout gave them (margin-layout.ts), moved by `transform`; a move caused by an activation, an add or a resolve
+   animates (`data-animate`, Docs' 350 ms `ease`), one caused by an edit never (Docs animates those too; kept still for
+   R4), and none under reduced motion. The active card does not move sideways: it is raised (below). App chrome inside
+   the page's scope, so it names the app's own type and colour tokens again (the page's `--ds-*` would reach it
+   otherwise). ── */
 .doc-margin {
   position: relative;
   flex: 0 0 var(--doc-margin-reserve, 0px);
   width: var(--doc-margin-reserve, 0px);
   min-height: var(--doc-margin-height, 0px);
+  overflow: visible;
   font-family: var(--font-ui);
   font-size: var(--text-ui);
   line-height: 1.4;
@@ -1036,12 +1052,12 @@
 .doc-margin-entry {
   position: absolute;
   top: 0;
-  left: var(--doc-margin-gap, 8px);
-  width: calc(100% + var(--doc-margin-overlap, 0px) - 2 * var(--doc-margin-gap, 8px));
+  left: var(--doc-margin-page-gutter, 26px);
+  width: var(--doc-margin-card, 282px);
   will-change: transform;
 }
 .doc-margin[data-animate] .doc-margin-entry {
-  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 350ms ease;
 }
 @media (prefers-reduced-motion: reduce) {
   .doc-margin[data-animate] .doc-margin-entry {
@@ -1051,14 +1067,28 @@
 .doc-margin-entry[data-active] {
   z-index: 2;
 }
-/* the icon tier: a dot at each anchor, a count where dots would collide; the active one opens its card over the page's
-   edge (`.doc-margin-overlay`, right-aligned to the column, so it reaches left over the page) */
+/* a card's state by elevation, as Docs marks it (LC-1 item 2): an inactive card flat, a grey tint of the ground; the
+   active one the floating surface with its shadow (its passage's highlight the darker one: the comments block above) */
+.doc-margin .thread-card {
+  border-color: transparent;
+  background: color-mix(in oklab, var(--bg) 96%, var(--fg));
+}
+.doc-margin .thread-card[aria-current='true'] {
+  background: var(--bg-overlay);
+  box-shadow: var(--shadow-float);
+}
+/* the icon tier: a round icon per thread at the page gutter, laid by the same stack (LC-1 item 7: Docs merges none),
+   over the page's right padding when the column overlaps it; the active thread's card opens over its icon, reaching
+   left over the page (`.doc-margin-overlay`, right-aligned to the icon), and that overlay floats the card itself */
+.doc-margin-entry[data-icon-entry] {
+  width: var(--doc-margin-icon, 32px);
+}
 .doc-margin-icon {
   position: absolute;
   top: 0;
-  right: var(--doc-margin-gap, 8px);
-  width: 24px;
-  height: 24px;
+  left: 0;
+  width: var(--doc-margin-icon, 32px);
+  height: var(--doc-margin-icon, 32px);
   border-radius: 50%;
   border: 0;
   padding: 0;
@@ -1078,18 +1108,22 @@
 .doc-margin-overlay {
   position: absolute;
   top: 0;
-  right: var(--doc-margin-gap, 8px);
-  width: min(300px, 80cqi);
+  right: 0;
+  width: min(var(--doc-margin-card, 282px), 80cqi);
   z-index: 7;
   box-shadow: var(--shadow-float);
   border-radius: var(--radius);
   will-change: transform;
 }
-/* the Add comment button beside a non-empty selection (C1), at the selection head's line (LC-1 item 8 re-bases) */
+.doc-margin-overlay .thread-card[aria-current='true'] {
+  box-shadow: none;
+}
+/* the Add comment button beside a non-empty selection (C1), at the selection head's line (LC-1 item 8 re-bases), at
+   the page gutter */
 .doc-margin-add {
   position: absolute;
   top: 0;
-  left: var(--doc-margin-gap, 8px);
+  left: var(--doc-margin-page-gutter, 26px);
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -1106,15 +1140,15 @@
 .doc-margin-add:hover {
   background: var(--bg-hover);
 }
-/* P4-B1: in the icon tier the button aligns with the dots, at the column's right edge: over the page's right padding
-   when the column reserves nothing or overlaps the page, so it never leaves a narrow scroll box (nor makes it scroll
-   sideways), and the page does not move as a selection shows it */
+/* P4-B1: in the icon tier the button lines up with the icons where the column has room for it and is pulled back
+   inside the column where it has not: over the page's right padding when the column reserves nothing (a selection on a
+   tab with no open thread), so it never leaves a narrow scroll box (nor makes it scroll sideways), and the page does
+   not move as a selection shows it */
 .doc-margin[data-margin-tier='icons'] .doc-margin-add {
-  left: auto;
-  right: var(--doc-margin-gap, 8px);
+  left: min(var(--doc-margin-page-gutter, 26px), calc(var(--doc-margin-reserve, 0px) - var(--doc-margin-gap, 10px) - 28px));
 }
 /* the compose card's entry hosts P2's card in flow (CommentCardHost's margin layout); in the icon tier the entry is
-   marked too, but its dot and overlay keep their own placing */
+   marked too, but its icon and overlay keep their own placing */
 .doc-margin-entry[data-compose]:not([data-icon-entry]) > * {
   position: relative;
 }

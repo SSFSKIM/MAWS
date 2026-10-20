@@ -21,10 +21,13 @@
   font-weight: var(--ds-type-body-weight, 400);
   /* P4-B1 (the P4 spec §4.3; MarginThreads.tsx): the page and, beside it, the comments' margin column are one centred
      unit that scrolls together; the page alone centres as before. A row, so the column's cards sit at the page's right
-     edge however wide the box is (an auto margin on the page would push the column to the box's far edge). */
+     edge however wide the box is (an auto margin on the page would push the column to the box's far edge). Centred
+     safely: where the page and the column's reserve are wider than the box, the row starts at the box's left edge and
+     the column runs off to the right, where the box scrolls (as Docs does under its least card; LC-1 item 6), rather
+     than the page's left edge going out of reach. */
   display: flex;
   align-items: flex-start;
-  justify-content: center;
+  justify-content: safe center;
 }
 
 .ds-doc-page {
