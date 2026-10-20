@@ -489,10 +489,12 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
 
   // P4-B4: put the caret at a revealed block's start and scroll it into view, once it is in this tab's editor (a switched
   // tab binds a moment later). The keyboard stays where it was: a reveal the agent asked must not take it from the owner.
+  // So the block's own DOM is scrolled to: ProseMirror scrolls a transaction's selection only when the DOM selection is
+  // in the editor, which needs its focus (prosemirror-view's `editorOwnsSelection`).
   useEffect(() => {
     if (!revealing) return;
-    // the block's start (a leaf block selected whole), or null while this editor does not hold it
-    const startOf = (): Selection | null => {
+    // the block's position and its start (a leaf block selected whole), or null while this editor does not hold it
+    const startOf = (): { pos: number; selection: Selection } | null => {
       const { doc } = editor.state;
       let at = -1;
       doc.descendants((node, pos) => {
@@ -501,10 +503,12 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         return at < 0;
       });
       if (at < 0) return null;
-      return doc.nodeAt(at)!.isLeaf ? NodeSelection.create(doc, at) : Selection.near(doc.resolve(at + 1));
+      return { pos: at, selection: doc.nodeAt(at)!.isLeaf ? NodeSelection.create(doc, at) : Selection.near(doc.resolve(at + 1)) };
     };
-    const reveal = (selection: Selection) => {
-      editor.view.dispatch(editor.state.tr.setSelection(selection).scrollIntoView());
+    const reveal = ({ pos, selection }: { pos: number; selection: Selection }) => {
+      editor.view.dispatch(editor.state.tr.setSelection(selection));
+      const block = editor.view.nodeDOM(pos);
+      if (block instanceof Element) block.scrollIntoView({ block: 'center' });
       onRevealed();
     };
     const now = startOf();
