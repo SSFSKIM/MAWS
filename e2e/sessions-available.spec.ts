@@ -24,7 +24,7 @@ const SKILL = { name: 'e8-probe:e8-hello', display_name: 'e8-probe:e8-hello', de
 const REPLY = 'OK';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
-  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const) as Promise<CommandResult<N>>;
+  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<CommandResult<N>>;
 }
 function value<N extends CommandName>(result: CommandResult<N>) {
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);

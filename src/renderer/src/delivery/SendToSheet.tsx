@@ -189,13 +189,14 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
   if (phase.phase === 'connecting') return line(target === 'notion' ? C.connecting : C.signingIn);
   if (status === null) return line(phase.phase === 'failed' ? phase.words : C.notionUnavailable, again);
   if (status.target === 'notion') {
+    const { source } = status;
     switch (status.state) {
       case 'ready':
-        return line(C.notionReady(status.source, status.connection));
+        return source && status.connection ? line(C.notionReady(source, status.connection)) : line(C.notionUnavailable, again);
       case 'signIn':
-        return line(C.notionSignIn(status.source.server), button(C.connect, () => void run.connect()));
+        return line(C.notionSignIn(source?.server ?? 'Notion'), button(C.connect, () => void run.connect()));
       case 'reconnect':
-        return line(C.notionReconnect(status.source.server), button(C.reconnect, () => void run.connect()));
+        return line(C.notionReconnect(source?.server ?? 'Notion'), button(C.reconnect, () => void run.connect()));
       case 'busy':
         return line(C.notionBusy, again);
       case 'none':

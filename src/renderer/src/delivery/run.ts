@@ -46,7 +46,7 @@ export interface SendToRunDeps {
 }
 
 const statusOf = (phase: SendToPhase): DeliveryStatus | null => ('status' in phase ? phase.status : null);
-const sourceOf = (status: DeliveryStatus | null): string | undefined => (status && status.target === 'notion' && 'source' in status ? status.source.key : undefined);
+const sourceOf = (status: DeliveryStatus | null): string | undefined => (status?.target === 'notion' ? status.source?.key : undefined);
 
 export function createSendToRun(deps: SendToRunDeps): SendToRun {
   const { client, artifactId } = deps;
@@ -81,7 +81,7 @@ export function createSendToRun(deps: SendToRunDeps): SendToRun {
     running = null;
     if (closed || state.getState().target !== target) return;
     if (answer?.ok && answer.value.ok) return check(target);
-    const why = answer?.ok && !answer.value.ok ? answer.value : null;
+    const why = answer?.ok && !answer.value.ok && answer.value.why ? { why: answer.value.why, message: answer.value.message } : null;
     // the state read again, then the sign-in's failure in words over it
     await check(target);
     if (closed || state.getState().target !== target) return;
@@ -103,12 +103,13 @@ export function createSendToRun(deps: SendToRunDeps): SendToRun {
       .catch(() => null);
     running = null;
     deps.onSending?.(null);
-    if (answer?.ok && answer.value.ok) {
-      deps.onReceipt?.(answer.value.receipt);
-      return set({ phase: 'sent', status, receipt: answer.value.receipt });
+    const receipt = answer?.ok && answer.value.ok ? answer.value.receipt : undefined;
+    if (receipt) {
+      deps.onReceipt?.(receipt);
+      return set({ phase: 'sent', status, receipt });
     }
     if (closed) return;
-    const failure = answer?.ok && !answer.value.ok ? answer.value : null;
+    const failure = answer?.ok && !answer.value.ok && answer.value.why ? { why: answer.value.why, maybeSent: answer.value.maybeSent, message: answer.value.message } : null;
     const base = failure ? SEND_FAILURE[failure.why] : SEND_FAILURE.failed;
     const words = `${base}${failure?.message ? `: ${failure.message}` : base.endsWith('.') ? '' : '.'}${failure?.maybeSent ? ` ${MAYBE_SENT(target)}` : ''}`;
     // a refusal that says the connection or the sign-in moved: the state is read again under the words

@@ -22,15 +22,20 @@ export const DeliveryDestinationSchema = z.discriminatedUnion('kind', [
 
 // The Notion connector MAWS would send through: the server's name and where it is configured, never its entry.
 const NotionSourceSchema = z.strictObject({ key: SourceKey, server: z.string().min(1).max(256), scope: z.enum(['user', 'local']), transport: z.enum(['stdio', 'http']), file: z.string().min(1).max(4096) });
-export const NotionStatusSchema = z.union([
-  // sends now: MAWS's own sign-in (`connected`), a local server (`local`) or an open one (`open`)
-  z.strictObject({ target: z.literal('notion'), state: z.literal('ready'), connection: z.enum(['connected', 'local', 'open']), source: NotionSourceSchema }),
-  // found, but the owner's Connect is needed first (`signIn`), its saved sign-in replaced (`reconnect`), or one is under way
-  z.strictObject({ target: z.literal('notion'), state: z.enum(['signIn', 'reconnect', 'busy']), source: NotionSourceSchema }),
-  // none MAWS can reach: no session is running to report one (`noSession`), or none of their reports names one
-  z.strictObject({ target: z.literal('notion'), state: z.literal('none'), why: z.enum(['noSession', 'notFound']) }),
-  z.strictObject({ target: z.literal('notion'), state: z.literal('unavailable') }), // route D or the engine host not answering
-]);
+// `ready`: sends now, through MAWS's own sign-in (`connection: connected`), a local server (`local`) or an open one
+// (`open`); `signIn`, `reconnect`, `busy`: found, but the owner's Connect is needed first, its saved sign-in replaced, or
+// one is under way; `none`: none MAWS can reach, no session running to report one (`why: noSession`) or none of their
+// reports naming one (`notFound`); `unavailable`: route D or the engine host not answering. One object, not a union of
+// four (every command's output is one union across the registry; e2e's typed `invoke` is at TypeScript's union bound).
+export const NotionStatusSchema = z
+  .strictObject({
+    target: z.literal('notion'),
+    state: z.enum(['ready', 'signIn', 'reconnect', 'busy', 'none', 'unavailable']),
+    connection: z.enum(['connected', 'local', 'open']).optional(),
+    source: NotionSourceSchema.optional(),
+    why: z.enum(['noSession', 'notFound']).optional(),
+  })
+  .refine((status) => (status.state === 'ready') === (status.connection !== undefined) && ['ready', 'signIn', 'reconnect', 'busy'].includes(status.state) === (status.source !== undefined) && (status.state === 'none') === (status.why !== undefined), 'the fields of the Notion state');
 // gws's own state as `gws auth status` reports it (src/main/delivery/gws.ts)
 export const DriveStatusSchema = z.strictObject({
   target: z.literal('drive'),
@@ -61,15 +66,18 @@ export const DELIVERY_FAILURES = [
   'failed',
 ] as const;
 export const DeliveryFailureSchema = z.enum(DELIVERY_FAILURES);
-export const DeliverySendAnswerSchema = z.union([
-  z.strictObject({ ok: z.literal(true), receipt: DeliveryReceiptSchema }),
-  z.strictObject({ ok: z.literal(false), why: DeliveryFailureSchema, maybeSent: z.boolean().optional(), message: Words.optional() }),
-]);
+// One object each, as the Notion state (above): `ok` with the receipt, or the failure's fields.
+export const DeliverySendAnswerSchema = z
+  .strictObject({ ok: z.boolean(), receipt: DeliveryReceiptSchema.optional(), why: DeliveryFailureSchema.optional(), maybeSent: z.boolean().optional(), message: Words.optional() })
+  .refine((answer) => (answer.ok ? answer.receipt !== undefined && answer.why === undefined : answer.receipt === undefined && answer.why !== undefined), 'a receipt, or why not');
 export const DELIVERY_CONNECT_FAILURES = ['cancelled', 'timeout', 'refused', 'denied', 'busy', 'absent', 'needsSetup', 'none', 'unavailable', 'failed'] as const;
-export const DeliveryConnectAnswerSchema = z.union([z.strictObject({ ok: z.literal(true) }), z.strictObject({ ok: z.literal(false), why: z.enum(DELIVERY_CONNECT_FAILURES), message: Words.optional() })]);
+export const DeliveryConnectAnswerSchema = z
+  .strictObject({ ok: z.boolean(), why: z.enum(DELIVERY_CONNECT_FAILURES).optional(), message: Words.optional() })
+  .refine((answer) => answer.ok === (answer.why === undefined), 'ok, or why not');
 
 export type DeliveryStatus = z.infer<typeof DeliveryStatusSchema>;
 export type NotionStatus = z.infer<typeof NotionStatusSchema>;
+export type NotionSource = z.infer<typeof NotionSourceSchema>;
 export type DriveStatus = z.infer<typeof DriveStatusSchema>;
 export type DeliveryReceipt = z.infer<typeof DeliveryReceiptSchema>;
 export type DeliveryFailure = (typeof DELIVERY_FAILURES)[number];

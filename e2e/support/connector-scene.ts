@@ -89,7 +89,7 @@ const show = (o) => {
 
 type Result<N extends CommandName> = CommandResult<N>;
 export function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<Result<N>> {
-  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const) as Promise<Result<N>>;
+  return page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name as string, input as unknown] as const) as Promise<Result<N>>;
 }
 export function value<N extends CommandName>(result: Result<N>) {
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);

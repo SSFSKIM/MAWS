@@ -1,7 +1,7 @@
 // P4-B5: the words of the Send to sheet and its header action (docs/doperpowers/plans/2026-10-19-p4-smoothing.md §4.7).
 // What the owner reads is what happens: MAWS sends the artifact itself, with no session and no Claude turn; Notion goes
 // through MAWS's own connection, Drive through the gws command-line tool, which keeps its own Google sign-in.
-import type { DeliveryFailure, NotionStatus } from '@shared/ipc/schema/delivery';
+import type { DeliveryFailure, NotionSource } from '@shared/ipc/schema/delivery';
 import type { DeliveryTarget } from '@shared/delivery/destination';
 
 export const SERVICE: Record<DeliveryTarget, string> = { notion: 'Notion', drive: 'Google Drive' };
@@ -42,7 +42,7 @@ export const SEND_TO_COPY = {
   sending: (target: DeliveryTarget) => `Exporting and sending to ${SERVICE[target]}…`,
   checking: { notion: 'Looking for your Notion connector…', drive: 'Checking the gws command-line tool…' } satisfies Record<DeliveryTarget, string>,
   // Notion's connection
-  notionReady: (source: Extract<NotionStatus, { state: 'ready' }>['source'], connection: 'connected' | 'local' | 'open') =>
+  notionReady: (source: NotionSource, connection: 'connected' | 'local' | 'open') =>
     connection === 'connected' ? `Connected through MAWS: “${source.server}” in ${scopeWords(source.scope)}.` : `Through MAWS’s own connection: “${source.server}” in ${scopeWords(source.scope)}.`,
   notionSignIn: (server: string) => `MAWS needs your go-ahead to reach “${server}” once. Connect opens Notion in your browser; MAWS keeps its own sign-in.`,
   notionReconnect: (server: string) => `MAWS’s sign-in to “${server}” needs renewing.`,
