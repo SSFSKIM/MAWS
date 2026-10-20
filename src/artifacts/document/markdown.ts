@@ -111,14 +111,29 @@ const NEWLINE = '\uE00E'; // a line ending inside text: `&#10;`, or a reader's `
 const LITERAL = '\uE00D';
 const ALPHABET = /[\uE000-\uE00F]/g;
 const LITERAL_PAIR = /\uE00D([a-p])/g;
-const toLiteral = (text: string): string => text.replace(ALPHABET, (char) => `${LITERAL}${String.fromCharCode(97 + char.charCodeAt(0) - 0xe000)}`);
-const fromLiteral = (text: string): string => text.replace(LITERAL_PAIR, (_, letter: string) => String.fromCharCode(0xe000 + letter.charCodeAt(0) - 97));
-/** Every string a node's JSON holds (its texts, attribute values, and property names inside an opaque value), mapped. */
-const mapStrings = <T>(value: T, map: (text: string) => string): T => {
+const IN_ALPHABET = /[\uE000-\uE00F]/;
+const toLiteral = (text: string): string => (IN_ALPHABET.test(text) ? text.replace(ALPHABET, (char) => `${LITERAL}${String.fromCharCode(97 + char.charCodeAt(0) - 0xe000)}`) : text);
+const fromLiteral = (text: string): string => (text.includes(LITERAL) ? text.replace(LITERAL_PAIR, (_, letter: string) => String.fromCharCode(0xe000 + letter.charCodeAt(0) - 97)) : text);
+/**
+ * Every string a node's JSON holds (its texts, attribute values, and property names inside an opaque value), mapped.
+ * P4-R5: what the map leaves as it was comes back as it was, not copied (every serialization maps every string, and few
+ * change), so a block's JSON keeps ProseMirror's own attribute objects: nothing that reads it writes to it.
+ */
+export const mapStrings = <T>(value: T, map: (text: string) => string): T => {
   if (typeof value === 'string') return map(value) as T;
-  if (Array.isArray(value)) return value.map((item) => mapStrings(item, map)) as T;
   if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [map(key), mapStrings(item, map)])) as T;
+  if (Array.isArray(value)) {
+    let out: unknown[] | null = null;
+    for (let k = 0; k < value.length; k++) {
+      const item = mapStrings(value[k] as unknown, map);
+      if (item !== value[k]) (out ??= value.slice())[k] = item;
+    }
+    return (out ?? value) as T;
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.every((key) => map(key) === key && mapStrings(record[key], map) === record[key])) return value;
+  return Object.fromEntries(keys.map((key) => [map(key), mapStrings(record[key], map)])) as T;
 };
 
 const ID = '[0-9a-z]{2,32}';
@@ -143,9 +158,10 @@ const ITEMS = new Set(['listItem', 'taskItem']);
 const CELLS = new Set(['tableCell', 'tableHeader']);
 
 const LETTERED_MARKER = /^(\s*[a-zA-Z]+)([.)])(?= {2})/;
+const MARKER_AT_END = new RegExp(`([ \\t])\\^(${ID})$`);
 // `@tiptap/markdown` already backslash-escapes \\ ` * _ [ ] ~ in text and writes & < > as entities; what the dialect adds
 // is escaped here, through a placeholder its escaper leaves alone and `restore` turns into the backslash.
-function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: boolean; lineEnd: boolean; inCell: boolean }): string {
+export function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: boolean; lineEnd: boolean; inCell: boolean }): string {
   let out = text.replace(/==/g, `${ESC}=${ESC}=`).replace(/\+\+/g, `${ESC}+${ESC}+`).replace(/\$\$/g, `${ESC}$${ESC}$`);
   if (inCell) out = out.replace(/\|/g, `${ESC}|`);
   if (lineStart) {
@@ -158,7 +174,7 @@ function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: b
       // a letter or roman marker with two spaces after it would read as an item (Decision Log 19)
       .replace(LETTERED_MARKER, `$1${ESC}$2`);
   }
-  if (lineEnd) out = out.replace(new RegExp(`([ \\t])\\^(${ID})$`), `$1${ESC}^$2`);
+  if (lineEnd) out = out.replace(MARKER_AT_END, `$1${ESC}^$2`);
   return out;
 }
 const restMarks = (node: Json | undefined): Mark[] => (node?.marks ?? []).filter((mark) => mark.type !== 'comment');
@@ -167,9 +183,11 @@ const restMarks = (node: Json | undefined): Mark[] => (node?.marks ?? []).filter
  * between them (one set of marks; a comment's edge splits them, its milestone or nothing), are escaped as one text, so
  * markup a comment's edge splits (`1` and `. x`, `x ` and `^ab`) is escaped as a whole; each escape stays in the run of
  * the character it precedes, inside or outside the comment. Inline code is not escaped (undefined). A reader's line
- * ending is kept, escaped where its next line starts; the canonical one is NEWLINE.
+ * ending is kept, escaped where its next line starts; the canonical one is NEWLINE. P4-R5: the escaped text is sliced back
+ * into the runs (built a code unit at a time, it was the host's row-5 step); markdown-runs.test.ts keeps that version as
+ * the oracle, hence the exports.
  */
-function escapeRuns(content: Json[], tables: Tables, { cell, lines }: { cell: boolean; lines: boolean }): (string | undefined)[] {
+export function escapeRuns(content: Json[], tables: Pick<Tables, 'forReaders'>, { cell, lines }: { cell: boolean; lines: boolean }): (string | undefined)[] {
   const plain = (node: Json | undefined) => node?.type === 'text' && !(node.marks ?? []).some((mark) => mark.type === 'code');
   const together = (a: Json, b: Json) => {
     const [x, y] = [restMarks(a), restMarks(b)];
@@ -183,18 +201,23 @@ function escapeRuns(content: Json[], tables: Tables, { cell, lines }: { cell: bo
     const before = content[start - 1];
     const lineStart = start === 0 || before?.type === 'hardBreak' || (tables.forReaders && before?.type === 'text' && (before.text ?? '').endsWith('\n'));
     const lineEnd = end === content.length;
-    const parts = runs.join('').split('\n');
-    const text = parts.map((line, k) => escapeText(line, { lineStart: lineStart || k > 0, lineEnd: lineEnd || k < parts.length - 1, inCell: cell })).join('\n');
-    // back into the runs: a character goes to its run, an escape to the run of the character after it
-    let run = 0;
-    let left = runs[0].length;
-    const out = runs.map(() => '');
-    for (let k = 0; k < text.length; k++) {
-      while (left === 0 && run < runs.length - 1) left = runs[++run].length;
-      out[run] += text[k]; // code units: a run may end inside a surrogate pair
-      if (text[k] !== ESC) left--;
+    const joined = runs.join('');
+    const text =
+      lines && joined.includes('\n')
+        ? joined.split('\n').map((line, k, all) => escapeText(line, { lineStart: lineStart || k > 0, lineEnd: lineEnd || k < all.length - 1, inCell: cell })).join('\n')
+        : escapeText(joined, { lineStart, lineEnd, inCell: cell });
+    // back into the runs: a character goes to its run, an escape to the run of the character after it. A run's own
+    // characters end at the running total of the runs' lengths, shifted by the escapes before them (code units: a run
+    // may end inside a surrogate pair)
+    let from = 0;
+    let shift = 0;
+    let esc = text.indexOf(ESC);
+    for (let k = 0, total = 0; k < runs.length - 1; k++) {
+      total += runs[k].length;
+      for (; esc !== -1 && esc - shift < total; esc = text.indexOf(ESC, esc + 1)) shift++;
+      escaped[start + k] = text.slice(from, (from = total + shift));
     }
-    out.forEach((piece, k) => (escaped[start + k] = piece));
+    escaped[end - 1] = text.slice(from);
   }
   return escaped;
 }
@@ -398,24 +421,24 @@ function realign(lines: string[], rows: Set<number>): void {
   }
 }
 
+const FENCED_CODE = new RegExp(`\`${CODE_OPEN}([\\s\\S]*?)${CODE_CLOSE}\``, 'g');
 /** Inline code that needs a longer fence: as many backticks as its longest run plus one, padded by a space each side. */
 function fenceInlineCode(markdown: string): string {
-  return markdown.replace(new RegExp(`\`${CODE_OPEN}([\\s\\S]*?)${CODE_CLOSE}\``, 'g'), (_, code: string) => {
+  if (!markdown.includes(CODE_OPEN)) return markdown;
+  return markdown.replace(FENCED_CODE, (_, code: string) => {
     const ticks = '`'.repeat(Math.max(0, ...[...code.matchAll(/`+/g)].map((m) => m[0].length)) + 1);
     return `${ticks} ${code} ${ticks}`;
   });
 }
 
+// what the single-character placeholders become (none becomes another), with the canonical line ending or a reader's
+const FORMS: Record<string, string> = { [ESC]: '\\', [EDGE_SPACE]: '&#32;', [EDGE_TAB]: '&#9;', [BREAK]: '', [SPACE_HOLDER]: '&#160;', [SEPARATOR]: '<!---->', [NEWLINE]: '&#10;' };
+const READER_FORMS: Record<string, string> = { ...FORMS, [NEWLINE]: '<br>' };
+const PLACEHOLDER = new RegExp(`[${Object.keys(FORMS).join('')}]`, 'g');
 function restore(markdown: string, tables: Tables): string {
   const rows = new Set<number>();
-  const text = fenceInlineCode(markdown)
-    .replaceAll(ESC, '\\')
-    .replaceAll(EDGE_SPACE, '&#32;')
-    .replaceAll(EDGE_TAB, '&#9;')
-    .replaceAll(BREAK, '')
-    .replaceAll(SPACE_HOLDER, '&#160;')
-    .replaceAll(SEPARATOR, '<!---->')
-    .replaceAll(NEWLINE, tables.forReaders ? '<br>' : '&#10;');
+  const forms = tables.forReaders ? READER_FORMS : FORMS;
+  const text = fenceInlineCode(markdown).replace(PLACEHOLDER, (char) => forms[char]);
   const lines = text.split('\n').map((line, at) => {
     let row: string | null = null;
     let out = line.replace(SENTINEL, (match, index: string) => {
