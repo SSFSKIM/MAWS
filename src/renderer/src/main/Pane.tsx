@@ -20,9 +20,12 @@ import { focusPaneElement, paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
 
 type PaneIndex = 0 | 1;
+const HIDDEN = { visibility: 'hidden', overflow: 'hidden' } as const;
 
 // `column` is the pane's column in the main region's grid (MainArea), where its strip and its content are placed.
-export function Pane({ index, split, column }: { index: PaneIndex; split: boolean; column: number }) {
+// `collapsed` (P4-B3 M1): the pane's column is at 0 px while a divider drag has armed its float; the strip and content
+// stay mounted but hidden, so a disarm in the same drag brings them back as they were.
+export function Pane({ index, split, column, collapsed = false }: { index: PaneIndex; split: boolean; column: number; collapsed?: boolean }) {
   const pane = useLayout((s) => currentSet(s.main).panes[index]);
   const hydrated = useLayout((s) => s.hydrated);
   const idPrefix = useId();
@@ -55,7 +58,7 @@ export function Pane({ index, split, column }: { index: PaneIndex; split: boolea
       onFocusCapture={focus}
       className="contents"
     >
-      <div data-pane-strip className="min-w-0" style={{ gridRow: 1, gridColumn: column }}>
+      <div data-pane-strip className="min-w-0" style={{ gridRow: 1, gridColumn: column, ...(collapsed ? HIDDEN : null) }}>
         <TabStrip pane={index} split={split} idPrefix={idPrefix} />
       </div>
       <div
@@ -64,7 +67,7 @@ export function Pane({ index, split, column }: { index: PaneIndex; split: boolea
         aria-label={active || !hydrated ? undefined : 'No open tabs'}
         aria-busy={active || hydrated ? undefined : true}
         className="relative min-h-0 min-w-0 overflow-hidden"
-        style={{ gridRow: 3, gridColumn: column }}
+        style={{ gridRow: 3, gridColumn: column, ...(collapsed ? HIDDEN : null) }}
       >
         {/* Until the saved layout applies, an empty pane is only not yet restored: it draws nothing rather than "No open
             tabs" (a relaunch flashed it). A tab opened before then draws at once. */}

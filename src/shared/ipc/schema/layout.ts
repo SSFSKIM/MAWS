@@ -137,14 +137,19 @@ export const StoredRegionsSchema = z.union([
 export const NO_PROJECT = 'none';
 export const TabSetKeySchema = z.union([z.literal(NO_PROJECT), ProjectIdSchema]);
 export type TabSetKey = z.infer<typeof TabSetKeySchema>;
-export const TabSetSchema = z.strictObject({
-  panes: z.tuple([PaneStateSchema]).or(z.tuple([PaneStateSchema, PaneStateSchema])), focusedPane: z.union([z.literal(0), z.literal(1)]), splitRatio: z.number() });
+const TabSetShape = {
+  panes: z.tuple([PaneStateSchema]).or(z.tuple([PaneStateSchema, PaneStateSchema])), focusedPane: z.union([z.literal(0), z.literal(1)]), splitRatio: z.number() };
+// P4-B3 (X37; its Decision Log 1): `floating` names the session tab whose pane has yielded into the floating card; absent
+// while docked (never written as null or undefined, so a docked set is the value it was before), and `splitRatio`, which
+// a float never writes, is the ratio Dock returns. Version 2 is kept: an older build reading a set that floats rejects
+// `main.tabs` and falls back to its default tabs.
+export const TabSetSchema = z.strictObject({ ...TabSetShape, floating: z.strictObject({ sessionTabId: z.string() }).optional() });
 export type TabSet = z.infer<typeof TabSetSchema>;
 const ClosedTabsSchema = z.array(TabRefSchema).max(10);
 export const LayoutMainSchema = z.strictObject({ version: z.literal(2), current: TabSetKeySchema,                // key `main.tabs`
   sets: z.partialRecord(TabSetKeySchema, TabSetSchema), closedTabs: ClosedTabsSchema });
 export type LayoutMain = z.infer<typeof LayoutMainSchema>;
-export const LayoutMainV1Schema = z.strictObject({ version: z.literal(1), ...TabSetSchema.shape, closedTabs: ClosedTabsSchema });
+export const LayoutMainV1Schema = z.strictObject({ version: z.literal(1), ...TabSetShape, closedTabs: ClosedTabsSchema });
 export type LayoutMainV1 = z.infer<typeof LayoutMainV1Schema>;
 // What hydration reads from `main.tabs`, either version: a tab whose kind this build does not name is dropped from the
 // panes and the closed-tab history (a pane it leaves empty goes, focusing pane 0; a pane whose active tab it was

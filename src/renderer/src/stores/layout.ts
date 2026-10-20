@@ -73,6 +73,9 @@ export interface LayoutState {
   splitWithActive(): void;
   focusPane(i: Pane): void;
   setSplitRatio(r: number): void;
+  // P4-B3 (X37): the split's float, `model.floatSplit` / `model.dockSplit` on the current set.
+  floatSplit(sessionTabId: string): void;
+  dockSplit(): void;
   dropSession(appSessionId: AppSessionId): void; // session.removed
   // A patch, or an updater for a change that depends on the sidebar it lands on (an early one is replayed over the
   // hydrated value, not the default it was made against).
@@ -356,6 +359,8 @@ export function createLayoutStore() {
       splitWithActive: () => main(model.splitWithActive),
       focusPane: (i) => main((m) => model.focusPane(m, i)),
       setSplitRatio: (r) => main((m) => model.setSplitRatio(m, r)),
+      floatSplit: (sessionTabId) => main((m) => model.floatSplit(m, sessionTabId)),
+      dockSplit: () => main(model.dockSplit),
       dropSession(appSessionId) {
         main((m) => model.dropSession(m, appSessionId));
         if (get().panelBySession.has(appSessionId)) {

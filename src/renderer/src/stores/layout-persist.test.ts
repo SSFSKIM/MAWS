@@ -116,6 +116,29 @@ describe('layout persistence', () => {
     expect(again.store.getState().main).toEqual(written);
   });
 
+  // P4-B3 (X37; its Decision Log 1): a floating split is written beside its ratio and comes back floating at the next
+  // launch; docked again, the value is byte-identical to the one it floated from.
+  it('writes a floating split to main.tabs, reads it back floating, and docks to the value it left', async () => {
+    const artifactId = '00000000-0000-4000-8000-000000000001';
+    const { store, hydrate, sets } = setup();
+    await hydrate();
+    store.getState().openTab({ kind: 'artifact', artifactId });
+    store.getState().openSession(A, { split: true });
+    store.getState().setSplitRatio(0.4);
+    vi.advanceTimersByTime(1000);
+    const before = JSON.stringify(sets().at(-1)!.value);
+    store.getState().floatSplit(`session:${A}`);
+    vi.advanceTimersByTime(1000);
+    const floating = sets().at(-1)!.value as LayoutMain;
+    expect(currentSet(floating)).toMatchObject({ floating: { sessionTabId: `session:${A}` }, splitRatio: 0.4 });
+    const again = setup({ 'main.tabs': JSON.parse(JSON.stringify(floating)) });
+    await again.hydrate();
+    expect(again.store.getState().main).toEqual(floating); // relaunch restores the float
+    store.getState().dockSplit();
+    vi.advanceTimersByTime(1000);
+    expect(JSON.stringify(sets().at(-1)!.value)).toBe(before);
+  });
+
   it('writes nothing for hydration alone when layout.json holds every key', async () => {
     const { hydrate, sets } = setup();
     await hydrate();
