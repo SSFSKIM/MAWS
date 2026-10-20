@@ -148,7 +148,7 @@ export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pen
   const tools = row.cells.flatMap((cell) => toolInputs(cell, turn));
   if (!tools.length) return null;
   const ids = new Set(tools.map((t) => t.instanceId));
-  if ([...pending.values()].some((e) => 'toolUseId' in e && e.toolUseId !== null && ids.has(e.toolUseId))) return null;
+  if ([...pending.values()].some((e) => 'toolUseId' in e && e.toolUseId != null && ids.has(e.toolUseId))) return null;
   if (tools.some((t) => t.props.tool === 'AskUserQuestion' && t.record.result === null)) return null;
   const calls: TranscriptProps['ToolGroup']['calls'] = [];
   let nodes = 0; let chars = 0;

@@ -17,6 +17,7 @@ import type { ArtifactDocOption, ArtifactHost, DocumentHandle, DocumentState } f
 import { PortProvider, type PortLike, type Restored, type SaveState } from '@artifacts/provider/port';
 import { newDoc, newSuggestionDoc, type Doc } from '@artifacts/yjs';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
+import type { ArtifactProvisional } from '@shared/artifacts/provisional'; // P4-A2
 import { artifactUrl } from '@shared/artifacts/scheme';
 import type { CommandInput, CommandName, CommandOutput, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
@@ -110,6 +111,9 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     }
     onRestored(listener: (restored: Restored) => void): () => void {
       return this.provider.onRestored(listener);
+    }
+    onProvisional(listener: (frame: ArtifactProvisional) => void): () => void {
+      return this.provider.onProvisional(listener); // P4-A2 (X35)
     }
     holdRemote(on: boolean): void {
       this.provider.holdRemote(on);

@@ -226,8 +226,10 @@ describe('normaliser: tools, blocks and safeguards', () => {
     ]);
     const deltas = only(events, 'assistant.block.delta');
     expect(deltas).toHaveLength(2);
-    expect(deltas[0]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 0, blockType: 'thinking', thinkingDelta: 'hm', textDelta: null, inputJsonDelta: null, userMessageUuid: 'u-1' });
-    expect(deltas[1]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 1, blockType: 'tool_use', inputJsonDelta: '{"c":1}' });
+    expect(deltas[0]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 0, blockType: 'thinking', thinkingDelta: 'hm', textDelta: null, inputJsonDelta: null, userMessageUuid: 'u-1', toolUseId: null, toolName: null });
+    // P4-A2 (X1 amendment, X35): a tool_use block's deltas carry the id and name its content_block_start announced, so the
+    // host can join them to the `tools/call` that follows (its `claudecode/toolUseId`) and read the call as it streams
+    expect(deltas[1]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 1, blockType: 'tool_use', inputJsonDelta: '{"c":1}', toolUseId: 'toolu_1', toolName: 'Bash' });
     const completes = only(events, 'assistant.block.complete');
     expect(completes.map((c) => [c.apiMessageId, c.blockIndex, c.block.type])).toEqual([['msg_1', 0, 'thinking'], ['msg_1', 1, 'tool_use']]);
     expect(completes[0]).toMatchObject({ messageUuid: 'a-1', model: 'm', supersedes: [], aborted: false, userMessageUuids: ['u-1'] });

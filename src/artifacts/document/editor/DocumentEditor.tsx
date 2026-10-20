@@ -20,6 +20,8 @@
 // selection) come with it. M9 (the scale gate): the version is drawn by an editor of its own, read-only, bound to the
 // version's doc from its creation, while the live editor stays bound to the tab, hidden: entering and leaving history
 // never re-binds (and re-renders) the live tab, and leaving keeps its undo. Awareness (D11): the other replicas' cursors and an agent's editing blocks.
+// P4-A2 (X35): the agent's batch drawn as it is written, the live editor's provisional layer (provisional.ts), its growth
+// bumping the comment overlay's `layoutKey` once a frame.
 // P3-F1: the rail beside the page in a body 720 px wide or more, a drawer over the page's right side below (rail-layout.ts).
 // P4-B1 (the P4 spec §4.3): the shown tab's open threads are cards in a margin beside the page (comments/MarginThreads.tsx,
 // inside the page's scroll box), activated only by the human; the threads list is the All comments panel (`rail`
@@ -67,6 +69,8 @@ import { Toolbar } from './Toolbar';
 import { Suggestions, type SuggestionHost } from './Suggestions';
 import { useReadOnly } from './read-only';
 import { useRailLayout } from './rail-layout'; // P3-F1
+import type { ProvisionalLayers } from '../../provisional'; // P4-A2 (X35)
+import { useProvisionalLayers } from './provisional'; // P4-A2 (X35)
 import './chrome.css';
 import './theme.css';
 
@@ -161,6 +165,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const [pendingSuggestions, setPendingSuggestions] = useState(false);
   const hold = useMemo(() => new JointHold(props.handle), [props.handle]); // the live editor's, the suggestion replica's too
   const typing = useMemo(() => new TypingPause(hold), [hold]); // the review waits for the person's pause
+  const provisional = useProvisionalLayers(props.handle); // P4-A2 (X35): per handle, so a tab switch keeps the layers that stand
   const [showing, setShowing] = useState<Showing | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   // P4-B1: the margin draws unless the view hides it, the panel is open or a version shows; its tier (off under a
@@ -311,6 +316,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
               historyController={history}
               historySnapshot={snapshot}
               hold={hold}
+              provisional={provisional}
               readOnly={readOnly}
               previewRevision={shownVersion} /* P3-E */
             />
@@ -359,6 +365,8 @@ interface TabEditorProps extends DocumentEditorProps {
   historySnapshot: HistorySnapshot | null;
   /** The composition hold: the base replica's, and the suggestion replica's beside it. */
   hold: JointHold;
+  /** P4-A2 (X35): the agent's streaming edits over this handle, drawn by the live editor. */
+  provisional: ProvisionalLayers;
   /** The store is read-only: the page is not editable. */
   readOnly: boolean;
   showing: Showing | null;
@@ -377,7 +385,7 @@ interface TabEditorProps extends DocumentEditorProps {
   previewRevision?: number;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, commentsView, onCommentsViewChange /* P4-B1 */, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, provisional, readOnly, showing, onShown, onActiveThread, onPassageClick, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, commentsView, onCommentsViewChange /* P4-B1 */, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -389,6 +397,11 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
   const commentRef = useRef<() => boolean>(() => false);
   // P4-B1: ⌃⌘ E then C enters the active thread's card: the margin fills this while it draws
   const enterRef = useRef<(threadId: string) => void>(() => {});
+  // P4-A2 (X35): the layer's growth moves the passages the comment overlay places, so it bumps the page frame's
+  // `layoutKey` through the frame's own `moved` (one bump per animation frame). The editor is built before the frame
+  // mounts and outlives its renders, so the extension calls through this ref, which the frame fills while it shows.
+  // P4-B1: `moved` also runs the margin's layout pass (`relayoutRef`) in that frame callback, so the cards follow the growth.
+  const growRef = useRef<() => void>(detached);
 
   const editor = useEditor(
     {
@@ -403,12 +416,13 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         },
         comments: { doc: handle.doc, tabId, onComment: () => commentRef.current(), onActivate: (_id, cause) => latest.current.onPassageClick(cause), onEnter: (id) => enterRef.current(id) /* P4-B1 */, blockQuote: (node) => latest.current.blockCommentQuote?.(node), artifactId /* P3-E */ },
         env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}), ...(renderChart ? { renderChart, displayed: displayedDocument(handle.doc) } : {}) /* P3-E */ },
+        provisional: { layers: provisional, onGrow: () => growRef.current() }, // P4-A2 (X35)
       }),
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'live' } },
       shouldRerenderOnTransaction: false,
       editable: !readOnly,
     },
-    [tabId, handle, host, artifactId, hold],
+    [tabId, handle, host, artifactId, hold, provisional],
   );
   // the store turning read-only (or writable again, after a reconnect) does not re-create the editor
   useEffect(() => {
@@ -558,6 +572,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         readOnly={readOnly}
         onComment={comments ? () => commentRef.current() : null}
         enterRef={enterRef}
+        growRef={growRef} // P4-A2
         onNewChanges={() => {
           openRail('history');
           void historyController?.openNewChanges();
@@ -594,10 +609,12 @@ interface PageFrameProps {
   readOnly: boolean;
   onComment: (() => boolean) | null;
   enterRef: { current: (threadId: string) => void };
+  /** P4-A2 (X35): filled with `moved` while the overlay or the margin is drawn, for the provisional layer's growth. */
+  growRef: { current: () => void };
   onNewChanges(): void;
 }
 
-function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, readOnly, onComment, enterRef, onNewChanges }: PageFrameProps) {
+function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, readOnly, onComment, enterRef, growRef /* P4-A2 */, onNewChanges }: PageFrameProps) {
   const editors = useShowEditors(live, history, tabId, preview === null);
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
@@ -663,6 +680,15 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       pending.current = null;
     };
   }, [editor, comments, margin /* P4-B1 */, moved]);
+  // P4-A2 (X35): the provisional layer grows the page without an editor update; with neither the overlay nor the margin
+  // (P4-B1: its layout pass runs in `moved`'s frame callback) nothing reads the layout
+  useLayoutEffect(() => {
+    if (!comments && !margin) return;
+    growRef.current = moved;
+    return () => {
+      growRef.current = detached;
+    };
+  }, [growRef, comments, margin /* P4-B1 */, moved]);
 
   const reach = useMemo<Omit<CommentOverlayProps, 'layoutKey' | 'placement'>>(() => {
     const { doc } = handle;

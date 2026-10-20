@@ -41,6 +41,7 @@ function plan(scenarioEnv) {
         POOL_E2E: '',
         LIBREOFFICE_E2E: '',
         LIVE_E2E: '',
+        LIVE_GUARD_E2E: '',
         MEASURED_E2E: '',
         ...scenarioEnv,
         GITHUB_OUTPUT: output,
@@ -188,20 +189,34 @@ test('a run that is not live refuses a live group, whether a trailer or a dispat
   }
 });
 
+// P4-A2 (X34): the tool-time guard's heavy-case fixture joins every live run, whichever live groups it names, and no
+// other run.
+test('a live run takes the LIVE_GUARD_E2E groups beside the live groups it names', () => {
+  const guarded = { ...live, LIVE_E2E: `${live.LIVE_E2E} tool-time-heavy-live`, LIVE_GUARD_E2E: 'tool-time-heavy-live' };
+  const groups = (outputs) => JSON.parse(outputs.e2e).map((entry) => entry.group);
+  assert.deepEqual(groups(plan({ ...guarded, HEAD_MESSAGE: livePush('e2e:library-live') }).outputs), ['library-live', 'tool-time-heavy-live']);
+  assert.deepEqual(groups(plan({ ...guarded, EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos', INPUT_GATES: 'e2e:send-to-live', INPUT_LIVE: 'true' }).outputs), ['send-to-live', 'tool-time-heavy-live']);
+  assert.deepEqual(groups(plan({ ...guarded, HEAD_MESSAGE: livePush('e2e:tool-time-heavy-live') }).outputs), ['tool-time-heavy-live']);
+  assert.deepEqual(groups(plan({ ...guarded, HEAD_MESSAGE: livePush('e2e:library', '\nRunner: macos') }).outputs), ['library']);
+});
+
 // The flags the e2e job sets under live are the ones the LIVE_E2E groups' specs skip without; a group whose spec gates
-// on another flag would build and skip under --live, as five of them did before it.
+// on another flag would build and skip under --live, as five of them did before it. A group may run one vitest file of
+// the `live` project instead (P4-A2's tool-time-heavy-live), skipping its suite on the flag.
 test("every LIVE_E2E group's spec skips on a flag the e2e job sets under live", () => {
   const workflow = readFileSync(join(root, '.github/workflows/gate.yml'), 'utf8');
   const groups = /^ {2}LIVE_E2E: (.*)$/m.exec(workflow)[1].split(/\s+/).filter(Boolean);
   const exported = [...workflow.matchAll(/^ {6}(MAWS_\w+): \$\{\{ needs\.plan\.outputs\.live == 'true' && '1' \|\| '' \}\}$/gm)].map((match) => match[1]);
   assert.deepEqual(exported.sort(), ['MAWS_LIBRARY_LIVE', 'MAWS_LIVE', 'MAWS_LIVE_DOCUMENT']);
+  const guards = /^ {2}LIVE_GUARD_E2E: (.*)$/m.exec(workflow)[1].split(/\s+/).filter(Boolean);
+  assert.deepEqual(guards.filter((group) => !groups.includes(group)), [], 'every LIVE_GUARD_E2E group is a LIVE_E2E group');
   const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   for (const group of groups) {
     const script = scripts[`e2e:${group}`];
     assert.ok(script, `e2e:${group} has a package script`);
-    const specs = script.split(/\s+/).filter((word) => /^e2e\/.*\.spec\.ts$/.test(word));
+    const specs = script.split(/\s+/).filter((word) => /^(e2e\/.*\.spec\.ts|test\/live\/.*\.live\.test\.ts)$/.test(word));
     assert.equal(specs.length, 1, `e2e:${group} runs one spec`);
-    const flags = [...readFileSync(join(root, specs[0]), 'utf8').matchAll(/test\.skip\(process\.env\.(MAWS_\w+) !== '1'/g)].map((match) => match[1]);
+    const flags = [...readFileSync(join(root, specs[0]), 'utf8').matchAll(/(?:test\.skip|describe\.skipIf)\(process\.env\.(MAWS_\w+) !== '1'/g)].map((match) => match[1]);
     assert.equal(flags.length, 1, `${specs[0]} skips on one flag`);
     assert.ok(exported.includes(flags[0]), `${specs[0]} skips without ${flags[0]}, which the e2e job does not set under live`);
   }

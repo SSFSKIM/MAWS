@@ -52,8 +52,8 @@ const host: ArtifactHost = {
     const doc = docs[id];
     if (!doc) throw new Error(`no artifact ${id}`);
     return {
-      doc, awareness: null as never, state: () => ({ phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false }),
-      subscribe: () => () => {}, onRestored: () => () => {}, holdRemote: () => {}, close: () => {},
+      doc, awareness: null as never, state: () => ({ phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false }),
+      subscribe: () => () => {}, onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote: () => {}, close: () => {},
     };
   },
   assetUrl: (id, ref) => `maws-artifact://${id}/live/${ref}`,

@@ -4,8 +4,10 @@
 // panes, `artifact_screenshot`'s capture), the asks waiting for the human and the blocking asks' attention items. The session owns
 // the process, the journal and the queue; the wiring asks it through `SessionMawsHost`. P3-A (M6): the artifact tools
 // write through the host's artifact store; each turn's end writes the session's `turn` versions there, and the process's
-// end closes the session's agent replicas (their bases and presence with them).
+// end closes the session's agent replicas (their bases and presence with them). P4-A2 (X35): the session's events feed
+// its `ProvisionalEmitter`, which shows an artifact call on the documents' ports while its input streams.
 import type { AttentionItem } from '@shared/graph/attention';
+import type { SessionEvent } from '@shared/graph/events';
 import type { RequestId, SessionId, ToolUseId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { MawsArtifactCapturedResult, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
@@ -27,6 +29,7 @@ import { ArtifactSession } from './tool-server/artifact-context'; // P3-A
 import type { ArtifactExportAnswer, ArtifactExportRequest, ExportBridge } from './tool-server/artifact-export'; // P3-A M7
 import type { ArtifactStore } from './documents/store'; // P3-A
 import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
+import { ProvisionalEmitter } from './tool-server/provisional'; // P4-A2 (X35)
 
 type AppSessionIdOf = LaunchSpec['appSessionId'];
 
@@ -65,6 +68,7 @@ export class SessionMaws {
   private readonly captures: CaptureBridge; // E2: the bridge `artifact_screenshot` asks main through
   private readonly exports: ExportBridge; // P3-A M7: the bridge `artifact_export` asks main through
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
+  private readonly provisional: ProvisionalEmitter; // P4-A2 (X35): the session's artifact calls shown as they stream
   private askItems = new Map<string, AttentionItem>(); // E1 M4b: the asks' attention items (P2-C2: async ones too), published with the broker's
 
   constructor(private readonly host: SessionMawsHost) {
@@ -78,6 +82,7 @@ export class SessionMaws {
         host.touch();
       },
     });
+    this.provisional = new ProvisionalEmitter({ store: () => host.artifacts?.() ?? null, appSessionId: host.appSessionId, artifactScope: host.artifactScope, log: host.log });
     this.toolServer = new MawsToolServer({
       tools: mawsTools({
         bridge: this.panes, capture: this.captures /* E2 */,
@@ -86,6 +91,7 @@ export class SessionMaws {
         artifacts: host.artifacts, session: new ArtifactSession(), log: host.log, // P3-A (M6)
         exporter: this.exports, // P3-A M7
         datasetRefresh: host.datasetRefresh, // E3
+        provisional: this.provisional, // P4-A2
       }),
       respond: (requestId, response, writeOpts) => host.respond(requestId, response, writeOpts),
       cwd: () => host.cwd(),
@@ -101,6 +107,11 @@ export class SessionMaws {
   // The `maws` server's JSON-RPC traffic (the server answers another server's name itself).
   accept(req: ControlRequestFrame): void {
     this.toolServer.accept(req);
+  }
+
+  // P4-A2 (X35): the session's events, every lane: an artifact call's input as it streams, and the engine's results.
+  observe(events: readonly SessionEvent[]): void {
+    this.provisional.observe(events);
   }
 
   // The engine withdrew a tool call.
@@ -192,6 +203,7 @@ export class SessionMaws {
   // P3-A (M6; Decision Log 23d, 23f): the session's turn ended: one `turn` version per artifact it edited, its presence
   // cleared. A failure is logged; the edits themselves are already durable.
   turnEnded(): void {
+    this.provisional.turnEnded(); // P4-A2 (R8): a layer whose call never arrived ends with the turn
     const store = this.host.artifacts?.() ?? null;
     store?.endTurn(this.host.appSessionId).catch((error: unknown) => this.host.log(`the turn's artifact versions were not written: ${messageOf(error)}`));
   }
@@ -206,6 +218,7 @@ export class SessionMaws {
     this.captures.processExited(); // E2
     this.exports.processExited(); // P3-A M7
     for (const ask of this.askTable.cancelAll('exit')) this.askCancelled(ask, 'exit'); // E1 M2: the async asks, before the exit row
+    this.provisional.processExited(); // P4-A2 (R8): every layer dropped, while the session's replicas are still open
     this.host.artifacts?.()?.service.closeSession(this.host.appSessionId); // P3-A: its agent replicas (Decision Log 9)
     return lostAsks;
   }
