@@ -263,8 +263,10 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   );
   const passRef = useRef(pass);
   passRef.current = pass;
-  // P4-B1: after the display's redraw for the threads map, a pass with the cause of the list's change (an add animates)
-  passSoon.current = () => passRef.current(lastCause.current, false);
+  // P4-B1: after the display's redraw for the threads map, a pass caused by the set's change (an add, a resolve's
+  // close-up, a reopen animate, D4 and Z1). The display's observer runs before React re-reads the list, so this pass,
+  // not React's later one, is the one that moves the cards
+  passSoon.current = () => passRef.current('set', false);
 
   // the passes React's state asks for: the thread set, the active thread, the tier and the hosting thread (the first
   // layout is not animated, D4)
@@ -566,7 +568,7 @@ function IconRail({
         const groupActive = active !== null && entries.slice(index, index + count).some((member) => member.id === active);
         const name = entry.thread ? `Comment by ${actorDisplay(entry.thread.createdBy).name}: ${firstWords(entry.thread)}` : 'Comment';
         return (
-          <div key={entry.id} ref={attach(entry.id)} className="doc-margin-entry" data-margin-entry={entry.id} data-icon-entry="" data-active={entry.id === active ? '' : undefined}>
+          <div key={entry.id} ref={attach(entry.id)} className="doc-margin-entry" data-margin-entry={entry.id} data-icon-entry="" data-active={entry.id === active ? '' : undefined} data-compose={entry.id === hosting && overlay ? '' : undefined}>
             {count > 0 && (
               <IconDot
                 label={count > 1 ? `${name}, and ${count - 1} more` : name}
@@ -577,7 +579,7 @@ function IconRail({
               />
             )}
             {(entry.id === hosting && overlay) || (entry.id === active && !open) ? (
-              <div className="doc-margin-overlay" data-compose={entry.id === hosting ? '' : undefined}>
+              <div className="doc-margin-overlay">
                 {entry.id === hosting && overlay ? <Hosted render={overlay} /> : card(entry, index, false)}
               </div>
             ) : null}
