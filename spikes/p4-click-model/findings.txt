@@ -104,7 +104,12 @@ Further findings
      the text box no longer ends the edit itself on a plain press elsewhere on the stage (that armed A again for a
      moment, writing its selection while the composition was still ending); the stage's new selection ends it. A
      modified press (shift or ⌘, which may keep A selected) and a press on a comment pin still end it from the box.
-  4. Known gaps of the prototype, for the plan rather than the spike: a press on the armed box begins the edit there,
+  4. The e2e deck stage is small: in a 1600 × 1000 window (the presentations specs' size; 1512 × 900 inner) the main
+     region is 832 px between the sidebar (300) and the panel (380), and the slide draws 256 × 144 px, a scale of
+     0.133, where a 9 px handle covers about 70 slide px and a 64 px heading is 8.5 px tall (measured 2026-10-20 with a
+     throwaway spec). B2's pointer cases (P2's caret at character 3, P5's grouped heading, P8's cell drag) need a
+     bigger stage: the live harness fills the work area with the sidebar and the panel collapsed (0.49 on the MacBook).
+  5. Known gaps of the prototype, for the plan rather than the spike: a press on the armed box begins the edit there,
      so the armed text cannot be dragged (T2 needs the stage to keep the press: the armed root without pointer events,
      the caret placed by posAtCoords on release); arming binds the text, and the binding writes an empty text node into
      an element that has none (ENSURE_ORIGIN): a model write on a selection; a press the stage keeps while a box is
