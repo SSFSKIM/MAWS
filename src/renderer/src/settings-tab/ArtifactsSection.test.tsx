@@ -88,7 +88,7 @@ describe('Settings › Artifacts', () => {
     expect([...research.options].map((o) => o.text)).toEqual(['Use my default', 'Classroom', 'MAWS']);
     fireEvent.change(research, { target: { value: MAWS } });
     await act(async () => {});
-    expect(b.sets.at(-1)).toEqual({ artifacts: { spaceDesignSystems: { [TEACHING]: CLASSROOM, [RESEARCH]: MAWS }, commentsView: 'expand' /* P4-B1 */ } });
+    expect(b.sets.at(-1)).toEqual({ artifacts: { spaceDesignSystems: { [TEACHING]: CLASSROOM, [RESEARCH]: MAWS } } });
     fireEvent.change(within(row).getByRole('combobox', { name: 'Design system for Teaching' }), { target: { value: '' } });
     await act(async () => {});
     expect(settings().spaceDesignSystems).toEqual({ [RESEARCH]: MAWS });
