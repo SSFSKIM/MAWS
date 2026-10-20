@@ -612,7 +612,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       pending.current = requestAnimationFrame(() => {
         pending.current = null;
         relayoutRef.current(); // P4-B1
-        if (overlayDrawn.current) setLayout((n) => n + 1); // P4-B1: when
+        if (overlayDrawn.current) setLayout((n) => n + 1); // P4-B1: only while the frame-level overlay is drawn
       });
     },
     [],

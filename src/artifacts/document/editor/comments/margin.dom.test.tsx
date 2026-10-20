@@ -204,8 +204,8 @@ describe('re-layout (R1 to R6)', () => {
   });
 
   // P4-B1: the layout pass runs in the frame's callback, so the card moves in the frame its text moved in, and no
-  // React render follows the edit (the cards' elements and the active one's shift are left as the pass wrote them)
-  it('an edit moves the cards in the frame callback without re-rendering them, the active card keeping its shift (R1)', async () => {
+  // React render is needed for the move (the cards' elements and the active one's shift are left as the pass wrote them)
+  it('an edit moves the cards in the frame callback itself, the active card keeping its shift (R1)', async () => {
     const m = await mount(content());
     comment(m, 't1', 'ships quarterly', 140);
     comment(m, 't2', 'track the budget', 300);
