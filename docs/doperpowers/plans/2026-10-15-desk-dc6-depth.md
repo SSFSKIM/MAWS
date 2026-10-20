@@ -62,7 +62,7 @@
   subagent panel's presentation as they stand, light first. At the end of
   M1 and of M2 a screenshot of the running depth column goes to the owner
   through the composite's writer; work continues meanwhile.
-- **MAWS's gates cover the work** (`scripts/ci-gate.sh <worktree>`: the
+- **MAWS's gates cover the work** (`scripts/ci-gate.sh <worktree> --gates static,unit,probes`: the
   root `pnpm typecheck`, `lint`, `test`, `build`), and the desk-web
   Playwright suite DC5 joined to the gate (`pnpm e2e:desk-web`) carries
   this child's browser tests. Local heavy runs follow MAWS's load rule.
@@ -185,7 +185,7 @@ From this child's worktree root:
     pnpm --filter desk-web dev                # against the local hub (DC3's M2 says how to run it)
     pnpm typecheck && pnpm lint && pnpm test  # the root scripts the gate runs
     pnpm e2e:desk-web                         # browser tests, under the load rule
-    scripts/ci-gate.sh "$PWD"
+    scripts/ci-gate.sh "$PWD" --gates static,unit,probes
 
 ## Interfaces and Dependencies
 

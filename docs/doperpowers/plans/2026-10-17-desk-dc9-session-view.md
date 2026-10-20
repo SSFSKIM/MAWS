@@ -100,8 +100,8 @@
   and `SMINOS_HOME`; the running daemon and sessions are left alone.
   Commits by explicit paths, no `Co-Authored-By` trailer, history never
   rewritten. A denied action is reported, not worked around.
-- **MAWS's gates cover the work**: `scripts/ci-gate.sh <worktree>` (static,
-  unit, probes on GitHub Actions) and the desk-web browser lane
+- **MAWS's gates cover the work**: `scripts/ci-gate.sh <worktree> --gates
+  static,unit,probes` (class 1a on GitHub Actions) and the desk-web browser lane
   (`--gates e2e:desk-web --runner linux`); focused unit tests run locally
   under the slot. DC5's and DC6's browser suites pass, or are moved where
   this child changes what they test, with the reason in the milestone's
