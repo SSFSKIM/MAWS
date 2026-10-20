@@ -70,7 +70,8 @@ export const DeliveryFailureSchema = z.enum(DELIVERY_FAILURES);
 export const DeliverySendAnswerSchema = z
   .strictObject({ ok: z.boolean(), receipt: DeliveryReceiptSchema.optional(), why: DeliveryFailureSchema.optional(), maybeSent: z.boolean().optional(), message: Words.optional() })
   .refine((answer) => (answer.ok ? answer.receipt !== undefined && answer.why === undefined : answer.receipt === undefined && answer.why !== undefined), 'a receipt, or why not');
-export const DELIVERY_CONNECT_FAILURES = ['cancelled', 'timeout', 'refused', 'denied', 'busy', 'absent', 'needsSetup', 'none', 'unavailable', 'failed'] as const;
+// `source`: the handle the window named is no longer kept (its sheet re-reads the state).
+export const DELIVERY_CONNECT_FAILURES = ['cancelled', 'timeout', 'refused', 'denied', 'busy', 'absent', 'needsSetup', 'none', 'source', 'unavailable', 'failed'] as const;
 export const DeliveryConnectAnswerSchema = z
   .strictObject({ ok: z.boolean(), why: z.enum(DELIVERY_CONNECT_FAILURES).optional(), message: Words.optional() })
   .refine((answer) => answer.ok === (answer.why === undefined), 'ok, or why not');
@@ -83,6 +84,7 @@ export type DeliveryReceipt = z.infer<typeof DeliveryReceiptSchema>;
 export type DeliveryFailure = (typeof DELIVERY_FAILURES)[number];
 export type DeliverySendAnswer = z.infer<typeof DeliverySendAnswerSchema>;
 export type DeliveryConnectAnswer = z.infer<typeof DeliveryConnectAnswerSchema>;
+export type DeliveryConnectFailure = (typeof DELIVERY_CONNECT_FAILURES)[number];
 
 export const commands = {
   // What the sheet shows for the target now: Notion's connector found through the live sessions' reports, or gws's state.
@@ -90,9 +92,10 @@ export const commands = {
   // The owner's sign-in: Notion's Connect through MAWS's own OAuth (the browser's consent), or gws's own login (its URL
   // opened in the browser; the CLI keeps the sign-in). Answers when it ended; `delivery.cancel` ends it.
   'delivery.connect': main(z.strictObject({ runId: RunId, target: DeliveryTargetSchema, artifactId: ArtifactId, source: SourceKey.optional() }), DeliveryConnectAnswerSchema),
-  // The delivery: the shown artifact (a version's when named) exported in `format`, then put where `destination` says.
+  // The delivery: the shown artifact (a version's when named; a design's PNG, the board shown) exported in `format`, then
+  // put where `destination` says. A `source` handle main no longer keeps is refused (`source`), never found again.
   'delivery.send': main(
-    z.strictObject({ runId: RunId, target: DeliveryTargetSchema, artifactId: ArtifactId, format: z.enum(ARTIFACT_EXPORT_FORMATS), versionId: z.number().int().positive().optional(), destination: DeliveryDestinationSchema, source: SourceKey.optional() }),
+    z.strictObject({ runId: RunId, target: DeliveryTargetSchema, artifactId: ArtifactId, format: z.enum(ARTIFACT_EXPORT_FORMATS), versionId: z.number().int().positive().optional(), board: z.string().min(1).max(64).optional(), destination: DeliveryDestinationSchema, source: SourceKey.optional() }),
     DeliverySendAnswerSchema,
   ),
   // Ends a run that has not written yet (a send already sent is not called back); `cancelled`: it was running.

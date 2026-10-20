@@ -97,6 +97,23 @@ describe('the owner’s delivery over route D (main)', () => {
     expect(await rejected.delivery.connect(source(), signal())).toEqual({ ok: false, why: 'refused' });
   });
 
+  // P4-B5 review: the record store's read (safeStorage) takes no signal, so it is raced against the caller's
+  it('a record read that stalls ends with the caller’s signal: find gives that source unavailable, a cancelled Connect answers cancelled', async () => {
+    const { delivery, deps } = scene();
+    vi.mocked(deps.oauth!.state).mockImplementation(() => new Promise(() => {}));
+    const deadline = new AbortController();
+    const finding = delivery.find({ tool: 'notion-create-pages', urlHosts: ['mcp.notion.com'], artifactId: ART }, deadline.signal);
+    await vi.waitFor(() => expect(deps.oauth!.state).toHaveBeenCalledTimes(1));
+    deadline.abort();
+    expect((await finding)?.sources.map((entry) => entry.connection)).toEqual(['unavailable']);
+    const cancel = new AbortController();
+    const connecting = delivery.connect(source(), cancel.signal);
+    await vi.waitFor(() => expect(deps.oauth!.state).toHaveBeenCalledTimes(2));
+    cancel.abort();
+    expect(await connecting).toEqual({ ok: false, why: 'cancelled' });
+    expect(deps.oauth!.connect).not.toHaveBeenCalled();
+  });
+
   it('hands the send to route D unchanged', async () => {
     const { delivery, deps } = scene();
     const request = { artifactId: ART, tool: 'notion-create-pages', arguments: { pages: [] } };

@@ -2,13 +2,15 @@
 // target's state from main (Notion's connector found through MAWS's own connection, or the gws CLI's sign-in), runs the
 // owner's sign-in when the state asks for one, and sends. No session, no prompt: every step is a `delivery.*` command
 // main runs itself. The sheet shows the phase; closing it cancels a sign-in and a send that has not written yet (main
-// refuses to call back one that may have reached the service, and that send's receipt still lands in the header).
+// refuses to call back one that may have reached the service: that send's receipt still lands in the header, and its
+// failure, which may say the service has it, is a toast).
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { DeliveryDestination, DeliveryTarget } from '@shared/delivery/destination';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { DeliveryReceipt, DeliveryStatus } from '@shared/ipc/schema/delivery';
 import type { ArtifactExportFormat } from '@shared/maws/tools';
-import { CONNECT_FAILURE, MAYBE_SENT, SEND_FAILURE } from './copy';
+import { toast } from '../stores/notices';
+import { CONNECT_FAILURE, MAYBE_SENT, SEND_TO_COPY, sendFailure } from './copy';
 
 export type SendToPhase =
   | { phase: 'checking' }
@@ -26,6 +28,7 @@ export interface SendToState {
 export interface SendToChoice {
   format: ArtifactExportFormat;
   versionId?: number;
+  board?: string; // a design's PNG: the board shown
   destination: DeliveryDestination;
 }
 
@@ -40,8 +43,9 @@ export interface SendToRun {
 export interface SendToRunDeps {
   client: MawsBridge;
   artifactId: string;
+  title: string; // the artifact's, for a failure said after the sheet closed
   target: DeliveryTarget;
-  onSending?(target: DeliveryTarget | null): void; // the header's "Sending to …"
+  onSending?(runId: string, target: DeliveryTarget | null): void; // the header's "Sending to …", this run's mark
   onReceipt?(receipt: DeliveryReceipt): void;
 }
 
@@ -65,7 +69,7 @@ export function createSendToRun(deps: SendToRunDeps): SendToRun {
     set({ phase: 'checking' });
     const answer = await client.invoke('delivery.status', { target, artifactId }).catch(() => null);
     if (mine !== reading || closed) return;
-    if (!answer?.ok) return set({ phase: 'failed', status: null, words: SEND_FAILURE.unavailable });
+    if (!answer?.ok) return set({ phase: 'failed', status: null, words: SEND_TO_COPY.checkFailed[target] });
     set({ phase: 'ready', status: answer.value });
   }
 
@@ -96,22 +100,26 @@ export function createSendToRun(deps: SendToRunDeps): SendToRun {
     const runId = crypto.randomUUID();
     running = runId;
     set({ phase: 'sending', status });
-    deps.onSending?.(target);
+    deps.onSending?.(runId, target);
     const source = sourceOf(status);
     const answer = await client
-      .invoke('delivery.send', { runId, target, artifactId, format: choice.format, ...(choice.versionId !== undefined && { versionId: choice.versionId }), destination: choice.destination, ...(source && { source }) })
+      .invoke('delivery.send', { runId, target, artifactId, format: choice.format, ...(choice.versionId !== undefined && { versionId: choice.versionId }), ...(choice.board !== undefined && { board: choice.board }), destination: choice.destination, ...(source && { source }) })
       .catch(() => null);
     running = null;
-    deps.onSending?.(null);
+    deps.onSending?.(runId, null);
     const receipt = answer?.ok && answer.value.ok ? answer.value.receipt : undefined;
     if (receipt) {
       deps.onReceipt?.(receipt);
       return set({ phase: 'sent', status, receipt });
     }
-    if (closed) return;
     const failure = answer?.ok && !answer.value.ok && answer.value.why ? { why: answer.value.why, maybeSent: answer.value.maybeSent, message: answer.value.message } : null;
-    const base = failure ? SEND_FAILURE[failure.why] : SEND_FAILURE.failed;
+    const base = sendFailure(failure?.why ?? 'failed', target);
     const words = `${base}${failure?.message ? `: ${failure.message}` : base.endsWith('.') ? '' : '.'}${failure?.maybeSent ? ` ${MAYBE_SENT(target)}` : ''}`;
+    // P4-B5 review: the sheet closed while main would not call the send back: what became of it is said, not dropped
+    if (closed) {
+      if (failure?.why !== 'cancelled' || failure.maybeSent) toast({ level: 'warning', text: SEND_TO_COPY.closedFailure(deps.title, target, words), actions: [], dismissible: true });
+      return;
+    }
     // a refusal that says the connection or the sign-in moved: the state is read again under the words
     if (failure && ['unauthorized', 'source', 'signIn', 'reconnect', 'auth', 'absent', 'needsSetup', 'none'].includes(failure.why)) await check(target);
     if (closed) return;

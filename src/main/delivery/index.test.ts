@@ -12,7 +12,7 @@ import type { CommandName } from '@shared/ipc/schema';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import type { OwnerDelivery } from '../connectors/owner-delivery';
-import { startDelivery, type DeliveryDeps, type GwsDriver } from '.';
+import { DELIVERY_SOURCE_LIMIT, startDelivery, type DeliveryDeps, type GwsDriver } from '.';
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const RUN = () => crypto.randomUUID();
@@ -183,6 +183,40 @@ describe('the Notion target', () => {
     expect(await sending).toMatchObject({ ok: true });
   });
 
+  // P4-B5 review: the run's signal is read again after the export's read, its last read and the write one step
+  it('a cancel while the Notion export is read sends nothing', async () => {
+    let reading!: () => void;
+    start({
+      readFile: async () => {
+        await new Promise<void>((resolve) => (reading = resolve));
+        return '# Notion body';
+      },
+    });
+    const runId = RUN();
+    const pending = call('delivery.send', { runId, target: 'notion', artifactId: ART, format: 'md', destination: { kind: 'default' } });
+    await vi.waitFor(() => expect(reading).toBeTypeOf('function'));
+    expect(await call('delivery.cancel', { runId })).toEqual({ cancelled: true });
+    reading();
+    expect(await pending).toEqual({ ok: false, why: 'cancelled' });
+    expect(connectors.send).not.toHaveBeenCalled();
+    expect(exported.every(({ path }) => !existsSync(path))).toBe(true);
+  });
+
+  // P4-B5 review: a handle main no longer keeps (the oldest evicted) is refused, never a fresh search's first source
+  it('refuses a source handle it no longer keeps, for a send and a Connect alike', async () => {
+    const first = (await call('delivery.status', { target: 'notion', artifactId: ART })) as { source: { key: string } };
+    for (let i = 0; i < DELIVERY_SOURCE_LIMIT; i++) await call('delivery.status', { target: 'notion', artifactId: ART });
+    connectors.find.mockClear();
+    expect(await sendNotion({ source: first.source.key })).toEqual({ ok: false, why: 'source' });
+    expect(await call('delivery.connect', { runId: RUN(), target: 'notion', artifactId: ART, source: first.source.key })).toEqual({ ok: false, why: 'source' });
+    expect(connectors.find).not.toHaveBeenCalled();
+    expect(connectors.send).not.toHaveBeenCalled();
+    expect(connectors.connect).not.toHaveBeenCalled();
+    expect(exported).toEqual([]);
+    await sendNotion(); // no handle named: the source found now
+    expect(connectors.find).toHaveBeenCalledTimes(1);
+  });
+
   it('connects the source the sheet named through the owner delivery', async () => {
     const status = (await call('delivery.status', { target: 'notion', artifactId: ART })) as { source: { key: string } };
     expect(await call('delivery.connect', { runId: RUN(), target: 'notion', artifactId: ART, source: status.source.key })).toEqual({ ok: true });
@@ -255,6 +289,12 @@ describe('the Drive target (gws)', () => {
     expect(opts).toMatchObject({ file: exported[0]!.path, name: 'Quarterly memo.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', parent: '1AbCdEfGhIjKlMn' });
     expect(answer).toMatchObject({ ok: true, receipt: { target: 'drive', name: 'Quarterly memo.docx', url: 'https://drive.google.com/file/d/f1/view', format: 'docx' } });
     expect(existsSync(exported[0]!.path)).toBe(false);
+  });
+
+  it('exports a design’s PNG at the board the sheet names (P4-B5 review)', async () => {
+    await sendDrive({ format: 'png', board: 'b2' });
+    expect(exported[0]!.input).toMatchObject({ format: 'png', board: 'b2' });
+    expect(gws.upload.mock.calls[0]![2]).toMatchObject({ mime: 'image/png' });
   });
 
   it('uploads only from gws’s own ready sign-in: signed out, expired or without Drive is auth, with nothing exported', async () => {

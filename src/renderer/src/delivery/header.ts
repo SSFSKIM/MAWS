@@ -5,26 +5,26 @@
 import { useMemo } from 'react';
 import type { EditorHostAction } from '../panel/editor-host';
 import { SEND_TO_COPY } from './copy';
-import { latestReceipt, openSendTo, useDelivery, type SendToSubject } from './store';
+import { latestReceipt, openSendTo, sendingTo, useDelivery, type SendToSubject } from './store';
 
 export const SEND_TO_ACTION = 'sendTo';
 
 // What an editor shows in place of the live artifact, as its Export reads it: a version's id, or the live one; two
-// versions compared send nothing (`compare`), as Export offers nothing then.
-export function sendToSubject(artifactId: string, kind: SendToSubject['kind'], title: string | null | undefined, shown: { versionId: number } | 'compare' | null | undefined): SendToSubject | null {
+// versions compared send nothing (`compare`), as Export offers nothing then. `board`: a design's, the one its Export takes.
+export function sendToSubject(artifactId: string, kind: SendToSubject['kind'], title: string | null | undefined, shown: { versionId: number } | 'compare' | null | undefined, board?: string | null): SendToSubject | null {
   if (!title || shown === 'compare') return null;
-  return { artifactId, kind, title, ...(shown && { versionId: shown.versionId }) };
+  return { artifactId, kind, title, ...(shown && { versionId: shown.versionId }), ...(board != null && { board }) };
 }
 
 // The action for `subject` (null: nothing to send yet, as while the artifact's row is unread).
 export function useSendToAction(subject: SendToSubject | null): EditorHostAction | null {
   const artifactId = subject?.artifactId ?? null;
-  const sending = useDelivery((s) => (artifactId === null ? null : (s.sending[artifactId] ?? null)));
+  const sending = useDelivery((s) => (artifactId === null ? null : sendingTo(s, artifactId)));
   const receipt = useDelivery((s) => (artifactId === null ? null : latestReceipt(s, artifactId)));
-  const { kind, title, versionId } = subject ?? {};
+  const { kind, title, versionId, board } = subject ?? {};
   return useMemo(() => {
     if (artifactId === null || kind === undefined || title === undefined) return null;
     const label = sending ? SEND_TO_COPY.actionSending(sending) : receipt ? SEND_TO_COPY.actionSent(receipt.target) : SEND_TO_COPY.action;
-    return { id: SEND_TO_ACTION, label, pinned: true, onSelect: () => openSendTo({ artifactId, kind, title, ...(versionId !== undefined && { versionId }) }, sending ?? receipt?.target) };
-  }, [artifactId, kind, title, versionId, sending, receipt]);
+    return { id: SEND_TO_ACTION, label, pinned: true, onSelect: () => openSendTo({ artifactId, kind, title, ...(versionId !== undefined && { versionId }), ...(board !== undefined && { board }) }, sending ?? receipt?.target) };
+  }, [artifactId, kind, title, versionId, board, sending, receipt]);
 }

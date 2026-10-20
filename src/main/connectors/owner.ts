@@ -108,8 +108,8 @@ const remember = <K, V>(map: Map<K, V>, key: K, value: V) => {
   if (map.size > MEMORY_LIMIT) map.delete(map.keys().next().value as K);
 };
 
-// `work`'s answer, or `fallback` once `signal` aborts first.
-function within<T>(work: Promise<T>, signal: AbortSignal, fallback: T): Promise<T> {
+// `work`'s answer, or `fallback` once `signal` aborts first (or `work` fails). P4-B5: the owner's delivery's too.
+export function within<T>(work: Promise<T>, signal: AbortSignal, fallback: T): Promise<T> {
   if (signal.aborted) return Promise.resolve(fallback);
   return new Promise((resolve) => {
     const end = () => resolve(fallback);

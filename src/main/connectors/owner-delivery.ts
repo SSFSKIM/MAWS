@@ -16,11 +16,14 @@
 // - Connecting is the provider's Connect (or, for a record that needs it, Reconnect): a browser consent the owner
 //   completes, sealed where route D keeps every grant, then a listing with it to prove it. Never the engine's credential.
 // - Sending is route D's `send`: one tools/call, never retried, its credential prepared inside the operation.
+// - The record store's read (a safeStorage decrypt that can stall, taking no signal) is raced against the caller's
+//   signal: `find` ends within its deadline (that source `unavailable`), and a cancelled `connect` answers `cancelled`.
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
 import type { DirectRoute, DirectSendAnswer } from './direct-route';
 import type { ConnectorOAuthConnectFailure, ConnectorOAuthProvider, ConnectorOAuthState } from './oauth-provider';
 import { oauthIdentityOf } from './oauth-types';
+import { within } from './owner';
 
 type HostCommand = 'engine.sessions' | 'library.entry' | 'connectors.observe';
 
@@ -58,6 +61,7 @@ const identityKey = (source: DirectSource): string | null => {
   return identity && JSON.stringify([identity.requestUrl, identity.server, identity.scope, identity.configPath, identity.entryPath]);
 };
 const RANK: Record<DeliveryConnection, number> = { connected: 0, local: 1, open: 2, signIn: 3, reconnect: 4, busy: 5, unavailable: 6 };
+const UNREAD: ConnectorOAuthState = { state: 'unavailable', why: 'store' }; // the store unread: failed, or the signal first
 
 export function createOwnerDelivery(deps: OwnerDeliveryDeps): OwnerDelivery {
   const log = deps.log ?? ((line: string) => console.warn(`[connectors] ${line}`));
@@ -101,12 +105,7 @@ export function createOwnerDelivery(deps: OwnerDeliveryDeps): OwnerDelivery {
     if (source.transport === 'stdio') return 'local';
     const identity = oauthIdentityOf(source);
     if (!identity || !deps.oauth) return 'unavailable';
-    let state: ConnectorOAuthState;
-    try {
-      state = await deps.oauth.state(identity);
-    } catch {
-      return 'unavailable';
-    }
+    const state = await within(deps.oauth.state(identity), signal, UNREAD);
     switch (state.state) {
       case 'connected':
         return 'connected';
@@ -146,7 +145,8 @@ export function createOwnerDelivery(deps: OwnerDeliveryDeps): OwnerDelivery {
       if (source.transport !== 'http') return { ok: true };
       const identity = oauthIdentityOf(source);
       if (!identity || !deps.oauth) return { ok: false, why: 'notHttp' };
-      const state = await deps.oauth.state(identity).catch(() => ({ state: 'unavailable' }) as const);
+      const state = await within(deps.oauth.state(identity), signal, UNREAD);
+      if (signal.aborted) return { ok: false, why: 'cancelled' };
       if (state.state === 'connecting') return { ok: false, why: 'busy' };
       if (state.state === 'unavailable') return { ok: false, why: 'unavailable' };
       if (state.state === 'disconnected') {

@@ -81,7 +81,8 @@ function SendToSheet({ subject, run }: { subject: SendToSubject; run: SendToRun 
         className="flex flex-col gap-3"
         onSubmit={(event) => {
           event.preventDefault();
-          if (canSend) void run.send({ format: format!, ...(subject.versionId !== undefined && { versionId: subject.versionId }), destination: destination! });
+          // a design's PNG pictures the board its Export would (a PDF prints every board)
+          if (canSend) void run.send({ format: format!, ...(subject.versionId !== undefined && { versionId: subject.versionId }), ...(format === 'png' && subject.board !== undefined && { board: subject.board }), destination: destination! });
         }}
       >
         <div role="radiogroup" aria-label={C.target} className="flex gap-1">
@@ -172,9 +173,9 @@ function SendToSheet({ subject, run }: { subject: SendToSubject; run: SendToRun 
 // What MAWS sends through, and what it needs first when it cannot send yet.
 function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; phase: SendToPhase; run: SendToRun; terminal(command: string): void }) {
   const status = statusOf(phase);
-  const line = (text: string, actions?: ReactNode, code?: string) => (
+  const line = (text: string | null, actions?: ReactNode, code?: string) => (
     <div data-send-to-connection={status?.state ?? phase.phase} className="flex flex-col gap-2 rounded-sm border border-border p-2.5">
-      <p className="m-0 text-ui text-fg">{text}</p>
+      {text !== null && <p className="m-0 text-ui text-fg">{text}</p>}
       {code && <code className="block rounded-sm bg-bg-raised px-2 py-1 font-mono text-ui-sm text-fg">{code}</code>}
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>
@@ -187,7 +188,7 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
   const again = button(C.checkAgain, () => void run.check());
   if (phase.phase === 'checking') return line(C.checking[target]);
   if (phase.phase === 'connecting') return line(target === 'notion' ? C.connecting : C.signingIn);
-  if (status === null) return line(phase.phase === 'failed' ? phase.words : C.notionUnavailable, again);
+  if (status === null) return line(null, again); // the state unread: the status line says why, once
   if (status.target === 'notion') {
     const { source } = status;
     switch (status.state) {

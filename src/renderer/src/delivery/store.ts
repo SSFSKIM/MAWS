@@ -10,17 +10,19 @@ import type { DeliveryReceipt } from '@shared/ipc/schema/delivery';
 import { ipc } from '../ipc/client';
 import { createSendToRun, type SendToRun } from './run';
 
-// What is sent: the artifact the header or the row shows, a retained version's when the editor shows one.
+// What is sent: the artifact the header or the row shows, a retained version's when the editor shows one; a design's
+// PNG, the board its Export would picture.
 export interface SendToSubject {
   artifactId: string;
   kind: ArtifactKind;
   title: string;
   versionId?: number;
+  board?: string;
 }
 
 interface DeliveryState {
   receipts: Readonly<Record<string, DeliveryReceipt>>; // by artifact and target
-  sending: Readonly<Record<string, DeliveryTarget>>; // by artifact: a send under way
+  sending: Readonly<Record<string, Readonly<Record<string, DeliveryTarget>>>>; // by artifact, then run: the sends under way
   sheet: { subject: SendToSubject; run: SendToRun } | null;
 }
 
@@ -39,11 +41,20 @@ export function latestReceipt(state: Pick<DeliveryState, 'receipts'>, artifactId
   return latest;
 }
 
-export function markSending(artifactId: string, target: DeliveryTarget | null): void {
+// The target of the artifact's latest send still running (null: none). P4-B5 review: each run marks and clears its own,
+// so a second run's `busy`, or another target's send ending first, leaves a running one's mark.
+export function sendingTo(state: Pick<DeliveryState, 'sending'>, artifactId: string): DeliveryTarget | null {
+  const runs = state.sending[artifactId];
+  return runs ? (Object.values(runs).at(-1) ?? null) : null;
+}
+
+export function markSending(artifactId: string, runId: string, target: DeliveryTarget | null): void {
   useDelivery.setState((s) => {
-    const sending = { ...s.sending };
-    if (target === null) delete sending[artifactId];
-    else sending[artifactId] = target;
+    const runs = { ...s.sending[artifactId] };
+    if (target === null) delete runs[runId];
+    else runs[runId] = target;
+    const sending = { ...s.sending, [artifactId]: runs };
+    if (Object.keys(runs).length === 0) delete sending[artifactId];
     return { sending };
   });
 }
@@ -55,7 +66,7 @@ export const defaultTarget = (kind: ArtifactKind): DeliveryTarget => (kind === '
 // one shown (its run cancelled where it may be).
 export function openSendTo(subject: SendToSubject, target: DeliveryTarget = defaultTarget(subject.kind), client: MawsBridge = ipc): void {
   useDelivery.getState().sheet?.run.close();
-  const run = createSendToRun({ client, artifactId: subject.artifactId, target, onSending: (sending) => markSending(subject.artifactId, sending), onReceipt: keep });
+  const run = createSendToRun({ client, artifactId: subject.artifactId, title: subject.title, target, onSending: (runId, sending) => markSending(subject.artifactId, runId, sending), onReceipt: keep });
   useDelivery.setState({ sheet: { subject, run } });
   void run.check();
 }
@@ -65,13 +76,16 @@ export function closeSendTo(run: SendToRun): void {
   useDelivery.setState((s) => (s.sheet?.run === run ? { sheet: null } : s));
 }
 
-// App-wide: main's receipts read once, then each new one as it is made.
+// App-wide: main's receipts read once, then each new one as it is made (a bridge that cannot answer leaves none).
 export function connectDelivery(client: MawsBridge = ipc): () => void {
   let live = true;
   const stop = client.on('delivery.receipt', keep);
-  void client.invoke('delivery.receipts', undefined).then((answer) => {
-    if (live && answer.ok) for (const receipt of answer.value.receipts) keep(receipt);
-  });
+  void client.invoke('delivery.receipts', undefined).then(
+    (answer) => {
+      if (live && answer.ok) for (const receipt of answer.value.receipts) keep(receipt);
+    },
+    () => {},
+  );
   return () => {
     live = false;
     stop();

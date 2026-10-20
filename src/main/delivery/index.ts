@@ -9,7 +9,10 @@
 //   login-shell environment; the CLI keeps its own sign-in, which its own login makes (MAWS opens the URL it prints).
 //   MAWS stores nothing of it.
 // - A run is the window's (`runId`): cancelled until it writes, never after (a request that may have reached the service
-//   is never called back, and a failure after it says so: `maybeSent`). One run per artifact and target at a time.
+//   is never called back, and a failure after it says so: `maybeSent`); its signal is read again after every await, the
+//   last read and the write one synchronous step. One run per artifact and target at a time.
+// - A located source is named back by its handle; one main no longer keeps is refused (`source`), never found afresh,
+//   so a send goes through the server the sheet showed or not at all.
 // - A receipt is main's memory for its life: the latest of each artifact and target, broadcast as it is made, for the
 //   header and the library's row. No delivery record persists.
 import { randomUUID } from 'node:crypto';
@@ -58,6 +61,7 @@ export interface DeliveryDeps {
   shellEnv(): Promise<Record<string, string>>; // the owner's login-shell environment (the one capture main makes)
   openExternal(url: string): boolean; // the scheme-checked opener
   gws?: GwsDriver; // tests
+  readFile?: (path: string) => Promise<string>; // tests: the Notion export's read
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -118,6 +122,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
   const gws: GwsDriver = deps.gws ?? { find: findGws, state: readGwsState, login: gwsLogin, upload: gwsUpload };
   const now = deps.now ?? (() => Date.now());
   const log = deps.log ?? ((line: string) => console.warn(`[delivery] ${line}`));
+  const readExport = deps.readFile ?? ((path: string) => readFile(path, 'utf8'));
   const sources = new Map<string, DirectSource>(); // a located source's handle, the window's to name back
   const receipts = new Map<string, DeliveryReceipt>(); // by artifact and target
   const runs = new Map<string, Run>(); // by run id
@@ -162,10 +167,10 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
     return { bin, env, state: await gws.state(bin, env, { signal }) };
   }
 
-  // A source the window named by its handle, else the first one found now that can send.
-  async function sourceFor(key: string | undefined, artifactId: string, signal: AbortSignal): Promise<DeliverySource | DirectSource | null> {
-    const kept = key === undefined ? undefined : sources.get(key);
-    if (kept) return kept;
+  // A source the window named by its handle (`unknown`: not kept, as once evicted), else, when it named none, the first
+  // one found now that can send.
+  async function sourceFor(key: string | undefined, artifactId: string, signal: AbortSignal): Promise<DeliverySource | DirectSource | 'unknown' | null> {
+    if (key !== undefined) return sources.get(key) ?? 'unknown';
     const found = await deps.connectors?.find({ tool: NOTION_TOOL, urlHosts: NOTION_HOSTS, artifactId }, signal);
     return found?.sources[0] ?? null;
   }
@@ -188,7 +193,8 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       if (target === 'notion') {
         if (!deps.connectors) return { ok: false, why: 'unavailable' };
         const found = await sourceFor(source, artifactId, signal);
-        if (!found) return { ok: false, why: 'none' };
+        if (found === 'unknown') return { ok: false, why: 'source' };
+        if (!found) return { ok: false, why: signal.aborted ? 'cancelled' : 'none' };
         const made = await deps.connectors.connect(directOf(found), signal);
         if (made.ok) return { ok: true };
         if (made.why === 'cancelled') return { ok: false, why: 'cancelled' };
@@ -215,16 +221,23 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
   }
 
   async function send(input: CommandInput<'delivery.send'>): Promise<DeliverySendAnswer> {
-    const { runId, target, artifactId, format, versionId, destination } = input;
+    const { runId, target, artifactId, format, versionId, board, destination } = input;
     const slot = `${artifactId}\0${target}`;
     if (active.has(slot)) return failure('busy');
     const run = begin(runId);
     if (!run) return failure('busy');
     active.add(slot);
     const signal = signalOf(run);
+    // the run's last read of its signal and its write, one synchronous step: a cancel answered `cancelled` sends nothing
+    const writes = (): boolean => {
+      if (signal.aborted) return false;
+      run.written = true;
+      return true;
+    };
     let path: string | null = null;
     try {
       const got = await deps.call('artifacts.get', { artifactId, prepare: false });
+      if (signal.aborted) return failure('cancelled');
       if (!got.ok) return failure('unavailable');
       const artifact = got.value.artifact;
       if (!artifact) return failure('deleted');
@@ -235,32 +248,35 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       if (target === 'notion') {
         if (!deps.connectors) return failure('unavailable');
         const found = await sourceFor(input.source, artifactId, signal);
+        if (signal.aborted) return failure('cancelled');
+        if (found === 'unknown') return failure('source');
         if (!found) return failure('none');
         notion = directOf(found);
       } else {
         // gws's own sign-in, read first: past it the CLI would reach another identity's credentials (./gws.ts)
         const { bin, env, state } = await driveState(signal);
+        if (signal.aborted) return failure('cancelled');
         if (bin === null) return failure('absent');
         if (state.state === 'needsSetup') return failure('needsSetup');
         if (state.state !== 'ready') return failure(state.state === 'failed' ? 'failed' : 'auth', state.state === 'failed' && state.message ? { message: state.message } : {});
         drive = { bin, env };
       }
-      if (signal.aborted) return failure('cancelled');
       let exported: CommandOutput<'artifacts.export'>;
       try {
-        exported = await deps.exportArtifact({ artifactId, format, ownFile: true, ...(versionId !== undefined && { versionId }) }, target === 'notion' ? { dialect: 'notion' } : undefined);
+        exported = await deps.exportArtifact({ artifactId, format, ownFile: true, ...(versionId !== undefined && { versionId }), ...(board !== undefined && { board }) }, target === 'notion' ? { dialect: 'notion' } : undefined);
       } catch (error) {
-        return failure('export', { message: words(error) });
+        return signal.aborted ? failure('cancelled') : failure('export', { message: words(error) });
       }
       path = exported.path;
       if (signal.aborted) return failure('cancelled');
       const name = notionTitle(artifact.title);
       const receipt = (url: string | null, arrivedAs: string): DeliveryReceipt => ({ artifactId, target, at: now(), name: arrivedAs.slice(0, 2_000), url, format, revision: exported.revision, ...(versionId !== undefined && { versionId }), destination });
       if (notion) {
-        const content = await readFile(path, 'utf8');
+        const content = await readExport(path);
+        if (signal.aborted) return failure('cancelled');
         if (Buffer.byteLength(content) > NOTION_CONTENT_MAX_BYTES) return failure('tooLarge');
         const args = notionArguments({ title: artifact.title, content, ...(destination.kind === 'inside' && { parent: destination.id }) });
-        run.written = true; // from here the request may reach Notion: no cancel calls it back (route D admits it at its write)
+        if (!writes()) return failure('cancelled'); // from here the request may reach Notion: no cancel calls it back (route D admits it at its write)
         const answer = await deps.connectors!.send(notion, { artifactId, tool: NOTION_TOOL, arguments: args }, stopping.signal);
         if (!answer.ok) return notionFailure(answer);
         const read = readNotionAnswer(answer.result);
@@ -268,7 +284,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
         return made(receipt(read.url, read.name ?? name));
       }
       const fileName = `${name}${extname(path)}`;
-      run.written = true; // the upload is one request once gws runs: never called back
+      if (!writes()) return failure('cancelled'); // the upload is one request once gws runs: never called back
       const uploaded = await gws.upload(drive!.bin, drive!.env, { file: path, name: fileName, mime: MIME[format], ...(destination.kind === 'inside' && { parent: destination.id }), signal: stopping.signal });
       if (uploaded.ok) return made(receipt(uploaded.link ?? null, uploaded.name));
       switch (uploaded.why) {
