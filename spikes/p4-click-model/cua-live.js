@@ -19,17 +19,31 @@
 // The 2-Set keys: 한글 = g k s r m f; 하나 = g k s k; 한 = g k s; 하 = g k. Hanja: alt+Return. Input source: ctrl+space
 // (macOS "Select the previous input source", enabled on both Macs: AppleSymbolicHotKeys 60 = ⌃Space).
 
+// The first hold (2026-10-20, findings.txt §4): through the relay route (the vendor helper's CGEventPostToPid) L8 ran
+// and passed, and the L0 gate failed: r and k arrived as plain keys, never reaching the input method. Run L0 first on any
+// new route, and L1 to L7 only once it composes.
+//
 // ---- cell: setup (once). Binds the MAWS window and the coordinate mapping.
-// The e2e app is the repository's Electron, so its process is "Electron"; pick the window titled MAWS.
-const app = await cua.getApp('Electron');
+// Bind the e2e app by its path: getApp('Electron') resolved the name to another Electron.app on disk and launched its
+// default app (the first hold). The path is <worktree>/node_modules/electron/dist/Electron.app.
+const app = await cua.getApp('/Users/new/<worktree>/node_modules/electron/dist/Electron.app');
 const shot = await app.getScreenshot({ emit: false });
 // Sky's coordinates on macOS are the window screenshot's pixels. The spec's targets are page px (CSS px from the
 // content's top-left; MAWS's window hides its title bar, so the content starts at the window's top-left). k maps one to
 // the other: the screenshot's width over the window's width in points (the first ready.json's `window.outerW`; the
 // spec fills the display's work area, the sidebar and the panel collapsed, and records the slide's `scale`).
 const OUTER_W = 0; // set from ready.json's window.outerW before running this cell
-const pngSize = (b) => ({ w: (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19], h: (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23] });
-const size = pngSize(shot);
+// the screenshot is a JPEG (the first hold: 5120 × 2716 for a 2560 × 1358 window, so k = 2): its size from the SOF marker
+const jpegSize = (b) => {
+  for (let i = 2; i < b.length; ) {
+    if (b[i] !== 0xff) { i++; continue; }
+    const m = b[i + 1];
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { h: (b[i + 5] << 8) | b[i + 6], w: (b[i + 7] << 8) | b[i + 8] };
+    i += 2 + ((b[i + 2] << 8) | b[i + 3]);
+  }
+  return null;
+};
+const size = jpegSize(shot);
 globalThis.k = size.w / OUTER_W;
 globalThis.press = (p) => app.click([Math.round(p.x * k), Math.round(p.y * k)]);
 globalThis.keys = async (list, gapMs = 60) => {

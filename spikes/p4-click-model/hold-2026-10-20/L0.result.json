@@ -1,0 +1,152 @@
+{
+ "case": "L0",
+ "mode": "clear",
+ "checks": {
+  "the keys reach the input method": [
+   false,
+   true
+  ]
+ },
+ "facts": {
+  "a": "Hello",
+  "b": "World",
+  "elements": 3,
+  "left": "200px",
+  "state": {
+   "surface": "main",
+   "selection": [],
+   "editingText": null
+  },
+  "firstKey": {
+   "key": "r",
+   "keyCode": 82,
+   "isComposing": false
+  },
+  "pressToFirstKeyMs": 426.9,
+  "focusChanges": [
+   "focusout stage @20452.3",
+   "focusin textarea @20453"
+  ],
+  "notes": "Notesrk"
+ },
+ "events": [
+  {
+   "t": 20447.9,
+   "type": "pointerdown",
+   "target": "textarea",
+   "slide": {
+    "x": -41,
+    "y": 1155
+   },
+   "defaultPrevented": false
+  },
+  {
+   "t": 20452.3,
+   "type": "focusout",
+   "target": "stage",
+   "defaultPrevented": false
+  },
+  {
+   "t": 20453,
+   "type": "focusin",
+   "target": "textarea",
+   "defaultPrevented": false
+  },
+  {
+   "t": 20874.8,
+   "type": "keydown",
+   "target": "textarea",
+   "key": "r",
+   "code": "KeyR",
+   "keyCode": 82,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 20874.8,
+   "type": "keypress",
+   "target": "textarea",
+   "key": "r",
+   "code": "KeyR",
+   "keyCode": 114,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 20881.4,
+   "type": "beforeinput",
+   "target": "textarea",
+   "inputType": "insertText",
+   "data": "r",
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 20883.7,
+   "type": "input",
+   "target": "textarea",
+   "inputType": "insertText",
+   "data": "r",
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 20874.8,
+   "type": "keyup",
+   "target": "textarea",
+   "key": "r",
+   "code": "KeyR",
+   "keyCode": 82,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 21009.1,
+   "type": "keydown",
+   "target": "textarea",
+   "key": "k",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 21009.1,
+   "type": "keypress",
+   "target": "textarea",
+   "key": "k",
+   "code": "KeyK",
+   "keyCode": 107,
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 21011.1,
+   "type": "beforeinput",
+   "target": "textarea",
+   "inputType": "insertText",
+   "data": "k",
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 21011.7,
+   "type": "input",
+   "target": "textarea",
+   "inputType": "insertText",
+   "data": "k",
+   "isComposing": false,
+   "defaultPrevented": false
+  },
+  {
+   "t": 21009.1,
+   "type": "keyup",
+   "target": "textarea",
+   "key": "k",
+   "code": "KeyK",
+   "keyCode": 75,
+   "isComposing": false,
+   "defaultPrevented": false
+  }
+ ]
+}

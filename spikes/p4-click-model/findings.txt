@@ -1,4 +1,5 @@
-P4-B2's spike S-IME: findings. Phase 1 (everything that needs no GUI), 2026-10-19.
+P4-B2's spike S-IME: findings. Phase 1 (everything that needs no GUI), 2026-10-19; the first GUI hold, 2026-10-20
+(§4: L8 passed, Q3 on the real Mac; the L0 gate failed, the relay route's keys never reaching the input method).
 
 Spec: docs/doperpowers/plans/2026-10-19-p4-smoothing.md, child P4-B2 (the spike half), parent pin blob
 1d9ca046870cf1606db19fa792d515f13809caef at master 48fec4bd1. §4.4 is binding on the states and on the armed editor as
@@ -79,7 +80,7 @@ Q3. Does preventDefault suppress Electron's menu accelerators while armed?
   a page listener
   cancelling ⌘C kept it from the menu. A CDP key enters that path at the unhandled-event step (with a native key code
   and its characters set; see finding 2), not at AppKit's performKeyEquivalent:, and the quiet e2e window is never key;
-  L8 runs the same keys at the HID level on a key window.
+  L8 ran the same keys on the real Mac with a key window at the app's event-queue level and passed (§4).
   The Edit menu by the mouse (webContents' copy, paste and undo, which the role items' selectors reach): Copy and
   Paste act on the armed element (the stage's handlers take the events before the editor; a cancelled beforecopy
   enables Copy on a collapsed caret), never on its text. Undo does not: see finding 1.
@@ -214,6 +215,57 @@ Throwaway
   - spikes/p4-click-model/lc2-steps.txt once LC-2 has run and its results are recorded in it.
 
 
-4. RESULTS OF THE REAL RUN
+4. RESULTS OF THE REAL RUN: the first hold, 2026-10-20 11:56Z to 12:02:30Z (released), stopped at the gate
 
-(not run yet)
+Host: the Mac mini (macOS 27.0, display 2560 × 1440 points at 2x, Korean UI), held by CI-opt from 11:56:01Z, the runner
+drained. Route (the coordinator's): cua driven from the MacBook through the relay device `mini`, whose GUI surface is the
+vendor SkyComputerUseService helper; its pressKey posts each key with CGEventPostToPid into the app's own event queue,
+not at the HID level. The shell work went over ssh, and the spec ran as a LaunchAgent bootstrapped into gui/501, so it sat
+in the Aqua session (`launchctl managername` there: Aqua; over ssh: Background). Evidence in
+spikes/p4-click-model/hold-2026-10-20/ (L8.ready.json, L8.result.json, L0.result.json, each with its full trace).
+
+Prep: a detached worktree at a0bfae279, install and the plain build in about a minute; the dry run green, the slide drawn
+at scale 0.975 (outerW 2560, outerY 30); the per-document input source preference read 0 (off) and stayed so.
+
+L8 (shortcuts while armed; ABC selected; it types nothing natively): passed every check.
+  - The first press armed `a` (solid frame, handles, no caret: the screenshot).
+  - The menu, a probe for the case, saw exactly copy, paste, undo, copy, paste, undo: ⌘C and ⌘V reached it, the ⌘Z the box
+    cancelled did not (it undid one nudge in the deck's stack: left 201px), then the mouse's Undo, Copy, Paste and Undo.
+    This is Q3 on the real Mac with a key window, the keys entering at the app's event queue (NSApp sendEvent and
+    performKeyEquivalent:), one level above CDP's entry and one below the HID.
+  - Every clipboard event went to the armed box's root and was cancelled by the stage's handlers; the two pastes are
+    copies of a (left 224px and 225px); a keeps Hello.
+  - Edit › Undo by the mouse left both pastes (5 elements, no historyUndo): finding 1's gap, now on the real Mac.
+
+L0 (the gate: 2-Set selected through TIS in the Aqua session, confirmed by TIS and by HIToolbox's
+AppleSelectedInputSources before and after; the notes field focused; pressKey r then k): FAILED. The field read
+"Notesrk". The trace: keydown key r code KeyR keyCode 82, keypress, beforeinput and input insertText "r"; the same for k
+(keyCode 75); no keyCode 229, no composition event. So the relay route's keys do not pass through the input method: the
+posted events carry their characters, or skip TSM's routing (which of the two was not read). Under the gate rule the run
+stopped: L1 to L7 were not run, and the L1 fixture was not recorded (e2e/fixtures/ime/l1-hangul.json stays the
+cdp-synthetic stand-in).
+
+Side effects, all undone before the release: ABC selected again (confirmed in AppleSelectedInputSources); the spec, its
+app, the four launchd jobs, the scratch files and the worktree removed. cua's `getApp("Electron")` launched the runner
+checkout's default Electron app (the name resolved to another Electron.app on disk) at 11:58:48Z; it was killed at about
+11:59Z, nothing having run in it. Bind the e2e app by its path (cua-live.js now does).
+
+What the three questions read now
+  Q1: unanswered on the real input method; no route this hold had delivers keys through it. Everything short of the
+      input method holds (the renderer cases, and the armed box focused before the first key, seen on the real Mac).
+  Q2: unchanged: proven in the renderer and by Chromium's message order; the real input method's view of a cleared
+      document still untested.
+  Q3: answered on the real Mac at the app-event-queue level (L8), as above.
+
+What a second hold needs: keys that reach the input method.
+  (a) The owner's hands, preferred: about 15 minutes. The harness already waits for a done file per case; the owner
+      follows each case's steps (ready.json's `steps`, read aloud or shown) and the session writes the done file and
+      reads the result. L4 (a key within 100 ms of the press) is natural for a person. Either Mac; on the MacBook, with
+      the owner's go.
+  (b) A HID-level poster (CGEventPost at kCGHIDEventTap from a helper in the Aqua session), which the input method
+      cannot tell from a keyboard. It needs Accessibility granted to that helper, which only the owner may approve; and
+      it would bypass cua (its docs rule CGEvent synthesis out unless asked).
+  (c) cua's own engine (#117) once M1b adds the switch, if its pressKey composes: maws-3f's reading says neither cua route
+      posts at the HID level, so this needs the same r, k gate first.
+  Whatever the route, L8 need not run again; run L0 (the gate), then L1 to L7, then the mode `select` comparison for
+      L1, L2 and L4.
