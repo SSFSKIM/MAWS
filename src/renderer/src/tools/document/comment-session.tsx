@@ -206,6 +206,9 @@ interface NoticeProps {
   locate(threadId: string): PassageRect | null;
   layoutKey: string;
   onClose(): void;
+  // P4-B1 (D7 of docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md): in the document margin's entry, in flow
+  // at the entry's width above the card host, rather than pinned over the page
+  inFlow?: boolean;
 }
 
 /**
@@ -216,10 +219,10 @@ export function PendingCommentNotice(props: NoticeProps) {
   return <Notice key={props.pending.serial} {...props} />;
 }
 
-function Notice({ pending, locate, layoutKey, onClose }: NoticeProps) {
+function Notice({ pending, locate, layoutKey, onClose, inFlow = false /* P4-B1 */ }: NoticeProps) {
   const host = useRef<HTMLDivElement>(null);
   const box = useHostBox(host);
-  const rect = useLocated(pending.threadId, locate, layoutKey, box);
+  const rect = useLocated(pending.threadId, locate, layoutKey, box, !inFlow /* P4-B1: the margin places the entry */);
   const style = placeCard(box, rect ? pinOf(rect, { scale: 1, offset: { x: 0, y: 0 } }) : null);
   const card = useRef<HTMLDivElement>(null);
   useEffect(() => card.current?.focus(), []);
@@ -232,16 +235,17 @@ function Notice({ pending, locate, layoutKey, onClose }: NoticeProps) {
     onClose();
   };
   return (
-    <div ref={host} data-markup-occluder className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+    // P4-B1: in flow in the margin's entry (the column carries the occluder), else over the page
+    <div ref={host} {...(inFlow ? { 'data-notice-flow': '' } : { 'data-markup-occluder': '' })} className={inFlow ? 'relative' : 'pointer-events-none absolute inset-0 z-10 overflow-hidden'}>
       <div
         ref={card}
         role="dialog"
         tabIndex={-1}
         aria-label={COPY.title(pending.label)}
         data-comment-context={notice.status}
-        style={positionOf(style)}
+        style={inFlow ? undefined : positionOf(style) /* P4-B1 */}
         onKeyDown={onKeyDown}
-        className="pointer-events-auto absolute flex flex-col gap-2 overflow-y-auto rounded-lg border border-border-strong bg-bg-raised p-2.5 text-ui text-fg shadow-float outline-none"
+        className={`pointer-events-auto ${inFlow ? 'relative w-full' : 'absolute'} flex flex-col gap-2 overflow-y-auto rounded-lg border border-border-strong bg-bg-raised p-2.5 text-ui text-fg shadow-float outline-none`}
       >
         <header className="flex min-w-0 shrink-0 items-center gap-1">
           <h3 className="m-0 min-w-0 flex-1 truncate text-ui-sm font-medium text-fg">{pending.label}</h3>
@@ -288,10 +292,11 @@ function Notice({ pending, locate, layoutKey, onClose }: NoticeProps) {
 
 // The passage where the editor draws it now, asked again whenever it may have moved (the editor's layout key, the box),
 // as P2's card host asks its frame: `locate` reads the editor's live view, which a render must not read for itself.
-function useLocated(threadId: string, locate: (threadId: string) => PassageRect | null, layoutKey: string, box: { width: number; height: number }): PassageRect | null {
+function useLocated(threadId: string, locate: (threadId: string) => PassageRect | null, layoutKey: string, box: { width: number; height: number }, enabled: boolean /* P4-B1 */): PassageRect | null {
   const [located, setLocated] = useState<{ threadId: string; rect: PassageRect | null } | null>(null);
   const { width, height } = box;
   useEffect(() => {
+    if (!enabled) return; // P4-B1
     let latest = true;
     void Promise.resolve().then(() => {
       if (latest) setLocated({ threadId, rect: locate(threadId) });
@@ -299,7 +304,7 @@ function useLocated(threadId: string, locate: (threadId: string) => PassageRect 
     return () => {
       latest = false;
     };
-  }, [threadId, locate, layoutKey, width, height]);
+  }, [threadId, locate, layoutKey, width, height, enabled /* P4-B1 */]);
   return located?.threadId === threadId ? located.rect : null;
 }
 
