@@ -115,6 +115,10 @@ describe('the frame a delivery names its send by', () => {
     const broad = scoped({ projects: many, machines: ['beta'] });
     expect(broad.test(`[sminos chat projB alpha/human:4 from human → @all in ${many.map((_, i) => `p${i}`).join(',')} on beta]`)).toBe(true);
     expect(broad.test(`[sminos chat projB alpha/human:4 from human → @all in ${many.map((_, i) => `p${i}`).join(',')} on mini]`)).toBe(false);
+    // The line up to the names is taken at its first place: a line repeating it is refused at once too.
+    const started = performance.now();
+    expect(broad.test(`[sminos chat ${'x alpha/human:4 from human → @all in '.repeat(2000)}zzz on mini]`)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(200);
   });
 });
 
