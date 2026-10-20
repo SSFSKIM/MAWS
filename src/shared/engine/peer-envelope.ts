@@ -60,8 +60,14 @@ const SMINOS_REPLY_LINE = /(?:^|\n)\[To reply, run in Bash: \/[^\n"]*\/sminos sa
 // `compose_chat_frame`, `compose_frame`): `[sminos chat <project> <writer_short>:<seq> from <from> → <target>[ |
 // unread N]]`, or `[sminos message from <via or from> id=<msg_id>]` for an event that carries a `msg_id`. The target is
 // `@you`, or a broadcast's: `@all`, or from sminos 1.2.0 its scope's label (`scope_label`: `@org`, or `@all in
-// <projects>`, `@all on <machines>` or both, either followed by ` (<states>)`).
-const SMINOS_CHAT_FRAME = /^\[sminos chat .+? \S+:\d+ from (.+) → (?:@you|@org(?: \(.+\))?|@all(?: in .+)?(?: on .+)?(?: \(.+\))?)(?: \| unread [1-9][0-9]*)?\]$/;
+// <projects>`, `@all on <machines>` or both, either followed by ` (<states>)`). Each part is read by its own grammar so
+// that a line which is no frame is refused in linear time: the states are sminos's state words, the machines names with
+// no space, comma, parenthesis or bracket (comma-joined), and the projects' names, which sminos leaves open, any run
+// without a `]`. The sender stops at the first ` → `, since a project's name may hold one.
+const SCOPE_STATES = String.raw`\([a-z]+(?:,[a-z]+)*\)`;
+const SCOPE_MACHINES = String.raw`[^\s,()[\]]+(?:,[^\s,()[\]]+)*`;
+const CHAT_TARGET = `@you|@org(?: ${SCOPE_STATES})?|@all(?: in [^\\]\\n]+?)?(?: on ${SCOPE_MACHINES})?(?: ${SCOPE_STATES})?`;
+const SMINOS_CHAT_FRAME = new RegExp(String.raw`^\[sminos chat .+? \S+:\d+ from (.+?) → (?:${CHAT_TARGET})(?: \| unread [1-9][0-9]*)?\]$`);
 const SMINOS_MESSAGE_FRAME = /^\[sminos message from (.+) id=\S+\]$/;
 
 /** Who a sminos frame line says sent the event, or null when the line is not a whole frame. */

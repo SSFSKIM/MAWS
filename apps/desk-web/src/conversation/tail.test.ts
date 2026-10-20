@@ -109,7 +109,12 @@ describe('the frame a delivery names its send by', () => {
       '[sminos chat projB alpha/human:4 from human → @you]', // not a broadcast
     ])
       expect(scoped({ machines: ['beta'] }).test(line), line).toBe(false);
-    expect(named.test('[sminos chat projB alpha/human:4 from human → @all in projB on beta,alpha (busy,idle)]')).toBe(false); // one project of two
+    // The names are one open run: a broad scope's frame is matched at once, where an open run per name backtracked for
+    // seconds over 35 of them.
+    const many = Array.from({ length: 35 }, (_, i) => `${P.slice(0, -2)}${String(i).padStart(2, '0')}`);
+    const broad = scoped({ projects: many, machines: ['beta'] });
+    expect(broad.test(`[sminos chat projB alpha/human:4 from human → @all in ${many.map((_, i) => `p${i}`).join(',')} on beta]`)).toBe(true);
+    expect(broad.test(`[sminos chat projB alpha/human:4 from human → @all in ${many.map((_, i) => `p${i}`).join(',')} on mini]`)).toBe(false);
   });
 });
 

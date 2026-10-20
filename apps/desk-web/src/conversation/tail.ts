@@ -79,13 +79,16 @@ const OPEN = '\u0000';
  * The first line sminos writes when it pushes this event, as a pattern over a whole line: `compose_frame`'s
  * `[sminos message from <via or from> id=<msg_id>]` for an event with a `msg_id`, else `compose_chat_frame`'s
  * `[sminos chat <project> <writer_short>:<seq> from <from> → <target>[ | unread N]]`, the target `@you`, or for a
- * broadcast (`wake`) its scope's label (`scopeLabel`), `@all` for a bare one. Only the project's name and the scope's
- * project names (each the machine's own for it) and the unread count are open.
+ * broadcast (`wake`) its scope's label (`scopeLabel`), `@all` for a bare one. Only the project's name, the scope's
+ * project names (each the machine's own for it) and the unread count are open; the scope's names are one open run
+ * together, since a pattern with an open run per name backtracks exponentially over a long list.
  */
 export function framePattern(event: { writer: string; seq: number; from?: unknown; via?: unknown; msg_id?: unknown; wake?: unknown; scope?: unknown }): RegExp {
   const str = (value: unknown) => (typeof value === 'string' ? value : '');
   if (str(event.msg_id) !== '') return new RegExp(`^${escape(`[sminos message from ${str(event.via) || str(event.from)} id=${str(event.msg_id)}]`)}$`);
-  const target = event.wake === true ? escape(broadcastLabel(event.scope, () => OPEN)).split(OPEN).join('.+') : '@you';
+  // The names stand side by side in the label, so its text before the first and after the last is all that is fixed.
+  const parts = escape(broadcastLabel(event.scope, () => OPEN)).split(OPEN);
+  const target = event.wake !== true ? '@you' : parts.length === 1 ? parts[0] : `${parts[0]}.+${parts[parts.length - 1]}`;
   const tail = `${escape(` ${writerShort(event.writer)}:${event.seq} from ${str(event.from)} → `)}${target}`;
   return new RegExp(`^\\[sminos chat .+${tail}(?: \\| unread [1-9][0-9]*)?\\]$`);
 }

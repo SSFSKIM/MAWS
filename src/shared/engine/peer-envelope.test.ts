@@ -109,6 +109,15 @@ describe('parsePeerMessage', () => {
       expect(parsePeerMessage(ENVELOPE('from-name="maws-fe"', `${frame}\nRebase on main.\n${reply}`)), frame).toMatchObject({ frame, body: 'Rebase on main.' });
     }
     expect(sminosFrameSender('[sminos chat MAWS 5e0c1f2a:3 from maws-fe → @all in projB on beta (waiting)]')).toBe('maws-fe');
+    // A project's name is open in sminos, an arrow and all: the sender stops at the first arrow.
+    expect(sminosFrameSender('[sminos chat MAWS alpha/human:4 from human → @all in ops → @all]')).toBe('human');
+    expect(sminosFrameSender('[sminos chat MAWS alpha/human:4 from my agent → @all in ops, west on mini]')).toBe('my agent');
+    // A line that only opens like a scoped frame is refused, and at once: each part of the scope has its own grammar.
+    expect(sminosFrameSender('[sminos chat MAWS alpha/human:4 from human → @all on beta] [example]')).toBeNull();
+    expect(sminosFrameSender('[sminos chat MAWS alpha/human:4 from human → @all in projB] [example]')).toBeNull();
+    expect(sminosFrameSender('[sminos chat MAWS alpha/human:4 from human → @org (not a state!)]')).toBeNull();
+    expect(sminosFrameSender(`[sminos chat MAWS alpha/human:4 from human → @all in ${'a on '.repeat(800)}${'(a '.repeat(800)}NOT_CLOSED`)).toBeNull();
+    expect(sminosFrameSender(`[sminos chat MAWS alpha/human:4 from ${'h → @all in '.repeat(400)}x on y (z`)).toBeNull();
     for (const body of [
       'Rebase on main.', // no frame
       '[sminos chat MAWS 5e0c1f2a:3 from maws-fe → @you]', // a frame with no text after it
