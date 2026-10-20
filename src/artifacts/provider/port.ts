@@ -39,6 +39,7 @@
 // keeps its accounting. An exception from an application listener (`subscribe`, `onRestored`) is the application's:
 // every listener still runs, the connection stays, and the first error is rethrown to the caller once state is settled.
 import * as awarenessProtocol from '@y/protocols/awareness';
+import { ArtifactProvisionalSchema, type ArtifactProvisional } from '@shared/artifacts/provisional'; // P4-A2 (X35)
 import { applyV1, diffV1, mergeUpdates, onUpdate, stateVector, type Doc } from '../yjs';
 import { decodeFrame, encodeFrame, type Frame } from './frames';
 
@@ -57,6 +58,10 @@ export interface SaveState {
   synced: boolean; // the host's step 2 has been applied on this connection
   unsaved: number; // local updates not yet known durable
   revision: number; // the host's live revision as last acked
+  // P4-A2 (X35 rule 2): the highest row seq this replica has integrated through the host's content frames (a step 2's
+  // revision, an update's seq); never an ack's revision, which passes the composition hold while the rows it counts
+  // wait in the buffer. A provisional layer whose `commitSeq` is at most this has its write on the page.
+  integrated: number;
 }
 export interface Restored {
   revision: number;
@@ -77,6 +82,7 @@ export class PortProvider {
   private carried = 0; // local updates that ride in the next step 2
   private carriedFrame = Infinity; // the step 2 frame that carries them, once sent
   private revision = 0;
+  private integrated = 0; // P4-A2
   private everSynced = false; // a step 2 from the host has been applied on some connection before this one's
   private catchUp: 'none' | 'first' | 'later' = 'none'; // whether the next frame may be the attach-time `restored`
   private restoreSeen: number | null = null; // the latest restore's version id this replica knows of
@@ -88,6 +94,7 @@ export class PortProvider {
   private awarenessPending = new Set<number>(); // clients whose awareness changed inside it
   private readonly listeners = new Set<(state: SaveState) => void>();
   private readonly restoredListeners = new Set<(restored: Restored) => void>();
+  private readonly provisionalListeners = new Set<(frame: ArtifactProvisional) => void>(); // P4-A2 (X35)
   private readonly log: (line: string) => void;
   private readonly offUpdate: () => void;
   private readonly onMessage = (event: { data?: unknown }) => this.receive(event.data);
@@ -106,7 +113,7 @@ export class PortProvider {
   }
 
   get state(): SaveState {
-    return { phase: this.phase, synced: this.synced, unsaved: this.carried + this.unacked.length, revision: this.revision };
+    return { phase: this.phase, synced: this.synced, unsaved: this.carried + this.unacked.length, revision: this.revision, integrated: this.integrated };
   }
 
   subscribe(listener: (state: SaveState) => void): () => void {
@@ -117,6 +124,15 @@ export class PortProvider {
   onRestored(listener: (restored: Restored) => void): () => void {
     this.restoredListeners.add(listener);
     return () => this.restoredListeners.delete(listener);
+  }
+
+  // P4-A2 (X35): the host's provisional frames, each after the frames it arrived with are applied (so a `committed`
+  // frame's listener reads `state.integrated` against its `commitSeq`). A provisional frame passes the composition
+  // hold: the layer moves while the person composes elsewhere and a refusal withdraws at once; the withdrawal on commit
+  // waits for the held row through `integrated`.
+  onProvisional(listener: (frame: ArtifactProvisional) => void): () => void {
+    this.provisionalListeners.add(listener);
+    return () => this.provisionalListeners.delete(listener);
   }
 
   connect(port: PortLike): void {
@@ -194,6 +210,7 @@ export class PortProvider {
     if (this.ownsAwareness) this.awareness.destroy();
     this.listeners.clear();
     this.restoredListeners.clear();
+    this.provisionalListeners.clear();
   }
 
   private readonly onDocUpdate = (update: Uint8Array, origin: unknown) => {
@@ -259,32 +276,36 @@ export class PortProvider {
   // (the rest are dropped with it). Listeners run once, after the frames.
   private process(frames: Frame[]): void {
     const restores: Restored[] = [];
+    const provisionals: ArtifactProvisional[] = []; // P4-A2
     for (let i = 0; i < frames.length; i += 1) {
       if (!this.port) break;
-      let restored: Restored | null;
+      let applied: Applied;
       try {
         let frame = frames[i];
         if (frame.type === 'update' && frames[i + 1]?.type === 'update') {
           const run = [frame.update];
+          let seq = frame.seq ?? 0;
           while (i + 1 < frames.length) {
             const next = frames[i + 1];
             if (next.type !== 'update') break;
             run.push(next.update);
+            seq = Math.max(seq, next.seq ?? 0);
             i += 1;
           }
-          frame = { type: 'update', update: mergeUpdates(run) };
+          frame = { type: 'update', update: mergeUpdates(run), seq };
         }
-        restored = this.apply(frame);
+        applied = this.apply(frame);
       } catch (error) {
         this.broken(error);
         break;
       }
-      if (restored) restores.push(restored);
+      if (applied?.restored) restores.push(applied.restored);
+      if (applied?.provisional) provisionals.push(applied.provisional);
     }
-    this.notify(restores);
+    this.notify(restores, provisionals);
   }
 
-  private apply(frame: Frame): Restored | null {
+  private apply(frame: Frame): Applied {
     const catchUp = this.catchUp;
     this.catchUp = 'none';
     switch (frame.type) {
@@ -298,6 +319,7 @@ export class PortProvider {
       case 'step2':
       case 'update':
         applyV1(this.doc, frame.update, this);
+        this.integrated = Math.max(this.integrated, (frame.type === 'step2' ? frame.revision : frame.seq) ?? 0); // P4-A2
         if (frame.type === 'step2') {
           this.synced = true;
           this.catchUp = this.everSynced ? 'later' : 'first';
@@ -319,7 +341,13 @@ export class PortProvider {
         if (frame.versionId === this.restoreSeen) return null;
         this.restoreSeen = frame.versionId;
         if (catchUp === 'first') return null; // the restore the opened document already reflects
-        return { revision: frame.revision, versionId: frame.versionId };
+        return { restored: { revision: frame.revision, versionId: frame.versionId } };
+      case 'provisional': {
+        // P4-A2: the host's JSON, read strictly (a frame the shape does not fit is a broken peer, as a malformed frame is)
+        const parsed = ArtifactProvisionalSchema.safeParse(JSON.parse(frame.json));
+        if (!parsed.success) throw new Error(`a provisional frame the shape refuses: ${parsed.error.issues[0]?.message ?? 'invalid'}`);
+        return { provisional: parsed.data };
+      }
     }
   }
 
@@ -334,11 +362,13 @@ export class PortProvider {
   }
 
   private emit(): void {
-    this.notify([]);
+    this.notify([], []);
   }
 
   // Runs every listener even when one throws, then rethrows the first error: the provider's state is already settled.
-  private notify(restores: Restored[]): void {
+  // P4-A2: the provisional listeners run after the state listeners, so a layer that waits on `integrated` reads the
+  // state the frames of this batch reached.
+  private notify(restores: Restored[], provisionals: ArtifactProvisional[]): void {
     const errors: unknown[] = [];
     const run = (call: () => void) => {
       try {
@@ -350,6 +380,10 @@ export class PortProvider {
     for (const restored of restores) for (const listener of [...this.restoredListeners]) run(() => listener(restored));
     const state = this.state;
     for (const listener of [...this.listeners]) run(() => listener(state));
+    for (const frame of provisionals) for (const listener of [...this.provisionalListeners]) run(() => listener(frame));
     if (errors.length > 0) throw errors[0];
   }
 }
+
+// What applying one frame yields for the listeners: a restore to announce, a provisional frame to hand on, or nothing.
+type Applied = { restored?: Restored; provisional?: ArtifactProvisional } | null;

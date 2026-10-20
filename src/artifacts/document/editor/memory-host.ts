@@ -7,6 +7,7 @@
 // and each host write is credited to an actor, and `onLanded` reports every applied update with its actor, which is
 // what the in-memory history (history/memory-history.ts) keeps as provenance.
 import type { Actor } from '@shared/artifacts/actor';
+import type { ArtifactProvisional } from '@shared/artifacts/provisional'; // P4-A2
 import { decodeFrame, encodeFrame, type Frame } from '../../provider/frames';
 import { PortProvider, type Restored } from '../../provider/port';
 import { applyV1, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../../yjs';
@@ -45,7 +46,7 @@ export class MemoryDocumentHost {
       const actor = this.connections.has(origin as Connection) ? (origin as Connection).actor : this.writer;
       for (const listener of this.landed) listener({ update, actor, revision: this.revision });
       for (const connection of this.connections) {
-        if (connection !== origin) connection.port.postMessage(encodeFrame({ type: 'update', update }));
+        if (connection !== origin) connection.port.postMessage(encodeFrame({ type: 'update', update, seq: this.revision })); // P4-A2: the row's seq, as the service sends it
       }
     });
   }
@@ -82,6 +83,20 @@ export class MemoryDocumentHost {
     for (const connection of this.connections) connection.port.postMessage(encodeFrame({ type: 'restored', ...this.latestRestore }));
   }
 
+  /**
+   * P4-A2 (X35): a provisional frame to every connection, as the host's emitter sends one; the editor suites drive the
+   * layer through it. A `committed` notice sent ahead of the next `write` names that write's revision, `nextRevision`.
+   */
+  announce(frame: ArtifactProvisional): void {
+    const json = JSON.stringify(frame);
+    for (const connection of this.connections) connection.port.postMessage(encodeFrame({ type: 'provisional', json }));
+  }
+
+  /** The revision the next write will make (what a `committed` frame sent ahead of it names). */
+  get nextRevision(): number {
+    return this.revision + 1;
+  }
+
   /** Drops every connection, as a host restart does; each provider moves its unacked updates into its next step 2. */
   dropConnections(): void {
     for (const connection of this.connections) connection.port.close();
@@ -96,7 +111,7 @@ export class MemoryDocumentHost {
   private receive(connection: Connection, frame: Frame): void {
     switch (frame.type) {
       case 'step1':
-        connection.port.postMessage(encodeFrame({ type: 'step2', update: diffV1(this.doc, frame.sv) }));
+        connection.port.postMessage(encodeFrame({ type: 'step2', update: diffV1(this.doc, frame.sv), revision: this.revision })); // P4-A2
         if (this.latestRestore) connection.port.postMessage(encodeFrame({ type: 'restored', ...this.latestRestore }));
         return;
       case 'step2':
@@ -128,6 +143,7 @@ export function openMemoryHandle(host: MemoryDocumentHost, options: { log?: (lin
     state: (): DocumentState => ({ ...provider.state, readOnly: false }),
     subscribe: (listener) => provider.subscribe((state) => listener({ ...state, readOnly: false })),
     onRestored: (listener) => provider.onRestored(listener),
+    onProvisional: (listener) => provider.onProvisional(listener), // P4-A2
     holdRemote: (on) => provider.holdRemote(on),
     close: () => provider.destroy(),
   };

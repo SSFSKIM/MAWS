@@ -1428,3 +1428,66 @@ describe('DocumentService: what the hooks return (Decision Log 23c, 25j)', () =>
   });
 });
 
+
+// P4-A2 (X35 rule 2; the execution document's R3): the committed notice ahead of the write's frames, the row's seq on
+// the update frame and the step 2's revision, and a frame sent outside any commit.
+describe('DocumentService: the provisional layer’s frames (P4-A2)', () => {
+  const notice = (json: string) => encodeFrame({ type: 'provisional', json });
+
+  it('sends an announced frame ahead of the write’s update, both revealed with the commit, and numbers the update with the write’s seq', async () => {
+    make();
+    const a = raw('a1', human);
+    tick();
+    a.take();
+    const written = service.writeAs('a1', agent, (doc) => doc.get('t').insert(0, 'agent'), {
+      inFrame: (revision) => service.announceWrite('a1', notice(JSON.stringify({ state: 'committed', commitSeq: revision }))),
+    });
+    expect(a.received).toEqual([]); // nothing before the commit
+    tick();
+    const revision = await written;
+    const frames = a.take();
+    expect(frames.map((frame) => frame.type)).toEqual(['provisional', 'update']);
+    expect(JSON.parse((frames[0] as { json: string }).json)).toEqual({ state: 'committed', commitSeq: revision });
+    expect((frames[1] as { seq: number }).seq).toBe(revision);
+    expect(revision).toBe(service.revision('a1'));
+  });
+
+  it('answers a step 1 with a step 2 carrying the revision the diff reaches', () => {
+    make();
+    const a = raw('a1', human);
+    tick();
+    a.take();
+    a.edit((doc) => doc.get('t').insert(0, 'abc'));
+    tick();
+    const b = raw('a1', human);
+    tick();
+    b.send({ type: 'step1', sv: stateVector(b.doc) });
+    tick();
+    const step2 = b.take().find((frame) => frame.type === 'step2') as { revision: number } | undefined;
+    expect(step2?.revision).toBe(service.revision('a1'));
+    expect(service.revision('a1')).toBeGreaterThan(0);
+  });
+
+  it('refuses announceWrite outside a write of the doc, and broadcasts a frame now to every connection of a loaded doc', () => {
+    make();
+    const a = raw('a1', human);
+    const b = raw('a1', agent);
+    tick();
+    a.take();
+    b.take();
+    expect(() => service.announceWrite('a1', notice('{}'))).toThrow(/outside a write/);
+    service.broadcast('a1', notice('{"state":"streaming"}'));
+    expect(a.take()).toEqual([{ type: 'provisional', json: '{"state":"streaming"}' }]); // no tick: sent at once
+    expect(b.take()).toEqual([{ type: 'provisional', json: '{"state":"streaming"}' }]);
+    service.broadcast('never-loaded', notice('{}')); // nothing, no throw
+    expect(service.stats.commits).toBe(0);
+  });
+
+  it('refuses an announce from a write naming another doc', async () => {
+    make();
+    const a = raw('a1', human);
+    tick();
+    a.take();
+    await expect(service.writeAs('a1', agent, (doc) => doc.get('t').insert(0, 'x'), { inFrame: () => service.announceWrite('a2', notice('{}')) })).rejects.toThrow(/outside a write/);
+  });
+});

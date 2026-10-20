@@ -37,9 +37,9 @@ function systemDoc(law = '# Harbor\n'): Doc {
   return doc;
 }
 function handleOf(doc: Doc) {
-  const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+  const state: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, integrated: 0, readOnly: false };
   const close = vi.fn<() => void>();
-  const handle: DocumentHandle = { doc, awareness: null as never, state: () => state, subscribe: () => () => {}, onRestored: () => () => {}, holdRemote: () => {}, close };
+  const handle: DocumentHandle = { doc, awareness: null as never, state: () => state, subscribe: () => () => {}, onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote: () => {}, close };
   return Object.assign(handle, { close });
 }
 function fakeHost(open: () => Promise<DocumentHandle>) {

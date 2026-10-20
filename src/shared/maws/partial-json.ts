@@ -1,0 +1,144 @@
+// P4-A2 (X35; docs/doperpowers/plans/2026-10-19-p4-a2-agent-experience.md R9): a tolerant reader of a tool call's input
+// while it streams. The engine's `input_json_delta` pieces concatenate to a JSON document that is complete only at the
+// block's end; the host wants to read `artifact`, the ops and their text as soon as they parse. The accumulated text is
+// completed rather than parsed incrementally: an open string is closed (a cut escape dropped), a member cut before its
+// value is dropped with its comma, a cut literal is dropped, open containers are closed, and the whole is parsed once.
+// Run per batch tick (about 16 ms), never per delta. A text no completion makes parseable answers `undefined`.
+
+interface Container {
+  kind: '{' | '[';
+  // what the container waits for next: an object's key, the colon after it, a value, or the comma or close after one
+  expect: 'key' | 'colon' | 'value' | 'next';
+  // where the member being read starts (the comma before it, or just after the open bracket): the cut point that
+  // drops the member whole
+  memberStart: number;
+}
+
+const NUMBER = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/;
+const LITERAL = /^(true|false|null)$/;
+const CUT_ESCAPE = /\\u[0-9a-fA-F]{0,3}$|\\$/;
+
+export function readPartialJson(text: string): unknown {
+  const trimmed = text.trimEnd();
+  if (trimmed.length === 0) return undefined;
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    // completed below
+  }
+  const stack: Container[] = [];
+  let inString = false;
+  let escape = false;
+  let literalStart = -1;
+  const top = (): Container | undefined => stack[stack.length - 1];
+  const valueDone = () => {
+    const container = top();
+    if (container) container.expect = 'next';
+  };
+  const endLiteral = (at: number): boolean => {
+    if (literalStart < 0) return true;
+    const literal = trimmed.slice(literalStart, at);
+    literalStart = -1;
+    if (!NUMBER.test(literal) && !LITERAL.test(literal)) return false;
+    valueDone();
+    return true;
+  };
+  let i = 0;
+  for (; i < trimmed.length; i += 1) {
+    const ch = trimmed[i]!;
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') {
+        inString = false;
+        const container = top();
+        if (container?.expect === 'key') container.expect = 'colon';
+        else valueDone();
+      }
+      continue;
+    }
+    if (literalStart >= 0) {
+      if (ch === ',' || ch === '}' || ch === ']' || /\s/.test(ch)) {
+        if (!endLiteral(i)) return undefined; // a malformed literal mid-text: not a cut, a broken input
+      } else continue;
+    }
+    if (/\s/.test(ch)) continue;
+    const container = top();
+    switch (ch) {
+      case '"':
+        inString = true;
+        escape = false;
+        if (container && container.expect !== 'key') container.expect = 'value';
+        break;
+      case '{':
+      case '[':
+        stack.push({ kind: ch, expect: ch === '{' ? 'key' : 'value', memberStart: i + 1 });
+        break;
+      case '}':
+      case ']':
+        stack.pop();
+        valueDone();
+        break;
+      case ':':
+        if (container) container.expect = 'value';
+        break;
+      case ',':
+        if (container) {
+          container.memberStart = i;
+          container.expect = container.kind === '{' ? 'key' : 'value';
+        }
+        break;
+      default:
+        literalStart = i;
+        if (container) container.expect = 'value';
+    }
+  }
+  let out = trimmed;
+  let cut = -1;
+  if (inString) {
+    const container = top();
+    if (container?.expect === 'key') cut = container.memberStart;
+    else {
+      out = out.replace(CUT_ESCAPE, '') + '"';
+      valueDone();
+    }
+  } else if (literalStart >= 0) {
+    // a literal at the very end: `true`, `false` and `null` cannot grow, so they are whole; a number can (`1` of `12`),
+    // so it is dropped until a delimiter follows it
+    const literal = trimmed.slice(literalStart);
+    if (LITERAL.test(literal)) valueDone();
+    else cut = top()?.memberStart ?? 0;
+  }
+  const container = top();
+  if (cut < 0 && container && container.expect !== 'next') {
+    // a container waiting for a key after a comma, for a colon, or for a value with nothing of it yet: the member goes
+    // whole (its comma with it); an empty container so far has nothing to drop
+    if (container.expect !== 'key' || trimmed[container.memberStart] === ',') cut = container.memberStart;
+  }
+  if (cut >= 0) {
+    out = out.slice(0, cut);
+    // the cut dropped what the innermost containers after it held: recount them
+    stack.length = 0;
+    inString = false;
+    escape = false;
+    for (let k = 0; k < out.length; k += 1) {
+      const ch = out[k]!;
+      if (inString) {
+        if (escape) escape = false;
+        else if (ch === '\\') escape = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === '{' || ch === '[') stack.push({ kind: ch, expect: 'next', memberStart: k + 1 });
+      else if (ch === '}' || ch === ']') stack.pop();
+    }
+    out = out.replace(/,\s*$/, '');
+  }
+  for (let k = stack.length - 1; k >= 0; k -= 1) out += stack[k]!.kind === '{' ? '}' : ']';
+  try {
+    return JSON.parse(out) as unknown;
+  } catch {
+    return undefined;
+  }
+}
