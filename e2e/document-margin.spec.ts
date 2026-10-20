@@ -12,9 +12,11 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { PerfSeam } from './support/document-scale';
 
-// P4-B1 (LC-1 item 1): a margin card's top sits 4 px below its passage's first line box top (MARGIN_CARD_INSET_PX in
-// src/artifacts/comments/margin-layout.ts)
+// P4-B1 (LC-1 item 1; docs/doperpowers/evidence/p4/lc1/lc1-docs-margin.md): a margin card's top sits 4 px below its
+// passage's first line box top (MARGIN_CARD_INSET_PX in src/artifacts/comments/margin-layout.ts), 26 px from the page
+// (LC-1 item 6: Docs' page gutter, `--doc-margin-page-gutter`)
 const CARD_INSET_PX = 4;
+const PAGE_GUTTER_PX = 26;
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 
@@ -161,7 +163,13 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
     await expect(entry(t2)).toBeVisible();
     expect(Math.abs((await entryTop(t1)) - (await lineTop(t1)) - CARD_INSET_PX), 'the first card at its line').toBeLessThanOrEqual(2);
     expect(Math.abs((await entryTop(t2)) - (await lineTop(t2)) - CARD_INSET_PX), 'the second card at its line').toBeLessThanOrEqual(2);
-    expect((await pageBox()).x, 'the page moved left (N6)').toBeLessThan(centredLeft - 40);
+    // N6 as Docs (LC-1 item 6): the page and the column's reserve centre as one unit, so the page moved left by half the
+    // reserve, and the card sits the page gutter from the page
+    const reserve = await margin.evaluate((el) => parseFloat(getComputedStyle(el).getPropertyValue('--doc-margin-reserve')));
+    expect(reserve, 'the margin reserved').toBeGreaterThan(0);
+    const moved = await pageBox();
+    expect(Math.abs(centredLeft - moved.x - reserve / 2), 'the page moved left by half the reserve (N6)').toBeLessThanOrEqual(1);
+    expect(Math.abs((await entry(t1).boundingBox())!.x - (moved.x + moved.width) - PAGE_GUTTER_PX), 'the card at the page gutter').toBeLessThanOrEqual(1);
     await page.screenshot({ path: 'test-results/document-margin-cards.png' });
   });
 
@@ -223,16 +231,24 @@ test('an agent reply grows a card while the owner types; the stack re-lays, the 
 
   await test.step('the view states: Minimize gives the icon rail, Hide no margin, Expand the cards; the panel takes the cards out and gives them back', async () => {
     const view = toolbar.getByRole('button', { name: 'Comment view' });
+    // Minimize keeps the passages' highlights; Hide draws them plain, as Docs' Hide does (LC-1 item 7), the decoration
+    // kept (only its colours go)
+    const passage = text.locator(`.comment-${t1}`);
+    const plain = 'rgba(0, 0, 0, 0)';
     await view.click();
     await toolbar.getByRole('menuitemradio', { name: 'Minimize' }).click();
     await expect(margin).toHaveAttribute('data-margin-tier', 'icons');
+    await expect(passage).not.toHaveCSS('background-color', plain);
     await view.click();
     await toolbar.getByRole('menuitemradio', { name: 'Hide' }).click();
     await expect(margin).toHaveCount(0);
-    await expect(text.locator(`.comment-${t1}`)).toHaveCount(1); // the highlight stays
+    await expect(passage).toHaveCount(1);
+    await expect(passage).toHaveCSS('background-color', plain);
+    await expect(passage).toHaveCSS('border-bottom-color', plain);
     await view.click();
     await toolbar.getByRole('menuitemradio', { name: 'Expand' }).click();
     await expect(margin).toHaveAttribute('data-margin-tier', 'cards');
+    await expect(passage).not.toHaveCSS('background-color', plain);
     await toolbar.getByRole('button', { name: /^Comments/ }).click();
     await expect(margin).toHaveCount(0);
     await expect(main.getByRole('complementary', { name: 'Comments' })).toBeVisible();

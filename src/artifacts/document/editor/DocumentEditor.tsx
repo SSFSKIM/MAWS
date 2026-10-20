@@ -521,7 +521,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
   };
 
   return (
-    <div className="doc-tab-editor" onKeyDown={onKeyDown}>
+    <div className="doc-tab-editor" data-comments-view={commentsView /* P4-B1: Hide draws the passages plain (chrome.css) */} onKeyDown={onKeyDown}>
       {preview?.view && (
         <PreviewEditor
           view={preview.view}
