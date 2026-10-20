@@ -1,5 +1,5 @@
 // P4-B3 M5 (its Decision Log 25; X38's carry for the document kind, and the dashboard's, which shares its body; tracker
-// row 126's undo half, candidate 22): a document's body remounts when it moves between the panel and a main tab, and
+// row 147's undo half, candidate 22): a document's body remounts when it moves between the panel and a main tab, and
 // when its tab is switched away and back. The tab's state keeps the undo history (one UndoManager per tab body, swapped
 // into each new editor), so ⌘Z after either undoes an edit made before it; a move also carries what the owner was
 // looking at: the first visible block, the selection and the focus. happy-dom lays nothing out, so the page and its
@@ -127,7 +127,7 @@ function edit(editor: Editor, state: DocumentTabState): void {
   act(() => void editor.commands.insertContent(' typed'));
 }
 
-describe('the document tab keeps its undo history across a remount (row 126’s undo half, candidate 22)', () => {
+describe('the document tab keeps its undo history across a remount (row 147’s undo half, candidate 22)', () => {
   it('⌘Z after the body remounts (its tab switched away and back) undoes edits made before it, step by step', async () => {
     const { state, remount } = mountIn(panel);
     const first = await ready();

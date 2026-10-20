@@ -13,7 +13,7 @@
 // chooses, as the deck's Export saves it (`artifacts.export`, then `library.saveAs`'s dialog at Downloads), the saved
 // path said in a toast and a cancelled dialog saying nothing.
 //
-// P4-B3 M5 (its Decision Log 25; tracker row 126's undo half): the tab also keeps the undo history, one UndoManager per
+// P4-B3 M5 (its Decision Log 25; tracker row 147's undo half): the tab also keeps the undo history, one UndoManager per
 // tab body of the document, which the body swaps into every editor it mounts (`view-carry.ts`): an editor's own manager
 // dies with it, so a remount (the tab switched away and back, a move between the panel and a main tab) would start
 // with nothing to undo. A restore this replica did not make clears it, as the binding clears its own (an undo across

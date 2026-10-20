@@ -137,7 +137,7 @@ export function restoreDocumentView(editor: Editor, page: HTMLElement | null, vi
   const { view: pm } = editor;
   if (view.focused) pm.focus();
   if (page && view.scroll === 'top') page.scrollTop = 0;
-  else if (page && view.scroll) {
+  else if (page && typeof view.scroll === 'object' && view.scroll !== null) {
     const [$block] = relativePositionsToResolvedPositions(pm, [view.scroll.block]);
     const dom = $block ? pm.nodeDOM($block.depth === 0 ? $block.pos : $block.before(1)) : null;
     if (dom instanceof HTMLElement) {
