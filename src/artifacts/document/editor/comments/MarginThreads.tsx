@@ -54,6 +54,9 @@ export interface MarginThreadsProps {
   onTier?(tier: MarginTier): void;
   /** ⌃⌘ E then C: filled with the card-focusing function while the margin draws. */
   enterRef?: { current: (threadId: string) => void };
+  /** P4-B1: the threads' reply drafts, the editor's, so a card the panel or a tab switch hides keeps its draft (X36). */
+  drafts: ReadonlyMap<string, string>;
+  onDraftChange(threadId: string, text: string): void;
 }
 
 interface Entry {
@@ -66,7 +69,7 @@ type Cause = 'activation' | 'set' | 'layout';
 
 const ANIMATED: ReadonlySet<Cause> = new Set<Cause>(['activation', 'set']);
 
-export function MarginThreads({ editor, doc, tabId, author, readOnly, view, layoutKey, hosting, overlay, onComment, onTier, enterRef }: MarginThreadsProps) {
+export function MarginThreads({ editor, doc, tabId, author, readOnly, view, layoutKey, hosting, overlay, onComment, onTier, enterRef, drafts, onDraftChange }: MarginThreadsProps) {
   const column = useRef<HTMLDivElement>(null);
   const states = useThreadStates(doc);
   const locator = useMemo(() => new MarginLocator(editor, doc), [editor, doc]);
@@ -254,17 +257,9 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, layo
     };
   });
 
-  // ── the drafts (X36: one per thread, kept while a card is hidden) and the announcements (K4) ──
-  const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(new Map());
+  // ── the drafts (X36: one per thread, kept while a card is hidden; P4-B1: the editor's, shared with the panel) and
+  // the announcements (K4) ──
   const draftOf = (id: string) => drafts.get(id) ?? '';
-  const setDraft = (id: string, text: string) =>
-    setDrafts((now) => {
-      if ((now.get(id) ?? '') === text) return now;
-      const next = new Map(now);
-      if (text === '') next.delete(id);
-      else next.set(id, text);
-      return next;
-    });
   const [announced, setAnnounced] = useState('');
   const seen = useRef(new Map<string, { status: ThreadState['status']; messages: number }>());
   useEffect(() => {
@@ -325,7 +320,7 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, layo
         position={{ index: index + 1, count: entries.length }}
         readOnly={readOnly}
         draft={draftOf(entry.id)}
-        onDraftChange={(text: string) => setDraft(entry.id, text)}
+        onDraftChange={(text: string) => onDraftChange(entry.id, text)}
         onActivate={() => activate(entry.id)}
         onReply={(body: string) => write(() => reply(doc, entry.id, { id: `${entry.id}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN))}
         onResolve={() => write(() => resolve(doc, entry.id, author.actor, author.now(), COMMENTS_ORIGIN))}

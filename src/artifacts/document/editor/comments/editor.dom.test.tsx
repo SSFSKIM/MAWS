@@ -243,6 +243,21 @@ describe('the threads rail', () => {
     expect(field(first).value).toBe('Draft kept');
   });
 
+  // P4-B1 (X36: a hidden card keeps its draft): the drafts are the editor's, not the panel's, so closing it loses none
+  it('keeps a reply being written across closing and reopening the panel (P4-B1, X36)', async () => {
+    const { first } = await seeded();
+    const toggle = () => within(toolbar()).getByRole('button', { name: /^Comments/ });
+    const field = () => within(rail().querySelector<HTMLElement>(`[data-thread="${first}"]`)!).getByRole('textbox', { name: 'Reply' }) as HTMLTextAreaElement;
+    act(() => fireEvent.click(toggle()));
+    await quiet();
+    act(() => fireEvent.change(field(), { target: { value: 'Not sent yet' } }));
+    act(() => fireEvent.click(within(rail()).getByRole('button', { name: 'Close comments' })));
+    expect(screen.queryByRole('complementary', { name: 'Comments' })).toBeNull();
+    act(() => fireEvent.click(toggle()));
+    await quiet();
+    expect(field().value).toBe('Not sent yet');
+  });
+
   it('moves the focus between its cards with J and K (P4-B1, K3)', async () => {
     const { first } = await seeded();
     act(() => fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ })));

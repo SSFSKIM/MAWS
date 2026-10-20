@@ -147,6 +147,8 @@ interface Showing {
   serial: number;
 }
 
+const NO_DRAFTS: ReadonlyMap<string, string> = new Map(); // P4-B1
+
 export function DocumentEditor(props: DocumentEditorProps) {
   const { doc } = props.handle;
   const tabs = useTabs(doc);
@@ -168,6 +170,22 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const active = tabs.find((tab) => tab.id === selected) ?? tabs[0] ?? null;
   const { host } = props;
   const author = useMemo<CommentAuthor>(() => ({ actor: host.identity().actor, now: () => Date.now() }), [host]);
+  // P4-B1 (X36's draft rule: a hidden card keeps its draft, one draft per thread): the threads' reply drafts, the
+  // document's, held here so the margin and the panel draw the same one and neither unmounting loses it
+  const [replyDrafts, setReplyDrafts] = useState(() => ({ doc, drafts: NO_DRAFTS }));
+  const drafts = replyDrafts.doc === doc ? replyDrafts.drafts : NO_DRAFTS;
+  const onDraftChange = useCallback(
+    (threadId: string, text: string) =>
+      setReplyDrafts((now) => {
+        const current = now.doc === doc ? now.drafts : NO_DRAFTS;
+        if ((current.get(threadId) ?? '') === text) return now;
+        const next = new Map(current);
+        if (text === '') next.delete(threadId);
+        else next.set(threadId, text);
+        return { doc, drafts: next };
+      }),
+    [doc],
+  );
   const history = useHistoryController(props.handle, props.history);
   const snapshot = useHistorySnapshot(history);
   const preview = snapshot?.preview ?? null;
@@ -287,6 +305,8 @@ export function DocumentEditor(props: DocumentEditorProps) {
                 if (cause === 'click') openRail('comments');
               }}
               marginView={marginOn ? commentsView : null}
+              drafts={drafts} // P4-B1
+              onDraftChange={onDraftChange} // P4-B1
               onMarginTier={setMarginTier}
               historyController={history}
               historySnapshot={snapshot}
@@ -308,6 +328,8 @@ export function DocumentEditor(props: DocumentEditorProps) {
             activeThread={activeThreadId}
             author={author}
             readOnly={readOnly}
+            drafts={drafts} // P4-B1
+            onDraftChange={onDraftChange} // P4-B1
             onShow={(thread) => {
               if (tabs.some((tab) => tab.id === thread.tabId)) setSelected(thread.tabId);
               setShowing({ threadId: thread.id, serial: (showing?.serial ?? 0) + 1 });
@@ -344,11 +366,14 @@ interface TabEditorProps extends DocumentEditorProps {
   /** P4-B1: the margin's view while it draws (Expand or Minimize), null while it does not (Hide, the panel open, a preview). */
   marginView: Exclude<CommentsView, 'hide'> | null;
   onMarginTier(kind: MarginTier['kind']): void;
+  /** P4-B1: the threads' reply drafts, the editor's (X36's draft rule). */
+  drafts: ReadonlyMap<string, string>;
+  onDraftChange(threadId: string, text: string): void;
   /** P3-E: the previewed version's revision, its charts' displayed one. */
   previewRevision?: number;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, marginView, onMarginTier, commentsView, onCommentsViewChange /* P4-B1 */, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, commentsView, onCommentsViewChange /* P4-B1 */, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision, blockCommentQuote /* P3-E */ }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -524,6 +549,8 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         onPage={onPage}
         marginView={marginView}
         onMarginTier={onMarginTier}
+        drafts={drafts} // P4-B1
+        onDraftChange={onDraftChange} // P4-B1
         readOnly={readOnly}
         onComment={comments ? () => commentRef.current() : null}
         enterRef={enterRef}
@@ -556,13 +583,16 @@ interface PageFrameProps {
   // for its Add button, and the chord's enter filled by it
   marginView: Exclude<CommentsView, 'hide'> | null;
   onMarginTier(kind: MarginTier['kind']): void;
+  /** P4-B1: the threads' reply drafts, the editor's (X36's draft rule). */
+  drafts: ReadonlyMap<string, string>;
+  onDraftChange(threadId: string, text: string): void;
   readOnly: boolean;
   onComment: (() => boolean) | null;
   enterRef: { current: (threadId: string) => void };
   onNewChanges(): void;
 }
 
-function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, marginView, onMarginTier, readOnly, onComment, enterRef, onNewChanges }: PageFrameProps) {
+function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, marginView, onMarginTier, drafts, onDraftChange /* P4-B1 */, readOnly, onComment, enterRef, onNewChanges }: PageFrameProps) {
   const editors = useShowEditors(live, history, tabId, preview === null);
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
@@ -681,6 +711,8 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
           onComment={onComment}
           onTier={onTier}
           enterRef={enterRef}
+          drafts={drafts} // P4-B1
+          onDraftChange={onDraftChange} // P4-B1
         />
       )}
     </div>

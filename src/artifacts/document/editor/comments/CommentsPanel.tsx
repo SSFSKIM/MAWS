@@ -12,8 +12,8 @@
 // thread is X36's card (src/artifacts/comments/ThreadCard.tsx) drawn whole with its quoted passage; a click on the card
 // or its quote shows the thread. The panel filters by status (All: the open threads, then the collapsible Resolved
 // section; Open; Resolved), by tab (All tabs; This tab) and by a search over the messages, the quotes and the authors'
-// names. Each card's reply draft is the panel's, kept while a filter hides the card. J and K move the focus between the
-// cards.
+// names. Each card's reply draft is the editor's (DocumentEditor holds one per thread, the margin draws the same), so a
+// filter hiding the card or the panel closing loses none. J and K move the focus between the cards.
 import { useEffect, useId, useRef, useState } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { ThreadCard } from '../../../comments/ThreadCard';
@@ -35,6 +35,9 @@ interface Props {
   author: CommentAuthor;
   /** The store is read-only: threads are listed and shown, not replied to, resolved or reopened. */
   readOnly?: boolean;
+  /** The threads' reply drafts, the editor's: the panel closing loses none, and the margin draws the same (X36). */
+  drafts: ReadonlyMap<string, string>;
+  onDraftChange(threadId: string, text: string): void;
   onShow(thread: ThreadState): void;
   onClose(): void;
 }
@@ -58,13 +61,12 @@ function matches(thread: ThreadState, needle: string): boolean {
   return has(thread.quote) || has(actorDisplay(thread.createdBy).name) || thread.messages.some((message) => has(message.body) || has(actorDisplay(message.by).name));
 }
 
-export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, readOnly = false, onShow, onClose }: Props) {
+export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, readOnly = false, drafts, onDraftChange, onShow, onClose }: Props) {
   const threads = useThreadStates(doc);
   const [showResolved, setShowResolved] = useState(true);
   const [status, setStatus] = useState<StatusFilter>('all');
   const [scope, setScope] = useState<ScopeFilter>('all');
   const [query, setQuery] = useState('');
-  const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(() => new Map());
   const body = useRef<HTMLDivElement>(null);
   const name = useId();
 
@@ -80,13 +82,6 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
     body.current?.querySelector(`[data-thread="${CSS.escape(activeThread)}"]`)?.scrollIntoView?.({ block: 'nearest' });
   }, [activeThread]);
 
-  const setDraft = (threadId: string, text: string) =>
-    setDrafts((current) => {
-      const next = new Map(current);
-      if (text === '') next.delete(threadId);
-      else next.set(threadId, text);
-      return next;
-    });
   const focusCard = (threadId: string) => body.current?.querySelector<HTMLElement>(`[data-thread="${CSS.escape(threadId)}"]`)?.focus();
   const tabTitle = (thread: ThreadState) => (thread.tabId === activeTab ? null : (tabs.find((tab) => tab.id === thread.tabId)?.title ?? null));
   const card = (thread: ThreadState) => {
@@ -104,7 +99,7 @@ export function CommentsPanel({ doc, tabs, activeTab, activeThread, author, read
         readOnly={readOnly}
         position={{ index: at + 1, count: listed.length }}
         draft={drafts.get(thread.id) ?? ''}
-        onDraftChange={(text) => setDraft(thread.id, text)}
+        onDraftChange={(text) => onDraftChange(thread.id, text)}
         onActivate={() => onShow(thread)}
         onReply={(text) => !readOnly && reply(doc, thread.id, { id: `${thread.id}:${nanoid8()}`, by: author.actor, at: author.now(), body: text }, COMMENTS_ORIGIN)}
         onResolve={() => !readOnly && resolve(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
