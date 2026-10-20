@@ -119,6 +119,12 @@ export class FakeEngineHost {
     return s;
   }
 
+  // A launch left initializing (`ready: false`) reports ready (W2-A: a row the recovery waits for).
+  readyNow(appSessionId: string): void {
+    const s = this.table.get(appSessionId);
+    if (s) this.setStatus({ ...s, process: 'ready', engineState: 'idle' });
+  }
+
   // The lingering process of a stop answered `{ exited: false }` finally exits.
   exitNow(appSessionId: string): void {
     const s = this.table.get(appSessionId);
@@ -251,6 +257,8 @@ export class FakeEngineHost {
         return undefined;
       }
       case 'session.rewind':
+        // C3's normaliser derives `boundary.rewind` from a successful answer, as the host's event log then holds it
+        if (this.rewound) this.batch(id, [{ kind: 'boundary.rewind', targetMessageUuid: input.targetMessageUuid, precedingAssistantUuid: null, prefillText: null }]);
         return { rewound: this.rewound, reason: this.rewound ? null : 'not found', error: null, prefillText: null, precedingAssistantUuid: null, files: null };
       case 'session.renameSession':
         if (this.renameError !== null) throw new Error(this.renameError);

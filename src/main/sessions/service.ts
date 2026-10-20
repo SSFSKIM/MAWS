@@ -25,7 +25,7 @@ import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDir
 import { readSettings, seedPermissionMode } from './launch-mapping';
 import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
 import type { BootstrapNote } from './intents';
-import { liveRows, markInterrupted, reconcileIntent, type LiveRows } from './recovery';
+import { awaitsReady, liveRows, markInterrupted, reconcileIntent, type LiveRows } from './recovery';
 import { removeCreatedWorktree, retainedWorktree, type Setup } from './setup';
 import { forkRefusal, guardIntentStart, guardResumeStart, sideThreadRefusal, type GuardContext, type Guarded } from './start-guards';
 // E3 start
@@ -248,11 +248,41 @@ export class SessionService {
     for (const id of new Set<string>([...owed, ...this.reconcileFailures.keys()]) as Set<AppSessionId>) {
       const intent = this.deps.intents.get(id);
       if (intent === null) this.unreconciled.delete(id);
+      else if (idle(id) && awaitsReady(intent, live)) this.reconcileWhenReady(id); // W2-A: beside the recovery
       else if (idle(id)) await this.reconcileOne(intent, live);
     }
     this.unrecovered = null;
     this.startedSince.clear();
     if (this.unreconciled.size > 0) void this.settleUnreconciled().catch((error: unknown) => this.log(`the owed reconciliations failed: ${error instanceof Error ? error.message : String(error)}`));
+  }
+
+  // P4 W2-A: a reconciliation that waits for its live row's ready (the first message not yet C3's) runs beside the
+  // recovery, since every command waits for the recovery. As the setup it resumes, it holds the id's `starting` mark,
+  // its lock and an in-flight entry from this tick, so a start or an intent operation is refused `starting` and an
+  // acquisition joins it, answered once the reconciliation ended.
+  private reconcileWhenReady(appSessionId: AppSessionId): void {
+    this.starting.add(appSessionId);
+    const registration = this.inflight.open(appSessionId, 'setup');
+    void this.serial(appSessionId, async () => {
+      const intent = this.deps.intents.get(appSessionId);
+      return intent === null ? null : this.reconcileOne(intent, null);
+    })
+      .then(
+        async (failure) => ({ outcome: await this.reconciledOutcome(appSessionId, failure) }),
+        (error: unknown) => ({ error }),
+      )
+      .then((result) => {
+        this.starting.delete(appSessionId);
+        registration.end(result);
+      });
+  }
+
+  // What a joiner of that reconciliation is answered: ready when the row is, else why it is not.
+  private async reconciledOutcome(appSessionId: AppSessionId, failure: string | null): Promise<AcquireOutcome> {
+    const live = await reservationOf(this.s.dispatch, appSessionId).catch(() => null);
+    if (failure === null && live?.process === 'ready') return { status: 'ready', appSessionId, launched: true, joined: false };
+    const last = this.deps.intents.get(appSessionId)?.progress.lastFailure ?? null;
+    return { status: 'failed', appSessionId, message: failure ?? last?.message ?? 'The session did not start.', resources: last?.resources ?? UNTOUCHED };
   }
 
   // The reconciliations a re-run passed over (their id locked or starting), each under its id's lock once the command

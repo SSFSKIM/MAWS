@@ -21,22 +21,29 @@
 // `ready` and the setup's `session.send` leaves the first message in the intent alone. Before a live row is handed off,
 // a first message with no recorded handoff is sent when the row is ready and idle (no turn, no host work), C3's queue
 // holds nothing for it and the pin has no transcript, so the message never reached C3; the handoff is recorded before
-// the intent goes, as the setup records it. A row still initializing cannot take a send (C3 refuses one before ready),
-// and a fork with a rewind point would need its rewind first: both are handed off as before.
+// the intent goes, as the setup records it. P4 W2-A (the residue row of 2026-10-07): C3 refuses a send before ready, so
+// a row still launching with its first message unsent is waited for as the setup waited for it (`awaitsReady`; the
+// service runs that reconciliation beside the recovery, never inside it), a launch the watchdog gives up on is stopped
+// as the setup's rollback stops it, and a row that ends without ready is reconciled as one that exited. A fork with a
+// rewind point is rewound before the send, as the setup does, unless the host saw that rewind succeed before the quit:
+// the engine refuses a second rewind to a target it already cut (`target_not_found`), and the host's event log keeps
+// the first one's `boundary.rewind`.
 //
 // E11 (tracker row E3 "quit before finishBinding leaves a side thread unrenamed"): a side thread's intent handed off
 // here was never bound (the setup's `finishBinding` removes the intent after binding), so the hand-off binds it as the
 // setup would have: the thread renamed through the engine (or in the index when the engine refuses, as for a thread
 // whose process is gone) and its `opened` row recorded and shown in the parent's transcript. A bind the quit
 // interrupted after its rename runs again harmlessly: the rename repeats and the row is inserted or ignored.
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { SetupResources } from '@shared/sessions/setup';
 import type { HostDispatch } from '../ipc/router';
 import { hostCall, isUnknownSession, pathExists, transcriptPathOf } from './context';
 import { reconcileWorktree } from './intent-rules';
-import { bindSideThread, retainedWorktree, type Setup } from './setup';
+import { LaunchWatch } from './launch-watch';
+import { bindSideThread, retainedWorktree, rewindFork, type Setup } from './setup';
+import { stopQuietly } from './setup-steps';
 
 export type Reconciled = 'none' | 'handed_off' | 'not_started';
 
@@ -48,11 +55,17 @@ export async function liveRows(dispatch: HostDispatch): Promise<LiveRows> {
   return new Map(table.filter((row) => row.process !== 'exited').map((row) => [row.appSessionId, row]));
 }
 
+// W2-A: whether this intent's reconciliation waits for its live row's ready (its first message not yet C3's).
+export function awaitsReady(intent: SetupIntent, live: LiveRows): boolean {
+  const row = live.get(intent.appSessionId);
+  return row !== undefined && row.process !== 'ready' && intent.message !== null && intent.progress.send === null;
+}
+
 export async function reconcileIntent(s: Setup, intent: SetupIntent, live: LiveRows): Promise<Reconciled> {
   const appSessionId = intent.appSessionId;
   const record = s.sessions.get(appSessionId);
   if (record === null) return 'none'; // nothing reached `launching`
-  const row = live.get(appSessionId);
+  const row = awaitsReady(intent, live) ? await readyRow(s, appSessionId) : live.get(appSessionId); // W2-A
   if (row) {
     await sendUnsent(s, intent, record.directory, row); // E11
     return handOff(s, intent); // E10: the row ran on while the app was away
@@ -79,16 +92,40 @@ export async function reconcileIntent(s: Setup, intent: SetupIntent, live: LiveR
   return 'not_started';
 }
 
+// W2-A: the row's launch waited out as the setup waits it, the watch made before the table is read so a ready landing
+// between the two is not missed. Answers the ready row, or undefined once it is not live (a launch the watchdog gave up
+// on is stopped first, as the setup's rollback stops it).
+async function readyRow(s: Setup, appSessionId: AppSessionId): Promise<EngineSessionStatus | undefined> {
+  const watch = new LaunchWatch(s, appSessionId);
+  try {
+    const row = (await liveRows(s.dispatch)).get(appSessionId);
+    if (row === undefined || row.process === 'ready') return row;
+    const end = await watch.untilReady();
+    if (end.kind === 'ready') return end.status;
+    if (end.kind === 'timeout') await stopQuietly(s, appSessionId);
+    return undefined;
+  } finally {
+    watch.dispose();
+  }
+}
+
 async function sendUnsent(s: Setup, intent: SetupIntent, directory: string, row: EngineSessionStatus): Promise<void> {
   const { appSessionId, message, progress } = intent;
   if (message === null || progress.send !== null) return;
   if (row.process !== 'ready' || row.turn !== null || row.busy) return;
-  if (intent.kind === 'fork' && (intent.source?.rewindTo ?? null) !== null) return;
   const pin = progress.engineSessionId;
   if (pin !== null && (await pathExists(await transcriptPathOf(s.env, directory, pin)))) return;
   if (await queueHolds(s, appSessionId)) return;
+  const rewindTo = intent.kind === 'fork' ? (intent.source?.rewindTo ?? null) : null; // W2-A
+  if (rewindTo !== null && !(await rewoundTo(s, appSessionId, rewindTo))) await rewindFork(s, appSessionId, rewindTo);
   const sent = await hostCall(s.dispatch, 'session.send', { appSessionId, content: message.content });
   await s.intents.put({ ...intent, updatedAt: s.now(), progress: { ...progress, send: { queueId: sent.queueId, messageUuid: sent.messageUuid, disposition: sent.disposition, at: s.now() } } });
+}
+
+// W2-A: whether the host saw this row's rewind to `target` succeed (C3's `boundary.rewind`, derived from the engine's answer).
+async function rewoundTo(s: Setup, appSessionId: AppSessionId, target: MessageUuid): Promise<boolean> {
+  const { events } = await hostCall(s.dispatch, 'session.events', { appSessionId, afterSeq: null, limit: null });
+  return events.some((event) => event.kind === 'boundary.rewind' && event.targetMessageUuid === target);
 }
 
 async function handOff(s: Setup, intent: SetupIntent): Promise<Reconciled> {
