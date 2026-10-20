@@ -1139,7 +1139,8 @@ export class Project extends DurableObject<Env> {
    * frames owe it, the backlog, the live fan-out of other machines' uploads), `control` for what the browsers' side
    * sends (subscriptions and their requests, forwarded RPCs and their acknowledgements, a session-plane frame's
    * refusal). Every project's lanes end at the machine's object, which writes one frame at a time in arrival order,
-   * so a browser's subscribe never waits behind a backlog being paged here, only behind the frame on the stream; a
+   * so a browser's subscribe never waits behind the rest of a backlog being paged here, only behind the frames already
+   * queued at the machine's object; a
    * stream that takes no write stops them all, until its write bound ends it. A stream that
    * is gone (or older than the machine's current one) leaves the fan-out until the machine's next `hello`. A send that
    * fails otherwise leaves it too, and its stream is ended, so the machine reconnects and its `hello` heals what it
